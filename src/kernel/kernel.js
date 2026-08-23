@@ -177,7 +177,6 @@ export class Kernel {
     }
     this.#removalObservers.clear();
     this.#registry.destroyAll();
-    this.bus.clear();
     this.#initialized = false;
     this.#seenVideos.clear();
   }

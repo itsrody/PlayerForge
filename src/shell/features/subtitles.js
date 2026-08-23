@@ -36,10 +36,8 @@ export class SubtitlesFeature {
   #hintEl = null;
   #loadButton = null;
   #removeButton = null;
-  #frameUnsub = null;
-  #timeupdateUnsub = null;
-  #onSeeked = null;
-  #onEnded = null;
+  #scope = new AbortController();
+  #frameHandle = null;
   #destroyed = false;
 
   constructor(shell) {
@@ -58,7 +56,8 @@ export class SubtitlesFeature {
       return;
     }
     this.#destroyed = true;
-    this.#stopListening();
+    this.#stopFrameLoop();
+    this.#scope.abort();
     this.#fileInput?.remove();
     this.#fileInput = null;
     this.#hintEl = null;
@@ -70,31 +69,43 @@ export class SubtitlesFeature {
   }
 
   #startListening() {
-    const onTick = (payload) => {
-      if (payload.shellId === this.#shell.id) {
+    const { signal } = this.#scope;
+    const onTick = (event) => {
+      if (event.detail.shellId === this.#shell.id) {
         this.#render();
       }
     };
-    this.#frameUnsub = this.#shell.bus.on("shell:frame", onTick);
-    this.#timeupdateUnsub = this.#shell.bus.on("shell:timeupdate", onTick);
+    this.#shell.bus.addEventListener("shell:timeupdate", onTick, { signal });
     const video = this.#shell.video;
-    this.#onSeeked = () => this.#render();
-    this.#onEnded = () => this.#shell?.cues?.clear();
-    video?.addEventListener("seeked", this.#onSeeked);
-    video?.addEventListener("ended", this.#onEnded);
+    video?.addEventListener("seeked", () => this.#render(), { signal });
+    video?.addEventListener("ended", () => this.#shell?.cues?.clear(), { signal });
   }
 
-  #stopListening() {
-    this.#frameUnsub?.();
-    this.#frameUnsub = null;
-    this.#timeupdateUnsub?.();
-    this.#timeupdateUnsub = null;
-    const video = this.#shell?.video;
-    video?.removeEventListener("seeked", this.#onSeeked);
-    video?.removeEventListener("ended", this.#onEnded);
-    this.#onSeeked = null;
-    this.#onEnded = null;
-    this.#shell?.cues?.clear();
+  /**
+   * Frame-accurate cue updates: drive rendering from painted video frames,
+   * but only while a track is active — no subtitles, no loop.
+   */
+  #startFrameLoop() {
+    if (this.#frameHandle != null || this.#destroyed || !this.#currentTrack) {
+      return;
+    }
+    const video = this.#shell.video;
+    const onFrame = () => {
+      this.#frameHandle = null;
+      if (!this.#currentTrack || this.#destroyed) {
+        return;
+      }
+      this.#render();
+      this.#frameHandle = video.requestVideoFrameCallback(onFrame);
+    };
+    this.#frameHandle = video.requestVideoFrameCallback(onFrame);
+  }
+
+  #stopFrameLoop() {
+    if (this.#frameHandle != null) {
+      this.#shell?.video?.cancelVideoFrameCallback(this.#frameHandle);
+      this.#frameHandle = null;
+    }
   }
 
   #render() {
@@ -476,6 +487,7 @@ export class SubtitlesFeature {
       this.#currentTrack = this.#tracks[this.#tracks.length - 1];
       this.#refreshHint();
       this.#render();
+      this.#startFrameLoop();
       this.#toast({
         icon: "captions",
         text: name,
@@ -508,6 +520,7 @@ export class SubtitlesFeature {
   #removeAll() {
     this.#currentTrack = null;
     this.#tracks = [];
+    this.#stopFrameLoop();
     this.#shell?.cues?.clear();
     this.#refreshHint();
   }

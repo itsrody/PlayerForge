@@ -44,7 +44,7 @@ export class HotkeysController {
   #lastScrubToastAt = 0;
 
   // Misc.
-  #fullscreenUnsub = null;
+  #scope = new AbortController();
   #gestureListeners = {};
 
   constructor(shell) {
@@ -61,7 +61,8 @@ export class HotkeysController {
       () => shell.fullscreen
     );
 
-    this.#fullscreenUnsub = shell.bus.on("shell:fullscreen-change", ({ shellId, fullscreen }) => {
+    shell.bus.addEventListener("shell:fullscreen-change", (event) => {
+      const { shellId, fullscreen } = event.detail;
       if (shellId !== shell.id) {
         return;
       }
@@ -77,7 +78,7 @@ export class HotkeysController {
         this.#clearFillMode(shell);
         logger.log("controller", "Fill cleared — fullscreen exited");
       }
-    });
+    }, { signal: this.#scope.signal });
 
     this.#listen(host, GESTURE_EVENTS.hold, (event) => this.#onHold(shell, event.detail));
     this.#listen(host, GESTURE_EVENTS.release, (event) => this.#onRelease(shell, event.detail));
@@ -96,8 +97,7 @@ export class HotkeysController {
   destroy() {
     this.#gestureController?.destroy();
     this.#gestureController = null;
-    this.#fullscreenUnsub?.();
-    this.#fullscreenUnsub = null;
+    this.#scope.abort();
     this.#scrubbing = false;
     this.#scrubDirectionMomentum = 0;
     this.#scrubDuration = 0;

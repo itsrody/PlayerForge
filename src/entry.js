@@ -22,7 +22,8 @@ function bootstrap() {
   if (getConfigValue("firstRun", true) !== false) {
     setConfigValue("firstRun", false);
     const coarsePointer = matchMedia("(pointer: coarse)").matches;
-    kernel.bus.once("shell:created", (shell) => {
+    kernel.bus.addEventListener("shell:created", (event) => {
+      const shell = event.detail;
       setTimeout(() => {
         if (shell && !shell.panel?.isOpen) {
           shell.toast({
@@ -34,10 +35,11 @@ function bootstrap() {
           });
         }
       }, 1200);
-    });
+    }, { once: true });
   }
 
-  kernel.bus.on("shell:created", (shell) => {
+  kernel.bus.addEventListener("shell:created", (event) => {
+    const shell = event.detail;
     logger.log("entry", `Shell ready: ${shell.id} (${shell.sdkName})`);
   });
 

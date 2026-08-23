@@ -47,7 +47,6 @@ export class Shell {
   #cleanups = new Set();
   #stopHostWatch = null;
   #fullscreen = false;
-  #frameCallbackHandle = null;
   #savedPositionStyle = null;
 
   constructor({ id, video, container, sdk, sdkName, bus }) {
@@ -263,14 +262,11 @@ export class Shell {
   #forwardMediaEvents() {
     const video = this.video;
     const makeHandler = (name) => (event) => {
-      const eventName = `shell:${name}`;
-      if (this.#bus.hasListeners(eventName)) {
-        this.#bus.emit(eventName, {
-          shellId: this.id,
-          event,
-          video
-        });
-      }
+      this.#bus.emit(`shell:${name}`, {
+        shellId: this.id,
+        event,
+        video
+      });
       if (MEDIA_SESSION_SYNC_EVENTS.has(name)) {
         this.#syncMediaSessionState();
       }
@@ -280,24 +276,6 @@ export class Shell {
       video.addEventListener(name, handler);
       this.#cleanups.add(() => video.removeEventListener(name, handler));
     }
-    const requestFrame = video.requestVideoFrameCallback.bind(video);
-    const onFrame = (_now, metadata) => {
-      if (this.#bus.hasListeners("shell:frame")) {
-        this.#bus.emit("shell:frame", {
-          shellId: this.id,
-          metadata
-        });
-      }
-      if (!this.#destroyed) {
-        this.#frameCallbackHandle = requestFrame.call(video, onFrame);
-      }
-    };
-    this.#frameCallbackHandle = requestFrame.call(video, onFrame);
-    this.#cleanups.add(() => {
-      if (this.#frameCallbackHandle != null) {
-        video.cancelVideoFrameCallback(this.#frameCallbackHandle);
-      }
-    });
   }
 
   #registerMediaSession() {

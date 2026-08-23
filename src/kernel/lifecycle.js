@@ -9,6 +9,7 @@ export class LifecycleManager {
   #bus;
   #registry;
   #shellFactory = null;
+  #scope = new AbortController();
 
   constructor(bus, registry) {
     this.#bus = bus;
@@ -21,8 +22,9 @@ export class LifecycleManager {
   }
 
   #wire() {
-    this.#bus.on("video:found", (discovery) => this.#onVideoFound(discovery));
-    this.#bus.on("video:removed", (removal) => this.#onVideoRemoved(removal));
+    const { signal } = this.#scope;
+    this.#bus.addEventListener("video:found", (event) => this.#onVideoFound(event.detail), { signal });
+    this.#bus.addEventListener("video:removed", (event) => this.#onVideoRemoved(event.detail), { signal });
     this.#guardUnload();
   }
 
@@ -58,7 +60,7 @@ export class LifecycleManager {
       if (!event?.persisted) {
         logger.log("lifecycle", "Page unloading, cleaning up");
         this.#registry.destroyAll();
-        this.#bus.clear();
+        this.#scope.abort();
       }
     };
     window.addEventListener("beforeunload", onUnload);

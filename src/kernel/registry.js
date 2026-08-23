@@ -5,6 +5,7 @@ export class ShellRegistry {
   #bus;
   #byId = new Map();
   #idByVideo = new WeakMap();
+  #scope = new AbortController();
 
   constructor(bus) {
     this.#bus = bus;
@@ -12,8 +13,9 @@ export class ShellRegistry {
   }
 
   #wire() {
-    this.#bus.on("shell:created", (shell) => this.#register(shell));
-    this.#bus.on("shell:destroyed", (shell) => this.#unregister(shell));
+    const { signal } = this.#scope;
+    this.#bus.addEventListener("shell:created", (event) => this.#register(event.detail), { signal });
+    this.#bus.addEventListener("shell:destroyed", (event) => this.#unregister(event.detail), { signal });
   }
 
   #register(shell) {

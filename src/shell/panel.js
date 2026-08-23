@@ -23,7 +23,7 @@ export class SettingsPanel {
   #onKeydownEscape = null;
   #onKeydownTab = null;
   #onTablistKeydown = null;
-  #fullscreenUnsub = null;
+  #scope = new AbortController();
   #destroyed = false;
 
   constructor(shell, bus) {
@@ -201,12 +201,11 @@ export class SettingsPanel {
     this.#shellHost.addEventListener(GESTURE_EVENTS.panel, this.#onPanelGesture);
     this.#shellHost.addEventListener(GESTURE_EVENTS.swipe, this.#onSwipeGesture);
 
-    this.#fullscreenUnsub = (event) => {
-      if (event.shellId === this.#shellId) {
+    this.#bus?.addEventListener("shell:fullscreen-change", (event) => {
+      if (event.detail.shellId === this.#shellId) {
         this.close();
       }
-    };
-    this.#bus?.on("shell:fullscreen-change", this.#fullscreenUnsub);
+    }, { signal: this.#scope.signal });
 
     this.#onKeydownEscape = (event) => {
       if (event.key !== "Escape" || !this.isOpen) {
@@ -288,12 +287,9 @@ export class SettingsPanel {
     if (this.#onTablistKeydown) {
       this.#tabList?.removeEventListener("keydown", this.#onTablistKeydown);
     }
-    if (this.#fullscreenUnsub) {
-      this.#bus?.off("shell:fullscreen-change", this.#fullscreenUnsub);
-    }
+    this.#scope.abort();
     this.#onPanelGesture = null;
     this.#onSwipeGesture = null;
-    this.#fullscreenUnsub = null;
     this.#onKeydownEscape = null;
     this.#onKeydownTab = null;
     this.#onTablistKeydown = null;
