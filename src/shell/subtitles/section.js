@@ -36,7 +36,6 @@ export class SubtitlesSection {
   #loadButton = null;
   #removeButton = null;
   #scope = new AbortController();
-  #frameHandle = null;
   #destroyed = false;
 
   constructor(shell) {
@@ -55,7 +54,6 @@ export class SubtitlesSection {
       return;
     }
     this.#destroyed = true;
-    this.#stopFrameLoop();
     this.#scope.abort();
     this.#fileInput?.remove();
     this.#fileInput = null;
@@ -78,33 +76,6 @@ export class SubtitlesSection {
     const video = this.#shell.video;
     video?.addEventListener("seeked", () => this.#render(), { signal });
     video?.addEventListener("ended", () => this.#shell?.cues?.clear(), { signal });
-  }
-
-  /**
-   * Frame-accurate cue updates: drive rendering from painted video frames,
-   * but only while a track is active — no subtitles, no loop.
-   */
-  #startFrameLoop() {
-    if (this.#frameHandle != null || this.#destroyed || !this.#currentTrack) {
-      return;
-    }
-    const video = this.#shell.video;
-    const onFrame = () => {
-      this.#frameHandle = null;
-      if (!this.#currentTrack || this.#destroyed) {
-        return;
-      }
-      this.#render();
-      this.#frameHandle = video.requestVideoFrameCallback(onFrame);
-    };
-    this.#frameHandle = video.requestVideoFrameCallback(onFrame);
-  }
-
-  #stopFrameLoop() {
-    if (this.#frameHandle != null) {
-      this.#shell?.video?.cancelVideoFrameCallback(this.#frameHandle);
-      this.#frameHandle = null;
-    }
   }
 
   #render() {
@@ -447,7 +418,6 @@ export class SubtitlesSection {
       this.#currentTrack = this.#tracks[this.#tracks.length - 1];
       this.#refreshHint();
       this.#render();
-      this.#startFrameLoop();
       this.#toast({
         icon: "captions",
         text: name,
@@ -480,7 +450,6 @@ export class SubtitlesSection {
   #removeAll() {
     this.#currentTrack = null;
     this.#tracks = [];
-    this.#stopFrameLoop();
     this.#shell?.cues?.clear();
     this.#refreshHint();
   }
