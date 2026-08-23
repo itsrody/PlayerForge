@@ -1,5 +1,5 @@
 import { Kernel } from "./kernel/kernel.js";
-import { installVideoProbe } from "./kernel/frame-probe.js";
+import { installContextBridge, installVideoProbe } from "./shared/context.js";
 import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/sdk.js";
 import { logger } from "./shared/logger.js";
 import { shouldSkipUrl } from "./shared/guard.js";
@@ -64,6 +64,7 @@ function bootstrap() {
     logger.log("entry", `Kernel booted (${window.top === window ? "top" : "frame"})`);
   };
 
+  installContextBridge();
   installVideoProbe({
     minWidth: MIN_VIDEO_WIDTH,
     minHeight: MIN_VIDEO_HEIGHT,

@@ -1,0 +1,192 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { JSDOM } from "jsdom";
+import {
+  getDomainKey,
+  domainsMatch,
+  domainScore,
+  hashEntry,
+  getPageContext,
+  createTopFrameResponder,
+  createFrameRelay,
+  installContextBridge,
+  installVideoProbe,
+  CTX_REQUEST_TIMEOUT_MS
+} from "../src/shared/context.js";
+
+const dom = (html = "", url = "https://www.youtube.com/watch?v=1") =>
+  new JSDOM(`<!doctype html><html><head><title>Page</title></head><body>${html}</body></html>`, { url });
+
+test("getDomainKey reduces hostnames to registrable keys", () => {
+  assert.equal(getDomainKey("www.youtube.com"), "youtube");
+  assert.equal(getDomainKey("example.co.uk"), "example");
+  assert.equal(getDomainKey("a.b.museum.org"), "museum");
+  assert.equal(getDomainKey("localhost"), "localhost");
+  assert.equal(getDomainKey("192.168.1.5"), "192-168-1-5");
+  assert.equal(getDomainKey(""), "");
+});
+
+test("hashEntry is deterministic and duration-rounding aware", () => {
+  assert.equal(hashEntry("/watch", 611.2), hashEntry("/watch", 610.9));
+  assert.notEqual(hashEntry("/watch", 611), hashEntry("/watch", 612));
+  assert.notEqual(hashEntry("/watch", 100), hashEntry("/other", 100));
+});
+
+test("domainsMatch accepts equality and label boundaries only", () => {
+  assert.equal(domainsMatch("youtube", "youtube"), true);
+  assert.equal(domainsMatch("tv.apple", "apple"), true);
+  assert.equal(domainsMatch("apple", "tv.apple"), true);
+  assert.equal(domainsMatch("", "apple"), false);
+  assert.equal(domainsMatch("notyoutube", "youtube"), false);
+  assert.equal(domainsMatch("espnw", "espn"), false);
+});
+
+test("domainScore ranks without fuzzy promotion", () => {
+  assert.equal(domainScore("youtube", "youtube"), 3);
+  assert.equal(domainScore("tv.apple", "apple"), 2);
+  assert.equal(domainScore("youtub", "youtube"), 2);
+  assert.equal(domainScore("xyz", "youtube"), 0);
+  assert.equal(domainScore("", "youtube"), 0);
+});
+
+test("getPageContext reads the top window directly", async () => {
+  const { window } = dom("<p>hi</p>");
+  globalThis.window = window;
+  globalThis.location = window.location;
+  globalThis.document = window.document;
+  const context = await getPageContext();
+  assert.deepEqual(context, { domain: "youtube", path: "/watch", title: "Page" });
+});
+
+test("top-frame responder validates shape and answers with fresh context", () => {
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  const iframe = win.document.createElement("iframe");
+  win.document.body.append(iframe);
+  let sent = null;
+  const post = (source, msg, target) => { sent = { msg, target, source }; };
+
+  let calls = 0;
+  const respond = createTopFrameResponder(() => {
+    calls++;
+    return { domain: "example", path: "/v/1", title: "T" };
+  }, "https://site.test", post);
+
+  respond({ data: { type: "pf:ctx-request", nonce: "n1" }, origin: "https://embed.net", source: iframe.contentWindow });
+  assert.equal(calls, 1);
+  assert.equal(sent.source, iframe.contentWindow);
+  assert.deepEqual(sent.msg, { type: "pf:ctx", nonce: "n1", domain: "example", path: "/v/1", title: "T" });
+  assert.equal(sent.target, "https://embed.net");
+
+  sent = null; calls = 0;
+  respond({ data: { type: "pf:ctx-request", nonce: "n4" }, origin: "https://site.test", source: {} });
+  assert.equal(calls, 1);
+
+  sent = null;
+  respond({ data: { type: "pf:ctx-request" }, origin: "https://embed.net", source: iframe.contentWindow });
+  respond({ data: { type: "other", nonce: "n2" }, origin: "https://embed.net", source: iframe.contentWindow });
+  respond({ data: { type: "pf:ctx-request", nonce: "n3" }, origin: "https://embed.net", source: null });
+  respond(null);
+  assert.equal(sent, null);
+});
+
+test("top-frame responder rejects foreign frames on foreign origins", () => {
+  let sent = null;
+  const stranger = { postMessage: (msg) => { sent = msg; } };
+  const respond = createTopFrameResponder(() => ({ domain: "x", path: "/", title: "" }), "https://site.test");
+  respond({ data: { type: "pf:ctx-request", nonce: "nx" }, origin: "https://evil.test", source: stranger });
+  assert.equal(sent, null);
+});
+
+test("frame relay forwards requests up and routes answers back down", () => {
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.parent = win.parent;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  let relayedUp = null;
+  const originalPostMessage = win.parent.postMessage.bind(win.parent);
+  win.parent.postMessage = (msg, target) => { relayedUp = { msg, target }; };
+
+  try {
+    const relay = createFrameRelay();
+    const child = { postMessage: (msg, target) => { child.sent = { msg, target }; } };
+
+    relay({ data: { type: "pf:ctx-request", nonce: "r1" }, origin: "https://kid.test", source: child });
+    assert.deepEqual(relayedUp.msg, { type: "pf:ctx-request", nonce: "r1" });
+
+    relay({ data: { type: "pf:ctx", nonce: "r1", domain: "site", path: "/", title: "" }, origin: "https://top.test" });
+    assert.deepEqual(child.sent.msg, { type: "pf:ctx", nonce: "r1", domain: "site", path: "/", title: "" });
+    assert.equal(child.sent.target, "https://top.test");
+
+    child.sent = null;
+    relay({ data: { type: "pf:ctx", nonce: "unknown", domain: "site", path: "/", title: "" }, origin: "https://top.test" });
+    assert.equal(child.sent, null);
+    win.parent.postMessage = originalPostMessage;
+  } finally {
+    win.parent.postMessage = originalPostMessage;
+  }
+});
+
+test("installContextBridge registers a top-frame message listener", () => {
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  let captured = null;
+  win.addEventListener("message", (event) => { captured = event; });
+
+  const stop = installContextBridge();
+
+  const request = new win.MessageEvent("message", {
+    data: { type: "pf:ctx-request", nonce: "z9" },
+    origin: "null",
+    source: win
+  });
+  win.dispatchEvent(request);
+  assert.ok(captured);
+
+  stop();
+});
+
+test("presence probe fires once on the first qualifying insertion", async () => {
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.document = win.document;
+  globalThis.MutationObserver = win.MutationObserver;
+
+  let fires = 0;
+  installVideoProbe({ minWidth: 0, minHeight: 0, onCandidate: () => fires++ });
+
+  win.document.body.append(win.document.createElement("video"));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(fires, 1);
+
+  win.document.body.append(win.document.createElement("video"));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(fires, 1);
+});
+
+test("stopped presence probe never fires", async () => {
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.document = win.document;
+  globalThis.MutationObserver = win.MutationObserver;
+
+  let fires = 0;
+  const stop = installVideoProbe({ minWidth: 0, minHeight: 0, onCandidate: () => fires++ });
+  stop();
+
+  win.document.body.append(win.document.createElement("video"));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(fires, 0);
+});
+
+test("context timeout constant stays sane", () => {
+  assert.ok(CTX_REQUEST_TIMEOUT_MS >= 1000 && CTX_REQUEST_TIMEOUT_MS <= 10000);
+});
