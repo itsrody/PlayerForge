@@ -1,12 +1,9 @@
 import { getConfigValue, setConfigValue } from "../../shared/storage.js";
 import { srtToVtt, ensureVttHeader, parseSubtitles } from "./ForgeVTT.js";
-import { createIconElement } from "../../shared/icons.js";
 import { logger } from "../../shared/logger.js";
 
 const SUBTITLE_FILE_ACCEPT = ".srt,.vtt";
 const SYNC_DEBOUNCE_MS = 150;
-/** Extra vertical offset per stacked cue so simultaneous lines don't overlap. */
-const STACK_OVERLAP_EM = 1.6;
 
 const SETTING_KEYS = {
   size: "subtitles.style.size",
@@ -26,8 +23,7 @@ const SETTING_KEYS = {
  */
 export class SubtitlesSection {
   #shell;
-  #tracks = [];
-  #currentTrack = null;
+  #track = null;
   #cueLayer = null;
   #positionOverride = null;
   #syncOffset = 0;
@@ -45,7 +41,6 @@ export class SubtitlesSection {
     this.#fileInput = this.#createFileInput(shell);
     this.#buildPanelUi(shell);
     this.#startListening();
-    this.#render();
     logger.log("subtitles", `Ready (${shell.sdkName})`);
   }
 
@@ -60,8 +55,7 @@ export class SubtitlesSection {
     this.#hintEl = null;
     this.#loadButton = null;
     this.#removeButton = null;
-    this.#tracks = [];
-    this.#currentTrack = null;
+    this.#track = null;
     this.#cueLayer = null;
   }
 
@@ -79,36 +73,16 @@ export class SubtitlesSection {
   }
 
   #render() {
-    const cuePool = this.#shell?.cues;
-    if (!cuePool) {
-      return;
-    }
-    const cues = this.#currentTrack?.cues;
-    if (!cues || !cues.length) {
-      cuePool.clear();
+    const cues = this.#shell?.cues;
+    if (!cues) {
       return;
     }
     const currentTime = this.#shell.video?.currentTime;
-    if (!(currentTime >= 0)) {
-      cuePool.clear();
+    if (!this.#track || !(currentTime >= 0)) {
+      cues.clear();
       return;
     }
-    const activeCues = this.#findActiveCues(cues, currentTime);
-    const override = this.#positionOverride;
-    const rendered = [];
-    for (let i = 0; i < activeCues.length; i++) {
-      const cue = activeCues[i];
-      const line = override ? override.line : cue.line ?? 85;
-      const position = override ? override.position : cue.position ?? 50;
-      const align = override ? override.align : cue.align || "center";
-      rendered.push({
-        text: cue.text,
-        top: `calc(${line}% - ${i * STACK_OVERLAP_EM}em)`,
-        left: `${position}%`,
-        x: align === "start" ? "0" : align === "end" ? "-100%" : "-50%"
-      });
-    }
-    cuePool.render(rendered);
+    cues.render(this.#findActiveCues(this.#track.cues, currentTime));
   }
 
   /** Binary search for all cues overlapping `time` (cues sorted by start). */
@@ -202,7 +176,7 @@ export class SubtitlesSection {
       title: "Remove subtitles",
       ariaLabel: "Remove subtitles",
       ghost: true,
-      onClick: () => this.#removeAll()
+      onClick: () => this.#removeTrack()
     });
 
     this.#hintEl = panel.addHint(loadRow, "Upload your file");
@@ -268,8 +242,8 @@ export class SubtitlesSection {
         this.#syncOffset = offset;
         clearTimeout(syncDebounce);
         syncDebounce = setTimeout(() => {
-          for (const track of this.#tracks) {
-            track.cues = parseSubtitles(track.text, offset);
+          if (this.#track) {
+            this.#track.cues = parseSubtitles(this.#track.text, offset);
           }
           this.#render();
           setConfigValue(SETTING_KEYS.syncOffset, String(offset));
@@ -410,12 +384,7 @@ export class SubtitlesSection {
         });
         return;
       }
-      this.#tracks.push({
-        name,
-        text: normalizedText,
-        cues
-      });
-      this.#currentTrack = this.#tracks[this.#tracks.length - 1];
+      this.#track = { name, text: normalizedText, cues };
       this.#refreshHint();
       this.#render();
       this.#toast({
@@ -436,9 +405,9 @@ export class SubtitlesSection {
 
   #refreshHint() {
     if (this.#hintEl) {
-      this.#hintEl.textContent = this.#currentTrack ? this.#currentTrack.name : "Upload your file";
+      this.#hintEl.textContent = this.#track ? this.#track.name : "Upload your file";
     }
-    const hasTrack = !!this.#currentTrack;
+    const hasTrack = !!this.#track;
     if (this.#loadButton) {
       this.#loadButton.disabled = hasTrack;
     }
@@ -447,9 +416,8 @@ export class SubtitlesSection {
     }
   }
 
-  #removeAll() {
-    this.#currentTrack = null;
-    this.#tracks = [];
+  #removeTrack() {
+    this.#track = null;
     this.#shell?.cues?.clear();
     this.#refreshHint();
   }
