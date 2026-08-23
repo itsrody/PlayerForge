@@ -37,7 +37,6 @@ export class HotkeysController {
   #streakCount = 0;
   #lastSkipDirection = null;
   #streakResetTimer = null;
-  #toastHideTimer = null;
 
   // Fill mode state.
   #fillActive = false;
@@ -108,8 +107,6 @@ export class HotkeysController {
     this.#lastSkipDirection = null;
     clearTimeout(this.#streakResetTimer);
     this.#streakResetTimer = null;
-    clearTimeout(this.#toastHideTimer);
-    this.#toastHideTimer = null;
     this.#fillActive = false;
     for (const [target, type, handler] of Object.values(this.#gestureListeners)) {
       target.removeEventListener(type, handler);
@@ -250,10 +247,9 @@ export class HotkeysController {
     shell.toast({
       icon: direction === "right" ? "RArrows" : "LArrows",
       text: `${step}s`,
+      duration: 800,
       group: "skip"
     });
-    clearTimeout(this.#toastHideTimer);
-    this.#toastHideTimer = setTimeout(() => shell.hideToast("skip"), 800);
   }
 
   #onSkip(shell, { direction }) {

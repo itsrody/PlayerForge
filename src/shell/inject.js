@@ -1,7 +1,6 @@
 import SHELL_CSS from "./styles.css";
 import { logger } from "../shared/logger.js";
 import { CueRenderer } from "./cue-renderer.js";
-import { ToastManager } from "./toast.js";
 
 let stylesInjected = false;
 
@@ -16,7 +15,7 @@ export function ensureStyles() {
 
 /**
  * Build the shell DOM inside the player container:
- * host > hud layer > [toast, cue layer].
+ * host > hud layer > cue layer.
  */
 export function injectShell(container) {
   if (!container) {
@@ -31,8 +30,6 @@ export function injectShell(container) {
   const hudLayer = doc.createElement("div");
   hudLayer.setAttribute("class", "pf-hud-layer");
   host.appendChild(hudLayer);
-
-  const toasts = new ToastManager(hudLayer);
 
   const cueLayer = doc.createElement("div");
   cueLayer.className = "pf-cue-layer";
@@ -52,10 +49,7 @@ export function injectShell(container) {
     host,
     hudLayer,
     cueLayer,
-    cuePool,
-    toasts,
-    toast: (payload) => toasts.show(payload),
-    hideToast: (group) => toasts.hide(group)
+    cuePool
   };
 }
 

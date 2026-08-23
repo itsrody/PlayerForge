@@ -5,6 +5,7 @@ import { ResumeFeature } from "./features/resume.js";
 import { SubtitlesFeature } from "./features/subtitles.js";
 import { SettingsFeature } from "./features/settings.js";
 import { SettingsPanel } from "./panel.js";
+import { ToastManager } from "./toast.js";
 import { ensureStyles, injectShell, watchShellHost, removeEl } from "./inject.js";
 
 export const VIDEO_EVENTS = [
@@ -43,6 +44,7 @@ export class Shell {
   #inputs = null;
   #features = [];
   #panel;
+  #toasts = null;
   #destroyed = false;
   #cleanups = new Set();
   #stopHostWatch = null;
@@ -58,6 +60,9 @@ export class Shell {
     this.#bus = bus;
     this.#injectDom();
     this.#panel = new SettingsPanel(this, bus);
+    if (this.#shellDom) {
+      this.#toasts = new ToastManager(this.#shellDom.hudLayer);
+    }
     this.#inputs = new HotkeysController(this);
     this.#features = [
       new ResumeFeature(this),
@@ -231,11 +236,15 @@ export class Shell {
   }
 
   toast(payload) {
-    this.#shellDom?.toast?.(payload);
+    this.#toasts?.show(payload);
   }
 
   hideToast(group) {
-    this.#shellDom?.hideToast?.(group);
+    this.#toasts?.hide(group);
+  }
+
+  get toasts() {
+    return this.#toasts;
   }
 
   get bus() {
@@ -487,7 +496,8 @@ export class Shell {
       this.#panel?.destroy();
       this.#panel = null;
       this.#shellDom?.cuePool?.destroy();
-      this.#shellDom?.toasts?.destroy();
+      this.#toasts?.destroy();
+      this.#toasts = null;
       removeEl(this.#shellDom?.host);
       this.#shellDom = null;
       if (this.#savedPositionStyle != null) {
