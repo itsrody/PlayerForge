@@ -4,15 +4,13 @@ import { GESTURE_EVENTS } from "../shared/events.js";
 import { EventBus } from "./bus.js";
 import { ShellRegistry } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
-import { findSdkForVideo, findContainer, MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./sdk.js";
+import { findSdkForVideo, findContainer, videoFromEvent, MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./sdk.js";
 import { Shell } from "../shell/shell.js";
 
 export const SHELL_MARKER = "data-pf-shell";
 
 /** Grace period before a disconnected video's shell is destroyed (SPA source swaps detach briefly). */
 const REMOVAL_GRACE_MS = 500;
-/** Second adoption sweep for videos still size-gated during the first pass. */
-const RESWEEP_DELAY_MS = 1500;
 
 /**
  * crypto.randomUUID() exists only in secure contexts; userscripts match
@@ -25,8 +23,9 @@ function makeId() {
 /**
  * Top-level orchestrator: watches for <video> elements, identifies the player
  * SDK, emits discovery events, and owns the bus/registry/lifecycle trio.
- * Discovery combines media events (loadeddata/play), deferred sweeps, and a
- * reconciler that destroys shells whose videos left the DOM.
+ * Under @run-at document-start nothing pre-exists us: an insertion observer
+ * catches SDK-created players the moment their <video> enters the DOM, and
+ * capture-phase media events cover readiness transitions on existing ones.
  */
 export class Kernel {
   bus;
@@ -36,24 +35,35 @@ export class Kernel {
   #seenVideos = new Set();
   #removalObservers = new Set();
   #removalTimers = new Map();
+  #insertionObserver = null;
   #scope = new AbortController();
 
   #onMediaEvent = (event) => {
-    if (event.target?.localName === "video") {
-      this.#adoptVideo(event.target);
+    const video = videoFromEvent(event);
+    if (video) {
+      this.#adoptVideo(video);
     }
   };
 
   #onPageShow = (event) => {
-    if (event.persisted) {
-      logger.log("kernel", "Restored from bfcache — sweeping");
-      this.#sweep();
+    if (!event.persisted) {
+      return;
+    }
+    logger.log("kernel", "Restored from bfcache — reconciling");
+    for (const shell of this.#registry.getAll()) {
+      if (!shell.video.isConnected) {
+        this.#seenVideos.delete(shell.video);
+        shell.destroy();
+        logger.log("kernel", `Reconciled orphaned shell: ${shell.id}`);
+      }
     }
   };
 
   #onPageHide = (event) => {
     if (!event.persisted) {
       logger.log("kernel", "Page hiding, cleaning up");
+      this.#insertionObserver?.disconnect();
+      this.#insertionObserver = null;
       for (const observer of this.#removalObservers) {
         observer.disconnect();
       }
@@ -86,29 +96,21 @@ export class Kernel {
     document.addEventListener("play", this.#onMediaEvent, { capture: true, signal });
     document.addEventListener("pageshow", this.#onPageShow, { signal });
     window.addEventListener("pagehide", this.#onPageHide, { signal });
-    requestIdleCallback(() => this.#sweep(), { timeout: 1000 });
-    setTimeout(() => this.#sweep(), RESWEEP_DELAY_MS);
-    logger.log("kernel", "Kernel ready — media events + sweeps active");
-  }
-
-  /**
-   * Adopt any unmanaged videos in the document and destroy shells whose
-   * videos have left the DOM without their removal watch noticing.
-   */
-  #sweep() {
-    if (!this.#initialized) {
-      return;
-    }
-    for (const video of document.querySelectorAll("video")) {
-      this.#adoptVideo(video);
-    }
-    for (const shell of this.#registry.getAll()) {
-      if (!shell.video.isConnected) {
-        this.#seenVideos.delete(shell.video);
-        shell.destroy();
-        logger.log("kernel", `Reconciled orphaned shell: ${shell.id}`);
+    this.#insertionObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node.localName === "video") {
+            this.#adoptVideo(node);
+          } else if (node.querySelectorAll) {
+            for (const video of node.querySelectorAll("video")) {
+              this.#adoptVideo(video);
+            }
+          }
+        }
       }
-    }
+    });
+    this.#insertionObserver.observe(document.documentElement, { childList: true, subtree: true });
+    logger.log("kernel", "Kernel ready — media events + insertion watch active");
   }
 
   /** Adopt the video, emit discovery and start removal watching. */

@@ -60,6 +60,25 @@ function identifySdk(element, matchedSelector) {
 }
 
 /**
+ * Resolve the real <video> for a media event. Media events don't bubble, but
+ * capture listeners on document still receive them through the composed path —
+ * where shadow-DOM hosts retarget event.target away from the actual video
+ * (open roots only; closed roots are unreachable by design).
+ */
+export function videoFromEvent(event) {
+  const target = event.target;
+  if (target?.localName === "video") {
+    return target;
+  }
+  for (const node of event.composedPath?.() ?? []) {
+    if (node?.localName === "video") {
+      return node;
+    }
+  }
+  return null;
+}
+
+/**
  * Find the element that should host the shell DOM: prefer an SDK container,
  * then the nearest positioned ancestor of meaningful size, then the parent.
  */

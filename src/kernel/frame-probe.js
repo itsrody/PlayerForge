@@ -1,18 +1,16 @@
 import { logger } from "../shared/logger.js";
-
-/** Deferred sweeps catching videos that appear shortly after injection. */
-const SWEEP_DELAYS_MS = [600, 1800];
+import { videoFromEvent } from "./sdk.js";
 
 /**
  * Cheap sentinel that defers the full kernel boot until a document actually
- * shows a video candidate: an initial sweep, two delayed sweeps, capture-phase
- * media events, and a mutation observer all feed one gate. The first
- * qualifying candidate fires `onCandidate` exactly once and tears the probe
- * down; documents without video never pay for a kernel.
+ * shows a video candidate. Under @run-at document-start nothing pre-exists
+ * us: SDK-created players trip the insertion observer the moment their
+ * <video> enters the DOM, and static players fire loadeddata/play right
+ * after parse. The first size-qualified candidate fires onCandidate exactly
+ * once; documents without video never pay for a kernel.
  */
 export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
   let done = false;
-  const timers = [];
 
   function qualifies(video) {
     try {
@@ -23,21 +21,32 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
     }
   }
 
-  function sweep() {
+  function onMediaEvent(event) {
     if (done) {
       return;
     }
-    for (const video of document.querySelectorAll("video")) {
-      if (qualifies(video)) {
-        fire();
-        return;
-      }
+    const video = videoFromEvent(event);
+    if (video && qualifies(video)) {
+      fire();
     }
   }
 
-  function onMediaEvent(event) {
-    if (!done && event.target?.localName === "video" && qualifies(event.target)) {
-      fire();
+  function onInsertions(mutations) {
+    if (done) {
+      return;
+    }
+    for (const mutation of mutations) {
+      for (const node of mutation.addedNodes) {
+        const candidates = node.localName === "video"
+          ? [node]
+          : node.querySelectorAll ? [...node.querySelectorAll("video")] : [];
+        for (const video of candidates) {
+          if (qualifies(video)) {
+            fire();
+            return;
+          }
+        }
+      }
     }
   }
 
@@ -45,10 +54,6 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
     observer.disconnect();
     document.removeEventListener("loadeddata", onMediaEvent, true);
     document.removeEventListener("play", onMediaEvent, true);
-    for (const timer of timers) {
-      clearTimeout(timer);
-    }
-    timers.length = 0;
   }
 
   function fire() {
@@ -58,13 +63,9 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
     onCandidate();
   }
 
-  const observer = new MutationObserver(sweep);
+  const observer = new MutationObserver(onInsertions);
   document.addEventListener("loadeddata", onMediaEvent, true);
   document.addEventListener("play", onMediaEvent, true);
   observer.observe(document.documentElement, { childList: true, subtree: true });
-  sweep();
-  for (const delay of SWEEP_DELAYS_MS) {
-    timers.push(setTimeout(sweep, delay));
-  }
   return stop;
 }
