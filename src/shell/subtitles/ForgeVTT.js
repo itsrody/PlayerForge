@@ -1,6 +1,7 @@
 const SRT_BLOCK_RE = /(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})\s*-->/;
 const CUE_LINE_RE = /^((?:\d+:\d{1,2}:\d{2}|\d{1,2}:\d{2})[.,]\d{1,3})\s+-->\s+((?:\d+:\d{1,2}:\d{2}|\d{1,2}:\d{2})[.,]\d{1,3})(.*)$/;
 const TIMECODE_RE = /^(?:(\d+):)?(\d{1,2}):(\d{2})[.,](\d{1,3})$/;
+const METADATA_BLOCK_RE = /^(NOTE|STYLE|REGION)(?:[ \t]|$)/;
 const TAG_RE = /<\/?[a-zA-Z][^>]*>/g;
 const ENTITY_MAP = {
   "&amp;": "&",
@@ -11,6 +12,7 @@ const ENTITY_MAP = {
   "&rlm;": "\u200F"
 };
 const ENTITY_RE = /&(?:amp|lt|gt|nbsp|lrm|rlm);/g;
+const NUMERIC_ENTITY_RE = /&#(x[0-9a-fA-F]+|\d+);/g;
 
 export function normalizeText(raw) {
   return raw.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
@@ -29,7 +31,7 @@ export function srtToVtt(raw) {
     }
     if (SRT_BLOCK_RE.test(line)) {
       out.push(line.replace(/(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})/g, (_m, h, m, s, ms) =>
-        `${h.padStart(2, "0")}:${m}:${s}.${ms.padEnd(3, "0")}`));
+        `${h.padStart(2, "0")}:${m}:${s}.${ms.padStart(3, "0")}`));
       inTimingBlock = true;
       continue;
     }
@@ -55,16 +57,36 @@ export function ensureVttHeader(raw) {
   return `WEBVTT\n\n${text.trimStart()}`;
 }
 
+/**
+ * Parse a WebVTT/SRT timecode ("HH:MM:SS.mmm", "MM:SS.mmm"; comma also
+ * accepted as the fractional separator) into seconds.
+ */
 export function timecodeToSeconds(timecode) {
   const match = TIMECODE_RE.exec(timecode);
-  if (match) {
-    return Number(match[1] || 0) * 3600 + Number(match[2]) * 60 + Number(match[3]) + +("0." + match[4]);
+  if (!match) {
+    return null;
   }
-  return null;
+  const hours = Number(match[1] || 0);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3]);
+  const millis = Number(match[4]) / 1000;
+  return hours * 3600 + minutes * 60 + seconds + millis;
+}
+
+function decodeNumericEntity(entity) {
+  const isHex = entity[2] === "x" || entity[2] === "X";
+  const code = parseInt(entity.slice(isHex ? 3 : 2, -1), isHex ? 16 : 10);
+  if (!(code >= 1 && code <= 0x10ffff)) {
+    return "\uFFFD";
+  }
+  return String.fromCodePoint(code);
 }
 
 function decodeCueText(text) {
-  return text.replace(TAG_RE, "").replace(ENTITY_RE, (entity) => ENTITY_MAP[entity]);
+  return text
+    .replace(TAG_RE, "")
+    .replace(ENTITY_RE, (entity) => ENTITY_MAP[entity])
+    .replace(NUMERIC_ENTITY_RE, decodeNumericEntity);
 }
 
 function parseCueSettings(settings) {
@@ -92,43 +114,61 @@ function parseCueSettings(settings) {
   return parsed;
 }
 
+function parseCueBlock(block, offset) {
+  const lines = block.split("\n");
+  if (METADATA_BLOCK_RE.test(lines[0])) {
+    return null;
+  }
+  let timingMatch = null;
+  let timingIndex = -1;
+  for (let i = 0; i < lines.length; i++) {
+    timingMatch = CUE_LINE_RE.exec(lines[i]);
+    if (timingMatch) {
+      timingIndex = i;
+      break;
+    }
+  }
+  if (!timingMatch) {
+    return null;
+  }
+  const rawStart = timecodeToSeconds(timingMatch[1]);
+  const rawEnd = timecodeToSeconds(timingMatch[2]);
+  const settings = parseCueSettings(timingMatch[3]);
+  if (rawStart == null || rawEnd == null || !(rawEnd > rawStart)) {
+    return null;
+  }
+  const shiftedEnd = rawEnd + offset;
+  if (shiftedEnd <= 0) {
+    return null;
+  }
+  const content = decodeCueText(lines.slice(timingIndex + 1).join("\n").trim());
+  if (!content) {
+    return null;
+  }
+  return {
+    start: Math.max(rawStart + offset, 0),
+    end: shiftedEnd,
+    text: content,
+    line: settings.line,
+    position: settings.position,
+    align: settings.align
+  };
+}
+
 /**
- * Parse a VTT (or SRT already normalized to VTT) document into cue objects.
- * `offset` shifts every cue by a constant number of seconds.
+ * Parse a VTT (or SRT already normalized to VTT) document into cue objects
+ * using blank-line-delimited blocks per the WebVTT grammar: NOTE/STYLE/REGION
+ * metadata blocks are skipped, a cue is its timing line plus payload, and any
+ * later timing-looking line inside a payload stays cue text.
+ * `offset` shifts every cue by a constant number of seconds; cues pushed
+ * fully before zero are dropped, partially shifted ones are clamped.
  */
 export function parseSubtitles(text, offset = 0) {
-  const lines = normalizeText(text).split("\n");
   const cues = [];
-  let i = 0;
-  while (i < lines.length) {
-    const match = CUE_LINE_RE.exec(lines[i]);
-    if (!match) {
-      i++;
-      continue;
-    }
-    const start = timecodeToSeconds(match[1]);
-    const end = timecodeToSeconds(match[2]);
-    const settings = parseCueSettings(match[3]);
-    i++;
-    const bodyLines = [];
-    while (i < lines.length && lines[i].trim() !== "") {
-      bodyLines.push(lines[i]);
-      i++;
-    }
-    i++;
-    if (start == null || end == null) {
-      continue;
-    }
-    const content = decodeCueText(bodyLines.join("\n")).trim();
-    if (content) {
-      cues.push({
-        start: offset ? Math.max(0, start + offset) : start,
-        end: offset ? Math.max(0, end + offset) : end,
-        text: content,
-        line: settings.line,
-        position: settings.position,
-        align: settings.align
-      });
+  for (const block of normalizeText(text).split(/\n[ \t]*\n/)) {
+    const cue = parseCueBlock(block, offset);
+    if (cue) {
+      cues.push(cue);
     }
   }
   return sortCues(cues);
