@@ -1,6 +1,7 @@
 import { logger } from "../shared/logger.js";
 import { SHELL_MARKER } from "../kernel/kernel.js";
 import { PluginManager } from "../plugins/manager.js";
+import { HotkeysController } from "./inputs/hotkeys.js";
 import { SettingsPanel } from "./panel.js";
 import { ensureStyles, injectShell, watchShellHost, removeEl } from "./inject.js";
 
@@ -39,6 +40,7 @@ export class Shell {
   #config;
   #shellDom = null;
   #plugins;
+  #inputs = null;
   #panel;
   #destroyed = false;
   #cleanups = new Set();
@@ -58,6 +60,7 @@ export class Shell {
     this.#plugins = new PluginManager(this, bus);
     this.#injectDom();
     this.#panel = new SettingsPanel(this, bus);
+    this.#inputs = new HotkeysController(this);
     this.#setupFocusManagement();
     this.#suppressContextMenu();
     this.#forwardMediaEvents();
@@ -234,6 +237,10 @@ export class Shell {
 
   get plugins() {
     return this.#plugins;
+  }
+
+  get bus() {
+    return this.#bus;
   }
 
   getPlugin(name) {
@@ -494,6 +501,8 @@ export class Shell {
       this.#cleanups.clear();
       this.#stopHostWatch?.();
       this.#stopHostWatch = null;
+      this.#inputs?.destroy();
+      this.#inputs = null;
       this.#panel?.destroy();
       this.#panel = null;
       this.#shellDom?.cuePool?.destroy();

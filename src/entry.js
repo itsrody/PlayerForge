@@ -19,8 +19,6 @@ function bootstrap() {
   const kernel = new Kernel();
   window.__PF_KERNEL__ = kernel;
   kernel.init({
-    gestures: true,
-    hotkeys: true,
     resume: true,
     subtitles: true
   });

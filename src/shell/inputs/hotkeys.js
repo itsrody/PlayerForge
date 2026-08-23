@@ -1,9 +1,8 @@
-import { Plugin } from "./base.js";
 import { GestureController } from "./gestures.js";
-import { getSetting } from "../shared/config.js";
-import { formatTime } from "../shared/format.js";
-import { GESTURE_EVENTS } from "../shared/events.js";
-import { logger } from "../shared/logger.js";
+import { getSetting } from "../../shared/config.js";
+import { formatTime } from "../../shared/format.js";
+import { GESTURE_EVENTS } from "../../shared/events.js";
+import { logger } from "../../shared/logger.js";
 
 const SCRUB_MAX_MULTIPLIER = 6;
 const SCRUB_VELOCITY_MAX = 1200;
@@ -15,11 +14,13 @@ const VOLUME_STEP = 0.1;
 let fullscreenHintShown = false;
 
 /**
- * Reacts to pf:gesture-* events: long-press speed boost, drag scrubbing,
+ * Shell-owned input layer: long-press speed boost, drag scrubbing,
  * swipe-down-to-exit-fullscreen, double-tap zones, keyboard skips,
- * volume steps, mute toggle, and pinch-to-fill.
+ * volume steps, mute toggle, and pinch-to-fill. Not a lifecycle plugin —
+ * each Shell instantiates it directly and destroys it on teardown.
  */
-export class HotkeysPlugin extends Plugin {
+export class HotkeysController {
+  #shell;
   #gestureController = null;
 
   // Hold-to-speed state.
@@ -46,24 +47,21 @@ export class HotkeysPlugin extends Plugin {
   #fullscreenUnsub = null;
   #gestureListeners = {};
 
-  constructor() {
-    super("controller");
-  }
-
-  onAttach(shell) {
+  constructor(shell) {
+    this.#shell = shell;
     if (!shell.container) {
       logger.error("controller", "No shell container");
       return;
     }
+    const host = shell.shellHost;
     this.#gestureController = new GestureController(
       shell.video,
       shell.container,
-      shell.shellHost,
+      host,
       () => shell.fullscreen
     );
 
-    this.#fullscreenUnsub?.();
-    this.#fullscreenUnsub = this.on("shell:fullscreen-change", ({ shellId, fullscreen }) => {
+    this.#fullscreenUnsub = shell.bus.on("shell:fullscreen-change", ({ shellId, fullscreen }) => {
       if (shellId !== shell.id) {
         return;
       }
@@ -81,7 +79,6 @@ export class HotkeysPlugin extends Plugin {
       }
     });
 
-    const host = shell.shellHost;
     this.#listen(host, GESTURE_EVENTS.hold, (event) => this.#onHold(shell, event.detail));
     this.#listen(host, GESTURE_EVENTS.release, (event) => this.#onRelease(shell, event.detail));
     this.#listen(host, GESTURE_EVENTS.scrub, (event) => this.#onScrub(shell, event.detail));
@@ -96,7 +93,7 @@ export class HotkeysPlugin extends Plugin {
     logger.log("controller", `Attached (${shell.sdkName})`);
   }
 
-  onDetach() {
+  destroy() {
     this.#gestureController?.destroy();
     this.#gestureController = null;
     this.#fullscreenUnsub?.();
@@ -118,7 +115,7 @@ export class HotkeysPlugin extends Plugin {
       target.removeEventListener(type, handler);
     }
     this.#gestureListeners = {};
-    logger.log("controller", "Detached");
+    logger.log("controller", "Destroyed");
   }
 
   #listen(target, type, handler) {

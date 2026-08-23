@@ -1,5 +1,5 @@
-import { getSetting } from "../shared/config.js";
-import { GESTURE_EVENTS } from "../shared/events.js";
+import { getSetting } from "../../shared/config.js";
+import { GESTURE_EVENTS } from "../../shared/events.js";
 
 // Tuning constants (ms / px / ratios).
 const HOLD_TIMEOUT_MS = 300;

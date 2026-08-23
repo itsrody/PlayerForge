@@ -190,8 +190,6 @@ export class Kernel {
 export const KERNEL_DEFAULTS = {
   enabled: true,
   plugins: {},
-  gestures: true,
-  hotkeys: true,
   resume: true,
   subtitles: true
 };
