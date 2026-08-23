@@ -2,8 +2,8 @@ import { logger } from "../shared/logger.js";
 
 /**
  * Bridges video discovery to shell creation: listens for `video:found` /
- * `video:removed`, invokes the shell factory, and cleans everything up on
- * page unload.
+ * `video:removed` and invokes the shell factory. Page-unload cleanup is
+ * owned by the kernel.
  */
 export class LifecycleManager {
   #bus;
@@ -14,18 +14,13 @@ export class LifecycleManager {
   constructor(bus, registry) {
     this.#bus = bus;
     this.#registry = registry;
-    this.#wire();
+    const { signal } = this.#scope;
+    this.#bus.addEventListener("video:found", (event) => this.#onVideoFound(event.detail), { signal });
+    this.#bus.addEventListener("video:removed", (event) => this.#onVideoRemoved(event.detail), { signal });
   }
 
   setShellFactory(factory) {
     this.#shellFactory = factory;
-  }
-
-  #wire() {
-    const { signal } = this.#scope;
-    this.#bus.addEventListener("video:found", (event) => this.#onVideoFound(event.detail), { signal });
-    this.#bus.addEventListener("video:removed", (event) => this.#onVideoRemoved(event.detail), { signal });
-    this.#guardUnload();
   }
 
   #onVideoFound({ video, container, sdk, sdkName, id }) {
@@ -53,17 +48,5 @@ export class LifecycleManager {
       shell.destroy();
       logger.log("lifecycle", `Shell destroyed: ${shell.id}`);
     }
-  }
-
-  #guardUnload() {
-    const onUnload = (event) => {
-      if (!event?.persisted) {
-        logger.log("lifecycle", "Page unloading, cleaning up");
-        this.#registry.destroyAll();
-        this.#scope.abort();
-      }
-    };
-    window.addEventListener("beforeunload", onUnload);
-    window.addEventListener("pagehide", onUnload);
   }
 }

@@ -9,9 +9,24 @@ import { Shell } from "../shell/shell.js";
 
 export const SHELL_MARKER = "data-pf-shell";
 
+/** Grace period before a disconnected video's shell is destroyed (SPA source swaps detach briefly). */
+const REMOVAL_GRACE_MS = 500;
+/** Second adoption sweep for videos still size-gated during the first pass. */
+const RESWEEP_DELAY_MS = 1500;
+
+/**
+ * crypto.randomUUID() exists only in secure contexts; userscripts match
+ * plain http pages too, so discovery needs a fallback id.
+ */
+function makeId() {
+  return crypto.randomUUID?.() ?? `pf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
 /**
  * Top-level orchestrator: watches for <video> elements, identifies the player
  * SDK, emits discovery events, and owns the bus/registry/lifecycle trio.
+ * Discovery combines media events (loadeddata/play), deferred sweeps, and a
+ * reconciler that destroys shells whose videos left the DOM.
  */
 export class Kernel {
   bus;
@@ -20,16 +35,35 @@ export class Kernel {
   #initialized = false;
   #seenVideos = new Set();
   #removalObservers = new Set();
+  #removalTimers = new Map();
+  #scope = new AbortController();
 
-  #onLoadStart = (event) => {
-    if (event.target instanceof HTMLVideoElement) {
-      this.#probeVideo(event.target);
+  #onMediaEvent = (event) => {
+    if (event.target?.localName === "video") {
+      this.#adoptVideo(event.target);
     }
   };
 
-  #onLoadedData = (event) => {
-    if (event.target instanceof HTMLVideoElement) {
-      this.#adoptVideo(event.target);
+  #onPageShow = (event) => {
+    if (event.persisted) {
+      logger.log("kernel", "Restored from bfcache — sweeping");
+      this.#sweep();
+    }
+  };
+
+  #onPageHide = (event) => {
+    if (!event.persisted) {
+      logger.log("kernel", "Page hiding, cleaning up");
+      for (const observer of this.#removalObservers) {
+        observer.disconnect();
+      }
+      this.#removalObservers.clear();
+      for (const timer of this.#removalTimers.values()) {
+        clearTimeout(timer);
+      }
+      this.#removalTimers.clear();
+      this.#registry.destroyAll();
+      this.#scope.abort();
     }
   };
 
@@ -41,32 +75,43 @@ export class Kernel {
   }
 
   init() {
+    if (this.#initialized) {
+      return;
+    }
+    this.#initialized = true;
+    logger.log("kernel", "Initializing kernel");
+    this.#registerMenuCommand();
+    const { signal } = this.#scope;
+    document.addEventListener("loadeddata", this.#onMediaEvent, { capture: true, signal });
+    document.addEventListener("play", this.#onMediaEvent, { capture: true, signal });
+    document.addEventListener("pageshow", this.#onPageShow, { signal });
+    window.addEventListener("pagehide", this.#onPageHide, { signal });
+    requestIdleCallback(() => this.#sweep(), { timeout: 1000 });
+    setTimeout(() => this.#sweep(), RESWEEP_DELAY_MS);
+    logger.log("kernel", "Kernel ready — media events + sweeps active");
+  }
+
+  /**
+   * Adopt any unmanaged videos in the document and destroy shells whose
+   * videos have left the DOM without their removal watch noticing.
+   */
+  #sweep() {
     if (!this.#initialized) {
-      this.#initialized = true;
-      logger.log("kernel", "Initializing kernel");
-      this.#registerMenuCommand();
-      document.addEventListener("loadstart", this.#onLoadStart, true);
-      document.addEventListener("loadeddata", this.#onLoadedData, true);
-      logger.log("kernel", "Kernel ready — init + ready hooks active");
+      return;
+    }
+    for (const video of document.querySelectorAll("video")) {
+      this.#adoptVideo(video);
+    }
+    for (const shell of this.#registry.getAll()) {
+      if (!shell.video.isConnected) {
+        this.#seenVideos.delete(shell.video);
+        shell.destroy();
+        logger.log("kernel", `Reconciled orphaned shell: ${shell.id}`);
+      }
     }
   }
 
-  /** Early hook: log candidate videos (no side effects). */
-  #probeVideo(video) {
-    if (this.#seenVideos.has(video) || video.hasAttribute(SHELL_MARKER)) {
-      return;
-    }
-    const sdk = findSdkForVideo(video);
-    if (!sdk || (!video.src && !video.currentSrc && !video.querySelector("source"))) {
-      return;
-    }
-    const rect = video.getBoundingClientRect();
-    if (!(rect.width < MIN_VIDEO_WIDTH) && !(rect.height < MIN_VIDEO_HEIGHT)) {
-      logger.log("kernel", `Init hook: ${sdk.name} video detected`);
-    }
-  }
-
-  /** Ready hook: adopt the video, emit discovery and start removal watching. */
+  /** Adopt the video, emit discovery and start removal watching. */
   #adoptVideo(video) {
     if (this.#seenVideos.has(video) || video.hasAttribute(SHELL_MARKER)) {
       return;
@@ -79,33 +124,33 @@ export class Kernel {
     if (rect.width < MIN_VIDEO_WIDTH || rect.height < MIN_VIDEO_HEIGHT) {
       return;
     }
-    this.#seenVideos.add(video);
     const container = findContainer(video, sdk);
     if (!container) {
       logger.warn("kernel", "No container for video — skipping");
-      this.#seenVideos.delete(video);
       return;
     }
-    logger.log("kernel", `Ready hook: ${sdk.name} (${video.videoWidth}×${video.videoHeight}, ${Math.round(video.duration)}s)`);
+    this.#seenVideos.add(video);
+    logger.log("kernel", `${sdk.name} adopted (${video.videoWidth}×${video.videoHeight}, ${Math.round(video.duration)}s)`);
     this.bus.emit("video:found", {
       video,
       container,
       sdk,
       sdkName: sdk.name,
-      id: crypto.randomUUID()
+      id: makeId()
     });
     this.#watchVideoRemoval(video, container);
   }
 
   #watchVideoRemoval(video, container) {
     const observers = [];
-    let removed = false;
 
     const stopWatching = () => {
       for (const observer of observers) {
         observer.disconnect();
         this.#removalObservers.delete(observer);
       }
+      clearTimeout(this.#removalTimers.get(video));
+      this.#removalTimers.delete(video);
       this.#seenVideos.delete(video);
     };
 
@@ -129,16 +174,24 @@ export class Kernel {
     let anchors = [];
 
     const checkAnchors = () => {
-      if (!removed) {
-        if (!video.isConnected) {
-          removed = true;
-          stopWatching();
-          this.bus.emit("video:removed", { video });
-          return;
-        }
-        if (video.parentElement !== anchors[0]) {
-          reanchorObservers();
-        }
+      if (this.#removalTimers.has(video)) {
+        return;
+      }
+      if (!video.isConnected) {
+        const timer = setTimeout(() => {
+          this.#removalTimers.delete(video);
+          if (!video.isConnected) {
+            stopWatching();
+            this.bus.emit("video:removed", { video });
+          } else {
+            reanchorObservers();
+          }
+        }, REMOVAL_GRACE_MS);
+        this.#removalTimers.set(video, timer);
+        return;
+      }
+      if (video.parentElement !== anchors[0]) {
+        reanchorObservers();
       }
     };
 
@@ -166,18 +219,5 @@ export class Kernel {
         }));
       }
     }, { autoClose: true });
-  }
-
-  destroy() {
-    logger.log("kernel", "Shutting down kernel");
-    document.removeEventListener("loadstart", this.#onLoadStart, true);
-    document.removeEventListener("loadeddata", this.#onLoadedData, true);
-    for (const observer of this.#removalObservers) {
-      observer.disconnect();
-    }
-    this.#removalObservers.clear();
-    this.#registry.destroyAll();
-    this.#initialized = false;
-    this.#seenVideos.clear();
   }
 }
