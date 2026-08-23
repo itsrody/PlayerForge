@@ -44,7 +44,6 @@ export class HotkeysPlugin extends Plugin {
 
   // Misc.
   #fullscreenUnsub = null;
-  #safeAreaProbe = null;
   #gestureListeners = {};
 
   constructor() {
@@ -115,8 +114,6 @@ export class HotkeysPlugin extends Plugin {
     clearTimeout(this.#toastHideTimer);
     this.#toastHideTimer = null;
     this.#fillActive = false;
-    this.#safeAreaProbe?.remove();
-    this.#safeAreaProbe = null;
     for (const [target, type, handler] of Object.values(this.#gestureListeners)) {
       target.removeEventListener(type, handler);
     }
@@ -317,30 +314,9 @@ export class HotkeysPlugin extends Plugin {
     }
   }
 
-  /** Measure safe-area insets via a hidden fixed-positioned probe element. */
-  #getSafeAreaInsets() {
-    if (!this.#safeAreaProbe) {
-      const probe = document.createElement("div");
-      probe.style.cssText =
-        "position:fixed;visibility:hidden;pointer-events:none;" +
-        "top:env(safe-area-inset-top,0px);right:env(safe-area-inset-right,0px);" +
-        "bottom:env(safe-area-inset-bottom,0px);left:env(safe-area-inset-left,0px);";
-      (document.body || document.documentElement).appendChild(probe);
-      this.#safeAreaProbe = probe;
-    }
-    const rect = this.#safeAreaProbe.getBoundingClientRect();
-    const positive = (value) => (Number.isFinite(value) ? Math.max(0, value) : 0);
-    return {
-      top: positive(rect.top),
-      right: positive(window.innerWidth - rect.right),
-      bottom: positive(window.innerHeight - rect.bottom),
-      left: positive(rect.left)
-    };
-  }
-
   /**
    * Scale factor needed for the video's rendered box to cover the visual
-   * viewport including safe-area insets.
+   * viewport.
    */
   #computeCoverScale(video) {
     const videoWidth = video.videoWidth;
@@ -348,9 +324,8 @@ export class HotkeysPlugin extends Plugin {
     if (!videoWidth || !videoHeight) {
       return 0;
     }
-    const insets = this.#getSafeAreaInsets();
-    const viewportWidth = window.innerWidth + insets.left + insets.right;
-    const viewportHeight = window.innerHeight + insets.top + insets.bottom;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
     if (!viewportWidth || !viewportHeight) {
       return 0;
     }
