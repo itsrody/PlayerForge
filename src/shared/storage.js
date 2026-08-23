@@ -3,26 +3,19 @@ import { logger } from "./logger.js";
 export const CONFIG_DOC_KEY = "pf:configs";
 
 export function gmGetValue(key, fallback) {
-  return typeof GM_getValue === "function" ? GM_getValue(key, fallback) : fallback;
+  return GM_getValue(key, fallback);
 }
 
 export function gmSetValue(key, value) {
-  if (typeof GM_setValue === "function") {
-    GM_setValue(key, value);
-  }
+  GM_setValue(key, value);
 }
 
 export function gmDeleteValue(key) {
-  if (typeof GM_deleteValue === "function") {
-    GM_deleteValue(key);
-  }
+  GM_deleteValue(key);
 }
 
 export function gmRegisterMenu(title, onClick, options) {
-  if (typeof GM_registerMenuCommand === "function") {
-    return GM_registerMenuCommand(title, onClick, options);
-  }
-  return null;
+  return GM_registerMenuCommand(title, onClick, options);
 }
 
 function readConfigDoc() {

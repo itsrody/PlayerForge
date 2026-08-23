@@ -4,7 +4,7 @@ import { shouldSkipUrl } from "./shared/guard.js";
 import { getConfigValue, setConfigValue } from "./shared/storage.js";
 import { registerBuiltins } from "./plugins/index.js";
 
-export const VERSION = "0.6.0";
+export const VERSION = "0.7.0";
 
 function bootstrap() {
   "use strict";
@@ -27,7 +27,7 @@ function bootstrap() {
 
   if (getConfigValue("firstRun", true) !== false) {
     setConfigValue("firstRun", false);
-    const coarsePointer = typeof matchMedia == "function" && matchMedia("(pointer: coarse)").matches;
+    const coarsePointer = matchMedia("(pointer: coarse)").matches;
     kernel.bus.once("shell:created", (shell) => {
       setTimeout(() => {
         if (shell && !shell.panel?.isOpen) {

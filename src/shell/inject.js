@@ -8,16 +8,9 @@ let stylesInjected = false;
 export function ensureStyles() {
   if (!stylesInjected) {
     stylesInjected = true;
-    try {
-      const sheet = new CSSStyleSheet();
-      sheet.replaceSync(SHELL_CSS);
-      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-    } catch {
-      const style = document.createElement("style");
-      style.textContent = SHELL_CSS;
-      style.setAttribute("data-pf-managed", "css");
-      (document.head || document.documentElement).appendChild(style);
-    }
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(SHELL_CSS);
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
   }
 }
 

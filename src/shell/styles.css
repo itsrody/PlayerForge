@@ -641,7 +641,6 @@ pf-toast.pf-toast-interactive {
 
 /* Toggle switch — appearance:none keeps real checkbox semantics. */
 .pf-panel input[type="checkbox"] {
-  -webkit-appearance: none;
   appearance: none;
   flex: none;
   width: 34px;

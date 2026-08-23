@@ -6,8 +6,8 @@ const watch = process.argv.includes("--watch");
 const banner = `// ==UserScript==
 // @name         PlayerForge
 // @namespace    https://github.com/PlayerForge
-// @version      0.6.0
-// @description  Generic HTML5 video player enhancer with gestures, hotkeys, progress resume, subtitles, and an extensible plugin system
+// @version      0.7.0
+// @description  Firefox 154+ / Violentmonkey 2.48+ exclusive HTML5 video player enhancer with gestures, hotkeys, progress resume, subtitles, and an extensible plugin system
 // @author       PlayerForge
 // @match        *://*/*
 // @exclude      *://*.youtube.com/*
@@ -55,17 +55,13 @@ const banner = `// ==UserScript==
 // @run-at       document-start
 // @license      MIT
 // ==/UserScript==
-
-// V8 explicit compile hint (Chrome 136+): eagerly parse+compile on a
-// background thread instead of lazily at first call during document_start.
-// Must precede the first non-comment token. Ignored by other engines.
-//# allFunctionsCalledOnLoad`;
+`;
 
 const options = {
   entryPoints: ["src/entry.js"],
   bundle: true,
   format: "iife",
-  target: ["es2022"],
+  target: ["firefox154"],
   outfile: "dist/playerforge.user.js",
   banner: { js: banner },
   loader: { ".css": "text" },

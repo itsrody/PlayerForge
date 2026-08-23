@@ -277,10 +277,7 @@ export class Shell {
       video.addEventListener(name, handler);
       this.#cleanups.add(() => video.removeEventListener(name, handler));
     }
-    const requestFrame = video.requestVideoFrameCallback;
-    if (typeof requestFrame !== "function") {
-      return;
-    }
+    const requestFrame = video.requestVideoFrameCallback.bind(video);
     const onFrame = (_now, metadata) => {
       if (this.#bus.hasListeners("shell:frame")) {
         this.#bus.emit("shell:frame", {
@@ -414,9 +411,9 @@ export class Shell {
   }
 
   exitFullscreen() {
-    const fullscreenEl = document.fullscreenElement || document.webkitFullscreenElement;
+    const fullscreenEl = document.fullscreenElement;
     if (fullscreenEl && this.#ownsFullscreenElement(fullscreenEl)) {
-      (document.exitFullscreen?.() ?? document.webkitExitFullscreen?.())?.catch?.(() => {});
+      document.exitFullscreen()?.catch(() => {});
       return;
     }
     for (let el = this.container; el; el = el.parentElement) {
@@ -463,7 +460,7 @@ export class Shell {
   }
 
   #detectFullscreen() {
-    const fullscreenEl = document.fullscreenElement || document.webkitFullscreenElement;
+    const fullscreenEl = document.fullscreenElement;
     if (fullscreenEl && this.#ownsFullscreenElement(fullscreenEl)) {
       return true;
     }
