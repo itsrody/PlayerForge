@@ -1,0 +1,874 @@
+.pf-shell {
+  /* Palette base — every translucent surface/ink in the HUD derives from
+     these via color-mix() (Chrome 111+), so the whole overlay is themeable
+     by overriding just these three custom properties. */
+  --pf-fg: #fff;
+  --pf-bg: #000;
+  --pf-accent: #4a9eff;
+
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 10000;
+  outline: none;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  color: var(--pf-fg);
+  box-sizing: border-box;
+}
+.pf-shell *,
+.pf-shell *::before,
+.pf-shell *::after {
+  box-sizing: border-box;
+}
+
+/* Neutralize the inline 'position: relative' we set on the container
+   while it is the native fullscreen element. The UA's ':fullscreen'
+   rule uses 'position: fixed' (non-important), which an inline style
+   would otherwise override - leaving the top-layer element sized to its
+   parent instead of covering the viewport. */
+[data-pf-shell]:fullscreen {
+  position: fixed !important;
+}
+
+/* ── HUD Layer ─────────────────────────────────────────────────── */
+.pf-hud-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+.pf-hud-layer > * {
+  pointer-events: auto;
+}
+
+/* ── Cue Layer (reusable caption DOM) ──────────────────────────── */
+/* Captions render here — above the video, so filters/transforms on the
+   <video> never touch them, and the cue pool diffs slots per transition. */
+.pf-cue-layer {
+  --pf-cue-color: #fff;
+  --pf-cue-font-family: inherit;
+  --pf-cue-font-size: 1.2em;
+  --pf-cue-font-weight: 500;
+  --pf-cue-line-height: 1.4;
+  --pf-cue-text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.9);
+  --pf-cue-top: 85%;
+  --pf-cue-left: 50%;
+  --pf-cue-x: -50%;
+
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 2;
+}
+/* .pf-hud-layer > * re-enables pointer events on every HUD child —
+   this more-specific rule keeps the caption layer click-transparent. */
+.pf-hud-layer > .pf-cue-layer {
+  pointer-events: none;
+}
+.pf-cue {
+  position: absolute;
+  top: var(--pf-cue-top, 85%);
+  left: var(--pf-cue-left, 50%);
+  transform: translateX(var(--pf-cue-x, -50%));
+  max-width: 80%;
+  color: var(--pf-cue-color, #fff);
+  font-family: var(--pf-cue-font-family, inherit);
+  font-size: var(--pf-cue-font-size, 1.2em);
+  font-weight: var(--pf-cue-font-weight, 500);
+  line-height: var(--pf-cue-line-height, 1.4);
+  text-shadow: var(--pf-cue-text-shadow, 1px 1px 3px rgba(0, 0, 0, 0.9));
+  white-space: pre-wrap;
+  text-align: center;
+  pointer-events: none;
+}
+.pf-cue[hidden] {
+  display: none !important;
+}
+
+/* ── Toast (singleton <pf-toast>) ──────────────────────────────── */
+/* Pill-shaped, top-centered, opacity morph for content changes. */
+pf-toast {
+  --pf-toast-bg: color-mix(in srgb, var(--pf-bg) 72%, transparent);
+  --pf-toast-color: var(--pf-fg);
+  --pf-toast-radius: 999px;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  /* Dedicated translate property (Chrome 104+) - keeps centering out of
+     the transform property, so transform-based animations on the toast
+     never clobber it. */
+  translate: -50%;
+  background: var(--pf-toast-bg);
+  -webkit-backdrop-filter: blur(14px) saturate(1.25);
+  backdrop-filter: blur(14px) saturate(1.25);
+  color: var(--pf-toast-color);
+  padding: 6px 16px;
+  border-radius: var(--pf-toast-radius);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 100;
+
+  /* Default hidden */
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+pf-toast.pf-visible {
+  opacity: 1;
+}
+
+/* Icon inside toast */
+pf-toast .pf-toast-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1em;
+  height: 1.1em;
+  flex-shrink: 0;
+  fill: currentColor;
+}
+
+/* Text inside toast */
+pf-toast .pf-toast-text {
+  display: inline;
+}
+
+/* Action buttons (interactive toasts — e.g. resume prompt) */
+pf-toast .pf-toast-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+}
+pf-toast .pf-toast-actions button {
+  border: none;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pf-fg) 16%, transparent);
+  color: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+pf-toast .pf-toast-actions button:hover {
+  background: color-mix(in srgb, var(--pf-fg) 28%, transparent);
+}
+/* Icon-only action buttons — square pill, glyph sized to the toast text */
+pf-toast .pf-toast-actions button:has(svg) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+}
+pf-toast .pf-toast-actions button svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+/* Interactive toasts get a card look instead of a pill so multi-word
+   actions fit; they also stay put until an action is taken. */
+pf-toast.pf-toast-interactive {
+  --pf-toast-radius: 12px;
+  max-width: min(92vw, 440px);
+  white-space: normal;
+  padding: 8px 12px;
+}
+
+/* ── Buffering indicator ────────────────────────────────────────── */
+/* CSS-only playback-state styling via media element pseudo-classes
+   (Chrome 152+, Interop 2026). No JS event listeners, no class
+   toggling — the browser keeps :buffering/:stalled in sync with the media
+   element. The spinner element is always in the HUD but only shown here;
+   on engines without the pseudo-classes it stays hidden and the dim never
+   applies (identical to today's behavior). */
+.pf-spinner {
+  display: none;
+  place-items: center;
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+}
+.pf-spinner::before {
+  content: '';
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 3px solid color-mix(in srgb, var(--pf-fg) 25%, transparent);
+  border-top-color: var(--pf-fg);
+  animation: pf-spin 0.8s linear infinite;
+}
+@keyframes pf-spin {
+  to { transform: rotate(360deg); }
+}
+
+@supports selector(video:playing) {
+  /* Container has [data-pf-shell] and wraps BOTH the shell host and the
+     <video> (shell/index.js), so :has() scopes the video state to this
+     player even when the SDK nests the video deeper in its own markup. */
+  video[data-pf-shell]:buffering,
+  video[data-pf-shell]:stalled {
+    filter: brightness(0.88);
+  }
+  [data-pf-shell]:has(video[data-pf-shell]:buffering) .pf-spinner,
+  [data-pf-shell]:has(video[data-pf-shell]:stalled) .pf-spinner {
+    display: grid;
+  }
+}
+
+/* ── Panel (universal plugin panel) ───────────────────────────── */
+/* Glassy, floating sheet centered in the shell on both axes. Vertical
+   centering is top: 50% + translate: 0 -50% (translate, not margin-top,
+   so it tracks the panel's own height and survives overflow scrolling); the
+   open/close slide folds into that same translate (calc(-50% - 6px) start)
+   so the two never conflict. Density adapts to the *shell* (not the
+   viewport) via the container query at the bottom of this block. */
+.pf-panel {
+  container-type: inline-size;
+  container-name: pf-panel;
+
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  margin: 0 auto;
+  translate: 0 -50%;
+  width: min(380px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--pf-fg) 25%, transparent) transparent;
+
+  background: color-mix(in srgb, var(--pf-bg) 72%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.25);
+  backdrop-filter: blur(14px) saturate(1.25);
+  color: var(--pf-fg);
+  border: 1px solid color-mix(in srgb, var(--pf-fg) 14%, transparent);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--pf-bg) 45%, transparent);
+  font-size: 13px;
+  line-height: 1.4;
+  z-index: 120;
+
+  opacity: 0;
+  translate: 0 -6px;
+  transition:
+    opacity 0.14s ease,
+    translate 0.14s ease,
+    display 0.14s allow-discrete;
+}
+.pf-panel:not([hidden]) {
+  opacity: 1;
+  translate: 0 -50%;
+}
+@starting-style {
+  .pf-panel:not([hidden]) {
+    opacity: 0;
+    translate: 0 calc(-50% - 6px);
+  }
+}
+.pf-panel[hidden] { display: none; }
+
+/* Single header row: [segmented tabs] [close]. */
+.pf-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--pf-fg) 10%, transparent);
+}
+
+/* Segmented tab strip — icon + label, active label accent-tinted. Tabs are
+   content-sized (uniform internal padding, no equal-width stretch) and the
+   strip distributes them with space-evenly, so every tab keeps the same
+   internal breathing room and tab separation is wider than the icon-label
+   gap (label pairs with its own icon, not the neighbour's). */
+.pf-panel-tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: space-evenly;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--pf-fg) 10%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--pf-fg) 5%, transparent);
+}
+.pf-panel-tab {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px 7px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: color-mix(in srgb, var(--pf-fg) 60%, transparent);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+  outline: none;
+}
+.pf-panel-tab svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  fill: currentColor;
+}
+.pf-panel-tab:hover { background: transparent; color: var(--pf-fg); }
+.pf-panel-tab-active {
+  background: transparent;
+  color: var(--pf-accent);
+  font-weight: 600;
+}
+.pf-panel-close {
+  flex: none;
+  border: none;
+  background: transparent;
+  color: color-mix(in srgb, var(--pf-fg) 70%, transparent);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 5px 8px;
+  border-radius: 7px;
+}
+.pf-panel-close:hover { background: color-mix(in srgb, var(--pf-fg) 14%, transparent); color: var(--pf-fg); }
+.pf-panel-close:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: -2px; }
+
+.pf-panel-body { padding: 6px 8px 10px; }
+
+.pf-panel-section { margin-bottom: 6px; }
+.pf-panel-section[hidden] { display: none; }
+.pf-panel-section:last-child { margin-bottom: 0; }
+
+/* Section header — label on the left, an icon action (e.g. Reset style)
+   on the right. */
+.pf-panel-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.pf-panel-section-head .pf-panel-label { margin-bottom: 0; }
+
+/* Icon-only action buttons — square, centered glyph, tooltip via title. */
+.pf-panel-actions .pf-btn.pf-btn-icon,
+.pf-panel-section-head .pf-btn.pf-btn-icon {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  margin-bottom: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pf-panel-actions .pf-btn.pf-btn-icon svg,
+.pf-panel-section-head .pf-btn.pf-btn-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.pf-panel-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.pf-panel-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--pf-fg) 65%, transparent);
+  margin-bottom: 4px;
+}
+.pf-panel-field .pf-panel-label {
+  flex: 1;
+  margin-bottom: 0;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--pf-fg);
+  font-size: 13px;
+}
+/* One-line toggle + preset row (Colors tab) — the label hugs the switch
+   instead of stretching, so the preset select fills the rest. */
+.pf-panel-top .pf-panel-label {
+  flex: none;
+}
+/* Reset / Preview buttons ride the right edge of the preset row. */
+.pf-panel-top .pf-panel-actions {
+  flex: none;
+  margin-bottom: 0;
+}
+.pf-panel-value {
+  min-width: 34px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--pf-fg) 80%, transparent);
+}
+.pf-panel-hint {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--pf-fg) 60%, transparent);
+  margin: 6px 0;
+}
+
+/* Subtitles tab — upload / remove buttons on the left, the status line
+   beside them (single line, truncated). */
+.pf-panel-load-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pf-panel-load-row .pf-panel-actions {
+  flex: none;
+  margin-bottom: 0;
+}
+.pf-panel-load-row .pf-panel-hint {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Drag-and-drop target (Subtitles tab) — highlighted while dragging files */
+.pf-panel-section.pf-drop-active {
+  outline: 2px dashed var(--pf-accent);
+  outline-offset: -4px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--pf-accent) 6%, transparent);
+}
+
+/* Generic paired-action row (e.g. Reset / Preview in the Colors tab).
+   Equal-width buttons stretch to fill the row. */
+.pf-panel-actions {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.pf-panel-actions .pf-btn {
+  width: auto;
+  flex: 1 1 0;
+  margin-bottom: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.pf-panel-actions .pf-btn svg { width: 16px; height: 16px; }
+
+/* Compact 2-column grid (Colors / Subtitles tabs) — minmax(0, 1fr)
+   lets columns shrink below a control's intrinsic width so the grid never
+   overflows the panel (no horizontal scroll). */
+.pf-panel-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 4px 8px;
+  margin-bottom: 4px;
+}
+.pf-panel-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.pf-panel-cell-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+.pf-panel-cell-head .pf-panel-label {
+  margin-bottom: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--pf-fg) 65%, transparent);
+}
+.pf-panel-cell-head .pf-panel-value {
+  min-width: 0;
+  font-size: 11px;
+}
+
+/* Compact inline sliders (Colors tab) — label · range · value all on one
+   line, so each control is a single row instead of label-over-slider.
+   Long labels ellipsize before the slider starves. */
+.pf-panel-grid-compact { gap: 4px 8px; }
+.pf-panel-grid-compact .pf-panel-cell {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+.pf-panel-grid-compact .pf-panel-cell .pf-panel-label {
+  flex: none;
+  min-width: 0;
+  max-width: 45%;
+  margin-bottom: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pf-panel-grid-compact .pf-panel-cell .pf-panel-value {
+  flex: none;
+  min-width: 30px;
+  font-size: 11px;
+}
+.pf-panel-grid-compact .pf-panel-cell input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+/* Color-swatch cell has no filling element — spread label / swatch / hex
+   so the value still lands on the right edge like the range cells. */
+.pf-panel-grid-compact .pf-panel-cell:has(> input[type="color"]) {
+  justify-content: space-between;
+}
+
+/* Position row (Subtitles tab) — toggle + two labeled sliders + Align
+   select on one line. Slider groups flex-grow; the select hugs its content;
+   the row wraps on very narrow panels instead of overflowing. */
+.pf-panel-pos-row {
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.pf-panel-pos-slider {
+  flex: 1 1 110px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pf-panel-pos-slider .pf-panel-label {
+  flex: none;
+  margin-bottom: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--pf-fg) 65%, transparent);
+}
+.pf-panel-pos-slider input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+.pf-panel-pos-slider .pf-panel-value {
+  flex: none;
+  min-width: 30px;
+  font-size: 11px;
+}
+.pf-panel-pos-row select.pf-select {
+  flex: 0 1 auto;
+  width: auto;
+}
+
+/* Range sliders — custom filled track (--pf-fill) + round thumb.
+   The fill percent is kept in sync by the panel's delegated input handler. */
+.pf-panel input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  --pf-fill: 50%;
+}
+.pf-panel input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(to right,
+    var(--pf-accent) 0,
+    var(--pf-accent) var(--pf-fill),
+    color-mix(in srgb, var(--pf-fg) 20%, transparent) var(--pf-fill),
+    color-mix(in srgb, var(--pf-fg) 20%, transparent) 100%);
+}
+.pf-panel input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: none;
+  border-radius: 50%;
+  background: var(--pf-fg);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--pf-bg) 40%, transparent);
+}
+.pf-panel input[type="range"]:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
+
+/* Color swatch — keeps the native picker, gets a rounded cap. */
+.pf-panel input[type="color"] {
+  width: 28px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--pf-fg) 20%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* Toggle switch — appearance:none keeps real checkbox semantics. */
+.pf-panel input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: none;
+  width: 34px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--pf-fg) 18%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pf-fg) 18%, transparent);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.pf-panel input[type="checkbox"]::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--pf-fg);
+  transition: translate 0.15s ease;
+}
+.pf-panel input[type="checkbox"]:checked {
+  background: var(--pf-accent);
+  border-color: var(--pf-accent);
+}
+.pf-panel input[type="checkbox"]:checked::before { translate: 14px 0; }
+.pf-panel input[type="checkbox"]:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
+
+/* Settings tab — compact toggle cards (whole card is the label) */
+.pf-settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--pf-fg) 10%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--pf-fg) 4%, transparent);
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  line-height: 1.3;
+}
+.pf-settings-toggle:hover { background: color-mix(in srgb, var(--pf-fg) 9%, transparent); }
+.pf-settings-toggle input { margin: 0; flex: none; }
+.pf-settings-toggle span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-panel select.pf-select {
+  flex: 1;
+  padding: 4px 6px;
+  border: 1px solid color-mix(in srgb, var(--pf-fg) 20%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--pf-fg) 8%, transparent);
+  color: var(--pf-fg);
+  font-size: 13px;
+}
+.pf-panel select.pf-select:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Grid cells stretch controls full-width */
+.pf-panel-cell input[type="range"],
+.pf-panel-cell select.pf-select {
+  flex: none;
+  width: 100%;
+}
+.pf-panel-cell input[type="color"] {
+  width: 100%;
+  height: 22px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--pf-fg) 20%, transparent);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.pf-btn {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  border: none;
+  border-radius: 8px;
+  background: var(--pf-accent);
+  color: var(--pf-fg);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.pf-btn:hover { background: color-mix(in srgb, var(--pf-accent) 90%, var(--pf-bg)); }
+.pf-btn:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
+.pf-btn-ghost {
+  background: color-mix(in srgb, var(--pf-fg) 9%, transparent);
+  color: inherit;
+}
+.pf-btn-ghost:hover { background: color-mix(in srgb, var(--pf-fg) 16%, transparent); }
+.pf-btn:disabled,
+.pf-btn:disabled:hover {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: var(--pf-accent);
+}
+.pf-btn-ghost:disabled,
+.pf-btn-ghost:disabled:hover {
+  background: color-mix(in srgb, var(--pf-fg) 9%, transparent);
+}
+.pf-btn.active {
+  background: color-mix(in srgb, var(--pf-accent) 28%, transparent);
+  color: var(--pf-fg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pf-accent) 55%, transparent);
+}
+.pf-btn.active:hover { background: color-mix(in srgb, var(--pf-accent) 34%, transparent); }
+
+/* Shell-true density — the panel adapts to its own width (≈ the video
+   container), not the viewport: wide panels keep the two-column grid,
+   very narrow players collapse it to one column. */
+@container pf-panel (max-width: 330px) {
+   .pf-panel-header { padding: 6px; gap: 6px; }
+   .pf-panel-body { padding: 6px; }
+  .pf-panel-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ── Mobile & touch ───────────────────────────────────────────── */
+/* Touch devices (phones/tablets): enlarge hit targets toward
+   thumb-sized (~40px) tap areas. */
+@media (pointer: coarse) {
+  .pf-panel-body { padding: 10px 12px 12px; }
+  .pf-panel-close { padding: 6px 10px; font-size: 18px; }
+  .pf-panel-tab { padding: 9px 10px; font-size: 12px; }
+  .pf-btn { padding: 11px 12px; font-size: 14px; }
+  .pf-panel input[type="range"] { min-height: 32px; }
+  .pf-panel input[type="color"] { height: 28px; }
+  .pf-panel input[type="checkbox"] { width: 40px; height: 24px; }
+  .pf-panel input[type="checkbox"]::before { width: 18px; height: 18px; }
+  .pf-panel input[type="checkbox"]:checked::before { translate: 18px 0; }
+  .pf-settings-toggle { padding: 9px 10px; font-size: 13px; }
+  .pf-panel select.pf-select { padding: 9px 8px; font-size: 14px; }
+  .pf-panel-actions .pf-btn.pf-btn-icon,
+  .pf-panel-section-head .pf-btn.pf-btn-icon {
+    width: 36px;
+    height: 36px;
+  }
+  .pf-panel-actions .pf-btn.pf-btn-icon svg,
+  .pf-panel-section-head .pf-btn.pf-btn-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+/* Narrow screens (portrait phones): a fixed 344px panel would
+   swallow the whole video — span edge-to-edge instead, clearing
+   notches/gesture bars via safe-area insets (video is typically
+   fullscreen here, so the shell covers the viewport). */
+@media (max-width: 520px) {
+  .pf-panel {
+    width: auto;
+    max-height: calc(100% - 16px);
+    border-radius: 12px;
+    top: max(8px, env(safe-area-inset-top, 0px));
+    right: max(8px, env(safe-area-inset-right, 0px));
+    left: max(8px, env(safe-area-inset-left, 0px));
+    bottom: auto;
+    margin: 0;
+  }
+  .pf-panel,
+  .pf-panel:not([hidden]) {
+    translate: none;
+  }
+}
+
+/* Portrait phones (touch): anchor the panel as a bottom sheet — it sits
+   within thumb reach and never covers the whole video. */
+@media (max-width: 520px) and (pointer: coarse) {
+  .pf-panel {
+    top: auto;
+    bottom: max(8px, env(safe-area-inset-bottom, 0px));
+    max-height: 62vh;
+    margin: 0;
+    border-radius: 16px 16px 0 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+  }
+  .pf-panel,
+  .pf-panel:not([hidden]) {
+    translate: none;
+  }
+}
+
+/* Landscape phones (touch): the viewport is short and wide, so the
+   centered dialog would swallow the height. Compact right-edge
+   sheet instead — spans the full height (minus safe areas), narrow
+   enough to leave the video's center clear, with icon-only tabs. */
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 480px) {
+  .pf-panel {
+    top: max(8px, env(safe-area-inset-top, 0px));
+    right: max(8px, env(safe-area-inset-right, 0px));
+    bottom: max(8px, env(safe-area-inset-bottom, 0px));
+    left: auto;
+    margin: 0;
+    width: min(340px, 45vw);
+    max-height: none;
+    border-radius: 14px;
+  }
+  .pf-panel,
+  .pf-panel:not([hidden]) {
+    translate: none;
+  }
+  @starting-style {
+    .pf-panel:not([hidden]) {
+      translate: none;
+    }
+  }
+  .pf-tab-label { display: none; }
+  .pf-panel-tab { padding: 8px 10px; }
+}
+
+/* Reduced motion — kill the toast morph fade and all shell transitions
+   (fill-mode, swipe, panel) for users who ask for it. */
+@media (prefers-reduced-motion: reduce) {
+  pf-toast {
+    transition: none;
+  }
+  .pf-shell *,
+  .pf-shell *::before,
+  .pf-shell *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
