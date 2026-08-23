@@ -1,6 +1,6 @@
 import { GestureController } from "./gestures.js";
 import { getSetting } from "../../shared/config.js";
-import { formatTime } from "../../shared/format.js";
+import { formatTime } from "../toast.js";
 import { GESTURE_EVENTS } from "../../shared/events.js";
 import { logger } from "../../shared/logger.js";
 

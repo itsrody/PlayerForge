@@ -1,7 +1,7 @@
 import { getPageContext, domainsMatch, domainScore, hashEntry } from "../../shared/page-context.js";
 import { getSetting } from "../../shared/config.js";
 import { gmGetValue, gmSetValue } from "../../shared/storage.js";
-import { formatTime } from "../../shared/format.js";
+import { formatTime } from "../toast.js";
 import { logger } from "../../shared/logger.js";
 
 const RESUME_SAVE_INTERVAL_MS = 60000;
