@@ -24,23 +24,6 @@ export function getDomainKey(hostname) {
   return parts[Math.max(0, idx)] || "";
 }
 
-/** Special path provider for the "rtcoi" streaming host family. */
-function getSpecialPath(domainKey, doc = document) {
-  const owner = doc || document;
-  if (!((owner.location?.hostname || "").includes("rtcoi")) && domainKey !== "rtcoi") {
-    return null;
-  }
-  const active = owner.querySelector(".server--name.active");
-  if (!active || !active.dataset.url) {
-    return null;
-  }
-  try {
-    return new URL(active.dataset.url).pathname;
-  } catch {
-    return active.dataset.url;
-  }
-}
-
 function boundedLevenshtein(a, b, max = Infinity) {
   const lenA = a.length;
   const lenB = b.length;
@@ -113,25 +96,18 @@ export function hashEntry(path, duration) {
  */
 export function setupContextBridge() {
   const domainKey = getDomainKey(location.hostname);
-  const isSpecialHost = location.hostname.includes("rtcoi") || domainKey === "rtcoi";
 
   if (window === window.top) {
-    const ready = isSpecialHost && document.readyState === "loading"
-      ? new Promise((resolve) => document.addEventListener("DOMContentLoaded", resolve, { once: true }))
-      : Promise.resolve();
-
     window.addEventListener("message", (event) => {
       const data = event.data;
       if (data && data.type === "pf:ctx-request") {
-        ready.then(() => {
-          event.source?.postMessage({
-            type: "pf:ctx",
-            nonce: data.nonce,
-            domain: domainKey,
-            path: getSpecialPath(domainKey) || location.pathname,
-            title: document.title
-          }, "*");
-        });
+        event.source?.postMessage({
+          type: "pf:ctx",
+          nonce: data.nonce,
+          domain: domainKey,
+          path: location.pathname,
+          title: document.title
+        }, "*");
       }
     });
     return;
@@ -161,7 +137,7 @@ export async function getPageContext() {
       const domainKey = getDomainKey(location.hostname);
       return {
         domain: domainKey,
-        path: getSpecialPath(domainKey) || location.pathname,
+        path: location.pathname,
         title: document.title
       };
     }
@@ -170,7 +146,7 @@ export async function getPageContext() {
       const domainKey = getDomainKey(topLocation.hostname);
       return {
         domain: domainKey,
-        path: getSpecialPath(domainKey, window.top.document) || topLocation.pathname,
+        path: topLocation.pathname,
         title: window.top.document.title
       };
     }
