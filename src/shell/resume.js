@@ -1,8 +1,8 @@
-import { getPageContext, domainsMatch, domainScore, hashEntry } from "../../shared/context.js";
-import { getSetting } from "../../shared/config.js";
-import { gmGetValue, gmSetValue } from "../../shared/storage.js";
-import { formatTime } from "../toast.js";
-import { logger } from "../../shared/logger.js";
+import { getPageContext, domainsMatch, domainScore, hashEntry } from "../shared/context.js";
+import { getSetting } from "../shared/config.js";
+import { gmGetValue, gmSetValue } from "../shared/storage.js";
+import { formatTime } from "./toast.js";
+import { logger } from "../shared/logger.js";
 
 const RESUME_SAVE_INTERVAL_MS = 60000;
 /** Progress at/after which the entry resets so the video restarts next time. */
@@ -17,10 +17,10 @@ const DEFAULT_STALE_DAYS = 14;
 
 /**
  * Persistent store of per-video entries (keyed by path+duration hash) holding
- * the resume position. Owned by ResumeFeature; merge-on-persist keeps
+ * the resume position. Owned by ResumeTracker; merge-on-persist keeps
  * concurrent shells/tabs from clobbering each other's entries.
  */
-class ResumeStore {
+export class ResumeStore {
   #state = null;
   #loaded = false;
 
@@ -67,18 +67,17 @@ class ResumeStore {
   findMatch(domainKey, path, duration) {
     this.#ensureLoaded();
     const targetDuration = duration || 0;
+    const maxFuzz = getSetting("resume.durationFuzz");
     let best = null;
     let bestScore = -Infinity;
     for (const entry of this.#state.entries) {
-      if (
-        entry.path !== path ||
-        entry.pending ||
-        !domainsMatch(entry.domain, domainKey) ||
-        Math.abs(entry.duration - targetDuration) > getSetting("resume.durationFuzz")
-      ) {
+      if (entry.path !== path || entry.pending || !domainsMatch(entry.domain, domainKey)) {
         continue;
       }
       const fuzz = Math.abs(entry.duration - targetDuration);
+      if (fuzz > maxFuzz) {
+        continue;
+      }
       const score = 4000000 + domainScore(entry.domain, domainKey) * 1000 - Math.min(fuzz, 999);
       if (score > bestScore) {
         bestScore = score;
@@ -137,19 +136,21 @@ class ResumeStore {
 }
 
 /**
- * Shell-owned feature: persists playback progress per (domain, path, duration)
+ * Shell-owned playback tracker: persists progress per (domain, path, duration)
  * and resumes where the user left off, with a "Start over" toast action.
+ * Saves are event-driven — throttled timeupdate ticks plus pause flushes —
+ * never a polling timer.
  */
-export class ResumeFeature {
+export class ResumeTracker {
   #shell;
   #store = new ResumeStore();
   #entry = null;
-  #saveTimer = null;
   /** Teardown hook that removes the resume-seek media listeners. */
   #stopResumeSeekWatch = null;
-  /** Teardown hook that removes the periodic-save "pause" listener. */
-  #stopPauseWatch = null;
+  /** Teardown hook that removes the save-throttle and pause listeners. */
+  #stopProgressWatch = null;
   #lastSavedPosition = 0;
+  #lastSaveAt = 0;
   #destroyed = false;
 
   constructor(shell) {
@@ -245,7 +246,7 @@ export class ResumeFeature {
     }
 
     this.#lastSavedPosition = startAt;
-    this.#startPeriodicSave(shell);
+    this.#startProgressWatch(shell);
   }
 
   #saveProgress(currentTime) {
@@ -261,32 +262,32 @@ export class ResumeFeature {
     this.#store.updateResume(this.#entry.id, currentTime);
   }
 
-  #startPeriodicSave(shell) {
-    clearInterval(this.#saveTimer);
+  #startProgressWatch(shell) {
+    const video = shell.video;
+    this.#lastSaveAt = Date.now();
 
-    let lastSeen = this.#lastSavedPosition;
-    this.#saveTimer = setInterval(() => {
-      const currentTime = shell.currentTime;
-      if (!shell.paused && currentTime !== lastSeen) {
-        this.#saveProgress(currentTime);
-        lastSeen = currentTime;
+    const onTimeUpdate = () => {
+      if (!shell.paused && Date.now() - this.#lastSaveAt >= RESUME_SAVE_INTERVAL_MS) {
+        this.#lastSaveAt = Date.now();
+        this.#saveProgress(shell.currentTime);
       }
-    }, RESUME_SAVE_INTERVAL_MS);
-
+    };
     const onPause = () => {
       this.#saveProgress(shell.currentTime);
     };
-    shell.video.addEventListener("pause", onPause);
-    this.#stopPauseWatch = () => shell.video.removeEventListener("pause", onPause);
+    video.addEventListener("timeupdate", onTimeUpdate);
+    video.addEventListener("pause", onPause);
+    this.#stopProgressWatch = () => {
+      video.removeEventListener("timeupdate", onTimeUpdate);
+      video.removeEventListener("pause", onPause);
+    };
   }
 
   destroy() {
     this.#stopResumeSeekWatch?.();
     this.#stopResumeSeekWatch = null;
-    this.#stopPauseWatch?.();
-    this.#stopPauseWatch = null;
-    clearInterval(this.#saveTimer);
-    this.#saveTimer = null;
+    this.#stopProgressWatch?.();
+    this.#stopProgressWatch = null;
     if (this.#entry && !this.#destroyed) {
       this.#saveProgress(this.#shell?.currentTime || 0);
     }

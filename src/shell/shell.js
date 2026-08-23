@@ -1,7 +1,7 @@
 import { logger } from "../shared/logger.js";
 import { SHELL_MARKER } from "../kernel/kernel.js";
 import { HotkeysController } from "./inputs/hotkeys.js";
-import { ResumeFeature } from "./features/resume.js";
+import { ResumeTracker } from "./resume.js";
 import { SubtitlesSection } from "./subtitles/section.js";
 import { CueRenderer } from "./subtitles/cue-renderer.js";
 import { SettingsPanel } from "./panel.js";
@@ -30,8 +30,8 @@ let mediaSessionOwner = null;
 
 /**
  * Per-video facade: wraps the media element with a stable API, injects the
- * HUD, hosts the input layer, features, and settings panel, tracks fullscreen
- * state, and wires MediaSession.
+ * HUD, hosts the input layer, playback tracking, subtitles, and settings
+ * panel, tracks fullscreen state, and wires MediaSession.
  */
 export class Shell {
   id;
@@ -43,7 +43,7 @@ export class Shell {
   #bus;
   #shellDom = null;
   #inputs = null;
-  #features = [];
+  #resume = null;
   #subtitles = null;
   #cues = null;
   #panel;
@@ -68,7 +68,7 @@ export class Shell {
       this.#cues = new CueRenderer(this.#shellDom.cueLayer);
     }
     this.#inputs = new HotkeysController(this);
-    this.#features = [new ResumeFeature(this)];
+    this.#resume = new ResumeTracker(this);
     this.#subtitles = new SubtitlesSection(this);
     addSettingsSection(this.#panel);
     this.#setupFocusManagement();
@@ -475,14 +475,12 @@ export class Shell {
     if (!this.#destroyed) {
       this.#destroyed = true;
       logger.log("shell", `Destroying shell "${this.id}"`);
-      for (const feature of this.#features) {
-        try {
-          feature.destroy();
-        } catch (err) {
-          logger.error("shell", "Feature destroy error:", err);
-        }
+      try {
+        this.#resume?.destroy();
+      } catch (err) {
+        logger.error("shell", "Resume destroy error:", err);
       }
-      this.#features = [];
+      this.#resume = null;
       try {
         this.#subtitles?.destroy();
       } catch (err) {
