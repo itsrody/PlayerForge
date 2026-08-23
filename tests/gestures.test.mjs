@@ -164,6 +164,7 @@ test("focus arbitration: the last active controller owns page-level keys", () =>
 test("trackpad ctrl+wheel pinches in fullscreen with a cooldown window", () => {
   const { dom, video, zone, host } = makeEnv();
   const controller = new GestureController(video, zone, host, () => true);
+  controller.setTrackpadPinchEnabled(true);
   const seen = collect(host, dom.window);
 
   zone.dispatchEvent(wheelEvent(dom.window, { deltaY: -100, ctrlKey: true }));
@@ -176,6 +177,49 @@ test("trackpad ctrl+wheel pinches in fullscreen with a cooldown window", () => {
   const passive = new dom.window.MouseEvent("wheel", { bubbles: true, cancelable: true });
   zone.dispatchEvent(passive);
   assert.equal(passive.defaultPrevented, false, "plain wheel untouched");
+  controller.destroy();
+});
+
+test("wheel pinch listener is inert until enabled and detaches on disable", () => {
+  const { dom, video, zone, host } = makeEnv();
+  const fullscreen = { value: false };
+  const controller = new GestureController(video, zone, host, () => fullscreen.value);
+  const seen = collect(host, dom.window);
+
+  const blocked = wheelEvent(dom.window, { deltaY: -100, ctrlKey: true });
+  zone.dispatchEvent(blocked);
+  assert.equal(seen.length, 0, "no pinch before the listener is scoped in");
+  assert.equal(blocked.defaultPrevented, false, "nothing cancelled while detached");
+
+  fullscreen.value = true;
+  controller.setTrackpadPinchEnabled(true);
+  zone.dispatchEvent(wheelEvent(dom.window, { deltaY: -100, ctrlKey: true }));
+  assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.pinch).length, 1);
+
+  controller.setTrackpadPinchEnabled(false);
+  const afterDetach = wheelEvent(dom.window, { deltaY: -100, ctrlKey: true });
+  zone.dispatchEvent(afterDetach);
+  assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.pinch).length, 1, "detached again");
+  assert.equal(afterDetach.defaultPrevented, false, "nothing cancelled once detached");
+  controller.destroy();
+});
+
+test("pointer gestures never cancel defaults (passivity contract)", () => {
+  const { dom, video, zone, host } = makeEnv();
+  const controller = new GestureController(video, zone, host, () => true);
+  collect(host, dom.window);
+
+  const dispatched = [
+    pointerEvent(dom.window, "pointerdown", { x: 50, y: 200 }),
+    pointerEvent(dom.window, "pointermove", { x: 55, y: 260 }),
+    pointerEvent(dom.window, "pointerup", { x: 55, y: 360 }),
+    pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }),
+    pointerEvent(dom.window, "pointercancel", { x: 402, y: 202 })
+  ];
+  for (const event of dispatched) {
+    const notCancelled = zone.dispatchEvent(event);
+    assert.equal(notCancelled, true, `${event.type} must not be default-cancelled`);
+  }
   controller.destroy();
 });
 

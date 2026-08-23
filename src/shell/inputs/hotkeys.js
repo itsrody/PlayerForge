@@ -59,12 +59,16 @@ export class HotkeysController {
       host,
       () => shell.fullscreen
     );
+    // Trackpad pinch is fullscreen-only: keep its non-passive wheel listener
+    // attached only while it can fire.
+    this.#gestureController.setTrackpadPinchEnabled(shell.fullscreen);
 
     shell.bus.addEventListener("shell:fullscreen-change", (event) => {
       const { shellId, fullscreen } = event.detail;
       if (shellId !== shell.id) {
         return;
       }
+      this.#gestureController?.setTrackpadPinchEnabled(fullscreen);
       if (fullscreen && !fullscreenHintShown) {
         fullscreenHintShown = true;
         shell.toast({

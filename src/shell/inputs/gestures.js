@@ -28,6 +28,15 @@ const KEY_ACTIONS = {
   KeyS: { event: "panel", allowSettingsFocus: true }
 };
 
+/**
+ * Pointer handlers never preventDefault — native pan/scroll over the zone is
+ * suppressed by the touch-action CSS set at construction — so every pointer
+ * listener can be passive. Only the wheel pinch listener cancels defaults,
+ * and it is subscribed only while fullscreen (see setTrackpadPinchEnabled).
+ */
+const PASSIVE_CAPTURE = { capture: true, passive: true };
+const WHEEL_CAPTURE = { capture: true, passive: false };
+
 /** All live gesture controllers, used for focus arbitration between players. */
 const activeControllers = new Set();
 let lastActiveController = null;
@@ -96,6 +105,8 @@ export class GestureController {
 
   // Trackpad ctrl+wheel pinch cooldown.
   #trackpadPinchCooldown = false;
+  /** Whether the (non-passive) wheel pinch listener is currently attached. */
+  #trackpadPinchSubscribed = false;
 
   // Bound handlers.
   #onPointerDown;
@@ -135,15 +146,14 @@ export class GestureController {
     this.#onKeyup = this.#handleKeyup.bind(this);
     this.#onBlur = this.#resetKeyboardHold.bind(this);
 
-    zone.addEventListener("pointerdown", this.#onPointerDown, true);
-    zone.addEventListener("pointermove", this.#onPointerMove, true);
-    zone.addEventListener("pointerup", this.#onPointerUp, true);
-    zone.addEventListener("pointercancel", this.#onPointerUp, true);
+    zone.addEventListener("pointerdown", this.#onPointerDown, PASSIVE_CAPTURE);
+    zone.addEventListener("pointermove", this.#onPointerMove, PASSIVE_CAPTURE);
+    zone.addEventListener("pointerup", this.#onPointerUp, PASSIVE_CAPTURE);
+    zone.addEventListener("pointercancel", this.#onPointerUp, PASSIVE_CAPTURE);
     zone.addEventListener("click", this.#onClickCapture, true);
     zone.addEventListener("dblclick", this.#onDblClickCapture, true);
-    window.addEventListener("pointerup", this.#onPointerUp, true);
-    window.addEventListener("pointercancel", this.#onPointerUp, true);
-    zone.addEventListener("wheel", this.#onWheelCapture, { capture: true, passive: false });
+    window.addEventListener("pointerup", this.#onPointerUp, PASSIVE_CAPTURE);
+    window.addEventListener("pointercancel", this.#onPointerUp, PASSIVE_CAPTURE);
     document.addEventListener("keydown", this.#onKeydown, true);
     document.addEventListener("keyup", this.#onKeyup, true);
     window.addEventListener("blur", this.#onBlur);
@@ -177,15 +187,15 @@ export class GestureController {
       this.#video.play = this.#originalPlay;
       this.#video.pause = this.#originalPause;
 
-      this.#zone.removeEventListener("pointerdown", this.#onPointerDown, true);
-      this.#zone.removeEventListener("pointermove", this.#onPointerMove, true);
-      this.#zone.removeEventListener("pointerup", this.#onPointerUp, true);
-      this.#zone.removeEventListener("pointercancel", this.#onPointerUp, true);
+      this.#zone.removeEventListener("pointerdown", this.#onPointerDown, PASSIVE_CAPTURE);
+      this.#zone.removeEventListener("pointermove", this.#onPointerMove, PASSIVE_CAPTURE);
+      this.#zone.removeEventListener("pointerup", this.#onPointerUp, PASSIVE_CAPTURE);
+      this.#zone.removeEventListener("pointercancel", this.#onPointerUp, PASSIVE_CAPTURE);
       this.#zone.removeEventListener("click", this.#onClickCapture, true);
       this.#zone.removeEventListener("dblclick", this.#onDblClickCapture, true);
-      this.#zone.removeEventListener("wheel", this.#onWheelCapture, true);
-      window.removeEventListener("pointerup", this.#onPointerUp, true);
-      window.removeEventListener("pointercancel", this.#onPointerUp, true);
+      this.#detachTrackpadPinch();
+      window.removeEventListener("pointerup", this.#onPointerUp, PASSIVE_CAPTURE);
+      window.removeEventListener("pointercancel", this.#onPointerUp, PASSIVE_CAPTURE);
       document.removeEventListener("keydown", this.#onKeydown, true);
       document.removeEventListener("keyup", this.#onKeyup, true);
       window.removeEventListener("blur", this.#onBlur);
@@ -195,6 +205,30 @@ export class GestureController {
         lastActiveController = null;
       }
       this.#resetKeyboardHold();
+    }
+  }
+
+  /**
+   * Subscribe/unsubscribe the trackpad pinch wheel listener. It is the only
+   * non-passive listener here, so it lives only while its feature can fire
+   * (fullscreen) instead of sitting registered on the page forever.
+   */
+  setTrackpadPinchEnabled(enabled) {
+    if (this.#destroyed || enabled === this.#trackpadPinchSubscribed) {
+      return;
+    }
+    if (enabled) {
+      this.#trackpadPinchSubscribed = true;
+      this.#zone.addEventListener("wheel", this.#onWheelCapture, WHEEL_CAPTURE);
+    } else {
+      this.#detachTrackpadPinch();
+    }
+  }
+
+  #detachTrackpadPinch() {
+    if (this.#trackpadPinchSubscribed) {
+      this.#trackpadPinchSubscribed = false;
+      this.#zone.removeEventListener("wheel", this.#onWheelCapture, true);
     }
   }
 

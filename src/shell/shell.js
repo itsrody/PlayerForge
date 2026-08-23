@@ -233,8 +233,8 @@ export class Shell {
         });
       }
     };
-    this.container.addEventListener("pointerdown", onPointerDown, true);
-    this.#cleanups.add(() => this.container.removeEventListener("pointerdown", onPointerDown, true));
+    this.container.addEventListener("pointerdown", onPointerDown, { capture: true, passive: true });
+    this.#cleanups.add(() => this.container.removeEventListener("pointerdown", onPointerDown, { capture: true, passive: true }));
   }
 
   toast(payload) {

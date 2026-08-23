@@ -79,11 +79,12 @@ function createStepper({
       }, HOLD_DELAY_MS);
       const release = () => {
         stopRepeat();
-        window.removeEventListener("pointerup", release);
-        window.removeEventListener("pointercancel", release);
+        window.removeEventListener("pointerup", release, { passive: true });
+        window.removeEventListener("pointercancel", release, { passive: true });
       };
-      window.addEventListener("pointerup", release);
-      window.addEventListener("pointercancel", release);
+      // Passive: the release handler only stops timers — it never cancels defaults.
+      window.addEventListener("pointerup", release, { passive: true });
+      window.addEventListener("pointercancel", release, { passive: true });
     });
     return button;
   };
