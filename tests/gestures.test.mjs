@@ -1,0 +1,213 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { JSDOM } from "jsdom";
+
+globalThis.GM_getValue = (key, fallback) => fallback;
+globalThis.GM_setValue = () => {};
+
+const { GestureController } = await import("../src/shell/inputs/gestures.js");
+const { GESTURE_EVENTS } = await import("../src/shared/events.js");
+
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function makeEnv() {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+    url: "https://www.youtube.com/watch?v=1"
+  });
+  globalThis.window = dom.window;
+  globalThis.location = dom.window.location;
+  globalThis.document = dom.window.document;
+  // gestures.js builds its CustomEvents against the ambient global realm;
+  // jsdom hosts reject foreign-realm event objects, so bridge the constructor.
+  globalThis.CustomEvent = dom.window.CustomEvent;
+
+  const video = dom.window.document.createElement("video");
+  dom.window.document.body.appendChild(video);
+  video.getBoundingClientRect = () => ({
+    left: 0, right: 800, top: 0, bottom: 450, width: 800, height: 450
+  });
+  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
+  Object.defineProperty(video, "paused", { value: true, configurable: true });
+
+  const zone = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(zone);
+  const host = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(host);
+
+  return { dom, video, zone, host };
+}
+
+function pointerEvent(win, type, { id = 1, x = 0, y = 0 } = {}) {
+  const event = new win.MouseEvent(type, {
+    bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0
+  });
+  Object.defineProperty(event, "pointerId", { value: id });
+  return event;
+}
+
+function wheelEvent(win, { deltaY, ctrlKey }) {
+  const event = new win.MouseEvent("wheel", { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "deltaY", { value: deltaY });
+  Object.defineProperty(event, "ctrlKey", { value: ctrlKey });
+  return event;
+}
+
+/** Collector for gesture CustomEvents fired on the host. */
+function collect(host, win) {
+  const seen = [];
+  for (const name of Object.values(GESTURE_EVENTS)) {
+    host.addEventListener(name, (event) => {
+      seen.push({ type: event.type, detail: event.detail });
+    });
+  }
+  return seen;
+}
+
+test("double tap in the left-edge zone dispatches once", () => {
+  const { dom, video, zone, host } = makeEnv();
+  const controller = new GestureController(video, zone, host, null);
+  const seen = collect(host, dom.window);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 50, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 50, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 52, y: 202 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 52, y: 202 }));
+
+  const dbltaps = seen.filter((entry) => entry.type === GESTURE_EVENTS.dbltap);
+  assert.equal(dbltaps.length, 1);
+  assert.equal(dbltaps[0].detail.zone, "left-edge");
+  controller.destroy();
+});
+
+test("keydown arrows map through the action table with preventDefault", () => {
+  const { dom, video, zone, host } = makeEnv();
+  const controller = new GestureController(video, zone, host, null);
+  const seen = collect(host, dom.window);
+
+  const right = new dom.window.KeyboardEvent("keydown", {
+    code: "ArrowRight", bubbles: true, cancelable: true
+  });
+  dom.window.document.dispatchEvent(right);
+  assert.deepEqual(seen.at(-1), {
+    type: GESTURE_EVENTS.skip,
+    detail: { method: "keyboard", direction: "right" }
+  });
+  assert.equal(right.defaultPrevented, true);
+  controller.destroy();
+});
+
+test("disabling the hotkeys toggle silences arrows but Space still toggles playback", async () => {
+  const { setSetting } = await import("../src/shell/config.js");
+  setSetting("gestures.hotkeys", false);
+  try {
+    const { dom, video, zone, host } = makeEnv();
+    const playCalls = [];
+    video.play = () => {
+      playCalls.push(true);
+      return Promise.resolve();
+    };
+    const controller = new GestureController(video, zone, host, null);
+    const seen = collect(host, dom.window);
+
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+      code: "ArrowRight", bubbles: true, cancelable: true
+    }));
+    assert.equal(seen.length, 0, "arrow fired despite toggle off");
+
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+      code: "Space", bubbles: true, cancelable: true
+    }));
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keyup", {
+      code: "Space", bubbles: true
+    }));
+    await flush();
+    assert.equal(playCalls.length, 1, "Space bypassed the hotkeys toggle");
+    controller.destroy();
+  } finally {
+    setSetting("gestures.hotkeys", true);
+  }
+});
+
+test("focus arbitration: the last active controller owns page-level keys", () => {
+  const { dom, video, zone, host } = makeEnv();
+  const video2 = dom.window.document.createElement("video");
+  dom.window.document.body.appendChild(video2);
+  video2.getBoundingClientRect = video.getBoundingClientRect;
+  Object.defineProperty(video2, "readyState", { value: 4, configurable: true });
+  const zone2 = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(zone2);
+  const host2 = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(host2);
+
+  const controllerA = new GestureController(video, zone, host, null);
+  const controllerB = new GestureController(video2, zone2, host2, null);
+  const seenA = collect(host, dom.window);
+  const seenB = collect(host2, dom.window);
+
+  dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+    code: "ArrowRight", bubbles: true, cancelable: true
+  }));
+  assert.equal(seenA.length + seenB.length, 0, "no owner chosen yet");
+
+  zone2.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  zone2.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 400, y: 200 }));
+  dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+    code: "ArrowRight", bubbles: true, cancelable: true
+  }));
+  assert.equal(seenA.length, 0);
+  assert.equal(seenB.length, 1);
+  controllerA.destroy();
+  controllerB.destroy();
+});
+
+test("trackpad ctrl+wheel pinches in fullscreen with a cooldown window", () => {
+  const { dom, video, zone, host } = makeEnv();
+  const controller = new GestureController(video, zone, host, () => true);
+  const seen = collect(host, dom.window);
+
+  zone.dispatchEvent(wheelEvent(dom.window, { deltaY: -100, ctrlKey: true }));
+  zone.dispatchEvent(wheelEvent(dom.window, { deltaY: -100, ctrlKey: true }));
+  const pinches = seen.filter((entry) => entry.type === GESTURE_EVENTS.pinch);
+  assert.equal(pinches.length, 1);
+  assert.equal(pinches[0].detail.direction, "out");
+  assert.equal(pinches[0].detail.method, "trackpad");
+
+  const passive = new dom.window.MouseEvent("wheel", { bubbles: true, cancelable: true });
+  zone.dispatchEvent(passive);
+  assert.equal(passive.defaultPrevented, false, "plain wheel untouched");
+  controller.destroy();
+});
+
+test("swipe down starts from any zone in fullscreen, not just the center", () => {
+  const { dom, video, zone, host } = makeEnv();
+  const controller = new GestureController(video, zone, host, () => true);
+  const seen = collect(host, dom.window);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 50, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 55, y: 240 }));
+  const starts = seen.filter((entry) => entry.type === GESTURE_EVENTS.swipeStart);
+  assert.equal(starts.length, 1);
+  assert.equal(starts[0].detail.zone, "left-edge");
+  assert.equal(starts[0].detail.direction, "down");
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 55, y: 360 }));
+  const swipes = seen.filter((entry) => entry.type === GESTURE_EVENTS.swipe);
+  assert.equal(swipes.length, 1);
+  assert.ok(swipes[0].detail.distance > 100);
+  controller.destroy();
+});
+
+test("destroying mid-hold fires the pending release before teardown", async () => {
+  const { dom, video, zone, host } = makeEnv();
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  const controller = new GestureController(video, zone, host, null);
+  const seen = collect(host, dom.window);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  await sleep(350);
+  assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.hold).length, 1);
+
+  controller.destroy();
+  assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.release).length, 1);
+});

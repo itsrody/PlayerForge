@@ -3,13 +3,30 @@ import { GESTURE_EVENTS } from "../../shared/events.js";
 
 // Tuning constants (ms / px / ratios).
 const HOLD_TIMEOUT_MS = 300;
+const HOLD_CANCEL_MOVE_PX = 10;
 const DOUBLE_TAP_WINDOW_MS = 300;
 const EDGE_ZONE_RATIO = 0.15;
 const SCROLL_START_PX = 15;
 const AXIS_DOMINANCE_RATIO = 2;
 const PINCH_MIN_DISTANCE_PX = 50;
 const PINCH_SCALE_THRESHOLD = 0.2;
+const PINCH_BASELINE_DELAY_MS = 2;
+const TRACKPAD_COOLDOWN_MS = 500;
 const SUPPRESS_WINDOW_MS = 600;
+
+/**
+ * Keyboard shortcuts mirroring pointer gestures. Space is absent on purpose:
+ * it has hold-to-speed semantics and is handled separately (and intentionally
+ * ignores the "Keyboard hotkeys" toggle).
+ */
+const KEY_ACTIONS = {
+  ArrowRight: { event: "skip", direction: "right" },
+  ArrowLeft: { event: "skip", direction: "left" },
+  ArrowUp: { event: "volume", direction: "up" },
+  ArrowDown: { event: "volume", direction: "down" },
+  KeyM: { event: "mute" },
+  KeyS: { event: "panel", allowSettingsFocus: true }
+};
 
 /** All live gesture controllers, used for focus arbitration between players. */
 const activeControllers = new Set();
@@ -41,7 +58,8 @@ export class GestureController {
   #startTime = 0;
   #holdTimer = null;
   #holding = false;
-  #lastTapTime = 0;
+  /** -Infinity so the very first tap can never match against boot time. */
+  #lastTapTime = -Infinity;
   #gestureZone = null;
 
   // Click/dblclick suppression after gestures.
@@ -145,6 +163,7 @@ export class GestureController {
 
   destroy() {
     if (!this.#destroyed) {
+      this.#endPointerSession();
       this.#destroyed = true;
       this.#clearHoldTimer();
       this.#clearKeyboardHoldTimer();
@@ -257,7 +276,7 @@ export class GestureController {
       this.#scrubbing = false;
       this.#scrubVelocity = 0;
       this.#dispatch(GESTURE_EVENTS.scrubEnd, {
-        zone: "screen",
+        zone: this.#gestureZone || "screen",
         method: "pointer",
         velocity: 0
       });
@@ -285,16 +304,16 @@ export class GestureController {
       if (this.#destroyed || this.#pointers.size < 2) {
         return;
       }
-      const points = [...this.#pointers.values()];
+      const points = [...this.#pointers.values()].slice(0, 2);
       this.#pinchStartDistance = Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y);
-    }, 2);
+    }, PINCH_BASELINE_DELAY_MS);
   }
 
   #checkPinch() {
     if (!this.#isFullscreen() || this.#pinchFired || this.#pinchStartDistance < PINCH_MIN_DISTANCE_PX) {
       return;
     }
-    const points = [...this.#pointers.values()];
+    const points = [...this.#pointers.values()].slice(0, 2);
     if (points.length < 2) {
       return;
     }
@@ -330,17 +349,15 @@ export class GestureController {
       return !!allowSettings || tag !== "BUTTON" && tag !== "SELECT" && tag !== "OPTION" && tag !== "INPUT";
     }
     if (activeElement === document.body || activeElement === document.documentElement || activeElement === null) {
-      if (this.#video.readyState <= 0 || this.#video.ended) {
+      if (!this.#isActive(this)) {
         return false;
       }
       let candidates = 0;
       let includesThis = false;
       for (const controller of activeControllers) {
-        if (!controller.#destroyed && !(controller.#video.readyState <= 0) && !controller.#video.ended) {
+        if (this.#isActive(controller)) {
           candidates++;
-          if (controller === this) {
-            includesThis = true;
-          }
+          includesThis ||= controller === this;
         }
       }
       if (candidates === 1) {
@@ -369,12 +386,13 @@ export class GestureController {
     return false;
   }
 
+  /** A controller can own playback when its video is loaded and not finished. */
+  #isActive(controller) {
+    return !controller.#destroyed && controller.#video.readyState > 0 && !controller.#video.ended;
+  }
+
   #isFullscreen() {
-    if (this.#isFullscreenFn) {
-      return !!this.#isFullscreenFn();
-    } else {
-      return false;
-    }
+    return this.#isFullscreenFn ? !!this.#isFullscreenFn() : false;
   }
 
   #dispatch(eventName, detail) {
@@ -481,11 +499,11 @@ export class GestureController {
     const dx = Math.abs(x - this.#startX);
     const dy = Math.abs(y - this.#startY);
 
-    if (dx > 10 || dy > 10) {
+    if (dx > HOLD_CANCEL_MOVE_PX || dy > HOLD_CANCEL_MOVE_PX) {
       this.#clearHoldTimer();
     }
 
-    if (this.#gestureZone === "screen" && this.#isFullscreen() && !this.#holding) {
+    if (this.#isFullscreen() && !this.#holding) {
       if (!this.#scrubbing && !this.#swiping) {
         if (this.#wantScrub && dx > SCROLL_START_PX && dx > dy * AXIS_DOMINANCE_RATIO) {
           this.#scrubbing = true;
@@ -501,7 +519,7 @@ export class GestureController {
           this.#suppressNextActivations();
           event.stopImmediatePropagation();
           this.#dispatch(GESTURE_EVENTS.swipeStart, {
-            zone: "screen",
+            zone: this.#gestureZone || "screen",
             method: "pointer",
             direction: this.#swipeDirection
           });
@@ -516,7 +534,7 @@ export class GestureController {
         this.#scrubLastX = x;
         this.#scrubLastTime = now;
         this.#dispatch(GESTURE_EVENTS.scrub, {
-          zone: "screen",
+          zone: this.#gestureZone || "screen",
           method: "pointer",
           dx: step,
           velocity: this.#scrubVelocity
@@ -562,7 +580,7 @@ export class GestureController {
       this.#suppressNextActivations();
       event.stopImmediatePropagation();
       this.#dispatch(GESTURE_EVENTS.scrubEnd, {
-        zone: "screen",
+        zone: this.#gestureZone || "screen",
         method: "pointer",
         velocity: finalVelocity
       });
@@ -572,7 +590,7 @@ export class GestureController {
       event.stopImmediatePropagation();
       this.#restoreTransform();
       this.#dispatch(GESTURE_EVENTS.swipe, {
-        zone: "screen",
+        zone: this.#gestureZone || "screen",
         method: "pointer",
         direction: this.#swipeDirection,
         distance
@@ -581,7 +599,7 @@ export class GestureController {
     } else if (elapsed < HOLD_TIMEOUT_MS && this.#gestureZone !== null && getSetting("gestures.dbltap")) {
       const now = performance.now();
       if (now - this.#lastTapTime < DOUBLE_TAP_WINDOW_MS) {
-        this.#lastTapTime = 0;
+        this.#lastTapTime = -Infinity;
         this.#suppressNextActivations();
         this.#dispatch(GESTURE_EVENTS.dbltap, { zone: this.#gestureZone, method: "pointer" });
       } else {
@@ -611,102 +629,64 @@ export class GestureController {
   }
 
   #handleWheelCapture(event) {
-    if (
-      this.#destroyed ||
-      !event.ctrlKey ||
-      event.momentum ||
-      !this.#isFullscreen() ||
-      !getSetting("gestures.pinch") ||
-      (event.preventDefault(), event.stopImmediatePropagation(), this.#trackpadPinchCooldown)
-    ) {
-      return;
+    if (this.#isFullscreen() && event.ctrlKey && !event.momentum && getSetting("gestures.pinch")) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (!this.#trackpadPinchCooldown) {
+        this.#trackpadPinchCooldown = true;
+        setTimeout(() => {
+          this.#trackpadPinchCooldown = false;
+        }, TRACKPAD_COOLDOWN_MS);
+        this.#suppressNextActivations();
+        this.#dispatch(GESTURE_EVENTS.pinch, {
+          zone: "screen",
+          method: "trackpad",
+          direction: event.deltaY < 0 ? "out" : "in"
+        });
+      }
     }
-    this.#trackpadPinchCooldown = true;
-    setTimeout(() => {
-      this.#trackpadPinchCooldown = false;
-    }, 500);
-    const direction = event.deltaY < 0 ? "out" : "in";
-    this.#suppressNextActivations();
-    this.#dispatch(GESTURE_EVENTS.pinch, {
-      zone: "screen",
-      method: "trackpad",
-      direction
-    });
   }
 
   #handleKeydown(event) {
-    if (!event.repeat && this.#shouldHandleKeys(event.code === "KeyS")) {
-      lastActiveController = this;
-      switch (event.code) {
-        case "ArrowRight":
-          if (!getSetting("gestures.hotkeys")) {
-            return;
-          }
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          this.#dispatch(GESTURE_EVENTS.skip, { direction: "right", method: "keyboard" });
-          return;
-        case "ArrowLeft":
-          if (!getSetting("gestures.hotkeys")) {
-            return;
-          }
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          this.#dispatch(GESTURE_EVENTS.skip, { direction: "left", method: "keyboard" });
-          return;
-        case "ArrowUp":
-          if (!getSetting("gestures.hotkeys")) {
-            return;
-          }
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          this.#dispatch(GESTURE_EVENTS.volume, { direction: "up", method: "keyboard" });
-          return;
-        case "ArrowDown":
-          if (!getSetting("gestures.hotkeys")) {
-            return;
-          }
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          this.#dispatch(GESTURE_EVENTS.volume, { direction: "down", method: "keyboard" });
-          return;
-        case "KeyM":
-          if (!getSetting("gestures.hotkeys")) {
-            return;
-          }
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          this.#dispatch(GESTURE_EVENTS.mute, { method: "keyboard" });
-          return;
-        case "KeyS":
-          if (!getSetting("gestures.hotkeys")) {
-            return;
-          }
-          event.preventDefault();
-          event.stopImmediatePropagation();
-          this.#dispatch(GESTURE_EVENTS.panel, { method: "keyboard" });
-          return;
-        case "Space": {
-          event.preventDefault();
-          this.#spaceHoldIntercepting = true;
-          this.#keyboardHoldStart = performance.now();
-          this.#keyboardHolding = false;
-          this.#clearKeyboardHoldTimer();
-          this.#keyboardHoldTimer = setTimeout(() => {
-            if (!this.#video.paused) {
-              if (getSetting("gestures.hold")) {
-                this.#keyboardHolding = true;
-                this.#dispatch(GESTURE_EVENTS.hold, {
-                  zone: "screen",
-                  method: "keyboard",
-                  duration: performance.now() - this.#keyboardHoldStart
-                });
-              }
+    if (event.repeat) {
+      return;
+    }
+    if (event.code === "Space") {
+      if (this.#shouldHandleKeys(false)) {
+        lastActiveController = this;
+        event.preventDefault();
+        this.#spaceHoldIntercepting = true;
+        this.#keyboardHoldStart = performance.now();
+        this.#keyboardHolding = false;
+        this.#clearKeyboardHoldTimer();
+        this.#keyboardHoldTimer = setTimeout(() => {
+          if (!this.#video.paused) {
+            if (getSetting("gestures.hold")) {
+              this.#keyboardHolding = true;
+              this.#dispatch(GESTURE_EVENTS.hold, {
+                zone: "screen",
+                method: "keyboard",
+                duration: performance.now() - this.#keyboardHoldStart
+              });
             }
-          }, HOLD_TIMEOUT_MS);
-          return;
-        }
+          }
+        }, HOLD_TIMEOUT_MS);
       }
+      return;
+    }
+    const action = KEY_ACTIONS[event.code];
+    if (action && this.#shouldHandleKeys(!!action.allowSettingsFocus)) {
+      if (!getSetting("gestures.hotkeys")) {
+        return;
+      }
+      lastActiveController = this;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const detail = { method: "keyboard" };
+      if (action.direction) {
+        detail.direction = action.direction;
+      }
+      this.#dispatch(GESTURE_EVENTS[action.event], detail);
     }
   }
 
