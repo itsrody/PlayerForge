@@ -10,10 +10,6 @@ export function gmSetValue(key, value) {
   GM_setValue(key, value);
 }
 
-export function gmDeleteValue(key) {
-  GM_deleteValue(key);
-}
-
 export function gmRegisterMenu(title, onClick, options) {
   return GM_registerMenuCommand(title, onClick, options);
 }
