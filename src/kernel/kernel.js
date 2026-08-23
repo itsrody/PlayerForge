@@ -126,7 +126,7 @@ export class Kernel {
     if (rect.width < MIN_VIDEO_WIDTH || rect.height < MIN_VIDEO_HEIGHT) {
       return;
     }
-    const container = findContainer(video, sdk);
+    const container = findContainer(video);
     if (!container) {
       logger.warn("kernel", "No container for video — skipping");
       return;

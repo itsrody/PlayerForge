@@ -1,62 +1,104 @@
-/** Container selectors probed (in order) via video.closest() to find the player wrapper. */
-export const PLAYER_SELECTORS = [
-  ".jwplayer",
-  "[id*=\"jwplayer\"]",
-  ".jw-wrapper",
-  "[data-vjs-player]",
-  ".video-js",
-  ".vjs-tech",
-  "[data-plyr]",
-  ".plyr",
-  ".plyr__video-wrapper",
-  ".artplayer",
-  ".art-video-player",
-  ".dplayer",
-  "#dplayer",
-  ".mejs-container",
-  ".mejs__container",
-  "[class*=\"player\"]",
-  "[class*=\"video-wrapper\"]",
-  "[class*=\"video-container\"]",
-  "[data-player]",
-  "[class*=\"bg-black\"][class*=\"overflow-hidden\"][class*=\"select-none\"]"
+/**
+ * SDK detection engine.
+ *
+ * Detection is registry-driven: every supported player SDK declares exactly one
+ * record below, and a video is adopted only when its composed ancestry contains
+ * one of that SDK's anchors. There is deliberately NO generic fallback — an
+ * anchor must be owned by its SDK (prefixed class, dedicated data attribute, or
+ * custom element tag), so pages merely styling a <div class="player"> stay
+ * unrecognized rather than misidentified. Coverage grows by adding records.
+ *
+ * Record schema:
+ *   name    - label used for logging and shell metadata.
+ *   anchors - selectors resolved against the video's composed ancestry
+ *             (closest(), shadow-boundary aware). Each must be SDK-namespaced;
+ *             ordered most specific first.
+ *   host    - optional selector overriding which element hosts the shell;
+ *             defaults to the matched element itself.
+ *
+ * Reserved for future needs (not implemented): corroborating selectors,
+ * version gates. Adding an SDK = one record plus one fixture test.
+ *
+ * Selection: among all matching anchors across all records, the element with
+ * the fewest composed ancestor hops from the video wins; ties break by
+ * registry order, then anchor order.
+ */
+const REGISTRY = [
+  { name: "JW Player", anchors: [".jwplayer", ".jw-wrapper"] },
+  { name: "Video.js", anchors: ["[data-vjs-player]", ".video-js"] },
+  { name: "Plyr", anchors: ["[data-plyr]", ".plyr__video-wrapper", ".plyr"] },
+  { name: "ArtPlayer", anchors: [".art-video-player", ".artplayer"] },
+  { name: "DPlayer", anchors: [".dplayer"] },
+  { name: "MediaElement.js", anchors: [".mejs-container", ".mejs__container"] },
+  { name: "XGPlayer", anchors: [".xgplayer"] },
+  { name: "Aliplayer", anchors: [".prism-player"] },
+  { name: "Flowplayer", anchors: ["[data-player-id]", ".flowplayer"] },
+  { name: "Clappr", anchors: ["[data-player]"] },
+  { name: "Vidstack", anchors: ["media-player"] },
+  { name: "Mux Player", anchors: ["mux-player"] },
+  { name: "Radiant Media Player", anchors: ["radiant-media-player"] },
 ];
 
 export const MIN_VIDEO_WIDTH = 100;
 export const MIN_VIDEO_HEIGHT = 60;
 
-const CONTAINER_MIN_WIDTH = 200;
-const CONTAINER_MIN_HEIGHT = 100;
-const MAX_ANCESTOR_WALK = 8;
+/**
+ * Ancestry of a node toward its document, crossing open shadow boundaries:
+ * light-DOM parents continue past a shadow root to its host. Yields element
+ * nodes only.
+ */
+function* composedAncestry(start) {
+  for (let node = start; node; ) {
+    if (node.nodeType === 1) {
+      yield node;
+    }
+    node = node.parentNode ?? node.host ?? null;
+  }
+}
 
-/** Identify the SDK from the closest matching player container. */
-export function findSdkForVideo(video) {
-  for (const selector of PLAYER_SELECTORS) {
-    const container = video.closest(selector);
-    if (container) {
-      return identifySdk(container, selector);
+function composedClosest(node, selector) {
+  for (const candidate of composedAncestry(node)) {
+    if (candidate.matches(selector)) {
+      return candidate;
     }
   }
   return null;
 }
 
-function identifySdk(element, matchedSelector) {
-  const signature = `${element.className || ""} ${element.id || ""}`;
-  if (/\bjw/i.test(signature) || matchedSelector.startsWith(".jw")) {
-    return { name: "JW Player", selectors: [".jwplayer", "[id*=\"jwplayer\"]"] };
-  } else if (/\bvjs/i.test(signature) || matchedSelector.startsWith(".vjs") || matchedSelector.startsWith("[data-vjs")) {
-    return { name: "Video.js", selectors: ["[data-vjs-player]", ".video-js"] };
-  } else if (/\bplyr/i.test(signature) || matchedSelector.startsWith(".plyr") || matchedSelector.startsWith("[data-plyr")) {
-    return { name: "Plyr", selectors: ["[data-plyr]", ".plyr"] };
-  } else if (/\bart\b/i.test(signature) || matchedSelector.startsWith(".art")) {
-    return { name: "ArtPlayer", selectors: [".artplayer", ".art-video-player"] };
-  } else if (/\bdplayer\b/i.test(signature) || matchedSelector.startsWith(".dplayer")) {
-    return { name: "DPlayer", selectors: [".dplayer", "#dplayer"] };
-  } else if (/\bmejs/i.test(signature) || matchedSelector.startsWith(".mejs")) {
-    return { name: "MediaElement.js", selectors: [".mejs-container", ".mejs__container"] };
-  } else {
-    return { name: "Generic", selectors: [matchedSelector] };
-  }
+function matchSdk(video) {
+  let best = null;
+  REGISTRY.forEach((record, order) => {
+    record.anchors.forEach((anchor) => {
+      const el = composedClosest(video, anchor);
+      if (!el) return;
+      let hops = 0;
+      for (const node of composedAncestry(video)) {
+        if (node === el) break;
+        hops++;
+      }
+      if (!best || hops < best.hops) {
+        best = { record, el, hops };
+      }
+    });
+  });
+  return best;
+}
+
+/** Identify the SDK owning a video, or null when unregistered. */
+export function findSdkForVideo(video) {
+  const match = matchSdk(video);
+  return match ? { name: match.record.name } : null;
+}
+
+/**
+ * Resolve the element that should host the shell DOM: the matched anchor, or
+ * the record's host override. Null when the video belongs to no registered
+ * SDK — callers gate this behind findSdkForVideo().
+ */
+export function findContainer(video) {
+  const match = matchSdk(video);
+  if (!match) return null;
+  return match.record.host ? composedClosest(match.el, match.record.host) : match.el;
 }
 
 /**
@@ -76,33 +118,4 @@ export function videoFromEvent(event) {
     }
   }
   return null;
-}
-
-/**
- * Find the element that should host the shell DOM: prefer an SDK container,
- * then the nearest positioned ancestor of meaningful size, then the parent.
- */
-export function findContainer(video, sdk) {
-  if (sdk.selectors?.length) {
-    for (const selector of sdk.selectors) {
-      const container = video.closest(selector);
-      if (container) {
-        return container;
-      }
-    }
-  }
-  let ancestor = video.parentElement;
-  let depth = 0;
-  while (ancestor && depth < MAX_ANCESTOR_WALK) {
-    const style = getComputedStyle(ancestor);
-    if (style.position === "relative" || style.position === "absolute") {
-      const rect = ancestor.getBoundingClientRect();
-      if (rect.width >= CONTAINER_MIN_WIDTH && rect.height >= CONTAINER_MIN_HEIGHT) {
-        return ancestor;
-      }
-    }
-    ancestor = ancestor.parentElement;
-    depth++;
-  }
-  return video.parentElement || null;
 }
