@@ -17,7 +17,6 @@ export class Kernel {
   bus;
   #registry;
   #lifecycle;
-  #config;
   #initialized = false;
   #seenVideos = new Set();
   #removalObservers = new Set();
@@ -38,14 +37,12 @@ export class Kernel {
     this.bus = new EventBus();
     this.#registry = new ShellRegistry(this.bus);
     this.#lifecycle = new LifecycleManager(this.bus, this.#registry);
-    this.#config = { ...KERNEL_DEFAULTS };
     this.#lifecycle.setShellFactory((discovery) => this.#createShell(discovery));
   }
 
-  init(config = {}) {
+  init() {
     if (!this.#initialized) {
       this.#initialized = true;
-      this.#config = { ...this.#config, ...config };
       logger.log("kernel", "Initializing kernel");
       this.#registerMenuCommand();
       document.addEventListener("loadstart", this.#onLoadStart, true);
@@ -155,8 +152,7 @@ export class Kernel {
       container,
       sdk,
       sdkName,
-      bus: this.bus,
-      config: this.#config
+      bus: this.bus
     });
   }
 
@@ -186,10 +182,3 @@ export class Kernel {
     this.#seenVideos.clear();
   }
 }
-
-export const KERNEL_DEFAULTS = {
-  enabled: true,
-  plugins: {},
-  resume: true,
-  subtitles: true
-};

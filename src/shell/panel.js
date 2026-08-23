@@ -4,7 +4,7 @@ import { GESTURE_EVENTS } from "../shared/events.js";
 
 /**
  * Tabbed settings panel hosted in the shell HUD. Sections are added by
- * plugins; handles open/close, focus trapping, and arrow-key tab navigation.
+ * features; handles open/close, focus trapping, and arrow-key tab navigation.
  */
 export class SettingsPanel {
   #hudLayer;

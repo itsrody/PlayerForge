@@ -1,9 +1,8 @@
-import { Plugin } from "./base.js";
-import { getConfigValue, setConfigValue } from "../shared/storage.js";
-import { srtToVtt, ensureVttHeader, parseSubtitles } from "../shared/subtitles.js";
-import { createIconElement } from "../shared/icons.js";
-import { createStepper } from "../shared/stepper.js";
-import { logger } from "../shared/logger.js";
+import { getConfigValue, setConfigValue } from "../../shared/storage.js";
+import { srtToVtt, ensureVttHeader, parseSubtitles } from "../../shared/subtitles.js";
+import { createIconElement } from "../../shared/icons.js";
+import { createStepper } from "../../shared/stepper.js";
+import { logger } from "../../shared/logger.js";
 
 const SUBTITLE_FILE_ACCEPT = ".srt,.vtt";
 const SYNC_DEBOUNCE_MS = 150;
@@ -21,23 +20,13 @@ const SETTING_KEYS = {
   syncOffset: "subtitles.sync.offset"
 };
 
-const CUE_CSS_VARS = {
-  color: "--pf-cue-color",
-  fontFamily: "--pf-cue-font-family",
-  fontSize: "--pf-cue-font-size",
-  fontWeight: "--pf-cue-font-weight",
-  lineHeight: "--pf-cue-line-height",
-  textShadow: "--pf-cue-text-shadow"
-};
-
-/** Cue style props owned by the settings UI; never overridden via options.cue. */
-const UI_MANAGED_CUE_PROPS = new Set(["color", "fontSize", "textShadow"]);
-
 /**
- * Loads .srt/.vtt files onto a video and renders cues through the shell's
- * cue layer, with caption styling, manual positioning, and sync offset.
+ * Shell-owned feature: loads .srt/.vtt files onto a video and renders cues
+ * through the shell's cue layer, with caption styling, manual positioning,
+ * and sync offset.
  */
-export class SubtitlesPlugin extends Plugin {
+export class SubtitlesFeature {
+  #shell;
   #tracks = [];
   #currentTrack = null;
   #cueLayer = null;
@@ -47,88 +36,69 @@ export class SubtitlesPlugin extends Plugin {
   #hintEl = null;
   #loadButton = null;
   #removeButton = null;
-  #uiBuilt = false;
-  #active = false;
-  #listening = false;
   #frameUnsub = null;
   #timeupdateUnsub = null;
   #onSeeked = null;
   #onEnded = null;
+  #destroyed = false;
 
-  constructor(options = {}) {
-    super("subtitles", options);
-  }
-
-  onAttach(shell) {
-    this.#active = true;
+  constructor(shell) {
+    this.#shell = shell;
     this.#syncOffset = Number(getConfigValue(SETTING_KEYS.syncOffset, 0)) || 0;
     this.#cueLayer = shell.shellDom?.cueLayer || null;
-    this.#applyCueOptions(shell);
-    if (!this.#uiBuilt) {
-      this.#uiBuilt = true;
-      this.#fileInput = this.#createFileInput(shell);
-      this.#buildPanelUi(shell);
-    }
+    this.#fileInput = this.#createFileInput(shell);
+    this.#buildPanelUi(shell);
     this.#startListening();
     this.#render();
-    logger.log("subtitles", `Attached (${shell.sdkName})`);
+    logger.log("subtitles", `Ready (${shell.sdkName})`);
   }
 
-  onDetach() {
+  destroy() {
+    if (this.#destroyed) {
+      return;
+    }
+    this.#destroyed = true;
     this.#stopListening();
-  }
-
-  onDestroy() {
-    this.#active = false;
-    this.#uiBuilt = false;
+    this.#fileInput?.remove();
+    this.#fileInput = null;
     this.#hintEl = null;
     this.#loadButton = null;
     this.#removeButton = null;
     this.#tracks = [];
     this.#currentTrack = null;
     this.#cueLayer = null;
-    this.#stopListening();
-    super.onDestroy();
   }
 
   #startListening() {
-    if (this.#listening) {
-      return;
-    }
-    this.#listening = true;
     const onTick = (payload) => {
-      if (payload.shellId === this.shell.id) {
+      if (payload.shellId === this.#shell.id) {
         this.#render();
       }
     };
-    this.#frameUnsub = this.on("shell:frame", onTick);
-    this.#timeupdateUnsub = this.on("shell:timeupdate", onTick);
-    const video = this.shell.video;
+    this.#frameUnsub = this.#shell.bus.on("shell:frame", onTick);
+    this.#timeupdateUnsub = this.#shell.bus.on("shell:timeupdate", onTick);
+    const video = this.#shell.video;
     this.#onSeeked = () => this.#render();
-    this.#onEnded = () => this.shell?.cues?.clear();
+    this.#onEnded = () => this.#shell?.cues?.clear();
     video?.addEventListener("seeked", this.#onSeeked);
     video?.addEventListener("ended", this.#onEnded);
   }
 
   #stopListening() {
-    if (!this.#listening) {
-      return;
-    }
-    this.#listening = false;
     this.#frameUnsub?.();
     this.#frameUnsub = null;
     this.#timeupdateUnsub?.();
     this.#timeupdateUnsub = null;
-    const video = this.shell.video;
+    const video = this.#shell?.video;
     video?.removeEventListener("seeked", this.#onSeeked);
     video?.removeEventListener("ended", this.#onEnded);
     this.#onSeeked = null;
     this.#onEnded = null;
-    this.shell?.cues?.clear();
+    this.#shell?.cues?.clear();
   }
 
   #render() {
-    const cuePool = this.shell?.cues;
+    const cuePool = this.#shell?.cues;
     if (!cuePool) {
       return;
     }
@@ -137,7 +107,7 @@ export class SubtitlesPlugin extends Plugin {
       cuePool.clear();
       return;
     }
-    const currentTime = this.shell.video?.currentTime;
+    const currentTime = this.#shell.video?.currentTime;
     if (!(currentTime >= 0)) {
       cuePool.clear();
       return;
@@ -221,7 +191,7 @@ export class SubtitlesPlugin extends Plugin {
       sectionRoot.classList.remove("pf-drop-active");
       const files = [...(event.dataTransfer?.files || [])].filter(isSubtitleFile);
       if (!files.length) {
-        this.toast({
+        this.#toast({
           icon: "captions",
           text: "Drop a .srt or .vtt file",
           duration: 2000
@@ -243,7 +213,6 @@ export class SubtitlesPlugin extends Plugin {
         }
       }
       parent.appendChild(node);
-      this.addCleanup(() => node.remove());
       return node;
     };
 
@@ -459,34 +428,8 @@ export class SubtitlesPlugin extends Plugin {
     this.#cueLayer?.style.setProperty(prop, value);
   }
 
-  /** Apply static cue-style overrides passed via plugin options (`cue`). */
-  #applyCueOptions(shell) {
-    const cueOptions = this.options.cue;
-    if (!cueOptions || typeof cueOptions !== "object") {
-      return;
-    }
-    const cueLayer = this.#cueLayer;
-    if (!cueLayer) {
-      return;
-    }
-    const appliedVars = [];
-    for (const [prop, cssVar] of Object.entries(CUE_CSS_VARS)) {
-      if (UI_MANAGED_CUE_PROPS.has(prop)) {
-        continue;
-      }
-      const value = cueOptions[prop];
-      if (value != null && value !== "") {
-        cueLayer.style.setProperty(cssVar, value);
-        appliedVars.push(cssVar);
-      }
-    }
-    if (appliedVars.length) {
-      this.addCleanup(() => {
-        for (const cssVar of appliedVars) {
-          cueLayer.style.removeProperty(cssVar);
-        }
-      });
-    }
+  #toast(payload) {
+    this.#shell?.toast(payload);
   }
 
   #createFileInput(shell) {
@@ -495,7 +438,6 @@ export class SubtitlesPlugin extends Plugin {
     input.accept = SUBTITLE_FILE_ACCEPT;
     input.style.display = "none";
     shell.container.appendChild(input);
-    this.addCleanup(() => input.remove());
     input.addEventListener("change", () => {
       const file = input.files?.[0];
       if (file) {
@@ -507,19 +449,19 @@ export class SubtitlesPlugin extends Plugin {
   }
 
   async load(file) {
-    if (!this.#active) {
+    if (this.#destroyed) {
       return;
     }
     const name = file.name;
     try {
       const rawText = await file.text();
-      if (!this.#active) {
+      if (this.#destroyed) {
         return;
       }
       const normalizedText = /\.srt$/i.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
       const cues = parseSubtitles(normalizedText, this.#syncOffset);
       if (!cues.length) {
-        this.toast({
+        this.#toast({
           icon: "captions",
           text: "No cues found",
           duration: 2500
@@ -534,7 +476,7 @@ export class SubtitlesPlugin extends Plugin {
       this.#currentTrack = this.#tracks[this.#tracks.length - 1];
       this.#refreshHint();
       this.#render();
-      this.toast({
+      this.#toast({
         icon: "captions",
         text: name,
         duration: 2000
@@ -542,7 +484,7 @@ export class SubtitlesPlugin extends Plugin {
       logger.log("subtitles", `Loaded ${name}`);
     } catch (err) {
       logger.error("subtitles", `Failed to load ${name}:`, err);
-      this.toast({
+      this.#toast({
         icon: "captions",
         text: "Failed to load subtitles",
         duration: 2500
@@ -566,7 +508,7 @@ export class SubtitlesPlugin extends Plugin {
   #removeAll() {
     this.#currentTrack = null;
     this.#tracks = [];
-    this.shell?.cues?.clear();
+    this.#shell?.cues?.clear();
     this.#refreshHint();
   }
 }

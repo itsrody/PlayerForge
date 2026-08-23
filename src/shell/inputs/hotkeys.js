@@ -16,7 +16,7 @@ let fullscreenHintShown = false;
 /**
  * Shell-owned input layer: long-press speed boost, drag scrubbing,
  * swipe-down-to-exit-fullscreen, double-tap zones, keyboard skips,
- * volume steps, mute toggle, and pinch-to-fill. Not a lifecycle plugin —
+ * volume steps, mute toggle, and pinch-to-fill. Not a lifecycle feature —
  * each Shell instantiates it directly and destroys it on teardown.
  */
 export class HotkeysController {

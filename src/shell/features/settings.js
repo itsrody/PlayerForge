@@ -1,27 +1,19 @@
-import { Plugin } from "./base.js";
-import { getSetting, setSetting, SETTINGS_SCHEMA } from "../shared/config.js";
-import { createStepper } from "../shared/stepper.js";
-import { logger } from "../shared/logger.js";
+import { getSetting, setSetting, SETTINGS_SCHEMA } from "../../shared/config.js";
+import { createStepper } from "../../shared/stepper.js";
+import { logger } from "../../shared/logger.js";
 
-/** Renders the generic settings schema (Playback / Gestures / Resume) into a panel section. */
-export class SettingsPlugin extends Plugin {
-  #built = false;
+/** Shell-owned feature: renders the generic settings schema (Playback / Gestures / Resume) into a panel section. */
+export class SettingsFeature {
+  #shell;
 
-  constructor() {
-    super("settings");
+  constructor(shell) {
+    this.#shell = shell;
+    this.#buildPanelUi(shell);
+    logger.log("settings", `Ready (${shell.sdkName})`);
   }
 
-  onAttach(shell) {
-    if (!this.#built) {
-      this.#built = true;
-      this.#buildPanelUi(shell);
-    }
-    logger.log("settings", `Attached (${shell.sdkName})`);
-  }
-
-  onDestroy() {
-    this.#built = false;
-    super.onDestroy();
+  destroy() {
+    this.#shell = null;
   }
 
   #buildPanelUi(shell) {
@@ -43,7 +35,6 @@ export class SettingsPlugin extends Plugin {
         }
       }
       parent.appendChild(node);
-      this.addCleanup(() => node.remove());
       return node;
     };
 
@@ -82,7 +73,6 @@ export class SettingsPlugin extends Plugin {
           }
         });
         cell.appendChild(stepper.root);
-        this.addCleanup(() => stepper.root.remove());
         valueLabel.textContent = definition.fmt(getSetting(definition.key));
       }
     }

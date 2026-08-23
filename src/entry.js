@@ -2,7 +2,6 @@ import { Kernel } from "./kernel/kernel.js";
 import { logger } from "./shared/logger.js";
 import { shouldSkipUrl } from "./shared/guard.js";
 import { getConfigValue, setConfigValue } from "./shared/storage.js";
-import { registerBuiltins } from "./plugins/index.js";
 
 export const VERSION = "0.7.0";
 
@@ -18,10 +17,7 @@ function bootstrap() {
   }
   const kernel = new Kernel();
   window.__PF_KERNEL__ = kernel;
-  kernel.init({
-    resume: true,
-    subtitles: true
-  });
+  kernel.init();
 
   if (getConfigValue("firstRun", true) !== false) {
     setConfigValue("firstRun", false);
@@ -42,7 +38,6 @@ function bootstrap() {
   }
 
   kernel.bus.on("shell:created", (shell) => {
-    registerBuiltins(shell);
     logger.log("entry", `Shell ready: ${shell.id} (${shell.sdkName})`);
   });
 

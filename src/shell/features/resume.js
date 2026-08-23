@@ -1,8 +1,7 @@
-import { Plugin } from "./base.js";
-import { resumeStore } from "../shared/resume-store.js";
-import { getPageContext } from "../shared/page-context.js";
-import { formatTime } from "../shared/format.js";
-import { logger } from "../shared/logger.js";
+import { resumeStore } from "../../shared/resume-store.js";
+import { getPageContext } from "../../shared/page-context.js";
+import { formatTime } from "../../shared/format.js";
+import { logger } from "../../shared/logger.js";
 
 const RESUME_SAVE_INTERVAL_MS = 60000;
 /** Progress at/after which the entry resets so the video restarts next time. */
@@ -13,27 +12,29 @@ const SAVE_EPSILON_SECONDS = 3;
 const RESUME_MIN_POSITION = 5;
 
 /**
- * Persists playback progress per (domain, path, duration) and resumes where
- * the user left off, with a "Start over" toast action.
+ * Shell-owned feature: persists playback progress per (domain, path, duration)
+ * and resumes where the user left off, with a "Start over" toast action.
  */
-export class ResumePlugin extends Plugin {
+export class ResumeFeature {
+  #shell;
   #store = resumeStore;
   #entry = null;
   #saveTimer = null;
-  #pauseUnsub = null;
-  /** Detach-time flush hook installed by onAttach (removes media listeners). */
+  /** Teardown hook that removes the resume-seek media listeners. */
   #stopResumeSeekWatch = null;
+  /** Teardown hook that removes the periodic-save "pause" listener. */
+  #stopPauseWatch = null;
   #lastSavedPosition = 0;
+  #destroyed = false;
 
-  constructor() {
-    super("resume");
+  constructor(shell) {
+    this.#shell = shell;
+    this.#init();
   }
 
-  async onAttach(shell) {
+  async #init() {
+    const shell = this.#shell;
     const context = await getPageContext();
-    if (!this.isActive) {
-      return;
-    }
     if (!context) {
       logger.log("resume", "Top context unavailable — skipping");
       return;
@@ -55,7 +56,7 @@ export class ResumePlugin extends Plugin {
       video.addEventListener("loadedmetadata", onLoaded);
       video.addEventListener("error", onError);
       await metadataReady;
-      if (!this.isActive) {
+      if (this.#destroyed || !video.isConnected) {
         return;
       }
     }
@@ -116,7 +117,6 @@ export class ResumePlugin extends Plugin {
       video.addEventListener("timeupdate", onTimeUpdate);
       video.addEventListener("play", onPlay);
       this.#stopResumeSeekWatch = stopWatching;
-      this.addCleanup(stopWatching);
     }
 
     this.#lastSavedPosition = startAt;
@@ -138,9 +138,6 @@ export class ResumePlugin extends Plugin {
 
   #startPeriodicSave(shell) {
     clearInterval(this.#saveTimer);
-    this.#saveTimer = null;
-    this.#pauseUnsub?.();
-    this.#pauseUnsub = null;
 
     let lastSeen = this.#lastSavedPosition;
     this.#saveTimer = setInterval(() => {
@@ -150,29 +147,24 @@ export class ResumePlugin extends Plugin {
         lastSeen = currentTime;
       }
     }, RESUME_SAVE_INTERVAL_MS);
-    this.addCleanup(() => clearInterval(this.#saveTimer));
 
-    this.#pauseUnsub = this.onVideo("pause", () => {
+    const onPause = () => {
       this.#saveProgress(shell.currentTime);
-    });
+    };
+    shell.video.addEventListener("pause", onPause);
+    this.#stopPauseWatch = () => shell.video.removeEventListener("pause", onPause);
   }
 
-  onDetach() {
+  destroy() {
     this.#stopResumeSeekWatch?.();
     this.#stopResumeSeekWatch = null;
+    this.#stopPauseWatch?.();
+    this.#stopPauseWatch = null;
     clearInterval(this.#saveTimer);
     this.#saveTimer = null;
-    this.#pauseUnsub?.();
-    this.#pauseUnsub = null;
-    if (this.#entry) {
-      this.#saveProgress(this.shell?.currentTime || 0);
+    if (this.#entry && !this.#destroyed) {
+      this.#saveProgress(this.#shell?.currentTime || 0);
     }
-  }
-
-  onDestroy() {
-    if (this.#entry) {
-      this.#saveProgress(this.shell?.currentTime || 0);
-    }
-    super.onDestroy();
+    this.#destroyed = true;
   }
 }

@@ -8,7 +8,7 @@ export const DEFAULT_STALE_DAYS = 14;
 
 /**
  * Persistent store of per-video entries (keyed by path+duration hash) holding
- * the resume position. Used by the resume plugin.
+ * the resume position. Used by the resume feature.
  */
 export class ResumeStore {
   #state = null;

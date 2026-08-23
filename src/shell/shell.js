@@ -1,7 +1,9 @@
 import { logger } from "../shared/logger.js";
 import { SHELL_MARKER } from "../kernel/kernel.js";
-import { PluginManager } from "../plugins/manager.js";
 import { HotkeysController } from "./inputs/hotkeys.js";
+import { ResumeFeature } from "./features/resume.js";
+import { SubtitlesFeature } from "./features/subtitles.js";
+import { SettingsFeature } from "./features/settings.js";
 import { SettingsPanel } from "./panel.js";
 import { ensureStyles, injectShell, watchShellHost, removeEl } from "./inject.js";
 
@@ -26,8 +28,8 @@ let mediaSessionOwner = null;
 
 /**
  * Per-video facade: wraps the media element with a stable API, injects the
- * HUD, hosts the plugin manager and settings panel, tracks fullscreen state,
- * and wires MediaSession.
+ * HUD, hosts the input layer, features, and settings panel, tracks fullscreen
+ * state, and wires MediaSession.
  */
 export class Shell {
   id;
@@ -37,10 +39,9 @@ export class Shell {
   sdkName;
 
   #bus;
-  #config;
   #shellDom = null;
-  #plugins;
   #inputs = null;
+  #features = [];
   #panel;
   #destroyed = false;
   #cleanups = new Set();
@@ -49,18 +50,21 @@ export class Shell {
   #frameCallbackHandle = null;
   #savedPositionStyle = null;
 
-  constructor({ id, video, container, sdk, sdkName, bus, config }) {
+  constructor({ id, video, container, sdk, sdkName, bus }) {
     this.id = id;
     this.video = video;
     this.container = container;
     this.sdk = sdk;
     this.sdkName = sdkName;
     this.#bus = bus;
-    this.#config = config;
-    this.#plugins = new PluginManager(this, bus);
     this.#injectDom();
     this.#panel = new SettingsPanel(this, bus);
     this.#inputs = new HotkeysController(this);
+    this.#features = [
+      new ResumeFeature(this),
+      new SubtitlesFeature(this),
+      new SettingsFeature(this)
+    ];
     this.#setupFocusManagement();
     this.#suppressContextMenu();
     this.#forwardMediaEvents();
@@ -235,16 +239,8 @@ export class Shell {
     this.#shellDom?.hideToast?.(group);
   }
 
-  get plugins() {
-    return this.#plugins;
-  }
-
   get bus() {
     return this.#bus;
-  }
-
-  getPlugin(name) {
-    return this.#plugins.get(name);
   }
 
   #injectDom() {
@@ -490,7 +486,14 @@ export class Shell {
     if (!this.#destroyed) {
       this.#destroyed = true;
       logger.log("shell", `Destroying shell "${this.id}"`);
-      this.#plugins.destroyAll();
+      for (const feature of this.#features) {
+        try {
+          feature.destroy();
+        } catch (err) {
+          logger.error("shell", "Feature destroy error:", err);
+        }
+      }
+      this.#features = [];
       for (const cleanup of this.#cleanups) {
         try {
           cleanup();
