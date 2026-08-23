@@ -363,7 +363,7 @@ export class GestureController {
     }
     if (el.tagName === "INPUT") {
       const type = (el.getAttribute("type") || "text").toLowerCase();
-      return type !== "checkbox" && type !== "radio" && type !== "range" &&
+      return type !== "checkbox" && type !== "radio" &&
         type !== "button" && type !== "submit" && type !== "reset" && type !== "color";
     }
     return false;

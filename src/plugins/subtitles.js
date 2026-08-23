@@ -2,6 +2,7 @@ import { Plugin } from "./base.js";
 import { getConfigValue, setConfigValue } from "../shared/storage.js";
 import { srtToVtt, ensureVttHeader, parseSubtitles } from "../shared/subtitles.js";
 import { createIconElement } from "../shared/icons.js";
+import { createStepper } from "../shared/stepper.js";
 import { logger } from "../shared/logger.js";
 
 const SUBTITLE_FILE_ACCEPT = ".srt,.vtt";
@@ -274,22 +275,23 @@ export class SubtitlesPlugin extends Plugin {
 
     const sizeCell = el("div", { class: "pf-panel-cell" }, styleGrid);
     el("span", { class: "pf-panel-label" }, sizeCell).textContent = "Size";
-    const sizeRange = el("input", {
-      type: "range",
-      min: "0.6",
-      max: "3",
-      step: "0.1",
-      value: getConfigValue(SETTING_KEYS.size, "1.2")
-    }, sizeCell);
+    const sizeStepper = createStepper({
+      min: 0.6,
+      max: 3,
+      step: 0.1,
+      value: Number(getConfigValue(SETTING_KEYS.size, "1.2")),
+      label: "Caption size",
+      onChange: (v) => {
+        applySize();
+        setConfigValue(SETTING_KEYS.size, String(v));
+      }
+    });
+    sizeCell.appendChild(sizeStepper.root);
     const sizeValue = el("span", { class: "pf-panel-value" }, sizeCell);
     const applySize = () => {
-      sizeValue.textContent = `${sizeRange.value}em`;
-      this.#setCueVar("--pf-cue-font-size", `${sizeRange.value}em`);
+      sizeValue.textContent = `${sizeStepper.getValue()}em`;
+      this.#setCueVar("--pf-cue-font-size", `${sizeStepper.getValue()}em`);
     };
-    sizeRange.addEventListener("input", () => {
-      applySize();
-      setConfigValue(SETTING_KEYS.size, sizeRange.value);
-    });
 
     const colorCell = el("div", { class: "pf-panel-cell" }, styleGrid);
     el("span", { class: "pf-panel-label" }, colorCell).textContent = "Color";
@@ -306,39 +308,42 @@ export class SubtitlesPlugin extends Plugin {
 
     const shadowCell = el("div", { class: "pf-panel-cell" }, styleGrid);
     el("span", { class: "pf-panel-label" }, shadowCell).textContent = "Shadow";
-    const shadowRange = el("input", {
-      type: "range",
-      min: "0",
-      max: "100",
-      step: "5",
-      value: getConfigValue(SETTING_KEYS.shadow, "40")
-    }, shadowCell);
+    const shadowStepper = createStepper({
+      min: 0,
+      max: 100,
+      step: 5,
+      value: Number(getConfigValue(SETTING_KEYS.shadow, "40")),
+      label: "Caption shadow",
+      onChange: () => {
+        applyShadow();
+        setConfigValue(SETTING_KEYS.shadow, String(shadowStepper.getValue()));
+      }
+    });
+    shadowCell.appendChild(shadowStepper.root);
     const shadowValue = el("span", { class: "pf-panel-value" }, shadowCell);
     const applyShadow = () => {
-      const strength = Number(shadowRange.value);
+      const strength = shadowStepper.getValue();
       shadowValue.textContent = strength ? `${strength}%` : "Off";
       this.#setCueVar("--pf-cue-text-shadow", strength
         ? `1px 1px ${Math.round(strength / 6)}px rgba(0, 0, 0, ${(0.4 + strength / 100 * 0.6).toFixed(2)})`
         : "none");
     };
-    shadowRange.addEventListener("input", () => {
-      applyShadow();
-      setConfigValue(SETTING_KEYS.shadow, shadowRange.value);
-    });
 
     const syncCell = el("div", { class: "pf-panel-cell" }, styleGrid);
     el("span", { class: "pf-panel-label" }, syncCell).textContent = "Sync";
-    const syncRange = el("input", {
-      type: "range",
-      min: "-20",
-      max: "20",
-      step: "0.25",
-      value: String(this.#syncOffset)
-    }, syncCell);
-    const syncValue = el("span", { class: "pf-panel-value" }, syncCell);
     let syncDebounce = null;
+    const syncStepper = createStepper({
+      min: -20,
+      max: 20,
+      step: 0.25,
+      value: this.#syncOffset,
+      label: "Subtitle sync offset",
+      onChange: () => applySync()
+    });
+    syncCell.appendChild(syncStepper.root);
+    const syncValue = el("span", { class: "pf-panel-value" }, syncCell);
     const applySync = (immediate = false) => {
-      const offset = Number(syncRange.value);
+      const offset = syncStepper.getValue();
       this.#syncOffset = offset;
       syncValue.textContent = offset === 0 ? "0s" : `${offset > 0 ? "+" : ""}${offset}s`;
       clearTimeout(syncDebounce);
@@ -355,26 +360,24 @@ export class SubtitlesPlugin extends Plugin {
         syncDebounce = setTimeout(reparseAll, SYNC_DEBOUNCE_MS);
       }
     };
-    syncRange.addEventListener("input", () => applySync());
 
     const resetButton = el("button", { class: "pf-btn pf-btn-ghost pf-btn-icon", type: "button" }, styleHead);
     resetButton.appendChild(createIconElement("reload"));
     resetButton.title = "Reset style";
     resetButton.setAttribute("aria-label", "Reset style");
     resetButton.addEventListener("click", () => {
-      sizeRange.value = "1.2";
+      sizeStepper.setValue(1.2);
       applySize();
       colorInput.value = "#ffffff";
       applyColor();
-      shadowRange.value = "40";
+      shadowStepper.setValue(40);
       applyShadow();
-      syncRange.value = "0";
+      syncStepper.setValue(0);
       applySync(true);
-      setConfigValue(SETTING_KEYS.size, sizeRange.value);
+      setConfigValue(SETTING_KEYS.size, String(sizeStepper.getValue()));
       setConfigValue(SETTING_KEYS.color, colorInput.value);
-      setConfigValue(SETTING_KEYS.shadow, shadowRange.value);
-      setConfigValue(SETTING_KEYS.syncOffset, syncRange.value);
-      this.shell?.panel?.refreshRangeFills();
+      setConfigValue(SETTING_KEYS.shadow, String(shadowStepper.getValue()));
+      setConfigValue(SETTING_KEYS.syncOffset, String(syncStepper.getValue()));
     });
 
     applySize();
@@ -390,17 +393,28 @@ export class SubtitlesPlugin extends Plugin {
     const enabledCheckbox = el("input", { type: "checkbox" }, positionRow);
     enabledCheckbox.checked = getConfigValue(SETTING_KEYS.posEnabled, true);
 
-    const makeSlider = (label) => {
+    const makeStepper = (label, key, fallback) => {
       const wrap = el("span", { class: "pf-panel-pos-slider" }, positionRow);
       el("span", { class: "pf-panel-label" }, wrap).textContent = label;
-      const range = el("input", { type: "range", min: "0", max: "100", step: "5" }, wrap);
       const value = el("span", { class: "pf-panel-value" }, wrap);
-      return { range, value };
+      const stepper = createStepper({
+        min: 0,
+        max: 100,
+        step: 5,
+        value: Number(getConfigValue(key, fallback)),
+        label,
+        onChange: () => {
+          setConfigValue(key, String(stepper.getValue()));
+          if (enabledCheckbox.checked) {
+            applyPosition();
+          }
+        }
+      });
+      wrap.appendChild(stepper.root);
+      return { stepper, value };
     };
-    const vertical = makeSlider("Vertical");
-    vertical.range.value = getConfigValue(SETTING_KEYS.line, "85");
-    const horizontal = makeSlider("Horizontal");
-    horizontal.range.value = getConfigValue(SETTING_KEYS.horizontal, "50");
+    const vertical = makeStepper("Vertical", SETTING_KEYS.line, "85");
+    const horizontal = makeStepper("Horizontal", SETTING_KEYS.horizontal, "50");
 
     const alignSelect = el("select", { class: "pf-select" }, positionRow);
     alignSelect.innerHTML =
@@ -408,17 +422,17 @@ export class SubtitlesPlugin extends Plugin {
     alignSelect.value = getConfigValue(SETTING_KEYS.align, "center");
 
     const setManualDisabled = (disabled) => {
-      vertical.range.disabled = disabled;
-      horizontal.range.disabled = disabled;
+      vertical.stepper.setDisabled(disabled);
+      horizontal.stepper.setDisabled(disabled);
       alignSelect.disabled = disabled;
     };
     const applyPosition = () => {
-      vertical.value.textContent = `${vertical.range.value}%`;
-      horizontal.value.textContent = `${horizontal.range.value}%`;
+      vertical.value.textContent = `${vertical.stepper.getValue()}%`;
+      horizontal.value.textContent = `${horizontal.stepper.getValue()}%`;
       this.#positionOverride = enabledCheckbox.checked
         ? {
-            line: Number(vertical.range.value),
-            position: Number(horizontal.range.value),
+            line: vertical.stepper.getValue(),
+            position: horizontal.stepper.getValue(),
             align: alignSelect.value
           }
         : null;
@@ -429,18 +443,6 @@ export class SubtitlesPlugin extends Plugin {
       setManualDisabled(!enabledCheckbox.checked);
       applyPosition();
       setConfigValue(SETTING_KEYS.posEnabled, enabledCheckbox.checked);
-    });
-    vertical.range.addEventListener("input", () => {
-      setConfigValue(SETTING_KEYS.line, vertical.range.value);
-      if (enabledCheckbox.checked) {
-        applyPosition();
-      }
-    });
-    horizontal.range.addEventListener("input", () => {
-      setConfigValue(SETTING_KEYS.horizontal, horizontal.range.value);
-      if (enabledCheckbox.checked) {
-        applyPosition();
-      }
     });
     alignSelect.addEventListener("change", () => {
       setConfigValue(SETTING_KEYS.align, alignSelect.value);

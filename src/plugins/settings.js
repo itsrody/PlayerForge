@@ -1,5 +1,6 @@
 import { Plugin } from "./base.js";
 import { getSetting, setSetting, SETTINGS_SCHEMA } from "../shared/config.js";
+import { createStepper } from "../shared/stepper.js";
 import { logger } from "../shared/logger.js";
 
 /** Renders the generic settings schema (Playback / Gestures / Resume) into a panel section. */
@@ -69,19 +70,19 @@ export class SettingsPlugin extends Plugin {
         const head = el("div", { class: "pf-panel-cell-head" }, cell);
         el("span", { class: "pf-panel-label" }, head).textContent = definition.label;
         const valueLabel = el("span", { class: "pf-panel-value" }, head);
-        const range = el("input", {
-          type: "range",
-          min: String(definition.min),
-          max: String(definition.max),
-          step: String(definition.step),
-          value: String(getSetting(definition.key))
-        }, cell);
-        const applyValue = () => {
-          const parsed = Number(range.value);
-          valueLabel.textContent = definition.fmt(parsed);
-          setSetting(definition.key, parsed);
-        };
-        range.addEventListener("input", applyValue);
+        const stepper = createStepper({
+          min: definition.min,
+          max: definition.max,
+          step: definition.step,
+          value: getSetting(definition.key),
+          label: definition.label,
+          onChange: (parsed) => {
+            valueLabel.textContent = definition.fmt(parsed);
+            setSetting(definition.key, parsed);
+          }
+        });
+        cell.appendChild(stepper.root);
+        this.addCleanup(() => stepper.root.remove());
         valueLabel.textContent = definition.fmt(getSetting(definition.key));
       }
     }

@@ -4,8 +4,7 @@ import { GESTURE_EVENTS } from "../shared/events.js";
 
 /**
  * Tabbed settings panel hosted in the shell HUD. Sections are added by
- * plugins; handles open/close, focus trapping, arrow-key tab navigation,
- * and range-input fill painting.
+ * plugins; handles open/close, focus trapping, and arrow-key tab navigation.
  */
 export class SettingsPanel {
   #hudLayer;
@@ -24,7 +23,6 @@ export class SettingsPanel {
   #onKeydownEscape = null;
   #onKeydownTab = null;
   #onTablistKeydown = null;
-  #onRangeInput = null;
   #fullscreenUnsub = null;
   #destroyed = false;
 
@@ -59,7 +57,6 @@ export class SettingsPanel {
       return;
     }
     this.#root.hidden = false;
-    this.#refreshRangeFills();
     const activeTab = this.#root.querySelector(".pf-panel-tab-active") || this.#closeButton;
     if (activeTab && document.activeElement !== activeTab) {
       activeTab.focus();
@@ -137,10 +134,6 @@ export class SettingsPanel {
       this.#activateSection(section, tab);
     }
     return section;
-  }
-
-  refreshRangeFills() {
-    this.#refreshRangeFills();
   }
 
   destroy() {
@@ -279,13 +272,6 @@ export class SettingsPanel {
     };
     this.#tabList.addEventListener("keydown", this.#onTablistKeydown);
 
-    this.#onRangeInput = (event) => {
-      const target = event.target;
-      if (target instanceof HTMLInputElement && target.type === "range") {
-        this.#paintRangeFill(target);
-      }
-    };
-    this.#root.addEventListener("input", this.#onRangeInput);
   }
 
   #unwireEvents() {
@@ -302,9 +288,6 @@ export class SettingsPanel {
     if (this.#onTablistKeydown) {
       this.#tabList?.removeEventListener("keydown", this.#onTablistKeydown);
     }
-    if (this.#onRangeInput) {
-      this.#root?.removeEventListener("input", this.#onRangeInput);
-    }
     if (this.#fullscreenUnsub) {
       this.#bus?.off("shell:fullscreen-change", this.#fullscreenUnsub);
     }
@@ -314,7 +297,6 @@ export class SettingsPanel {
     this.#onKeydownEscape = null;
     this.#onKeydownTab = null;
     this.#onTablistKeydown = null;
-    this.#onRangeInput = null;
     this.#closeButton = null;
   }
 
@@ -326,19 +308,5 @@ export class SettingsPanel {
       tab.setAttribute("aria-selected", String(isActive));
     }
     this.#activeSection = targetSection;
-  }
-
-  #refreshRangeFills() {
-    for (const input of this.#body?.querySelectorAll("input[type=\"range\"]") || []) {
-      this.#paintRangeFill(input);
-    }
-  }
-
-  #paintRangeFill(input) {
-    const min = Number(input.min) || 0;
-    const max = Number(input.max) || 100;
-    const value = Number(input.value);
-    const pct = max > min ? ((value - min) / (max - min)) * 100 : 50;
-    input.style.setProperty("--pf-fill", `${pct.toFixed(2)}%`);
   }
 }

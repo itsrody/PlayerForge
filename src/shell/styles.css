@@ -506,9 +506,9 @@ pf-toast.pf-toast-interactive {
   font-size: 11px;
 }
 
-/* Compact inline sliders (Colors tab) — label · range · value all on one
-   line, so each control is a single row instead of label-over-slider.
-   Long labels ellipsize before the slider starves. */
+/* Compact inline cells (Subtitles style grid) — label · control · value
+   on one line, so each control is a single row instead of label-over-input.
+   Long labels ellipsize before the control starves. */
 .pf-panel-grid-compact { gap: 4px 8px; }
 .pf-panel-grid-compact .pf-panel-cell {
   flex-direction: row;
@@ -529,18 +529,14 @@ pf-toast.pf-toast-interactive {
   min-width: 30px;
   font-size: 11px;
 }
-.pf-panel-grid-compact .pf-panel-cell input[type="range"] {
-  flex: 1;
-  min-width: 0;
-}
 /* Color-swatch cell has no filling element — spread label / swatch / hex
-   so the value still lands on the right edge like the range cells. */
+   so the value still lands on the right edge like the stepper cells. */
 .pf-panel-grid-compact .pf-panel-cell:has(> input[type="color"]) {
   justify-content: space-between;
 }
 
-/* Position row (Subtitles tab) — toggle + two labeled sliders + Align
-   select on one line. Slider groups flex-grow; the select hugs its content;
+/* Position row (Subtitles tab) — toggle + two labeled steppers + Align
+   select on one line. Stepper groups flex-grow; the select hugs its content;
    the row wraps on very narrow panels instead of overflowing. */
 .pf-panel-pos-row {
   flex-wrap: wrap;
@@ -562,10 +558,6 @@ pf-toast.pf-toast-interactive {
   letter-spacing: 0.04em;
   color: rgba(255, 255, 255, 0.65);
 }
-.pf-panel-pos-slider input[type="range"] {
-  flex: 1;
-  min-width: 0;
-}
 .pf-panel-pos-slider .pf-panel-value {
   flex: none;
   min-width: 30px;
@@ -576,40 +568,65 @@ pf-toast.pf-toast-interactive {
   width: auto;
 }
 
-/* Range sliders — custom filled track (--pf-fill) + round thumb.
-   The fill percent is kept in sync by the panel's delegated input handler. */
-.pf-panel input[type="range"] {
-  -webkit-appearance: none;
-  appearance: none;
+/* Numeric stepper — text input with stacked up/down chevron buttons.
+   Replaces the old range sliders; fills its cell, or the flexible middle
+   slot in inline rows. */
+.pf-stepper {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+  transition: border-color 0.12s ease;
+}
+.pf-stepper:focus-within { border-color: var(--pf-accent); }
+.pf-stepper-input {
   flex: 1;
-  height: 20px;
-  margin: 0;
-  padding: 0;
-  background: transparent;
-  cursor: pointer;
-  --pf-fill: 50%;
-}
-.pf-panel input[type="range"]::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: 999px;
-  background: linear-gradient(to right,
-    var(--pf-accent) 0,
-    var(--pf-accent) var(--pf-fill),
-    rgba(255, 255, 255, 0.2) var(--pf-fill),
-    rgba(255, 255, 255, 0.2) 100%);
-}
-.pf-panel input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  margin-top: -5px;
+  min-width: 0;
+  width: 100%;
+  padding: 0 8px;
   border: none;
-  border-radius: 50%;
-  background: var(--pf-fg);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  outline: none;
+  background: transparent;
+  color: var(--pf-fg);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
-.pf-panel input[type="range"]:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
+.pf-stepper-arrows {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: 18px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+}
+.pf-stepper-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  touch-action: none;
+}
+.pf-stepper-btn svg { width: 11px; height: 11px; fill: currentColor; }
+.pf-stepper-btn:hover { color: var(--pf-fg); background: rgba(255, 255, 255, 0.09); }
+.pf-stepper-btn:first-child { border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
+.pf-stepper-disabled { opacity: 0.45; pointer-events: none; }
+
+/* Steppers in one-line cells (Subtitles style grid / position row) take
+   the same flexible middle slot the range inputs used to occupy. */
+.pf-panel-grid-compact .pf-panel-cell .pf-stepper,
+.pf-panel-pos-slider .pf-stepper {
+  flex: 1;
+  width: auto;
+}
 
 /* Color swatch — keeps the native picker, gets a rounded cap. */
 .pf-panel input[type="color"] {
@@ -695,7 +712,7 @@ pf-toast.pf-toast-interactive {
 }
 
 /* Grid cells stretch controls full-width */
-.pf-panel-cell input[type="range"],
+.pf-panel-cell .pf-stepper,
 .pf-panel-cell select.pf-select {
   flex: none;
   width: 100%;
@@ -764,7 +781,7 @@ pf-toast.pf-toast-interactive {
   .pf-panel-close { padding: 6px 10px; font-size: 18px; }
   .pf-panel-tab { padding: 9px 10px; font-size: 12px; }
   .pf-btn { padding: 11px 12px; font-size: 14px; }
-  .pf-panel input[type="range"] { min-height: 32px; }
+  .pf-panel .pf-stepper { height: 32px; }
   .pf-panel input[type="color"] { height: 28px; }
   .pf-panel input[type="checkbox"] { width: 40px; height: 24px; }
   .pf-panel input[type="checkbox"]::before { width: 18px; height: 18px; }
