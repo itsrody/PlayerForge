@@ -5,6 +5,8 @@ import { formatTime } from "./toast.js";
 import { logger } from "../shared/logger.js";
 
 const RESUME_SAVE_INTERVAL_MS = 60000;
+/** How long to wait for media metadata before giving up on resume. */
+const METADATA_WAIT_MS = 10000;
 /** Progress at/after which the entry resets so the video restarts next time. */
 const COMPLETION_RATIO = 0.95;
 /** Ignore tiny drifts between saves. */
@@ -147,6 +149,8 @@ export class ResumeTracker {
   #entry = null;
   /** Teardown hook that removes the resume-seek media listeners. */
   #stopResumeSeekWatch = null;
+  /** Teardown hook that cancels a pending metadata wait. */
+  #stopMetadataWait = null;
   /** Teardown hook that removes the save-throttle and pause listeners. */
   #stopProgressWatch = null;
   #lastSavedPosition = 0;
@@ -155,7 +159,7 @@ export class ResumeTracker {
 
   constructor(shell) {
     this.#shell = shell;
-    this.#init();
+    this.#init().catch((err) => logger.error("resume", "Init failed:", err));
   }
 
   async #init() {
@@ -168,21 +172,42 @@ export class ResumeTracker {
 
     const video = shell.video;
     if (!video.duration || !isFinite(video.duration)) {
-      const { promise: metadataReady, resolve: resolveMetadata } = Promise.withResolvers();
+      let resolveMetadata;
+      const metadataReady = new Promise((resolve) => {
+        resolveMetadata = resolve;
+      });
       let timeoutHandle;
+      let stopWaiting = null;
       const finishWaiting = () => {
+        stopWaiting?.();
+        resolveMetadata();
+      };
+      const onDurationChange = () => {
+        if (video.duration && isFinite(video.duration)) {
+          finishWaiting();
+        }
+      };
+      stopWaiting = () => {
         video.removeEventListener("loadedmetadata", onLoaded);
+        video.removeEventListener("durationchange", onDurationChange);
         video.removeEventListener("error", onError);
         clearTimeout(timeoutHandle);
-        resolveMetadata();
+        this.#stopMetadataWait = null;
       };
       const onLoaded = () => finishWaiting();
       const onError = () => finishWaiting();
-      timeoutHandle = setTimeout(finishWaiting, 10000);
+      timeoutHandle = setTimeout(finishWaiting, METADATA_WAIT_MS);
       video.addEventListener("loadedmetadata", onLoaded);
+      video.addEventListener("durationchange", onDurationChange);
       video.addEventListener("error", onError);
+      this.#stopMetadataWait = stopWaiting;
       await metadataReady;
-      if (this.#destroyed || !video.isConnected) {
+      if (this.#destroyed) {
+        logger.log("resume", "Shell destroyed before metadata — skipping");
+        return;
+      }
+      if (!video.isConnected) {
+        logger.log("resume", "Video detached before metadata — skipping");
         return;
       }
     }
@@ -284,6 +309,8 @@ export class ResumeTracker {
   }
 
   destroy() {
+    this.#stopMetadataWait?.();
+    this.#stopMetadataWait = null;
     this.#stopResumeSeekWatch?.();
     this.#stopResumeSeekWatch = null;
     this.#stopProgressWatch?.();
