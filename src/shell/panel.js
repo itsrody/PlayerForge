@@ -1,5 +1,5 @@
 import { logger } from "../shared/logger.js";
-import { createIconElement } from "../shared/icons.js";
+import { createIconElement } from "./icons.js";
 import { GESTURE_EVENTS } from "../shared/events.js";
 
 const HOLD_DELAY_MS = 400;

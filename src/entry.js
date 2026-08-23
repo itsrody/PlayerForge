@@ -2,7 +2,7 @@ import { Kernel } from "./kernel/kernel.js";
 import { installContextBridge, installVideoProbe } from "./shared/context.js";
 import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/sdk.js";
 import { logger } from "./shared/logger.js";
-import { shouldSkipUrl } from "./shared/guard.js";
+import { shouldSkipUrl } from "./kernel/guard.js";
 import { getConfigValue, setConfigValue } from "./shared/storage.js";
 
 export const VERSION = "0.7.0";

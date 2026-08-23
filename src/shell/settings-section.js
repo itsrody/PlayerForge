@@ -1,4 +1,4 @@
-import { getSetting, setSetting, SETTINGS_SCHEMA } from "../shared/config.js";
+import { getSetting, setSetting, SETTINGS_SCHEMA } from "./config.js";
 import { logger } from "../shared/logger.js";
 
 /**

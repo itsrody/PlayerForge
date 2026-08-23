@@ -1,4 +1,4 @@
-import { iconMarkup } from "../shared/icons.js";
+import { iconMarkup } from "./icons.js";
 
 /**
  * Seconds → "M:SS" (or "H:MM:SS" past the hour). Lives here because every

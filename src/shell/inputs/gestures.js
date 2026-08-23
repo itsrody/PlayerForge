@@ -1,4 +1,4 @@
-import { getSetting } from "../../shared/config.js";
+import { getSetting } from "../config.js";
 import { GESTURE_EVENTS } from "../../shared/events.js";
 
 // Tuning constants (ms / px / ratios).

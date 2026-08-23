@@ -1,5 +1,5 @@
 import { getPageContext, domainsMatch, domainScore, hashEntry } from "../shared/context.js";
-import { getSetting } from "../shared/config.js";
+import { getSetting } from "./config.js";
 import { gmGetValue, gmSetValue } from "../shared/storage.js";
 import { formatTime } from "./toast.js";
 import { logger } from "../shared/logger.js";

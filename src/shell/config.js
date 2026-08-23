@@ -1,4 +1,4 @@
-import { getConfigValue, setConfigValue } from "./storage.js";
+import { getConfigValue, setConfigValue } from "../shared/storage.js";
 
 export const SETTINGS_PREFIX = "settings";
 
