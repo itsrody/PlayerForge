@@ -16,7 +16,7 @@ export function ensureStyles() {
 
 /**
  * Build the shell DOM inside the player container:
- * host > hud layer > [toast, spinner, cue layer].
+ * host > hud layer > [toast, cue layer].
  */
 export function injectShell(container) {
   if (!container) {
@@ -43,12 +43,6 @@ export function injectShell(container) {
   toast.appendChild(toastText);
   toast.appendChild(toastActions);
   hudLayer.appendChild(toast);
-
-  const spinner = doc.createElement("div");
-  spinner.className = "pf-spinner";
-  spinner.setAttribute("role", "status");
-  spinner.setAttribute("aria-label", "Buffering");
-  hudLayer.appendChild(spinner);
 
   const cueLayer = doc.createElement("div");
   cueLayer.className = "pf-cue-layer";
