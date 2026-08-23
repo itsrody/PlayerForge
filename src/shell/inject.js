@@ -1,6 +1,5 @@
 import SHELL_CSS from "./styles.css";
 import { logger } from "../shared/logger.js";
-import { CueRenderer } from "./cue-renderer.js";
 
 let stylesInjected = false;
 
@@ -36,8 +35,6 @@ export function injectShell(container) {
   cueLayer.setAttribute("aria-hidden", "true");
   hudLayer.appendChild(cueLayer);
 
-  const cuePool = new CueRenderer(cueLayer);
-
   if (container.firstChild) {
     container.insertBefore(host, container.firstChild);
   } else {
@@ -48,8 +45,7 @@ export function injectShell(container) {
   return {
     host,
     hudLayer,
-    cueLayer,
-    cuePool
+    cueLayer
   };
 }
 

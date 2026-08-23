@@ -2,7 +2,8 @@ import { logger } from "../shared/logger.js";
 import { SHELL_MARKER } from "../kernel/kernel.js";
 import { HotkeysController } from "./inputs/hotkeys.js";
 import { ResumeFeature } from "./features/resume.js";
-import { SubtitlesFeature } from "./features/subtitles.js";
+import { SubtitlesSection } from "./subtitles/section.js";
+import { CueRenderer } from "./subtitles/cue-renderer.js";
 import { SettingsPanel } from "./panel.js";
 import { addSettingsSection } from "./settings-section.js";
 import { ToastManager } from "./toast.js";
@@ -43,6 +44,8 @@ export class Shell {
   #shellDom = null;
   #inputs = null;
   #features = [];
+  #subtitles = null;
+  #cues = null;
   #panel;
   #toasts = null;
   #destroyed = false;
@@ -62,12 +65,11 @@ export class Shell {
     this.#panel = new SettingsPanel(this, bus);
     if (this.#shellDom) {
       this.#toasts = new ToastManager(this.#shellDom.hudLayer);
+      this.#cues = new CueRenderer(this.#shellDom.cueLayer);
     }
     this.#inputs = new HotkeysController(this);
-    this.#features = [
-      new ResumeFeature(this),
-      new SubtitlesFeature(this)
-    ];
+    this.#features = [new ResumeFeature(this)];
+    this.#subtitles = new SubtitlesSection(this);
     addSettingsSection(this.#panel);
     this.#setupFocusManagement();
     this.#suppressContextMenu();
@@ -189,7 +191,7 @@ export class Shell {
   }
 
   get cues() {
-    return this.#shellDom?.cuePool;
+    return this.#cues;
   }
 
   get panel() {
@@ -481,6 +483,12 @@ export class Shell {
         }
       }
       this.#features = [];
+      try {
+        this.#subtitles?.destroy();
+      } catch (err) {
+        logger.error("shell", "Subtitles destroy error:", err);
+      }
+      this.#subtitles = null;
       for (const cleanup of this.#cleanups) {
         try {
           cleanup();
@@ -495,7 +503,8 @@ export class Shell {
       this.#inputs = null;
       this.#panel?.destroy();
       this.#panel = null;
-      this.#shellDom?.cuePool?.destroy();
+      this.#cues?.destroy();
+      this.#cues = null;
       this.#toasts?.destroy();
       this.#toasts = null;
       removeEl(this.#shellDom?.host);

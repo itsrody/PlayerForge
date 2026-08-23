@@ -1,5 +1,5 @@
 import { getConfigValue, setConfigValue } from "../../shared/storage.js";
-import { srtToVtt, ensureVttHeader, parseSubtitles } from "../../shared/subtitles.js";
+import { srtToVtt, ensureVttHeader, parseSubtitles } from "./ForgeVTT.js";
 import { createIconElement } from "../../shared/icons.js";
 import { logger } from "../../shared/logger.js";
 
@@ -20,11 +20,11 @@ const SETTING_KEYS = {
 };
 
 /**
- * Shell-owned feature: loads .srt/.vtt files onto a video and renders cues
- * through the shell's cue layer, with caption styling, manual positioning,
+ * Shell-owned subtitles section: loads .srt/.vtt files onto a video and renders
+ * cues through the shell's cue layer, with caption styling, manual positioning,
  * and sync offset.
  */
-export class SubtitlesFeature {
+export class SubtitlesSection {
   #shell;
   #tracks = [];
   #currentTrack = null;
