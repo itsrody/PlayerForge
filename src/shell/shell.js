@@ -5,7 +5,7 @@ import { ResumeTracker } from "./resume.js";
 import { SubtitlesSection } from "./subtitles/section.js";
 import { CueRenderer } from "./subtitles/cue-renderer.js";
 import { SettingsPanel } from "./panel.js";
-import { addSettingsSection } from "./settings-section.js";
+import { addSettingsSection } from "./config.js";
 import { ToastManager } from "./toast.js";
 import { ensureStyles, injectShell, watchShellHost, removeEl } from "./inject.js";
 
