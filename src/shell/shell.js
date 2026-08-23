@@ -487,6 +487,7 @@ export class Shell {
       this.#panel?.destroy();
       this.#panel = null;
       this.#shellDom?.cuePool?.destroy();
+      this.#shellDom?.toasts?.destroy();
       removeEl(this.#shellDom?.host);
       this.#shellDom = null;
       if (this.#savedPositionStyle != null) {

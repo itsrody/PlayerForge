@@ -1,7 +1,7 @@
 import SHELL_CSS from "./styles.css";
 import { logger } from "../shared/logger.js";
-import { iconMarkup } from "../shared/icons.js";
 import { CueRenderer } from "./cue-renderer.js";
+import { ToastManager } from "./toast.js";
 
 let stylesInjected = false;
 
@@ -32,17 +32,7 @@ export function injectShell(container) {
   hudLayer.setAttribute("class", "pf-hud-layer");
   host.appendChild(hudLayer);
 
-  const toast = doc.createElement("pf-toast");
-  const toastIcon = doc.createElement("span");
-  toastIcon.className = "pf-toast-icon";
-  const toastText = doc.createElement("span");
-  toastText.className = "pf-toast-text";
-  const toastActions = doc.createElement("span");
-  toastActions.className = "pf-toast-actions";
-  toast.appendChild(toastIcon);
-  toast.appendChild(toastText);
-  toast.appendChild(toastActions);
-  hudLayer.appendChild(toast);
+  const toasts = new ToastManager(hudLayer);
 
   const cueLayer = doc.createElement("div");
   cueLayer.className = "pf-cue-layer";
@@ -58,88 +48,14 @@ export function injectShell(container) {
   }
   logger.log("injection", `Shell DOM built inside ${container.tagName}#${container.id || container.className}`);
 
-  let autoHideTimer = null;
-  let activeGroup = null;
-
-  function toastFn({ icon, text, duration = 0, color, group, actions } = {}) {
-    activeGroup = group ?? null;
-    if (icon) {
-      const markup = iconMarkup(icon);
-      if (markup) {
-        toastIcon.innerHTML = markup;
-        toastIcon.style.display = "";
-      } else {
-        toastIcon.innerHTML = "";
-        toastIcon.style.display = "none";
-      }
-    } else {
-      toastIcon.innerHTML = "";
-      toastIcon.style.display = "none";
-    }
-    if (text) {
-      toastText.textContent = text;
-      toastText.style.display = "";
-    } else {
-      toastText.textContent = "";
-      toastText.style.display = "none";
-    }
-    if (actions && actions.length) {
-      toastActions.textContent = "";
-      for (const action of actions) {
-        const button = doc.createElement("button");
-        button.type = "button";
-        if (action.icon) {
-          const markup = iconMarkup(action.icon);
-          if (markup) {
-            button.innerHTML = markup;
-          }
-        } else {
-          button.textContent = action.label;
-        }
-        button.title = action.title ?? action.label ?? "";
-        button.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          action.onClick?.();
-        });
-        toastActions.appendChild(button);
-      }
-      toastActions.style.display = "";
-      toast.classList.add("pf-toast-interactive");
-      toast.style.pointerEvents = "auto";
-    } else {
-      toastActions.style.display = "none";
-      toast.classList.remove("pf-toast-interactive");
-      toast.style.pointerEvents = "";
-    }
-    if (color) {
-      toast.style.color = color;
-    } else {
-      toast.style.color = "";
-    }
-    toast.classList.add("pf-visible");
-    clearTimeout(autoHideTimer);
-    if (duration > 0) {
-      autoHideTimer = setTimeout(() => {
-        toast.classList.remove("pf-visible");
-      }, duration);
-    }
-  }
-
-  function hideToastFn(group) {
-    if (group === undefined || group === activeGroup) {
-      clearTimeout(autoHideTimer);
-      toast.classList.remove("pf-visible");
-    }
-  }
-
   return {
     host,
     hudLayer,
     cueLayer,
     cuePool,
-    toast: toastFn,
-    hideToast: hideToastFn
+    toasts,
+    toast: (payload) => toasts.show(payload),
+    hideToast: (group) => toasts.hide(group)
   };
 }
 
