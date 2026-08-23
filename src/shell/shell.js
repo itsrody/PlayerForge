@@ -3,8 +3,8 @@ import { SHELL_MARKER } from "../kernel/kernel.js";
 import { HotkeysController } from "./inputs/hotkeys.js";
 import { ResumeFeature } from "./features/resume.js";
 import { SubtitlesFeature } from "./features/subtitles.js";
-import { SettingsFeature } from "./features/settings.js";
 import { SettingsPanel } from "./panel.js";
+import { addSettingsSection } from "./settings-section.js";
 import { ToastManager } from "./toast.js";
 import { ensureStyles, injectShell, watchShellHost, removeEl } from "./inject.js";
 
@@ -66,9 +66,9 @@ export class Shell {
     this.#inputs = new HotkeysController(this);
     this.#features = [
       new ResumeFeature(this),
-      new SubtitlesFeature(this),
-      new SettingsFeature(this)
+      new SubtitlesFeature(this)
     ];
+    addSettingsSection(this.#panel);
     this.#setupFocusManagement();
     this.#suppressContextMenu();
     this.#forwardMediaEvents();
