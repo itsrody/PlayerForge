@@ -1,7 +1,6 @@
 import { getConfigValue, setConfigValue } from "../../shared/storage.js";
 import { srtToVtt, ensureVttHeader, parseSubtitles } from "../../shared/subtitles.js";
 import { createIconElement } from "../../shared/icons.js";
-import { createStepper } from "../../shared/stepper.js";
 import { logger } from "../../shared/logger.js";
 
 const SUBTITLE_FILE_ACCEPT = ".srt,.vtt";
@@ -164,11 +163,12 @@ export class SubtitlesFeature {
   }
 
   #buildPanelUi(shell) {
-    const panelBody = shell.panel?.body;
+    const panel = shell.panel;
+    const panelBody = panel?.body;
     if (!panelBody) {
       return;
     }
-    const sectionRoot = shell.panel.addSection("Subtitles", "captions");
+    const sectionRoot = panel.addSection("Subtitles", "captions");
     if (!sectionRoot) {
       return;
     }
@@ -214,220 +214,180 @@ export class SubtitlesFeature {
       }
     });
 
-    const el = (tag, attrs = {}, parent = panelBody) => {
-      const node = document.createElement(tag);
-      for (const [key, value] of Object.entries(attrs)) {
-        if (key === "style" && typeof value === "object") {
-          Object.assign(node.style, value);
-        } else {
-          node.setAttribute(key, value);
-        }
-      }
-      parent.appendChild(node);
-      return node;
-    };
-
     // Load row: upload button, remove button, hint text.
-    const loadSection = el("div", { class: "pf-panel-section" }, sectionRoot);
-    const loadRow = el("div", { class: "pf-panel-load-row" }, loadSection);
-    const actions = el("div", { class: "pf-panel-actions" }, loadRow);
+    const loadSection = panel.el("div", { class: "pf-panel-section" }, sectionRoot);
+    const loadRow = panel.el("div", { class: "pf-panel-load-row" }, loadSection);
+    const actions = panel.el("div", { class: "pf-panel-actions" }, loadRow);
 
-    this.#loadButton = el("button", { class: "pf-btn pf-btn-icon", type: "button" }, actions);
-    this.#loadButton.appendChild(createIconElement("upload"));
-    this.#loadButton.title = "Load subtitles (.srt / .vtt)";
-    this.#loadButton.setAttribute("aria-label", "Load subtitles");
-    this.#loadButton.addEventListener("click", () => this.#fileInput?.click());
+    this.#loadButton = panel.addButton(actions, {
+      icon: "upload",
+      title: "Load subtitles (.srt / .vtt)",
+      ariaLabel: "Load subtitles",
+      onClick: () => this.#fileInput?.click()
+    });
 
-    this.#removeButton = el("button", { class: "pf-btn pf-btn-ghost pf-btn-icon", type: "button" }, actions);
-    this.#removeButton.appendChild(createIconElement("trash"));
-    this.#removeButton.title = "Remove subtitles";
-    this.#removeButton.setAttribute("aria-label", "Remove subtitles");
-    this.#removeButton.addEventListener("click", () => this.#removeAll());
+    this.#removeButton = panel.addButton(actions, {
+      icon: "trash",
+      title: "Remove subtitles",
+      ariaLabel: "Remove subtitles",
+      ghost: true,
+      onClick: () => this.#removeAll()
+    });
 
-    this.#hintEl = el("div", { class: "pf-panel-hint" }, loadRow);
+    this.#hintEl = panel.addHint(loadRow, "Upload your file");
     this.#refreshHint();
 
     // Caption style grid: size / color / shadow / sync.
-    const styleSection = el("div", { class: "pf-panel-section" }, sectionRoot);
-    const styleHead = el("div", { class: "pf-panel-section-head" }, styleSection);
-    el("span", { class: "pf-panel-label" }, styleHead).textContent = "Caption style";
-    const styleGrid = el("div", { class: "pf-panel-grid pf-panel-grid-compact" }, styleSection);
+    const styleSection = panel.el("div", { class: "pf-panel-section" }, sectionRoot);
+    const styleHead = panel.el("div", { class: "pf-panel-section-head" }, styleSection);
+    panel.addLabel(styleHead, "Caption style");
+    const styleGrid = panel.el("div", { class: "pf-panel-grid pf-panel-grid-compact" }, styleSection);
 
-    const sizeCell = el("div", { class: "pf-panel-cell" }, styleGrid);
-    el("span", { class: "pf-panel-label" }, sizeCell).textContent = "Size";
-    const sizeStepper = createStepper({
+    const applyCueSize = (v) => this.#setCueVar("--pf-cue-font-size", `${v}em`);
+    const sizeStepper = panel.addStepper(styleGrid, {
+      label: "Size",
       min: 0.6,
       max: 3,
       step: 0.1,
       value: Number(getConfigValue(SETTING_KEYS.size, "1.2")),
-      label: "Caption size",
+      format: (v) => `${v}em`,
       onChange: (v) => {
-        applySize();
         setConfigValue(SETTING_KEYS.size, String(v));
+        applyCueSize(v);
       }
     });
-    sizeCell.appendChild(sizeStepper.root);
-    const sizeValue = el("span", { class: "pf-panel-value" }, sizeCell);
-    const applySize = () => {
-      sizeValue.textContent = `${sizeStepper.getValue()}em`;
-      this.#setCueVar("--pf-cue-font-size", `${sizeStepper.getValue()}em`);
-    };
+    applyCueSize(sizeStepper.getValue());
 
-    const colorCell = el("div", { class: "pf-panel-cell" }, styleGrid);
-    el("span", { class: "pf-panel-label" }, colorCell).textContent = "Color";
-    const colorInput = el("input", { type: "color", value: getConfigValue(SETTING_KEYS.color, "#ffffff") }, colorCell);
-    const colorValue = el("span", { class: "pf-panel-value" }, colorCell);
-    const applyColor = () => {
-      colorValue.textContent = colorInput.value;
-      this.#setCueVar("--pf-cue-color", colorInput.value);
-    };
-    colorInput.addEventListener("input", () => {
-      applyColor();
-      setConfigValue(SETTING_KEYS.color, colorInput.value);
+    const colorField = panel.addColor(styleGrid, {
+      label: "Color",
+      value: getConfigValue(SETTING_KEYS.color, "#ffffff"),
+      onChange: (hex) => {
+        setConfigValue(SETTING_KEYS.color, hex);
+        this.#setCueVar("--pf-cue-color", hex);
+      }
     });
+    this.#setCueVar("--pf-cue-color", colorField.getValue());
 
-    const shadowCell = el("div", { class: "pf-panel-cell" }, styleGrid);
-    el("span", { class: "pf-panel-label" }, shadowCell).textContent = "Shadow";
-    const shadowStepper = createStepper({
+    const applyCueShadow = (strength) => this.#setCueVar("--pf-cue-text-shadow", strength
+      ? `1px 1px ${Math.round(strength / 6)}px rgba(0, 0, 0, ${(0.4 + strength / 100 * 0.6).toFixed(2)})`
+      : "none");
+    const shadowStepper = panel.addStepper(styleGrid, {
+      label: "Shadow",
       min: 0,
       max: 100,
       step: 5,
       value: Number(getConfigValue(SETTING_KEYS.shadow, "40")),
-      label: "Caption shadow",
-      onChange: () => {
-        applyShadow();
-        setConfigValue(SETTING_KEYS.shadow, String(shadowStepper.getValue()));
+      format: (v) => v ? `${v}%` : "Off",
+      onChange: (v) => {
+        setConfigValue(SETTING_KEYS.shadow, String(v));
+        applyCueShadow(v);
       }
     });
-    shadowCell.appendChild(shadowStepper.root);
-    const shadowValue = el("span", { class: "pf-panel-value" }, shadowCell);
-    const applyShadow = () => {
-      const strength = shadowStepper.getValue();
-      shadowValue.textContent = strength ? `${strength}%` : "Off";
-      this.#setCueVar("--pf-cue-text-shadow", strength
-        ? `1px 1px ${Math.round(strength / 6)}px rgba(0, 0, 0, ${(0.4 + strength / 100 * 0.6).toFixed(2)})`
-        : "none");
-    };
+    applyCueShadow(shadowStepper.getValue());
 
-    const syncCell = el("div", { class: "pf-panel-cell" }, styleGrid);
-    el("span", { class: "pf-panel-label" }, syncCell).textContent = "Sync";
     let syncDebounce = null;
-    const syncStepper = createStepper({
+    const syncStepper = panel.addStepper(styleGrid, {
+      label: "Sync",
       min: -20,
       max: 20,
       step: 0.25,
       value: this.#syncOffset,
-      label: "Subtitle sync offset",
-      onChange: () => applySync()
-    });
-    syncCell.appendChild(syncStepper.root);
-    const syncValue = el("span", { class: "pf-panel-value" }, syncCell);
-    const applySync = (immediate = false) => {
-      const offset = syncStepper.getValue();
-      this.#syncOffset = offset;
-      syncValue.textContent = offset === 0 ? "0s" : `${offset > 0 ? "+" : ""}${offset}s`;
-      clearTimeout(syncDebounce);
-      const reparseAll = () => {
-        for (const track of this.#tracks) {
-          track.cues = parseSubtitles(track.text, this.#syncOffset);
-        }
-        this.#render();
-        setConfigValue(SETTING_KEYS.syncOffset, String(offset));
-      };
-      if (immediate) {
-        reparseAll();
-      } else {
-        syncDebounce = setTimeout(reparseAll, SYNC_DEBOUNCE_MS);
+      format: (v) => v === 0 ? "0s" : `${v > 0 ? "+" : ""}${v}s`,
+      onChange: (offset) => {
+        this.#syncOffset = offset;
+        clearTimeout(syncDebounce);
+        syncDebounce = setTimeout(() => {
+          for (const track of this.#tracks) {
+            track.cues = parseSubtitles(track.text, offset);
+          }
+          this.#render();
+          setConfigValue(SETTING_KEYS.syncOffset, String(offset));
+        }, SYNC_DEBOUNCE_MS);
       }
-    };
-
-    const resetButton = el("button", { class: "pf-btn pf-btn-ghost pf-btn-icon", type: "button" }, styleHead);
-    resetButton.appendChild(createIconElement("reload"));
-    resetButton.title = "Reset style";
-    resetButton.setAttribute("aria-label", "Reset style");
-    resetButton.addEventListener("click", () => {
-      sizeStepper.setValue(1.2);
-      applySize();
-      colorInput.value = "#ffffff";
-      applyColor();
-      shadowStepper.setValue(40);
-      applyShadow();
-      syncStepper.setValue(0);
-      applySync(true);
-      setConfigValue(SETTING_KEYS.size, String(sizeStepper.getValue()));
-      setConfigValue(SETTING_KEYS.color, colorInput.value);
-      setConfigValue(SETTING_KEYS.shadow, String(shadowStepper.getValue()));
-      setConfigValue(SETTING_KEYS.syncOffset, String(syncStepper.getValue()));
     });
 
-    applySize();
-    applyColor();
-    applyShadow();
-    applySync(true);
+    panel.addButton(styleHead, {
+      icon: "reload",
+      title: "Reset style",
+      ariaLabel: "Reset style",
+      ghost: true,
+      onClick: () => {
+        sizeStepper.setValue(1.2);
+        colorField.setValue("#ffffff");
+        shadowStepper.setValue(40);
+        syncStepper.setValue(0);
+      }
+    });
 
     // Position controls.
-    const positionSection = el("div", { class: "pf-panel-section" }, sectionRoot);
-    el("div", { class: "pf-panel-label" }, positionSection).textContent = "Position";
-    const positionRow = el("div", { class: "pf-panel-field pf-panel-pos-row" }, positionSection);
+    const positionSection = panel.el("div", { class: "pf-panel-section" }, sectionRoot);
+    panel.addLabel(positionSection, "Position");
+    const positionRow = panel.el("div", { class: "pf-panel-field pf-panel-pos-row" }, positionSection);
 
-    const enabledCheckbox = el("input", { type: "checkbox" }, positionRow);
-    enabledCheckbox.checked = getConfigValue(SETTING_KEYS.posEnabled, true);
-
-    const makeStepper = (label, key, fallback) => {
-      const wrap = el("span", { class: "pf-panel-pos-slider" }, positionRow);
-      el("span", { class: "pf-panel-label" }, wrap).textContent = label;
-      const value = el("span", { class: "pf-panel-value" }, wrap);
-      const stepper = createStepper({
-        min: 0,
-        max: 100,
-        step: 5,
-        value: Number(getConfigValue(key, fallback)),
-        label,
-        onChange: () => {
-          setConfigValue(key, String(stepper.getValue()));
-          if (enabledCheckbox.checked) {
-            applyPosition();
-          }
-        }
-      });
-      wrap.appendChild(stepper.root);
-      return { stepper, value };
-    };
-    const vertical = makeStepper("Vertical", SETTING_KEYS.line, "85");
-    const horizontal = makeStepper("Horizontal", SETTING_KEYS.horizontal, "50");
-
-    const alignSelect = el("select", { class: "pf-select" }, positionRow);
-    alignSelect.innerHTML =
-      "<option value=\"start\">Start</option><option value=\"center\" selected>Center</option><option value=\"end\">End</option>";
-    alignSelect.value = getConfigValue(SETTING_KEYS.align, "center");
-
-    const setManualDisabled = (disabled) => {
-      vertical.stepper.setDisabled(disabled);
-      horizontal.stepper.setDisabled(disabled);
-      alignSelect.disabled = disabled;
-    };
     const applyPosition = () => {
-      vertical.value.textContent = `${vertical.stepper.getValue()}%`;
-      horizontal.value.textContent = `${horizontal.stepper.getValue()}%`;
       this.#positionOverride = enabledCheckbox.checked
         ? {
-            line: vertical.stepper.getValue(),
-            position: horizontal.stepper.getValue(),
+            line: verticalStepper.getValue(),
+            position: horizontalStepper.getValue(),
             align: alignSelect.value
           }
         : null;
       this.#render();
     };
+    const setManualDisabled = (disabled) => {
+      verticalStepper.setDisabled(disabled);
+      horizontalStepper.setDisabled(disabled);
+      alignSelect.disabled = disabled;
+    };
 
-    enabledCheckbox.addEventListener("change", () => {
-      setManualDisabled(!enabledCheckbox.checked);
-      applyPosition();
-      setConfigValue(SETTING_KEYS.posEnabled, enabledCheckbox.checked);
-    });
-    alignSelect.addEventListener("change", () => {
-      setConfigValue(SETTING_KEYS.align, alignSelect.value);
-      if (enabledCheckbox.checked) {
+    const enabledCheckbox = panel.addCheckbox(positionRow, {
+      checked: getConfigValue(SETTING_KEYS.posEnabled, true),
+      onChange: (checked) => {
+        setManualDisabled(!checked);
+        setConfigValue(SETTING_KEYS.posEnabled, checked);
         applyPosition();
+      }
+    });
+
+    const verticalStepper = panel.addStepper(positionRow, {
+      class: "pf-panel-pos-slider",
+      label: "Vertical",
+      min: 0,
+      max: 100,
+      step: 5,
+      value: Number(getConfigValue(SETTING_KEYS.line, "85")),
+      format: (v) => `${v}%`,
+      onChange: (v) => {
+        setConfigValue(SETTING_KEYS.line, String(v));
+        if (enabledCheckbox.checked) {
+          applyPosition();
+        }
+      }
+    });
+    const horizontalStepper = panel.addStepper(positionRow, {
+      class: "pf-panel-pos-slider",
+      label: "Horizontal",
+      min: 0,
+      max: 100,
+      step: 5,
+      value: Number(getConfigValue(SETTING_KEYS.horizontal, "50")),
+      format: (v) => `${v}%`,
+      onChange: (v) => {
+        setConfigValue(SETTING_KEYS.horizontal, String(v));
+        if (enabledCheckbox.checked) {
+          applyPosition();
+        }
+      }
+    });
+
+    const alignSelect = panel.addSelect(positionRow, {
+      options: [["start", "Start"], ["center", "Center"], ["end", "End"]],
+      value: getConfigValue(SETTING_KEYS.align, "center"),
+      onChange: (align) => {
+        setConfigValue(SETTING_KEYS.align, align);
+        if (enabledCheckbox.checked) {
+          applyPosition();
+        }
       }
     });
 
