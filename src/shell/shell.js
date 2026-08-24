@@ -254,6 +254,11 @@ export class Shell {
     return this.#bus;
   }
 
+  /** The command plane, for interaction layers that issue media commands. */
+  get media() {
+    return this.#media;
+  }
+
   #injectDom() {
     ensureStyles();
     this.#shellDom = injectShell(this.container);

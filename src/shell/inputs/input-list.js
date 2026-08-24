@@ -101,7 +101,6 @@ const SCRUB_MAX_MULTIPLIER = 6;
 const SCRUB_VELOCITY_MAX = 1200;
 const SWIPE_EXIT_MIN_PX = 100;
 const STREAK_RESET_MS = 600;
-const VOLUME_STEP = 0.1;
 
 const stateFor = (() => {
   const states = new WeakMap();
@@ -238,7 +237,7 @@ export function attachInputActions(shell, host, signal) {
     }
     const speed = getSetting("controller.holdSpeed");
     state.savedRate = shell.playbackRate;
-    shell.playbackRate = speed;
+    shell.media.beginBoost(speed);
     shell.toast({ icon: "right-arrows", text: `${speed}x`, group: "hold" });
   }, { signal });
 
@@ -249,7 +248,7 @@ export function attachInputActions(shell, host, signal) {
       return;
     }
     if (shell.video) {
-      shell.playbackRate = state.savedRate;
+      shell.media.endBoost(state.savedRate);
     }
     shell.hideToast("hold");
   }, { signal });
@@ -349,9 +348,7 @@ export function attachInputActions(shell, host, signal) {
     if (!shell.video) {
       return;
     }
-    shell.volume = detail.direction === "up"
-      ? Math.min(1, shell.volume + VOLUME_STEP)
-      : Math.max(0, shell.volume - VOLUME_STEP);
+    shell.media.nudgeVolume(detail.direction);
     shell.toast({
       icon: volumeIcon(shell.volume, false),
       text: `${Math.round(shell.volume * 100)}%`,
@@ -364,7 +361,7 @@ export function attachInputActions(shell, host, signal) {
     if (!shell.video) {
       return;
     }
-    shell.toggleMute();
+    shell.media.toggleMute();
     shell.toast({
       icon: volumeIcon(shell.volume, shell.muted),
       text: shell.muted ? "Muted" : `${Math.round(shell.volume * 100)}%`,
