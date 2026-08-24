@@ -56,6 +56,7 @@ const banner = `// ==UserScript==
 // @grant        GM_deleteValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_setClipboard
+// @grant        GM_addValueChangeListener
 // @grant        GM_xmlhttpRequest
 // @run-at       document-start
 // @license      MIT

@@ -6,6 +6,7 @@ import { SubtitlesSection } from "./subtitles/section.js";
 import { CueRenderer } from "./subtitles/cue-renderer.js";
 import { SettingsPanel } from "./chrome/panel.js";
 import { addSettingsSection } from "./chrome/config.js";
+import { addDataSection } from "./chrome/data-section.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls } from "./media.js";
 import { SHELL_MARKER, ensureStyles, injectShell, watchShellHost } from "./chrome/inject.js";
@@ -72,6 +73,7 @@ export class Shell {
     this.#resume = new ResumeTracker(this);
     this.#subtitles = new SubtitlesSection(this);
     addSettingsSection(this.#panel);
+    addDataSection(this.#panel, this);
     this.#setupFocusManagement();
     this.#suppressContextMenu();
     this.#forwardMediaEvents();
@@ -247,6 +249,16 @@ export class Shell {
 
   get toasts() {
     return this.#toasts;
+  }
+
+  /** Whole-store clipboard export (JSON) for the Data panel section. */
+  exportResume() {
+    return this.#resume?.exportResume() ?? null;
+  }
+
+  /** Merge pasted JSON into the resume store; returns counts or null. */
+  importResume(text) {
+    return this.#resume?.importResume(text) ?? null;
   }
 
   get bus() {

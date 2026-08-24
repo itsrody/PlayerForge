@@ -15,15 +15,64 @@ const SAVE_EPSILON_SECONDS = 3;
 const RESUME_MIN_POSITION = 5;
 
 const DEFAULT_STALE_DAYS = 14;
+/** Hard ceiling for stored entries regardless of age pruning. */
+const MAX_ENTRIES = 1000;
 
 /**
  * Persistent store of per-video entries (keyed by path+duration hash) holding
- * the resume position. Owned by ResumeTracker; merge-on-persist keeps
- * concurrent shells/tabs from clobbering each other's entries.
+ * the resume position. Owned by ResumeTracker; per-entry last-write-wins
+ * merging keeps concurrent shells/tabs - and any future whole-blob transport -
+ * converging without clobbering each other's entries.
  */
 export class ResumeStore {
   #state = null;
   #loaded = false;
+
+  constructor() {
+    // Live reload across tabs: whoever writes pf:resume elsewhere triggers a
+    // merge-only adoption here (never written back - the writer owns that
+    // round trip). This is also the seam where Violentmonkey's eventual value
+    // sync would land for free.
+    if (typeof GM_addValueChangeListener === "function") {
+      GM_addValueChangeListener(KEYS.resume, () => this.#adoptExternal());
+    }
+  }
+
+  #adoptExternal() {
+    if (!this.#loaded) {
+      return;
+    }
+    const raw = loadJsonObject(KEYS.resume, null);
+    if (raw && Array.isArray(raw.entries)) {
+      this.#mergeRaw(raw);
+    }
+  }
+
+  /**
+   * LWW merge of foreign entries into memory. Unknown ids join the store;
+   * known ids keep whichever side carries the newer updatedAt. Known entries
+   * are updated IN PLACE so trackers holding references stay live.
+   */
+  #mergeRaw(raw) {
+    let added = 0;
+    let updated = 0;
+    const byId = new Map(this.#state.entries.map((entry) => [entry.id, entry]));
+    for (const incoming of raw.entries) {
+      if (!incoming || typeof incoming !== "object" || typeof incoming.id !== "string") {
+        continue;
+      }
+      const known = byId.get(incoming.id);
+      if (!known) {
+        byId.set(incoming.id, incoming);
+        added++;
+      } else if ((incoming.updatedAt || 0) > (known.updatedAt || 0)) {
+        Object.assign(known, incoming);
+        updated++;
+      }
+    }
+    this.#state.entries = [...byId.values()];
+    return { added, updated };
+  }
 
   #ensureLoaded() {
     if (this.#loaded) {
@@ -31,7 +80,13 @@ export class ResumeStore {
     }
     const raw = loadJsonObject(KEYS.resume, null);
     if (raw && Array.isArray(raw.entries)) {
-      this.#state = raw;
+      // Tolerate foreign or future writers: adopt their entries as-is and
+      // restamp our schema version - resetting would destroy history.
+      const valid = raw.entries.filter((entry) => entry && typeof entry === "object" && typeof entry.id === "string");
+      if (valid.length !== raw.entries.length) {
+        logger.warn("resume", `Dropped ${raw.entries.length - valid.length} malformed entries`);
+      }
+      this.#state = { ...raw, version: 1, entries: valid };
     } else {
       this.#state = { version: 1, entries: [] };
       gmSetValue(KEYS.resume, this.#state);
@@ -47,17 +102,29 @@ export class ResumeStore {
     this.#loaded = true;
   }
 
+  /**
+   * Store-level invariants over the current entries: age pruning plus the
+   * hard entry cap (oldest evicted). Returns a fresh array; callers assign.
+   */
+  #enforceBounds(days = DEFAULT_STALE_DAYS) {
+    const cutoff = Date.now() - days * 86400000;
+    let kept = this.#state.entries.filter((entry) => entry.updatedAt > cutoff);
+    if (kept.length > MAX_ENTRIES) {
+      kept.sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0));
+      kept = kept.slice(kept.length - MAX_ENTRIES);
+    }
+    return kept;
+  }
+
   #persist() {
     try {
       const raw = loadJsonObject(KEYS.resume, null);
       if (raw && Array.isArray(raw.entries)) {
-        const knownIds = new Set(this.#state.entries.map((entry) => entry.id));
-        for (const entry of raw.entries) {
-          if (entry && typeof entry === "object" && !knownIds.has(entry.id)) {
-            this.#state.entries.push(entry);
-          }
-        }
+        this.#mergeRaw(raw);
       }
+      // Bounds run AFTER the merge so a stale disk copy can never resurrect
+      // pruned entries - cleanup converges instead of oscillating.
+      this.#state.entries = this.#enforceBounds();
       this.#state.updatedAt = Date.now();
       gmSetValue(KEYS.resume, this.#state);
     } catch (err) {
@@ -127,13 +194,45 @@ export class ResumeStore {
 
   cleanStale(days = DEFAULT_STALE_DAYS) {
     this.#ensureLoaded();
-    const cutoff = Date.now() - days * 86400000;
-    const before = this.#state.entries.length;
-    this.#state.entries = this.#state.entries.filter((entry) => entry.updatedAt > cutoff);
-    if (this.#state.entries.length !== before) {
-      this.#persist();
-      logger.log("resume", `Cleaned ${before - this.#state.entries.length} stale entries`);
+    const raw = loadJsonObject(KEYS.resume, null);
+    if (raw && Array.isArray(raw.entries)) {
+      this.#mergeRaw(raw);
     }
+    const before = this.#state.entries.length;
+    this.#state.entries = this.#enforceBounds(days);
+    const removed = before - this.#state.entries.length;
+    if (removed > 0) {
+      this.#persist();
+      logger.log("resume", `Pruned ${removed} resume entries`);
+    }
+  }
+
+  /** Whole-store JSON snapshot for the clipboard bridge and backups. */
+  exportData() {
+    this.#ensureLoaded();
+    return JSON.stringify(this.#state);
+  }
+
+  /**
+   * Merge a previously exported JSON document via LWW. Returns
+   * {added, updated} counts, or null when the text is not a data document.
+   */
+  importData(text) {
+    this.#ensureLoaded();
+    let raw;
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      return null;
+    }
+    if (!raw || typeof raw !== "object" || !Array.isArray(raw.entries)) {
+      return null;
+    }
+    const result = this.#mergeRaw(raw);
+    if (result.added || result.updated) {
+      this.#persist();
+    }
+    return result;
   }
 }
 
@@ -283,6 +382,15 @@ export class ResumeTracker {
     };
     video.addEventListener("timeupdate", onTimeUpdate, { signal: this.#scope.signal });
     video.addEventListener("pause", onPause, { signal: this.#scope.signal });
+  }
+
+  /** Clipboard bridge passthroughs (see ResumeStore exportData/importData). */
+  exportResume() {
+    return this.#store.exportData();
+  }
+
+  importResume(text) {
+    return this.#store.importData(text);
   }
 
   destroy() {
