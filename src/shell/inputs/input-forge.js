@@ -126,7 +126,9 @@ export class InputForge {
     window.addEventListener("pointercancel", (event) => this.#handlePointerUp(event), options);
     document.addEventListener("keydown", (event) => this.#handleKeydown(event), { capture: true, signal });
     document.addEventListener("keyup", (event) => this.#handleKeyup(event), { capture: true, signal });
-    window.addEventListener("blur", () => this.#resetKeyboardHold(), { signal });
+    // A window blur can swallow the matching Space keyup; finish the hold
+    // through the normal release path so playback rate never stays boosted.
+    window.addEventListener("blur", () => this.#finishKeyboardHold(false), { signal });
 
     document.addEventListener("fullscreenchange", () => {
       this.setTrackpadPinchEnabled(this.#isFullscreen());
@@ -720,8 +722,17 @@ export class InputForge {
     if (event.code !== "Space") {
       return;
     }
+    this.#finishKeyboardHold(true);
+  }
+
+  /**
+   * End a Space session: an active hold always releases (restoring playback
+   * rate via the action layer), a bare tap toggles play/pause — but only on
+   * a real keyup. Blur finishes silently-with-release and never toggles.
+   */
+  #finishKeyboardHold(allowToggle) {
     const wasHolding = this.#keyboardHolding;
-    const shouldToggle = this.#shouldHandleKeys();
+    const shouldToggle = allowToggle && !wasHolding && this.#shouldHandleKeys();
     clearTimeout(this.#keyboardHoldTimer);
     this.#keyboardHoldTimer = null;
     this.#keyboardHolding = false;
