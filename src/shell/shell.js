@@ -268,8 +268,7 @@ export class Shell {
       this.#savedPositionStyle = style.position;
       this.container.style.position = "relative";
     }
-    const stopHostWatch = watchShellHost(this.container, this.#shellDom.host);
-    this.#scope.signal.addEventListener("abort", () => stopHostWatch(), { once: true });
+    watchShellHost(this.container, this.#shellDom.host, { signal: this.#scope.signal });
     logger.log("shell", "Shell DOM appended as overlay child of container");
   }
 

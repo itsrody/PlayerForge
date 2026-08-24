@@ -13,39 +13,6 @@ export function ensureStyles() {
 }
 
 /**
- * Resolve once the container's child list has been quiet for a run of
- * consecutive animation frames, or when the cap expires - whichever comes
- * first. SDKs build their player over several microtasks/frames after the
- * <video> appears; injecting mid-build invites wholesale innerHTML wipes.
- */
-export function whenDomSettled(container, { quietFrames = 2, capMs = 150 } = {}) {
-  const { promise, resolve } = Promise.withResolvers();
-  let quiet = 0;
-  let rafId = 0;
-  const observer = new MutationObserver(() => {
-    quiet = 0;
-  });
-  const done = () => {
-    clearTimeout(capTimer);
-    cancelAnimationFrame(rafId);
-    observer.disconnect();
-    resolve();
-  };
-  const tick = () => {
-    quiet += 1;
-    if (quiet >= quietFrames) {
-      done();
-      return;
-    }
-    rafId = requestAnimationFrame(tick);
-  };
-  const capTimer = setTimeout(done, capMs);
-  observer.observe(container, { childList: true });
-  rafId = requestAnimationFrame(tick);
-  return promise;
-}
-
-/**
  * Build the shell DOM inside the player container as a parasite:
  * host > hud layer > cue layer, appended LAST so no SDK child ever changes
  * index. Rendering dominance comes from the host's z-index, not tree order.
@@ -84,9 +51,9 @@ export function injectShell(container) {
  * without ever fighting the SDK over sibling order. A single debounced
  * observer re-appends the host (as last child) only when something removed
  * it from the container; re-parenting of the container carries the host
- * along and needs no reaction.
+ * along and needs no reaction. Dies with `signal`.
  */
-export function watchShellHost(container, host) {
+export function watchShellHost(container, host, { signal } = {}) {
   let scheduled = false;
 
   const check = () => {
@@ -107,6 +74,5 @@ export function watchShellHost(container, host) {
 
   const observer = new MutationObserver(schedule);
   observer.observe(container, { childList: true });
-
-  return () => observer.disconnect();
+  signal?.addEventListener("abort", () => observer.disconnect(), { once: true });
 }
