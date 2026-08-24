@@ -151,6 +151,20 @@ function performSkip(shell, state, direction) {
   });
 }
 
+/**
+ * Eased snap for inline video transforms: one curve, one cleanup window,
+ * shared by fill-mode exit, pinch fill, and swipe/pinch restore.
+ */
+const TRANSFORM_EASE_MS = 200;
+
+export function easeTransformTo(video, transform) {
+  video.style.transition = "transform 0.15s cubic-bezier(0.2, 0, 0, 1)";
+  video.style.transform = transform;
+  setTimeout(() => {
+    video.style.transition = "";
+  }, TRANSFORM_EASE_MS);
+}
+
 function clearFillMode(shell, state, animate = true) {
   if (!state.fillActive) {
     return;
@@ -158,15 +172,11 @@ function clearFillMode(shell, state, animate = true) {
   state.fillActive = false;
   const video = shell.video;
   if (video) {
-    video.style.transition = animate ? "transform 0.15s cubic-bezier(0.2, 0, 0, 1)" : "none";
-    video.style.transform = "";
     if (animate) {
-      setTimeout(() => {
-        if (video) {
-          video.style.transition = "";
-        }
-      }, 200);
+      easeTransformTo(video, "");
     } else {
+      video.style.transition = "none";
+      video.style.transform = "";
       video.style.transition = "";
     }
   }
@@ -374,8 +384,7 @@ export function attachInputActions(shell, host, signal) {
       if (scale <= 1) {
         return;
       }
-      video.style.transition = "transform 0.15s cubic-bezier(0.2, 0, 0, 1)";
-      video.style.transform = `scale(${scale})`;
+      easeTransformTo(video, `scale(${scale})`);
       state.fillActive = true;
       shell.toast({
         icon: "fill-aspect",

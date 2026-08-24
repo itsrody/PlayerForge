@@ -3,10 +3,13 @@ import { readFileSync } from "node:fs";
 
 const watch = process.argv.includes("--watch");
 
+/** Single source of truth: the banner and entry.js both read this. */
+const VERSION = "0.7.0";
+
 const banner = `// ==UserScript==
 // @name         PlayerForge
 // @namespace    https://github.com/PlayerForge
-// @version      0.7.0
+// @version      ${VERSION}
 // @description  Firefox 154+ / Violentmonkey 2.48+ exclusive HTML5 video player enhancer with gestures, hotkeys, progress resume, subtitles, and an extensible plugin system
 // @author       PlayerForge
 // @match        *://*/*
@@ -69,6 +72,7 @@ const options = {
   // glyphs (close X, settings gear, toast separator) stay readable and the
   // bundle stops paying six bytes per code point.
   charset: "utf8",
+  define: { VERSION: JSON.stringify(VERSION) },
   legalComments: "none",
   minify: false,
   sourcemap: false,

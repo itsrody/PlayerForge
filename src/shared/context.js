@@ -148,7 +148,7 @@ export async function getPageContext() {
 }
 
 /** Ask the parent chain for page context via postMessage (cross-origin iframes). */
-export function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
+function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve) => {
     let nonce = null;
@@ -192,7 +192,7 @@ export function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS)
 
 /* - 4. Frame bridge - */
 
-export const NONCE_TTL_MS = 5000;
+const NONCE_TTL_MS = 5000;
 export const CTX_REQUEST_TIMEOUT_MS = 3000;
 
 /**

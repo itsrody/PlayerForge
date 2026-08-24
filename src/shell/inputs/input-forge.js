@@ -1,4 +1,4 @@
-import { allowsIntent, armedKeys, GESTURE_EVENTS } from "./input-list.js";
+import { allowsIntent, armedKeys, GESTURE_EVENTS, easeTransformTo } from "./input-list.js";
 
 // Tuning constants (ms / px / ratios).
 const HOLD_TIMEOUT_MS = 300;
@@ -180,12 +180,7 @@ export class InputForge {
 
   /** Snap any inline transform back with a short transition. */
   #restoreTransform() {
-    const video = this.#video;
-    video.style.transition = "transform 0.15s cubic-bezier(0.2, 0, 0, 1)";
-    video.style.transform = this.#swipeBaseTransform || "";
-    setTimeout(() => {
-      video.style.transition = "";
-    }, 200);
+    easeTransformTo(this.#video, this.#swipeBaseTransform || "");
   }
 
   destroy() {

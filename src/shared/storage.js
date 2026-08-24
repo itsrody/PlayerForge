@@ -1,6 +1,6 @@
 import { logger } from "./logger.js";
 
-export const CONFIG_DOC_KEY = "pf:configs";
+const CONFIG_DOC_KEY = "pf:configs";
 
 export function gmGetValue(key, fallback) {
   return GM_getValue(key, fallback);

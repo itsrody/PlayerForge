@@ -1,4 +1,4 @@
-export const PREFIX = "[PlayerForge]";
+const PREFIX = "[PlayerForge]";
 
 const STYLES = {
   kernel: "color: #FF6B35; font-weight: bold",

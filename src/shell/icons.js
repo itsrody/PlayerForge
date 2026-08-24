@@ -1,7 +1,7 @@
 const svgIcon = (path, viewBox = "24 24") =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 ${viewBox}" fill="currentColor"><path d="${path}"/></svg>`;
 
-export const ICONS = {
+const ICONS = {
   "volume-1": svgIcon("M3 9h4l5-5v16l-5-5H3V9zm18 3a9.003 9.003 0 0 1-7 8.777V18.71a7.003 7.003 0 0 0 0-13.42V3.223c4.008.91 7 4.494 7 8.777zm-4 0a5.001 5.001 0 0 1-3 4.584V7.416c1.766.772 3 2.534 3 4.584z"),
   "volume-2": svgIcon("M5 9v6h4l5 5V4L9 9H5zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"),
   "volume-3": svgIcon("M3 9h4l5-5v16l-5-5H3V9zm9 2a4 4 0 0 1 0 6"),
@@ -58,7 +58,7 @@ const ALIASES = {
   dec: "chevron-down"
 };
 
-export function canonicalName(name) {
+function canonicalName(name) {
   return ALIASES[name] ?? (name in ICONS ? name : null);
 }
 

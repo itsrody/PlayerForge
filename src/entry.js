@@ -5,7 +5,8 @@ import { logger } from "./shared/logger.js";
 import { shouldSkipUrl } from "./kernel/guard.js";
 import { getConfigValue, setConfigValue } from "./shared/storage.js";
 
-export const VERSION = "0.7.0";
+// VERSION is injected by esbuild `define` from the single constant in
+// esbuild.config.mjs, so the userscript banner can never drift.
 
 function bootstrap() {
   "use strict";

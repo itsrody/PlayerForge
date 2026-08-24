@@ -5,9 +5,9 @@
 import { getConfigValue, setConfigValue } from "../shared/storage.js";
 import { logger } from "../shared/logger.js";
 
-export const SETTINGS_PREFIX = "settings";
+const SETTINGS_PREFIX = "settings";
 
-export const DEFAULT_SETTINGS = {
+const DEFAULT_SETTINGS = {
   "controller.holdSpeed": 2,
   "controller.stepSeek": 5,
   "controller.streakMax": 10,
@@ -21,7 +21,7 @@ export const DEFAULT_SETTINGS = {
   "resume.durationFuzz": 2
 };
 
-export const SETTINGS_SCHEMA = [
+const SETTINGS_SCHEMA = [
   {
     key: "controller.holdSpeed",
     type: "number",
