@@ -146,12 +146,11 @@ export class Shell {
   }
 
   /**
-   * Pure platform truth: this shell is fullscreen iff the document's
-   * fullscreen element belongs to it. No cached state, no SDK heuristics.
+   * Pure platform truth: one main video page, so the document's fullscreen
+   * element is ours by definition. No cached state, no SDK heuristics.
    */
   get fullscreen() {
-    const el = document.fullscreenElement;
-    return !!el && this.#ownsFullscreenElement(el);
+    return !!document.fullscreenElement;
   }
 
   async play() {
@@ -388,17 +387,9 @@ export class Shell {
   }
 
   exitFullscreen() {
-    const fullscreenEl = document.fullscreenElement;
-    if (fullscreenEl && this.#ownsFullscreenElement(fullscreenEl)) {
+    if (document.fullscreenElement) {
       document.exitFullscreen()?.catch(() => {});
     }
-  }
-
-  #ownsFullscreenElement(element) {
-    const container = this.container;
-    const video = this.video;
-    return element === container || element === video ||
-      container?.contains(element) || video?.contains(element) || element.contains(container);
   }
 
   #markManaged() {

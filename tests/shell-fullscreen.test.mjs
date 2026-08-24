@@ -62,7 +62,7 @@ function makeShell(id = "t") {
   return { dom, shell, container, video, emissions, setFullscreenEl, fireChange, changes, teardown };
 }
 
-test("checkmark is false until an owned element goes fullscreen", () => {
+test("checkmark is false until an element goes fullscreen", () => {
   const { shell, teardown } = makeShell();
   assert.equal(shell.fullscreen, false);
   teardown();
@@ -82,7 +82,7 @@ test("entering fullscreen on our container flips the checkmark and emits one cha
   teardown();
 });
 
-test("a foreign fullscreen element never marks this shell", () => {
+test("any document fullscreen element marks this shell", () => {
   const env = makeShell();
   const { dom, shell, setFullscreenEl, fireChange, changes, teardown } = env;
 
@@ -90,10 +90,11 @@ test("a foreign fullscreen element never marks this shell", () => {
   dom.window.document.body.appendChild(stranger);
   setFullscreenEl(stranger);
   fireChange();
-  fireChange();
 
-  assert.equal(shell.fullscreen, false);
-  assert.equal(changes().length, 0, "foreign transitions must stay silent");
+  assert.equal(shell.fullscreen, true);
+  assert.deepEqual(changes(), [
+    { type: "shell:fullscreen-change", detail: { shellId: "t", fullscreen: true } }
+  ]);
   teardown();
 });
 
