@@ -2,8 +2,8 @@
  * User-settings engine: defaults, schema, cached accessors, and the generic
  * panel renderer for that schema.
  */
-import { getConfigValue, setConfigValue } from "../shared/storage.js";
-import { logger } from "../shared/logger.js";
+import { getConfigValue, setConfigValue } from "../../shared/storage.js";
+import { logger } from "../../shared/logger.js";
 
 const SETTINGS_PREFIX = "settings";
 

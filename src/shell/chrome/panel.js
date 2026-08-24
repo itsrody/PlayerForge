@@ -1,6 +1,6 @@
-import { logger } from "../shared/logger.js";
+import { logger } from "../../shared/logger.js";
 import { createIconElement } from "./icons.js";
-import { GESTURE_EVENTS } from "./inputs/input-list.js";
+import { GESTURE_EVENTS } from "../inputs/actions.js";
 
 const HOLD_DELAY_MS = 400;
 const HOLD_REPEAT_MS = 75;

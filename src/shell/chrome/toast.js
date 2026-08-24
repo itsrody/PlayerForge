@@ -1,5 +1,5 @@
-import { logger } from "../shared/logger.js";
-import { delay } from "../shared/time.js";
+import { logger } from "../../shared/logger.js";
+import { delay } from "../../shared/time.js";
 import { iconMarkup } from "./icons.js";
 
 /**

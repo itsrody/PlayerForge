@@ -1,15 +1,14 @@
 import { logger } from "../shared/logger.js";
-import { SHELL_MARKER } from "../kernel/kernel.js";
-import { InputForge } from "./inputs/input-forge.js";
-import { attachInputActions } from "./inputs/input-list.js";
+import { InputForge } from "./inputs/forge.js";
+import { attachInputActions } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
 import { SubtitlesSection } from "./subtitles/section.js";
 import { CueRenderer } from "./subtitles/cue-renderer.js";
-import { SettingsPanel } from "./panel.js";
-import { addSettingsSection } from "./config.js";
-import { ToastManager } from "./toast.js";
+import { SettingsPanel } from "./chrome/panel.js";
+import { addSettingsSection } from "./chrome/config.js";
+import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls } from "./media.js";
-import { ensureStyles, injectShell, watchShellHost } from "./inject.js";
+import { SHELL_MARKER, ensureStyles, injectShell, watchShellHost } from "./chrome/inject.js";
 
 const VIDEO_EVENTS = [
   "play", "pause", "playing", "waiting", "seeking", "seeked", "timeupdate",

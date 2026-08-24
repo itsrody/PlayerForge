@@ -1,4 +1,4 @@
-import { getSetting } from "../config.js";
+import { getSetting } from "../chrome/config.js";
 import { formatTime } from "../../shared/time.js";
 
 /**

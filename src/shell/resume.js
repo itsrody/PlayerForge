@@ -1,5 +1,5 @@
 import { getPageContext, domainsMatch, domainScore, hashEntry } from "../shared/context.js";
-import { getSetting } from "./config.js";
+import { getSetting } from "./chrome/config.js";
 import { KEYS, gmGetValue, gmSetValue, loadJsonObject } from "../shared/storage.js";
 import { formatTime } from "../shared/time.js";
 import { logger } from "../shared/logger.js";

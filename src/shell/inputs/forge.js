@@ -1,4 +1,4 @@
-import { allowsIntent, armedKeys, GESTURE_EVENTS, easeTransformTo } from "./input-list.js";
+import { allowsIntent, armedKeys, GESTURE_EVENTS, easeTransformTo } from "./actions.js";
 
 // Tuning constants (ms / px / ratios).
 const HOLD_TIMEOUT_MS = 300;

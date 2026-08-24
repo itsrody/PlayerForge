@@ -1,5 +1,8 @@
 import SHELL_CSS from "./styles.css";
-import { logger } from "../shared/logger.js";
+import { logger } from "../../shared/logger.js";
+
+/** DOM contract: marks videos/containers/shell hosts this script manages. */
+export const SHELL_MARKER = "data-pf-shell";
 
 let stylesInjected = false;
 

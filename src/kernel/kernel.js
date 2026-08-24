@@ -1,14 +1,13 @@
 import { logger } from "../shared/logger.js";
 import { KEYS, gmRegisterMenu, gmSetClipboard, loadJsonObject } from "../shared/storage.js";
 import { delay } from "../shared/time.js";
-import { GESTURE_EVENTS } from "../shell/inputs/input-list.js";
+import { GESTURE_EVENTS } from "../shell/inputs/actions.js";
+import { SHELL_MARKER } from "../shell/chrome/inject.js";
 import { EventBus } from "./bus.js";
 import { ShellRegistry } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, findContainer, meetsMinSize, watchDocumentVideos } from "./sdk.js";
 import { Shell } from "../shell/shell.js";
-
-export const SHELL_MARKER = "data-pf-shell";
 
 /** Grace period before a disconnected video's shell is destroyed (SPA source swaps detach briefly). */
 const REMOVAL_GRACE_MS = 500;

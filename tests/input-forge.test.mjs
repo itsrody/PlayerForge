@@ -5,8 +5,8 @@ import { JSDOM } from "jsdom";
 globalThis.GM_getValue = (key, fallback) => fallback;
 globalThis.GM_setValue = () => {};
 
-const { InputForge } = await import("../src/shell/inputs/input-forge.js");
-const { GESTURE_EVENTS } = await import("../src/shell/inputs/input-list.js");
+const { InputForge } = await import("../src/shell/inputs/forge.js");
+const { GESTURE_EVENTS } = await import("../src/shell/inputs/actions.js");
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -122,7 +122,7 @@ test("keydown arrows map through the action table with preventDefault", () => {
 });
 
 test("disabling the hotkeys toggle silences arrows but Space still toggles playback", async () => {
-  const { setSetting } = await import("../src/shell/config.js");
+  const { setSetting } = await import("../src/shell/chrome/config.js");
   setSetting("gestures.hotkeys", false);
   try {
     const { dom, video, zone, host } = makeEnv();
