@@ -2,24 +2,10 @@
  * User-settings engine: defaults, schema, cached accessors, and the generic
  * panel renderer for that schema.
  */
-import { getConfigValue, setConfigValue } from "../../shared/storage.js";
+import { KEYS, getConfigValue, setConfigValue } from "../../shared/storage.js";
 import { logger } from "../../shared/logger.js";
 
 const SETTINGS_PREFIX = "settings";
-
-const DEFAULT_SETTINGS = {
-  "controller.holdSpeed": 2,
-  "controller.stepSeek": 5,
-  "controller.streakMax": 10,
-  "controller.scrubSensitivity": 150,
-  "gestures.hotkeys": true,
-  "gestures.hold": true,
-  "gestures.scrub": true,
-  "gestures.swipe": true,
-  "gestures.dbltap": true,
-  "gestures.pinch": true,
-  "resume.durationFuzz": 2
-};
 
 const SETTINGS_SCHEMA = [
   {
@@ -29,6 +15,7 @@ const SETTINGS_SCHEMA = [
     min: 1.5,
     max: 4,
     step: 0.5,
+    default: 2,
     fmt: (v) => `${v}x`,
     group: "Playback"
   },
@@ -39,6 +26,7 @@ const SETTINGS_SCHEMA = [
     min: 1,
     max: 30,
     step: 1,
+    default: 5,
     fmt: (v) => `${v}s`,
     group: "Playback"
   },
@@ -49,54 +37,71 @@ const SETTINGS_SCHEMA = [
     min: 1,
     max: 30,
     step: 1,
+    default: 10,
     fmt: (v) => `${v}x`,
     group: "Playback"
   },
   {
+    // Stored raw around the 150 anchor; shown as the effective multiplier
+    // the scrub model actually applies (see actions.js).
     key: "controller.scrubSensitivity",
     type: "number",
     label: "Scrub sensitivity",
     min: 50,
     max: 500,
     step: 10,
-    fmt: (v) => `${v}`,
+    default: 150,
+    fmt: (v) => `${(v / 150).toFixed(1)}x`,
     group: "Playback"
   },
   {
     key: "gestures.hotkeys",
     type: "bool",
     label: "Keyboard hotkeys",
+    default: true,
     group: "Gestures"
   },
   {
     key: "gestures.hold",
     type: "bool",
     label: "Hold to speed up",
+    default: true,
     group: "Gestures"
   },
   {
     key: "gestures.scrub",
     type: "bool",
     label: "Horizontal scrub",
+    default: true,
     group: "Gestures"
   },
   {
     key: "gestures.swipe",
     type: "bool",
     label: "Swipe gestures",
+    default: true,
     group: "Gestures"
   },
   {
     key: "gestures.dbltap",
     type: "bool",
     label: "Double-tap skip",
+    default: true,
     group: "Gestures"
   },
   {
     key: "gestures.pinch",
     type: "bool",
     label: "Pinch to fill",
+    default: true,
     group: "Gestures"
+  },
+  {
+    key: "resume.enabled",
+    type: "bool",
+    label: "Remember playback position",
+    default: true,
+    group: "Resume"
   },
   {
     key: "resume.durationFuzz",
@@ -105,10 +110,16 @@ const SETTINGS_SCHEMA = [
     min: 0,
     max: 10,
     step: 1,
+    default: 2,
     fmt: (v) => `${v}s`,
     group: "Resume"
   }
 ];
+
+/** Defaults ride their schema definitions - one source, no drift. */
+const DEFAULT_SETTINGS = Object.fromEntries(
+  SETTINGS_SCHEMA.map((definition) => [definition.key, definition.default])
+);
 
 const cache = {};
 for (const key of Object.keys(DEFAULT_SETTINGS)) {
@@ -122,6 +133,30 @@ export function getSetting(key) {
 export function setSetting(key, value) {
   cache[key] = value;
   setConfigValue(`${SETTINGS_PREFIX}.${key}`, value);
+}
+
+/**
+ * Live reload across tabs: pf:configs lives in shared Violentmonkey storage,
+ * so a write from any other tab re-seeds this cache and every event-time
+ * getSetting() consumer picks it up on its next read. Our own writes echo
+ * back through the same path and land as no-ops.
+ */
+function refreshSettingsCache() {
+  let changed = 0;
+  for (const key of Object.keys(cache)) {
+    const fresh = getConfigValue(`${SETTINGS_PREFIX}.${key}`, DEFAULT_SETTINGS[key]);
+    if (cache[key] !== fresh) {
+      cache[key] = fresh;
+      changed++;
+    }
+  }
+  if (changed > 0) {
+    logger.log("settings", `Live-reloaded ${changed} setting(s) from storage`);
+  }
+}
+
+if (typeof GM_addValueChangeListener === "function") {
+  GM_addValueChangeListener(KEYS.configs, () => refreshSettingsCache());
 }
 
 /**

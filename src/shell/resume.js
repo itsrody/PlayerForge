@@ -264,6 +264,10 @@ export class ResumeTracker {
       logger.log("resume", "Top context unavailable - skipping");
       return;
     }
+    if (!getSetting("resume.enabled")) {
+      logger.log("resume", "Resume disabled by setting - skipping");
+      return;
+    }
 
     const video = shell.video;
     if (!video.duration || !isFinite(video.duration)) {
