@@ -7,9 +7,9 @@ import { CueRenderer } from "./subtitles/cue-renderer.js";
 import { SettingsPanel } from "./panel.js";
 import { addSettingsSection } from "./config.js";
 import { ToastManager } from "./toast.js";
-import { ensureStyles, injectShell, watchShellHost, removeEl } from "./inject.js";
+import { ensureStyles, injectShell, watchShellHost } from "./inject.js";
 
-export const VIDEO_EVENTS = [
+const VIDEO_EVENTS = [
   "play", "pause", "playing", "waiting", "seeking", "seeked", "timeupdate",
   "durationchange", "loadedmetadata", "loadeddata", "canplay", "canplaythrough",
   "ended", "volumechange", "ratechange", "progress", "stalled", "emptied", "error"
@@ -62,11 +62,12 @@ export class Shell {
     this.sdkName = sdkName;
     this.#bus = bus;
     this.#injectDom();
-    this.#panel = new SettingsPanel(this, bus);
-    if (this.#shellDom) {
-      this.#toasts = new ToastManager(this.#shellDom.hudLayer);
-      this.#cues = new CueRenderer(this.#shellDom.cueLayer);
+    if (!this.#shellDom) {
+      throw new Error(`Shell "${id}": failed to inject shell DOM`);
     }
+    this.#panel = new SettingsPanel(this, bus);
+    this.#toasts = new ToastManager(this.#shellDom.hudLayer);
+    this.#cues = new CueRenderer(this.#shellDom.cueLayer);
     this.#inputs = new HotkeysController(this);
     this.#resume = new ResumeTracker(this);
     this.#subtitles = new SubtitlesSection(this);
@@ -179,7 +180,10 @@ export class Shell {
   }
 
   skip(delta) {
-    this.currentTime = Math.max(0, Math.min(this.currentTime + delta, this.duration));
+    const target = this.currentTime + delta;
+    this.currentTime = this.duration > 0
+      ? Math.max(0, Math.min(target, this.duration))
+      : Math.max(0, target);
   }
 
   get shellDom() {
@@ -209,12 +213,6 @@ export class Shell {
 
   focus() {
     this.shellHost?.focus();
-  }
-
-  passFocusTo(target) {
-    if (target) {
-      target.focus();
-    }
   }
 
   /** Keep focus on the shell host when pointer interactions happen inside it. */
@@ -319,8 +317,6 @@ export class Shell {
         this.currentTime = details.seekTime;
       }
     });
-    registerAction("previoustrack", null);
-    registerAction("nexttrack", null);
     session.playbackState = this.paused ? "paused" : "playing";
     this.#updatePositionState();
     this.#cleanups.add(() => {
@@ -358,7 +354,7 @@ export class Shell {
       return;
     }
     const session = navigator.mediaSession;
-    if (!!session && !!this.video.duration && !!isFinite(this.video.duration)) {
+    if (session && Number.isFinite(this.video.duration) && this.video.duration > 0) {
       try {
         session.setPositionState({
           duration: this.video.duration,
@@ -475,17 +471,9 @@ export class Shell {
     if (!this.#destroyed) {
       this.#destroyed = true;
       logger.log("shell", `Destroying shell "${this.id}"`);
-      try {
-        this.#resume?.destroy();
-      } catch (err) {
-        logger.error("shell", "Resume destroy error:", err);
-      }
+      this.#resume?.destroy();
       this.#resume = null;
-      try {
-        this.#subtitles?.destroy();
-      } catch (err) {
-        logger.error("shell", "Subtitles destroy error:", err);
-      }
+      this.#subtitles?.destroy();
       this.#subtitles = null;
       for (const cleanup of this.#cleanups) {
         try {
@@ -505,7 +493,7 @@ export class Shell {
       this.#cues = null;
       this.#toasts?.destroy();
       this.#toasts = null;
-      removeEl(this.#shellDom?.host);
+      this.#shellDom?.host.remove();
       this.#shellDom = null;
       if (this.#savedPositionStyle != null) {
         this.container.style.position = this.#savedPositionStyle;

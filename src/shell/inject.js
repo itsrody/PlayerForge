@@ -23,11 +23,11 @@ export function injectShell(container) {
   }
   const doc = container.ownerDocument;
   const host = doc.createElement("div");
-  host.setAttribute("class", "pf-shell");
+  host.className = "pf-shell";
   host.setAttribute("tabindex", "-1");
 
   const hudLayer = doc.createElement("div");
-  hudLayer.setAttribute("class", "pf-hud-layer");
+  hudLayer.className = "pf-hud-layer";
   host.appendChild(hudLayer);
 
   const cueLayer = doc.createElement("div");
@@ -95,8 +95,4 @@ export function watchShellHost(container, host) {
     reorderObserver.disconnect();
     reparentObserver.disconnect();
   };
-}
-
-export function removeEl(el) {
-  el?.remove();
 }
