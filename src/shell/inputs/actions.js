@@ -151,17 +151,36 @@ function performSkip(shell, state, direction) {
 }
 
 /**
- * Eased snap for inline video transforms: one curve, one cleanup window,
- * shared by fill-mode exit, pinch fill, and swipe/pinch restore.
+ * Eased snap for inline video transforms: one curve, shared by fill-mode
+ * exit, pinch fill, and swipe/pinch restore. The eased style is stripped by
+ * the transition's own end/cancel event - never by a timer - and a newer
+ * snap invalidates the previous waiter so no cleanup lands mid-gesture.
  */
-const TRANSFORM_EASE_MS = 200;
+const pendingEase = new WeakMap();
 
 export function easeTransformTo(video, transform) {
+  pendingEase.get(video)?.();
+  const stop = () => {
+    video.removeEventListener("transitionend", onEnd);
+    video.removeEventListener("transitioncancel", onCancel);
+    if (pendingEase.get(video) === stop) {
+      pendingEase.delete(video);
+      video.style.transition = "";
+    }
+  };
+  const onEnd = (event) => {
+    if (event.propertyName === "transform") {
+      stop();
+    }
+  };
+  const onCancel = () => stop();
+  // Listeners first, styles second: no completion event can slip past us.
+  video.addEventListener("transitionend", onEnd);
+  video.addEventListener("transitioncancel", onCancel);
+  pendingEase.set(video, stop);
+
   video.style.transition = "transform 0.15s cubic-bezier(0.2, 0, 0, 1)";
   video.style.transform = transform;
-  setTimeout(() => {
-    video.style.transition = "";
-  }, TRANSFORM_EASE_MS);
 }
 
 function clearFillMode(shell, state, animate = true) {
