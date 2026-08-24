@@ -5,7 +5,7 @@ import { JSDOM } from "jsdom";
 globalThis.GM_getValue = (key, fallback) => fallback;
 globalThis.GM_setValue = () => {};
 
-const { GestureController } = await import("../src/shell/inputs/gestures.js");
+const { InputForge } = await import("../src/shell/inputs/input-forge.js");
 const { GESTURE_EVENTS } = await import("../src/shared/events.js");
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -21,6 +21,8 @@ function makeEnv() {
   // gestures.js builds its CustomEvents against the ambient global realm;
   // jsdom hosts reject foreign-realm event objects, so bridge the constructor.
   globalThis.CustomEvent = dom.window.CustomEvent;
+  // jsdom rejects foreign-realm AbortSignals in listener options.
+  globalThis.AbortController = dom.window.AbortController;
 
   const video = dom.window.document.createElement("video");
   dom.window.document.body.appendChild(video);
@@ -74,7 +76,7 @@ function collect(host, win) {
 test("double tap in the left-edge zone dispatches once in fullscreen", () => {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true);
-  const controller = new GestureController(video, zone, host);
+  const controller = new InputForge(video, zone, host);
   const seen = collect(host, dom.window);
 
   zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 50, y: 200 }));
@@ -90,7 +92,7 @@ test("double tap in the left-edge zone dispatches once in fullscreen", () => {
 
 test("inline double taps never dispatch outside fullscreen", () => {
   const { dom, video, zone, host } = makeEnv();
-  const controller = new GestureController(video, zone, host);
+  const controller = new InputForge(video, zone, host);
   const seen = collect(host, dom.window);
 
   zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 50, y: 200 }));
@@ -104,7 +106,7 @@ test("inline double taps never dispatch outside fullscreen", () => {
 
 test("keydown arrows map through the action table with preventDefault", () => {
   const { dom, video, zone, host } = makeEnv();
-  const controller = new GestureController(video, zone, host);
+  const controller = new InputForge(video, zone, host);
   const seen = collect(host, dom.window);
 
   const right = new dom.window.KeyboardEvent("keydown", {
@@ -129,7 +131,7 @@ test("disabling the hotkeys toggle silences arrows but Space still toggles playb
       playCalls.push(true);
       return Promise.resolve();
     };
-    const controller = new GestureController(video, zone, host);
+    const controller = new InputForge(video, zone, host);
     const seen = collect(host, dom.window);
 
     dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
@@ -162,8 +164,8 @@ test("focus arbitration: the last active controller owns page-level keys", () =>
   const host2 = dom.window.document.createElement("div");
   dom.window.document.body.appendChild(host2);
 
-  const controllerA = new GestureController(video, zone, host);
-  const controllerB = new GestureController(video2, zone2, host2);
+  const controllerA = new InputForge(video, zone, host);
+  const controllerB = new InputForge(video2, zone2, host2);
   const seenA = collect(host, dom.window);
   const seenB = collect(host2, dom.window);
 
@@ -186,7 +188,7 @@ test("focus arbitration: the last active controller owns page-level keys", () =>
 test("trackpad ctrl+wheel pinches in fullscreen with a cooldown window", () => {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true);
-  const controller = new GestureController(video, zone, host);
+  const controller = new InputForge(video, zone, host);
   controller.setTrackpadPinchEnabled(true);
   const seen = collect(host, dom.window);
 
@@ -205,7 +207,7 @@ test("trackpad ctrl+wheel pinches in fullscreen with a cooldown window", () => {
 
 test("wheel pinch listener is inert until enabled and detaches on disable", () => {
   const { dom, video, zone, host } = makeEnv();
-  const controller = new GestureController(video, zone, host);
+  const controller = new InputForge(video, zone, host);
   const seen = collect(host, dom.window);
 
   const blocked = wheelEvent(dom.window, { deltaY: -100, ctrlKey: true });
@@ -229,7 +231,7 @@ test("wheel pinch listener is inert until enabled and detaches on disable", () =
 test("pointer gestures never cancel defaults (passivity contract)", () => {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true);
-  const controller = new GestureController(video, zone, host);
+  const controller = new InputForge(video, zone, host);
   collect(host, dom.window);
 
   const dispatched = [
@@ -249,7 +251,7 @@ test("pointer gestures never cancel defaults (passivity contract)", () => {
 test("swipe down starts from any zone in fullscreen, not just the center", () => {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true);
-  const controller = new GestureController(video, zone, host);
+  const controller = new InputForge(video, zone, host);
   const seen = collect(host, dom.window);
 
   zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 50, y: 200 }));
@@ -269,7 +271,7 @@ test("swipe down starts from any zone in fullscreen, not just the center", () =>
 test("destroying mid-hold fires the pending release before teardown", async () => {
   const { dom, video, zone, host } = makeEnv();
   Object.defineProperty(video, "paused", { value: false, configurable: true });
-  const controller = new GestureController(video, zone, host);
+  const controller = new InputForge(video, zone, host);
   const seen = collect(host, dom.window);
 
   zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));

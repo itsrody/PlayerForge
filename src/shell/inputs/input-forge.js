@@ -1,4 +1,4 @@
-import { getSetting } from "../config.js";
+import { allowsIntent, armedKeys } from "./input-list.js";
 import { GESTURE_EVENTS } from "../../shared/events.js";
 
 // Tuning constants (ms / px / ratios).
@@ -15,42 +15,36 @@ const TRACKPAD_COOLDOWN_MS = 500;
 const SUPPRESS_WINDOW_MS = 600;
 
 /**
- * Keyboard shortcuts mirroring pointer gestures. Space is absent on purpose:
- * it has hold-to-speed semantics and is handled separately (and intentionally
- * ignores the "Keyboard hotkeys" toggle).
- */
-const KEY_ACTIONS = {
-  ArrowRight: { event: "skip", direction: "right" },
-  ArrowLeft: { event: "skip", direction: "left" },
-  ArrowUp: { event: "volume", direction: "up" },
-  ArrowDown: { event: "volume", direction: "down" },
-  KeyM: { event: "mute" },
-  KeyS: { event: "panel", allowSettingsFocus: true }
-};
-
-/**
  * Pointer handlers never preventDefault — native pan/scroll over the zone is
  * suppressed by the touch-action CSS set at construction — so every pointer
- * listener can be passive. Only the wheel pinch listener cancels defaults,
- * and it is subscribed only while fullscreen (see setTrackpadPinchEnabled).
+ * listener can be passive. Only two listeners cancel defaults: the wheel
+ * pinch listener (subscribed only while fullscreen) and the click/dblclick
+ * suppressors that swallow post-gesture activations.
  */
 const PASSIVE_CAPTURE = { capture: true, passive: true };
 const WHEEL_CAPTURE = { capture: true, passive: false };
 
-/** All live gesture controllers, used for focus arbitration between players. */
-const activeControllers = new Set();
-let lastActiveController = null;
+/** All live input engines, used for keyboard focus arbitration. */
+const activeForges = new Set();
+let lastActiveForge = null;
 
 /**
- * Pointer/keyboard/wheel gesture recognizer attached to a player container.
- * Emits pf:gesture-* CustomEvents on the shell host; intercepts the video
- * element's play/pause while a keyboard Space hold is in progress.
+ * InputForge engine: pure recognition transport. Turns pointer/keyboard/
+ * wheel physics into semantic GESTURE_EVENTS on the shell host; every policy
+ * decision (settings gates, fullscreen requirement) is delegated to the
+ * declarative INPUT_BINDINGS list, sampled live at each decision point.
+ *
+ * Gecko 154+ native by design: one AbortSignal owns the entire listener
+ * lifetime (destroy() === scope.abort()), all pointer listeners are passive,
+ * scrub sampling consumes getCoalescedEvents(), and fullscreen truth is read
+ * straight off document.fullscreenElement.
  */
-export class GestureController {
+export class InputForge {
   #video;
   #zone;
   #eventTarget;
 
+  #scope = new AbortController();
   #destroyed = false;
   #savedTouchAction;
   #originalPlay;
@@ -74,10 +68,6 @@ export class GestureController {
   #suppressClickPending = false;
   #suppressDblclickPending = false;
   #clickSuppressTimer = null;
-
-  // Intent flags sampled at pointerdown.
-  #wantScrub = false;
-  #wantSwipe = false;
 
   // Scrub state.
   #scrubbing = false;
@@ -106,22 +96,14 @@ export class GestureController {
   #trackpadPinchCooldown = false;
   /** Whether the (non-passive) wheel pinch listener is currently attached. */
   #trackpadPinchSubscribed = false;
-
-  // Bound handlers.
-  #onPointerDown;
-  #onPointerMove;
-  #onPointerUp;
-  #onClickCapture;
-  #onDblClickCapture;
-  #onWheelCapture;
-  #onKeydown;
-  #onKeyup;
-  #onBlur;
+  /** Stable reference so the scoped wheel listener can be removed again. */
+  #wheelHandler = null;
 
   constructor(video, zone, eventTarget) {
     this.#video = video;
     this.#zone = zone;
     this.#eventTarget = eventTarget;
+    const { signal } = this.#scope;
     this.#savedTouchAction = zone.style.touchAction;
     zone.style.touchAction = "none";
 
@@ -134,29 +116,65 @@ export class GestureController {
       }
     };
 
-    this.#onPointerDown = this.#handlePointerDown.bind(this);
-    this.#onPointerMove = this.#handlePointerMove.bind(this);
-    this.#onPointerUp = this.#handlePointerUp.bind(this);
-    this.#onClickCapture = this.#handleClickCapture.bind(this);
-    this.#onDblClickCapture = this.#handleDblClickCapture.bind(this);
-    this.#onWheelCapture = this.#handleWheelCapture.bind(this);
-    this.#onKeydown = this.#handleKeydown.bind(this);
-    this.#onKeyup = this.#handleKeyup.bind(this);
-    this.#onBlur = this.#resetKeyboardHold.bind(this);
+    const options = { capture: true, passive: true, signal };
+    zone.addEventListener("pointerdown", (event) => this.#handlePointerDown(event), options);
+    zone.addEventListener("pointermove", (event) => this.#handlePointerMove(event), options);
+    zone.addEventListener("pointerup", (event) => this.#handlePointerUp(event), options);
+    zone.addEventListener("pointercancel", (event) => this.#handlePointerUp(event), options);
+    zone.addEventListener("click", (event) => this.#handleClickCapture(event), { capture: true, signal });
+    zone.addEventListener("dblclick", (event) => this.#handleDblClickCapture(event), { capture: true, signal });
+    window.addEventListener("pointerup", (event) => this.#handlePointerUp(event), options);
+    window.addEventListener("pointercancel", (event) => this.#handlePointerUp(event), options);
+    document.addEventListener("keydown", (event) => this.#handleKeydown(event), { capture: true, signal });
+    document.addEventListener("keyup", (event) => this.#handleKeyup(event), { capture: true, signal });
+    window.addEventListener("blur", () => this.#resetKeyboardHold(), { signal });
 
-    zone.addEventListener("pointerdown", this.#onPointerDown, PASSIVE_CAPTURE);
-    zone.addEventListener("pointermove", this.#onPointerMove, PASSIVE_CAPTURE);
-    zone.addEventListener("pointerup", this.#onPointerUp, PASSIVE_CAPTURE);
-    zone.addEventListener("pointercancel", this.#onPointerUp, PASSIVE_CAPTURE);
-    zone.addEventListener("click", this.#onClickCapture, true);
-    zone.addEventListener("dblclick", this.#onDblClickCapture, true);
-    window.addEventListener("pointerup", this.#onPointerUp, PASSIVE_CAPTURE);
-    window.addEventListener("pointercancel", this.#onPointerUp, PASSIVE_CAPTURE);
-    document.addEventListener("keydown", this.#onKeydown, true);
-    document.addEventListener("keyup", this.#onKeyup, true);
-    window.addEventListener("blur", this.#onBlur);
+    document.addEventListener("fullscreenchange", () => {
+      this.setTrackpadPinchEnabled(this.#isFullscreen());
+    }, { signal });
 
-    activeControllers.add(this);
+    activeForges.add(this);
+  }
+
+  /** Engine lifetime signal — action wiring shares it and dies with it. */
+  get signal() {
+    return this.#scope.signal;
+  }
+
+  #isFullscreen() {
+    return !!document.fullscreenElement;
+  }
+
+  /**
+   * Subscribe/unsubscribe the trackpad pinch wheel listener. It is the only
+   * non-passive listener here besides the activation suppressors, so it lives
+   * only while its feature can fire (fullscreen). Driven natively by
+   * fullscreenchange; exposed for explicit scoping in tests.
+   */
+  setTrackpadPinchEnabled(enabled) {
+    if (this.#destroyed || enabled === this.#trackpadPinchSubscribed) {
+      return;
+    }
+    if (enabled) {
+      this.#trackpadPinchSubscribed = true;
+      this.#wheelHandler = (event) => this.#handleWheelCapture(event);
+      this.#zone.addEventListener("wheel", this.#wheelHandler, WHEEL_CAPTURE);
+    } else {
+      this.#detachTrackpadPinch();
+    }
+  }
+
+  #detachTrackpadPinch() {
+    if (!this.#trackpadPinchSubscribed) {
+      return;
+    }
+    this.#trackpadPinchSubscribed = false;
+    if (this.#wheelHandler) {
+      // Managed manually: live scoping needs add/remove symmetry outside the
+      // shared AbortSignal.
+      this.#zone.removeEventListener("wheel", this.#wheelHandler, true);
+      this.#wheelHandler = null;
+    }
   }
 
   /** Snap any inline transform back with a short transition. */
@@ -171,12 +189,17 @@ export class GestureController {
 
   destroy() {
     if (!this.#destroyed) {
+      this.#detachTrackpadPinch();
       this.#endPointerSession();
       this.#destroyed = true;
-      this.#clearHoldTimer();
-      this.#clearKeyboardHoldTimer();
-      this.#clearPinchTimer();
-      this.#clearClickSuppressTimer();
+      clearTimeout(this.#holdTimer);
+      this.#holdTimer = null;
+      clearTimeout(this.#keyboardHoldTimer);
+      this.#keyboardHoldTimer = null;
+      clearTimeout(this.#pinchInitTimer);
+      this.#pinchInitTimer = null;
+      clearTimeout(this.#clickSuppressTimer);
+      this.#clickSuppressTimer = null;
       this.#pointers.clear();
       this.#spaceHoldIntercepting = false;
       this.#video.style.transition = "";
@@ -185,76 +208,12 @@ export class GestureController {
       this.#video.play = this.#originalPlay;
       this.#video.pause = this.#originalPause;
 
-      this.#zone.removeEventListener("pointerdown", this.#onPointerDown, PASSIVE_CAPTURE);
-      this.#zone.removeEventListener("pointermove", this.#onPointerMove, PASSIVE_CAPTURE);
-      this.#zone.removeEventListener("pointerup", this.#onPointerUp, PASSIVE_CAPTURE);
-      this.#zone.removeEventListener("pointercancel", this.#onPointerUp, PASSIVE_CAPTURE);
-      this.#zone.removeEventListener("click", this.#onClickCapture, true);
-      this.#zone.removeEventListener("dblclick", this.#onDblClickCapture, true);
-      this.#detachTrackpadPinch();
-      window.removeEventListener("pointerup", this.#onPointerUp, PASSIVE_CAPTURE);
-      window.removeEventListener("pointercancel", this.#onPointerUp, PASSIVE_CAPTURE);
-      document.removeEventListener("keydown", this.#onKeydown, true);
-      document.removeEventListener("keyup", this.#onKeyup, true);
-      window.removeEventListener("blur", this.#onBlur);
-
-      activeControllers.delete(this);
-      if (lastActiveController === this) {
-        lastActiveController = null;
+      activeForges.delete(this);
+      if (lastActiveForge === this) {
+        lastActiveForge = null;
       }
       this.#resetKeyboardHold();
-    }
-  }
-
-  /**
-   * Subscribe/unsubscribe the trackpad pinch wheel listener. It is the only
-   * non-passive listener here, so it lives only while its feature can fire
-   * (fullscreen) instead of sitting registered on the page forever.
-   */
-  setTrackpadPinchEnabled(enabled) {
-    if (this.#destroyed || enabled === this.#trackpadPinchSubscribed) {
-      return;
-    }
-    if (enabled) {
-      this.#trackpadPinchSubscribed = true;
-      this.#zone.addEventListener("wheel", this.#onWheelCapture, WHEEL_CAPTURE);
-    } else {
-      this.#detachTrackpadPinch();
-    }
-  }
-
-  #detachTrackpadPinch() {
-    if (this.#trackpadPinchSubscribed) {
-      this.#trackpadPinchSubscribed = false;
-      this.#zone.removeEventListener("wheel", this.#onWheelCapture, true);
-    }
-  }
-
-  #clearHoldTimer() {
-    if (this.#holdTimer) {
-      clearTimeout(this.#holdTimer);
-      this.#holdTimer = null;
-    }
-  }
-
-  #clearKeyboardHoldTimer() {
-    if (this.#keyboardHoldTimer) {
-      clearTimeout(this.#keyboardHoldTimer);
-      this.#keyboardHoldTimer = null;
-    }
-  }
-
-  #clearPinchTimer() {
-    if (this.#pinchInitTimer) {
-      clearTimeout(this.#pinchInitTimer);
-      this.#pinchInitTimer = null;
-    }
-  }
-
-  #clearClickSuppressTimer() {
-    if (this.#clickSuppressTimer) {
-      clearTimeout(this.#clickSuppressTimer);
-      this.#clickSuppressTimer = null;
+      this.#scope.abort();
     }
   }
 
@@ -262,7 +221,7 @@ export class GestureController {
   #suppressNextActivations() {
     this.#suppressClickPending = true;
     this.#suppressDblclickPending = true;
-    this.#clearClickSuppressTimer();
+    clearTimeout(this.#clickSuppressTimer);
     this.#clickSuppressTimer = setTimeout(() => {
       this.#clickSuppressTimer = null;
       this.#suppressClickPending = false;
@@ -273,7 +232,8 @@ export class GestureController {
   #resetKeyboardHold() {
     this.#spaceHoldIntercepting = false;
     this.#keyboardHolding = false;
-    this.#clearKeyboardHoldTimer();
+    clearTimeout(this.#keyboardHoldTimer);
+    this.#keyboardHoldTimer = null;
   }
 
   #hitTestVideo(pointerEvent) {
@@ -321,6 +281,11 @@ export class GestureController {
     this.#suppressNextActivations();
   }
 
+  #clearHoldTimer() {
+    clearTimeout(this.#holdTimer);
+    this.#holdTimer = null;
+  }
+
   #beginPinchTracking() {
     this.#endPointerSession();
     this.#primaryPointerId = null;
@@ -330,7 +295,7 @@ export class GestureController {
     this.#pinchStartDistance = 0;
     this.#pinchFired = false;
     this.#pinchZone = this.#gestureZone || "screen";
-    this.#clearPinchTimer();
+    clearTimeout(this.#pinchInitTimer);
     this.#pinchInitTimer = setTimeout(() => {
       this.#pinchInitTimer = null;
       if (this.#destroyed || this.#pointers.size < 2) {
@@ -352,23 +317,23 @@ export class GestureController {
     const scaleDelta =
       (Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y) - this.#pinchStartDistance) /
       this.#pinchStartDistance;
-    if (scaleDelta > PINCH_SCALE_THRESHOLD) {
+    if (scaleDelta > PINCH_SCALE_THRESHOLD || scaleDelta < -PINCH_SCALE_THRESHOLD) {
       this.#pinchFired = true;
       this.#suppressNextActivations();
-      this.#dispatch(GESTURE_EVENTS.pinch, { zone: this.#pinchZone, method: "pointer", direction: "out" });
-    } else if (scaleDelta < -PINCH_SCALE_THRESHOLD) {
-      this.#pinchFired = true;
-      this.#suppressNextActivations();
-      this.#dispatch(GESTURE_EVENTS.pinch, { zone: this.#pinchZone, method: "pointer", direction: "in" });
+      this.#dispatch(GESTURE_EVENTS.pinch, {
+        zone: this.#pinchZone,
+        method: "pointer",
+        direction: scaleDelta > 0 ? "out" : "in"
+      });
     }
   }
 
   /**
    * Decide whether keyboard shortcuts should apply: yes when focus is inside
-   * the container on non-interactive elements (unless `allowSettings` is set),
-   * or when focus is page-level and this controller owns playback.
+   * the container on non-interactive elements (unless `allowControlFocus`),
+   * or when focus is page-level and this engine owns playback.
    */
-  #shouldHandleKeys(allowSettings = false) {
+  #shouldHandleKeys(allowControlFocus = false) {
     const activeElement = document.activeElement;
     if (!this.#zone) {
       return false;
@@ -378,7 +343,7 @@ export class GestureController {
         return false;
       }
       const tag = activeElement.tagName;
-      return !!allowSettings || tag !== "BUTTON" && tag !== "SELECT" && tag !== "OPTION" && tag !== "INPUT";
+      return !!allowControlFocus || tag !== "BUTTON" && tag !== "SELECT" && tag !== "OPTION" && tag !== "INPUT";
     }
     if (activeElement === document.body || activeElement === document.documentElement || activeElement === null) {
       if (!this.#isActive(this)) {
@@ -386,16 +351,16 @@ export class GestureController {
       }
       let candidates = 0;
       let includesThis = false;
-      for (const controller of activeControllers) {
-        if (this.#isActive(controller)) {
+      for (const forge of activeForges) {
+        if (this.#isActive(forge)) {
           candidates++;
-          includesThis ||= controller === this;
+          includesThis ||= forge === this;
         }
       }
       if (candidates === 1) {
         return includesThis;
       } else if (candidates > 1) {
-        return lastActiveController === this;
+        return lastActiveForge === this;
       } else {
         return false;
       }
@@ -418,13 +383,9 @@ export class GestureController {
     return false;
   }
 
-  /** A controller can own playback when its video is loaded and not finished. */
-  #isActive(controller) {
-    return !controller.#destroyed && controller.#video.readyState > 0 && !controller.#video.ended;
-  }
-
-  #isFullscreen() {
-    return !!document.fullscreenElement;
+  /** An engine can own playback when its video is loaded and not finished. */
+  #isActive(forge) {
+    return !forge.#destroyed && forge.#video.readyState > 0 && !forge.#video.ended;
   }
 
   #dispatch(eventName, detail) {
@@ -461,7 +422,7 @@ export class GestureController {
     ) {
       return;
     }
-    lastActiveController = this;
+    lastActiveForge = this;
     const existing = this.#pointers.get(event.pointerId);
     if (existing) {
       existing.x = event.clientX;
@@ -471,7 +432,7 @@ export class GestureController {
     }
 
     if (this.#pointers.size === 2) {
-      if (getSetting("gestures.pinch")) {
+      if (allowsIntent("pinch")) {
         this.#beginPinchTracking();
       }
       return;
@@ -483,10 +444,9 @@ export class GestureController {
       this.#startTime = performance.now();
       this.#holding = false;
       this.#suppressClickPending = false;
-      this.#clearClickSuppressTimer();
+      clearTimeout(this.#clickSuppressTimer);
+      this.#clickSuppressTimer = null;
       this.#gestureZone = this.#zoneForPoint(event);
-      this.#wantScrub = getSetting("gestures.scrub");
-      this.#wantSwipe = getSetting("gestures.swipe");
       this.#scrubbing = false;
       this.#scrubLastX = event.clientX;
       this.#scrubLastTime = this.#startTime;
@@ -496,16 +456,15 @@ export class GestureController {
       this.#clearHoldTimer();
 
       this.#holdTimer = setTimeout(() => {
-        if (this.#primaryPointerId !== null && !this.#video.paused) {
-          if (getSetting("gestures.hold")) {
-            this.#holding = true;
-            this.#capturePointerSafe(this.#primaryPointerId);
-            this.#dispatch(GESTURE_EVENTS.hold, {
-              zone: this.#gestureZone,
-              method: "pointer",
-              duration: performance.now() - this.#startTime
-            });
-          }
+        this.#holdTimer = null;
+        if (this.#primaryPointerId !== null && !this.#video.paused && allowsIntent("hold")) {
+          this.#holding = true;
+          this.#capturePointerSafe(this.#primaryPointerId);
+          this.#dispatch(GESTURE_EVENTS.hold, {
+            zone: this.#gestureZone,
+            method: "pointer",
+            duration: performance.now() - this.#startTime
+          });
         }
       }, HOLD_TIMEOUT_MS);
     }
@@ -537,13 +496,15 @@ export class GestureController {
 
     if (this.#isFullscreen() && !this.#holding) {
       if (!this.#scrubbing && !this.#swiping) {
-        if (this.#wantScrub && dx > SCROLL_START_PX && dx > dy * AXIS_DOMINANCE_RATIO) {
+        // Intent gates are sampled live: toggling a setting mid-session
+        // applies to the very next move.
+        if (allowsIntent("scrub") && dx > SCROLL_START_PX && dx > dy * AXIS_DOMINANCE_RATIO) {
           this.#scrubbing = true;
           this.#capturePointerSafe(this.#primaryPointerId);
           this.#scrubLastX = x;
           this.#scrubLastTime = now;
           this.#scrubVelocity = 0;
-        } else if (this.#wantSwipe && dy > SCROLL_START_PX && dy > dx * AXIS_DOMINANCE_RATIO) {
+        } else if (allowsIntent("swipe") && dy > SCROLL_START_PX && dy > dx * AXIS_DOMINANCE_RATIO) {
           this.#swiping = true;
           this.#swipeDirection = y > this.#startY ? "down" : "up";
           this.#swipeBaseTransform = this.#video.style.transform || "";
@@ -559,18 +520,7 @@ export class GestureController {
       }
       if (this.#scrubbing) {
         event.stopImmediatePropagation();
-        const dt = (now - this.#scrubLastTime) / 1000;
-        const step = x - this.#scrubLastX;
-        const instantVelocity = dt > 0.001 ? step / dt : 0;
-        this.#scrubVelocity = this.#scrubVelocity * 0.7 + instantVelocity * 0.3;
-        this.#scrubLastX = x;
-        this.#scrubLastTime = now;
-        this.#dispatch(GESTURE_EVENTS.scrub, {
-          zone: this.#gestureZone || "screen",
-          method: "pointer",
-          dx: step,
-          velocity: this.#scrubVelocity
-        });
+        this.#advanceScrub(event, x, now);
       }
       if (this.#swiping && this.#swipeDirection === "down") {
         event.stopImmediatePropagation();
@@ -578,6 +528,35 @@ export class GestureController {
         this.#video.style.transform = `${this.#swipeBaseTransform} translateY(${drag}px)`;
       }
     }
+  }
+
+  /**
+   * Consume every coalesced sample of the move so high-rate Gecko pointer
+   * streams scrub at full fidelity; one semantic event is emitted per move.
+   */
+  #advanceScrub(event, x, now) {
+    let totalStep = 0;
+    let lastSampleTime = this.#scrubLastTime;
+    const samples = typeof event.getCoalescedEvents === "function"
+      ? event.getCoalescedEvents()
+      : [];
+    const stream = samples.length > 0 ? [...samples, event] : [event];
+    for (const sample of stream) {
+      const step = sample.clientX - this.#scrubLastX;
+      this.#scrubLastX = sample.clientX;
+      totalStep += step;
+      const dt = (now - lastSampleTime) / 1000;
+      const instantVelocity = dt > 0.001 ? step / dt : 0;
+      this.#scrubVelocity = this.#scrubVelocity * 0.7 + instantVelocity * 0.3;
+      lastSampleTime = now;
+    }
+    this.#scrubLastTime = now;
+    this.#dispatch(GESTURE_EVENTS.scrub, {
+      zone: this.#gestureZone || "screen",
+      method: "pointer",
+      dx: totalStep,
+      velocity: this.#scrubVelocity
+    });
   }
 
   #handlePointerUp(event) {
@@ -629,10 +608,9 @@ export class GestureController {
       });
       this.#swipeDirection = null;
     } else if (
-      this.#isFullscreen() &&
       elapsed < HOLD_TIMEOUT_MS &&
       this.#gestureZone !== null &&
-      getSetting("gestures.dbltap")
+      allowsIntent("dbltap")
     ) {
       const now = performance.now();
       if (now - this.#lastTapTime < DOUBLE_TAP_WINDOW_MS) {
@@ -652,7 +630,9 @@ export class GestureController {
       event.stopImmediatePropagation();
       event.preventDefault();
       this.#suppressClickPending = false;
-      this.#clearClickSuppressTimer();
+      clearTimeout(this.#clickSuppressTimer);
+      this.#clickSuppressTimer = null;
+      this.#suppressDblclickPending = false;
     }
   }
 
@@ -661,12 +641,14 @@ export class GestureController {
       event.stopImmediatePropagation();
       event.preventDefault();
       this.#suppressDblclickPending = false;
-      this.#clearClickSuppressTimer();
+      clearTimeout(this.#clickSuppressTimer);
+      this.#clickSuppressTimer = null;
+      this.#suppressClickPending = false;
     }
   }
 
   #handleWheelCapture(event) {
-    if (this.#isFullscreen() && event.ctrlKey && !event.momentum && getSetting("gestures.pinch")) {
+    if (this.#isFullscreen() && event.ctrlKey && !event.momentum && allowsIntent("pinch")) {
       event.preventDefault();
       event.stopImmediatePropagation();
       if (!this.#trackpadPinchCooldown) {
@@ -684,46 +666,54 @@ export class GestureController {
     }
   }
 
+  /**
+   * Space is absent from the binding table on purpose: it carries hold-to-
+   * speed semantics and intentionally ignores the hotkeys toggle. While a
+   * Space hold is in progress the video's play/pause are intercepted so the
+   * browser's own Space-activates-video default cannot fight the hold.
+   */
   #handleKeydown(event) {
     if (event.repeat) {
       return;
     }
     if (event.code === "Space") {
       if (this.#shouldHandleKeys(false)) {
-        lastActiveController = this;
+        lastActiveForge = this;
         event.preventDefault();
         this.#spaceHoldIntercepting = true;
         this.#keyboardHoldStart = performance.now();
         this.#keyboardHolding = false;
-        this.#clearKeyboardHoldTimer();
+        clearTimeout(this.#keyboardHoldTimer);
         this.#keyboardHoldTimer = setTimeout(() => {
-          if (!this.#video.paused) {
-            if (getSetting("gestures.hold")) {
-              this.#keyboardHolding = true;
-              this.#dispatch(GESTURE_EVENTS.hold, {
-                zone: "screen",
-                method: "keyboard",
-                duration: performance.now() - this.#keyboardHoldStart
-              });
-            }
+          this.#keyboardHoldTimer = null;
+          if (!this.#video.paused && allowsIntent("hold")) {
+            this.#keyboardHolding = true;
+            this.#dispatch(GESTURE_EVENTS.hold, {
+              zone: "screen",
+              method: "keyboard",
+              duration: performance.now() - this.#keyboardHoldStart
+            });
           }
         }, HOLD_TIMEOUT_MS);
       }
       return;
     }
-    const action = KEY_ACTIONS[event.code];
-    if (action && this.#shouldHandleKeys(!!action.allowSettingsFocus)) {
-      if (!getSetting("gestures.hotkeys")) {
-        return;
+    for (const binding of armedKeys()) {
+      if (binding.code !== event.code) {
+        continue;
       }
-      lastActiveController = this;
+      if (!this.#shouldHandleKeys(!!binding.allowControlFocus)) {
+        continue;
+      }
+      lastActiveForge = this;
       event.preventDefault();
       event.stopImmediatePropagation();
       const detail = { method: "keyboard" };
-      if (action.direction) {
-        detail.direction = action.direction;
+      if (binding.direction) {
+        detail.direction = binding.direction;
       }
-      this.#dispatch(GESTURE_EVENTS[action.event], detail);
+      this.#dispatch(binding.emit, detail);
+      return;
     }
   }
 
@@ -733,7 +723,8 @@ export class GestureController {
     }
     const wasHolding = this.#keyboardHolding;
     const shouldToggle = this.#shouldHandleKeys();
-    this.#clearKeyboardHoldTimer();
+    clearTimeout(this.#keyboardHoldTimer);
+    this.#keyboardHoldTimer = null;
     this.#keyboardHolding = false;
     this.#spaceHoldIntercepting = false;
     if (wasHolding) {

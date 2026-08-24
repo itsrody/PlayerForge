@@ -1,6 +1,7 @@
 import { logger } from "../shared/logger.js";
 import { SHELL_MARKER } from "../kernel/kernel.js";
-import { HotkeysController } from "./inputs/hotkeys.js";
+import { InputForge } from "./inputs/input-forge.js";
+import { attachInputActions } from "./inputs/input-list.js";
 import { ResumeTracker } from "./resume.js";
 import { SubtitlesSection } from "./subtitles/section.js";
 import { CueRenderer } from "./subtitles/cue-renderer.js";
@@ -68,7 +69,8 @@ export class Shell {
     this.#panel = new SettingsPanel(this, bus);
     this.#toasts = new ToastManager(this.#shellDom.hudLayer);
     this.#cues = new CueRenderer(this.#shellDom.cueLayer);
-    this.#inputs = new HotkeysController(this);
+    this.#inputs = new InputForge(this.video, this.container, this.shellHost);
+    attachInputActions(this, this.shellHost, this.#inputs.signal);
     this.#resume = new ResumeTracker(this);
     this.#subtitles = new SubtitlesSection(this);
     addSettingsSection(this.#panel);
