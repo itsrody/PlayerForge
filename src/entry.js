@@ -4,6 +4,7 @@ import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/sdk.js";
 import { logger } from "./shared/logger.js";
 import { shouldSkipUrl } from "./kernel/guard.js";
 import { KEYS, getConfigValue, setConfigValue, gmDeleteValue } from "./shared/storage.js";
+import { TUNING } from "./shell/chrome/config.js";
 
 // The version lives in the banner and is read from the installed script at
 // runtime via GM_info, so what the UI reports is always what VM actually
@@ -48,7 +49,7 @@ function bootstrap() {
             text: coarsePointer
               ? "Swipe down to exit fullscreen"
               : "Press S for settings · Swipe down to exit fullscreen",
-            duration: 5000
+            duration: TUNING.toast.hintMs
           });
         }
       }, 1200);

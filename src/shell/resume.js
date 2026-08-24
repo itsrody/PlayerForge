@@ -317,7 +317,8 @@ export class ResumeTracker {
             shell.toast({
               icon: "resume",
               text: `Resumed at ${formatTime(savedPosition)}`,
-              duration: 3000,
+              duration: TUNING.toast.actionMs,
+              group: "resume",
               actions: [{
                 icon: "reload",
                 title: "Start over",

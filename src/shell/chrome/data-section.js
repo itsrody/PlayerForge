@@ -1,5 +1,6 @@
 import { createIconElement } from "./icons.js";
 import { gmSetClipboard } from "../../shared/storage.js";
+import { TUNING } from "./config.js";
 import { logger } from "../../shared/logger.js";
 
 function actionButton(panel, parent, icon, label) {
@@ -37,10 +38,20 @@ export function addDataSection(panel, shell) {
       }
       gmSetClipboard(data, "text/plain");
       const count = JSON.parse(data).entries.length;
-      shell.toast({ text: `Copied ${count} ${count === 1 ? "entry" : "entries"}`, duration: 2500 });
+      shell.toast({
+        icon: "copy",
+        text: `Copied ${count} ${count === 1 ? "entry" : "entries"}`,
+        duration: TUNING.toast.infoMs,
+        group: "data"
+      });
       logger.log("data", `Exported ${count} resume entries`);
     } catch (err) {
-      shell.toast({ text: "Copy failed", duration: 2500 });
+      shell.toast({
+        icon: "copy",
+        text: "Copy failed",
+        duration: TUNING.toast.infoMs,
+        group: "data"
+      });
       logger.error("data", "Export failed:", err);
     }
   });
@@ -55,22 +66,39 @@ export function addDataSection(panel, shell) {
   actionButton(panel, sectionRoot, "upload", "Import").addEventListener("click", () => {
     const text = textarea.value.trim();
     if (!text) {
-      shell.toast({ text: "Paste data first", duration: 2000 });
+      shell.toast({
+        icon: "upload",
+        text: "Paste data first",
+        duration: TUNING.toast.infoMs,
+        group: "data"
+      });
       return;
     }
     const result = shell.importResume(text);
     if (!result) {
-      shell.toast({ text: "Import failed - unrecognized data", duration: 3000 });
+      shell.toast({
+        icon: "upload",
+        text: "Import failed - unrecognized data",
+        duration: TUNING.toast.infoMs,
+        group: "data"
+      });
       return;
     }
     if (!result.added && !result.updated) {
-      shell.toast({ text: "Already up to date", duration: 2000 });
+      shell.toast({
+        icon: "upload",
+        text: "Already up to date",
+        duration: TUNING.toast.infoMs,
+        group: "data"
+      });
       textarea.value = "";
       return;
     }
     shell.toast({
+      icon: "upload",
       text: `Imported ${result.added} new, ${result.updated} updated`,
-      duration: 3000
+      duration: TUNING.toast.infoMs,
+      group: "data"
     });
     textarea.value = "";
     logger.log("data", `Import finished: +${result.added}, ~${result.updated}`);

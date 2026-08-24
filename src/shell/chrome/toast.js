@@ -7,6 +7,12 @@ import { iconMarkup } from "./icons.js";
  * overlapping callers (scrub hints, hold indicators) don't clobber each
  * other. Visibility is a pure opacity morph on pf-visible; stacking above
  * captions and below the panel is plain local z-index.
+ *
+ * Producer convention: durations come from TUNING.toast (flash for
+ * completed actions, info for status, action for toasts with buttons,
+ * hint for onboarding); sticky gesture toasts pass 0 explicitly and are
+ * hidden by their gesture's end. Every producer tags its family via
+ * `group` (skip, hold, scrub, fs, volume, pinch, resume, data).
  */
 export class ToastManager {
   #toast;

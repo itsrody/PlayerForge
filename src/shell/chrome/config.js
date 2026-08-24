@@ -179,6 +179,16 @@ export const TUNING = {
   subtitles: {
     syncDebounceMs: 150
   },
+  toast: {
+    /** Completed-action feedback: skip, volume, fullscreen exit, fill. */
+    flashMs: 800,
+    /** Plain status messages. */
+    infoMs: 2500,
+    /** Toasts carrying a clickable button - extra reading time. */
+    actionMs: 4000,
+    /** Onboarding hints. */
+    hintMs: 5000
+  },
   kernel: {
     removalGraceMs: 500
   }

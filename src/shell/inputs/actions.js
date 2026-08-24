@@ -141,7 +141,7 @@ function performSkip(shell, state, direction) {
   shell.toast({
     icon: direction === "right" ? "right-arrows" : "left-arrows",
     text: `${step}s`,
-    duration: 800,
+    duration: TUNING.toast.flashMs,
     group: "skip"
   });
 }
@@ -348,7 +348,7 @@ export function attachInputActions(shell, host, signal) {
       shell.toast({
         icon: "fs-exit",
         text: "Fullscreen Exited",
-        duration: 800,
+        duration: TUNING.toast.flashMs,
         group: "fs"
       });
       shell.exitFullscreen();
@@ -381,7 +381,7 @@ export function attachInputActions(shell, host, signal) {
     shell.toast({
       icon: volumeIcon(shell.volume, false),
       text: `${Math.round(shell.volume * 100)}%`,
-      duration: 800,
+      duration: TUNING.toast.flashMs,
       group: "volume"
     });
   }, { signal });
@@ -394,7 +394,7 @@ export function attachInputActions(shell, host, signal) {
     shell.toast({
       icon: volumeIcon(shell.volume, shell.muted),
       text: shell.muted ? "Muted" : `${Math.round(shell.volume * 100)}%`,
-      duration: 800,
+      duration: TUNING.toast.flashMs,
       group: "volume"
     });
   }, { signal });
@@ -415,7 +415,8 @@ export function attachInputActions(shell, host, signal) {
       shell.toast({
         icon: "fill-aspect",
         text: "Fill Mode",
-        duration: 800
+        duration: TUNING.toast.flashMs,
+        group: "pinch"
       });
     } else if (detail.direction === "in" && state.fillActive) {
       clearFillMode(shell, state);

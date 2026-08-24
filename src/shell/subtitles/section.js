@@ -152,8 +152,9 @@ export class SubtitlesSection {
       if (!files.length) {
         this.#toast({
           icon: "captions",
-          text: "Drop a .srt or .vtt file",
-          duration: 2000
+        text: "Drop a .srt or .vtt file",
+        duration: TUNING.toast.infoMs,
+        group: "subtitles"
         });
         return;
       }
@@ -386,7 +387,8 @@ export class SubtitlesSection {
       this.#toast({
         icon: "captions",
         text: "Failed to load subtitles",
-        duration: 2500
+        duration: TUNING.toast.infoMs,
+        group: "subtitles"
       });
     }
   }
@@ -408,7 +410,8 @@ export class SubtitlesSection {
       this.#toast({
         icon: "link",
         text: "Failed to fetch subtitles",
-        duration: 2500
+        duration: TUNING.toast.infoMs,
+        group: "subtitles"
       });
       return;
     }
@@ -419,7 +422,8 @@ export class SubtitlesSection {
       this.#toast({
         icon: "link",
         text: "Failed to load subtitles",
-        duration: 2500
+        duration: TUNING.toast.infoMs,
+        group: "subtitles"
       });
     }
   }
@@ -456,7 +460,8 @@ export class SubtitlesSection {
       this.#toast({
         icon: "captions",
         text: "No cues found",
-        duration: 2500
+        duration: TUNING.toast.infoMs,
+        group: "subtitles"
       });
       return;
     }
@@ -466,7 +471,8 @@ export class SubtitlesSection {
     this.#toast({
       icon: "captions",
       text: name,
-      duration: 2000
+      duration: TUNING.toast.infoMs,
+      group: "subtitles"
     });
     logger.log("subtitles", `Loaded ${name}`);
   }
