@@ -4,15 +4,6 @@ import { logger } from "../../shared/logger.js";
 /** DOM contract: marks videos/containers/shell hosts this script manages. */
 export const SHELL_MARKER = "data-pf-shell";
 
-/**
- * Per-shell anchor name for CSS anchor positioning: the shell host declares
- * it via anchor-name, its Top Layer surfaces (panel, toast) tether to it via
- * position-anchor. Ids are UUIDs/base-36, so the ident is always valid.
- */
-export function shellAnchorName(id) {
-  return `--pf-shell-${id}`;
-}
-
 let stylesInjected = false;
 
 export function ensureStyles() {

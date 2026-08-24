@@ -1,6 +1,5 @@
 import { logger } from "../../shared/logger.js";
 import { createIconElement } from "./icons.js";
-import { shellAnchorName } from "./inject.js";
 import { GESTURE_EVENTS } from "../inputs/actions.js";
 
 const HOLD_DELAY_MS = 400;
@@ -196,9 +195,10 @@ function createStepper({
  * Tabbed settings panel hosted in the shell HUD, and the shell's open UI
  * API: features declare controls through parameterized builders
  * (addStepper/addButton/addCheckbox/...) instead of assembling DOM.
- * The root is an auto popover: Gecko renders open panels in the Top Layer
- * above every page surface (fullscreen included) and owns Esc/light-dismiss;
- * arrow-key tab navigation stays ours.
+ * The root is a plain sheet in the HUD layer under the host's z-index
+ * doctrine; open/close is a class flip on display, and Esc plus
+ * outside-click dismissal are ours (guarded document listeners).
+ * Arrow-key tab navigation likewise stays ours.
  */
 export class SettingsPanel {
   #hudLayer;
@@ -227,9 +227,6 @@ export class SettingsPanel {
     }
     this.#buildDom();
     this.#wireEvents();
-    // Tether to the shell host: the stylesheet centers via anchor(), so the
-    // engine keeps the open panel over the player region with zero JS.
-    this.#root.style.setProperty("position-anchor", shellAnchorName(this.#shellId));
     logger.log("panel", "Panel ready");
   }
 
@@ -242,14 +239,14 @@ export class SettingsPanel {
   }
 
   get isOpen() {
-    return !!this.#root && this.#root.matches(":popover-open");
+    return !!this.#root && this.#root.classList.contains("pf-open");
   }
 
   open() {
     if (!this.#root || this.#destroyed || !this.#body.childElementCount || this.isOpen) {
       return;
     }
-    this.#root.showPopover();
+    this.#root.classList.add("pf-open");
     const activeTab = this.#root.querySelector(".pf-panel-tab-active") || this.#closeButton;
     if (activeTab && document.activeElement !== activeTab) {
       activeTab.focus();
@@ -258,7 +255,7 @@ export class SettingsPanel {
 
   close() {
     if (this.#root && !this.#destroyed && this.isOpen) {
-      this.#root.hidePopover();
+      this.#root.classList.remove("pf-open");
       if (this.#shellHost && this.#root.contains(document.activeElement)) {
         this.#shellHost.focus();
       }
@@ -478,7 +475,6 @@ export class SettingsPanel {
   #buildDom() {
     const root = document.createElement("div");
     root.className = "pf-panel";
-    root.setAttribute("popover", "auto");
     root.setAttribute("role", "dialog");
     root.setAttribute("aria-modal", "false");
     root.setAttribute("aria-label", "PlayerForge controls");
@@ -531,6 +527,22 @@ export class SettingsPanel {
         this.close();
       }
     }, { signal });
+
+    // Dismissal is ours since the popover left: Esc closes, and a press
+    // outside the shell closes. The whole host counts as "inside" so our
+    // own controls toggle themselves without a close/reopen flicker.
+    // Static guarded listeners: two no-op calls when closed, zero churn.
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && this.isOpen) {
+        this.close();
+      }
+    }, { signal });
+    document.addEventListener("pointerdown", (event) => {
+      if (!this.isOpen || this.#shellHost.contains(event.target)) {
+        return;
+      }
+      this.close();
+    }, { signal, capture: true });
 
     this.#tabList.addEventListener("keydown", (event) => {
       if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {

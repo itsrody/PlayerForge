@@ -99,8 +99,9 @@
 }
 
 /* - Toast (singleton <pf-toast>) - */
-/* Pill-shaped, top-centered, opacity morph for content changes. Lives
-   in the Top Layer as a manual popover, so no z-index is needed. */
+/* Pill-shaped, top-centered, opacity morph for content changes. Rides the
+   HUD layer under the host's z-index doctrine - above captions, below
+   the panel. */
 pf-toast {
   --pf-toast-bg: rgba(0, 0, 0, 0.8);
   --pf-toast-color: var(--pf-fg);
@@ -110,15 +111,9 @@ pf-toast {
   align-items: center;
   gap: 6px;
   position: absolute;
-  /* Reset the popover UA box; position-anchor (set inline per shell) plus
-     anchor() then tether the toast to the shell host, so the engine keeps
-     it top-centered over the player region - scroll, resize, fullscreen,
-     zero JS. */
-  inset: auto;
-  margin: 0;
-  border: none;
-  top: calc(anchor(top) + 12px);
-  left: anchor(center);
+  top: 12px;
+  left: 50%;
+  z-index: 3;
   /* Dedicated translate property (Chrome 104+) - keeps centering out of
      the transform property, so transform-based animations on the toast
      never clobber it. */
@@ -204,27 +199,27 @@ pf-toast.pf-toast-interactive {
 }
 
 /* - Panel (universal plugin panel) - */
-/* Glassy, floating sheet centered on the shell on both axes, rendered
-   in the Top Layer while open (auto popover: Gecko owns Esc and
-   outside-click dismissal). Centering is anchor() insets (position-anchor
-   is set inline per shell) + translate self-centering; the open/close
-   slide folds into that same translate (calc(-50% - 6px) start) so the
-   two never conflict. Density adapts to the *shell* (not the viewport)
-   via the container query at the bottom of this block. */
+/* Glassy, floating sheet centered on the shell on both axes. Open/close
+   flips display via the pf-open class (allow-discrete), so the open/close
+   slide folds into the translate chain (calc(-50% - 6px) start) exactly as
+   before; Esc and outside-click dismissal are JS-owned in panel.js.
+   Density adapts to the *shell* (not the viewport) via the container
+   query at the bottom of this block. */
 .pf-panel {
   container-type: inline-size;
   container-name: pf-panel;
 
   position: absolute;
-  /* Reset the popover UA box; the anchor tether takes over. */
-  inset: auto;
+  z-index: 4;
   padding: 0;
 
-  /* Centered on the shell host; translate self-centers and carries the
-     slide. Breakpoint modes override left/top directly. */
-  left: anchor(center);
+  /* Closed by default; @starting-style keys off the display flip. Centered
+     on the shell host; translate self-centers and carries the slide.
+     Breakpoint modes override left/top directly. */
+  display: none;
+  left: 50%;
   right: auto;
-  top: anchor(center);
+  top: 50%;
   margin: 0;
   translate: -50% -6px;
   width: min(380px, calc(100% - 24px));
@@ -248,12 +243,13 @@ pf-toast.pf-toast-interactive {
     translate 0.14s ease,
     display 0.14s allow-discrete;
 }
-.pf-panel:popover-open {
+.pf-panel.pf-open {
+  display: block;
   opacity: 1;
   translate: -50% -50%;
 }
 @starting-style {
-  .pf-panel:popover-open {
+  .pf-panel.pf-open {
     opacity: 0;
     translate: -50% calc(-50% - 6px);
   }
@@ -784,7 +780,7 @@ pf-toast.pf-toast-interactive {
     margin: 0;
   }
   .pf-panel,
-  .pf-panel:popover-open {
+  .pf-panel.pf-open {
     translate: none;
   }
 }
@@ -805,7 +801,7 @@ pf-toast.pf-toast-interactive {
     border-bottom: none;
   }
   .pf-panel,
-  .pf-panel:popover-open {
+  .pf-panel.pf-open {
     translate: none;
   }
 }
@@ -826,11 +822,11 @@ pf-toast.pf-toast-interactive {
     border-radius: 14px;
   }
   .pf-panel,
-  .pf-panel:popover-open {
+  .pf-panel.pf-open {
     translate: none;
   }
   @starting-style {
-    .pf-panel:popover-open {
+    .pf-panel.pf-open {
       translate: none;
     }
   }
