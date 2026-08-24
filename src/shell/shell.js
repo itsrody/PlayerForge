@@ -15,7 +15,6 @@ const VIDEO_EVENTS = [
   "ended", "volumechange", "ratechange", "progress", "stalled", "emptied", "error"
 ];
 
-const SDK_FULLSCREEN_CLASSES = ["plyr--fullscreen", "mejs-container-fullscreen", "vjs-fullscreen"];
 const MEDIA_SESSION_SYNC_EVENTS = new Set([
   "play", "pause", "playing", "ended", "seeked", "durationchange", "ratechange",
   "volumechange", "loadedmetadata"
@@ -51,7 +50,8 @@ export class Shell {
   #destroyed = false;
   #cleanups = new Set();
   #stopHostWatch = null;
-  #fullscreen = false;
+  /** Mirror of the fullscreen checkmark, used only to dedup change events. */
+  #lastFullscreen = false;
   #savedPositionStyle = null;
 
   constructor({ id, video, container, sdk, sdkName, bus }) {
@@ -145,8 +145,13 @@ export class Shell {
     return this.video.textTracks;
   }
 
+  /**
+   * Pure platform truth: this shell is fullscreen iff the document's
+   * fullscreen element belongs to it. No cached state, no SDK heuristics.
+   */
   get fullscreen() {
-    return this.#fullscreen;
+    const el = document.fullscreenElement;
+    return !!el && this.#ownsFullscreenElement(el);
   }
 
   async play() {
@@ -365,11 +370,12 @@ export class Shell {
     }
   }
 
+  /** Emit shell:fullscreen-change whenever this shell's checkmark flips. */
   #watchFullscreen() {
-    const checkFullscreen = () => {
-      const active = this.#detectFullscreen();
-      if (active !== this.#fullscreen) {
-        this.#fullscreen = active;
+    const onChange = () => {
+      const active = this.fullscreen;
+      if (active !== this.#lastFullscreen) {
+        this.#lastFullscreen = active;
         this.#bus.emit("shell:fullscreen-change", {
           shellId: this.id,
           fullscreen: active
@@ -377,44 +383,19 @@ export class Shell {
         logger.log("shell", `Fullscreen: ${active}`);
       }
     };
-    document.addEventListener("fullscreenchange", checkFullscreen, true);
-    this.#cleanups.add(() => document.removeEventListener("fullscreenchange", checkFullscreen, true));
-    window.addEventListener("resize", checkFullscreen);
-    this.#cleanups.add(() => window.removeEventListener("resize", checkFullscreen));
-
-    const observer = new MutationObserver(checkFullscreen);
-    const observeTree = (element) =>
-      observer.observe(element, {
-        attributes: true,
-        attributeFilter: ["class", "style"],
-        childList: true
-      });
-    let ancestor = this.container.parentElement;
-    observeTree(this.container);
-    for (let depth = 0; ancestor && depth < 4; depth++, ancestor = ancestor.parentElement) {
-      observeTree(ancestor);
-    }
-    this.#cleanups.add(() => observer.disconnect());
-    this.#fullscreen = this.#detectFullscreen();
+    document.addEventListener("fullscreenchange", onChange);
+    this.#cleanups.add(() => document.removeEventListener("fullscreenchange", onChange));
   }
 
   exitFullscreen() {
     const fullscreenEl = document.fullscreenElement;
     if (fullscreenEl && this.#ownsFullscreenElement(fullscreenEl)) {
       document.exitFullscreen()?.catch(() => {});
-      return;
-    }
-    for (let el = this.container; el; el = el.parentElement) {
-      for (const cls of SDK_FULLSCREEN_CLASSES) {
-        if (el.classList.contains(cls)) {
-          el.classList.remove(cls);
-        }
-      }
     }
   }
 
   async enterFullscreen(lockOrientation = false) {
-    if (!this.#fullscreen) {
+    if (!this.fullscreen) {
       try {
         await this.container.requestFullscreen({ navigationUI: "hide" });
       } catch (err) {
@@ -445,21 +426,6 @@ export class Shell {
     const video = this.video;
     return element === container || element === video ||
       container?.contains(element) || video?.contains(element) || element.contains(container);
-  }
-
-  #detectFullscreen() {
-    const fullscreenEl = document.fullscreenElement;
-    if (fullscreenEl && this.#ownsFullscreenElement(fullscreenEl)) {
-      return true;
-    }
-    for (let el = this.container; el; el = el.parentElement) {
-      for (const cls of SDK_FULLSCREEN_CLASSES) {
-        if (el.classList.contains(cls)) {
-          return true;
-        }
-      }
-    }
-    return false;
   }
 
   #markManaged() {
