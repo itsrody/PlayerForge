@@ -3,7 +3,7 @@ import { installContextBridge, installVideoProbe } from "./shared/context.js";
 import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/sdk.js";
 import { logger } from "./shared/logger.js";
 import { shouldSkipUrl } from "./kernel/guard.js";
-import { KEYS, getConfigValue, setConfigValue } from "./shared/storage.js";
+import { KEYS, getConfigValue, setConfigValue, gmDeleteValue } from "./shared/storage.js";
 
 // The version lives in the banner and is read from the installed script at
 // runtime via GM_info, so what the UI reports is always what VM actually
@@ -25,8 +25,13 @@ function bootstrap() {
     kernel.init();
 
     // One subscription serves both duties: readiness log always, first-run
-    // welcome toast only until the flag flips.
-    let welcomePending = getConfigValue(KEYS.firstRun, getConfigValue("firstRun", true) !== false);
+    // welcome toast only until the flag flips. Installs from before the key
+    // rename carry a bare "firstRun" root - absorb it once, then sweep it.
+    const legacyFirstRun = getConfigValue("firstRun", undefined);
+    let welcomePending = getConfigValue(KEYS.firstRun, legacyFirstRun !== false);
+    if (legacyFirstRun !== undefined) {
+      gmDeleteValue("firstRun");
+    }
     kernel.bus.addEventListener("pf:shell-created", (event) => {
       const shell = event.detail;
       logger.log("entry", `Shell ready: ${shell.id} (${shell.sdkName})`);
