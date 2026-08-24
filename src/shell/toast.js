@@ -1,3 +1,4 @@
+import { logger } from "../shared/logger.js";
 import { iconMarkup } from "./icons.js";
 
 /**
@@ -18,7 +19,9 @@ export function formatTime(seconds) {
  * Single toast surface hosted in the shell HUD layer: icon + text +
  * optional action buttons, optional auto-hide, and group-tagged hides so
  * overlapping callers (scrub hints, hold indicators) don't clobber each
- * other.
+ * other. The element is a manual popover shown for its whole life: Gecko
+ * paints it in the Top Layer above every page surface (fullscreen
+ * included), while visibility stays a pure opacity morph on pf-visible.
  */
 export class ToastManager {
   #toast;
@@ -31,6 +34,12 @@ export class ToastManager {
   constructor(hudLayer) {
     const doc = hudLayer.ownerDocument;
     this.#toast = doc.createElement("pf-toast");
+    this.#toast.setAttribute("popover", "manual");
+    try {
+      this.#toast.showPopover();
+    } catch (err) {
+      logger.warn("toast", "Top Layer unavailable - toast falls back to HUD layer", err);
+    }
     this.#icon = doc.createElement("span");
     this.#icon.className = "pf-toast-icon";
     this.#text = doc.createElement("span");

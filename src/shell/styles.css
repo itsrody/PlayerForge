@@ -94,7 +94,8 @@
 }
 
 /* ── Toast (singleton <pf-toast>) ──────────────────────────────── */
-/* Pill-shaped, top-centered, opacity morph for content changes. */
+/* Pill-shaped, top-centered, opacity morph for content changes. Lives
+   in the Top Layer as a manual popover, so no z-index is needed. */
 pf-toast {
   --pf-toast-bg: rgba(0, 0, 0, 0.8);
   --pf-toast-color: var(--pf-fg);
@@ -104,6 +105,11 @@ pf-toast {
   align-items: center;
   gap: 6px;
   position: absolute;
+  /* Reset the popover UA box (fixed inset-0) back to HUD-layer anchoring:
+     top-center of the video container. */
+  inset: auto;
+  margin: 0;
+  border: none;
   top: 12px;
   left: 50%;
   /* Dedicated translate property (Chrome 104+) - keeps centering out of
@@ -119,7 +125,6 @@ pf-toast {
   line-height: 1;
   white-space: nowrap;
   pointer-events: none;
-  z-index: 100;
 
   /* Default hidden */
   opacity: 0;
@@ -192,22 +197,28 @@ pf-toast.pf-toast-interactive {
 }
 
 /* ── Panel (universal plugin panel) ───────────────────────────── */
-/* Glassy, floating sheet centered in the shell on both axes. Vertical
-   centering is top: 50% + translate: 0 -50% (translate, not margin-top,
-   so it tracks the panel's own height and survives overflow scrolling); the
-   open/close slide folds into that same translate (calc(-50% - 6px) start)
-   so the two never conflict. Density adapts to the *shell* (not the
-   viewport) via the container query at the bottom of this block. */
+/* Glassy, floating sheet centered in the shell on both axes, rendered
+   in the Top Layer while open (auto popover: Gecko owns Esc and
+   outside-click dismissal). Vertical centering is top: 50% + translate:
+   0 -50% (translate, not margin-top, so it tracks the panel's own height
+   and survives overflow scrolling); the open/close slide folds into that
+   same translate (calc(-50% - 6px) start) so the two never conflict.
+   Density adapts to the *shell* (not the viewport) via the container
+   query at the bottom of this block. */
 .pf-panel {
   container-type: inline-size;
   container-name: pf-panel;
 
   position: absolute;
+  /* Reset the popover UA box; the shell HUD is the containing block. */
+  inset: auto;
+  padding: 0;
+
   left: 0;
   right: 0;
   top: 50%;
   margin: 0 auto;
-  translate: 0 -50%;
+  translate: 0 -6px;
   width: min(380px, calc(100% - 24px));
   max-height: calc(100% - 24px);
   overflow-y: auto;
@@ -222,7 +233,6 @@ pf-toast.pf-toast-interactive {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   font-size: 13px;
   line-height: 1.4;
-  z-index: 120;
 
   opacity: 0;
   translate: 0 -6px;
@@ -231,17 +241,16 @@ pf-toast.pf-toast-interactive {
     translate 0.14s ease,
     display 0.14s allow-discrete;
 }
-.pf-panel:not([hidden]) {
+.pf-panel:popover-open {
   opacity: 1;
   translate: 0 -50%;
 }
 @starting-style {
-  .pf-panel:not([hidden]) {
+  .pf-panel:popover-open {
     opacity: 0;
     translate: 0 calc(-50% - 6px);
   }
 }
-.pf-panel[hidden] { display: none; }
 
 /* Single header row: [segmented tabs] [close]. */
 .pf-panel-header {
@@ -776,7 +785,7 @@ pf-toast.pf-toast-interactive {
     margin: 0;
   }
   .pf-panel,
-  .pf-panel:not([hidden]) {
+  .pf-panel:popover-open {
     translate: none;
   }
 }
@@ -795,7 +804,7 @@ pf-toast.pf-toast-interactive {
     border-bottom: none;
   }
   .pf-panel,
-  .pf-panel:not([hidden]) {
+  .pf-panel:popover-open {
     translate: none;
   }
 }
@@ -816,11 +825,11 @@ pf-toast.pf-toast-interactive {
     border-radius: 14px;
   }
   .pf-panel,
-  .pf-panel:not([hidden]) {
+  .pf-panel:popover-open {
     translate: none;
   }
   @starting-style {
-    .pf-panel:not([hidden]) {
+    .pf-panel:popover-open {
       translate: none;
     }
   }

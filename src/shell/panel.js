@@ -195,7 +195,9 @@ function createStepper({
  * Tabbed settings panel hosted in the shell HUD, and the shell's open UI
  * API: features declare controls through parameterized builders
  * (addStepper/addButton/addCheckbox/...) instead of assembling DOM.
- * Handles open/close, focus trapping, and arrow-key tab navigation.
+ * The root is an auto popover: Gecko renders open panels in the Top Layer
+ * above every page surface (fullscreen included) and owns Esc/light-dismiss;
+ * arrow-key tab navigation stays ours.
  */
 export class SettingsPanel {
   #hudLayer;
@@ -236,14 +238,14 @@ export class SettingsPanel {
   }
 
   get isOpen() {
-    return !!this.#root && !this.#root.hidden;
+    return !!this.#root && this.#root.matches(":popover-open");
   }
 
   open() {
-    if (!this.#root || this.#destroyed || !this.#body.childElementCount) {
+    if (!this.#root || this.#destroyed || !this.#body.childElementCount || this.isOpen) {
       return;
     }
-    this.#root.hidden = false;
+    this.#root.showPopover();
     const activeTab = this.#root.querySelector(".pf-panel-tab-active") || this.#closeButton;
     if (activeTab && document.activeElement !== activeTab) {
       activeTab.focus();
@@ -251,8 +253,8 @@ export class SettingsPanel {
   }
 
   close() {
-    if (!!this.#root && !this.#destroyed) {
-      this.#root.hidden = true;
+    if (this.#root && !this.#destroyed && this.isOpen) {
+      this.#root.hidePopover();
       if (this.#shellHost && this.#root.contains(document.activeElement)) {
         this.#shellHost.focus();
       }
@@ -472,7 +474,7 @@ export class SettingsPanel {
   #buildDom() {
     const root = document.createElement("div");
     root.className = "pf-panel";
-    root.hidden = true;
+    root.setAttribute("popover", "auto");
     root.setAttribute("role", "dialog");
     root.setAttribute("aria-modal", "false");
     root.setAttribute("aria-label", "PlayerForge controls");
@@ -525,37 +527,6 @@ export class SettingsPanel {
         this.close();
       }
     }, { signal });
-
-    document.addEventListener("keydown", (event) => {
-      if (event.key !== "Escape" || !this.isOpen) {
-        return;
-      }
-      const active = document.activeElement;
-      if (!active || active.tagName !== "INPUT" && active.tagName !== "TEXTAREA" && !active.isContentEditable) {
-        this.close();
-      }
-    }, { capture: true, signal });
-
-    document.addEventListener("keydown", (event) => {
-      if (event.key !== "Tab" || !this.isOpen) {
-        return;
-      }
-      const focusables = [...this.#root.querySelectorAll(
-        "button, [href], input, select, textarea, [tabindex]:not([tabindex=\"-1\"])"
-      )].filter((el) => !el.disabled && !el.hidden);
-      if (!focusables.length) {
-        return;
-      }
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    }, { capture: true, signal });
 
     this.#tabList.addEventListener("keydown", (event) => {
       if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
