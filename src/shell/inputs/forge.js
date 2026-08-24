@@ -1,5 +1,6 @@
 import { allowsIntent, armedKeys, GESTURE_EVENTS, easeTransformTo } from "./actions.js";
 import { TUNING } from "../chrome/config.js";
+import { SHELL_MARKER } from "../chrome/inject.js";
 
 /**
  * Pointer handlers never preventDefault - native pan/scroll over the zone is
@@ -312,44 +313,64 @@ export class InputForge {
     }
   }
 
-  /**
-   * Decide whether keyboard shortcuts should apply: yes when focus is inside
-   * the container on non-interactive elements (unless `allowControlFocus`),
-   * or when focus is page-level and this engine owns playback.
-   */
+    /**
+     * Decide whether keyboard shortcuts should apply: yes when focus sits
+     * on a target that cannot consume the keystroke itself - inside the
+     * container, or at page level (SPA roots park focus on app wrappers,
+     * not body) while this engine owns playback.
+     */
   #shouldHandleKeys(allowControlFocus = false) {
     const activeElement = document.activeElement;
     if (!this.#zone) {
       return false;
     }
-    if (this.#zone.contains(activeElement)) {
-      if (this.#isTextEntryTarget(activeElement) || activeElement.closest("a[href]")) {
-        return false;
-      }
-      const tag = activeElement.tagName;
-      return !!allowControlFocus || tag !== "BUTTON" && tag !== "SELECT" && tag !== "OPTION" && tag !== "INPUT";
+    if (!this.#keysAllowedForTarget(activeElement, allowControlFocus)) {
+      return false;
     }
-    if (activeElement === document.body || activeElement === document.documentElement || activeElement === null) {
-      if (!this.#isActive(this)) {
-        return false;
+    if (this.#zone.contains(activeElement)) {
+      return true;
+    }
+    if (!this.#isActive(this)) {
+      return false;
+    }
+    let candidates = 0;
+    let includesThis = false;
+    for (const forge of activeForges) {
+      if (this.#isActive(forge)) {
+        candidates++;
+        includesThis ||= forge === this;
       }
-      let candidates = 0;
-      let includesThis = false;
-      for (const forge of activeForges) {
-        if (this.#isActive(forge)) {
-          candidates++;
-          includesThis ||= forge === this;
-        }
-      }
-      if (candidates === 1) {
-        return includesThis;
-      } else if (candidates > 1) {
-        return lastActiveForge === this;
-      } else {
-        return false;
-      }
+    }
+    if (candidates === 1) {
+      return includesThis;
+    } else if (candidates > 1) {
+      return lastActiveForge === this;
     }
     return false;
+  }
+
+  /**
+   * Whether a focused element must keep its keystrokes (playback keys yield).
+   * Text entry, links, selects/options and inputs always win. Buttons only
+   * win when they belong to PlayerForge's own chrome - clicking a NATIVE
+   * player control must never silence hotkeys (desktop-player parity), while
+   * pf stepper/select controls genuinely consume arrows.
+   */
+  #keysAllowedForTarget(el, allowControlFocus) {
+    if (!el || el === document.body || el === document.documentElement) {
+      return true;
+    }
+    if (this.#isTextEntryTarget(el) || el.closest?.("a[href]")) {
+      return false;
+    }
+    const tag = el.tagName;
+    if (tag === "SELECT" || tag === "OPTION" || tag === "INPUT") {
+      return !!allowControlFocus;
+    }
+    if (tag === "BUTTON") {
+      return !!allowControlFocus || !el.closest(`[${SHELL_MARKER}]`);
+    }
+    return true;
   }
 
   #isTextEntryTarget(el) {

@@ -281,3 +281,75 @@ test("destroying mid-hold fires the pending release before teardown", async () =
   controller.destroy();
   assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.release).length, 1);
 });
+
+test("a focused native player button does not silence hotkeys", () => {
+  const { dom, video, zone, host } = makeEnv();
+  // Native SDK control-bar button inside the container - NOT pf chrome.
+  const nativeButton = dom.window.document.createElement("button");
+  nativeButton.textContent = "play";
+  zone.appendChild(nativeButton);
+  nativeButton.focus();
+
+  const controller = new InputForge(video, zone, host);
+  const seen = collect(host, dom.window);
+  dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+    code: "ArrowRight", bubbles: true, cancelable: true
+  }));
+  assert.equal(seen.filter((e) => e.type === GESTURE_EVENTS.skip).length, 1,
+    "clicking a native control must not kill arrow hotkeys");
+  controller.destroy();
+});
+
+test("pf-owned buttons still keep exclusive key ownership", async () => {
+  const { SHELL_MARKER } = await import("../src/shell/chrome/inject.js");
+  const { dom, video, zone, host } = makeEnv();
+  host.setAttribute(SHELL_MARKER, "t");
+  const stepperButton = dom.window.document.createElement("button");
+  host.appendChild(stepperButton);
+  stepperButton.focus();
+
+  const controller = new InputForge(video, zone, host);
+  const seen = collect(host, dom.window);
+  dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+    code: "ArrowRight", bubbles: true, cancelable: true
+  }));
+  assert.equal(seen.length, 0, "panel stepper arrows belong to the stepper");
+  controller.destroy();
+});
+
+test("an SPA app-root div holding page focus arms hotkeys", () => {
+  const { dom, video, zone, host } = makeEnv();
+  // Sites commonly focus their app wrapper instead of body.
+  const appRoot = dom.window.document.createElement("div");
+  appRoot.setAttribute("tabindex", "-1");
+  dom.window.document.body.appendChild(appRoot);
+  appRoot.focus();
+  assert.equal(dom.window.document.activeElement, appRoot);
+
+  const controller = new InputForge(video, zone, host);
+  const seen = collect(host, dom.window);
+  dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+    code: "ArrowRight", bubbles: true, cancelable: true
+  }));
+  assert.equal(seen.filter((e) => e.type === GESTURE_EVENTS.skip).length, 1,
+    "page-level non-interactive focus must not block hotkeys");
+  controller.destroy();
+});
+
+test("typing targets outside the container never trigger hotkeys", () => {
+  const { dom, video, zone, host } = makeEnv();
+  const searchBox = dom.window.document.createElement("input");
+  searchBox.setAttribute("type", "text");
+  dom.window.document.body.appendChild(searchBox);
+  searchBox.focus();
+
+  const controller = new InputForge(video, zone, host);
+  const seen = collect(host, dom.window);
+  const keystroke = new dom.window.KeyboardEvent("keydown", {
+    code: "ArrowRight", bubbles: true, cancelable: true
+  });
+  dom.window.document.dispatchEvent(keystroke);
+  assert.equal(seen.length, 0, "text entry owns the keyboard");
+  assert.equal(keystroke.defaultPrevented, false);
+  controller.destroy();
+});
