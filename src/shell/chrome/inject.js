@@ -50,32 +50,66 @@ export function injectShell(container) {
 }
 
 /**
- * Parasite watchdog: keep the shell host attached inside its container
- * without ever fighting the SDK over sibling order. A single debounced
- * observer re-appends the host (as last child) only when something removed
- * it from the container; re-parenting of the container carries the host
- * along and needs no reaction. Dies with `signal`.
+ * Parasite watchdog, fully event-driven. Reacts only to real evictions of
+ * the host - ordinary player churn never wakes us - and rides the document
+ * stream whenever the container itself leaves the DOM, since detach and
+ * reattach fire nothing on the container. There are deliberately no timers,
+ * delays, or surrender heuristics: a page that keeps fighting gets fought
+ * back indefinitely, and a stalemate is the user's to settle. Dies with
+ * `signal`.
  */
 export function watchShellHost(container, host, { signal } = {}) {
   let scheduled = false;
+  /** Armed only while the container is out of the document. */
+  let reconnectObserver = null;
 
-  const check = () => {
+  const reconcile = () => {
     scheduled = false;
-    if (host.parentElement !== container && container.isConnected) {
+    if (!container.isConnected) {
+      armReconnectWatch();
+      return;
+    }
+    dropReconnectWatch();
+    if (host.parentElement !== container) {
       container.appendChild(host);
       logger.log("inject", "Shell host re-attached by watchdog");
     }
   };
 
   const schedule = () => {
-    if (scheduled) {
-      return;
+    if (!scheduled) {
+      scheduled = true;
+      queueMicrotask(reconcile);
     }
-    scheduled = true;
-    queueMicrotask(check);
   };
 
-  const observer = new MutationObserver(schedule);
+  const armReconnectWatch = () => {
+    if (reconnectObserver) {
+      return;
+    }
+    reconnectObserver = new MutationObserver(schedule);
+    reconnectObserver.observe(container.ownerDocument.documentElement, { childList: true, subtree: true });
+  };
+
+  const dropReconnectWatch = () => {
+    reconnectObserver?.disconnect();
+    reconnectObserver = null;
+  };
+
+  const observer = new MutationObserver((records) => {
+    for (const { removedNodes } of records) {
+      for (const node of removedNodes) {
+        if (node === host) {
+          schedule();
+          return;
+        }
+      }
+    }
+  });
   observer.observe(container, { childList: true });
-  signal?.addEventListener("abort", () => observer.disconnect(), { once: true });
+
+  signal?.addEventListener("abort", () => {
+    observer.disconnect();
+    dropReconnectWatch();
+  }, { once: true });
 }
