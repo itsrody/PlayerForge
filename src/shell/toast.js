@@ -1,4 +1,5 @@
 import { logger } from "../shared/logger.js";
+import { delay } from "../shared/time.js";
 import { iconMarkup } from "./icons.js";
 
 /**
@@ -14,7 +15,8 @@ export class ToastManager {
   #icon;
   #text;
   #actions;
-  #autoHideTimer = null;
+  /** Cancel handle for the pending auto-hide, null when none is scheduled. */
+  #cancelAutoHide = null;
   #activeGroup = null;
 
   constructor(hudLayer) {
@@ -76,24 +78,26 @@ export class ToastManager {
     }
     this.#toast.style.color = color || "";
     this.#toast.classList.add("pf-visible");
-    clearTimeout(this.#autoHideTimer);
-    if (duration > 0) {
-      this.#autoHideTimer = setTimeout(() => {
-        this.#toast.classList.remove("pf-visible");
-      }, duration);
-    }
+    this.#cancelAutoHide?.();
+    this.#cancelAutoHide = duration > 0
+      ? delay(() => {
+          this.#cancelAutoHide = null;
+          this.#toast.classList.remove("pf-visible");
+        }, duration)
+      : null;
   }
 
   hide(group) {
     if (group === undefined || group === this.#activeGroup) {
-      clearTimeout(this.#autoHideTimer);
+      this.#cancelAutoHide?.();
+      this.#cancelAutoHide = null;
       this.#toast.classList.remove("pf-visible");
     }
   }
 
   destroy() {
-    clearTimeout(this.#autoHideTimer);
-    this.#autoHideTimer = null;
+    this.#cancelAutoHide?.();
+    this.#cancelAutoHide = null;
     this.#toast.remove();
   }
 }

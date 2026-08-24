@@ -1,5 +1,6 @@
 import { logger } from "../shared/logger.js";
 import { gmRegisterMenu } from "../shared/storage.js";
+import { delay } from "../shared/time.js";
 import { GESTURE_EVENTS } from "../shell/inputs/input-list.js";
 import { EventBus } from "./bus.js";
 import { ShellRegistry } from "./registry.js";
@@ -62,8 +63,8 @@ export class Kernel {
         observer.disconnect();
       }
       this.#removalObservers.clear();
-      for (const timer of this.#removalTimers.values()) {
-        clearTimeout(timer);
+      for (const cancel of this.#removalTimers.values()) {
+        cancel();
       }
       this.#removalTimers.clear();
       this.#registry.destroyAll();
@@ -131,7 +132,7 @@ export class Kernel {
         observer.disconnect();
         this.#removalObservers.delete(observer);
       }
-      clearTimeout(this.#removalTimers.get(video));
+      this.#removalTimers.get(video)?.();
       this.#removalTimers.delete(video);
       this.#seenVideos.delete(video);
     };
@@ -160,7 +161,7 @@ export class Kernel {
         return;
       }
       if (!video.isConnected) {
-        const timer = setTimeout(() => {
+        this.#removalTimers.set(video, delay(() => {
           this.#removalTimers.delete(video);
           if (!video.isConnected) {
             stopWatching();
@@ -168,8 +169,7 @@ export class Kernel {
           } else {
             reanchorObservers();
           }
-        }, REMOVAL_GRACE_MS);
-        this.#removalTimers.set(video, timer);
+        }, REMOVAL_GRACE_MS));
         return;
       }
       if (video.parentElement !== anchors[0]) {

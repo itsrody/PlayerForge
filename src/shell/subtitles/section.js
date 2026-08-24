@@ -1,5 +1,6 @@
 import { getConfigValue, setConfigValue } from "../../shared/storage.js";
 import { srtToVtt, ensureVttHeader, parseSubtitles } from "./forgevtt.js";
+import { debounce } from "../../shared/time.js";
 import { logger } from "../../shared/logger.js";
 
 const SUBTITLE_FILE_ACCEPT = ".srt,.vtt";
@@ -229,7 +230,13 @@ export class SubtitlesSection {
     });
     applyCueShadow(shadowStepper.getValue());
 
-    let syncDebounce = null;
+    const applySyncOffset = debounce((offset) => {
+      if (this.#track) {
+        this.#track.cues = parseSubtitles(this.#track.text, offset);
+      }
+      this.#render();
+      setConfigValue(SETTING_KEYS.syncOffset, offset);
+    }, SYNC_DEBOUNCE_MS);
     const syncStepper = panel.addStepper(styleGrid, {
       label: "Sync",
       min: -20,
@@ -239,14 +246,7 @@ export class SubtitlesSection {
       format: (v) => v === 0 ? "0s" : `${v > 0 ? "+" : ""}${v}s`,
       onChange: (offset) => {
         this.#syncOffset = offset;
-        clearTimeout(syncDebounce);
-        syncDebounce = setTimeout(() => {
-          if (this.#track) {
-            this.#track.cues = parseSubtitles(this.#track.text, offset);
-          }
-          this.#render();
-          setConfigValue(SETTING_KEYS.syncOffset, offset);
-        }, SYNC_DEBOUNCE_MS);
+        applySyncOffset(offset);
       }
     });
 

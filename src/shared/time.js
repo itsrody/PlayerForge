@@ -11,3 +11,18 @@ export function formatTime(seconds) {
     ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
     : `${m}:${String(s).padStart(2, "0")}`;
 }
+
+/** Cancellable setTimeout: the returned function cancels a pending run. */
+export function delay(fn, ms) {
+  const id = setTimeout(fn, ms);
+  return () => clearTimeout(id);
+}
+
+/** Trailing-edge debounce. Re-calling within the window reschedules. */
+export function debounce(fn, ms) {
+  let cancel = null;
+  return (...args) => {
+    cancel?.();
+    cancel = delay(() => fn(...args), ms);
+  };
+}
