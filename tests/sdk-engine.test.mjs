@@ -24,8 +24,10 @@ test("adopts each registered SDK via its namespaced anchor", () => {
     ['<div class="mejs__container"><video></video></div>', "MediaElement.js"],
     ['<div class="xgplayer xgplayer-desktop"><video></video></div>', "XGPlayer"],
     ['<div class="prism-player"><video></video></div>', "Aliplayer"],
+    ['<div class="fluid_video_wrapper fluid_player_layout_default"><video></video></div>', "Fluid Player"],
     ['<div data-player-id="4c522212"><video></video></div>', "Flowplayer"],
     ['<div class="flowplayer is-ready"><video></video></div>', "Flowplayer"],
+    ['<div class="fp-engine"><div class="fp-ui"></div><video></video></div>', "Flowplayer"],
     ['<div data-player><video></video></div>', "Clappr"],
     ['<media-player><video slot="media"></video></media-player>', "Vidstack"],
     ['<mux-player><video></video></mux-player>', "Mux Player"],
@@ -39,7 +41,7 @@ test("adopts each registered SDK via its namespaced anchor", () => {
 });
 
 test("crosses open shadow boundaries to reach custom-element players", () => {
-  for (const tag of ["media-player", "mux-player", "radiant-media-player"]) {
+  for (const tag of ["media-player", "mux-player", "radiant-media-player", "flowplayer-ui"]) {
     const doc = dom(`<${tag}></${tag}>`);
     const player = doc.querySelector(tag);
     const video = doc.createElement("video");
@@ -47,7 +49,8 @@ test("crosses open shadow boundaries to reach custom-element players", () => {
     assert.equal(findSdkForVideo(video)?.name, doc.querySelector(tag) && {
       "media-player": "Vidstack",
       "mux-player": "Mux Player",
-      "radiant-media-player": "Radiant Media Player"
+      "radiant-media-player": "Radiant Media Player",
+      "flowplayer-ui": "Flowplayer"
     }[tag], tag);
     assert.equal(findContainer(video), player, tag);
   }
