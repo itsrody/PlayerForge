@@ -16,6 +16,8 @@ function makeEnv(duration) {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", {
     url: "https://www.youtube.com/watch?v=1"
   });
+  // jsdom rejects AbortSignals from the Node realm; lend the DOM realm's.
+  globalThis.AbortController = dom.window.AbortController;
   globalThis.window = dom.window;
   globalThis.location = dom.window.location;
   globalThis.document = dom.window.document;

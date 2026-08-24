@@ -18,7 +18,7 @@
  * unless the relay chain is already listening.
  */
 import { logger } from "./logger.js";
-import { videoFromEvent } from "../kernel/sdk.js";
+import { videoFromEvent, videosFromMutations } from "../kernel/sdk.js";
 
 /* ── 1. Domain identity ──────────────────────────────────────────────── */
 
@@ -312,17 +312,10 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
     if (done) {
       return;
     }
-    for (const mutation of mutations) {
-      for (const node of mutation.addedNodes) {
-        const candidates = node.localName === "video"
-          ? [node]
-          : node.querySelectorAll ? [...node.querySelectorAll("video")] : [];
-        for (const video of candidates) {
-          if (qualifies(video)) {
-            fire();
-            return;
-          }
-        }
+    for (const video of videosFromMutations(mutations)) {
+      if (qualifies(video)) {
+        fire();
+        return;
       }
     }
   }

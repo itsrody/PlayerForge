@@ -119,3 +119,16 @@ export function videoFromEvent(event) {
   }
   return null;
 }
+
+/** Every <video> entering the DOM in a MutationObserver batch's added nodes. */
+export function* videosFromMutations(mutations) {
+  for (const mutation of mutations) {
+    for (const node of mutation.addedNodes) {
+      if (node.localName === "video") {
+        yield node;
+      } else if (node.querySelectorAll) {
+        yield* node.querySelectorAll("video");
+      }
+    }
+  }
+}

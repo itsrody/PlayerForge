@@ -4,7 +4,7 @@ import { GESTURE_EVENTS } from "../shell/inputs/input-list.js";
 import { EventBus } from "./bus.js";
 import { ShellRegistry } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
-import { findSdkForVideo, findContainer, videoFromEvent, MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./sdk.js";
+import { findSdkForVideo, findContainer, videoFromEvent, videosFromMutations, MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./sdk.js";
 import { Shell } from "../shell/shell.js";
 
 export const SHELL_MARKER = "data-pf-shell";
@@ -97,16 +97,8 @@ export class Kernel {
     document.addEventListener("pageshow", this.#onPageShow, { signal });
     window.addEventListener("pagehide", this.#onPageHide, { signal });
     this.#insertionObserver = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        for (const node of mutation.addedNodes) {
-          if (node.localName === "video") {
-            this.#adoptVideo(node);
-          } else if (node.querySelectorAll) {
-            for (const video of node.querySelectorAll("video")) {
-              this.#adoptVideo(video);
-            }
-          }
-        }
+      for (const video of videosFromMutations(mutations)) {
+        this.#adoptVideo(video);
       }
     });
     this.#insertionObserver.observe(document.documentElement, { childList: true, subtree: true });

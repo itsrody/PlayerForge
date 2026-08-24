@@ -209,11 +209,7 @@ export class SettingsPanel {
   #sections = new Map();
   #activeSection = null;
   #sectionCounter = 0;
-  #onPanelGesture = null;
-  #onSwipeGesture = null;
-  #onKeydownEscape = null;
-  #onKeydownTab = null;
-  #onTablistKeydown = null;
+  /** All panel subscriptions die with this signal. */
   #scope = new AbortController();
   #destroyed = false;
 
@@ -318,7 +314,7 @@ export class SettingsPanel {
     label.textContent = title;
     tab.appendChild(label);
 
-    tab.addEventListener("click", () => this.#activateSection(section, tab));
+    tab.addEventListener("click", () => this.#activateSection(section, tab), { signal: this.#scope.signal });
     this.#tabList.appendChild(tab);
     this.#sections.set(section, tab);
     if (!this.#activeSection) {
@@ -463,7 +459,7 @@ export class SettingsPanel {
   destroy() {
     if (!this.#destroyed) {
       this.#destroyed = true;
-      this.#unwireEvents();
+      this.#scope.abort();
       this.#root?.remove();
       this.#root = null;
       this.#body = null;
@@ -509,29 +505,28 @@ export class SettingsPanel {
     this.#body = body;
     this.#closeButton = closeButton;
 
-    closeButton.addEventListener("click", () => this.close());
+    closeButton.addEventListener("click", () => this.close(), { signal: this.#scope.signal });
   }
 
   #wireEvents() {
-    this.#onPanelGesture = (event) => {
+    const { signal } = this.#scope;
+    this.#shellHost.addEventListener(GESTURE_EVENTS.panel, (event) => {
       event.stopPropagation();
       this.toggle();
-    };
-    this.#onSwipeGesture = (event) => {
+    }, { signal });
+    this.#shellHost.addEventListener(GESTURE_EVENTS.swipe, (event) => {
       if (event.detail?.direction === "up") {
         this.toggle();
       }
-    };
-    this.#shellHost.addEventListener(GESTURE_EVENTS.panel, this.#onPanelGesture);
-    this.#shellHost.addEventListener(GESTURE_EVENTS.swipe, this.#onSwipeGesture);
+    }, { signal });
 
     this.#bus?.addEventListener("shell:fullscreen-change", (event) => {
       if (event.detail.shellId === this.#shellId) {
         this.close();
       }
-    }, { signal: this.#scope.signal });
+    }, { signal });
 
-    this.#onKeydownEscape = (event) => {
+    document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape" || !this.isOpen) {
         return;
       }
@@ -539,10 +534,9 @@ export class SettingsPanel {
       if (!active || active.tagName !== "INPUT" && active.tagName !== "TEXTAREA" && !active.isContentEditable) {
         this.close();
       }
-    };
-    document.addEventListener("keydown", this.#onKeydownEscape, true);
+    }, { capture: true, signal });
 
-    this.#onKeydownTab = (event) => {
+    document.addEventListener("keydown", (event) => {
       if (event.key !== "Tab" || !this.isOpen) {
         return;
       }
@@ -561,10 +555,9 @@ export class SettingsPanel {
         event.preventDefault();
         first.focus();
       }
-    };
-    document.addEventListener("keydown", this.#onKeydownTab, true);
+    }, { capture: true, signal });
 
-    this.#onTablistKeydown = (event) => {
+    this.#tabList.addEventListener("keydown", (event) => {
       if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
         return;
       }
@@ -592,32 +585,7 @@ export class SettingsPanel {
       if (targetSection) {
         this.#activateSection(targetSection, tabs[nextIndex]);
       }
-    };
-    this.#tabList.addEventListener("keydown", this.#onTablistKeydown);
-
-  }
-
-  #unwireEvents() {
-    if (this.#shellHost) {
-      this.#shellHost.removeEventListener(GESTURE_EVENTS.panel, this.#onPanelGesture);
-      this.#shellHost.removeEventListener(GESTURE_EVENTS.swipe, this.#onSwipeGesture);
-    }
-    if (this.#onKeydownEscape) {
-      document.removeEventListener("keydown", this.#onKeydownEscape, true);
-    }
-    if (this.#onKeydownTab) {
-      document.removeEventListener("keydown", this.#onKeydownTab, true);
-    }
-    if (this.#onTablistKeydown) {
-      this.#tabList?.removeEventListener("keydown", this.#onTablistKeydown);
-    }
-    this.#scope.abort();
-    this.#onPanelGesture = null;
-    this.#onSwipeGesture = null;
-    this.#onKeydownEscape = null;
-    this.#onKeydownTab = null;
-    this.#onTablistKeydown = null;
-    this.#closeButton = null;
+    }, { signal });
   }
 
   #activateSection(targetSection, targetTab) {

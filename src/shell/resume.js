@@ -147,12 +147,8 @@ export class ResumeTracker {
   #shell;
   #store = new ResumeStore();
   #entry = null;
-  /** Teardown hook that removes the resume-seek media listeners. */
-  #stopResumeSeekWatch = null;
-  /** Teardown hook that cancels a pending metadata wait. */
-  #stopMetadataWait = null;
-  /** Teardown hook that removes the save-throttle and pause listeners. */
-  #stopProgressWatch = null;
+  /** Every media listener this tracker attaches dies with this signal. */
+  #scope = new AbortController();
   #lastSavedPosition = 0;
   #lastSaveAt = 0;
   #destroyed = false;
@@ -176,10 +172,9 @@ export class ResumeTracker {
       const metadataReady = new Promise((resolve) => {
         resolveMetadata = resolve;
       });
-      let timeoutHandle;
-      let stopWaiting = null;
+      // Resolving twice is a no-op, so timeout and signal races are safe.
       const finishWaiting = () => {
-        stopWaiting?.();
+        clearTimeout(timeoutHandle);
         resolveMetadata();
       };
       const onDurationChange = () => {
@@ -187,20 +182,13 @@ export class ResumeTracker {
           finishWaiting();
         }
       };
-      stopWaiting = () => {
-        video.removeEventListener("loadedmetadata", onLoaded);
-        video.removeEventListener("durationchange", onDurationChange);
-        video.removeEventListener("error", onError);
-        clearTimeout(timeoutHandle);
-        this.#stopMetadataWait = null;
-      };
       const onLoaded = () => finishWaiting();
       const onError = () => finishWaiting();
-      timeoutHandle = setTimeout(finishWaiting, METADATA_WAIT_MS);
-      video.addEventListener("loadedmetadata", onLoaded);
-      video.addEventListener("durationchange", onDurationChange);
-      video.addEventListener("error", onError);
-      this.#stopMetadataWait = stopWaiting;
+      const { signal } = this.#scope;
+      const timeoutHandle = setTimeout(finishWaiting, METADATA_WAIT_MS);
+      video.addEventListener("loadedmetadata", onLoaded, { signal });
+      video.addEventListener("durationchange", onDurationChange, { signal });
+      video.addEventListener("error", onError, { signal });
       await metadataReady;
       if (this.#destroyed) {
         logger.log("resume", "Shell destroyed before metadata — skipping");
@@ -232,11 +220,12 @@ export class ResumeTracker {
     const savedPosition = this.#entry.resume || 0;
     if (savedPosition > RESUME_MIN_POSITION) {
       startAt = savedPosition;
+      // The seeked flag guards re-entry; the scope removes these listeners
+      // on destroy, so no manual stop bookkeeping is needed.
       let seeked = false;
       const trySeek = () => {
         if (!seeked) {
           seeked = true;
-          stopWatching();
           if (!(video.currentTime > savedPosition - 5)) {
             shell.seek(savedPosition);
             shell.toast({
@@ -261,13 +250,8 @@ export class ResumeTracker {
         }
       };
       const onPlay = () => trySeek();
-      const stopWatching = () => {
-        video.removeEventListener("timeupdate", onTimeUpdate);
-        video.removeEventListener("play", onPlay);
-      };
-      video.addEventListener("timeupdate", onTimeUpdate);
-      video.addEventListener("play", onPlay);
-      this.#stopResumeSeekWatch = stopWatching;
+      video.addEventListener("timeupdate", onTimeUpdate, { signal: this.#scope.signal });
+      video.addEventListener("play", onPlay, { signal: this.#scope.signal });
     }
 
     this.#lastSavedPosition = startAt;
@@ -300,21 +284,12 @@ export class ResumeTracker {
     const onPause = () => {
       this.#saveProgress(shell.currentTime);
     };
-    video.addEventListener("timeupdate", onTimeUpdate);
-    video.addEventListener("pause", onPause);
-    this.#stopProgressWatch = () => {
-      video.removeEventListener("timeupdate", onTimeUpdate);
-      video.removeEventListener("pause", onPause);
-    };
+    video.addEventListener("timeupdate", onTimeUpdate, { signal: this.#scope.signal });
+    video.addEventListener("pause", onPause, { signal: this.#scope.signal });
   }
 
   destroy() {
-    this.#stopMetadataWait?.();
-    this.#stopMetadataWait = null;
-    this.#stopResumeSeekWatch?.();
-    this.#stopResumeSeekWatch = null;
-    this.#stopProgressWatch?.();
-    this.#stopProgressWatch = null;
+    this.#scope.abort();
     if (this.#entry && !this.#destroyed) {
       this.#saveProgress(this.#shell?.currentTime || 0);
     }

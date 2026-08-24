@@ -49,8 +49,8 @@ export class Shell {
   #panel;
   #toasts = null;
   #destroyed = false;
-  #cleanups = new Set();
-  #stopHostWatch = null;
+  /** Every platform subscription this facade makes dies with this signal. */
+  #scope = new AbortController();
   /** Mirror of the fullscreen checkmark, used only to dedup change events. */
   #lastFullscreen = false;
   #savedPositionStyle = null;
@@ -213,8 +213,7 @@ export class Shell {
       event.preventDefault();
       event.stopPropagation();
     };
-    this.container.addEventListener("contextmenu", handler, true);
-    this.#cleanups.add(() => this.container.removeEventListener("contextmenu", handler, true));
+    this.container.addEventListener("contextmenu", handler, { capture: true, signal: this.#scope.signal });
   }
 
   focus() {
@@ -237,8 +236,7 @@ export class Shell {
         });
       }
     };
-    this.container.addEventListener("pointerdown", onPointerDown, { capture: true, passive: true });
-    this.#cleanups.add(() => this.container.removeEventListener("pointerdown", onPointerDown, { capture: true, passive: true }));
+    this.container.addEventListener("pointerdown", onPointerDown, { capture: true, passive: true, signal: this.#scope.signal });
   }
 
   toast(payload) {
@@ -270,7 +268,8 @@ export class Shell {
       this.#savedPositionStyle = style.position;
       this.container.style.position = "relative";
     }
-    this.#stopHostWatch = watchShellHost(this.container, this.#shellDom.host);
+    const stopHostWatch = watchShellHost(this.container, this.#shellDom.host);
+    this.#scope.signal.addEventListener("abort", () => stopHostWatch(), { once: true });
     logger.log("shell", "Shell DOM appended as overlay child of container");
   }
 
@@ -288,8 +287,7 @@ export class Shell {
     };
     for (const name of VIDEO_EVENTS) {
       const handler = makeHandler(name);
-      video.addEventListener(name, handler);
-      this.#cleanups.add(() => video.removeEventListener(name, handler));
+      video.addEventListener(name, handler, { signal: this.#scope.signal });
     }
   }
 
@@ -304,11 +302,6 @@ export class Shell {
     mediaSessionOwner = this;
     const registerAction = (action, handler) => {
       session.setActionHandler(action, handler);
-      this.#cleanups.add(() => {
-        if (mediaSessionOwner === this) {
-          session.setActionHandler(action, null);
-        }
-      });
     };
     registerAction("play", () => this.play());
     registerAction("pause", () => this.pause());
@@ -325,12 +318,14 @@ export class Shell {
     });
     session.playbackState = this.paused ? "paused" : "playing";
     this.#updatePositionState();
-    this.#cleanups.add(() => {
+    // One abort listener owns the whole MediaSession teardown: a newer shell
+    // taking over, or destroy(), both funnel through the same ownership check.
+    this.#scope.signal.addEventListener("abort", () => {
       if (mediaSessionOwner === this) {
-        session.playbackState = "none";
+        this.#clearMediaSession();
         mediaSessionOwner = null;
       }
-    });
+    }, { once: true });
     logger.log("shell", "MediaSession handlers registered");
   }
 
@@ -384,8 +379,7 @@ export class Shell {
         logger.log("shell", `Fullscreen: ${active}`);
       }
     };
-    document.addEventListener("fullscreenchange", onChange);
-    this.#cleanups.add(() => document.removeEventListener("fullscreenchange", onChange));
+    document.addEventListener("fullscreenchange", onChange, { signal: this.#scope.signal });
   }
 
   exitFullscreen() {
@@ -407,16 +401,10 @@ export class Shell {
       this.#resume = null;
       this.#subtitles?.destroy();
       this.#subtitles = null;
-      for (const cleanup of this.#cleanups) {
-        try {
-          cleanup();
-        } catch (err) {
-          logger.error("shell", "Cleanup error:", err);
-        }
-      }
-      this.#cleanups.clear();
-      this.#stopHostWatch?.();
-      this.#stopHostWatch = null;
+      // One abort tears down every platform subscription: media event
+      // forwarding, fullscreen watch, focus management, host watchdog,
+      // MediaSession ownership.
+      this.#scope.abort();
       this.#inputs?.destroy();
       this.#inputs = null;
       this.#panel?.destroy();
