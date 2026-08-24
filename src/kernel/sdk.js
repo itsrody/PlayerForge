@@ -132,3 +132,42 @@ export function* videosFromMutations(mutations) {
     }
   }
 }
+
+/** Shared adoption gate: the rendered box must reach minimum player size. */
+export function meetsMinSize(video, minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_VIDEO_HEIGHT) {
+  try {
+    const rect = video.getBoundingClientRect();
+    return rect.width >= minWidth && rect.height >= minHeight;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The one document-level discovery tap: capture-phase media events plus a
+ * document-wide insertion observer, multiplexed to every subscriber. Both
+ * riders - the boot probe and the kernel's permanent watch - get identical
+ * signal from this single wiring instead of installing their own.
+ * Returns the unsubscribe function.
+ */
+export function watchDocumentVideos(onVideo) {
+  const onMediaEvent = (event) => {
+    const video = videoFromEvent(event);
+    if (video) {
+      onVideo(video);
+    }
+  };
+  const observer = new MutationObserver((mutations) => {
+    for (const video of videosFromMutations(mutations)) {
+      onVideo(video);
+    }
+  });
+  document.addEventListener("loadeddata", onMediaEvent, true);
+  document.addEventListener("play", onMediaEvent, true);
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+  return () => {
+    observer.disconnect();
+    document.removeEventListener("loadeddata", onMediaEvent, true);
+    document.removeEventListener("play", onMediaEvent, true);
+  };
+}

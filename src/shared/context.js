@@ -18,7 +18,7 @@
  * unless the relay chain is already listening.
  */
 import { logger } from "./logger.js";
-import { videoFromEvent, videosFromMutations } from "../kernel/sdk.js";
+import { watchDocumentVideos, meetsMinSize } from "../kernel/sdk.js";
 
 /* - 1. Domain identity - */
 
@@ -281,61 +281,21 @@ export function installContextBridge() {
 /**
  * Cheap sentinel that defers the full kernel boot until a document actually
  * shows a video candidate. Under @run-at document-start nothing pre-exists
- * us: SDK-created players trip the insertion observer the moment their
+ * us: SDK-created players trip the shared discovery tap the moment their
  * <video> enters the DOM, and static players fire loadeddata/play right
  * after parse. The first size-qualified candidate fires onCandidate exactly
  * once; documents without video never pay for a kernel.
  */
 export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
   let done = false;
-
-  function qualifies(video) {
-    try {
-      const rect = video.getBoundingClientRect();
-      return rect.width >= minWidth && rect.height >= minHeight;
-    } catch {
-      return false;
-    }
-  }
-
-  function onMediaEvent(event) {
-    if (done) {
+  const stop = watchDocumentVideos((video) => {
+    if (done || !meetsMinSize(video, minWidth, minHeight)) {
       return;
     }
-    const video = videoFromEvent(event);
-    if (video && qualifies(video)) {
-      fire();
-    }
-  }
-
-  function onInsertions(mutations) {
-    if (done) {
-      return;
-    }
-    for (const video of videosFromMutations(mutations)) {
-      if (qualifies(video)) {
-        fire();
-        return;
-      }
-    }
-  }
-
-  function stop() {
-    observer.disconnect();
-    document.removeEventListener("loadeddata", onMediaEvent, true);
-    document.removeEventListener("play", onMediaEvent, true);
-  }
-
-  function fire() {
     done = true;
     stop();
     logger.log("probe", "Video candidate found - booting kernel");
     onCandidate();
-  }
-
-  const observer = new MutationObserver(onInsertions);
-  document.addEventListener("loadeddata", onMediaEvent, true);
-  document.addEventListener("play", onMediaEvent, true);
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  });
   return stop;
 }

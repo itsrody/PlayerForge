@@ -4,7 +4,7 @@ import { GESTURE_EVENTS } from "../shell/inputs/input-list.js";
 import { EventBus } from "./bus.js";
 import { ShellRegistry } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
-import { findSdkForVideo, findContainer, videoFromEvent, videosFromMutations, MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./sdk.js";
+import { findSdkForVideo, findContainer, meetsMinSize, watchDocumentVideos } from "./sdk.js";
 import { Shell } from "../shell/shell.js";
 
 export const SHELL_MARKER = "data-pf-shell";
@@ -23,9 +23,9 @@ function makeId() {
 /**
  * Top-level orchestrator: watches for <video> elements, identifies the player
  * SDK, emits discovery events, and owns the bus/registry/lifecycle trio.
- * Under @run-at document-start nothing pre-exists us: an insertion observer
- * catches SDK-created players the moment their <video> enters the DOM, and
- * capture-phase media events cover readiness transitions on existing ones.
+ * Under @run-at document-start nothing pre-exists us: the kernel rides the
+ * shared discovery tap (sdk.js), catching SDK-created players the moment
+ * their <video> enters the DOM and readiness transitions on existing ones.
  */
 export class Kernel {
   bus;
@@ -35,15 +35,9 @@ export class Kernel {
   #seenVideos = new Set();
   #removalObservers = new Set();
   #removalTimers = new Map();
-  #insertionObserver = null;
+  /** Unsubscribe for the shared discovery tap; dropped at pagehide. */
+  #stopDiscoveryTap = null;
   #scope = new AbortController();
-
-  #onMediaEvent = (event) => {
-    const video = videoFromEvent(event);
-    if (video) {
-      this.#adoptVideo(video);
-    }
-  };
 
   #onPageShow = (event) => {
     if (!event.persisted) {
@@ -62,8 +56,8 @@ export class Kernel {
   #onPageHide = (event) => {
     if (!event.persisted) {
       logger.log("kernel", "Page hiding, cleaning up");
-      this.#insertionObserver?.disconnect();
-      this.#insertionObserver = null;
+      this.#stopDiscoveryTap?.();
+      this.#stopDiscoveryTap = null;
       for (const observer of this.#removalObservers) {
         observer.disconnect();
       }
@@ -92,17 +86,12 @@ export class Kernel {
     logger.log("kernel", "Initializing kernel");
     this.#registerMenuCommand();
     const { signal } = this.#scope;
-    document.addEventListener("loadeddata", this.#onMediaEvent, { capture: true, signal });
-    document.addEventListener("play", this.#onMediaEvent, { capture: true, signal });
     document.addEventListener("pageshow", this.#onPageShow, { signal });
     window.addEventListener("pagehide", this.#onPageHide, { signal });
-    this.#insertionObserver = new MutationObserver((mutations) => {
-      for (const video of videosFromMutations(mutations)) {
-        this.#adoptVideo(video);
-      }
-    });
-    this.#insertionObserver.observe(document.documentElement, { childList: true, subtree: true });
-    logger.log("kernel", "Kernel ready - media events + insertion watch active");
+    // Permanent rider on the shared discovery tap: every video the probe
+    // would have seen, the kernel now adopts through the same wiring.
+    this.#stopDiscoveryTap = watchDocumentVideos((video) => this.#adoptVideo(video));
+    logger.log("kernel", "Kernel ready - discovery tap active");
   }
 
   /** Adopt the video, emit discovery and start removal watching. */
@@ -114,8 +103,7 @@ export class Kernel {
     if (!sdk) {
       return;
     }
-    const rect = video.getBoundingClientRect();
-    if (rect.width < MIN_VIDEO_WIDTH || rect.height < MIN_VIDEO_HEIGHT) {
+    if (!meetsMinSize(video)) {
       return;
     }
     const container = findContainer(video);
