@@ -56,8 +56,7 @@ export class HotkeysController {
     this.#gestureController = new GestureController(
       shell.video,
       shell.container,
-      host,
-      () => shell.fullscreen
+      host
     );
     // Trackpad pinch is fullscreen-only: keep its non-passive wheel listener
     // attached only while it can fire.
@@ -304,6 +303,9 @@ export class HotkeysController {
    * Inline-mode double-taps belong to the browser/player natively.
    */
   #onDoubleTap(shell, { zone }) {
+    if (!shell.fullscreen) {
+      return;
+    }
     if (zone === "left-edge" || zone === "right-edge") {
       this.#performSkip(shell, zone === "left-edge" ? "left" : "right");
     } else if (zone === "screen") {

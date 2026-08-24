@@ -50,7 +50,6 @@ export class GestureController {
   #video;
   #zone;
   #eventTarget;
-  #isFullscreenFn;
 
   #destroyed = false;
   #savedTouchAction;
@@ -119,11 +118,10 @@ export class GestureController {
   #onKeyup;
   #onBlur;
 
-  constructor(video, zone, eventTarget, isFullscreenFn = null) {
+  constructor(video, zone, eventTarget) {
     this.#video = video;
     this.#zone = zone;
     this.#eventTarget = eventTarget;
-    this.#isFullscreenFn = isFullscreenFn;
     this.#savedTouchAction = zone.style.touchAction;
     zone.style.touchAction = "none";
 
@@ -426,7 +424,7 @@ export class GestureController {
   }
 
   #isFullscreen() {
-    return this.#isFullscreenFn ? !!this.#isFullscreenFn() : false;
+    return !!document.fullscreenElement;
   }
 
   #dispatch(eventName, detail) {
@@ -630,7 +628,12 @@ export class GestureController {
         distance
       });
       this.#swipeDirection = null;
-    } else if (elapsed < HOLD_TIMEOUT_MS && this.#gestureZone !== null && getSetting("gestures.dbltap")) {
+    } else if (
+      this.#isFullscreen() &&
+      elapsed < HOLD_TIMEOUT_MS &&
+      this.#gestureZone !== null &&
+      getSetting("gestures.dbltap")
+    ) {
       const now = performance.now();
       if (now - this.#lastTapTime < DOUBLE_TAP_WINDOW_MS) {
         this.#lastTapTime = -Infinity;

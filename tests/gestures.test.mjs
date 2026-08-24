@@ -46,6 +46,13 @@ function pointerEvent(win, type, { id = 1, x = 0, y = 0 } = {}) {
   return event;
 }
 
+/** Force document.fullscreenElement for fullscreen-gated gesture paths. */
+function stubFullscreen(dom, value) {
+  Object.defineProperty(dom.window.document, "fullscreenElement", {
+    value, configurable: true
+  });
+}
+
 function wheelEvent(win, { deltaY, ctrlKey }) {
   const event = new win.MouseEvent("wheel", { bubbles: true, cancelable: true });
   Object.defineProperty(event, "deltaY", { value: deltaY });
@@ -64,9 +71,10 @@ function collect(host, win) {
   return seen;
 }
 
-test("double tap in the left-edge zone dispatches once", () => {
+test("double tap in the left-edge zone dispatches once in fullscreen", () => {
   const { dom, video, zone, host } = makeEnv();
-  const controller = new GestureController(video, zone, host, null);
+  stubFullscreen(dom, true);
+  const controller = new GestureController(video, zone, host);
   const seen = collect(host, dom.window);
 
   zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 50, y: 200 }));
@@ -80,9 +88,23 @@ test("double tap in the left-edge zone dispatches once", () => {
   controller.destroy();
 });
 
+test("inline double taps never dispatch outside fullscreen", () => {
+  const { dom, video, zone, host } = makeEnv();
+  const controller = new GestureController(video, zone, host);
+  const seen = collect(host, dom.window);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 50, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 50, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 52, y: 202 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 52, y: 202 }));
+
+  assert.equal(seen.length, 0, "dbltap is fullscreen-only");
+  controller.destroy();
+});
+
 test("keydown arrows map through the action table with preventDefault", () => {
   const { dom, video, zone, host } = makeEnv();
-  const controller = new GestureController(video, zone, host, null);
+  const controller = new GestureController(video, zone, host);
   const seen = collect(host, dom.window);
 
   const right = new dom.window.KeyboardEvent("keydown", {
@@ -107,7 +129,7 @@ test("disabling the hotkeys toggle silences arrows but Space still toggles playb
       playCalls.push(true);
       return Promise.resolve();
     };
-    const controller = new GestureController(video, zone, host, null);
+    const controller = new GestureController(video, zone, host);
     const seen = collect(host, dom.window);
 
     dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
@@ -140,8 +162,8 @@ test("focus arbitration: the last active controller owns page-level keys", () =>
   const host2 = dom.window.document.createElement("div");
   dom.window.document.body.appendChild(host2);
 
-  const controllerA = new GestureController(video, zone, host, null);
-  const controllerB = new GestureController(video2, zone2, host2, null);
+  const controllerA = new GestureController(video, zone, host);
+  const controllerB = new GestureController(video2, zone2, host2);
   const seenA = collect(host, dom.window);
   const seenB = collect(host2, dom.window);
 
@@ -163,7 +185,8 @@ test("focus arbitration: the last active controller owns page-level keys", () =>
 
 test("trackpad ctrl+wheel pinches in fullscreen with a cooldown window", () => {
   const { dom, video, zone, host } = makeEnv();
-  const controller = new GestureController(video, zone, host, () => true);
+  stubFullscreen(dom, true);
+  const controller = new GestureController(video, zone, host);
   controller.setTrackpadPinchEnabled(true);
   const seen = collect(host, dom.window);
 
@@ -182,8 +205,7 @@ test("trackpad ctrl+wheel pinches in fullscreen with a cooldown window", () => {
 
 test("wheel pinch listener is inert until enabled and detaches on disable", () => {
   const { dom, video, zone, host } = makeEnv();
-  const fullscreen = { value: false };
-  const controller = new GestureController(video, zone, host, () => fullscreen.value);
+  const controller = new GestureController(video, zone, host);
   const seen = collect(host, dom.window);
 
   const blocked = wheelEvent(dom.window, { deltaY: -100, ctrlKey: true });
@@ -191,7 +213,7 @@ test("wheel pinch listener is inert until enabled and detaches on disable", () =
   assert.equal(seen.length, 0, "no pinch before the listener is scoped in");
   assert.equal(blocked.defaultPrevented, false, "nothing cancelled while detached");
 
-  fullscreen.value = true;
+  stubFullscreen(dom, true);
   controller.setTrackpadPinchEnabled(true);
   zone.dispatchEvent(wheelEvent(dom.window, { deltaY: -100, ctrlKey: true }));
   assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.pinch).length, 1);
@@ -206,7 +228,8 @@ test("wheel pinch listener is inert until enabled and detaches on disable", () =
 
 test("pointer gestures never cancel defaults (passivity contract)", () => {
   const { dom, video, zone, host } = makeEnv();
-  const controller = new GestureController(video, zone, host, () => true);
+  stubFullscreen(dom, true);
+  const controller = new GestureController(video, zone, host);
   collect(host, dom.window);
 
   const dispatched = [
@@ -225,7 +248,8 @@ test("pointer gestures never cancel defaults (passivity contract)", () => {
 
 test("swipe down starts from any zone in fullscreen, not just the center", () => {
   const { dom, video, zone, host } = makeEnv();
-  const controller = new GestureController(video, zone, host, () => true);
+  stubFullscreen(dom, true);
+  const controller = new GestureController(video, zone, host);
   const seen = collect(host, dom.window);
 
   zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 50, y: 200 }));
@@ -245,7 +269,7 @@ test("swipe down starts from any zone in fullscreen, not just the center", () =>
 test("destroying mid-hold fires the pending release before teardown", async () => {
   const { dom, video, zone, host } = makeEnv();
   Object.defineProperty(video, "paused", { value: false, configurable: true });
-  const controller = new GestureController(video, zone, host, null);
+  const controller = new GestureController(video, zone, host);
   const seen = collect(host, dom.window);
 
   zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
