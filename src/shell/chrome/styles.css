@@ -17,7 +17,9 @@
      the SDK paints inside the player. */
   z-index: 2147483647;
   outline: none;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* system-ui first: the platform font path Firefox actually resolves;
+     the -apple-system tokens remain as Safari/Chrome fallbacks. */
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 14px;
   color: var(--pf-fg);
   box-sizing: border-box;
@@ -67,6 +69,9 @@
   overflow: hidden;
   pointer-events: none;
   z-index: 2;
+  /* Caption swaps are our hottest DOM churn - keep their layout and paint
+     isolated inside this fixed-size layer so the player tree never pays. */
+  contain: layout paint;
 }
 /* .pf-hud-layer > * re-enables pointer events on every HUD child -
    this more-specific rule keeps the caption layer click-transparent. */
@@ -235,7 +240,6 @@ pf-toast.pf-toast-interactive {
   line-height: 1.4;
 
   opacity: 0;
-  translate: 0 -6px;
   transition:
     opacity 0.14s ease,
     translate 0.14s ease,
@@ -300,6 +304,7 @@ pf-toast.pf-toast-interactive {
   fill: currentColor;
 }
 .pf-panel-tab:hover { background: transparent; color: var(--pf-fg); }
+.pf-panel-tab:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: -2px; }
 .pf-panel-tab-active {
   background: transparent;
   color: var(--pf-accent);
@@ -710,9 +715,7 @@ pf-toast.pf-toast-interactive {
   font-weight: 500;
   cursor: pointer;
 }
-.pf-btn:hover { background: var(--pf-accent); }
-.pf-btn:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
-.pf-btn-ghost {
+.pf-btn:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }.pf-btn-ghost {
   background: rgba(255, 255, 255, 0.09);
   color: inherit;
 }
@@ -771,7 +774,6 @@ pf-toast.pf-toast-interactive {
   .pf-panel {
     width: auto;
     max-height: calc(100% - 16px);
-    border-radius: 12px;
     top: 8px;
     right: 8px;
     left: 8px;
