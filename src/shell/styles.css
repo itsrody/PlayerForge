@@ -727,12 +727,6 @@ pf-toast.pf-toast-interactive {
 .pf-btn-ghost:disabled:hover {
   background: rgba(255, 255, 255, 0.09);
 }
-.pf-btn.active {
-  background: rgba(74, 158, 255, 0.28);
-  color: var(--pf-fg);
-  box-shadow: inset 0 0 0 1px rgba(74, 158, 255, 0.55);
-}
-.pf-btn.active:hover { background: rgba(74, 158, 255, 0.34); }
 
 /* Shell-true density - the panel adapts to its own width (~ the video
    container), not the viewport: wide panels keep the two-column grid,

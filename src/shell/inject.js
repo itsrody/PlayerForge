@@ -52,7 +52,7 @@ export function whenDomSettled(container, { quietFrames = 2, capMs = 150 } = {})
  */
 export function injectShell(container) {
   if (!container) {
-    logger.error("injection", "injectShell: no container");
+    logger.error("inject", "injectShell: no container");
     return null;
   }
   const doc = container.ownerDocument;
@@ -70,7 +70,7 @@ export function injectShell(container) {
   hudLayer.appendChild(cueLayer);
 
   container.appendChild(host);
-  logger.log("injection", `Shell DOM built inside ${container.tagName}#${container.id || container.className}`);
+  logger.log("inject", `Shell DOM built inside ${container.tagName}#${container.id || container.className}`);
 
   return {
     host,
@@ -93,7 +93,7 @@ export function watchShellHost(container, host) {
     scheduled = false;
     if (host.parentElement !== container && container.isConnected) {
       container.appendChild(host);
-      logger.log("injection", "Shell host re-attached by watchdog");
+      logger.log("inject", "Shell host re-attached by watchdog");
     }
   };
 

@@ -125,7 +125,7 @@ export class Kernel {
     }
     this.#seenVideos.add(video);
     logger.log("kernel", `${sdk.name} adopted (${video.videoWidth}x${video.videoHeight}, ${Math.round(video.duration)}s)`);
-    this.bus.emit("video:found", {
+    this.bus.emit("pf:video-found", {
       video,
       container,
       sdk,
@@ -176,7 +176,7 @@ export class Kernel {
           this.#removalTimers.delete(video);
           if (!video.isConnected) {
             stopWatching();
-            this.bus.emit("video:removed", { video });
+            this.bus.emit("pf:video-removed", { video });
           } else {
             reanchorObservers();
           }

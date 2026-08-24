@@ -1,5 +1,5 @@
 import { getConfigValue, setConfigValue } from "../../shared/storage.js";
-import { srtToVtt, ensureVttHeader, parseSubtitles } from "./ForgeVTT.js";
+import { srtToVtt, ensureVttHeader, parseSubtitles } from "./forgevtt.js";
 import { logger } from "../../shared/logger.js";
 
 const SUBTITLE_FILE_ACCEPT = ".srt,.vtt";
@@ -66,7 +66,7 @@ export class SubtitlesSection {
         this.#render();
       }
     };
-    this.#shell.bus.addEventListener("shell:timeupdate", onTick, { signal });
+    this.#shell.bus.addEventListener("pf:shell-timeupdate", onTick, { signal });
     const video = this.#shell.video;
     video?.addEventListener("seeked", () => this.#render(), { signal });
     video?.addEventListener("ended", () => this.#shell?.cues?.clear(), { signal });

@@ -522,7 +522,7 @@ export class SettingsPanel {
       }
     }, { signal });
 
-    this.#bus?.addEventListener("shell:fullscreen-change", (event) => {
+    this.#bus?.addEventListener("pf:shell-fullscreen-change", (event) => {
       if (event.detail.shellId === this.#shellId) {
         this.close();
       }

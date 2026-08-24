@@ -1,5 +1,5 @@
 import { getSetting } from "../config.js";
-import { formatTime } from "../toast.js";
+import { formatTime } from "../../shared/time.js";
 
 /**
  * The gesture event contract: semantic CustomEvents dispatched by the
@@ -144,7 +144,7 @@ function performSkip(shell, state, direction) {
   const step = getSetting("controller.stepSeek") * state.streakCount;
   shell.skip(direction === "right" ? step : -step);
   shell.toast({
-    icon: direction === "right" ? "RArrows" : "LArrows",
+    icon: direction === "right" ? "right-arrows" : "left-arrows",
     text: `${step}s`,
     duration: 800,
     group: "skip"
@@ -217,7 +217,7 @@ function volumeIcon(volume, muted) {
  */
 export function attachInputActions(shell, host, signal) {
   /** Fullscreen exit also collapses fill mode - the one cross-feature rule. */
-  shell.bus.addEventListener("shell:fullscreen-change", (event) => {
+  shell.bus.addEventListener("pf:shell-fullscreen-change", (event) => {
     const { shellId, fullscreen } = event.detail;
     if (shellId === shell.id && !fullscreen) {
       const state = stateFor(shell);
@@ -239,7 +239,7 @@ export function attachInputActions(shell, host, signal) {
     const speed = getSetting("controller.holdSpeed");
     state.savedRate = shell.playbackRate;
     shell.playbackRate = speed;
-    shell.toast({ icon: "RArrows", text: `${speed}x`, group: "hold" });
+    shell.toast({ icon: "right-arrows", text: `${speed}x`, group: "hold" });
   }, { signal });
 
   host.addEventListener(GESTURE_EVENTS.release, ({ detail }) => {
@@ -282,7 +282,7 @@ export function attachInputActions(shell, host, signal) {
     }
     state.lastScrubToastAt = now;
     shell.toast({
-      icon: state.scrubDirectionMomentum >= 0 ? "RArrows" : "LArrows",
+      icon: state.scrubDirectionMomentum >= 0 ? "right-arrows" : "left-arrows",
       text: `${formatTime(state.scrubDuration)} / ${formatTime(shell.video.currentTime)}`,
       group: "scrub"
     });

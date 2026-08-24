@@ -2,20 +2,6 @@ import { logger } from "../shared/logger.js";
 import { iconMarkup } from "./icons.js";
 
 /**
- * Seconds -> "M:SS" (or "H:MM:SS" past the hour). Lives here because every
- * consumer formats time solely to render toast text.
- */
-export function formatTime(seconds) {
-  seconds = Math.max(0, Math.floor(seconds));
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return h > 0
-    ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
-    : `${m}:${String(s).padStart(2, "0")}`;
-}
-
-/**
  * Single toast surface hosted in the shell HUD layer: icon + text +
  * optional action buttons, optional auto-hide, and group-tagged hides so
  * overlapping callers (scrub hints, hold indicators) don't clobber each

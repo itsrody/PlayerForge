@@ -49,7 +49,7 @@ function makeShell(id = "t") {
   const fireChange = () => {
     dom.window.document.dispatchEvent(new dom.window.Event("fullscreenchange"));
   };
-  const changes = () => emissions.filter((entry) => entry.type === "shell:fullscreen-change");
+  const changes = () => emissions.filter((entry) => entry.type === "pf:shell-fullscreen-change");
 
   const shell = new Shell({ id, video, container, sdk: {}, sdkName: "test-sdk", bus });
   const teardown = () => {
@@ -77,7 +77,7 @@ test("entering fullscreen on our container flips the checkmark and emits one cha
 
   assert.equal(shell.fullscreen, true);
   assert.deepEqual(changes(), [
-    { type: "shell:fullscreen-change", detail: { shellId: "t", fullscreen: true } }
+    { type: "pf:shell-fullscreen-change", detail: { shellId: "t", fullscreen: true } }
   ]);
   teardown();
 });
@@ -93,7 +93,7 @@ test("any document fullscreen element marks this shell", () => {
 
   assert.equal(shell.fullscreen, true);
   assert.deepEqual(changes(), [
-    { type: "shell:fullscreen-change", detail: { shellId: "t", fullscreen: true } }
+    { type: "pf:shell-fullscreen-change", detail: { shellId: "t", fullscreen: true } }
   ]);
   teardown();
 });
@@ -135,7 +135,7 @@ test("a destroyed shell no longer reacts to fullscreen transitions", () => {
   fireChange();
 
   assert.equal(
-    emissions.filter((entry) => entry.type === "shell:fullscreen-change").length,
+    emissions.filter((entry) => entry.type === "pf:shell-fullscreen-change").length,
     0,
     "listener removed with the shell"
   );

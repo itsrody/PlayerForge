@@ -7,7 +7,7 @@ import {
   timecodeToSeconds,
   parseSubtitles,
   sortCues
-} from "../src/shell/subtitles/ForgeVTT.js";
+} from "../src/shell/subtitles/forgevtt.js";
 
 test("timecodeToSeconds treats the ms field as an integer millisecond count", () => {
   assert.equal(timecodeToSeconds("00:00:05,5"), 5.005);

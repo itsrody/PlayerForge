@@ -276,7 +276,7 @@ export class Shell {
   #forwardMediaEvents() {
     const video = this.video;
     const makeHandler = (name) => (event) => {
-      this.#bus.emit(`shell:${name}`, {
+      this.#bus.emit(`pf:shell-${name}`, {
         shellId: this.id,
         event,
         video
@@ -372,7 +372,7 @@ export class Shell {
       const active = this.fullscreen;
       if (active !== this.#lastFullscreen) {
         this.#lastFullscreen = active;
-        this.#bus.emit("shell:fullscreen-change", {
+        this.#bus.emit("pf:shell-fullscreen-change", {
           shellId: this.id,
           fullscreen: active
         });
@@ -420,7 +420,7 @@ export class Shell {
       }
       this.video.removeAttribute(SHELL_MARKER);
       this.container.removeAttribute(SHELL_MARKER);
-      this.#bus.emit("shell:destroyed", this);
+      this.#bus.emit("pf:shell-destroyed", this);
     }
   }
 }

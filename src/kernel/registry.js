@@ -14,8 +14,8 @@ export class ShellRegistry {
 
   #wire() {
     const { signal } = this.#scope;
-    this.#bus.addEventListener("shell:created", (event) => this.#register(event.detail), { signal });
-    this.#bus.addEventListener("shell:destroyed", (event) => this.#unregister(event.detail), { signal });
+    this.#bus.addEventListener("pf:shell-created", (event) => this.#register(event.detail), { signal });
+    this.#bus.addEventListener("pf:shell-destroyed", (event) => this.#unregister(event.detail), { signal });
   }
 
   #register(shell) {

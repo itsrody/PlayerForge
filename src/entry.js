@@ -16,41 +16,41 @@ function bootstrap() {
   }
 
   const boot = () => {
-    if (window.__PF_KERNEL__) {
-      console.warn("[PlayerForge] Kernel already initialized");
+    if (window.PlayerForge) {
+      logger.warn("entry", "Kernel already initialized");
       return;
     }
     const kernel = new Kernel();
-    window.__PF_KERNEL__ = kernel;
     kernel.init();
 
-    if (getConfigValue("firstRun", true) !== false) {
-      setConfigValue("firstRun", false);
-      const coarsePointer = matchMedia("(pointer: coarse)").matches;
-      kernel.bus.addEventListener("shell:created", (event) => {
-        const shell = event.detail;
-        setTimeout(() => {
-          if (shell && !shell.panel?.isOpen) {
-            shell.toast({
-              icon: "captions",
-              text: coarsePointer
-                ? "Swipe down to exit fullscreen"
-                : "Press S for settings · Swipe down to exit fullscreen",
-              duration: 5000
-            });
-          }
-        }, 1200);
-      }, { once: true });
-    }
-
-    kernel.bus.addEventListener("shell:created", (event) => {
+    // One subscription serves both duties: readiness log always, first-run
+    // welcome toast only until the flag flips.
+    let welcomePending = getConfigValue("pf:first-run", getConfigValue("firstRun", true) !== false);
+    kernel.bus.addEventListener("pf:shell-created", (event) => {
       const shell = event.detail;
       logger.log("entry", `Shell ready: ${shell.id} (${shell.sdkName})`);
+      if (!welcomePending) {
+        return;
+      }
+      welcomePending = false;
+      setConfigValue("pf:first-run", false);
+      const coarsePointer = matchMedia("(pointer: coarse)").matches;
+      setTimeout(() => {
+        if (shell && !shell.panel?.isOpen) {
+          shell.toast({
+            icon: "captions",
+            text: coarsePointer
+              ? "Swipe down to exit fullscreen"
+              : "Press S for settings · Swipe down to exit fullscreen",
+            duration: 5000
+          });
+        }
+      }, 1200);
     });
 
     if (location.hash.includes("pf-debug")) {
       kernel.bus.debug = true;
-      console.log("[PlayerForge] Debug mode enabled");
+      logger.log("entry", "Debug mode enabled");
     }
 
     Object.defineProperty(window, "PlayerForge", {

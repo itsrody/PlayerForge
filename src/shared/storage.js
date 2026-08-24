@@ -58,6 +58,6 @@ export function setConfigValue(path, value) {
   try {
     gmSetValue(CONFIG_DOC_KEY, doc);
   } catch (err) {
-    logger.error("config", "Failed to persist config:", err);
+    logger.error("storage", "Failed to persist config:", err);
   }
 }
