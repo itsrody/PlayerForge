@@ -1,6 +1,11 @@
 import { logger } from "./logger.js";
 
-const CONFIG_DOC_KEY = "pf:configs";
+/** The whole GM storage namespace: every root key lives here. */
+export const KEYS = {
+  configs: "pf:configs",
+  resume: "pf:resume",
+  firstRun: "pf:first-run"
+};
 
 export function gmGetValue(key, fallback) {
   return GM_getValue(key, fallback);
@@ -14,9 +19,14 @@ export function gmRegisterMenu(title, onClick, options) {
   return GM_registerMenuCommand(title, onClick, options);
 }
 
+/** Read a stored JSON object, or the fallback when missing/corrupt. */
+export function loadJsonObject(key, fallback) {
+  const raw = gmGetValue(key, null);
+  return raw && typeof raw === "object" ? raw : fallback;
+}
+
 function readConfigDoc() {
-  const doc = gmGetValue(CONFIG_DOC_KEY, { version: 1 });
-  return doc && typeof doc === "object" ? doc : { version: 1 };
+  return loadJsonObject(KEYS.configs, { version: 1 });
 }
 
 function isSafeKeySegment(key) {
@@ -56,7 +66,7 @@ export function setConfigValue(path, value) {
   }
   node[last] = value;
   try {
-    gmSetValue(CONFIG_DOC_KEY, doc);
+    gmSetValue(KEYS.configs, doc);
   } catch (err) {
     logger.error("storage", "Failed to persist config:", err);
   }

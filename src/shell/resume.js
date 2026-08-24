@@ -1,6 +1,6 @@
 import { getPageContext, domainsMatch, domainScore, hashEntry } from "../shared/context.js";
 import { getSetting } from "./config.js";
-import { gmGetValue, gmSetValue } from "../shared/storage.js";
+import { KEYS, gmGetValue, gmSetValue, loadJsonObject } from "../shared/storage.js";
 import { formatTime } from "../shared/time.js";
 import { logger } from "../shared/logger.js";
 
@@ -14,7 +14,6 @@ const SAVE_EPSILON_SECONDS = 3;
 /** Only auto-seek when the saved position is meaningful. */
 const RESUME_MIN_POSITION = 5;
 
-const RESUME_STORE_KEY = "pf:resume";
 const DEFAULT_STALE_DAYS = 14;
 
 /**
@@ -30,19 +29,19 @@ export class ResumeStore {
     if (this.#loaded) {
       return;
     }
-    const raw = gmGetValue(RESUME_STORE_KEY, null);
-    if (raw && typeof raw === "object" && Array.isArray(raw.entries)) {
+    const raw = loadJsonObject(KEYS.resume, null);
+    if (raw && Array.isArray(raw.entries)) {
       this.#state = raw;
     } else {
       this.#state = { version: 1, entries: [] };
-      gmSetValue(RESUME_STORE_KEY, this.#state);
+      gmSetValue(KEYS.resume, this.#state);
       logger.warn("resume", "Resume store missing or corrupt - reset");
     }
     const stalePending = this.#state.entries.filter((entry) => entry.pending).length;
     if (stalePending) {
       this.#state.entries = this.#state.entries.filter((entry) => !entry.pending);
       this.#state.updatedAt = Date.now();
-      gmSetValue(RESUME_STORE_KEY, this.#state);
+      gmSetValue(KEYS.resume, this.#state);
       logger.log("resume", `Dropped ${stalePending} stale pending entries`);
     }
     this.#loaded = true;
@@ -50,8 +49,8 @@ export class ResumeStore {
 
   #persist() {
     try {
-      const raw = gmGetValue(RESUME_STORE_KEY, null);
-      if (raw && typeof raw === "object" && Array.isArray(raw.entries)) {
+      const raw = loadJsonObject(KEYS.resume, null);
+      if (raw && Array.isArray(raw.entries)) {
         const knownIds = new Set(this.#state.entries.map((entry) => entry.id));
         for (const entry of raw.entries) {
           if (entry && typeof entry === "object" && !knownIds.has(entry.id)) {
@@ -60,7 +59,7 @@ export class ResumeStore {
         }
       }
       this.#state.updatedAt = Date.now();
-      gmSetValue(RESUME_STORE_KEY, this.#state);
+      gmSetValue(KEYS.resume, this.#state);
     } catch (err) {
       logger.error("resume", "Failed to persist resume store:", err);
     }

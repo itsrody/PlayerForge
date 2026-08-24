@@ -36,8 +36,7 @@ export class SubtitlesSection {
 
   constructor(shell) {
     this.#shell = shell;
-    this.#syncOffset = Number(getConfigValue(SETTING_KEYS.syncOffset, 0)) || 0;
-    this.#cueLayer = shell.shellDom?.cueLayer || null;
+    this.#syncOffset = Number(getConfigValue(SETTING_KEYS.syncOffset, 0)) || 0;    this.#cueLayer = shell.shellDom?.cueLayer || null;
     this.#fileInput = this.#createFileInput(shell);
     this.#buildPanelUi(shell);
     this.#startListening();
@@ -194,10 +193,10 @@ export class SubtitlesSection {
       min: 0.6,
       max: 3,
       step: 0.1,
-      value: Number(getConfigValue(SETTING_KEYS.size, "1.2")),
+      value: getConfigValue(SETTING_KEYS.size, 1.2),
       format: (v) => `${v}em`,
       onChange: (v) => {
-        setConfigValue(SETTING_KEYS.size, String(v));
+        setConfigValue(SETTING_KEYS.size, v);
         applyCueSize(v);
       }
     });
@@ -221,10 +220,10 @@ export class SubtitlesSection {
       min: 0,
       max: 100,
       step: 5,
-      value: Number(getConfigValue(SETTING_KEYS.shadow, "40")),
+      value: getConfigValue(SETTING_KEYS.shadow, 40),
       format: (v) => v ? `${v}%` : "Off",
       onChange: (v) => {
-        setConfigValue(SETTING_KEYS.shadow, String(v));
+        setConfigValue(SETTING_KEYS.shadow, v);
         applyCueShadow(v);
       }
     });
@@ -246,7 +245,7 @@ export class SubtitlesSection {
             this.#track.cues = parseSubtitles(this.#track.text, offset);
           }
           this.#render();
-          setConfigValue(SETTING_KEYS.syncOffset, String(offset));
+          setConfigValue(SETTING_KEYS.syncOffset, offset);
         }, SYNC_DEBOUNCE_MS);
       }
     });
@@ -300,10 +299,10 @@ export class SubtitlesSection {
       min: 0,
       max: 100,
       step: 5,
-      value: Number(getConfigValue(SETTING_KEYS.line, "85")),
+      value: getConfigValue(SETTING_KEYS.line, 85),
       format: (v) => `${v}%`,
       onChange: (v) => {
-        setConfigValue(SETTING_KEYS.line, String(v));
+        setConfigValue(SETTING_KEYS.line, v);
         if (enabledCheckbox.checked) {
           applyPosition();
         }
@@ -315,10 +314,10 @@ export class SubtitlesSection {
       min: 0,
       max: 100,
       step: 5,
-      value: Number(getConfigValue(SETTING_KEYS.horizontal, "50")),
+      value: getConfigValue(SETTING_KEYS.horizontal, 50),
       format: (v) => `${v}%`,
       onChange: (v) => {
-        setConfigValue(SETTING_KEYS.horizontal, String(v));
+        setConfigValue(SETTING_KEYS.horizontal, v);
         if (enabledCheckbox.checked) {
           applyPosition();
         }

@@ -3,7 +3,7 @@ import { installContextBridge, installVideoProbe } from "./shared/context.js";
 import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/sdk.js";
 import { logger } from "./shared/logger.js";
 import { shouldSkipUrl } from "./kernel/guard.js";
-import { getConfigValue, setConfigValue } from "./shared/storage.js";
+import { KEYS, getConfigValue, setConfigValue } from "./shared/storage.js";
 
 // VERSION is injected by esbuild `define` from the single constant in
 // esbuild.config.mjs, so the userscript banner can never drift.
@@ -25,7 +25,7 @@ function bootstrap() {
 
     // One subscription serves both duties: readiness log always, first-run
     // welcome toast only until the flag flips.
-    let welcomePending = getConfigValue("pf:first-run", getConfigValue("firstRun", true) !== false);
+    let welcomePending = getConfigValue(KEYS.firstRun, getConfigValue("firstRun", true) !== false);
     kernel.bus.addEventListener("pf:shell-created", (event) => {
       const shell = event.detail;
       logger.log("entry", `Shell ready: ${shell.id} (${shell.sdkName})`);
@@ -33,7 +33,7 @@ function bootstrap() {
         return;
       }
       welcomePending = false;
-      setConfigValue("pf:first-run", false);
+      setConfigValue(KEYS.firstRun, false);
       const coarsePointer = matchMedia("(pointer: coarse)").matches;
       setTimeout(() => {
         if (shell && !shell.panel?.isOpen) {
