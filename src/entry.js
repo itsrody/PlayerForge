@@ -5,8 +5,9 @@ import { logger } from "./shared/logger.js";
 import { shouldSkipUrl } from "./kernel/guard.js";
 import { KEYS, getConfigValue, setConfigValue } from "./shared/storage.js";
 
-// VERSION is injected by esbuild `define` from the single constant in
-// esbuild.config.mjs, so the userscript banner can never drift.
+// The version lives in the banner and is read from the installed script at
+// runtime via GM_info, so what the UI reports is always what VM actually
+// runs - never a stale build-time constant.
 
 function bootstrap() {
   "use strict";
@@ -56,13 +57,17 @@ function bootstrap() {
     Object.defineProperty(window, "PlayerForge", {
       value: Object.freeze({
         kernel,
-        version: VERSION
+        version: GM_info.script.version
       }),
       writable: false,
       configurable: false
     });
 
-    logger.log("entry", `Kernel booted (${window.top === window ? "top" : "frame"})`);
+    logger.log(
+      "entry",
+      `Kernel booted (${window.top === window ? "top" : "frame"}) - ` +
+        `${GM_info.scriptHandler} ${GM_info.version}, script ${GM_info.script.version}`
+    );
   };
 
   installContextBridge();
