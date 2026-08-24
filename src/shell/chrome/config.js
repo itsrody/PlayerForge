@@ -121,6 +121,69 @@ const DEFAULT_SETTINGS = Object.fromEntries(
   SETTINGS_SCHEMA.map((definition) => [definition.key, definition.default])
 );
 
+/**
+ * Engineering calibration - every tunable value in the codebase lives here,
+ * beside the user schema. These are behavior constants, not preferences:
+ * no panel controls, no storage. Grouped by subsystem, units embedded.
+ */
+export const TUNING = {
+  gestures: {
+    /** Hold-to-speed-up: press must stay still and last this long. */
+    holdTimeoutMs: 300,
+    holdCancelMovePx: 10,
+    doubleTapWindowMs: 300,
+    /** Swipe-exit hot zones as a viewport fraction. */
+    edgeZoneRatio: 0.15,
+    scrollStartPx: 15,
+    axisDominanceRatio: 2,
+    pinchMinDistancePx: 50,
+    pinchScaleThreshold: 0.2,
+    pinchBaselineDelayMs: 2,
+    trackpadCooldownMs: 500,
+    /** Click/dblclick suppression window after a consumed gesture. */
+    suppressWindowMs: 600,
+    /** Horizontal travel that dismisses the HUD. */
+    swipeExitMinPx: 100,
+    /** Idle time that resets the double-tap skip streak. */
+    streakResetMs: 600
+  },
+  scrub: {
+    /**
+     * Scrub calibration follows the desktop-player reference (mpv's
+     * {1s,5s,60s} arrows, VLC's {3s,10s,60s,300s} jumps): a deliberate
+     * action spans a consistent FRACTION of the runtime, never an absolute
+     * time across content lengths. One full-width stroke at rest covers
+     * strokeFraction of the video; distance escalation tops out so a capped
+     * stroke spans ~10% - every video is traversable end-to-end in roughly
+     * ten capped strokes, on a phone thumbnail or a fullscreen monitor
+     * alike (width-normalized).
+     */
+    strokeFraction: 0.01,
+    /** Path-length doubling distance: escalation is speed- and pause-free. */
+    escalationPx: 150,
+    maxMultiplier: 10
+  },
+  resume: {
+    saveIntervalMs: 60000,
+    metadataWaitMs: 10000,
+    /** Progress at/after which the entry resets so the video restarts next time. */
+    completionRatio: 0.95,
+    /** Ignore tiny drifts between saves. */
+    saveEpsilonSeconds: 3,
+    /** Only auto-seek when the saved position is meaningful. */
+    minPosition: 5,
+    staleDays: 14,
+    /** Hard ceiling for stored entries regardless of age pruning. */
+    maxEntries: 1000
+  },
+  subtitles: {
+    syncDebounceMs: 150
+  },
+  kernel: {
+    removalGraceMs: 500
+  }
+};
+
 const cache = {};
 for (const key of Object.keys(DEFAULT_SETTINGS)) {
   cache[key] = getConfigValue(`${SETTINGS_PREFIX}.${key}`, DEFAULT_SETTINGS[key]);

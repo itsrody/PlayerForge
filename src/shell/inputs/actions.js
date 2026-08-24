@@ -1,4 +1,4 @@
-import { getSetting } from "../chrome/config.js";
+import { getSetting, TUNING } from "../chrome/config.js";
 import { formatTime } from "../../shared/time.js";
 
 /**
@@ -97,22 +97,6 @@ export function armedKeys() {
 
 /* - Per-shell action state - */
 
-/**
- * Scrub calibration follows the desktop-player reference (mpv's {1s,5s,60s}
- * arrows, VLC's {3s,10s,60s,300s} jumps): a deliberate action spans a
- * consistent FRACTION of the runtime, never an absolute time across content
- * lengths. One full-width stroke at rest covers SCRUB_STROKE_FRACTION of
- * the video; distance escalation tops out so a capped stroke spans ~10% -
- * every video is traversable end-to-end in roughly ten capped strokes, on
- * a phone thumbnail or a fullscreen monitor alike (width-normalized).
- */
-const SCRUB_STROKE_FRACTION = 0.01;
-/** Path-length doubling distance: escalation is speed- and pause-free. */
-const SCRUB_ESCALATION_PX = 150;
-const SCRUB_MAX_MULTIPLIER = 10;
-const SWIPE_EXIT_MIN_PX = 100;
-const STREAK_RESET_MS = 600;
-
 const stateFor = (() => {
   const states = new WeakMap();
   return (shell) => {
@@ -150,7 +134,7 @@ function performSkip(shell, state, direction) {
   state.streakResetTimer = setTimeout(() => {
     state.streakCount = 0;
     state.lastSkipDirection = null;
-  }, STREAK_RESET_MS);
+  }, TUNING.gestures.streakResetMs);
 
   const step = getSetting("controller.stepSeek") * state.streakCount;
   shell.skip(direction === "right" ? step : -step);
@@ -295,25 +279,25 @@ export function attachInputActions(shell, host, signal) {
       if (!duration || !Number.isFinite(duration)) {
         return;
       }
-      // Base rate: SCRUB_STROKE_FRACTION of the runtime per full-width
+      // Base rate: TUNING.scrub.strokeFraction of the runtime per full-width
       // stroke, scaled by the sensitivity setting around its 150 default.
       const width = shell.container?.clientWidth || shell.video?.clientWidth || 640;
       state.scrubbing = true;
       state.scrubDuration = duration;
       state.scrubPixelsPerSecond =
-        (duration * SCRUB_STROKE_FRACTION * (getSetting("controller.scrubSensitivity") / 150)) / width;
+        (duration * TUNING.scrub.strokeFraction * (getSetting("controller.scrubSensitivity") / 150)) / width;
       state.scrubDirectionMomentum = 0;
       state.scrubTravelPx = 0;
     }
 
-    // Distance escalation: every SCRUB_ESCALATION_PX of path length doubles
-    // the step, capping at SCRUB_MAX_MULTIPLIER. Sustained strokes earn
+    // Distance escalation: every TUNING.scrub.escalationPx of path length doubles
+    // the step, capping at TUNING.scrub.maxMultiplier. Sustained strokes earn
     // range regardless of speed, reversals count as travel, and pauses cost
     // nothing because nothing here is time-based.
     state.scrubTravelPx += Math.abs(detail.dx);
     const multiplier = Math.min(
-      2 ** (state.scrubTravelPx / SCRUB_ESCALATION_PX),
-      SCRUB_MAX_MULTIPLIER
+      2 ** (state.scrubTravelPx / TUNING.scrub.escalationPx),
+      TUNING.scrub.maxMultiplier
     );
     const deltaSeconds = (detail.dx / state.scrubPixelsPerSecond) * multiplier;
     shell.scrubTo(shell.currentTime + deltaSeconds);
@@ -359,7 +343,7 @@ export function attachInputActions(shell, host, signal) {
     if (detail.direction !== "down") {
       return;
     }
-    if (detail.distance > SWIPE_EXIT_MIN_PX) {
+    if (detail.distance > TUNING.gestures.swipeExitMinPx) {
       clearFillMode(shell, state, false);
       shell.toast({
         icon: "fs-exit",

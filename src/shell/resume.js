@@ -1,22 +1,8 @@
 import { getPageContext, domainsMatch, domainScore, hashEntry } from "../shared/context.js";
-import { getSetting } from "./chrome/config.js";
+import { getSetting, TUNING } from "./chrome/config.js";
 import { KEYS, gmGetValue, gmSetValue, loadJsonObject } from "../shared/storage.js";
 import { formatTime } from "../shared/time.js";
 import { logger } from "../shared/logger.js";
-
-const RESUME_SAVE_INTERVAL_MS = 60000;
-/** How long to wait for media metadata before giving up on resume. */
-const METADATA_WAIT_MS = 10000;
-/** Progress at/after which the entry resets so the video restarts next time. */
-const COMPLETION_RATIO = 0.95;
-/** Ignore tiny drifts between saves. */
-const SAVE_EPSILON_SECONDS = 3;
-/** Only auto-seek when the saved position is meaningful. */
-const RESUME_MIN_POSITION = 5;
-
-const DEFAULT_STALE_DAYS = 14;
-/** Hard ceiling for stored entries regardless of age pruning. */
-const MAX_ENTRIES = 1000;
 
 /**
  * Persistent store of per-video entries (keyed by path+duration hash) holding
@@ -106,12 +92,12 @@ export class ResumeStore {
    * Store-level invariants over the current entries: age pruning plus the
    * hard entry cap (oldest evicted). Returns a fresh array; callers assign.
    */
-  #enforceBounds(days = DEFAULT_STALE_DAYS) {
+  #enforceBounds(days = TUNING.resume.staleDays) {
     const cutoff = Date.now() - days * 86400000;
     let kept = this.#state.entries.filter((entry) => entry.updatedAt > cutoff);
-    if (kept.length > MAX_ENTRIES) {
+    if (kept.length > TUNING.resume.maxEntries) {
       kept.sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0));
-      kept = kept.slice(kept.length - MAX_ENTRIES);
+      kept = kept.slice(kept.length - TUNING.resume.maxEntries);
     }
     return kept;
   }
@@ -192,7 +178,7 @@ export class ResumeStore {
     }
   }
 
-  cleanStale(days = DEFAULT_STALE_DAYS) {
+  cleanStale(days = TUNING.resume.staleDays) {
     this.#ensureLoaded();
     const raw = loadJsonObject(KEYS.resume, null);
     if (raw && Array.isArray(raw.entries)) {
@@ -285,7 +271,7 @@ export class ResumeTracker {
       };
       const onLoaded = () => finishWaiting();
       const onError = () => finishWaiting();
-      const timeoutHandle = setTimeout(finishWaiting, METADATA_WAIT_MS);
+      const timeoutHandle = setTimeout(finishWaiting, TUNING.resume.metadataWaitMs);
       video.addEventListener("loadedmetadata", onLoaded, { signal });
       video.addEventListener("durationchange", onDurationChange, { signal });
       video.addEventListener("error", onError, { signal });
@@ -318,7 +304,7 @@ export class ResumeTracker {
     }
 
     const savedPosition = this.#entry.resume || 0;
-    if (savedPosition > RESUME_MIN_POSITION) {
+    if (savedPosition > TUNING.resume.minPosition) {
       startAt = savedPosition;
       // The seeked flag guards re-entry; the scope removes these listeners
       // on destroy, so no manual stop bookkeeping is needed.
@@ -359,11 +345,11 @@ export class ResumeTracker {
   }
 
   #saveProgress(currentTime) {
-    if (Math.abs(currentTime - this.#lastSavedPosition) < SAVE_EPSILON_SECONDS) {
+    if (Math.abs(currentTime - this.#lastSavedPosition) < TUNING.resume.saveEpsilonSeconds) {
       return;
     }
     this.#lastSavedPosition = currentTime;
-    if (this.#entry.duration > 0 && currentTime / this.#entry.duration >= COMPLETION_RATIO) {
+    if (this.#entry.duration > 0 && currentTime / this.#entry.duration >= TUNING.resume.completionRatio) {
       this.#entry.resume = 0;
       this.#store.updateResume(this.#entry.id, 0);
       return;
@@ -376,7 +362,7 @@ export class ResumeTracker {
     this.#lastSaveAt = Date.now();
 
     const onTimeUpdate = () => {
-      if (!shell.paused && Date.now() - this.#lastSaveAt >= RESUME_SAVE_INTERVAL_MS) {
+      if (!shell.paused && Date.now() - this.#lastSaveAt >= TUNING.resume.saveIntervalMs) {
         this.#lastSaveAt = Date.now();
         this.#saveProgress(shell.currentTime);
       }

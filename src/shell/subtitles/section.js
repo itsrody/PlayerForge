@@ -1,10 +1,10 @@
 import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/storage.js";
+import { TUNING } from "../chrome/config.js";
 import { srtToVtt, ensureVttHeader, parseSubtitles } from "./forgevtt.js";
 import { debounce } from "../../shared/time.js";
 import { logger } from "../../shared/logger.js";
 
 const SUBTITLE_FILE_ACCEPT = ".srt,.vtt";
-const SYNC_DEBOUNCE_MS = 150;
 
 const SETTING_KEYS = {
   size: "subtitles.style.size",
@@ -247,7 +247,7 @@ export class SubtitlesSection {
       }
       this.#render();
       setConfigValue(SETTING_KEYS.syncOffset, offset);
-    }, SYNC_DEBOUNCE_MS);
+    }, TUNING.subtitles.syncDebounceMs);
     const syncStepper = panel.addStepper(styleGrid, {
       label: "Sync",
       min: -20,

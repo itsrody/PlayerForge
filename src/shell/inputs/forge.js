@@ -1,17 +1,5 @@
 import { allowsIntent, armedKeys, GESTURE_EVENTS, easeTransformTo } from "./actions.js";
-
-// Tuning constants (ms / px / ratios).
-const HOLD_TIMEOUT_MS = 300;
-const HOLD_CANCEL_MOVE_PX = 10;
-const DOUBLE_TAP_WINDOW_MS = 300;
-const EDGE_ZONE_RATIO = 0.15;
-const SCROLL_START_PX = 15;
-const AXIS_DOMINANCE_RATIO = 2;
-const PINCH_MIN_DISTANCE_PX = 50;
-const PINCH_SCALE_THRESHOLD = 0.2;
-const PINCH_BASELINE_DELAY_MS = 2;
-const TRACKPAD_COOLDOWN_MS = 500;
-const SUPPRESS_WINDOW_MS = 600;
+import { TUNING } from "../chrome/config.js";
 
 /**
  * Pointer handlers never preventDefault - native pan/scroll over the zone is
@@ -222,7 +210,7 @@ export class InputForge {
       this.#clickSuppressTimer = null;
       this.#suppressClickPending = false;
       this.#suppressDblclickPending = false;
-    }, SUPPRESS_WINDOW_MS);
+    }, TUNING.gestures.suppressWindowMs);
   }
 
   #resetKeyboardHold() {
@@ -240,9 +228,9 @@ export class InputForge {
 
   #zoneForPoint(pointerEvent) {
     const viewportWidth = window.innerWidth;
-    if (pointerEvent.clientX < viewportWidth * EDGE_ZONE_RATIO) {
+    if (pointerEvent.clientX < viewportWidth * TUNING.gestures.edgeZoneRatio) {
       return "left-edge";
-    } else if (pointerEvent.clientX > viewportWidth * (1 - EDGE_ZONE_RATIO)) {
+    } else if (pointerEvent.clientX > viewportWidth * (1 - TUNING.gestures.edgeZoneRatio)) {
       return "right-edge";
     } else {
       return "screen";
@@ -299,11 +287,11 @@ export class InputForge {
       }
       const points = [...this.#pointers.values()].slice(0, 2);
       this.#pinchStartDistance = Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y);
-    }, PINCH_BASELINE_DELAY_MS);
+    }, TUNING.gestures.pinchBaselineDelayMs);
   }
 
   #checkPinch() {
-    if (!this.#isFullscreen() || this.#pinchFired || this.#pinchStartDistance < PINCH_MIN_DISTANCE_PX) {
+    if (!this.#isFullscreen() || this.#pinchFired || this.#pinchStartDistance < TUNING.gestures.pinchMinDistancePx) {
       return;
     }
     const points = [...this.#pointers.values()].slice(0, 2);
@@ -313,7 +301,7 @@ export class InputForge {
     const scaleDelta =
       (Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y) - this.#pinchStartDistance) /
       this.#pinchStartDistance;
-    if (scaleDelta > PINCH_SCALE_THRESHOLD || scaleDelta < -PINCH_SCALE_THRESHOLD) {
+    if (scaleDelta > TUNING.gestures.pinchScaleThreshold || scaleDelta < -TUNING.gestures.pinchScaleThreshold) {
       this.#pinchFired = true;
       this.#suppressNextActivations();
       this.#dispatch(GESTURE_EVENTS.pinch, {
@@ -462,7 +450,7 @@ export class InputForge {
             duration: performance.now() - this.#startTime
           });
         }
-      }, HOLD_TIMEOUT_MS);
+      }, TUNING.gestures.holdTimeoutMs);
     }
   }
 
@@ -486,7 +474,7 @@ export class InputForge {
     const dx = Math.abs(x - this.#startX);
     const dy = Math.abs(y - this.#startY);
 
-    if (dx > HOLD_CANCEL_MOVE_PX || dy > HOLD_CANCEL_MOVE_PX) {
+    if (dx > TUNING.gestures.holdCancelMovePx || dy > TUNING.gestures.holdCancelMovePx) {
       this.#clearHoldTimer();
     }
 
@@ -494,13 +482,13 @@ export class InputForge {
       if (!this.#scrubbing && !this.#swiping) {
         // Intent gates are sampled live: toggling a setting mid-session
         // applies to the very next move.
-        if (allowsIntent("scrub") && dx > SCROLL_START_PX && dx > dy * AXIS_DOMINANCE_RATIO) {
+        if (allowsIntent("scrub") && dx > TUNING.gestures.scrollStartPx && dx > dy * TUNING.gestures.axisDominanceRatio) {
           this.#scrubbing = true;
           this.#capturePointerSafe(this.#primaryPointerId);
           this.#scrubLastX = x;
           this.#scrubLastTime = now;
           this.#scrubVelocity = 0;
-        } else if (allowsIntent("swipe") && dy > SCROLL_START_PX && dy > dx * AXIS_DOMINANCE_RATIO) {
+        } else if (allowsIntent("swipe") && dy > TUNING.gestures.scrollStartPx && dy > dx * TUNING.gestures.axisDominanceRatio) {
           this.#swiping = true;
           this.#swipeDirection = y > this.#startY ? "down" : "up";
           this.#swipeBaseTransform = this.#video.style.transform || "";
@@ -604,12 +592,12 @@ export class InputForge {
       });
       this.#swipeDirection = null;
     } else if (
-      elapsed < HOLD_TIMEOUT_MS &&
+      elapsed < TUNING.gestures.holdTimeoutMs &&
       this.#gestureZone !== null &&
       allowsIntent("dbltap")
     ) {
       const now = performance.now();
-      if (now - this.#lastTapTime < DOUBLE_TAP_WINDOW_MS) {
+      if (now - this.#lastTapTime < TUNING.gestures.doubleTapWindowMs) {
         this.#lastTapTime = -Infinity;
         this.#suppressNextActivations();
         this.#dispatch(GESTURE_EVENTS.dbltap, { zone: this.#gestureZone, method: "pointer" });
@@ -651,7 +639,7 @@ export class InputForge {
         this.#trackpadPinchCooldown = true;
         setTimeout(() => {
           this.#trackpadPinchCooldown = false;
-        }, TRACKPAD_COOLDOWN_MS);
+        }, TUNING.gestures.trackpadCooldownMs);
         this.#suppressNextActivations();
         this.#dispatch(GESTURE_EVENTS.pinch, {
           zone: "screen",
@@ -690,7 +678,7 @@ export class InputForge {
               duration: performance.now() - this.#keyboardHoldStart
             });
           }
-        }, HOLD_TIMEOUT_MS);
+        }, TUNING.gestures.holdTimeoutMs);
       }
       return;
     }

@@ -8,9 +8,7 @@ import { ShellRegistry } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, findContainer, meetsMinSize, watchDocumentVideos } from "./sdk.js";
 import { Shell } from "../shell/shell.js";
-
-/** Grace period before a disconnected video's shell is destroyed (SPA source swaps detach briefly). */
-const REMOVAL_GRACE_MS = 500;
+import { TUNING } from "../shell/chrome/config.js";
 
 /**
  * crypto.randomUUID() exists only in secure contexts; userscripts match
@@ -168,7 +166,7 @@ export class Kernel {
           } else {
             reanchorObservers();
           }
-        }, REMOVAL_GRACE_MS));
+        }, TUNING.kernel.removalGraceMs));
         return;
       }
       if (video.parentElement !== anchors[0]) {
