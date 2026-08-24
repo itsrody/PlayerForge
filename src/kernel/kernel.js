@@ -1,6 +1,6 @@
 import { logger } from "../shared/logger.js";
 import { gmRegisterMenu } from "../shared/storage.js";
-import { GESTURE_EVENTS } from "../shared/events.js";
+import { GESTURE_EVENTS } from "../shell/inputs/input-list.js";
 import { EventBus } from "./bus.js";
 import { ShellRegistry } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";

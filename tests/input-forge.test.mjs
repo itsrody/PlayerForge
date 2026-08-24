@@ -6,7 +6,7 @@ globalThis.GM_getValue = (key, fallback) => fallback;
 globalThis.GM_setValue = () => {};
 
 const { InputForge } = await import("../src/shell/inputs/input-forge.js");
-const { GESTURE_EVENTS } = await import("../src/shared/events.js");
+const { GESTURE_EVENTS } = await import("../src/shell/inputs/input-list.js");
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

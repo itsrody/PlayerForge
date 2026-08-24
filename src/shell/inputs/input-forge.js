@@ -1,5 +1,4 @@
-import { allowsIntent, armedKeys } from "./input-list.js";
-import { GESTURE_EVENTS } from "../../shared/events.js";
+import { allowsIntent, armedKeys, GESTURE_EVENTS } from "./input-list.js";
 
 // Tuning constants (ms / px / ratios).
 const HOLD_TIMEOUT_MS = 300;

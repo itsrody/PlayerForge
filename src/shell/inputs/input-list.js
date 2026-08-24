@@ -1,6 +1,25 @@
 import { getSetting } from "../config.js";
 import { formatTime } from "../toast.js";
-import { GESTURE_EVENTS } from "../../shared/events.js";
+
+/**
+ * The gesture event contract: semantic CustomEvents dispatched by the
+ * InputForge engine onto the shell host, consumed by these bindings (and by
+ * the settings panel for its open/close request).
+ */
+export const GESTURE_EVENTS = {
+  hold: "pf:gesture-hold",
+  release: "pf:gesture-release",
+  scrub: "pf:gesture-scrub",
+  scrubEnd: "pf:gesture-scrub-end",
+  swipeStart: "pf:gesture-swipe-start",
+  swipe: "pf:gesture-swipe",
+  dbltap: "pf:gesture-dbltap",
+  skip: "pf:gesture-skip",
+  volume: "pf:gesture-volume",
+  mute: "pf:gesture-mute",
+  panel: "pf:gesture-panel",
+  pinch: "pf:gesture-pinch"
+};
 
 /**
  * Declarative input bindings — the single source of input policy.
