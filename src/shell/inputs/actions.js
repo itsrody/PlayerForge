@@ -102,11 +102,11 @@ export function armedKeys() {
  * arrows, VLC's {3s,10s,60s,300s} jumps): a deliberate action spans a
  * consistent FRACTION of the runtime, never an absolute time across content
  * lengths. One full-width stroke at rest covers SCRUB_STROKE_FRACTION of
- * the video; distance escalation tops out so a capped stroke spans ~5% -
- * every video is traversable end-to-end in roughly twenty capped strokes,
- * on a phone thumbnail or a fullscreen monitor alike (width-normalized).
+ * the video; distance escalation tops out so a capped stroke spans ~10% -
+ * every video is traversable end-to-end in roughly ten capped strokes, on
+ * a phone thumbnail or a fullscreen monitor alike (width-normalized).
  */
-const SCRUB_STROKE_FRACTION = 0.005;
+const SCRUB_STROKE_FRACTION = 0.01;
 /** Path-length doubling distance: escalation is speed- and pause-free. */
 const SCRUB_ESCALATION_PX = 150;
 const SCRUB_MAX_MULTIPLIER = 10;
