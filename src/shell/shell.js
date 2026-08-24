@@ -272,7 +272,6 @@ export class Shell {
       this.container.style.position = "relative";
     }
     watchShellHost(this.container, this.#shellDom.host, { signal: this.#scope.signal });
-    logger.log("shell", "Shell DOM appended as overlay child of container");
   }
 
   #forwardMediaEvents() {

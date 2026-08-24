@@ -115,8 +115,10 @@ pf-toast {
   inset: auto;
   margin: 0;
   border: none;
-  top: 12px;
-  left: 50%;
+  /* Top Layer lays out against the viewport - JS pins --pf-toast-x/y to the
+     player region; these are the HUD-local fallbacks when it can't. */
+  top: var(--pf-toast-y, 12px);
+  left: var(--pf-toast-x, 50%);
   /* Dedicated translate property (Chrome 104+) - keeps centering out of
      the transform property, so transform-based animations on the toast
      never clobber it. */
@@ -219,11 +221,14 @@ pf-toast.pf-toast-interactive {
   inset: auto;
   padding: 0;
 
-  left: 0;
-  right: 0;
-  top: 50%;
-  margin: 0 auto;
-  translate: 0 -6px;
+  /* Centered on the player region: JS pins --pf-panel-x/y to viewport
+     coords (Top Layer ignores DOM anchoring); the fallbacks center on the
+     viewport. Breakpoint modes override left/top and ignore the vars. */
+  left: var(--pf-panel-x, 50%);
+  right: auto;
+  top: var(--pf-panel-y, 50%);
+  margin: 0;
+  translate: -50% -6px;
   width: min(380px, calc(100% - 24px));
   max-height: calc(100% - 24px);
   overflow-y: auto;
@@ -247,12 +252,12 @@ pf-toast.pf-toast-interactive {
 }
 .pf-panel:popover-open {
   opacity: 1;
-  translate: 0 -50%;
+  translate: -50% -50%;
 }
 @starting-style {
   .pf-panel:popover-open {
     opacity: 0;
-    translate: 0 calc(-50% - 6px);
+    translate: -50% calc(-50% - 6px);
   }
 }
 
@@ -792,6 +797,8 @@ pf-toast.pf-toast-interactive {
   .pf-panel {
     top: auto;
     bottom: 8px;
+    left: 8px;
+    right: 8px;
     max-height: 62vh;
     margin: 0;
     border-radius: 16px 16px 0 0;
