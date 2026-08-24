@@ -99,9 +99,9 @@
 }
 
 /* - Toast (singleton <pf-toast>) - */
-/* Pill-shaped, top-centered, opacity morph for content changes. Rides the
-   HUD layer under the host's z-index doctrine - above captions, below
-   the panel. */
+/* Pill-shaped, top-centered, drop-and-fade morph for content changes.
+   Rides the HUD layer under the host's z-index doctrine - above captions,
+   below the panel. */
 pf-toast {
   --pf-toast-bg: rgba(0, 0, 0, 0.8);
   --pf-toast-color: var(--pf-fg);
@@ -125,16 +125,27 @@ pf-toast {
   font-size: 14px;
   font-weight: 500;
   line-height: 1;
+  /* One geometry for every toast - pill, single line, width capped with
+     ellipsis - whether or not action buttons ride along; their metrics
+     already match the text row. */
+  max-width: min(92%, 440px);
   white-space: nowrap;
+  overflow: hidden;
   pointer-events: none;
 
-  /* Default hidden */
+  /* Default hidden: faded and hovering 4px high; entry drops it into
+     place. Centering lives in the translate property precisely so this
+     transform axis stays free for the motion. */
   opacity: 0;
-  transition: opacity 0.15s ease;
+  transform: translateY(-4px);
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
 }
 
 pf-toast.pf-visible {
   opacity: 1;
+  transform: translateY(0);
 }
 
 /* Icon inside toast */
@@ -148,9 +159,13 @@ pf-toast .pf-toast-icon {
   fill: currentColor;
 }
 
-/* Text inside toast */
+/* Text inside toast - clips with an ellipsis when a message exceeds the
+   pill cap instead of spilling out of the shell. */
 pf-toast .pf-toast-text {
-  display: inline;
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Action buttons (interactive toasts - e.g. resume prompt) */
@@ -188,14 +203,6 @@ pf-toast .pf-toast-actions button svg {
   width: 16px;
   height: 16px;
   fill: currentColor;
-}
-/* Interactive toasts get a card look instead of a pill so multi-word
-   actions fit; they also stay put until an action is taken. */
-pf-toast.pf-toast-interactive {
-  --pf-toast-radius: 12px;
-  max-width: min(92vw, 440px);
-  white-space: normal;
-  padding: 8px 12px;
 }
 
 /* - Panel (universal plugin panel) - */

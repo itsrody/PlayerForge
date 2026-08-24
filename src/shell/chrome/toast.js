@@ -66,12 +66,10 @@ export class ToastManager {
         this.#actions.appendChild(button);
       }
       this.#actions.style.display = "";
-      this.#toast.classList.add("pf-toast-interactive");
       this.#toast.style.pointerEvents = "auto";
     } else {
       this.#actions.textContent = "";
       this.#actions.style.display = "none";
-      this.#toast.classList.remove("pf-toast-interactive");
       this.#toast.style.pointerEvents = "";
     }
     this.#toast.style.color = color || "";
