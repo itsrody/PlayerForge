@@ -394,33 +394,6 @@ export class Shell {
     }
   }
 
-  async enterFullscreen(lockOrientation = false) {
-    if (!this.fullscreen) {
-      try {
-        await this.container.requestFullscreen({ navigationUI: "hide" });
-      } catch (err) {
-        logger.error("shell", "Fullscreen enter failed:", err);
-        return;
-      }
-      if (lockOrientation) {
-        try {
-          await screen.orientation?.lock?.("landscape");
-        } catch (err) {
-          const retryLock = () => {
-            document.removeEventListener("fullscreenchange", retryLock, true);
-            const lock = screen.orientation?.lock;
-            if (lock) {
-              lock("landscape").catch(() => {});
-            }
-          };
-          document.addEventListener("fullscreenchange", retryLock, true);
-          setTimeout(() => document.removeEventListener("fullscreenchange", retryLock, true), 2000);
-          logger.log("shell", "Orientation lock unavailable:", err);
-        }
-      }
-    }
-  }
-
   #ownsFullscreenElement(element) {
     const container = this.container;
     const video = this.video;

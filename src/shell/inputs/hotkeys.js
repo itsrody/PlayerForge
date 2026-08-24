@@ -299,11 +299,11 @@ export class HotkeysController {
     });
   }
 
+  /**
+   * Fullscreen-mode semantics only: edges skip, center toggles playback.
+   * Inline-mode double-taps belong to the browser/player natively.
+   */
   #onDoubleTap(shell, { zone }) {
-    if (!shell.fullscreen) {
-      shell.enterFullscreen(true);
-      return;
-    }
     if (zone === "left-edge" || zone === "right-edge") {
       this.#performSkip(shell, zone === "left-edge" ? "left" : "right");
     } else if (zone === "screen") {
