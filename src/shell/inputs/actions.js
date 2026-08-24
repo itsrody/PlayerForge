@@ -97,9 +97,19 @@ export function armedKeys() {
 
 /* - Per-shell action state - */
 
-const SCRUB_MAX_MULTIPLIER = 6;
-/** Doubling distance: every N px of drag path length doubles the step. */
+/**
+ * Scrub calibration follows the desktop-player reference (mpv's {1s,5s,60s}
+ * arrows, VLC's {3s,10s,60s,300s} jumps): a deliberate action spans a
+ * consistent FRACTION of the runtime, never an absolute time across content
+ * lengths. One full-width stroke at rest covers SCRUB_STROKE_FRACTION of
+ * the video; distance escalation tops out so a capped stroke spans ~5% -
+ * every video is traversable end-to-end in roughly twenty capped strokes,
+ * on a phone thumbnail or a fullscreen monitor alike (width-normalized).
+ */
+const SCRUB_STROKE_FRACTION = 0.005;
+/** Path-length doubling distance: escalation is speed- and pause-free. */
 const SCRUB_ESCALATION_PX = 150;
+const SCRUB_MAX_MULTIPLIER = 10;
 const SWIPE_EXIT_MIN_PX = 100;
 const STREAK_RESET_MS = 600;
 
@@ -285,9 +295,13 @@ export function attachInputActions(shell, host, signal) {
       if (!duration || !Number.isFinite(duration)) {
         return;
       }
+      // Base rate: SCRUB_STROKE_FRACTION of the runtime per full-width
+      // stroke, scaled by the sensitivity setting around its 150 default.
+      const width = shell.container?.clientWidth || shell.video?.clientWidth || 640;
       state.scrubbing = true;
       state.scrubDuration = duration;
-      state.scrubPixelsPerSecond = getSetting("controller.scrubSensitivity") / (duration / 300);
+      state.scrubPixelsPerSecond =
+        (duration * SCRUB_STROKE_FRACTION * (getSetting("controller.scrubSensitivity") / 150)) / width;
       state.scrubDirectionMomentum = 0;
       state.scrubTravelPx = 0;
     }
