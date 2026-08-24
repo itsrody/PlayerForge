@@ -8,7 +8,7 @@ import { CueRenderer } from "./subtitles/cue-renderer.js";
 import { SettingsPanel } from "./panel.js";
 import { addSettingsSection } from "./config.js";
 import { ToastManager } from "./toast.js";
-import { createMediaControls } from "./media.js";
+import { claimMediaSession, createMediaControls } from "./media.js";
 import { ensureStyles, injectShell, watchShellHost } from "./inject.js";
 
 const VIDEO_EVENTS = [
@@ -21,13 +21,6 @@ const MEDIA_SESSION_SYNC_EVENTS = new Set([
   "play", "pause", "playing", "ended", "seeked", "durationchange", "ratechange",
   "volumechange", "loadedmetadata"
 ]);
-const MEDIA_SESSION_ACTIONS = [
-  "play", "pause", "stop", "seekbackward", "seekforward", "seekto",
-  "previoustrack", "nexttrack"
-];
-
-/** The shell whose video currently owns navigator.mediaSession. */
-let mediaSessionOwner = null;
 
 /**
  * Per-video facade: wraps the media element with a stable API, injects the
@@ -54,6 +47,8 @@ export class Shell {
   #scope = new AbortController();
   /** Command plane: all playback control routes through these primitives. */
   #media;
+  /** OS media-key facet, null without MediaSession support. */
+  #mediaSession = null;
   /** Mirror of the fullscreen checkmark, used only to dedup change events. */
   #lastFullscreen = false;
   #savedPositionStyle = null;
@@ -81,7 +76,11 @@ export class Shell {
     this.#setupFocusManagement();
     this.#suppressContextMenu();
     this.#forwardMediaEvents();
-    this.#registerMediaSession();
+    this.#mediaSession = claimMediaSession({
+      controls: this.#media,
+      video,
+      signal: this.#scope.signal
+    });
     this.#watchFullscreen();
     this.#markManaged();
     logger.log("shell", `Shell "${id}" constructed (${sdkName})`);
@@ -281,87 +280,12 @@ export class Shell {
         video
       });
       if (MEDIA_SESSION_SYNC_EVENTS.has(name)) {
-        this.#syncMediaSessionState();
+        this.#mediaSession?.sync();
       }
     };
     for (const name of VIDEO_EVENTS) {
       const handler = makeHandler(name);
       video.addEventListener(name, handler, { signal: this.#scope.signal });
-    }
-  }
-
-  #registerMediaSession() {
-    const session = navigator.mediaSession;
-    if (!session) {
-      return;
-    }
-    if (mediaSessionOwner && mediaSessionOwner !== this) {
-      mediaSessionOwner.#clearMediaSession();
-    }
-    mediaSessionOwner = this;
-    const registerAction = (action, handler) => {
-      session.setActionHandler(action, handler);
-    };
-    registerAction("play", () => this.play());
-    registerAction("pause", () => this.pause());
-    registerAction("stop", () => {
-      this.pause();
-      this.currentTime = 0;
-    });
-    registerAction("seekbackward", (details) => this.skip(-(details?.seekOffset || 10)));
-    registerAction("seekforward", (details) => this.skip(details?.seekOffset || 10));
-    registerAction("seekto", (details) => {
-      if (details?.seekTime != null) {
-        this.#media.seekTo(details.seekTime);
-      }
-    });
-    session.playbackState = this.paused ? "paused" : "playing";
-    this.#updatePositionState();
-    // One abort listener owns the whole MediaSession teardown: a newer shell
-    // taking over, or destroy(), both funnel through the same ownership check.
-    this.#scope.signal.addEventListener("abort", () => {
-      if (mediaSessionOwner === this) {
-        this.#clearMediaSession();
-        mediaSessionOwner = null;
-      }
-    }, { once: true });
-    logger.log("shell", "MediaSession handlers registered");
-  }
-
-  #clearMediaSession() {
-    const session = navigator.mediaSession;
-    if (session) {
-      for (const action of MEDIA_SESSION_ACTIONS) {
-        session.setActionHandler(action, null);
-      }
-      session.playbackState = "none";
-    }
-  }
-
-  #syncMediaSessionState() {
-    if (mediaSessionOwner !== this) {
-      return;
-    }
-    const session = navigator.mediaSession;
-    if (session) {
-      session.playbackState = this.video.paused ? "paused" : "playing";
-      this.#updatePositionState();
-    }
-  }
-
-  #updatePositionState() {
-    if (mediaSessionOwner !== this) {
-      return;
-    }
-    const session = navigator.mediaSession;
-    if (session && Number.isFinite(this.video.duration) && this.video.duration > 0) {
-      try {
-        session.setPositionState({
-          duration: this.video.duration,
-          playbackRate: this.video.playbackRate,
-          position: Math.min(this.video.currentTime, this.video.duration)
-        });
-      } catch {}
     }
   }
 
