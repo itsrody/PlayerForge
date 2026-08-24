@@ -238,13 +238,16 @@ export function createFrameRelay() {
       return;
     }
     if (data.type === "pf:ctx-request" && typeof data.nonce === "string" && event.source) {
-      pending.set(data.nonce, event.source);
+      // Remember who asked AND from which origin: the answer must travel back
+      // down addressed to the requester's origin - this hop's upstream origin
+      // would get the delivery dropped whenever the two differ.
+      pending.set(data.nonce, { source: event.source, origin: event.origin });
       setTimeout(() => pending.delete(data.nonce), NONCE_TTL_MS);
       window.parent.postMessage(data, "*");
     } else if (data.type === "pf:ctx" && pending.has(data.nonce)) {
       const requester = pending.get(data.nonce);
       pending.delete(data.nonce);
-      requester?.postMessage(data, event.origin || "*");
+      requester.source?.postMessage(data, requester.origin || "*");
     }
   };
 }

@@ -121,7 +121,7 @@ test("frame relay forwards requests up and routes answers back down", () => {
 
     relay({ data: { type: "pf:ctx", nonce: "r1", domain: "site", path: "/", title: "" }, origin: "https://top.test" });
     assert.deepEqual(child.sent.msg, { type: "pf:ctx", nonce: "r1", domain: "site", path: "/", title: "" });
-    assert.equal(child.sent.target, "https://top.test");
+    assert.equal(child.sent.target, "https://kid.test");
 
     child.sent = null;
     relay({ data: { type: "pf:ctx", nonce: "unknown", domain: "site", path: "/", title: "" }, origin: "https://top.test" });
@@ -129,6 +129,60 @@ test("frame relay forwards requests up and routes answers back down", () => {
     win.parent.postMessage = originalPostMessage;
   } finally {
     win.parent.postMessage = originalPostMessage;
+  }
+});
+
+test("nested relays address every down-leg with its own requester origin", () => {
+  // Chain under test, all origins distinct:
+  //   leaf(kid) -> relayInner -> inner window -> relayOuter -> top
+  // The top answer must reach the leaf with targetOrigin "kid" at the final
+  // hop even though every upstream leg carries foreign origins.
+  const makeWin = () => {
+    const { window: w } = dom();
+    const original = w.parent.postMessage.bind(w.parent);
+    let up = null;
+    w.parent.postMessage = (msg, target) => { up = { msg, target }; };
+    return { win: w, setUp: () => {
+      globalThis.window = w;
+      globalThis.parent = w.parent;
+      globalThis.location = w.location;
+      globalThis.document = w.document;
+    }, restoreUp: () => { w.parent.postMessage = original; }, get up() { return up; } };
+  };
+
+  const outer = makeWin();
+  outer.setUp();
+  const relayOuter = createFrameRelay();
+
+  const inner = makeWin();
+  inner.setUp();
+  const relayInner = createFrameRelay();
+
+  try {
+    const leaf = { postMessage: (msg, target) => { leaf.sent = { msg, target }; } };
+    const innerWindow = { postMessage: (msg, target) => { innerWindow.sent = { msg, target }; } };
+
+    // Leaf asks up through the inner relay (inner globals active).
+    relayInner({ data: { type: "pf:ctx-request", nonce: "nn" }, origin: "https://kid.test", source: leaf });
+    assert.deepEqual(inner.up.msg, { type: "pf:ctx-request", nonce: "nn" });
+
+    // Inner window's message arrives at the outer relay - reactivate the
+    // outer globals first, since relays read window.parent per event.
+    outer.setUp();
+    relayOuter({ data: inner.up.msg, origin: "https://inner.test", source: innerWindow });
+    assert.ok(outer.up);
+
+    // Top answers; each relay routes down with the origin it stored per hop.
+    const answer = { type: "pf:ctx", nonce: "nn", domain: "site", path: "/", title: "" };
+    relayOuter({ data: answer, origin: "https://top.test" });
+    assert.equal(innerWindow.sent.target, "https://inner.test");
+
+    relayInner({ data: answer, origin: "https://inner.test" });
+    assert.equal(leaf.sent.target, "https://kid.test");
+    assert.deepEqual(leaf.sent.msg, answer);
+  } finally {
+    inner.restoreUp();
+    outer.restoreUp();
   }
 });
 
