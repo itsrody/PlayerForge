@@ -14,8 +14,8 @@ const TRACKPAD_COOLDOWN_MS = 500;
 const SUPPRESS_WINDOW_MS = 600;
 
 /**
- * Pointer handlers never preventDefault — native pan/scroll over the zone is
- * suppressed by the touch-action CSS set at construction — so every pointer
+ * Pointer handlers never preventDefault - native pan/scroll over the zone is
+ * suppressed by the touch-action CSS set at construction - so every pointer
  * listener can be passive. Only two listeners cancel defaults: the wheel
  * pinch listener (subscribed only while fullscreen) and the click/dblclick
  * suppressors that swallow post-gesture activations.
@@ -137,7 +137,7 @@ export class InputForge {
     activeForges.add(this);
   }
 
-  /** Engine lifetime signal — action wiring shares it and dies with it. */
+  /** Engine lifetime signal - action wiring shares it and dies with it. */
   get signal() {
     return this.#scope.signal;
   }
@@ -727,7 +727,7 @@ export class InputForge {
 
   /**
    * End a Space session: an active hold always releases (restoring playback
-   * rate via the action layer), a bare tap toggles play/pause — but only on
+   * rate via the action layer), a bare tap toggles play/pause - but only on
    * a real keyup. Blur finishes silently-with-release and never toggles.
    */
   #finishKeyboardHold(allowToggle) {

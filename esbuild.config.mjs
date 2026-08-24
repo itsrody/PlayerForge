@@ -65,6 +65,10 @@ const options = {
   outfile: "dist/playerforge.user.js",
   banner: { js: banner },
   loader: { ".css": "text" },
+  // Emit real UTF-8 instead of \uXXXX escapes: the three intentional UI
+  // glyphs (close X, settings gear, toast separator) stay readable and the
+  // bundle stops paying six bytes per code point.
+  charset: "utf8",
   legalComments: "none",
   minify: false,
   sourcemap: false,

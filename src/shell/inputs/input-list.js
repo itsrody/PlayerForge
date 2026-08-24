@@ -22,7 +22,7 @@ export const GESTURE_EVENTS = {
 };
 
 /**
- * Declarative input bindings — the single source of input policy.
+ * Declarative input bindings - the single source of input policy.
  *
  * Every gesture the shell understands is one record here: what triggers it,
  * which settings toggle arms it, whether it demands fullscreen, and what it
@@ -42,14 +42,14 @@ export const GESTURE_EVENTS = {
  */
 
 export const INPUT_BINDINGS = [
-  // ── Pointer intents ──────────────────────────────────────────────
+  // - Pointer intents -
   { id: "hold-speed", gesture: "hold", setting: "gestures.hold", fs: false },
   { id: "drag-scrub", gesture: "scrub", setting: "gestures.scrub", fs: true },
   { id: "drag-swipe", gesture: "swipe", setting: "gestures.swipe", fs: true },
   { id: "double-tap", gesture: "dbltap", setting: "gestures.dbltap", fs: true },
   { id: "pinch-fill", gesture: "pinch", setting: "gestures.pinch", fs: true },
 
-  // ── Keyboard ─────────────────────────────────────────────────────
+  // - Keyboard -
   {
     id: "key-skip-right", gesture: "key", code: "ArrowRight", emit: GESTURE_EVENTS.skip,
     direction: "right", setting: "gestures.hotkeys", fs: false
@@ -90,12 +90,12 @@ export function allowsIntent(gesture) {
   return INPUT_BINDINGS.some((binding) => binding.gesture === gesture && gateOpen(binding));
 }
 
-/** Armed key bindings, in table order — sampled live per keystroke. */
+/** Armed key bindings, in table order - sampled live per keystroke. */
 export function armedKeys() {
   return INPUT_BINDINGS.filter((binding) => binding.gesture === "key" && gateOpen(binding));
 }
 
-/* ── Per-shell action state ─────────────────────────────────────────── */
+/* - Per-shell action state - */
 
 const SCRUB_MAX_MULTIPLIER = 6;
 const SCRUB_VELOCITY_MAX = 1200;
@@ -206,7 +206,7 @@ function volumeIcon(volume, muted) {
  * the engine's AbortSignal, so destroying the engine tears the actions down.
  */
 export function attachInputActions(shell, host, signal) {
-  /** Fullscreen exit also collapses fill mode — the one cross-feature rule. */
+  /** Fullscreen exit also collapses fill mode - the one cross-feature rule. */
   shell.bus.addEventListener("shell:fullscreen-change", (event) => {
     const { shellId, fullscreen } = event.detail;
     if (shellId === shell.id && !fullscreen) {

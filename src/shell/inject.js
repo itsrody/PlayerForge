@@ -14,7 +14,7 @@ export function ensureStyles() {
 
 /**
  * Resolve once the container's child list has been quiet for a run of
- * consecutive animation frames, or when the cap expires — whichever comes
+ * consecutive animation frames, or when the cap expires - whichever comes
  * first. SDKs build their player over several microtasks/frames after the
  * <video> appears; injecting mid-build invites wholesale innerHTML wipes.
  */

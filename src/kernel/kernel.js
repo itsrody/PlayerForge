@@ -49,7 +49,7 @@ export class Kernel {
     if (!event.persisted) {
       return;
     }
-    logger.log("kernel", "Restored from bfcache — reconciling");
+    logger.log("kernel", "Restored from bfcache - reconciling");
     for (const shell of this.#registry.getAll()) {
       if (!shell.video.isConnected) {
         this.#seenVideos.delete(shell.video);
@@ -102,7 +102,7 @@ export class Kernel {
       }
     });
     this.#insertionObserver.observe(document.documentElement, { childList: true, subtree: true });
-    logger.log("kernel", "Kernel ready — media events + insertion watch active");
+    logger.log("kernel", "Kernel ready - media events + insertion watch active");
   }
 
   /** Adopt the video, emit discovery and start removal watching. */
@@ -120,11 +120,11 @@ export class Kernel {
     }
     const container = findContainer(video);
     if (!container) {
-      logger.warn("kernel", "No container for video — skipping");
+      logger.warn("kernel", "No container for video - skipping");
       return;
     }
     this.#seenVideos.add(video);
-    logger.log("kernel", `${sdk.name} adopted (${video.videoWidth}×${video.videoHeight}, ${Math.round(video.duration)}s)`);
+    logger.log("kernel", `${sdk.name} adopted (${video.videoWidth}x${video.videoHeight}, ${Math.round(video.duration)}s)`);
     this.bus.emit("video:found", {
       video,
       container,

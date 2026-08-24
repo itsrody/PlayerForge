@@ -82,7 +82,7 @@ function createStepper({
         window.removeEventListener("pointerup", release, { passive: true });
         window.removeEventListener("pointercancel", release, { passive: true });
       };
-      // Passive: the release handler only stops timers — it never cancels defaults.
+      // Passive: the release handler only stops timers - it never cancels defaults.
       window.addEventListener("pointerup", release, { passive: true });
       window.addEventListener("pointercancel", release, { passive: true });
     });
@@ -221,7 +221,7 @@ export class SettingsPanel {
     this.#shellId = shell.id;
     this.#bus = bus;
     if (!this.#hudLayer || !this.#shellHost) {
-      logger.error("panel", "Missing shell DOM — panel not available");
+      logger.error("panel", "Missing shell DOM - panel not available");
       return;
     }
     this.#buildDom();

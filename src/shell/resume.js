@@ -36,7 +36,7 @@ export class ResumeStore {
     } else {
       this.#state = { version: 1, entries: [] };
       gmSetValue(RESUME_STORE_KEY, this.#state);
-      logger.warn("resume", "Resume store missing or corrupt — reset");
+      logger.warn("resume", "Resume store missing or corrupt - reset");
     }
     const stalePending = this.#state.entries.filter((entry) => entry.pending).length;
     if (stalePending) {
@@ -104,7 +104,8 @@ export class ResumeStore {
       id,
       domain: domainKey,
       path,
-      title: title || "",
+      // NFC so stored titles compare equal regardless of source encoding.
+      title: (title || "").normalize("NFC"),
       duration: duration || 0,
       resume: 0,
       createdAt: Date.now(),
@@ -140,7 +141,7 @@ export class ResumeStore {
 /**
  * Shell-owned playback tracker: persists progress per (domain, path, duration)
  * and resumes where the user left off, with a "Start over" toast action.
- * Saves are event-driven — throttled timeupdate ticks plus pause flushes —
+ * Saves are event-driven - throttled timeupdate ticks plus pause flushes -
  * never a polling timer.
  */
 export class ResumeTracker {
@@ -162,7 +163,7 @@ export class ResumeTracker {
     const shell = this.#shell;
     const context = await getPageContext();
     if (!context) {
-      logger.log("resume", "Top context unavailable — skipping");
+      logger.log("resume", "Top context unavailable - skipping");
       return;
     }
 
@@ -191,18 +192,18 @@ export class ResumeTracker {
       video.addEventListener("error", onError, { signal });
       await metadataReady;
       if (this.#destroyed) {
-        logger.log("resume", "Shell destroyed before metadata — skipping");
+        logger.log("resume", "Shell destroyed before metadata - skipping");
         return;
       }
       if (!video.isConnected) {
-        logger.log("resume", "Video detached before metadata — skipping");
+        logger.log("resume", "Video detached before metadata - skipping");
         return;
       }
     }
 
     const duration = video.duration || 0;
     if (duration <= 0) {
-      logger.log("resume", "No duration available — skipping");
+      logger.log("resume", "No duration available - skipping");
       return;
     }
 
@@ -211,7 +212,7 @@ export class ResumeTracker {
     let startAt = shell.currentTime || 0;
     if (match) {
       this.#entry = match;
-      logger.log("resume", `Matched ${match.id} — resume at ${match.resume}s`);
+      logger.log("resume", `Matched ${match.id} - resume at ${match.resume}s`);
     } else {
       this.#entry = this.#store.createEntry(context.domain, context.path, context.title, duration);
       logger.log("resume", `Created ${this.#entry.id} for ${context.domain}${context.path}`);

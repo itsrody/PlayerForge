@@ -1,5 +1,5 @@
 .pf-shell {
-  /* Palette base — ink and accent custom properties for the flat HUD.
+  /* Palette base - ink and accent custom properties for the flat HUD.
      --pf-bg is kept as a hook for consumers; surfaces use fixed rgba(). */
   --pf-fg: #fff;
   --pf-bg: #000;
@@ -13,7 +13,7 @@
   pointer-events: none;
   /* Rendering dominance over the SDK inside its own player region. The host
      is absolutely positioned within the container, so the INT32_MAX ceiling
-     cannot escape onto page chrome — it only outranks every sibling stack
+     cannot escape onto page chrome - it only outranks every sibling stack
      the SDK paints inside the player. */
   z-index: 2147483647;
   outline: none;
@@ -37,7 +37,7 @@
   position: fixed !important;
 }
 
-/* ── HUD Layer ─────────────────────────────────────────────────── */
+/* - HUD Layer - */
 .pf-hud-layer {
   position: absolute;
   inset: 0;
@@ -48,8 +48,8 @@
   pointer-events: auto;
 }
 
-/* ── Cue Layer (reusable caption DOM) ──────────────────────────── */
-/* Captions render here — above the video, so filters/transforms on the
+/* - Cue Layer (reusable caption DOM) - */
+/* Captions render here - above the video, so filters/transforms on the
    <video> never touch them, and the cue pool diffs slots per transition. */
 .pf-cue-layer {
   --pf-cue-color: #fff;
@@ -68,7 +68,7 @@
   pointer-events: none;
   z-index: 2;
 }
-/* .pf-hud-layer > * re-enables pointer events on every HUD child —
+/* .pf-hud-layer > * re-enables pointer events on every HUD child -
    this more-specific rule keeps the caption layer click-transparent. */
 .pf-hud-layer > .pf-cue-layer {
   pointer-events: none;
@@ -93,7 +93,7 @@
   display: none !important;
 }
 
-/* ── Toast (singleton <pf-toast>) ──────────────────────────────── */
+/* - Toast (singleton <pf-toast>) - */
 /* Pill-shaped, top-centered, opacity morph for content changes. Lives
    in the Top Layer as a manual popover, so no z-index is needed. */
 pf-toast {
@@ -151,7 +151,7 @@ pf-toast .pf-toast-text {
   display: inline;
 }
 
-/* Action buttons (interactive toasts — e.g. resume prompt) */
+/* Action buttons (interactive toasts - e.g. resume prompt) */
 pf-toast .pf-toast-actions {
   display: inline-flex;
   align-items: center;
@@ -172,7 +172,7 @@ pf-toast .pf-toast-actions button {
 pf-toast .pf-toast-actions button:hover {
   background: rgba(255, 255, 255, 0.28);
 }
-/* Icon-only action buttons — square pill, glyph sized to the toast text */
+/* Icon-only action buttons - square pill, glyph sized to the toast text */
 pf-toast .pf-toast-actions button:has(svg) {
   display: inline-flex;
   align-items: center;
@@ -196,7 +196,7 @@ pf-toast.pf-toast-interactive {
   padding: 8px 12px;
 }
 
-/* ── Panel (universal plugin panel) ───────────────────────────── */
+/* - Panel (universal plugin panel) - */
 /* Glassy, floating sheet centered in the shell on both axes, rendered
    in the Top Layer while open (auto popover: Gecko owns Esc and
    outside-click dismissal). Vertical centering is top: 50% + translate:
@@ -261,7 +261,7 @@ pf-toast.pf-toast-interactive {
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-/* Segmented tab strip — icon + label, active label accent-tinted. Tabs are
+/* Segmented tab strip - icon + label, active label accent-tinted. Tabs are
    content-sized (uniform internal padding, no equal-width stretch) and the
    strip distributes them with space-evenly, so every tab keeps the same
    internal breathing room and tab separation is wider than the icon-label
@@ -325,7 +325,7 @@ pf-toast.pf-toast-interactive {
 .pf-panel-section[hidden] { display: none; }
 .pf-panel-section:last-child { margin-bottom: 0; }
 
-/* Section header — label on the left, an icon action (e.g. Reset style)
+/* Section header - label on the left, an icon action (e.g. Reset style)
    on the right. */
 .pf-panel-section-head {
   display: flex;
@@ -336,7 +336,7 @@ pf-toast.pf-toast-interactive {
 }
 .pf-panel-section-head .pf-panel-label { margin-bottom: 0; }
 
-/* Icon-only action buttons — square, centered glyph, tooltip via title. */
+/* Icon-only action buttons - square, centered glyph, tooltip via title. */
 .pf-panel-actions .pf-btn.pf-btn-icon,
 .pf-panel-section-head .pf-btn.pf-btn-icon {
   flex: none;
@@ -375,7 +375,7 @@ pf-toast.pf-toast-interactive {
   color: var(--pf-fg);
   font-size: 13px;
 }
-/* One-line toggle + preset row (Colors tab) — the label hugs the switch
+/* One-line toggle + preset row (Colors tab) - the label hugs the switch
    instead of stretching, so the preset select fills the rest. */
 .pf-panel-top .pf-panel-label {
   flex: none;
@@ -397,7 +397,7 @@ pf-toast.pf-toast-interactive {
   margin: 6px 0;
 }
 
-/* Subtitles tab — upload / remove buttons on the left, the status line
+/* Subtitles tab - upload / remove buttons on the left, the status line
    beside them (single line, truncated). */
 .pf-panel-load-row {
   display: flex;
@@ -417,7 +417,7 @@ pf-toast.pf-toast-interactive {
   white-space: nowrap;
 }
 
-/* Drag-and-drop target (Subtitles tab) — highlighted while dragging files */
+/* Drag-and-drop target (Subtitles tab) - highlighted while dragging files */
 .pf-panel-section.pf-drop-active {
   outline: 2px dashed var(--pf-accent);
   outline-offset: -4px;
@@ -444,7 +444,7 @@ pf-toast.pf-toast-interactive {
 }
 .pf-panel-actions .pf-btn svg { width: 16px; height: 16px; }
 
-/* Compact 2-column grid (Colors / Subtitles tabs) — minmax(0, 1fr)
+/* Compact 2-column grid (Colors / Subtitles tabs) - minmax(0, 1fr)
    lets columns shrink below a control's intrinsic width so the grid never
    overflows the panel (no horizontal scroll). */
 .pf-panel-grid {
@@ -477,7 +477,7 @@ pf-toast.pf-toast-interactive {
   font-size: 11px;
 }
 
-/* Compact inline cells (Subtitles style grid) — label · control · value
+/* Compact inline cells (Subtitles style grid) - label | control | value
    on one line, so each control is a single row instead of label-over-input.
    Long labels ellipsize before the control starves. */
 .pf-panel-grid-compact { gap: 4px 8px; }
@@ -500,13 +500,13 @@ pf-toast.pf-toast-interactive {
   min-width: 30px;
   font-size: 11px;
 }
-/* Color-swatch cell has no filling element — spread label / swatch / hex
+/* Color-swatch cell has no filling element - spread label / swatch / hex
    so the value still lands on the right edge like the stepper cells. */
 .pf-panel-grid-compact .pf-panel-cell:has(> input[type="color"]) {
   justify-content: space-between;
 }
 
-/* Position row (Subtitles tab) — toggle + two labeled steppers + Align
+/* Position row (Subtitles tab) - toggle + two labeled steppers + Align
    select on one line. Stepper groups flex-grow; the select hugs its content;
    the row wraps on very narrow panels instead of overflowing. */
 .pf-panel-pos-row {
@@ -539,7 +539,7 @@ pf-toast.pf-toast-interactive {
   width: auto;
 }
 
-/* Numeric stepper — text input with stacked up/down chevron buttons.
+/* Numeric stepper - text input with stacked up/down chevron buttons.
    Replaces the old range sliders; fills its cell, or the flexible middle
    slot in inline rows. */
 .pf-stepper {
@@ -599,7 +599,7 @@ pf-toast.pf-toast-interactive {
   width: auto;
 }
 
-/* Color swatch — keeps the native picker, gets a rounded cap. */
+/* Color swatch - keeps the native picker, gets a rounded cap. */
 .pf-panel input[type="color"] {
   width: 28px;
   height: 22px;
@@ -610,7 +610,7 @@ pf-toast.pf-toast-interactive {
   cursor: pointer;
 }
 
-/* Toggle switch — appearance:none keeps real checkbox semantics. */
+/* Toggle switch - appearance:none keeps real checkbox semantics. */
 .pf-panel input[type="checkbox"] {
   appearance: none;
   flex: none;
@@ -643,7 +643,7 @@ pf-toast.pf-toast-interactive {
 .pf-panel input[type="checkbox"]:checked::before { translate: 14px 0; }
 .pf-panel input[type="checkbox"]:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
 
-/* Settings tab — compact toggle cards (whole card is the label) */
+/* Settings tab - compact toggle cards (whole card is the label) */
 .pf-settings-toggle {
   display: flex;
   align-items: center;
@@ -734,7 +734,7 @@ pf-toast.pf-toast-interactive {
 }
 .pf-btn.active:hover { background: rgba(74, 158, 255, 0.34); }
 
-/* Shell-true density — the panel adapts to its own width (≈ the video
+/* Shell-true density - the panel adapts to its own width (~ the video
    container), not the viewport: wide panels keep the two-column grid,
    very narrow players collapse it to one column. */
 @container pf-panel (max-width: 330px) {
@@ -743,7 +743,7 @@ pf-toast.pf-toast-interactive {
   .pf-panel-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* ── Mobile & touch ───────────────────────────────────────────── */
+/* - Mobile & touch - */
 /* Touch devices (phones/tablets): enlarge hit targets toward
    thumb-sized (~40px) tap areas. */
 @media (pointer: coarse) {
@@ -771,7 +771,7 @@ pf-toast.pf-toast-interactive {
 }
 
 /* Narrow screens (portrait phones): a fixed 344px panel would
-   swallow the whole video — span edge-to-edge instead (video is
+   swallow the whole video - span edge-to-edge instead (video is
    typically fullscreen here, so the shell covers the viewport). */
 @media (max-width: 520px) {
   .pf-panel {
@@ -790,7 +790,7 @@ pf-toast.pf-toast-interactive {
   }
 }
 
-/* Portrait phones (touch): anchor the panel as a bottom sheet — it sits
+/* Portrait phones (touch): anchor the panel as a bottom sheet - it sits
    within thumb reach and never covers the whole video. */
 @media (max-width: 520px) and (pointer: coarse) {
   .pf-panel {
@@ -811,7 +811,7 @@ pf-toast.pf-toast-interactive {
 
 /* Landscape phones (touch): the viewport is short and wide, so the
    centered dialog would swallow the height. Compact right-edge
-   sheet instead — spans the full height, narrow enough to leave the
+   sheet instead - spans the full height, narrow enough to leave the
    video's center clear, with icon-only tabs. */
 @media (orientation: landscape) and (pointer: coarse) and (max-height: 480px) {
   .pf-panel {

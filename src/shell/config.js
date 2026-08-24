@@ -127,7 +127,7 @@ export function setSetting(key, value) {
 /**
  * Render SETTINGS_SCHEMA into the settings panel: one labeled section per
  * group, toggles for bools, steppers for numbers. Pure function over the
- * panel API — no lifecycle of its own.
+ * panel API - no lifecycle of its own.
  */
 export function addSettingsSection(panel) {
   if (!panel?.body) {

@@ -2,7 +2,7 @@ import { logger } from "../shared/logger.js";
 import { iconMarkup } from "./icons.js";
 
 /**
- * Seconds → "M:SS" (or "H:MM:SS" past the hour). Lives here because every
+ * Seconds -> "M:SS" (or "H:MM:SS" past the hour). Lives here because every
  * consumer formats time solely to render toast text.
  */
 export function formatTime(seconds) {

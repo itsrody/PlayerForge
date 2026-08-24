@@ -3,7 +3,7 @@
  *
  * Detection is registry-driven: every supported player SDK declares exactly one
  * record below, and a video is adopted only when its composed ancestry contains
- * one of that SDK's anchors. There is deliberately NO generic fallback — an
+ * one of that SDK's anchors. There is deliberately NO generic fallback - an
  * anchor must be owned by its SDK (prefixed class, dedicated data attribute, or
  * custom element tag), so pages merely styling a <div class="player"> stay
  * unrecognized rather than misidentified. Coverage grows by adding records.
@@ -93,7 +93,7 @@ export function findSdkForVideo(video) {
 /**
  * Resolve the element that should host the shell DOM: the matched anchor, or
  * the record's host override. Null when the video belongs to no registered
- * SDK — callers gate this behind findSdkForVideo().
+ * SDK - callers gate this behind findSdkForVideo().
  */
 export function findContainer(video) {
   const match = matchSdk(video);
@@ -103,7 +103,7 @@ export function findContainer(video) {
 
 /**
  * Resolve the real <video> for a media event. Media events don't bubble, but
- * capture listeners on document still receive them through the composed path —
+ * capture listeners on document still receive them through the composed path -
  * where shadow-DOM hosts retarget event.target away from the actual video
  * (open roots only; closed roots are unreachable by design).
  */

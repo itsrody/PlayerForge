@@ -4,7 +4,7 @@ const MAX_SLOTS = 8;
 
 /**
  * Pooled caption surface for the shell's cue layer. Consumes engine-shaped
- * cues ({ text, line?, position?, align? } — WebVTT semantics, defaults
+ * cues ({ text, line?, position?, align? } - WebVTT semantics, defaults
  * 85 / 50 / center), computes each slot's geometry including stacking, and
  * diffs content/styles between renders.
  */

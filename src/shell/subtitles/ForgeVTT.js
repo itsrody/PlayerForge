@@ -15,7 +15,9 @@ const ENTITY_RE = /&(?:amp|lt|gt|nbsp|lrm|rlm);/g;
 const NUMERIC_ENTITY_RE = /&#(x[0-9a-fA-F]+|\d+);/g;
 
 export function normalizeText(raw) {
-  return raw.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+  // NFC at the boundary: composed accents keep matching/timing stable no
+  // matter how the source encoded them.
+  return raw.normalize("NFC").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
 }
 
 /** Convert an SRT document into VTT (fixes timecode format, escapes stray "-->"). */

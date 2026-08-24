@@ -13,7 +13,7 @@ export class LifecycleManager {
   #registry;
   #shellFactory = null;
   #scope = new AbortController();
-  /** Videos with a settle wait in flight — dedups repeated discovery. */
+  /** Videos with a settle wait in flight - dedups repeated discovery. */
   #pending = new Set();
 
   constructor(bus, registry) {
@@ -29,7 +29,7 @@ export class LifecycleManager {
   }
 
   async #onVideoFound({ video, container, sdk, sdkName, id }) {
-    logger.log("lifecycle", `video:found — ${sdkName} (${id})`);
+    logger.log("lifecycle", `video:found - ${sdkName} (${id})`);
     if (this.#registry.getByVideo(video)) {
       logger.log("lifecycle", "Video already has a shell, skipping");
       return;
@@ -45,7 +45,7 @@ export class LifecycleManager {
     await whenDomSettled(container);
     this.#pending.delete(video);
     if (!video.isConnected || !container.isConnected) {
-      logger.log("lifecycle", `Video ${id} left the document before settle — skipping`);
+      logger.log("lifecycle", `Video ${id} left the document before settle - skipping`);
       return;
     }
     if (this.#registry.getByVideo(video)) {

@@ -7,11 +7,11 @@
  * player at all.
  *
  * Sections:
- *   1. Domain identity   — registrable-domain keys and comparison
- *   2. Entry hashing     — deterministic ids for resume entries
- *   3. Page context      — resolving {domain, path, title} for this shell
- *   4. Frame bridge      — always-on top↔iframe message plumbing (context)
- *   5. Presence probe    — defers full kernel boot until a video shows up
+ *   1. Domain identity   - registrable-domain keys and comparison
+ *   2. Entry hashing     - deterministic ids for resume entries
+ *   3. Page context      - resolving {domain, path, title} for this shell
+ *   4. Frame bridge      - always-on top<->iframe message plumbing (context)
+ *   5. Presence probe    - defers full kernel boot until a video shows up
  *
  * The bridge MUST be installed in every frame at document-start: kernels boot
  * lazily, so a video-bearing iframe cannot assume its ancestors run anything
@@ -20,7 +20,7 @@
 import { logger } from "./logger.js";
 import { videoFromEvent, videosFromMutations } from "../kernel/sdk.js";
 
-/* ── 1. Domain identity ──────────────────────────────────────────────── */
+/* - 1. Domain identity - */
 
 /**
  * Reduce a hostname to its registrable-domain key (best effort, no PSL).
@@ -91,7 +91,7 @@ export function domainsMatch(a, b) {
 
 /**
  * Graded similarity for ranking: exact 3, boundary-related 2, otherwise
- * distance-based decay to 0. Fuzz never promotes to a match — it only orders
+ * distance-based decay to 0. Fuzz never promotes to a match - it only orders
  * candidates once domainsMatch() has accepted them.
  */
 export function domainScore(a, b) {
@@ -107,7 +107,7 @@ export function domainScore(a, b) {
   return Math.max(0, 3 - boundedLevenshtein(a, b, 3));
 }
 
-/* ── 2. Entry hashing ────────────────────────────────────────────────── */
+/* - 2. Entry hashing - */
 
 /** Deterministic djb2-based id for a (path, duration) pair. */
 export function hashEntry(path, duration) {
@@ -120,7 +120,7 @@ export function hashEntry(path, duration) {
   return Math.abs(hash).toString(36).substring(0, 8);
 }
 
-/* ── 3. Page context ─────────────────────────────────────────────────── */
+/* - 3. Page context - */
 
 /**
  * Resolve the page context ({domain, path, title}) this shell belongs to:
@@ -190,7 +190,7 @@ export function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS)
   });
 }
 
-/* ── 4. Frame bridge ─────────────────────────────────────────────────── */
+/* - 4. Frame bridge - */
 
 export const NONCE_TTL_MS = 5000;
 export const CTX_REQUEST_TIMEOUT_MS = 3000;
@@ -261,7 +261,7 @@ function isOwnFrame(source) {
 
 /**
  * Install the context bridge for this frame and return its teardown. Top
- * frames answer; nested frames relay. Idempotent per frame — the userscript
+ * frames answer; nested frames relay. Idempotent per frame - the userscript
  * evaluates exactly once per document sandbox.
  */
 export function installContextBridge() {
@@ -276,7 +276,7 @@ export function installContextBridge() {
   return () => window.removeEventListener("message", handler);
 }
 
-/* ── 5. Presence probe ───────────────────────────────────────────────── */
+/* - 5. Presence probe - */
 
 /**
  * Cheap sentinel that defers the full kernel boot until a document actually
@@ -329,7 +329,7 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
   function fire() {
     done = true;
     stop();
-    logger.log("probe", "Video candidate found — booting kernel");
+    logger.log("probe", "Video candidate found - booting kernel");
     onCandidate();
   }
 
