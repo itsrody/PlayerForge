@@ -110,15 +110,15 @@ pf-toast {
   align-items: center;
   gap: 6px;
   position: absolute;
-  /* Reset the popover UA box (fixed inset-0) back to HUD-layer anchoring:
-     top-center of the video container. */
+  /* Reset the popover UA box; position-anchor (set inline per shell) plus
+     anchor() then tether the toast to the shell host, so the engine keeps
+     it top-centered over the player region - scroll, resize, fullscreen,
+     zero JS. */
   inset: auto;
   margin: 0;
   border: none;
-  /* Top Layer lays out against the viewport - JS pins --pf-toast-x/y to the
-     player region; these are the HUD-local fallbacks when it can't. */
-  top: var(--pf-toast-y, 12px);
-  left: var(--pf-toast-x, 50%);
+  top: calc(anchor(top) + 12px);
+  left: anchor(center);
   /* Dedicated translate property (Chrome 104+) - keeps centering out of
      the transform property, so transform-based animations on the toast
      never clobber it. */
@@ -204,29 +204,27 @@ pf-toast.pf-toast-interactive {
 }
 
 /* - Panel (universal plugin panel) - */
-/* Glassy, floating sheet centered in the shell on both axes, rendered
+/* Glassy, floating sheet centered on the shell on both axes, rendered
    in the Top Layer while open (auto popover: Gecko owns Esc and
-   outside-click dismissal). Vertical centering is top: 50% + translate:
-   0 -50% (translate, not margin-top, so it tracks the panel's own height
-   and survives overflow scrolling); the open/close slide folds into that
-   same translate (calc(-50% - 6px) start) so the two never conflict.
-   Density adapts to the *shell* (not the viewport) via the container
-   query at the bottom of this block. */
+   outside-click dismissal). Centering is anchor() insets (position-anchor
+   is set inline per shell) + translate self-centering; the open/close
+   slide folds into that same translate (calc(-50% - 6px) start) so the
+   two never conflict. Density adapts to the *shell* (not the viewport)
+   via the container query at the bottom of this block. */
 .pf-panel {
   container-type: inline-size;
   container-name: pf-panel;
 
   position: absolute;
-  /* Reset the popover UA box; the shell HUD is the containing block. */
+  /* Reset the popover UA box; the anchor tether takes over. */
   inset: auto;
   padding: 0;
 
-  /* Centered on the player region: JS pins --pf-panel-x/y to viewport
-     coords (Top Layer ignores DOM anchoring); the fallbacks center on the
-     viewport. Breakpoint modes override left/top and ignore the vars. */
-  left: var(--pf-panel-x, 50%);
+  /* Centered on the shell host; translate self-centers and carries the
+     slide. Breakpoint modes override left/top directly. */
+  left: anchor(center);
   right: auto;
-  top: var(--pf-panel-y, 50%);
+  top: anchor(center);
   margin: 0;
   translate: -50% -6px;
   width: min(380px, calc(100% - 24px));

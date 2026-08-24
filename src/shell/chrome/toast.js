@@ -1,6 +1,7 @@
 import { logger } from "../../shared/logger.js";
 import { delay } from "../../shared/time.js";
 import { iconMarkup } from "./icons.js";
+import { shellAnchorName } from "./inject.js";
 
 /**
  * Single toast surface hosted in the shell HUD layer: icon + text +
@@ -11,7 +12,6 @@ import { iconMarkup } from "./icons.js";
  * included), while visibility stays a pure opacity morph on pf-visible.
  */
 export class ToastManager {
-  #hudLayer;
   #toast;
   #icon;
   #text;
@@ -22,10 +22,13 @@ export class ToastManager {
   /** True once showPopover() succeeded - guards retries and teardown. */
   #inTopLayer = false;
 
-  constructor(hudLayer) {
+  constructor(hudLayer, shellId) {
     const doc = hudLayer.ownerDocument;
-    this.#hudLayer = hudLayer;
     this.#toast = doc.createElement("pf-toast");
+    this.#toast.setAttribute("popover", "manual");
+    // Tether to the shell host: the stylesheet positions via anchor(), so
+    // the engine keeps the toast over the player region with zero JS.
+    this.#toast.style.setProperty("position-anchor", shellAnchorName(shellId));
     this.#toast.setAttribute("popover", "manual");
     this.#icon = doc.createElement("span");
     this.#icon.className = "pf-toast-icon";
@@ -58,24 +61,8 @@ export class ToastManager {
     }
   }
 
-  /**
-   * Top Layer layout ignores the DOM anchoring, so pin the toast over the
-   * player region with viewport coordinates; HUD-local mode keeps the
-   * stylesheet fallbacks. One-shot per show - toasts are ephemeral.
-   */
-  #syncAnchor() {
-    if (!this.#inTopLayer || !this.#hudLayer?.isConnected) {
-      return;
-    }
-    const rect = this.#hudLayer.getBoundingClientRect();
-    // 12px matches the stylesheet's top inset for the HUD-local fallback.
-    this.#toast.style.setProperty("--pf-toast-x", `${rect.left + rect.width / 2}px`);
-    this.#toast.style.setProperty("--pf-toast-y", `${rect.top + 12}px`);
-  }
-
   show({ icon, text, duration = 0, color, group, actions } = {}) {
     this.#claimTopLayer();
-    this.#syncAnchor();
     this.#activeGroup = group ?? null;
     const markup = icon ? iconMarkup(icon) : null;
     this.#icon.innerHTML = markup || "";

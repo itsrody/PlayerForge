@@ -8,7 +8,7 @@ import { SettingsPanel } from "./chrome/panel.js";
 import { addSettingsSection } from "./chrome/config.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls } from "./media.js";
-import { SHELL_MARKER, ensureStyles, injectShell, watchShellHost } from "./chrome/inject.js";
+import { SHELL_MARKER, ensureStyles, injectShell, shellAnchorName, watchShellHost } from "./chrome/inject.js";
 
 const VIDEO_EVENTS = [
   "play", "pause", "playing", "waiting", "seeking", "seeked", "timeupdate",
@@ -65,7 +65,7 @@ export class Shell {
       throw new Error(`Shell "${id}": failed to inject shell DOM`);
     }
     this.#panel = new SettingsPanel(this, bus);
-    this.#toasts = new ToastManager(this.#shellDom.hudLayer);
+    this.#toasts = new ToastManager(this.#shellDom.hudLayer, this.id);
     this.#cues = new CueRenderer(this.#shellDom.cueLayer);
     this.#inputs = new InputForge(this.video, this.container, this.shellHost);
     attachInputActions(this, this.shellHost, this.#inputs.signal);
@@ -266,6 +266,9 @@ export class Shell {
       return;
     }
     this.#shellDom.host.setAttribute(SHELL_MARKER, this.id);
+    // Anchor origin for the Top Layer surfaces: they tether to this box via
+    // position-anchor, so the engine keeps them over the player region.
+    this.#shellDom.host.style.setProperty("anchor-name", shellAnchorName(this.id));
     const style = getComputedStyle(this.container);
     if (style.position === "static") {
       this.#savedPositionStyle = style.position;

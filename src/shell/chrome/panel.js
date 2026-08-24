@@ -1,5 +1,6 @@
 import { logger } from "../../shared/logger.js";
 import { createIconElement } from "./icons.js";
+import { shellAnchorName } from "./inject.js";
 import { GESTURE_EVENTS } from "../inputs/actions.js";
 
 const HOLD_DELAY_MS = 400;
@@ -226,11 +227,9 @@ export class SettingsPanel {
     }
     this.#buildDom();
     this.#wireEvents();
-    // Top Layer positioning: re-pin the open panel onto the player region
-    // whenever the viewport shifts underneath it. No-ops while closed.
-    const { signal } = this.#scope;
-    window.addEventListener("resize", () => this.#syncAnchor(), { signal, passive: true });
-    document.addEventListener("scroll", () => this.#syncAnchor(), { signal, capture: true, passive: true });
+    // Tether to the shell host: the stylesheet centers via anchor(), so the
+    // engine keeps the open panel over the player region with zero JS.
+    this.#root.style.setProperty("position-anchor", shellAnchorName(this.#shellId));
     logger.log("panel", "Panel ready");
   }
 
@@ -246,26 +245,11 @@ export class SettingsPanel {
     return !!this.#root && this.#root.matches(":popover-open");
   }
 
-  /**
-   * Top Layer surfaces lay out against the viewport, not the shell - pin
-   * the centered layout to the player region via custom properties that
-   * only that layout consumes; breakpoint modes keep their edge pinning.
-   */
-  #syncAnchor() {
-    if (!this.isOpen || !this.#shellHost?.isConnected) {
-      return;
-    }
-    const rect = this.#shellHost.getBoundingClientRect();
-    this.#root.style.setProperty("--pf-panel-x", `${rect.left + rect.width / 2}px`);
-    this.#root.style.setProperty("--pf-panel-y", `${rect.top + rect.height / 2}px`);
-  }
-
   open() {
     if (!this.#root || this.#destroyed || !this.#body.childElementCount || this.isOpen) {
       return;
     }
     this.#root.showPopover();
-    this.#syncAnchor();
     const activeTab = this.#root.querySelector(".pf-panel-tab-active") || this.#closeButton;
     if (activeTab && document.activeElement !== activeTab) {
       activeTab.focus();
