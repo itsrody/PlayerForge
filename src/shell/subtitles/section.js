@@ -1,4 +1,4 @@
-import { getConfigValue, setConfigValue } from "../../shared/storage.js";
+import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/storage.js";
 import { srtToVtt, ensureVttHeader, parseSubtitles } from "./forgevtt.js";
 import { debounce } from "../../shared/time.js";
 import { logger } from "../../shared/logger.js";
@@ -32,12 +32,14 @@ export class SubtitlesSection {
   #hintEl = null;
   #loadButton = null;
   #removeButton = null;
+  #urlButton = null;
   #scope = new AbortController();
   #destroyed = false;
 
   constructor(shell) {
     this.#shell = shell;
-    this.#syncOffset = Number(getConfigValue(SETTING_KEYS.syncOffset, 0)) || 0;    this.#cueLayer = shell.shellDom?.cueLayer || null;
+    this.#syncOffset = Number(getConfigValue(SETTING_KEYS.syncOffset, 0)) || 0;
+    this.#cueLayer = shell.shellDom?.cueLayer || null;
     this.#fileInput = this.#createFileInput(shell);
     this.#buildPanelUi(shell);
     this.#startListening();
@@ -55,6 +57,7 @@ export class SubtitlesSection {
     this.#hintEl = null;
     this.#loadButton = null;
     this.#removeButton = null;
+    this.#urlButton = null;
     this.#track = null;
     this.#cueLayer = null;
   }
@@ -177,6 +180,14 @@ export class SubtitlesSection {
       ariaLabel: "Remove subtitles",
       ghost: true,
       onClick: () => this.#removeTrack()
+    });
+
+    this.#urlButton = panel.addButton(actions, {
+      icon: "link",
+      title: "Load subtitles from URL",
+      ariaLabel: "Load subtitles from URL",
+      ghost: true,
+      onClick: () => this.#promptForUrl()
     });
 
     this.#hintEl = panel.addHint(loadRow, "Upload your file");
@@ -367,39 +378,97 @@ export class SubtitlesSection {
     if (this.#destroyed) {
       return;
     }
-    const name = file.name;
     try {
       const rawText = await file.text();
-      if (this.#destroyed) {
-        return;
-      }
-      const normalizedText = /\.srt$/i.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
-      const cues = parseSubtitles(normalizedText, this.#syncOffset);
-      if (!cues.length) {
-        this.#toast({
-          icon: "captions",
-          text: "No cues found",
-          duration: 2500
-        });
-        return;
-      }
-      this.#track = { name, text: normalizedText, cues };
-      this.#refreshHint();
-      this.#render();
-      this.#toast({
-        icon: "captions",
-        text: name,
-        duration: 2000
-      });
-      logger.log("subtitles", `Loaded ${name}`);
+      await this.#ingest(file.name, rawText);
     } catch (err) {
-      logger.error("subtitles", `Failed to load ${name}:`, err);
+      logger.error("subtitles", `Failed to load ${file.name}:`, err);
       this.#toast({
         icon: "captions",
         text: "Failed to load subtitles",
         duration: 2500
       });
     }
+  }
+
+  /** Fetch a subtitle file from the web through the manager's xhr. */
+  async loadFromUrl(rawUrl) {
+    if (this.#destroyed) {
+      return;
+    }
+    const url = String(rawUrl || "").trim();
+    if (!url) {
+      return;
+    }
+    let response;
+    try {
+      response = await gmRequestText(url);
+    } catch (err) {
+      logger.error("subtitles", `Failed to fetch ${url}:`, err);
+      this.#toast({
+        icon: "link",
+        text: "Failed to fetch subtitles",
+        duration: 2500
+      });
+      return;
+    }
+    try {
+      await this.#ingest(this.#nameFromUrl(response.finalUrl || url), response.responseText);
+    } catch (err) {
+      logger.error("subtitles", `Failed to parse subtitles from ${url}:`, err);
+      this.#toast({
+        icon: "link",
+        text: "Failed to load subtitles",
+        duration: 2500
+      });
+    }
+  }
+
+  #promptForUrl() {
+    // The sandbox forwards prompt() to the page; a hostile page can stub it,
+    // in which case the dialog misbehaves and file loading stays untouched.
+    const url = window.prompt("Subtitle URL (.srt / .vtt)");
+    if (url) {
+      this.loadFromUrl(url);
+    }
+  }
+
+  /** Last path segment as a display name, defaulted to .vtt when unknown. */
+  #nameFromUrl(url) {
+    try {
+      const last = decodeURIComponent(new URL(url).pathname.split("/").pop() || "");
+      if (!last) {
+        return "subtitles.vtt";
+      }
+      return /\.(srt|vtt)$/i.test(last) ? last : `${last}.vtt`;
+    } catch {
+      return "subtitles.vtt";
+    }
+  }
+
+  async #ingest(name, rawText) {
+    if (this.#destroyed) {
+      return;
+    }
+    const normalizedText = /\.srt$/i.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
+    const cues = parseSubtitles(normalizedText, this.#syncOffset);
+    if (!cues.length) {
+      this.#toast({
+        icon: "captions",
+        text: "No cues found",
+        duration: 2500
+      });
+      return;
+    }
+    this.#track = { name, text: normalizedText, cues };
+    this.#refreshHint();
+    this.#render();
+    this.#toast({
+      icon: "captions",
+      text: name,
+      duration: 2000
+    });
+    logger.log("subtitles", `Loaded ${name}`);
   }
 
   #refreshHint() {
@@ -409,6 +478,9 @@ export class SubtitlesSection {
     const hasTrack = !!this.#track;
     if (this.#loadButton) {
       this.#loadButton.disabled = hasTrack;
+    }
+    if (this.#urlButton) {
+      this.#urlButton.disabled = hasTrack;
     }
     if (this.#removeButton) {
       this.#removeButton.disabled = !hasTrack;

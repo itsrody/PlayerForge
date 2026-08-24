@@ -23,6 +23,34 @@ export function gmRegisterMenu(title, onClick, options) {
   return GM_registerMenuCommand(title, onClick, options);
 }
 
+export function gmSetClipboard(data, type) {
+  GM_setClipboard(data, type);
+}
+
+/**
+ * Cross-origin text fetch through the manager - CORS cannot block it.
+ * No @connect metadata is declared, so Violentmonkey asks once per new
+ * domain and remembers the answer; that is the consent UI, for free.
+ */
+export function gmRequestText(url, { timeoutMs = 30000 } = {}) {
+  return new Promise((resolve, reject) => {
+    GM_xmlhttpRequest({
+      url,
+      method: "GET",
+      timeout: timeoutMs,
+      onload: (res) => {
+        if (res.status >= 200 && res.status < 300) {
+          resolve(res);
+        } else {
+          reject(new Error(`HTTP ${res.status}`));
+        }
+      },
+      onerror: () => reject(new Error("Network error")),
+      ontimeout: () => reject(new Error(`Timed out after ${timeoutMs}ms`))
+    });
+  });
+}
+
 /** Read a stored JSON object, or the fallback when missing/corrupt. */
 export function loadJsonObject(key, fallback) {
   const raw = gmGetValue(key, null);

@@ -1,5 +1,5 @@
 import { logger } from "../shared/logger.js";
-import { KEYS, gmRegisterMenu, loadJsonObject } from "../shared/storage.js";
+import { KEYS, gmRegisterMenu, gmSetClipboard, loadJsonObject } from "../shared/storage.js";
 import { delay } from "../shared/time.js";
 import { GESTURE_EVENTS } from "../shell/inputs/input-list.js";
 import { EventBus } from "./bus.js";
@@ -206,7 +206,7 @@ export class Kernel {
         configs: loadJsonObject(KEYS.configs, null),
         resume: loadJsonObject(KEYS.resume, null)
       };
-      GM_setClipboard(JSON.stringify(dump, null, 2), "application/json");
+      gmSetClipboard(JSON.stringify(dump, null, 2), "application/json");
       logger.log("kernel", "Config and resume store copied to clipboard");
     }, { autoClose: true });
   }
