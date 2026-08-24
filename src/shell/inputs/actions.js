@@ -99,6 +99,10 @@ export function armedKeys() {
 
 const SCRUB_MAX_MULTIPLIER = 6;
 const SCRUB_VELOCITY_MAX = 1200;
+/** Quadratic ramp: a long fine-control plateau, punchy flick acceleration. */
+const SCRUB_CURVE_EXPONENT = 2;
+/** Wall-clock e-fold for stale speed: silence means the finger stopped. */
+const SCRUB_VELOCITY_DECAY_MS = 120;
 const SWIPE_EXIT_MIN_PX = 100;
 const STREAK_RESET_MS = 600;
 
@@ -114,6 +118,7 @@ const stateFor = (() => {
         scrubDuration: 0,
         scrubPixelsPerSecond: 0,
         scrubDirectionMomentum: 0,
+        lastScrubAt: 0,
         lastScrubToastAt: 0,
         streakCount: 0,
         lastSkipDirection: null,
@@ -277,6 +282,7 @@ export function attachInputActions(shell, host, signal) {
       return;
     }
     const state = stateFor(shell);
+    const now = performance.now();
     if (!state.scrubbing) {
       const duration = shell.duration;
       if (!duration || !Number.isFinite(duration)) {
@@ -286,15 +292,23 @@ export function attachInputActions(shell, host, signal) {
       state.scrubDuration = duration;
       state.scrubPixelsPerSecond = getSetting("controller.scrubSensitivity") / (duration / 300);
       state.scrubDirectionMomentum = 0;
+      state.lastScrubAt = now;
     }
 
-    const multiplier = Math.min(1 + Math.abs(detail.velocity) / SCRUB_VELOCITY_MAX, SCRUB_MAX_MULTIPLIER);
+    // Real-time velocity curve: the forge's EMA only updates while move
+    // events arrive, so decay it across the wall-clock gap - a pause means
+    // stationary, and creeping after a flick starts fine again. Continuous
+    // coalesced streams have near-zero gaps and keep full speed.
+    const gapMs = now - state.lastScrubAt;
+    state.lastScrubAt = now;
+    const liveVelocity = Math.abs(detail.velocity) * Math.exp(-gapMs / SCRUB_VELOCITY_DECAY_MS);
+    const norm = Math.min(liveVelocity / SCRUB_VELOCITY_MAX, 1);
+    const multiplier = 1 + (SCRUB_MAX_MULTIPLIER - 1) * norm ** SCRUB_CURVE_EXPONENT;
     const deltaSeconds = (detail.dx / state.scrubPixelsPerSecond) * multiplier;
     shell.scrubTo(shell.currentTime + deltaSeconds);
     const instantDirection = detail.dx > 1 ? 1 : detail.dx < -1 ? -1 : 0;
     state.scrubDirectionMomentum = state.scrubDirectionMomentum * 0.6 + instantDirection * 0.4;
 
-    const now = performance.now();
     if (now - state.lastScrubToastAt < 100) {
       return;
     }
@@ -315,6 +329,7 @@ export function attachInputActions(shell, host, signal) {
     state.scrubDirectionMomentum = 0;
     state.scrubDuration = 0;
     state.scrubPixelsPerSecond = 0;
+    state.lastScrubAt = 0;
     shell.hideToast("scrub");
   }, { signal });
 
