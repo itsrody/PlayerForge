@@ -183,6 +183,11 @@ export class Shell {
     this.#media.seekTo(time);
   }
 
+  /** Continuous drag variant of seek: canonical clamp, no command event. */
+  scrubTo(time) {
+    this.#media.scrubTo(time);
+  }
+
   skip(delta) {
     this.#media.skip(delta);
   }
@@ -307,7 +312,7 @@ export class Shell {
     registerAction("seekforward", (details) => this.skip(details?.seekOffset || 10));
     registerAction("seekto", (details) => {
       if (details?.seekTime != null) {
-        this.currentTime = details.seekTime;
+        this.#media.seekTo(details.seekTime);
       }
     });
     session.playbackState = this.paused ? "paused" : "playing";

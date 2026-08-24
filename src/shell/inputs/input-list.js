@@ -272,7 +272,7 @@ export function attachInputActions(shell, host, signal) {
 
     const multiplier = Math.min(1 + Math.abs(detail.velocity) / SCRUB_VELOCITY_MAX, SCRUB_MAX_MULTIPLIER);
     const deltaSeconds = (detail.dx / state.scrubPixelsPerSecond) * multiplier;
-    shell.video.currentTime = Math.max(0, Math.min(shell.video.currentTime + deltaSeconds, state.scrubDuration));
+    shell.scrubTo(shell.currentTime + deltaSeconds);
     const instantDirection = detail.dx > 1 ? 1 : detail.dx < -1 ? -1 : 0;
     state.scrubDirectionMomentum = state.scrubDirectionMomentum * 0.6 + instantDirection * 0.4;
 
