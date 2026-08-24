@@ -19,30 +19,30 @@ export function ensureStyles() {
  * <video> appears; injecting mid-build invites wholesale innerHTML wipes.
  */
 export function whenDomSettled(container, { quietFrames = 2, capMs = 150 } = {}) {
-  return new Promise((resolve) => {
-    let quiet = 0;
-    let rafId = 0;
-    const observer = new MutationObserver(() => {
-      quiet = 0;
-    });
-    const done = () => {
-      clearTimeout(capTimer);
-      cancelAnimationFrame(rafId);
-      observer.disconnect();
-      resolve();
-    };
-    const tick = () => {
-      quiet += 1;
-      if (quiet >= quietFrames) {
-        done();
-        return;
-      }
-      rafId = requestAnimationFrame(tick);
-    };
-    const capTimer = setTimeout(done, capMs);
-    observer.observe(container, { childList: true });
-    rafId = requestAnimationFrame(tick);
+  const { promise, resolve } = Promise.withResolvers();
+  let quiet = 0;
+  let rafId = 0;
+  const observer = new MutationObserver(() => {
+    quiet = 0;
   });
+  const done = () => {
+    clearTimeout(capTimer);
+    cancelAnimationFrame(rafId);
+    observer.disconnect();
+    resolve();
+  };
+  const tick = () => {
+    quiet += 1;
+    if (quiet >= quietFrames) {
+      done();
+      return;
+    }
+    rafId = requestAnimationFrame(tick);
+  };
+  const capTimer = setTimeout(done, capMs);
+  observer.observe(container, { childList: true });
+  rafId = requestAnimationFrame(tick);
+  return promise;
 }
 
 /**

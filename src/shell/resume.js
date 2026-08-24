@@ -168,11 +168,9 @@ export class ResumeTracker {
 
     const video = shell.video;
     if (!video.duration || !isFinite(video.duration)) {
-      let resolveMetadata;
-      const metadataReady = new Promise((resolve) => {
-        resolveMetadata = resolve;
-      });
       // Resolving twice is a no-op, so timeout and signal races are safe.
+      const { signal } = this.#scope;
+      const { promise: metadataReady, resolve: resolveMetadata } = Promise.withResolvers();
       const finishWaiting = () => {
         clearTimeout(timeoutHandle);
         resolveMetadata();
@@ -184,7 +182,6 @@ export class ResumeTracker {
       };
       const onLoaded = () => finishWaiting();
       const onError = () => finishWaiting();
-      const { signal } = this.#scope;
       const timeoutHandle = setTimeout(finishWaiting, METADATA_WAIT_MS);
       video.addEventListener("loadedmetadata", onLoaded, { signal });
       video.addEventListener("durationchange", onDurationChange, { signal });

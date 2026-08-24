@@ -1,3 +1,5 @@
+/** SRT timecode capture; global so srtToVtt rewrites every match in a line. */
+const SRT_TIMECODE_RE = /(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})/g;
 const SRT_BLOCK_RE = /(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})\s*-->/;
 const CUE_LINE_RE = /^((?:\d+:\d{1,2}:\d{2}|\d{1,2}:\d{2})[.,]\d{1,3})\s+-->\s+((?:\d+:\d{1,2}:\d{2}|\d{1,2}:\d{2})[.,]\d{1,3})(.*)$/;
 const TIMECODE_RE = /^(?:(\d+):)?(\d{1,2}):(\d{2})[.,](\d{1,3})$/;
@@ -32,7 +34,7 @@ export function srtToVtt(raw) {
       continue;
     }
     if (SRT_BLOCK_RE.test(line)) {
-      out.push(line.replace(/(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})/g, (_m, h, m, s, ms) =>
+      out.push(line.replace(SRT_TIMECODE_RE, (_m, h, m, s, ms) =>
         `${h.padStart(2, "0")}:${m}:${s}.${ms.padStart(3, "0")}`));
       inTimingBlock = true;
       continue;

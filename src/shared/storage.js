@@ -33,22 +33,22 @@ export function gmSetClipboard(data, type) {
  * domain and remembers the answer; that is the consent UI, for free.
  */
 export function gmRequestText(url, { timeoutMs = 30000 } = {}) {
-  return new Promise((resolve, reject) => {
-    GM_xmlhttpRequest({
-      url,
-      method: "GET",
-      timeout: timeoutMs,
-      onload: (res) => {
-        if (res.status >= 200 && res.status < 300) {
-          resolve(res);
-        } else {
-          reject(new Error(`HTTP ${res.status}`));
-        }
-      },
-      onerror: () => reject(new Error("Network error")),
-      ontimeout: () => reject(new Error(`Timed out after ${timeoutMs}ms`))
-    });
+  const { promise, resolve, reject } = Promise.withResolvers();
+  GM_xmlhttpRequest({
+    url,
+    method: "GET",
+    timeout: timeoutMs,
+    onload: (res) => {
+      if (res.status >= 200 && res.status < 300) {
+        resolve(res);
+      } else {
+        reject(new Error(`HTTP ${res.status}`));
+      }
+    },
+    onerror: () => reject(new Error("Network error")),
+    ontimeout: () => reject(new Error(`Timed out after ${timeoutMs}ms`))
   });
+  return promise;
 }
 
 /** Read a stored JSON object, or the fallback when missing/corrupt. */
@@ -92,7 +92,7 @@ export function setConfigValue(path, value) {
     }
     node = node[segment];
   }
-  const last = segments[segments.length - 1];
+  const last = segments.at(-1);
   if (!isSafeKeySegment(last)) {
     return;
   }

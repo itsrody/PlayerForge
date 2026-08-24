@@ -150,44 +150,44 @@ export async function getPageContext() {
 /** Ask the parent chain for page context via postMessage (cross-origin iframes). */
 function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs;
-  return new Promise((resolve) => {
-    let nonce = null;
-    let retryTimer = null;
+  const { promise, resolve } = Promise.withResolvers();
+  let nonce = null;
+  let retryTimer = null;
 
-    const onMessage = (event) => {
-      const data = event.data;
-      if (
-        data && typeof data === "object"
-        && data.type === "pf:ctx" && data.nonce === nonce
-        && typeof data.domain === "string"
-      ) {
-        clearTimeout(retryTimer);
-        window.removeEventListener("message", onMessage);
-        resolve({
-          domain: data.domain,
-          path: data.path,
-          title: data.title
-        });
-      }
-    };
+  const onMessage = (event) => {
+    const data = event.data;
+    if (
+      data && typeof data === "object"
+      && data.type === "pf:ctx" && data.nonce === nonce
+      && typeof data.domain === "string"
+    ) {
+      clearTimeout(retryTimer);
+      window.removeEventListener("message", onMessage);
+      resolve({
+        domain: data.domain,
+        path: data.path,
+        title: data.title
+      });
+    }
+  };
 
-    window.addEventListener("message", onMessage);
+  window.addEventListener("message", onMessage);
 
-    const sendRequest = () => {
-      nonce = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      window.parent.postMessage({ type: "pf:ctx-request", nonce }, "*");
-    };
-    const attempt = () => {
-      if (Date.now() >= deadline) {
-        window.removeEventListener("message", onMessage);
-        resolve(null);
-        return;
-      }
-      sendRequest();
-      retryTimer = setTimeout(attempt, 1200);
-    };
-    attempt();
-  });
+  const sendRequest = () => {
+    nonce = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    window.parent.postMessage({ type: "pf:ctx-request", nonce }, "*");
+  };
+  const attempt = () => {
+    if (Date.now() >= deadline) {
+      window.removeEventListener("message", onMessage);
+      resolve(null);
+      return;
+    }
+    sendRequest();
+    retryTimer = setTimeout(attempt, 1200);
+  };
+  attempt();
+  return promise;
 }
 
 /* - 4. Frame bridge - */

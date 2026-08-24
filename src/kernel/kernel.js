@@ -194,7 +194,7 @@ export class Kernel {
   #registerMenuCommand() {
     gmRegisterMenu("⚙️ PlayerForge Settings", () => {
       const shells = this.#registry.getAll();
-      const host = shells.length ? shells[shells.length - 1].shellHost : null;
+      const host = shells.length ? shells.at(-1).shellHost : null;
       if (host) {
         host.dispatchEvent(new CustomEvent(GESTURE_EVENTS.panel, {
           detail: { method: "menu" }
