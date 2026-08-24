@@ -13,8 +13,42 @@ export function ensureStyles() {
 }
 
 /**
- * Build the shell DOM inside the player container:
- * host > hud layer > cue layer.
+ * Resolve once the container's child list has been quiet for a run of
+ * consecutive animation frames, or when the cap expires — whichever comes
+ * first. SDKs build their player over several microtasks/frames after the
+ * <video> appears; injecting mid-build invites wholesale innerHTML wipes.
+ */
+export function whenDomSettled(container, { quietFrames = 2, capMs = 150 } = {}) {
+  return new Promise((resolve) => {
+    let quiet = 0;
+    let rafId = 0;
+    const observer = new MutationObserver(() => {
+      quiet = 0;
+    });
+    const done = () => {
+      clearTimeout(capTimer);
+      cancelAnimationFrame(rafId);
+      observer.disconnect();
+      resolve();
+    };
+    const tick = () => {
+      quiet += 1;
+      if (quiet >= quietFrames) {
+        done();
+        return;
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    const capTimer = setTimeout(done, capMs);
+    observer.observe(container, { childList: true });
+    rafId = requestAnimationFrame(tick);
+  });
+}
+
+/**
+ * Build the shell DOM inside the player container as a parasite:
+ * host > hud layer > cue layer, appended LAST so no SDK child ever changes
+ * index. Rendering dominance comes from the host's z-index, not tree order.
  */
 export function injectShell(container) {
   if (!container) {
@@ -35,11 +69,7 @@ export function injectShell(container) {
   cueLayer.setAttribute("aria-hidden", "true");
   hudLayer.appendChild(cueLayer);
 
-  if (container.firstChild) {
-    container.insertBefore(host, container.firstChild);
-  } else {
-    container.appendChild(host);
-  }
+  container.appendChild(host);
   logger.log("injection", `Shell DOM built inside ${container.tagName}#${container.id || container.className}`);
 
   return {
@@ -50,49 +80,33 @@ export function injectShell(container) {
 }
 
 /**
- * Keep the shell host alive inside its container: re-insert it if something
- * removes or reorders it, and re-arm on container re-parenting.
+ * Parasite watchdog: keep the shell host attached inside its container
+ * without ever fighting the SDK over sibling order. A single debounced
+ * observer re-appends the host (as last child) only when something removed
+ * it from the container; re-parenting of the container carries the host
+ * along and needs no reaction.
  */
 export function watchShellHost(container, host) {
-  let reorderObserver = null;
-  let reparentObserver = null;
-  let parent = container.parentElement;
+  let scheduled = false;
 
-  const restorePosition = () => {
-    if (host.parentElement !== container) {
-      if (container.firstChild) {
-        container.insertBefore(host, container.firstChild);
-      } else {
-        container.appendChild(host);
-      }
+  const check = () => {
+    scheduled = false;
+    if (host.parentElement !== container && container.isConnected) {
+      container.appendChild(host);
+      logger.log("injection", "Shell host re-attached by watchdog");
+    }
+  };
+
+  const schedule = () => {
+    if (scheduled) {
       return;
     }
-    if (container.firstChild !== host) {
-      container.insertBefore(host, container.firstChild);
-    }
+    scheduled = true;
+    queueMicrotask(check);
   };
 
-  reorderObserver = new MutationObserver(restorePosition);
-  reorderObserver.observe(container, { childList: true });
+  const observer = new MutationObserver(schedule);
+  observer.observe(container, { childList: true });
 
-  reparentObserver = new MutationObserver(() => {
-    if (container.parentElement !== parent) {
-      reparentObserver.disconnect();
-      parent = container.parentElement;
-      if (!parent) {
-        return;
-      }
-      reparentObserver.observe(parent, { childList: true, subtree: false });
-    }
-    restorePosition();
-  });
-
-  if (parent) {
-    reparentObserver.observe(parent, { childList: true, subtree: false });
-  }
-
-  return () => {
-    reorderObserver.disconnect();
-    reparentObserver.disconnect();
-  };
+  return () => observer.disconnect();
 }

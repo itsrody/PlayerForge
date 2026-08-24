@@ -1,15 +1,20 @@
 import { logger } from "../shared/logger.js";
+import { whenDomSettled } from "../shell/inject.js";
 
 /**
  * Bridges video discovery to shell creation: listens for `video:found` /
- * `video:removed` and invokes the shell factory. Page-unload cleanup is
- * owned by the kernel.
+ * `video:removed` and invokes the shell factory once the SDK's DOM has
+ * settled. Creation is deferred (quiescence-capped) so the parasite overlay
+ * never lands mid-build, with post-wait guards against videos that vanished
+ * or were adopted meanwhile. Page-unload cleanup is owned by the kernel.
  */
 export class LifecycleManager {
   #bus;
   #registry;
   #shellFactory = null;
   #scope = new AbortController();
+  /** Videos with a settle wait in flight — dedups repeated discovery. */
+  #pending = new Set();
 
   constructor(bus, registry) {
     this.#bus = bus;
@@ -23,7 +28,7 @@ export class LifecycleManager {
     this.#shellFactory = factory;
   }
 
-  #onVideoFound({ video, container, sdk, sdkName, id }) {
+  async #onVideoFound({ video, container, sdk, sdkName, id }) {
     logger.log("lifecycle", `video:found — ${sdkName} (${id})`);
     if (this.#registry.getByVideo(video)) {
       logger.log("lifecycle", "Video already has a shell, skipping");
@@ -31,6 +36,19 @@ export class LifecycleManager {
     }
     if (!this.#shellFactory) {
       logger.error("lifecycle", "No shell factory set!");
+      return;
+    }
+    if (this.#pending.has(video)) {
+      return;
+    }
+    this.#pending.add(video);
+    await whenDomSettled(container);
+    this.#pending.delete(video);
+    if (!video.isConnected || !container.isConnected) {
+      logger.log("lifecycle", `Video ${id} left the document before settle — skipping`);
+      return;
+    }
+    if (this.#registry.getByVideo(video)) {
       return;
     }
     try {

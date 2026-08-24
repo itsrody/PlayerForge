@@ -269,7 +269,7 @@ export class Shell {
       this.container.style.position = "relative";
     }
     this.#stopHostWatch = watchShellHost(this.container, this.#shellDom.host);
-    logger.log("shell", "Shell DOM injected as first child of container");
+    logger.log("shell", "Shell DOM appended as overlay child of container");
   }
 
   #forwardMediaEvents() {
