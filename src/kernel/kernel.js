@@ -1,5 +1,5 @@
 import { logger } from "../shared/logger.js";
-import { gmRegisterMenu } from "../shared/storage.js";
+import { KEYS, gmRegisterMenu, loadJsonObject } from "../shared/storage.js";
 import { delay } from "../shared/time.js";
 import { GESTURE_EVENTS } from "../shell/inputs/input-list.js";
 import { EventBus } from "./bus.js";
@@ -200,6 +200,14 @@ export class Kernel {
           detail: { method: "menu" }
         }));
       }
+    }, { autoClose: true });
+    gmRegisterMenu("\u{1F4CB} PlayerForge Copy Config", () => {
+      const dump = {
+        configs: loadJsonObject(KEYS.configs, null),
+        resume: loadJsonObject(KEYS.resume, null)
+      };
+      GM_setClipboard(JSON.stringify(dump, null, 2), "application/json");
+      logger.log("kernel", "Config and resume store copied to clipboard");
     }, { autoClose: true });
   }
 }

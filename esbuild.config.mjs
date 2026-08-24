@@ -55,6 +55,7 @@ const banner = `// ==UserScript==
 // @grant        GM_getValue
 // @grant        GM_deleteValue
 // @grant        GM_registerMenuCommand
+// @grant        GM_setClipboard
 // @run-at       document-start
 // @license      MIT
 // ==/UserScript==
