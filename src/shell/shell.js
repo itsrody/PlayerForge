@@ -8,6 +8,7 @@ import { CueRenderer } from "./subtitles/cue-renderer.js";
 import { SettingsPanel } from "./panel.js";
 import { addSettingsSection } from "./config.js";
 import { ToastManager } from "./toast.js";
+import { createMediaControls } from "./media.js";
 import { ensureStyles, injectShell, watchShellHost } from "./inject.js";
 
 const VIDEO_EVENTS = [
@@ -51,6 +52,8 @@ export class Shell {
   #destroyed = false;
   /** Every platform subscription this facade makes dies with this signal. */
   #scope = new AbortController();
+  /** Command plane: all playback control routes through these primitives. */
+  #media;
   /** Mirror of the fullscreen checkmark, used only to dedup change events. */
   #lastFullscreen = false;
   #savedPositionStyle = null;
@@ -62,6 +65,7 @@ export class Shell {
     this.sdk = sdk;
     this.sdkName = sdkName;
     this.#bus = bus;
+    this.#media = createMediaControls({ video, bus, shellId: id });
     this.#injectDom();
     if (!this.#shellDom) {
       throw new Error(`Shell "${id}": failed to inject shell DOM`);
@@ -156,40 +160,31 @@ export class Shell {
   }
 
   async play() {
-    try {
-      await this.video.play();
-    } catch (err) {
-      if (err.name !== "AbortError" && err.name !== "NotAllowedError") {
-        throw err;
-      }
-    }
+    return this.#media.play();
   }
 
   pause() {
-    this.video.pause();
+    this.#media.pause();
   }
 
   togglePlay() {
-    if (this.paused) {
-      this.play();
-    } else {
-      this.pause();
-    }
+    return this.#media.togglePlay();
+  }
+
+  stop() {
+    this.#media.stop();
   }
 
   toggleMute() {
-    this.muted = !this.muted;
+    this.#media.toggleMute();
   }
 
   seek(time) {
-    this.currentTime = time;
+    this.#media.seekTo(time);
   }
 
   skip(delta) {
-    const target = this.currentTime + delta;
-    this.currentTime = this.duration > 0
-      ? Math.max(0, Math.min(target, this.duration))
-      : Math.max(0, target);
+    this.#media.skip(delta);
   }
 
   get shellDom() {
