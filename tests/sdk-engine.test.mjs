@@ -27,7 +27,7 @@ test("adopts each registered SDK via its namespaced anchor", () => {
     ['<div class="fluid_video_wrapper fluid_player_layout_default"><video></video></div>', "Fluid Player"],
     ['<div data-player-id="4c522212"><video></video></div>', "Flowplayer"],
     ['<div class="flowplayer is-ready"><video></video></div>', "Flowplayer"],
-    ['<div class="fp-engine"><div class="fp-ui"></div><video></video></div>', "Flowplayer"],
+    ['<div class="fp-player"><div class="fp-ui"></div><video></video></div>', "Flowplayer"],
     ['<div data-player><video></video></div>', "Clappr"],
     ['<media-player><video slot="media"></video></media-player>', "Vidstack"],
     ['<mux-player><video></video></mux-player>', "Mux Player"],

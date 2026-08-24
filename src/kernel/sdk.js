@@ -33,7 +33,7 @@ const REGISTRY = [
   { name: "XGPlayer", anchors: [".xgplayer"] },
   { name: "Aliplayer", anchors: [".prism-player"] },
   { name: "Fluid Player", anchors: [".fluid_video_wrapper"] },
-  { name: "Flowplayer", anchors: [".fp-engine", "flowplayer-ui", "[data-player-id]", ".flowplayer"] },
+  { name: "Flowplayer", anchors: [".fp-player", "flowplayer-ui", "[data-player-id]", ".flowplayer"] },
   { name: "Clappr", anchors: ["[data-player]"] },
   { name: "Vidstack", anchors: ["media-player"] },
   { name: "Mux Player", anchors: ["mux-player"] },
