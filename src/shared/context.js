@@ -157,7 +157,8 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   const onMessage = (event) => {
     const data = event.data;
     if (
-      data && typeof data === "object"
+      event.source === window.parent
+      && data && typeof data === "object"
       && data.type === "pf:ctx" && data.nonce === nonce
       && typeof data.domain === "string"
     ) {
@@ -252,14 +253,33 @@ export function createFrameRelay() {
   };
 }
 
-/** True when window is an <iframe> descendant of this document. */
+/**
+ * True when window is an <iframe> descendant reachable through this document.
+ * Walks nested frame trees while they stay same-origin readable; a cross-origin
+ * layer's subtree is invisible, so descendants behind it are not vouched for -
+ * the strict security posture is unchanged, only deeper visible trees count.
+ */
 function isOwnFrame(source) {
-  for (const iframe of document.querySelectorAll("iframe")) {
-    if (iframe.contentWindow === source) {
-      return true;
+  const scan = (doc, depth) => {
+    if (depth > 4) {
+      return false;
     }
-  }
-  return false;
+    for (const iframe of doc.querySelectorAll("iframe")) {
+      if (iframe.contentWindow === source) {
+        return true;
+      }
+      try {
+        const nested = iframe.contentDocument;
+        if (nested && scan(nested, depth + 1)) {
+          return true;
+        }
+      } catch {
+        // Cross-origin contentDocument throws: subtree ends here.
+      }
+    }
+    return false;
+  };
+  return scan(document, 0);
 }
 
 /**

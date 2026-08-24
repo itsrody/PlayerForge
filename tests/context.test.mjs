@@ -101,6 +101,35 @@ test("top-frame responder rejects foreign frames on foreign origins", () => {
   assert.equal(sent, null);
 });
 
+test("top-frame responder vouches for grandchildren through readable frame trees", () => {
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  // child iframe with its own nested grandchild - jsdom documents stay
+  // same-origin readable, mirroring an accessible middle layer. The blank
+  // frame document exists synchronously after insertion.
+  const child = win.document.createElement("iframe");
+  const grandchild = win.document.createElement("iframe");
+  win.document.body.append(child);
+  child.contentDocument.body.append(grandchild);
+
+  let sent = null;
+  const post = (source, msg, target) => { sent = { msg, target, source }; };
+  const respond = createTopFrameResponder(() => ({ domain: "x", path: "/", title: "" }), "https://site.test", post);
+
+  // Grandchild is not a direct iframe child but sits in the visible tree.
+  respond({ data: { type: "pf:ctx-request", nonce: "g1" }, origin: "https://embed.net", source: grandchild.contentWindow });
+  assert.equal(sent.source, grandchild.contentWindow);
+  assert.equal(sent.msg.nonce, "g1");
+
+  // A stranger window still gets nothing.
+  sent = null;
+  respond({ data: { type: "pf:ctx-request", nonce: "g2" }, origin: "https://evil.test", source: { postMessage() {} } });
+  assert.equal(sent, null);
+});
+
 test("frame relay forwards requests up and routes answers back down", () => {
   const { window: win } = dom();
   globalThis.window = win;
