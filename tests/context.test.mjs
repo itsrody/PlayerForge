@@ -87,6 +87,26 @@ test("getPageContext keeps hyphen in mixed-script titles", async () => {
   assert.equal(context.title, "Pull Strings - 1");
 });
 
+test("getPageContext strips bracketed tags and dash-prefixed tags from titles", async () => {
+  const { window } = dom("");
+  window.document.title = "Show-Name [Reducing Mosaic] -Uncensored-Leaked [English Subtitle] - Episode 1";
+  globalThis.window = window;
+  globalThis.location = window.location;
+  globalThis.document = window.document;
+  const context = await getPageContext();
+  assert.equal(context.title, "Show-Name - Episode 1");
+});
+
+test("getPageContext does not strip title words separated by dash-space", async () => {
+  const { window } = dom("");
+  window.document.title = "My-Show - Episode 1 - Uncensored";
+  globalThis.window = window;
+  globalThis.location = window.location;
+  globalThis.document = window.document;
+  const context = await getPageContext();
+  assert.equal(context.title, "My-Show - Episode 1 - Uncensored");
+});
+
 test("getPageContext keeps original when title is entirely non-ASCII", async () => {
   const { window } = dom("");
   window.document.title = "فلم عربي كامل";

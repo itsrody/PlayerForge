@@ -139,15 +139,21 @@ export function hashEntry(domainKey, path, duration) {
 /* - 3. Page context - */
 
 /**
- * Strip non-Latin script characters from a page title, keeping Latin text
- * and common typographic punctuation (dashes, ellipsis, etc.).
+ * Strip non-Latin script characters and common video-title tags from a page
+ * title, keeping only the show name and episode number.
  * Returns the original when the result would be empty (entirely non-Latin).
  * Trailing punctuation left behind by removed segments is cleaned up.
  */
 function stripNonAscii(raw) {
   if (!raw) return "";
-  const ascii = raw.replace(/[^\p{Script=Latin}\p{Script=Common}]+/gu, " ").replace(/\s{2,}/g, " ").replace(/^[\s\-–—|·:,/]+/, "").replace(/[\s\-–—|·:,/]+$/, "").trim();
-  return ascii || raw;
+  let s = raw;
+  // Remove bracketed tags: [Reducing Mosaic], [English Subtitle], [RAW], etc.
+  s = s.replace(/\[[^\]]*\]/g, " ");
+  // Remove dash-prefixed tags (no space after dash): -Uncensored-Leaked, -WEBRip, etc.
+  s = s.replace(/(?:^|\s)-(?! )[\w]+(?:-[\w]+)*(?=\s|$)/g, " ");
+  s = s.replace(/[^\p{Script=Latin}\p{Script=Common}]+/gu, " ");
+  s = s.replace(/\s{2,}/g, " ").replace(/^[\s\-–—|·:,/]+/, "").replace(/[\s\-–—|·:,/]+$/, "").trim();
+  return s || raw;
 }
 
 /**
