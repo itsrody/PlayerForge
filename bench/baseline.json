@@ -1,0 +1,12 @@
+{
+  "hashEntry (djb2, domain-seeded)": 17258.33104301223,
+  "getDomainKey typical hosts": 29506.077354591085,
+  "domainsMatch boundary checks": 9440.460355246292,
+  "resume findMatch over 200 entries": 10252.95988538682,
+  "resume createEntry fresh store (hash+persist)": 57753.92288432649,
+  "findSdkForVideo full scan (Plyr tree)": 2035.499600283228,
+  "findSdkForVideo miss (generic markup)": 1045.398828757886,
+  "timecodeToSeconds cue lines": 55901.26467268623,
+  "formatTime scrub ticks": 9179.046538461538,
+  "parseSubtitles 500-cue VTT": 305260.4438642298
+}
