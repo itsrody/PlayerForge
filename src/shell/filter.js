@@ -54,13 +54,16 @@ function buildFilterString(values) {
 
 export class VideoFilter {
   #video;
+  #shell;
   #values = { ...DEFAULTS };
   #presetSelect = null;
+  #resetBtn = null;
   #steppers = {};
   #destroyed = false;
 
-  constructor(video, panel) {
-    this.#video = video;
+  constructor(shell, panel) {
+    this.#video = shell.video;
+    this.#shell = shell;
     this.#buildSection(panel);
     this.#loadFromConfig();
     this.#apply();
@@ -82,7 +85,7 @@ export class VideoFilter {
     });
     this.#presetSelect.style.marginLeft = "auto";
 
-    const resetBtn = panel.addButton(head, {
+    this.#resetBtn = panel.addButton(head, {
       icon: "reload",
       title: "Reset all",
       ariaLabel: "Reset all",
@@ -194,6 +197,12 @@ export class VideoFilter {
     this.#apply();
     this.#persist();
     this.#syncPresetMenu();
+    if (this.#resetBtn) {
+      this.#resetBtn.classList.remove("pf-flash");
+      void this.#resetBtn.offsetWidth;
+      this.#resetBtn.classList.add("pf-flash");
+    }
+    this.#shell?.toast({ icon: "reload", text: "Color Reset", duration: TUNING.toast.flashMs, group: "filter" });
   }
 
   destroy() {

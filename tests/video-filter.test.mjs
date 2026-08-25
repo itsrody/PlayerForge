@@ -12,6 +12,10 @@ function makeFakeVideo() {
   return { style: { filter: "" } };
 }
 
+function makeFakeShell(video) {
+  return { video, toast: () => {} };
+}
+
 function makeFakePanel() {
   const calls = { sections: [], selects: [], buttons: [], steppers: [] };
   const node = (tag, attrs = {}, parent = null) => {
@@ -63,13 +67,13 @@ function cleanWrites() {
 test("applies default filter as 'none'", () => {
   const video = makeFakeVideo();
   const panel = makeFakePanel();
-  new VideoFilter(video, panel);
+  new VideoFilter(makeFakeShell(video), panel);
   assert.equal(video.style.filter, "none");
 });
 
 test("creates Color section with 7 steppers", () => {
   const panel = makeFakePanel();
-  new VideoFilter(makeFakeVideo(), panel);
+  new VideoFilter(makeFakeShell(makeFakeVideo()), panel);
   assert.equal(panel.calls.sections.length, 1);
   assert.equal(panel.calls.sections[0].title, "Color");
   assert.equal(panel.calls.steppers.length, 7);
@@ -79,7 +83,7 @@ test("creates Color section with 7 steppers", () => {
 
 test("preset dropdown has all presets plus Custom", () => {
   const panel = makeFakePanel();
-  new VideoFilter(makeFakeVideo(), panel);
+  new VideoFilter(makeFakeShell(makeFakeVideo()), panel);
   const opts = panel.calls.selects[0].options;
   assert.ok(opts.includes("Default"));
   assert.ok(opts.includes("Cinematic"));
@@ -94,12 +98,12 @@ test("preset dropdown has all presets plus Custom", () => {
 test("non-default values produce correct filter string", () => {
   const video = makeFakeVideo();
   const panel = makeFakePanel();
-  const filter = new VideoFilter(video, panel);
+  const filter = new VideoFilter(makeFakeShell(video), panel);
   filter.destroy();
 
   const video2 = makeFakeVideo();
   const panel2 = makeFakePanel();
-  const filter2 = new VideoFilter(video2, panel2);
+  const filter2 = new VideoFilter(makeFakeShell(video2), panel2);
 
   const brightnessStepper = panel2.calls.steppers.find((s) => s.label === "Brightness");
   brightnessStepper.onChange(150);
@@ -117,7 +121,7 @@ test("non-default values produce correct filter string", () => {
 test("reset restores defaults and clears filter", () => {
   const video = makeFakeVideo();
   const panel = makeFakePanel();
-  const filter = new VideoFilter(video, panel);
+  const filter = new VideoFilter(makeFakeShell(video), panel);
 
   const brightnessStepper = panel.calls.steppers.find((s) => s.label === "Brightness");
   brightnessStepper.onChange(200);
@@ -130,7 +134,7 @@ test("reset restores defaults and clears filter", () => {
 test("destroy clears video filter", () => {
   const video = makeFakeVideo();
   const panel = makeFakePanel();
-  const filter = new VideoFilter(video, panel);
+  const filter = new VideoFilter(makeFakeShell(video), panel);
 
   const brightnessStepper = panel.calls.steppers.find((s) => s.label === "Brightness");
   brightnessStepper.onChange(150);
@@ -143,7 +147,7 @@ test("destroy clears video filter", () => {
 test("persist writes to pf:configs", () => {
   const video = makeFakeVideo();
   const panel = makeFakePanel();
-  const filter = new VideoFilter(video, panel);
+  const filter = new VideoFilter(makeFakeShell(video), panel);
 
   const contrastStepper = panel.calls.steppers.find((s) => s.label === "Contrast");
   contrastStepper.onChange(130);
@@ -153,7 +157,7 @@ test("persist writes to pf:configs", () => {
 test("second destroy is a no-op", () => {
   const video = makeFakeVideo();
   const panel = makeFakePanel();
-  const filter = new VideoFilter(video, panel);
+  const filter = new VideoFilter(makeFakeShell(video), panel);
   filter.destroy();
   filter.destroy();
   assert.equal(video.style.filter, "");

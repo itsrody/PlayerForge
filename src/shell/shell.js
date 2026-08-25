@@ -73,9 +73,9 @@ export class Shell {
     attachInputActions(this, this.shellHost, this.#inputs.signal);
     this.#resume = new ResumeTracker(this);
     this.#subtitles = new SubtitlesSection(this);
+    this.#filter = new VideoFilter(this, this.#panel);
     addHistorySection(this.#panel, this);
     addSettingsSection(this.#panel);
-    this.#filter = new VideoFilter(this.video, this.#panel);
     this.#setupFocusManagement();
     this.#suppressContextMenu();
     this.#forwardMediaEvents();
