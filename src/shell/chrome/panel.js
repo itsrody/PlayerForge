@@ -27,7 +27,8 @@ function createStepper({
   step = 1,
   value,
   label,
-  onChange
+  onChange,
+  deferTextInput = false
 } = {}) {
   const lo = Number(min);
   const hi = Number(max);
@@ -125,6 +126,12 @@ function createStepper({
   }
 
   input.addEventListener("input", () => {
+    // deferTextInput (settings steppers): typing stays local until blur or
+    // Enter commits, so every keystroke doesn't write GM storage and wake
+    // every other tab's live-reload. Arrow nudges still commit per click.
+    if (deferTextInput) {
+      return;
+    }
     const text = input.value.trim();
     if (!text) {
       return;
@@ -386,6 +393,7 @@ export class SettingsPanel {
     value,
     format = String,
     onChange,
+    deferTextInput = false,
     class: className,
     head
   } = {}) {
@@ -397,6 +405,7 @@ export class SettingsPanel {
       step,
       value,
       label,
+      deferTextInput,
       onChange: (v) => {
         valueEl.textContent = format(v);
         onChange?.(v);

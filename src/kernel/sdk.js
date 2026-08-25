@@ -99,7 +99,9 @@ export function findSdkForVideo(video) {
 export function findContainer(video) {
   const match = matchSdk(video);
   if (!match) return null;
-  return match.record.host ? composedClosest(match.el, match.record.host) : match.el;
+  // No registry record defines a `host` override today - the old
+  // record.host ternary always took the plain-anchor branch.
+  return match.el;
 }
 
 /**

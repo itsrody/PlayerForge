@@ -68,6 +68,11 @@ function isSafeKeySegment(key) {
 export function getConfigValue(path, fallback) {
   let node = readConfigDoc();
   for (const segment of path.split(".")) {
+    // Same segment guard as writes - a hostile stored doc must not turn a
+    // read path into prototype traversal either.
+    if (!isSafeKeySegment(segment)) {
+      return fallback;
+    }
     if (node == null || typeof node !== "object") {
       return fallback;
     }
@@ -97,6 +102,36 @@ export function setConfigValue(path, value) {
     return;
   }
   node[last] = value;
+  try {
+    gmSetValue(KEYS.configs, doc);
+  } catch (err) {
+    logger.error("storage", "Failed to persist config:", err);
+  }
+}
+
+/**
+ * Remove one dotted field from the configs document (migration sweeps).
+ * No-op when any intermediate segment or the leaf itself is missing.
+ */
+export function deleteConfigField(path) {
+  const doc = readConfigDoc();
+  const segments = path.split(".");
+  let node = doc;
+  for (let i = 0; i < segments.length - 1; i++) {
+    const segment = segments[i];
+    if (!isSafeKeySegment(segment)) {
+      return;
+    }
+    if (node == null || typeof node !== "object") {
+      return;
+    }
+    node = node[segment];
+  }
+  const last = segments.at(-1);
+  if (!isSafeKeySegment(last) || node == null || typeof node !== "object" || !(last in node)) {
+    return;
+  }
+  delete node[last];
   try {
     gmSetValue(KEYS.configs, doc);
   } catch (err) {

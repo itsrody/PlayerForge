@@ -273,6 +273,9 @@ export function addSettingsSection(panel) {
         value: getSetting(definition.key),
         head: true,
         format: definition.fmt,
+        // Typing stays local until blur/Enter - no GM_setValue per keystroke
+        // (subtitle steppers keep live output, so they stay immediate).
+        deferTextInput: true,
         onChange: (parsed) => setSetting(definition.key, parsed)
       });
     }

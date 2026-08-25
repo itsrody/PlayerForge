@@ -33,6 +33,11 @@ export function getDomainKey(hostname) {
   if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname)) {
     return hostname.replace(/\./g, "-");
   }
+  // Bracketed IPv6 ([::1]) or bare forms - the TLD walk would mangle them
+  // into garbage keys, so collapse to one dash-safe identifier like IPv4.
+  if (hostname.includes(":")) {
+    return hostname.replace(/[\[\]:]+/g, "-").replace(/^-+|-+$/g, "") || "ipv6";
+  }
   const parts = hostname.toLowerCase().replace(/^www\./, "").split(".");
   const multiPartTlds = new Set(["co", "com", "org", "net", "gov", "edu", "ac", "mil"]);
   let idx = parts.length - 1;
@@ -185,6 +190,8 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   };
   const attempt = () => {
     if (Date.now() >= deadline) {
+      // The pending retry would fire into a torn-down request otherwise.
+      clearTimeout(retryTimer);
       window.removeEventListener("message", onMessage);
       resolve(null);
       return;

@@ -1,0 +1,41 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+let stored = {};
+globalThis.GM_getValue = (key, fallback) => (key in stored ? stored[key] : fallback);
+globalThis.GM_setValue = (key, value) => { stored[key] = value; };
+
+const { KEYS, getConfigValue, setConfigValue, deleteConfigField } = await import("../src/shared/storage.js");
+
+test("getConfigValue resolves dotted paths with fallbacks", () => {
+  stored = { [KEYS.configs]: { version: 1, ui: { volume: 0.5 } } };
+  assert.equal(getConfigValue("ui.volume"), 0.5);
+  assert.equal(getConfigValue("ui.missing", "fb"), "fb");
+  assert.equal(getConfigValue("nope.deeper", null), null);
+});
+
+test("getConfigValue rejects prototype-walking segments like writes do", () => {
+  // A hostile doc must not turn a read path into traversal either.
+  stored = {};
+  assert.equal(getConfigValue("__proto__.polluted", "safe"), "safe");
+  assert.equal(getConfigValue("constructor.prototype.x", "safe"), "safe");
+  assert.equal(getConfigValue("ok.__proto__.x", "safe"), "safe");
+});
+
+test("deleteConfigField removes leaves and tolerates missing paths", () => {
+  const doc = { version: 1, firstRun: false, ui: { volume: 1, nested: { deep: 2 } } };
+  stored = { [KEYS.configs]: doc };
+
+  deleteConfigField("firstRun");
+  assert.ok(!("firstRun" in stored[KEYS.configs]));
+  assert.equal(stored[KEYS.configs].version, 1);
+
+  deleteConfigField("ui.nested.deep");
+  assert.deepEqual(stored[KEYS.configs].ui.nested, {});
+
+  const before = JSON.stringify(stored[KEYS.configs]);
+  deleteConfigField("ui.nope.deep");
+  deleteConfigField("__proto__.x");
+  deleteConfigField("");
+  assert.equal(JSON.stringify(stored[KEYS.configs]), before);
+});

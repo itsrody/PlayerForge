@@ -23,6 +23,8 @@ test("getDomainKey reduces hostnames to registrable keys", () => {
   assert.equal(getDomainKey("a.b.museum.org"), "museum");
   assert.equal(getDomainKey("localhost"), "localhost");
   assert.equal(getDomainKey("192.168.1.5"), "192-168-1-5");
+  assert.equal(getDomainKey("[2001:db8::1]"), "2001-db8-1");
+  assert.equal(getDomainKey("[::1]"), "1");
   assert.equal(getDomainKey(""), "");
 });
 
