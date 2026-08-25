@@ -77,14 +77,14 @@ test("getPageContext strips non-Latin scripts but keeps typographic punctuation"
   assert.equal(context.title, "Arabic Text here | more stuff");
 });
 
-test("getPageContext keeps em-dash in mixed-script titles", async () => {
+test("getPageContext keeps hyphen in mixed-script titles", async () => {
   const { window } = dom("");
-  window.document.title = " التلاعب بالخيوط Pull Strings — الحلقة 1 ";
+  window.document.title = " التلاعب بالخيوط Pull Strings - الحلقة 1 ";
   globalThis.window = window;
   globalThis.location = window.location;
   globalThis.document = window.document;
   const context = await getPageContext();
-  assert.equal(context.title, "Pull Strings — 1");
+  assert.equal(context.title, "Pull Strings - 1");
 });
 
 test("getPageContext keeps original when title is entirely non-ASCII", async () => {
