@@ -51,9 +51,12 @@ export const logger = {
   error,
   group,
   groupEnd,
-  /** Enable chatter - wired to the #pf-debug hash in entry.js. */
+  /** Enable chatter - wired to the #pf-debug hash / debug setting in kernel. */
   enable() {
     enabled = true;
+  },
+  disable() {
+    enabled = false;
   },
   get enabled() {
     return enabled;

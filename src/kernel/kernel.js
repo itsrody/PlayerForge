@@ -1,5 +1,5 @@
 import { logger } from "../shared/logger.js";
-import { KEYS, gmRegisterMenu, gmSetClipboard, loadJsonObject } from "../shared/storage.js";
+import { gmRegisterMenu, gmUnregisterMenu, getConfigValue, setConfigValue } from "../shared/storage.js";
 import { delay } from "../shared/time.js";
 import { GESTURE_EVENTS } from "../shell/inputs/actions.js";
 import { SHELL_MARKER } from "../shell/chrome/inject.js";
@@ -9,6 +9,9 @@ import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, findContainer, meetsMinSize, watchDocumentVideos } from "./sdk.js";
 import { Shell } from "../shell/shell.js";
 import { TUNING } from "../shell/chrome/config.js";
+
+/** Configs-doc field persisting the debug-logs menu toggle. */
+const DEBUG_LOGS_KEY = "debug.logs";
 
 /**
  * crypto.randomUUID() exists only in secure contexts; userscripts match
@@ -36,6 +39,8 @@ export class Kernel {
   /** Unsubscribe for the shared discovery tap; dropped at pagehide. */
   #stopDiscoveryTap = null;
   #scope = new AbortController();
+  /** GM menu handle for the debug-logs command - unregistered on re-caption. */
+  #debugMenuId = null;
 
   #onPageShow = (event) => {
     if (!event.persisted) {
@@ -82,6 +87,15 @@ export class Kernel {
     }
     this.#initialized = true;
     logger.log("kernel", "Initializing kernel");
+    // Debug logs activate from the persisted menu toggle or the #pf-debug
+    // hash. The hash alone is a per-load override - it never writes the
+    // setting, and an explicit menu "Off" wins over it.
+    const storedDebug = getConfigValue(DEBUG_LOGS_KEY, false);
+    const hashDebug = location.hash.includes("pf-debug");
+    if (storedDebug || hashDebug) {
+      this.#setDebugRuntime(true);
+      logger.log("kernel", `Debug logs on (${[storedDebug && "setting", hashDebug && "hash"].filter(Boolean).join(" + ")})`);
+    }
     this.#registerMenuCommand();
     const { signal } = this.#scope;
     document.addEventListener("pageshow", this.#onPageShow, { signal });
@@ -189,22 +203,51 @@ export class Kernel {
   }
 
   #registerMenuCommand() {
-    gmRegisterMenu("⚙️ PlayerForge Settings", () => {
+    gmRegisterMenu("⚙️ PlayerForge Panel", () => {
       const shells = this.#registry.getAll();
       const host = shells.length ? shells.at(-1).shellHost : null;
-      if (host) {
-        host.dispatchEvent(new CustomEvent(GESTURE_EVENTS.panel, {
-          detail: { method: "menu" }
-        }));
+      if (!host) {
+        // warn stays unconditional - the user clicked something and must
+        // know why nothing visibly happened.
+        logger.warn("kernel", "Panel toggle requested but no player is active on this page");
+        return;
       }
+      host.dispatchEvent(new CustomEvent(GESTURE_EVENTS.panel, {
+        detail: { method: "menu" }
+      }));
     }, { autoClose: true });
-    gmRegisterMenu("\u{1F4CB} PlayerForge Copy Config", () => {
-      const dump = {
-        configs: loadJsonObject(KEYS.configs, null),
-        resume: loadJsonObject(KEYS.resume, null)
-      };
-      gmSetClipboard(JSON.stringify(dump, null, 2), "application/json");
-      logger.log("kernel", "Config and resume store copied to clipboard");
-    }, { autoClose: true });
+    this.#refreshDebugMenu();
+  }
+
+  /**
+   * Debug logs toggle with a caption that always reflects current state:
+   * re-registered after every flip so the GM menu label reads On or Off.
+   * State persists in the configs doc, so it survives reloads and live-
+   * reloads into other tabs through the shared storage.
+   */
+  #refreshDebugMenu() {
+    if (this.#debugMenuId != null) {
+      gmUnregisterMenu(this.#debugMenuId);
+    }
+    const enabled = getConfigValue(DEBUG_LOGS_KEY, false);
+    this.#debugMenuId = gmRegisterMenu(
+      `\u{1F41B} PlayerForge Debug Logs: ${enabled ? "On" : "Off"}`,
+      () => {
+        const next = !getConfigValue(DEBUG_LOGS_KEY, false);
+        setConfigValue(DEBUG_LOGS_KEY, next);
+        this.#setDebugRuntime(next);
+        this.#refreshDebugMenu();
+      },
+      { autoClose: true }
+    );
+  }
+
+  #setDebugRuntime(on) {
+    if (on) {
+      logger.enable();
+    } else {
+      logger.disable();
+    }
+    this.bus.debug = on;
   }
 }

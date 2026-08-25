@@ -23,6 +23,11 @@ export function gmRegisterMenu(title, onClick, options) {
   return GM_registerMenuCommand(title, onClick, options);
 }
 
+/** Takes the handle returned by gmRegisterMenu. */
+export function gmUnregisterMenu(handle) {
+  GM_unregisterMenuCommand(handle);
+}
+
 export function gmSetClipboard(data, type) {
   GM_setClipboard(data, type);
 }
