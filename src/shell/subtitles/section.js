@@ -263,7 +263,7 @@ export class SubtitlesSection {
     this.#styleControls = { size: sizeStepper, color: colorField, shadow: shadowStepper, sync: syncStepper };
     this.#positionControls = { vertical: verticalStepper, horizontal: horizontalStepper };
 
-    panel.addButton(styleHead, {
+    const resetBtn = panel.addButton(styleHead, {
       icon: "reload",
       title: "Reset all",
       ariaLabel: "Reset all",
@@ -275,6 +275,10 @@ export class SubtitlesSection {
         syncStepper.setValue(0);
         verticalStepper.setValue(85);
         horizontalStepper.setValue(50);
+        resetBtn.classList.remove("pf-flash");
+        void resetBtn.offsetWidth;
+        resetBtn.classList.add("pf-flash");
+        this.#toast({ icon: "reload", text: "Style reset", duration: TUNING.toast.flashMs, group: "subtitles" });
       }
     });
 

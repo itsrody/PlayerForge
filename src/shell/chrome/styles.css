@@ -829,3 +829,13 @@ pf-toast .pf-toast-actions button svg {
   .pf-tab-label { display: none; }
   .pf-panel-tab { padding: 8px 10px; }
 }
+
+/* Reset-button flash: a quick accent-colored glow that fades out. */
+@keyframes pf-reset-flash {
+  0% { background-color: transparent; }
+  30% { background-color: var(--pf-accent); }
+  100% { background-color: transparent; }
+}
+.pf-flash {
+  animation: pf-reset-flash 0.4s ease-out;
+}

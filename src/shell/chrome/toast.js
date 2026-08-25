@@ -66,6 +66,9 @@ export class ToastManager {
         button.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
+          button.classList.remove("pf-flash");
+          void button.offsetWidth;
+          button.classList.add("pf-flash");
           action.onClick?.();
         });
         this.#actions.appendChild(button);
