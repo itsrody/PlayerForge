@@ -4,6 +4,7 @@
  */
 import { KEYS, getConfigValue, setConfigValue } from "../../shared/storage.js";
 import { logger } from "../../shared/logger.js";
+import { createIconElement } from "./icons.js";
 
 const SETTINGS_PREFIX = "settings";
 
@@ -116,6 +117,13 @@ const SETTINGS_SCHEMA = [
     default: 2,
     fmt: (v) => `${v}s`,
     group: "Resume"
+  },
+  {
+    key: "video.pip",
+    type: "bool",
+    label: "Picture-in-Picture",
+    default: false,
+    group: "Video"
   }
 ];
 
@@ -240,7 +248,7 @@ if (typeof GM_addValueChangeListener === "function") {
  * group, toggles for bools, steppers for numbers. Pure function over the
  * panel API - no lifecycle of its own.
  */
-export function addSettingsSection(panel) {
+export function addSettingsSection(panel, shell) {
   if (!panel?.body) {
     return;
   }
@@ -257,16 +265,33 @@ export function addSettingsSection(panel) {
       const groupSection = panel.el("div", { class: "pf-panel-section" }, sectionRoot);
       panel.addLabel(groupSection, definition.group);
       groupGrid = panel.el("div", { class: "pf-panel-grid" }, groupSection);
+
+      // Audio output button at the end of the Video group
+      if (currentGroup === "Video" && shell) {
+        addAudioOutputButton(panel, groupGrid, shell);
+      }
     }
     if (definition.type === "bool") {
       const cell = panel.el("div", { class: "pf-panel-cell" }, groupGrid);
       const toggleLabel = panel.el("label", { class: "pf-settings-toggle" }, cell);
       const checkbox = panel.addCheckbox(toggleLabel, {
         checked: getSetting(definition.key),
-        onChange: (checked) => setSetting(definition.key, checked)
+        onChange: (checked) => {
+          setSetting(definition.key, checked);
+          // Live PiP toggle: request or exit PiP immediately.
+          if (definition.key === "video.pip" && shell) {
+            applyPipState(checked, shell);
+          }
+        }
       });
       checkbox.setAttribute("aria-label", definition.label);
       panel.el("span", {}, toggleLabel).textContent = definition.label;
+
+      // Reverse-sync: native PiP events (e.g. user clicks native PiP button)
+      // flip the checkbox to match reality.
+      if (definition.key === "video.pip" && shell) {
+        watchPipState(checkbox, shell);
+      }
     } else {
       panel.addStepper(groupGrid, {
         label: definition.label,
@@ -284,4 +309,78 @@ export function addSettingsSection(panel) {
     }
   }
   logger.log("settings", "Settings section ready");
+}
+
+/** Request or exit PiP to match a boolean state. */
+async function applyPipState(wantPip, shell) {
+  const video = shell.video;
+  if (!video) {
+    return;
+  }
+  try {
+    if (wantPip) {
+      if (!document.pictureInPictureElement) {
+        await video.requestPictureInPicture();
+      }
+    } else if (document.pictureInPictureElement) {
+      await document.exitPictureInPicture();
+    }
+  } catch (err) {
+    if (err.name !== "AbortError") {
+      logger.warn("settings", `PiP toggle failed: ${err.message}`);
+    }
+    // Revert setting to actual state.
+    setSetting("video.pip", !wantPip);
+  }
+}
+
+/** Sync checkbox when PiP changes outside our toggle (e.g. native PiP button). */
+function watchPipState(checkbox, shell) {
+  const video = shell.video;
+  if (!video) {
+    return;
+  }
+  video.addEventListener("enterpictureinpicture", () => {
+    if (!getSetting("video.pip")) {
+      setSetting("video.pip", true);
+      checkbox.checked = true;
+    }
+  });
+  video.addEventListener("leavepictureinpicture", () => {
+    if (getSetting("video.pip")) {
+      setSetting("video.pip", false);
+      checkbox.checked = false;
+    }
+  });
+}
+
+/** Add an "Audio output" button that opens the native device picker. */
+function addAudioOutputButton(panel, parent, shell) {
+  if (typeof navigator.mediaDevices?.selectAudioOutput !== "function") {
+    return;
+  }
+  const cell = panel.el("div", { class: "pf-panel-cell" }, parent);
+  const btn = panel.el("button", {
+    type: "button",
+    class: "pf-btn pf-btn-ghost"
+  }, cell);
+  const iconEl = createIconElement("speaker");
+  if (iconEl) {
+    btn.appendChild(iconEl);
+  }
+  panel.el("span", {}, btn).textContent = "Pick speaker\u2026";
+  btn.addEventListener("click", async () => {
+    try {
+      const device = await navigator.mediaDevices.selectAudioOutput();
+      if (device?.deviceId && shell.video) {
+        await shell.video.setSinkId(device.deviceId);
+        logger.log("settings", `Audio output: ${device.label || device.deviceId}`);
+      }
+    } catch (err) {
+      // AbortError = user cancelled the picker, not a real error.
+      if (err.name !== "AbortError") {
+        logger.warn("settings", `Audio output picker failed: ${err.message}`);
+      }
+    }
+  });
 }

@@ -40,6 +40,7 @@ export class Shell {
   #subtitles = null;
   #panel;
   #toasts = null;
+  #wakeLock = null;
   #destroyed = false;
   /** Every platform subscription this facade makes dies with this signal. */
   #scope = new AbortController();
@@ -69,7 +70,7 @@ export class Shell {
     attachInputActions(this, this.shellHost, this.#inputs.signal);
     this.#resume = new ResumeTracker(this);
     this.#subtitles = new SubtitlesSection(this);
-    addSettingsSection(this.#panel);
+    addSettingsSection(this.#panel, this);
     addDataSection(this.#panel, this);
     this.#setupFocusManagement();
     this.#suppressContextMenu();
@@ -80,6 +81,7 @@ export class Shell {
       signal: this.#scope.signal
     });
     this.#watchFullscreen();
+    this.#watchWakeLock();
     this.#markManaged();
     logger.log("shell", `Shell "${id}" constructed (${sdkName})`);
   }
@@ -305,6 +307,32 @@ export class Shell {
     document.addEventListener("fullscreenchange", onChange, { signal: this.#scope.signal });
   }
 
+  /** Keep screen awake while video is playing; release on pause/ended/hidden. */
+  #watchWakeLock() {
+    const video = this.video;
+    const { signal } = this.#scope;
+    const acquire = async () => {
+      if (this.#destroyed || video.paused || video.ended) {
+        return;
+      }
+      try {
+        this.#wakeLock = await navigator.wakeLock.request("screen");
+      } catch {}
+    };
+    const release = () => {
+      this.#wakeLock?.release();
+      this.#wakeLock = null;
+    };
+    video.addEventListener("play", acquire, { signal, passive: true });
+    video.addEventListener("pause", release, { signal, passive: true });
+    video.addEventListener("ended", release, { signal, passive: true });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && !video.paused && !video.ended) {
+        acquire();
+      }
+    }, { signal });
+  }
+
   exitFullscreen() {
     if (document.fullscreenElement) {
       document.exitFullscreen()?.catch(() => {});
@@ -324,6 +352,13 @@ export class Shell {
       this.#resume = null;
       this.#subtitles?.destroy();
       this.#subtitles = null;
+      this.#wakeLock?.release();
+      this.#wakeLock = null;
+      // Exit PiP if the shell owned it — the video outlives the shell in
+      // SPAs, but the user expects the floating window to close with the HUD.
+      if (document.pictureInPictureElement === this.video) {
+        document.exitPictureInPicture().catch(() => {});
+      }
       // One abort tears down every platform subscription: media event
       // forwarding, fullscreen watch, focus management, host watchdog,
       // MediaSession ownership.

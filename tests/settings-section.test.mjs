@@ -59,13 +59,13 @@ test("renders one labeled section per unique schema group", () => {
   const panel = makeFakePanel();
   addSettingsSection(panel);
   assert.deepEqual(panel.calls.sections.map((s) => s.title), ["Settings"]);
-  assert.deepEqual(panel.calls.labels, ["Playback", "Gestures", "Resume"]);
+  assert.deepEqual(panel.calls.labels, ["Playback", "Gestures", "Resume", "Video"]);
 });
 
 test("bool settings render toggles with labels and aria", () => {
   const panel = makeFakePanel();
   addSettingsSection(panel);
-  assert.equal(panel.calls.checkboxes.length, 7);
+  assert.equal(panel.calls.checkboxes.length, 8);
   assert.ok(panel.calls.checkboxes.every((box) => typeof box.onChange === "function"));
   const hotkeys = panel.calls.checkboxes[0];
   assert.equal(hotkeys.checked, true);

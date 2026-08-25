@@ -182,7 +182,11 @@ class MediaSessionBridge {
     session.setActionHandler("seekforward", (details) => controls.skip(details?.seekOffset || 10));
     session.setActionHandler("seekto", (details) => {
       if (details?.seekTime != null) {
-        controls.seekTo(details.seekTime);
+        if (details.fastSeek && typeof video.fastSeek === "function") {
+          video.fastSeek(details.seekTime);
+        } else {
+          controls.seekTo(details.seekTime);
+        }
       }
     });
     session.playbackState = this.#video.paused ? "paused" : "playing";
