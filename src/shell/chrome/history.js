@@ -1,5 +1,6 @@
 import { formatTime } from "../../shared/time.js";
 import { createIconElement } from "./icons.js";
+import { TUNING } from "./config.js";
 
 function formatDomain(domain) {
   if (!domain) return "";
@@ -56,7 +57,7 @@ export function addHistorySection(panel, shell) {
       shell.toast({
         icon: "resume",
         text: `Reset "${entry.title || entry.domain}"`,
-        duration: 2500,
+        duration: TUNING.toast.infoMs,
         group: "history"
       });
     });
@@ -77,7 +78,7 @@ export function addHistorySection(panel, shell) {
       shell.toast({
         icon: "trash",
         text: `Removed "${entry.title || entry.domain}"`,
-        duration: 2500,
+        duration: TUNING.toast.infoMs,
         group: "history"
       });
     });
