@@ -67,7 +67,7 @@ export class VideoFilter {
   }
 
   #buildSection(panel) {
-    const sectionRoot = panel.addSection("Color", "captions");
+    const sectionRoot = panel.addSection("Color", "color");
     if (!sectionRoot) {
       return;
     }
