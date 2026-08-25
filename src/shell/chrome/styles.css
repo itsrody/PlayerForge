@@ -713,6 +713,12 @@ pf-toast .pf-toast-actions button svg {
   justify-content: space-between;
   gap: 10px;
 }
+.pf-options-cell .pf-panel-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .pf-options-row {
   display: flex;
   gap: 6px;
@@ -733,14 +739,10 @@ pf-toast .pf-toast-actions button svg {
   color: #fff;
 }
 
-/* Narrow screens: stack options label above buttons to prevent row overflow. */
+/* Narrow screens: prevent options label + buttons from overflowing. */
 @media (max-width: 520px) {
-  .pf-options-cell {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 4px;
-  }
-  .pf-options-row { justify-content: center; }
+  .pf-options-cell { gap: 6px; }
+  .pf-options-row { justify-content: center; flex-shrink: 0; }
 }
 
 /* History tab - card rows */
