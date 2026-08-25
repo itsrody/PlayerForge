@@ -171,7 +171,8 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
       resolve({
         domain: data.domain,
         path: data.path,
-        title: data.title
+        // Bridge answers carry no title (see createTopFrameResponder).
+        title: typeof data.title === "string" ? data.title : ""
       });
     }
   };
@@ -205,6 +206,11 @@ export const CTX_REQUEST_TIMEOUT_MS = 3000;
  * resolved per request (not captured at install time) so late titles and SPA
  * route changes are reflected. Requests qualify when they originate from our
  * own origin or from one of this document's <iframe> descendants.
+ *
+ * The payload deliberately omits document.title: any embed in the page can
+ * pass the frame-tree vouch, and the title is the one field with nothing to
+ * offer resume matching (domain + path + duration drive identity). Domain
+ * and path stay because cross-origin players cannot function without them.
  */
 export function createTopFrameResponder(resolveContext, ownOrigin = location.origin, post = defaultPostToSource) {
   return (event) => {
@@ -219,13 +225,12 @@ export function createTopFrameResponder(resolveContext, ownOrigin = location.ori
     if (event.origin !== ownOrigin && !isOwnFrame(event.source)) {
       return;
     }
-    const { domain, path, title } = resolveContext();
+    const { domain, path } = resolveContext();
     post(event.source, {
       type: "pf:ctx",
       nonce: data.nonce,
       domain,
-      path,
-      title
+      path
     }, event.origin || "*");
   };
 }
@@ -250,6 +255,11 @@ export function createFrameRelay() {
       setTimeout(() => pending.delete(data.nonce), NONCE_TTL_MS);
       window.parent.postMessage(data, "*");
     } else if (data.type === "pf:ctx" && pending.has(data.nonce)) {
+      // Answers may only come from the parent we relayed to - a sibling or
+      // nested frame that guesses a live nonce must not inject context.
+      if (event.source !== window.parent) {
+        return;
+      }
       const requester = pending.get(data.nonce);
       pending.delete(data.nonce);
       requester.source?.postMessage(data, requester.origin || "*");

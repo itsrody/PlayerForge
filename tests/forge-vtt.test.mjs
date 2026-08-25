@@ -118,6 +118,14 @@ test("out-of-range numeric entities become replacement chars", () => {
   assert.equal(cued[0].text, "x\uFFFDy");
 });
 
+test("lone surrogate entities degrade to replacement chars without throwing", () => {
+  const cues = parseSubtitles(
+    "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\na&#55296;b&#xD800;c"
+  );
+  assert.equal(cues.length, 1);
+  assert.equal(cues[0].text, "a\uFFFDb\uFFFDc");
+});
+
 test("markup tags are stripped but entity-encoded tags stay literal", () => {
   const cues = parseSubtitles("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\n<i>bold</i> &lt;b&gt;kept&lt;/b&gt;");
   assert.equal(cues[0].text, "bold <b>kept</b>");

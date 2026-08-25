@@ -80,7 +80,7 @@ test("top-frame responder validates shape and answers with fresh context", () =>
   respond({ data: { type: "pf:ctx-request", nonce: "n1" }, origin: "https://embed.net", source: iframe.contentWindow });
   assert.equal(calls, 1);
   assert.equal(sent.source, iframe.contentWindow);
-  assert.deepEqual(sent.msg, { type: "pf:ctx", nonce: "n1", domain: "example", path: "/v/1", title: "T" });
+  assert.deepEqual(sent.msg, { type: "pf:ctx", nonce: "n1", domain: "example", path: "/v/1" });
   assert.equal(sent.target, "https://embed.net");
 
   sent = null; calls = 0;
@@ -150,12 +150,18 @@ test("frame relay forwards requests up and routes answers back down", () => {
     relay({ data: { type: "pf:ctx-request", nonce: "r1" }, origin: "https://kid.test", source: child });
     assert.deepEqual(relayedUp.msg, { type: "pf:ctx-request", nonce: "r1" });
 
-    relay({ data: { type: "pf:ctx", nonce: "r1", domain: "site", path: "/", title: "" }, origin: "https://top.test" });
+    // Answers are only accepted from the parent this hop relayed to.
+    const answer = { type: "pf:ctx", nonce: "r1", domain: "site", path: "/", title: "" };
+    const impostor = { postMessage: () => { throw new Error("impostor answered"); } };
+    relay({ data: answer, origin: "https://top.test", source: impostor });
+    assert.equal(child.sent, undefined);
+
+    relay({ data: answer, origin: "https://top.test", source: win.parent });
     assert.deepEqual(child.sent.msg, { type: "pf:ctx", nonce: "r1", domain: "site", path: "/", title: "" });
     assert.equal(child.sent.target, "https://kid.test");
 
     child.sent = null;
-    relay({ data: { type: "pf:ctx", nonce: "unknown", domain: "site", path: "/", title: "" }, origin: "https://top.test" });
+    relay({ data: { type: "pf:ctx", nonce: "unknown", domain: "site", path: "/", title: "" }, origin: "https://top.test", source: win.parent });
     assert.equal(child.sent, null);
     win.parent.postMessage = originalPostMessage;
   } finally {
@@ -205,10 +211,11 @@ test("nested relays address every down-leg with its own requester origin", () =>
 
     // Top answers; each relay routes down with the origin it stored per hop.
     const answer = { type: "pf:ctx", nonce: "nn", domain: "site", path: "/", title: "" };
-    relayOuter({ data: answer, origin: "https://top.test" });
+    relayOuter({ data: answer, origin: "https://top.test", source: outer.win.parent });
     assert.equal(innerWindow.sent.target, "https://inner.test");
 
-    relayInner({ data: answer, origin: "https://inner.test" });
+    inner.setUp();
+    relayInner({ data: answer, origin: "https://inner.test", source: inner.win.parent });
     assert.equal(leaf.sent.target, "https://kid.test");
     assert.deepEqual(leaf.sent.msg, answer);
   } finally {

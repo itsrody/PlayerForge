@@ -55,16 +55,20 @@ function bootstrap() {
       }, 1200);
     });
 
-    if (location.hash.includes("pf-debug")) {
+    const debugMode = location.hash.includes("pf-debug");
+    if (debugMode) {
       kernel.bus.debug = true;
       logger.log("entry", "Debug mode enabled");
     }
 
+    // Minimal public surface: pages get the version string only. The kernel
+    // (and through it the bus and shell registry) stays private - handing it
+    // to page scripts would let them forge discovery events or poke shells.
+    // #pf-debug in the hash re-exposes it for console debugging sessions.
     Object.defineProperty(window, "PlayerForge", {
-      value: Object.freeze({
-        kernel,
-        version: GM_info.script.version
-      }),
+      value: Object.freeze(debugMode
+        ? { kernel, version: GM_info.script.version }
+        : { version: GM_info.script.version }),
       writable: false,
       configurable: false
     });

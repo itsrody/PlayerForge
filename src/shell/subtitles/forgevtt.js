@@ -80,7 +80,9 @@ export function timecodeToSeconds(timecode) {
 function decodeNumericEntity(entity) {
   const isHex = entity[2] === "x" || entity[2] === "X";
   const code = parseInt(entity.slice(isHex ? 3 : 2, -1), isHex ? 16 : 10);
-  if (!(code >= 1 && code <= 0x10ffff)) {
+  // Lone surrogates are unencodable - fromCodePoint would throw and one
+  // hostile entity must not reject the whole track.
+  if (!(code >= 1 && code <= 0x10ffff) || (code >= 0xd800 && code <= 0xdfff)) {
     return "\uFFFD";
   }
   return String.fromCodePoint(code);
