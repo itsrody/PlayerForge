@@ -233,7 +233,7 @@ export function addSettingsSection(panel) {
       checkbox.setAttribute("aria-label", definition.label);
       panel.el("span", {}, toggleLabel).textContent = definition.label;
     } else if (definition.type === "options") {
-      const cell = panel.el("div", { class: "pf-panel-cell" }, groupGrid);
+      const cell = panel.el("div", { class: "pf-panel-cell pf-options-cell" }, groupGrid);
       panel.addLabel(cell, definition.label);
       const row = panel.el("div", { class: "pf-options-row" }, cell);
       const current = getSetting(definition.key);

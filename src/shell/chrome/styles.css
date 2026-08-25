@@ -705,14 +705,19 @@ pf-toast .pf-toast-actions button svg {
   background: rgba(255, 255, 255, 0.09);
 }
 
+.pf-options-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
 .pf-options-row {
   display: flex;
   gap: 6px;
-  margin-top: 6px;
+  flex-shrink: 0;
 }
 .pf-options-btn {
-  flex: 1;
-  padding: 6px 0;
+  padding: 5px 10px;
   font-size: 13px;
   font-weight: 600;
   text-align: center;
