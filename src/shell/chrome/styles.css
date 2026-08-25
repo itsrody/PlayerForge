@@ -763,9 +763,6 @@ pf-toast .pf-toast-actions button svg {
   background: rgba(255, 255, 255, 0.04);
 }
 .pf-history-card:hover { background: rgba(255, 255, 255, 0.09); }
-.pf-history-done {
-  opacity: 0.45;
-}
 .pf-history-info {
   flex: 1;
   min-width: 0;

@@ -31,10 +31,6 @@ export function addHistorySection(panel, shell) {
 
   function renderCard(entry) {
     const card = panel.el("div", { class: "pf-history-card" }, list);
-    const done = entry.resume === 0 && entry.duration > 0;
-    if (done) {
-      card.classList.add("pf-history-done");
-    }
 
     const info = panel.el("div", { class: "pf-history-info" }, card);
     const title = panel.el("div", { class: "pf-history-title" }, info);
@@ -57,11 +53,10 @@ export function addHistorySection(panel, shell) {
     resetBtn.appendChild(createIconElement("reload"));
     resetBtn.addEventListener("click", () => {
       shell.resume?.resetEntry(entry.id);
-      entry.resume = 0;
-      card.classList.add("pf-history-done");
       shell.toast({
         icon: "resume",
         text: `Reset "${entry.title || entry.domain}"`,
+        duration: 2500,
         group: "history"
       });
     });
@@ -79,6 +74,12 @@ export function addHistorySection(panel, shell) {
       if (!list.children.length) {
         hint.hidden = false;
       }
+      shell.toast({
+        icon: "trash",
+        text: `Removed "${entry.title || entry.domain}"`,
+        duration: 2500,
+        group: "history"
+      });
     });
   }
 
