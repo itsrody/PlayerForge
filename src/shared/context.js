@@ -176,7 +176,6 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
       resolve({
         domain: data.domain,
         path: data.path,
-        // Bridge answers carry no title (see createTopFrameResponder).
         title: typeof data.title === "string" ? data.title : ""
       });
     }
@@ -232,12 +231,13 @@ export function createTopFrameResponder(resolveContext, ownOrigin = location.ori
     if (event.origin !== ownOrigin && !isOwnFrame(event.source)) {
       return;
     }
-    const { domain, path } = resolveContext();
+    const { domain, path, title } = resolveContext();
     post(event.source, {
       type: "pf:ctx",
       nonce: data.nonce,
       domain,
-      path
+      path,
+      title
     }, event.origin || "*");
   };
 }

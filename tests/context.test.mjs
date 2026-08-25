@@ -82,7 +82,7 @@ test("top-frame responder validates shape and answers with fresh context", () =>
   respond({ data: { type: "pf:ctx-request", nonce: "n1" }, origin: "https://embed.net", source: iframe.contentWindow });
   assert.equal(calls, 1);
   assert.equal(sent.source, iframe.contentWindow);
-  assert.deepEqual(sent.msg, { type: "pf:ctx", nonce: "n1", domain: "example", path: "/v/1" });
+  assert.deepEqual(sent.msg, { type: "pf:ctx", nonce: "n1", domain: "example", path: "/v/1", title: "T" });
   assert.equal(sent.target, "https://embed.net");
 
   sent = null; calls = 0;
