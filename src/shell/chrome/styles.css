@@ -797,6 +797,10 @@ pf-toast .pf-toast-actions button svg {
    .pf-panel-header { padding: 6px; gap: 6px; }
    .pf-panel-body { padding: 6px; }
   .pf-panel-grid { grid-template-columns: minmax(0, 1fr); }
+  .pf-history-card { padding: 5px 6px; gap: 6px; }
+  .pf-history-title { font-size: 11px; }
+  .pf-history-meta { font-size: 10px; }
+  .pf-history-list { max-height: 152px; }
 }
 
 /* - Mobile-only controls - */
@@ -832,6 +836,10 @@ pf-toast .pf-toast-actions button svg {
     width: 18px;
     height: 18px;
   }
+  .pf-history-card { padding: 8px 10px; gap: 8px; }
+  .pf-history-title { font-size: 13px; }
+  .pf-history-meta { font-size: 12px; }
+  .pf-history-list { max-height: 184px; }
 }
 
 /* Narrow screens (portrait phones): a fixed 344px panel would
@@ -900,6 +908,10 @@ pf-toast .pf-toast-actions button svg {
   }
   .pf-tab-label { display: none; }
   .pf-panel-tab { padding: 8px 10px; }
+  .pf-history-card { padding: 6px 8px; gap: 6px; }
+  .pf-history-title { font-size: 11px; }
+  .pf-history-meta { font-size: 10px; }
+  .pf-history-list { max-height: 144px; }
 }
 
 /* Reset-button flash: a quick accent-colored glow that fades out. */
