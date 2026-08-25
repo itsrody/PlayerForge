@@ -132,6 +132,17 @@ export function hashEntry(domainKey, path, duration) {
 /* - 3. Page context - */
 
 /**
+ * Strip non-ASCII characters from a page title, keeping only Latin text.
+ * Returns the original when the result would be empty (entirely non-Latin).
+ * Trailing punctuation left behind by removed segments is cleaned up.
+ */
+function stripNonAscii(raw) {
+  if (!raw) return "";
+  const ascii = raw.replace(/[^\x00-\x7F]+/g, " ").replace(/\s{2,}/g, " ").replace(/^[\s\-–—|·:,/]+/, "").replace(/[\s\-–—|·:,/]+$/, "").trim();
+  return ascii || raw;
+}
+
+/**
  * Resolve the page context ({domain, path, title}) this shell belongs to:
  * read the top frame directly when possible, otherwise ask up the parent
  * chain through the frame bridge.
@@ -141,7 +152,7 @@ export async function getPageContext() {
     return {
       domain: getDomainKey(location.hostname),
       path: location.pathname,
-      title: document.title
+      title: stripNonAscii(document.title)
     };
   }
   try {
@@ -149,7 +160,7 @@ export async function getPageContext() {
     return {
       domain: getDomainKey(top.location.hostname),
       path: top.location.pathname,
-      title: top.document?.title ?? ""
+      title: stripNonAscii(top.document?.title ?? "")
     };
   } catch {
     return requestPageContextFromParent();
@@ -176,7 +187,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
       resolve({
         domain: data.domain,
         path: data.path,
-        title: typeof data.title === "string" ? data.title : ""
+        title: stripNonAscii(typeof data.title === "string" ? data.title : "")
       });
     }
   };
@@ -313,7 +324,7 @@ export function installContextBridge() {
     ? createTopFrameResponder(() => ({
         domain: getDomainKey(location.hostname),
         path: location.pathname,
-        title: document.title
+        title: stripNonAscii(document.title)
       }))
     : createFrameRelay();
   window.addEventListener("message", handler);

@@ -62,6 +62,26 @@ test("getPageContext reads the top window directly", async () => {
   assert.deepEqual(context, { domain: "youtube", path: "/watch", title: "Page" });
 });
 
+test("getPageContext strips non-ASCII from mixed-script titles", async () => {
+  const { window } = dom("");
+  window.document.title = "Arabic Text فلم here | more عربي stuff";
+  globalThis.window = window;
+  globalThis.location = window.location;
+  globalThis.document = window.document;
+  const context = await getPageContext();
+  assert.equal(context.title, "Arabic Text here | more stuff");
+});
+
+test("getPageContext keeps original when title is entirely non-ASCII", async () => {
+  const { window } = dom("");
+  window.document.title = "فلم عربي كامل";
+  globalThis.window = window;
+  globalThis.location = window.location;
+  globalThis.document = window.document;
+  const context = await getPageContext();
+  assert.equal(context.title, "فلم عربي كامل");
+});
+
 test("top-frame responder validates shape and answers with fresh context", () => {
   const { window: win } = dom();
   globalThis.window = win;
