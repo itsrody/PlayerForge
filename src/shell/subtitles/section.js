@@ -280,7 +280,7 @@ export class SubtitlesSection {
         this.#resetBtn.classList.remove("pf-flash");
         void this.#resetBtn.offsetWidth;
         this.#resetBtn.classList.add("pf-flash");
-        this.#toast({ icon: "reload", text: "Style reset", duration: TUNING.toast.flashMs, group: "subtitles" });
+        this.#toast({ icon: "reload", text: "Subtitle Style Reset", duration: TUNING.toast.flashMs, group: "subtitles" });
       }
     });
 
