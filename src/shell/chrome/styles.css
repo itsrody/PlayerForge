@@ -712,6 +712,7 @@ pf-toast .pf-toast-actions button svg {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  grid-column: 1 / -1;
 }
 .pf-options-cell .pf-panel-label {
   min-width: 0;
