@@ -109,9 +109,13 @@ export function domainScore(a, b) {
 
 /* - 2. Entry hashing - */
 
-/** Deterministic djb2-based id for a (path, duration) pair. */
-export function hashEntry(path, duration) {
-  const seed = `${path}::${Math.round(duration)}`;
+/**
+ * Deterministic djb2-based id for a (domain, path, duration) triple. The
+ * domain participates so identical paths on different sites can never
+ * collide into one shared entry - /watch/1 on two hosts are different videos.
+ */
+export function hashEntry(domainKey, path, duration) {
+  const seed = `${domainKey}::${path}::${Math.round(duration)}`;
   let hash = 5381;
   for (let i = 0; i < seed.length; i++) {
     hash = (hash << 5) + hash + seed.charCodeAt(i);

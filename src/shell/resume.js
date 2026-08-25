@@ -143,9 +143,12 @@ export class ResumeStore {
 
   createEntry(domainKey, path, title, duration) {
     this.#ensureLoaded();
-    const id = hashEntry(path, duration);
+    const id = hashEntry(domainKey, path, duration);
+    // The id is only a cache key - trust it solely when the domain agrees.
+    // Legacy ids (hashed without domain) and true collisions fall through to
+    // findMatch, which is domain-aware, so old stores keep matching.
     const existingById = this.#state.entries.find((entry) => entry.id === id);
-    if (existingById) {
+    if (existingById && domainsMatch(existingById.domain, domainKey)) {
       return existingById;
     }
     const existingByMatch = this.findMatch(domainKey, path, duration);

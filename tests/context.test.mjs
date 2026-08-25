@@ -27,9 +27,11 @@ test("getDomainKey reduces hostnames to registrable keys", () => {
 });
 
 test("hashEntry is deterministic and duration-rounding aware", () => {
-  assert.equal(hashEntry("/watch", 611.2), hashEntry("/watch", 610.9));
-  assert.notEqual(hashEntry("/watch", 611), hashEntry("/watch", 612));
-  assert.notEqual(hashEntry("/watch", 100), hashEntry("/other", 100));
+  assert.equal(hashEntry("yt", "/watch", 611.2), hashEntry("yt", "/watch", 610.9));
+  assert.notEqual(hashEntry("yt", "/watch", 611), hashEntry("yt", "/watch", 612));
+  assert.notEqual(hashEntry("yt", "/watch", 100), hashEntry("yt", "/other", 100));
+  // The domain participates: same path+duration on two sites differ.
+  assert.notEqual(hashEntry("yt", "/watch", 600), hashEntry("vimeo", "/watch", 600));
 });
 
 test("domainsMatch accepts equality and label boundaries only", () => {

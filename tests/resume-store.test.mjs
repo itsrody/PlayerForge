@@ -116,6 +116,28 @@ test("createEntry dedupes by hash id and by fuzzy match", () => {
   assert.equal(fuzzy, first);
 });
 
+test("identical paths on different domains never share an entry", () => {
+  installGm({ version: 1, entries: [] });
+  const store = new ResumeStore();
+  const a = store.createEntry("youtube", "/watch", "A", 600);
+  const b = store.createEntry("vimeo", "/watch", "B", 600);
+  assert.notEqual(a.id, b.id);
+  assert.equal(store.findMatch("youtube", "/watch", 600)?.id, a.id);
+  assert.equal(store.findMatch("vimeo", "/watch", 600)?.id, b.id);
+});
+
+test("legacy foreign-domain entry with a colliding legacy id is ignored", () => {
+  // Pre-fix store: /watch@600 hashed WITHOUT domain - both sites got "x1".
+  installGm({
+    version: 1,
+    entries: [{ ...entry(), id: "x1", domain: "vimeo", resume: 300 }]
+  });
+  const store = new ResumeStore();
+  const mine = store.createEntry("youtube", "/watch", "T", 600);
+  assert.notEqual(mine.id, "x1");
+  assert.equal(mine.resume, 0);
+});
+
 test("updateResume persists position and timestamp", () => {
   const e = entry();
   const gm = installGm({ version: 1, entries: [e] });

@@ -36,6 +36,11 @@ export class ToastManager {
     this.#toast.appendChild(this.#text);
     this.#toast.appendChild(this.#actions);
     hudLayer.appendChild(this.#toast);
+    // Inline, not stylesheet: ".pf-hud-layer > *" re-enables pointer events
+    // on every HUD child and would let the hidden pill swallow clicks across
+    // the player's top strip. show() flips this to "auto" only when action
+    // buttons ride along; the hide path resets to "" which lands back here.
+    this.#toast.style.pointerEvents = "none";
   }
 
   show({ icon, text, duration = 0, color, group, actions } = {}) {
