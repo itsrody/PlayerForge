@@ -30,11 +30,10 @@ function debugMenu() {
   return registered.find((h) => h.title.includes("Debug Logs"));
 }
 
-test("both commands register immediately, without any kernel", () => {
+test("debug command registers immediately, without any kernel", () => {
   registered.length = 0;
   const uninstall = installMenuCommands({ getKernel: () => null });
-  assert.equal(registered.length, 2);
-  assert.ok(registered.some((h) => h.title.includes("Panel")));
+  assert.equal(registered.length, 1);
   assert.match(debugMenu().title, /Off$/);
   uninstall();
   assert.equal(registered.length, 0);
@@ -57,21 +56,6 @@ test("debug toggle persists, flips logger, recaptions - all pre-boot", () => {
 
   // Exactly one debug command exists at any time (re-caption, no dupes).
   assert.equal(registered.filter((h) => h.title.includes("Debug Logs")).length, 1);
-  uninstall();
-});
-
-test("panel click reaches kernel.togglePanel once a kernel exists", () => {
-  registered.length = 0;
-  let toggles = 0;
-  let live = null;
-  const uninstall = installMenuCommands({ getKernel: () => live });
-
-  // Pre-boot: warn path, no throw.
-  registered.find((h) => h.title.includes("Panel")).fn();
-
-  live = { togglePanel: () => { toggles++; } };
-  registered.find((h) => h.title.includes("Panel")).fn();
-  assert.equal(toggles, 1);
   uninstall();
 });
 
