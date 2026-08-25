@@ -6,6 +6,7 @@ import { ResumeTracker } from "./resume.js";
 import { SubtitlesSection } from "./subtitles/section.js";
 import { SettingsPanel } from "./chrome/panel.js";
 import { addSettingsSection, getSetting } from "./chrome/config.js";
+import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls } from "./media.js";
 import { SHELL_MARKER, ensureStyles, injectShell, watchShellHost } from "./chrome/inject.js";
@@ -69,8 +70,9 @@ export class Shell {
     this.#inputs = new InputForge(this.video, this.container, this.shellHost);
     attachInputActions(this, this.shellHost, this.#inputs.signal);
     this.#resume = new ResumeTracker(this);
-    this.#subtitles = new SubtitlesSection(this);
     addSettingsSection(this.#panel);
+    addHistorySection(this.#panel, this);
+    this.#subtitles = new SubtitlesSection(this);
     this.#setupFocusManagement();
     this.#suppressContextMenu();
     this.#forwardMediaEvents();
@@ -201,6 +203,10 @@ export class Shell {
 
   get panel() {
     return this.#panel;
+  }
+
+  get resume() {
+    return this.#resume;
   }
 
   #suppressContextMenu() {

@@ -349,7 +349,8 @@ pf-toast .pf-toast-actions button svg {
 
 /* Icon-only action buttons - square, centered glyph, tooltip via title. */
 .pf-panel-actions .pf-btn.pf-btn-icon,
-.pf-panel-section-head .pf-btn.pf-btn-icon {
+.pf-panel-section-head .pf-btn.pf-btn-icon,
+.pf-history-actions .pf-btn.pf-btn-icon {
   flex: none;
   width: 28px;
   height: 28px;
@@ -360,7 +361,8 @@ pf-toast .pf-toast-actions button svg {
   justify-content: center;
 }
 .pf-panel-actions .pf-btn.pf-btn-icon svg,
-.pf-panel-section-head .pf-btn.pf-btn-icon svg {
+.pf-panel-section-head .pf-btn.pf-btn-icon svg,
+.pf-history-actions .pf-btn.pf-btn-icon svg {
   width: 16px;
   height: 16px;
 }
@@ -741,6 +743,56 @@ pf-toast .pf-toast-actions button svg {
   .pf-options-row { justify-content: center; }
 }
 
+/* History tab - card rows */
+.pf-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 168px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+}
+.pf-history-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.pf-history-card:hover { background: rgba(255, 255, 255, 0.09); }
+.pf-history-done {
+  opacity: 0.45;
+}
+.pf-history-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.pf-history-title {
+  font-size: 12px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-history-meta {
+  font-size: 11px;
+  opacity: 0.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pf-history-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
 /* Shell-true density - the panel adapts to its own width (~ the video
    container), not the viewport: wide panels keep the two-column grid,
    very narrow players collapse it to one column. */
@@ -772,12 +824,14 @@ pf-toast .pf-toast-actions button svg {
   .pf-settings-toggle { padding: 9px 10px; font-size: 13px; }
   .pf-panel select.pf-select { padding: 9px 8px; font-size: 14px; }
   .pf-panel-actions .pf-btn.pf-btn-icon,
-  .pf-panel-section-head .pf-btn.pf-btn-icon {
+  .pf-panel-section-head .pf-btn.pf-btn-icon,
+  .pf-history-actions .pf-btn.pf-btn-icon {
     width: 36px;
     height: 36px;
   }
   .pf-panel-actions .pf-btn.pf-btn-icon svg,
-  .pf-panel-section-head .pf-btn.pf-btn-icon svg {
+  .pf-panel-section-head .pf-btn.pf-btn-icon svg,
+  .pf-history-actions .pf-btn.pf-btn-icon svg {
     width: 18px;
     height: 18px;
   }

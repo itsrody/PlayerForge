@@ -181,6 +181,20 @@ export class ResumeStore {
     }
   }
 
+  getEntries() {
+    this.#ensureLoaded();
+    return [...this.#state.entries].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  }
+
+  removeEntry(id) {
+    this.#ensureLoaded();
+    const before = this.#state.entries.length;
+    this.#state.entries = this.#state.entries.filter((entry) => entry.id !== id);
+    if (this.#state.entries.length < before) {
+      this.#persist();
+    }
+  }
+
   cleanStale(days = TUNING.resume.staleDays) {
     this.#ensureLoaded();
     const raw = loadJsonObject(KEYS.resume, null);
@@ -388,6 +402,18 @@ export class ResumeTracker {
 
   importResume(text) {
     return this.#store.importData(text);
+  }
+
+  getEntries() {
+    return this.#store.getEntries();
+  }
+
+  removeEntry(id) {
+    this.#store.removeEntry(id);
+  }
+
+  resetEntry(id) {
+    this.#store.updateResume(id, 0);
   }
 
   destroy() {
