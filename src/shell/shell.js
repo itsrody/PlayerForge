@@ -4,6 +4,7 @@ import { InputForge } from "./inputs/forge.js";
 import { attachInputActions } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
 import { SubtitlesSection } from "./subtitles/section.js";
+import { VideoFilter } from "./filter.js";
 import { SettingsPanel } from "./chrome/panel.js";
 import { addSettingsSection, getSetting } from "./chrome/config.js";
 import { addHistorySection } from "./chrome/history.js";
@@ -39,6 +40,7 @@ export class Shell {
   #inputs = null;
   #resume = null;
   #subtitles = null;
+  #filter = null;
   #panel;
   #toasts = null;
   #wakeLock = null;
@@ -73,6 +75,7 @@ export class Shell {
     this.#subtitles = new SubtitlesSection(this);
     addHistorySection(this.#panel, this);
     addSettingsSection(this.#panel);
+    this.#filter = new VideoFilter(this.video, this.#panel);
     this.#setupFocusManagement();
     this.#suppressContextMenu();
     this.#forwardMediaEvents();
@@ -379,6 +382,8 @@ export class Shell {
       this.#resume = null;
       this.#subtitles?.destroy();
       this.#subtitles = null;
+      this.#filter?.destroy();
+      this.#filter = null;
       this.#wakeLock?.release();
       this.#wakeLock = null;
       // Exit PiP if the shell owned it — the video outlives the shell in

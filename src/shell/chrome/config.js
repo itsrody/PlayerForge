@@ -59,7 +59,7 @@ const SETTINGS_SCHEMA = [
     key: "gestures.pinch",
     type: "bool",
     label: "Pinch to Fill",
-    default: true,
+    default: false,
     group: "Features"
   },
   {
@@ -68,7 +68,14 @@ const SETTINGS_SCHEMA = [
     label: "Mobile PiP",
     default: false,
     group: "Features"
-  }
+  },
+  { key: "filter.brightness", type: "number", label: "Brightness", min: 0, max: 200, step: 5, fmt: (v) => `${v}%`, default: 100, group: "Color" },
+  { key: "filter.contrast", type: "number", label: "Contrast", min: 0, max: 200, step: 5, fmt: (v) => `${v}%`, default: 100, group: "Color" },
+  { key: "filter.saturate", type: "number", label: "Saturate", min: 0, max: 200, step: 5, fmt: (v) => `${v}%`, default: 100, group: "Color" },
+  { key: "filter.hue", type: "number", label: "Hue", min: 0, max: 360, step: 5, fmt: (v) => `${v}°`, default: 0, group: "Color" },
+  { key: "filter.grayscale", type: "number", label: "Grayscale", min: 0, max: 100, step: 5, fmt: (v) => `${v}%`, default: 0, group: "Color" },
+  { key: "filter.sepia", type: "number", label: "Sepia", min: 0, max: 100, step: 5, fmt: (v) => `${v}%`, default: 0, group: "Color" },
+  { key: "filter.invert", type: "number", label: "Invert", min: 0, max: 100, step: 5, fmt: (v) => `${v}%`, default: 0, group: "Color" }
 ];
 
 /** Defaults ride their schema definitions - one source, no drift. */
