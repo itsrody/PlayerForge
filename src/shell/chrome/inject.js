@@ -1,5 +1,6 @@
 import SHELL_CSS from "./styles.css";
 import { logger } from "../../shared/logger.js";
+import { onDomMutations } from "../../kernel/dom-watch.js";
 
 /** DOM contract: marks videos/containers/shell hosts this script manages. */
 export const SHELL_MARKER = "data-pf-shell";
@@ -61,7 +62,7 @@ export function injectShell(container) {
 export function watchShellHost(container, host, { signal } = {}) {
   let scheduled = false;
   /** Armed only while the container is out of the document. */
-  let reconnectObserver = null;
+  let detachWatch = null;
 
   const reconcile = () => {
     scheduled = false;
@@ -83,17 +84,18 @@ export function watchShellHost(container, host, { signal } = {}) {
     }
   };
 
+  // While detached, ANY document mutation may be the re-insertion - ride
+  // the shared dom-watch dispatcher instead of owning a full-document
+  // observer. The `scheduled` latch makes redundant wake-ups free.
   const armReconnectWatch = () => {
-    if (reconnectObserver) {
-      return;
+    if (!detachWatch) {
+      detachWatch = onDomMutations(schedule);
     }
-    reconnectObserver = new MutationObserver(schedule);
-    reconnectObserver.observe(container.ownerDocument.documentElement, { childList: true, subtree: true });
   };
 
   const dropReconnectWatch = () => {
-    reconnectObserver?.disconnect();
-    reconnectObserver = null;
+    detachWatch?.();
+    detachWatch = null;
   };
 
   const observer = new MutationObserver((records) => {

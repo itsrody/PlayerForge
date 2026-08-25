@@ -23,6 +23,8 @@
  * the fewest composed ancestor hops from the video wins; ties break by
  * registry order, then anchor order.
  */
+import { onDomMutations } from "./dom-watch.js";
+
 const REGISTRY = [
   { name: "JW Player", anchors: [".jwplayer", ".jw-wrapper"] },
   { name: "Video.js", anchors: ["[data-vjs-player]", ".video-js"] },
@@ -159,10 +161,10 @@ export function meetsMinSize(video, minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_
 }
 
 /**
- * The one document-level discovery tap: capture-phase media events plus a
- * document-wide insertion observer, multiplexed to every subscriber. Both
- * riders - the boot probe and the kernel's permanent watch - get identical
- * signal from this single wiring instead of installing their own.
+ * The one document-level discovery tap: capture-phase media events plus the
+ * shared dom-watch dispatcher, multiplexed to every subscriber. Both riders -
+ * the boot probe and the kernel's permanent watch - get identical signal
+ * from this single wiring instead of installing their own.
  * Returns the unsubscribe function.
  */
 export function watchDocumentVideos(onVideo) {
@@ -172,16 +174,15 @@ export function watchDocumentVideos(onVideo) {
       onVideo(video);
     }
   };
-  const observer = new MutationObserver((mutations) => {
+  const offMutations = onDomMutations((mutations) => {
     for (const video of videosFromMutations(mutations)) {
       onVideo(video);
     }
   });
   document.addEventListener("loadeddata", onMediaEvent, true);
   document.addEventListener("play", onMediaEvent, true);
-  observer.observe(document.documentElement, { childList: true, subtree: true });
   return () => {
-    observer.disconnect();
+    offMutations();
     document.removeEventListener("loadeddata", onMediaEvent, true);
     document.removeEventListener("play", onMediaEvent, true);
   };
