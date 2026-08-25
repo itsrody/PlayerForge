@@ -7,6 +7,9 @@ import { logger } from "../../shared/logger.js";
 
 const SETTINGS_PREFIX = "settings";
 
+/** Configs-doc field behind the GM-menu debug-logs toggle (kernel + entry). */
+export const DEBUG_LOGS_KEY = "debug.logs";
+
 const SETTINGS_SCHEMA = [
   {
     key: "controller.holdSpeed",

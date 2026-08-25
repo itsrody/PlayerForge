@@ -19,12 +19,19 @@ export function gmDeleteValue(key) {
   GM_deleteValue(key);
 }
 
+/** Returns a handle for gmUnregisterMenu, or null when unavailable. */
 export function gmRegisterMenu(title, onClick, options) {
+  if (typeof GM_registerMenuCommand !== "function") {
+    return null;
+  }
   return GM_registerMenuCommand(title, onClick, options);
 }
 
 /** Takes the handle returned by gmRegisterMenu. */
 export function gmUnregisterMenu(handle) {
+  if (handle == null || typeof GM_unregisterMenuCommand !== "function") {
+    return;
+  }
   GM_unregisterMenuCommand(handle);
 }
 

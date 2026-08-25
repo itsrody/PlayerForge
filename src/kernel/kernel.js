@@ -1,5 +1,5 @@
 import { logger } from "../shared/logger.js";
-import { gmRegisterMenu, gmUnregisterMenu, getConfigValue, setConfigValue } from "../shared/storage.js";
+import { getConfigValue } from "../shared/storage.js";
 import { delay } from "../shared/time.js";
 import { GESTURE_EVENTS } from "../shell/inputs/actions.js";
 import { SHELL_MARKER } from "../shell/chrome/inject.js";
@@ -8,10 +8,7 @@ import { ShellRegistry } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, findContainer, meetsMinSize, watchDocumentVideos } from "./sdk.js";
 import { Shell } from "../shell/shell.js";
-import { TUNING } from "../shell/chrome/config.js";
-
-/** Configs-doc field persisting the debug-logs menu toggle. */
-const DEBUG_LOGS_KEY = "debug.logs";
+import { TUNING, DEBUG_LOGS_KEY } from "../shell/chrome/config.js";
 
 /**
  * crypto.randomUUID() exists only in secure contexts; userscripts match
@@ -39,8 +36,6 @@ export class Kernel {
   /** Unsubscribe for the shared discovery tap; dropped at pagehide. */
   #stopDiscoveryTap = null;
   #scope = new AbortController();
-  /** GM menu handle for the debug-logs command - unregistered on re-caption. */
-  #debugMenuId = null;
 
   #onPageShow = (event) => {
     if (!event.persisted) {
@@ -96,7 +91,6 @@ export class Kernel {
       this.#setDebugRuntime(true);
       logger.log("kernel", `Debug logs on (${[storedDebug && "setting", hashDebug && "hash"].filter(Boolean).join(" + ")})`);
     }
-    this.#registerMenuCommand();
     const { signal } = this.#scope;
     document.addEventListener("pageshow", this.#onPageShow, { signal });
     window.addEventListener("pagehide", this.#onPageHide, { signal });
@@ -202,44 +196,21 @@ export class Kernel {
     });
   }
 
-  #registerMenuCommand() {
-    gmRegisterMenu("⚙️ PlayerForge Panel", () => {
-      const shells = this.#registry.getAll();
-      const host = shells.length ? shells.at(-1).shellHost : null;
-      if (!host) {
-        // warn stays unconditional - the user clicked something and must
-        // know why nothing visibly happened.
-        logger.warn("kernel", "Panel toggle requested but no player is active on this page");
-        return;
-      }
-      host.dispatchEvent(new CustomEvent(GESTURE_EVENTS.panel, {
-        detail: { method: "menu" }
-      }));
-    }, { autoClose: true });
-    this.#refreshDebugMenu();
-  }
-
   /**
-   * Debug logs toggle with a caption that always reflects current state:
-   * re-registered after every flip so the GM menu label reads On or Off.
-   * State persists in the configs doc, so it survives reloads and live-
-   * reloads into other tabs through the shared storage.
+   * Toggle the most recently created shell's panel from outside the input
+   * stack (GM menu). Warns unconditionally when nothing can host a panel -
+   * the user clicked something and must know why nothing happened.
    */
-  #refreshDebugMenu() {
-    if (this.#debugMenuId != null) {
-      gmUnregisterMenu(this.#debugMenuId);
+  togglePanel() {
+    const shells = this.#registry.getAll();
+    const host = shells.length ? shells.at(-1).shellHost : null;
+    if (!host) {
+      logger.warn("kernel", "Panel toggle requested but no player is active on this page");
+      return;
     }
-    const enabled = getConfigValue(DEBUG_LOGS_KEY, false);
-    this.#debugMenuId = gmRegisterMenu(
-      `\u{1F41B} PlayerForge Debug Logs: ${enabled ? "On" : "Off"}`,
-      () => {
-        const next = !getConfigValue(DEBUG_LOGS_KEY, false);
-        setConfigValue(DEBUG_LOGS_KEY, next);
-        this.#setDebugRuntime(next);
-        this.#refreshDebugMenu();
-      },
-      { autoClose: true }
-    );
+    host.dispatchEvent(new CustomEvent(GESTURE_EVENTS.panel, {
+      detail: { method: "menu" }
+    }));
   }
 
   #setDebugRuntime(on) {

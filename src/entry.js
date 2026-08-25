@@ -1,4 +1,5 @@
 import { Kernel } from "./kernel/kernel.js";
+import { installMenuCommands } from "./kernel/menus.js";
 import { installContextBridge, installVideoProbe } from "./shared/context.js";
 import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/sdk.js";
 import { logger } from "./shared/logger.js";
@@ -17,6 +18,14 @@ function bootstrap() {
     return;
   }
 
+  // GM menu commands exist from script eval - not from first video
+  // discovery. Registration used to live inside kernel.init(), so pages
+  // without a supported player showed NO menu entries at all.
+  let activeKernel = null;
+  if (window.top === window) {
+    installMenuCommands({ getKernel: () => activeKernel });
+  }
+
   const boot = () => {
     if (window.PlayerForge) {
       logger.warn("entry", "Kernel already initialized");
@@ -24,6 +33,7 @@ function bootstrap() {
     }
     const kernel = new Kernel();
     kernel.init();
+    activeKernel = kernel;
 
     // One subscription serves both duties: readiness log always, first-run
     // welcome toast only until the flag flips. Installs from before the key
