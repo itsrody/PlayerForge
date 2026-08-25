@@ -67,7 +67,7 @@ test("getPageContext reads the top window directly", async () => {
   assert.deepEqual(context, { domain: "youtube", path: "/watch", title: "Page" });
 });
 
-test("getPageContext strips non-ASCII from mixed-script titles", async () => {
+test("getPageContext strips non-Latin scripts but keeps typographic punctuation", async () => {
   const { window } = dom("");
   window.document.title = "Arabic Text فلم here | more عربي stuff";
   globalThis.window = window;
@@ -75,6 +75,16 @@ test("getPageContext strips non-ASCII from mixed-script titles", async () => {
   globalThis.document = window.document;
   const context = await getPageContext();
   assert.equal(context.title, "Arabic Text here | more stuff");
+});
+
+test("getPageContext keeps em-dash in mixed-script titles", async () => {
+  const { window } = dom("");
+  window.document.title = " التلاعب بالخيوط Pull Strings — الحلقة 1 ";
+  globalThis.window = window;
+  globalThis.location = window.location;
+  globalThis.document = window.document;
+  const context = await getPageContext();
+  assert.equal(context.title, "Pull Strings — 1");
 });
 
 test("getPageContext keeps original when title is entirely non-ASCII", async () => {

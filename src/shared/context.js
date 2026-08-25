@@ -139,13 +139,14 @@ export function hashEntry(domainKey, path, duration) {
 /* - 3. Page context - */
 
 /**
- * Strip non-ASCII characters from a page title, keeping only Latin text.
+ * Strip non-Latin script characters from a page title, keeping Latin text
+ * and common typographic punctuation (dashes, ellipsis, etc.).
  * Returns the original when the result would be empty (entirely non-Latin).
  * Trailing punctuation left behind by removed segments is cleaned up.
  */
 function stripNonAscii(raw) {
   if (!raw) return "";
-  const ascii = raw.replace(/[^\x00-\x7F]+/g, " ").replace(/\s{2,}/g, " ").replace(/^[\s\-–—|·:,/]+/, "").replace(/[\s\-–—|·:,/]+$/, "").trim();
+  const ascii = raw.replace(/[^\p{Script=Latin}\p{Script=Common}]+/gu, " ").replace(/\s{2,}/g, " ").replace(/^[\s\-–—|·:,/]+/, "").replace(/[\s\-–—|·:,/]+$/, "").trim();
   return ascii || raw;
 }
 
