@@ -84,7 +84,7 @@ test("bool settings render toggles with labels and aria", () => {
   assert.ok(panel.calls.checkboxes.every((box) => typeof box.onChange === "function"));
   const hotkeys = panel.calls.checkboxes[0];
   assert.equal(hotkeys.checked, true);
-  assert.equal(hotkeys.ariaLabel, "Keyboard hotkeys");
+  assert.equal(hotkeys.ariaLabel, "Hotkeys");
 });
 
 test("toggle onChange persists through setSetting", () => {

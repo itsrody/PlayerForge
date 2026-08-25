@@ -23,42 +23,42 @@ const SETTINGS_SCHEMA = [
   {
     key: "gestures.hotkeys",
     type: "bool",
-    label: "Keyboard hotkeys",
+    label: "Hotkeys",
     default: true,
     group: "Features"
   },
   {
     key: "gestures.hold",
     type: "bool",
-    label: "Hold to speed up",
+    label: "Speed Up Hold",
     default: true,
     group: "Features"
   },
   {
     key: "gestures.scrub",
     type: "bool",
-    label: "Horizontal scrub",
+    label: "Scrub Seeking",
     default: true,
     group: "Features"
   },
   {
     key: "gestures.swipe",
     type: "bool",
-    label: "Swipe gestures",
+    label: "Swiping",
     default: true,
     group: "Features"
   },
   {
     key: "gestures.dbltap",
     type: "bool",
-    label: "Double-tap skip",
+    label: "Double-tap Skip",
     default: true,
     group: "Features"
   },
   {
     key: "gestures.pinch",
     type: "bool",
-    label: "Pinch to fill",
+    label: "Pinch to Fill",
     default: true,
     group: "Features"
   },
@@ -268,4 +268,3 @@ export function addSettingsSection(panel) {
   }
   logger.log("settings", "Settings section ready");
 }
-
