@@ -9,7 +9,7 @@ globalThis.GM_addValueChangeListener = () => {};
 const { VideoFilter } = await import("../src/shell/filter.js");
 
 function makeFakeVideo() {
-  return { style: { filter: "" } };
+  return { style: { filter: "" }, closest: () => null };
 }
 
 function makeFakeShell(video) {
@@ -39,7 +39,13 @@ function makeFakePanel() {
     addLabel: (parent, text) => node("label", { text }, parent),
     addSelect: (parent, opts) => {
       calls.selects.push(opts);
-      return { value: opts.value, style: {} };
+      let val = opts.value;
+      return {
+        get value() { return val; },
+        set value(v) { val = v; },
+        setValue: (v) => { val = v; },
+        style: {}
+      };
     },
     addButton: (parent, opts) => {
       calls.buttons.push(opts);
@@ -51,7 +57,9 @@ function makeFakePanel() {
       return {
         getValue: () => val,
         setValue: (v) => { val = v; },
-        setDisabled: () => {}
+        setDisabled: () => {},
+        get value() { return val; },
+        set value(v) { val = v; }
       };
     }
   };
@@ -65,23 +73,35 @@ function cleanWrites() {
 }
 
 test("applies default filter as 'none'", () => {
+  cleanWrites();
   const video = makeFakeVideo();
   const panel = makeFakePanel();
   new VideoFilter(makeFakeShell(video), panel);
   assert.equal(video.style.filter, "none");
 });
 
-test("creates Color section with 7 steppers", () => {
+test("creates Color section with 9 steppers and 1 select", () => {
+  cleanWrites();
   const panel = makeFakePanel();
   new VideoFilter(makeFakeShell(makeFakeVideo()), panel);
   assert.equal(panel.calls.sections.length, 1);
   assert.equal(panel.calls.sections[0].title, "Color");
-  assert.equal(panel.calls.steppers.length, 7);
+  assert.equal(panel.calls.steppers.length, 9);
   assert.equal(panel.calls.selects.length, 1);
   assert.equal(panel.calls.buttons.length, 1);
 });
 
+test("stepper labels include Temperature and Tint", () => {
+  cleanWrites();
+  const panel = makeFakePanel();
+  new VideoFilter(makeFakeShell(makeFakeVideo()), panel);
+  const labels = panel.calls.steppers.map((s) => s.label);
+  assert.ok(labels.includes("Temp"), "should have Temp stepper");
+  assert.ok(labels.includes("Tint"), "should have Tint stepper");
+});
+
 test("preset dropdown has all presets plus Custom", () => {
+  cleanWrites();
   const panel = makeFakePanel();
   new VideoFilter(makeFakeShell(makeFakeVideo()), panel);
   const opts = panel.calls.selects[0].options;
@@ -92,33 +112,65 @@ test("preset dropdown has all presets plus Custom", () => {
   assert.ok(opts.includes("Sepia"));
   assert.ok(opts.includes("Night"));
   assert.ok(opts.includes("Inverted"));
+  assert.ok(opts.includes("Teal & Orange"));
+  assert.ok(opts.includes("Film Kodak"));
+  assert.ok(opts.includes("Bleach Bypass"));
+  assert.ok(opts.includes("Cross Process"));
+  assert.ok(opts.includes("Vintage"));
+  assert.ok(opts.includes("Cold Tone"));
+  assert.ok(opts.includes("Warm Tone"));
   assert.ok(opts.includes("Custom"));
 });
 
 test("non-default values produce correct filter string", () => {
+  cleanWrites();
   const video = makeFakeVideo();
   const panel = makeFakePanel();
   const filter = new VideoFilter(makeFakeShell(video), panel);
-  filter.destroy();
 
-  const video2 = makeFakeVideo();
-  const panel2 = makeFakePanel();
-  const filter2 = new VideoFilter(makeFakeShell(video2), panel2);
-
-  const brightnessStepper = panel2.calls.steppers.find((s) => s.label === "Brightness");
+  const brightnessStepper = panel.calls.steppers.find((s) => s.label === "Brightness");
   brightnessStepper.onChange(150);
-  assert.ok(video2.style.filter.includes("brightness(150%)"));
+  assert.ok(video.style.filter.includes("brightness(150%)"));
 
-  const hueStepper = panel2.calls.steppers.find((s) => s.label === "Hue");
+  const hueStepper = panel.calls.steppers.find((s) => s.label === "Hue");
   hueStepper.onChange(45);
-  assert.ok(video2.style.filter.includes("hue-rotate(45deg)"));
+  assert.ok(video.style.filter.includes("hue-rotate(45deg)"));
 
-  const grayscaleStepper = panel2.calls.steppers.find((s) => s.label === "Grayscale");
+  const grayscaleStepper = panel.calls.steppers.find((s) => s.label === "Grayscale");
   grayscaleStepper.onChange(80);
-  assert.ok(video2.style.filter.includes("grayscale(80%)"));
+  assert.ok(video.style.filter.includes("grayscale(80%)"));
+
+  filter.destroy();
+});
+
+test("temperature affects hue-rotate and saturate", () => {
+  cleanWrites();
+  const video = makeFakeVideo();
+  const panel = makeFakePanel();
+  const filter = new VideoFilter(makeFakeShell(video), panel);
+
+  const tempStepper = panel.calls.steppers.find((s) => s.label === "Temp");
+  tempStepper.onChange(50);
+  const f = video.style.filter;
+  assert.ok(f.includes("hue-rotate(15deg)"), `expected hue-rotate(15deg) in "${f}"`);
+  assert.ok(f.includes("saturate("), `expected saturate in "${f}"`);
+  filter.destroy();
+});
+
+test("tint affects hue-rotate", () => {
+  cleanWrites();
+  const video = makeFakeVideo();
+  const panel = makeFakePanel();
+  const filter = new VideoFilter(makeFakeShell(video), panel);
+
+  const tintStepper = panel.calls.steppers.find((s) => s.label === "Tint");
+  tintStepper.onChange(50);
+  assert.ok(video.style.filter.includes("hue-rotate(10deg)"));
+  filter.destroy();
 });
 
 test("reset restores defaults and clears filter", () => {
+  cleanWrites();
   const video = makeFakeVideo();
   const panel = makeFakePanel();
   const filter = new VideoFilter(makeFakeShell(video), panel);
@@ -132,6 +184,7 @@ test("reset restores defaults and clears filter", () => {
 });
 
 test("destroy clears video filter", () => {
+  cleanWrites();
   const video = makeFakeVideo();
   const panel = makeFakePanel();
   const filter = new VideoFilter(makeFakeShell(video), panel);
@@ -145,6 +198,7 @@ test("destroy clears video filter", () => {
 });
 
 test("persist writes to pf:configs", () => {
+  cleanWrites();
   const video = makeFakeVideo();
   const panel = makeFakePanel();
   const filter = new VideoFilter(makeFakeShell(video), panel);
@@ -152,13 +206,39 @@ test("persist writes to pf:configs", () => {
   const contrastStepper = panel.calls.steppers.find((s) => s.label === "Contrast");
   contrastStepper.onChange(130);
   assert.equal(writes["pf:configs"]?.filter?.contrast, 130);
+  filter.destroy();
 });
 
 test("second destroy is a no-op", () => {
+  cleanWrites();
   const video = makeFakeVideo();
   const panel = makeFakePanel();
   const filter = new VideoFilter(makeFakeShell(video), panel);
   filter.destroy();
   filter.destroy();
   assert.equal(video.style.filter, "");
+});
+
+test("temperature persists to config", () => {
+  cleanWrites();
+  const video = makeFakeVideo();
+  const panel = makeFakePanel();
+  const filter = new VideoFilter(makeFakeShell(video), panel);
+
+  const tempStepper = panel.calls.steppers.find((s) => s.label === "Temp");
+  tempStepper.onChange(30);
+  assert.equal(writes["pf:configs"]?.filter?.temperature, 30);
+  filter.destroy();
+});
+
+test("tint persists to config", () => {
+  cleanWrites();
+  const video = makeFakeVideo();
+  const panel = makeFakePanel();
+  const filter = new VideoFilter(makeFakeShell(video), panel);
+
+  const tintStepper = panel.calls.steppers.find((s) => s.label === "Tint");
+  tintStepper.onChange(-20);
+  assert.equal(writes["pf:configs"]?.filter?.tint, -20);
+  filter.destroy();
 });
