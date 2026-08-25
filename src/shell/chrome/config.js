@@ -25,49 +25,49 @@ const SETTINGS_SCHEMA = [
     type: "bool",
     label: "Keyboard hotkeys",
     default: true,
-    group: "Gestures"
+    group: "Features"
   },
   {
     key: "gestures.hold",
     type: "bool",
     label: "Hold to speed up",
     default: true,
-    group: "Gestures"
+    group: "Features"
   },
   {
     key: "gestures.scrub",
     type: "bool",
     label: "Horizontal scrub",
     default: true,
-    group: "Gestures"
+    group: "Features"
   },
   {
     key: "gestures.swipe",
     type: "bool",
     label: "Swipe gestures",
     default: true,
-    group: "Gestures"
+    group: "Features"
   },
   {
     key: "gestures.dbltap",
     type: "bool",
     label: "Double-tap skip",
     default: true,
-    group: "Gestures"
+    group: "Features"
   },
   {
     key: "gestures.pinch",
     type: "bool",
     label: "Pinch to fill",
     default: true,
-    group: "Gestures"
+    group: "Features"
   },
   {
     key: "video.pip",
     type: "bool",
     label: "Mobile PiP",
     default: false,
-    group: "Video"
+    group: "Features"
   }
 ];
 
@@ -218,7 +218,11 @@ export function addSettingsSection(panel) {
       groupGrid = panel.el("div", { class: "pf-panel-grid" }, groupSection);
     }
     if (definition.type === "bool") {
-      const cell = panel.el("div", { class: "pf-panel-cell" }, groupGrid);
+      const cellAttrs = { class: "pf-panel-cell" };
+      if (definition.key === "video.pip") {
+        cellAttrs["data-pf-pip"] = "";
+      }
+      const cell = panel.el("div", cellAttrs, groupGrid);
       const toggleLabel = panel.el("label", { class: "pf-settings-toggle" }, cell);
       const checkbox = panel.addCheckbox(toggleLabel, {
         checked: getSetting(definition.key),

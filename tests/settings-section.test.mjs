@@ -74,7 +74,7 @@ test("renders one labeled section per unique schema group", () => {
   const panel = makeFakePanel();
   addSettingsSection(panel);
   assert.deepEqual(panel.calls.sections.map((s) => s.title), ["Settings"]);
-  assert.deepEqual(panel.calls.labels, ["Playback", "Skip Step", "Gestures", "Video"]);
+  assert.deepEqual(panel.calls.labels, ["Playback", "Skip Step", "Features"]);
 });
 
 test("bool settings render toggles with labels and aria", () => {

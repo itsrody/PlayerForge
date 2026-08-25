@@ -735,10 +735,14 @@ pf-toast .pf-toast-actions button svg {
   .pf-panel-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* - Mobile-only controls - */
+[data-pf-pip] { display: none; }
+
 /* - Mobile & touch - */
 /* Touch devices (phones/tablets): enlarge hit targets toward
    thumb-sized (~40px) tap areas. */
 @media (pointer: coarse) {
+  [data-pf-pip] { display: block; }
   .pf-panel-body { padding: 10px 12px 12px; }
   .pf-panel-close { padding: 6px 10px; font-size: 18px; }
   .pf-panel-tab { padding: 9px 10px; font-size: 12px; }
