@@ -58,7 +58,7 @@ export function addHistorySection(panel, shell) {
       void resetBtn.offsetWidth;
       resetBtn.classList.add("pf-flash");
       shell.toast({
-        icon: "resume",
+        icon: "reload",
         text: "Resume Entry Reset",
         duration: TUNING.toast.infoMs,
         group: "history"
