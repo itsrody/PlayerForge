@@ -59,7 +59,7 @@ export function addHistorySection(panel, shell) {
       resetBtn.classList.add("pf-flash");
       shell.toast({
         icon: "resume",
-        text: `Reset "${entry.title || entry.domain}"`,
+        text: "Resume Entry Reset",
         duration: TUNING.toast.infoMs,
         group: "history"
       });
@@ -80,7 +80,7 @@ export function addHistorySection(panel, shell) {
       }
       shell.toast({
         icon: "trash",
-        text: `Removed "${entry.title || entry.domain}"`,
+        text: "Resume Entry Removed",
         duration: TUNING.toast.infoMs,
         group: "history"
       });
