@@ -70,7 +70,7 @@ export class Shell {
     attachInputActions(this, this.shellHost, this.#inputs.signal);
     this.#resume = new ResumeTracker(this);
     this.#subtitles = new SubtitlesSection(this);
-    addSettingsSection(this.#panel, this);
+    addSettingsSection(this.#panel);
     this.#setupFocusManagement();
     this.#suppressContextMenu();
     this.#forwardMediaEvents();
