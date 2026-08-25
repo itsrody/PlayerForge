@@ -5,21 +5,22 @@ import { onDomMutations } from "../../kernel/dom-watch.js";
 /** DOM contract: marks videos/containers/shell hosts this script manages. */
 export const SHELL_MARKER = "data-pf-shell";
 
-let stylesInjected = false;
+let sharedSheet = null;
 
 export function ensureStyles() {
-  if (!stylesInjected) {
-    stylesInjected = true;
-    const sheet = new CSSStyleSheet();
-    sheet.replaceSync(SHELL_CSS);
-    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+  if (!sharedSheet) {
+    sharedSheet = new CSSStyleSheet();
+    sharedSheet.replaceSync(SHELL_CSS);
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sharedSheet];
   }
 }
 
 /**
  * Build the shell DOM inside the player container as a parasite:
- * host > hud layer > cue layer, appended LAST so no SDK child ever changes
- * index. Rendering dominance comes from the host's z-index, not tree order.
+ * host > #shadow-root > hud layer > cue layer, appended LAST so no SDK
+ * child ever changes index. Rendering dominance comes from the host's
+ * z-index, not tree order. The open shadow root encapsulates all PF UI
+ * for style isolation from host-page CSS.
  */
 export function injectShell(container) {
   if (!container) {
@@ -31,9 +32,14 @@ export function injectShell(container) {
   host.className = "pf-shell";
   host.setAttribute("tabindex", "-1");
 
+  const shadow = host.attachShadow({ mode: "open" });
+  if (sharedSheet) {
+    shadow.adoptedStyleSheets = [sharedSheet];
+  }
+
   const hudLayer = doc.createElement("div");
   hudLayer.className = "pf-hud-layer";
-  host.appendChild(hudLayer);
+  shadow.appendChild(hudLayer);
 
   const cueLayer = doc.createElement("div");
   cueLayer.className = "pf-cue-layer";
@@ -45,6 +51,7 @@ export function injectShell(container) {
 
   return {
     host,
+    shadow,
     hudLayer,
     cueLayer
   };

@@ -1,6 +1,7 @@
 import { allowsIntent, armedKeys, GESTURE_EVENTS, easeTransformTo } from "./actions.js";
 import { TUNING } from "../chrome/config.js";
 import { SHELL_MARKER } from "../chrome/inject.js";
+import { deepestActiveElement, isInsideShell } from "../../shared/shadow.js";
 
 /**
  * Pointer handlers never preventDefault - native pan/scroll over the zone is
@@ -320,14 +321,14 @@ export class InputForge {
      * not body) while this engine owns playback.
      */
   #shouldHandleKeys(allowControlFocus = false) {
-    const activeElement = document.activeElement;
+    const activeElement = deepestActiveElement(this.#eventTarget);
     if (!this.#zone) {
       return false;
     }
     if (!this.#keysAllowedForTarget(activeElement, allowControlFocus)) {
       return false;
     }
-    if (this.#zone.contains(activeElement)) {
+    if (isInsideShell(this.#eventTarget, activeElement)) {
       return true;
     }
     if (!this.#isActive(this)) {
@@ -368,7 +369,7 @@ export class InputForge {
       return !!allowControlFocus;
     }
     if (tag === "BUTTON") {
-      return !!allowControlFocus || !el.closest(`[${SHELL_MARKER}]`);
+      return !!allowControlFocus || !isInsideShell(this.#eventTarget, el);
     }
     return true;
   }
@@ -422,7 +423,7 @@ export class InputForge {
   #handlePointerDown(event) {
     if (
       event.button !== 0 ||
-      this.#eventTarget && this.#eventTarget.contains(event.target) ||
+      this.#eventTarget && event.composedPath().includes(this.#eventTarget) ||
       this.#pointers.size === 0 && !this.#hitTestVideo(event)
     ) {
       return;

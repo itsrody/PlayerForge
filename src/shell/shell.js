@@ -1,4 +1,5 @@
 import { logger } from "../shared/logger.js";
+import { deepestActiveElement, isInsideShell } from "../shared/shadow.js";
 import { InputForge } from "./inputs/forge.js";
 import { attachInputActions } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
@@ -223,9 +224,9 @@ export class Shell {
     }
     host.focus();
     const onPointerDown = (event) => {
-      if (!this.#destroyed && !host.contains(event.target)) {
+      if (!this.#destroyed && !isInsideShell(host, event.composedPath()[0])) {
         queueMicrotask(() => {
-          if (!this.#destroyed && document.activeElement !== host) {
+          if (!this.#destroyed && deepestActiveElement(host) !== host) {
             host.focus();
           }
         });

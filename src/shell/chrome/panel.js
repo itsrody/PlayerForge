@@ -1,6 +1,7 @@
 import { logger } from "../../shared/logger.js";
 import { createIconElement } from "./icons.js";
 import { GESTURE_EVENTS } from "../inputs/actions.js";
+import { deepestActiveElement } from "../../shared/shadow.js";
 
 const HOLD_DELAY_MS = 400;
 const HOLD_REPEAT_MS = 75;
@@ -255,7 +256,7 @@ export class SettingsPanel {
     }
     this.#root.classList.add("pf-open");
     const activeTab = this.#root.querySelector(".pf-panel-tab-active") || this.#closeButton;
-    if (activeTab && document.activeElement !== activeTab) {
+    if (activeTab && deepestActiveElement(this.#shellHost) !== activeTab) {
       activeTab.focus();
     }
   }
@@ -263,7 +264,7 @@ export class SettingsPanel {
   close() {
     if (this.#root && !this.#destroyed && this.isOpen) {
       this.#root.classList.remove("pf-open");
-      if (this.#shellHost && this.#root.contains(document.activeElement)) {
+      if (this.#shellHost && this.#root.contains(deepestActiveElement(this.#shellHost))) {
         this.#shellHost.focus();
       }
     }
@@ -547,7 +548,7 @@ export class SettingsPanel {
       }
     }, { signal });
     document.addEventListener("pointerdown", (event) => {
-      if (!this.isOpen || this.#shellHost.contains(event.target)) {
+      if (!this.isOpen || event.composedPath().includes(this.#shellHost)) {
         return;
       }
       this.close();
@@ -561,7 +562,7 @@ export class SettingsPanel {
       if (!tabs.length) {
         return;
       }
-      const currentIndex = tabs.indexOf(document.activeElement);
+      const currentIndex = tabs.indexOf(deepestActiveElement(this.#shellHost));
       if (currentIndex === -1) {
         return;
       }
