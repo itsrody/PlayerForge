@@ -1,15 +1,11 @@
 import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/storage.js";
 import { TUNING } from "../chrome/config.js";
 import { srtToVtt, ensureVttHeader, parseSubtitles } from "./forgevtt.js";
-import { findActiveCues } from "./active-cues.js";
+import { ForgeTrack } from "./forge-track.js";
 import { debounce } from "../../shared/time.js";
 import { logger } from "../../shared/logger.js";
 
 const SUBTITLE_FILE_ACCEPT = ".srt,.vtt";
-
-// Shared lookup buffer for the render path - findActiveCues fills it
-// in place, render consumes it before the next lookup.
-const activeCueBuffer = [];
 
 const SETTING_KEYS = {
   size: "subtitles.style.size",
@@ -29,7 +25,8 @@ const SETTING_KEYS = {
  */
 export class SubtitlesSection {
   #shell;
-  #track = null;
+  #forgeTrack = null;
+  #trackMeta = null;
   #cueLayer = null;
   #positionOverride = null;
   #syncOffset = 0;
@@ -40,8 +37,6 @@ export class SubtitlesSection {
   #urlButton = null;
   #scope = new AbortController();
   #destroyed = false;
-  /** Boundary-aware render timer: next setTimeout id (0 = none pending). */
-  #nextWake = 0;
 
   constructor(shell) {
     this.#shell = shell;
@@ -58,93 +53,23 @@ export class SubtitlesSection {
       return;
     }
     this.#destroyed = true;
-    this.#cancelWake();
     this.#scope.abort();
+    this.#forgeTrack?.destroy();
+    this.#forgeTrack = null;
     this.#fileInput?.remove();
     this.#fileInput = null;
     this.#hintEl = null;
     this.#loadButton = null;
     this.#removeButton = null;
     this.#urlButton = null;
-    this.#track = null;
+    this.#trackMeta = null;
     this.#cueLayer = null;
   }
 
   #startListening() {
     const { signal } = this.#scope;
     const video = this.#shell.video;
-    video?.addEventListener("seeked", () => this.#onSeeked(), { signal, passive: true });
-    video?.addEventListener("ended", () => this.#shell?.cues?.clear(), { signal, passive: true });
-    video?.addEventListener("play", () => this.#scheduleNext(), { signal, passive: true });
-    video?.addEventListener("pause", () => this.#cancelWake(), { signal, passive: true });
-    video?.addEventListener("ratechange", () => {
-      this.#cancelWake();
-      this.#scheduleNext();
-    }, { signal, passive: true });
-  }
-
-  /**
-   * Schedule the next render at the nearest cue boundary after currentTime.
-   * The timer fires in video-time, but setTimeout is wall-clock, so we
-   * divide the delta by playbackRate. Between boundaries: zero work.
-   */
-  #scheduleNext() {
-    if (this.#destroyed || !this.#track?.cues?.length) {
-      return;
-    }
-    const video = this.#shell?.video;
-    if (!video || video.paused || video.ended) {
-      return;
-    }
-    const time = video.currentTime;
-    if (!(time >= 0)) {
-      return;
-    }
-    let next = Infinity;
-    for (const cue of this.#track.cues) {
-      if (cue.start > time && cue.start < next) {
-        next = cue.start;
-      }
-      if (cue.end > time && cue.end < next) {
-        next = cue.end;
-      }
-    }
-    if (!isFinite(next)) {
-      return;
-    }
-    const videoDelta = next - time;
-    const wallDelta = Math.max(0, videoDelta / (video.playbackRate || 1)) * 1000;
-    this.#nextWake = setTimeout(() => {
-      this.#nextWake = 0;
-      this.#render();
-      this.#scheduleNext();
-    }, wallDelta);
-  }
-
-  #cancelWake() {
-    if (this.#nextWake) {
-      clearTimeout(this.#nextWake);
-      this.#nextWake = 0;
-    }
-  }
-
-  #onSeeked() {
-    this.#render();
-    this.#cancelWake();
-    this.#scheduleNext();
-  }
-
-  #render() {
-    const cues = this.#shell?.cues;
-    if (!cues) {
-      return;
-    }
-    const currentTime = this.#shell.video?.currentTime;
-    if (!this.#track || !(currentTime >= 0)) {
-      cues.clear();
-      return;
-    }
-    cues.render(findActiveCues(this.#track.cues, currentTime, activeCueBuffer));
+    video?.addEventListener("ended", () => this.#forgeTrack?.clear(), { signal, passive: true });
   }
 
   #buildPanelUi(shell) {
@@ -280,12 +205,10 @@ export class SubtitlesSection {
     applyCueShadow(shadowStepper.getValue());
 
     const applySyncOffset = debounce((offset) => {
-      if (this.#track) {
-        this.#track.cues = parseSubtitles(this.#track.text, offset);
+      if (this.#trackMeta) {
+        const cues = parseSubtitles(this.#trackMeta.text, offset);
+        this.#forgeTrack?.load(cues);
       }
-      this.#cancelWake();
-      this.#scheduleNext();
-      this.#render();
       setConfigValue(SETTING_KEYS.syncOffset, offset);
     }, TUNING.subtitles.syncDebounceMs);
     const syncStepper = panel.addStepper(styleGrid, {
@@ -327,7 +250,6 @@ export class SubtitlesSection {
             align: alignSelect.value
           }
         : null;
-      this.#render();
     };
     const setManualDisabled = (disabled) => {
       verticalStepper.setDisabled(disabled);
@@ -391,7 +313,7 @@ export class SubtitlesSection {
   }
 
   #setCueVar(prop, value) {
-    this.#cueLayer?.style.setProperty(prop, value);
+    this.#forgeTrack?.setVar(prop, value);
   }
 
   #toast(payload) {
@@ -504,11 +426,12 @@ export class SubtitlesSection {
       });
       return;
     }
-    this.#track = { name, text: normalizedText, cues };
-    this.#cancelWake();
-    this.#scheduleNext();
+    if (!this.#forgeTrack) {
+      this.#forgeTrack = new ForgeTrack(this.#shell.video, this.#cueLayer);
+    }
+    this.#trackMeta = { name, text: normalizedText };
+    this.#forgeTrack.load(cues);
     this.#refreshHint();
-    this.#render();
     this.#toast({
       icon: "captions",
       text: name,
@@ -520,9 +443,9 @@ export class SubtitlesSection {
 
   #refreshHint() {
     if (this.#hintEl) {
-      this.#hintEl.textContent = this.#track ? this.#track.name : "Upload your file";
+      this.#hintEl.textContent = this.#trackMeta ? this.#trackMeta.name : "Upload your file";
     }
-    const hasTrack = !!this.#track;
+    const hasTrack = !!this.#trackMeta;
     if (this.#loadButton) {
       this.#loadButton.disabled = hasTrack;
     }
@@ -535,9 +458,9 @@ export class SubtitlesSection {
   }
 
   #removeTrack() {
-    this.#track = null;
-    this.#cancelWake();
-    this.#shell?.cues?.clear();
+    this.#forgeTrack?.destroy();
+    this.#forgeTrack = null;
+    this.#trackMeta = null;
     this.#refreshHint();
   }
 }

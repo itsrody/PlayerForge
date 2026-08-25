@@ -3,7 +3,6 @@ import { InputForge } from "./inputs/forge.js";
 import { attachInputActions } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
 import { SubtitlesSection } from "./subtitles/section.js";
-import { CueRenderer } from "./subtitles/cue-renderer.js";
 import { SettingsPanel } from "./chrome/panel.js";
 import { addSettingsSection } from "./chrome/config.js";
 import { addDataSection } from "./chrome/data-section.js";
@@ -39,7 +38,6 @@ export class Shell {
   #inputs = null;
   #resume = null;
   #subtitles = null;
-  #cues = null;
   #panel;
   #toasts = null;
   #destroyed = false;
@@ -67,7 +65,6 @@ export class Shell {
     }
     this.#panel = new SettingsPanel(this, bus);
     this.#toasts = new ToastManager(this.#shellDom.hudLayer);
-    this.#cues = new CueRenderer(this.#shellDom.cueLayer);
     this.#inputs = new InputForge(this.video, this.container, this.shellHost);
     attachInputActions(this, this.shellHost, this.#inputs.signal);
     this.#resume = new ResumeTracker(this);
@@ -198,10 +195,6 @@ export class Shell {
 
   get shellHost() {
     return this.#shellDom?.host;
-  }
-
-  get cues() {
-    return this.#cues;
   }
 
   get panel() {
@@ -339,8 +332,6 @@ export class Shell {
       this.#inputs = null;
       this.#panel?.destroy();
       this.#panel = null;
-      this.#cues?.destroy();
-      this.#cues = null;
       this.#toasts?.destroy();
       this.#toasts = null;
       this.#shellDom?.host.remove();
