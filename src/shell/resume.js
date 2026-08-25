@@ -293,7 +293,6 @@ export class ResumeTracker {
 
     this.#store.cleanStale();
     const match = this.#store.findMatch(context.domain, context.path, duration);
-    let startAt = shell.currentTime || 0;
     if (match) {
       this.#entry = match;
       logger.log("resume", `Matched ${match.id} - resume at ${match.resume}s`);
@@ -304,37 +303,36 @@ export class ResumeTracker {
 
     const savedPosition = this.#entry.resume || 0;
     if (savedPosition > TUNING.resume.minPosition) {
-      startAt = savedPosition;
-      // The seeked flag guards re-entry; the scope removes these listeners
-      // on destroy, so no manual stop bookkeeping is needed.
       let seeked = false;
-      const trySeek = () => {
-        if (!seeked) {
-          seeked = true;
-          if (!(video.currentTime > savedPosition - 5)) {
-            shell.seek(savedPosition);
-            shell.toast({
-              icon: "resume",
-              text: `Resumed at ${formatTime(savedPosition)}`,
-              duration: TUNING.toast.actionMs,
-              group: "resume",
-              actions: [{
-                icon: "reload",
-                title: "Start over",
-                onClick: () => {
-                  this.#lastSavedPosition = 0;
-                  shell.seek(0);
-                }
-              }]
-            });
-          }
+      const applyResume = () => {
+        if (seeked) {
+          return;
         }
+        seeked = true;
+        shell.seek(savedPosition);
+        shell.toast({
+          icon: "resume",
+          text: `Resumed at ${formatTime(savedPosition)}`,
+          duration: TUNING.toast.actionMs,
+          group: "resume",
+          actions: [{
+            icon: "reload",
+            title: "Start over",
+            onClick: () => {
+              this.#lastSavedPosition = 0;
+              shell.seek(0);
+            }
+          }]
+        });
       };
-      const onPlay = () => trySeek();
-      video.addEventListener("play", onPlay, { signal: this.#scope.signal, passive: true });
+      if (!video.paused && video.readyState >= 2) {
+        applyResume();
+      } else {
+        video.addEventListener("canplay", applyResume, { signal: this.#scope.signal, once: true });
+      }
     }
 
-    this.#lastSavedPosition = startAt;
+    this.#lastSavedPosition = savedPosition || shell.currentTime || 0;
     this.#startProgressWatch(shell);
   }
 

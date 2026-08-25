@@ -92,7 +92,7 @@ test("destroy during the metadata wait cancels it without touching the store", a
   assert.equal(writes["pf:resume"], undefined);
 });
 
-test("a saved position past the threshold seeks and toasts on play", async () => {
+test("a saved position past the threshold seeks and toasts on canplay", async () => {
   writes["pf:resume"] = {
     version: 1,
     entries: [{
@@ -110,9 +110,35 @@ test("a saved position past the threshold seeks and toasts on play", async () =>
   const tracker = new ResumeTracker(shell);
   await flush();
   await flush();
-  video.dispatchEvent(new dom.window.Event("play"));
+  video.dispatchEvent(new dom.window.Event("canplay"));
   await flush();
   assert.deepEqual(shell.seeks, [42]);
+  assert.equal(shell.toasts.length, 1);
+  tracker.destroy();
+});
+
+test("autoplaying video seeks immediately without waiting for canplay", async () => {
+  writes["pf:resume"] = {
+    version: 1,
+    entries: [{
+      id: "xyz789",
+      domain: "youtube",
+      path: "/watch",
+      title: "",
+      duration: 600,
+      resume: 100,
+      createdAt: 0,
+      updatedAt: Date.now()
+    }]
+  };
+  const { dom, video, shell } = makeEnv(600);
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
+  const tracker = new ResumeTracker(shell);
+  await flush();
+  await flush();
+  await flush();
+  assert.deepEqual(shell.seeks, [100]);
   assert.equal(shell.toasts.length, 1);
   tracker.destroy();
 });
