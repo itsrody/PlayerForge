@@ -538,39 +538,6 @@ pf-toast .pf-toast-actions button svg {
   justify-content: space-between;
 }
 
-/* Position row (Subtitles tab) - toggle + two labeled steppers + Align
-   select on one line. Stepper groups flex-grow; the select hugs its content;
-   the row wraps on very narrow panels instead of overflowing. */
-.pf-panel-pos-row {
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 6px;
-}
-.pf-panel-pos-slider {
-  flex: 1 1 110px;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.pf-panel-pos-slider .pf-panel-label {
-  flex: none;
-  margin-bottom: 0;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: rgba(255, 255, 255, 0.65);
-}
-.pf-panel-pos-slider .pf-panel-value {
-  flex: none;
-  min-width: 30px;
-  font-size: 11px;
-}
-.pf-panel-pos-row select.pf-select {
-  flex: 0 1 auto;
-  width: auto;
-}
-
 /* Numeric stepper - text input with stacked up/down chevron buttons.
    Replaces the old range sliders; fills its cell, or the flexible middle
    slot in inline rows. */
@@ -623,10 +590,9 @@ pf-toast .pf-toast-actions button svg {
 .pf-stepper-btn:first-child { border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
 .pf-stepper-disabled { opacity: 0.45; pointer-events: none; }
 
-/* Steppers in one-line cells (Subtitles style grid / position row) take
-   the same flexible middle slot the range inputs used to occupy. */
-.pf-panel-grid-compact .pf-panel-cell .pf-stepper,
-.pf-panel-pos-slider .pf-stepper {
+/* Steppers in one-line cells (Subtitles style grid) take the same flexible
+   middle slot the range inputs used to occupy. */
+.pf-panel-grid-compact .pf-panel-cell .pf-stepper {
   flex: 1;
   width: auto;
 }

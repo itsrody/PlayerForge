@@ -399,7 +399,6 @@ export class SettingsPanel {
     head
   } = {}) {
     const cell = this.el("div", { class: className || "pf-panel-cell" }, parent);
-    const valueEl = this.el("span", { class: "pf-panel-value" }, cell);
     const stepper = createStepper({
       min,
       max,
@@ -407,20 +406,15 @@ export class SettingsPanel {
       value,
       label,
       deferTextInput,
-      onChange: (v) => {
-        valueEl.textContent = format(v);
-        onChange?.(v);
-      }
+      onChange
     });
-    valueEl.textContent = format(stepper.getValue());
     if (head) {
       const cellHead = this.el("div", { class: "pf-panel-cell-head" }, cell);
       this.addLabel(cellHead, label);
-      cellHead.appendChild(valueEl);
       cell.appendChild(stepper.root);
     } else {
-      cell.insertBefore(this.addLabel(cell, label), valueEl);
-      cell.insertBefore(stepper.root, valueEl);
+      this.addLabel(cell, label);
+      cell.appendChild(stepper.root);
     }
     return stepper;
   }
@@ -436,10 +430,7 @@ export class SettingsPanel {
     const cell = this.el("div", { class: "pf-panel-cell" }, parent);
     this.addLabel(cell, label);
     const input = this.el("input", { type: "color", value }, cell);
-    const valueEl = this.el("span", { class: "pf-panel-value" }, cell);
-    valueEl.textContent = input.value;
     const apply = (v) => {
-      valueEl.textContent = v;
       onChange?.(v);
     };
     input.addEventListener("input", () => apply(input.value));

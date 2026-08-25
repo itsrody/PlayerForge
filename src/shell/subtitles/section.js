@@ -11,10 +11,8 @@ const SETTING_KEYS = {
   size: "subtitles.style.size",
   color: "subtitles.style.color",
   shadow: "subtitles.style.shadow",
-  posEnabled: "subtitles.position.enabled",
   line: "subtitles.position.line",
   horizontal: "subtitles.position.horizontal",
-  align: "subtitles.position.align",
   syncOffset: "subtitles.sync.offset"
 };
 
@@ -35,6 +33,8 @@ export class SubtitlesSection {
   #loadButton = null;
   #removeButton = null;
   #urlButton = null;
+  #styleControls = null;
+  #positionControls = null;
   #scope = new AbortController();
   #destroyed = false;
 
@@ -62,6 +62,8 @@ export class SubtitlesSection {
     this.#loadButton = null;
     this.#removeButton = null;
     this.#urlButton = null;
+    this.#styleControls = null;
+    this.#positionControls = null;
     this.#trackMeta = null;
     this.#cueLayer = null;
   }
@@ -137,14 +139,6 @@ export class SubtitlesSection {
       onClick: () => this.#fileInput?.click()
     });
 
-    this.#removeButton = panel.addButton(actions, {
-      icon: "trash",
-      title: "Remove subtitles",
-      ariaLabel: "Remove subtitles",
-      ghost: true,
-      onClick: () => this.#removeTrack()
-    });
-
     this.#urlButton = panel.addButton(actions, {
       icon: "link",
       title: "Load subtitles from URL",
@@ -153,13 +147,20 @@ export class SubtitlesSection {
       onClick: () => this.#promptForUrl()
     });
 
-    this.#hintEl = panel.addHint(loadRow, "Upload your file");
-    this.#refreshHint();
+    this.#removeButton = panel.addButton(actions, {
+      icon: "trash",
+      title: "Remove subtitles",
+      ariaLabel: "Remove subtitles",
+      ghost: true,
+      onClick: () => this.#removeTrack()
+    });
 
-    // Caption style grid: size / color / shadow / sync.
+    this.#hintEl = panel.addHint(loadRow, "Upload your file");
+
+    // Caption style + position grid: size / color / shadow / sync / V / H.
     const styleSection = panel.el("div", { class: "pf-panel-section" }, sectionRoot);
     const styleHead = panel.el("div", { class: "pf-panel-section-head" }, styleSection);
-    panel.addLabel(styleHead, "Caption style");
+    panel.addLabel(styleHead, "Style & Position");
     const styleGrid = panel.el("div", { class: "pf-panel-grid pf-panel-grid-compact" }, styleSection);
 
     const applyCueSize = (v) => this.#setCueVar("--pf-cue-font-size", `${v}em`);
@@ -224,51 +225,16 @@ export class SubtitlesSection {
       }
     });
 
-    panel.addButton(styleHead, {
-      icon: "reload",
-      title: "Reset style",
-      ariaLabel: "Reset style",
-      ghost: true,
-      onClick: () => {
-        sizeStepper.setValue(1.2);
-        colorField.setValue("#ffffff");
-        shadowStepper.setValue(40);
-        syncStepper.setValue(0);
-      }
-    });
-
-    // Position controls.
-    const positionSection = panel.el("div", { class: "pf-panel-section" }, sectionRoot);
-    panel.addLabel(positionSection, "Position");
-    const positionRow = panel.el("div", { class: "pf-panel-field pf-panel-pos-row" }, positionSection);
-
     const applyPosition = () => {
-      this.#positionOverride = enabledCheckbox.checked
-        ? {
-            line: verticalStepper.getValue(),
-            position: horizontalStepper.getValue(),
-            align: alignSelect.value
-          }
-        : null;
-    };
-    const setManualDisabled = (disabled) => {
-      verticalStepper.setDisabled(disabled);
-      horizontalStepper.setDisabled(disabled);
-      alignSelect.disabled = disabled;
+      this.#positionOverride = {
+        line: verticalStepper.getValue(),
+        position: horizontalStepper.getValue(),
+        align: "center"
+      };
     };
 
-    const enabledCheckbox = panel.addCheckbox(positionRow, {
-      checked: getConfigValue(SETTING_KEYS.posEnabled, true),
-      onChange: (checked) => {
-        setManualDisabled(!checked);
-        setConfigValue(SETTING_KEYS.posEnabled, checked);
-        applyPosition();
-      }
-    });
-
-    const verticalStepper = panel.addStepper(positionRow, {
-      class: "pf-panel-pos-slider",
-      label: "Vertical",
+    const verticalStepper = panel.addStepper(styleGrid, {
+      label: "V",
       min: 0,
       max: 100,
       step: 5,
@@ -276,14 +242,11 @@ export class SubtitlesSection {
       format: (v) => `${v}%`,
       onChange: (v) => {
         setConfigValue(SETTING_KEYS.line, v);
-        if (enabledCheckbox.checked) {
-          applyPosition();
-        }
+        applyPosition();
       }
     });
-    const horizontalStepper = panel.addStepper(positionRow, {
-      class: "pf-panel-pos-slider",
-      label: "Horizontal",
+    const horizontalStepper = panel.addStepper(styleGrid, {
+      label: "H",
       min: 0,
       max: 100,
       step: 5,
@@ -291,25 +254,31 @@ export class SubtitlesSection {
       format: (v) => `${v}%`,
       onChange: (v) => {
         setConfigValue(SETTING_KEYS.horizontal, v);
-        if (enabledCheckbox.checked) {
-          applyPosition();
-        }
+        applyPosition();
       }
     });
 
-    const alignSelect = panel.addSelect(positionRow, {
-      options: [["start", "Start"], ["center", "Center"], ["end", "End"]],
-      value: getConfigValue(SETTING_KEYS.align, "center"),
-      onChange: (align) => {
-        setConfigValue(SETTING_KEYS.align, align);
-        if (enabledCheckbox.checked) {
-          applyPosition();
-        }
-      }
-    });
-
-    setManualDisabled(!enabledCheckbox.checked);
     applyPosition();
+
+    this.#styleControls = { size: sizeStepper, color: colorField, shadow: shadowStepper, sync: syncStepper };
+    this.#positionControls = { vertical: verticalStepper, horizontal: horizontalStepper };
+
+    panel.addButton(styleHead, {
+      icon: "reload",
+      title: "Reset all",
+      ariaLabel: "Reset all",
+      ghost: true,
+      onClick: () => {
+        sizeStepper.setValue(1.2);
+        colorField.setValue("#ffffff");
+        shadowStepper.setValue(40);
+        syncStepper.setValue(0);
+        verticalStepper.setValue(85);
+        horizontalStepper.setValue(50);
+      }
+    });
+
+    this.#refreshHint();
   }
 
   #setCueVar(prop, value) {
@@ -454,6 +423,18 @@ export class SubtitlesSection {
     }
     if (this.#removeButton) {
       this.#removeButton.disabled = !hasTrack;
+    }
+    if (this.#styleControls) {
+      const disabled = !hasTrack;
+      this.#styleControls.size.setDisabled(disabled);
+      this.#styleControls.color.input.disabled = disabled;
+      this.#styleControls.shadow.setDisabled(disabled);
+      this.#styleControls.sync.setDisabled(disabled);
+    }
+    if (this.#positionControls) {
+      const disabled = !hasTrack;
+      this.#positionControls.vertical.setDisabled(disabled);
+      this.#positionControls.horizontal.setDisabled(disabled);
     }
   }
 
