@@ -731,6 +731,16 @@ pf-toast .pf-toast-actions button svg {
   color: #fff;
 }
 
+/* Narrow screens: stack options label above buttons to prevent row overflow. */
+@media (max-width: 520px) {
+  .pf-options-cell {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+  }
+  .pf-options-row { justify-content: center; }
+}
+
 /* Shell-true density - the panel adapts to its own width (~ the video
    container), not the viewport: wide panels keep the two-column grid,
    very narrow players collapse it to one column. */
@@ -748,6 +758,8 @@ pf-toast .pf-toast-actions button svg {
    thumb-sized (~40px) tap areas. */
 @media (pointer: coarse) {
   [data-pf-pip] { display: block; }
+  .pf-options-btn { padding: 7px 14px; font-size: 14px; }
+  .pf-options-row { gap: 8px; }
   .pf-panel-body { padding: 10px 12px 12px; }
   .pf-panel-close { padding: 6px 10px; font-size: 18px; }
   .pf-panel-tab { padding: 9px 10px; font-size: 12px; }
