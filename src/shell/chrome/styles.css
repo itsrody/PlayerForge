@@ -408,27 +408,6 @@ pf-toast .pf-toast-actions button svg {
   margin: 6px 0;
 }
 
-/* Data tab - paste target for cross-device resume import. Monospace so
-   exported JSON stays readable while debugging handoffs. */
-.pf-data-textarea {
-  display: block;
-  width: 100%;
-  min-height: 64px;
-  margin-bottom: 6px;
-  padding: 6px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--pf-fg);
-  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  resize: vertical;
-}
-.pf-data-textarea::placeholder { color: rgba(255, 255, 255, 0.4); }
-.pf-data-textarea:focus-visible {
-  outline: none;
-  border-color: var(--pf-accent);
-}
-
 /* Subtitles tab - upload / remove buttons on the left, the status line
    beside them (single line, truncated). */
 .pf-panel-load-row {
