@@ -40,8 +40,15 @@ export function getDomainKey(hostname) {
   }
   const parts = hostname.toLowerCase().replace(/^www\./, "").split(".");
   const multiPartTlds = new Set(["co", "com", "org", "net", "gov", "edu", "ac", "mil"]);
+  const singleLabelTlds = new Set([
+    "biz", "info", "name", "mobi", "asia", "tel", "travel", "jobs", "museum", "coop", "aero",
+    "app", "blog", "dev", "fun", "game", "host", "live", "love", "new", "news", "one", "online",
+    "page", "park", "plus", "pro", "shop", "site", "store", "tech", "video", "work", "xyz",
+    "club", "life", "world", "today", "tools", "social", "beer", "email", "space", "cool",
+    "social", "games", "legal", "luxury", "fans", "buzz", "country", "kim", "pub", "rest"
+  ]);
   let idx = parts.length - 1;
-  if (parts[idx] && parts[idx].length <= 3) {
+  if (parts[idx] && (parts[idx].length <= 3 || singleLabelTlds.has(parts[idx]))) {
     idx--;
   }
   if (parts[idx] && multiPartTlds.has(parts[idx])) {

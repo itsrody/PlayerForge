@@ -26,6 +26,11 @@ test("getDomainKey reduces hostnames to registrable keys", () => {
   assert.equal(getDomainKey("[2001:db8::1]"), "2001-db8-1");
   assert.equal(getDomainKey("[::1]"), "1");
   assert.equal(getDomainKey(""), "");
+  assert.equal(getDomainKey("web82518x.faselhdx.life"), "faselhdx");
+  assert.equal(getDomainKey("foo.bar.site"), "bar");
+  assert.equal(getDomainKey("a.b.work"), "b");
+  assert.equal(getDomainKey("a.b.tech"), "b");
+  assert.equal(getDomainKey("a.b.club"), "b");
 });
 
 test("hashEntry is deterministic and duration-rounding aware", () => {
