@@ -57,31 +57,43 @@ function* composedAncestry(start) {
   }
 }
 
-function composedClosest(node, selector) {
-  for (const candidate of composedAncestry(node)) {
-    if (candidate.matches(selector)) {
-      return candidate;
-    }
-  }
-  return null;
-}
+/**
+ * Repeat-query memo: discovery calls findSdkForVideo + findContainer on the
+ * same element back to back, and SPA frameworks re-ask about surviving
+ * videos. WeakMap keys die with their videos - session-only, never persisted.
+ */
+const matchCache = new WeakMap();
 
 function matchSdk(video) {
+  const cached = matchCache.get(video);
+  if (cached) {
+    return cached;
+  }
+  // Single composed walk (uBO's one-pass-over-tokens shape): the old code
+  // re-walked ancestry once per anchor via composedClosest, then walked
+  // again per hit to count hops. Chain index IS the hop count, so one pass
+  // serves every anchor. Selection semantics unchanged: fewest hops wins,
+  // ties keep registry order then anchor order (strict < keeps the first).
+  const chain = [];
+  for (const node of composedAncestry(video)) {
+    chain.push(node);
+  }
   let best = null;
-  REGISTRY.forEach((record, order) => {
+  REGISTRY.forEach((record) => {
     record.anchors.forEach((anchor) => {
-      const el = composedClosest(video, anchor);
-      if (!el) return;
-      let hops = 0;
-      for (const node of composedAncestry(video)) {
-        if (node === el) break;
-        hops++;
-      }
-      if (!best || hops < best.hops) {
-        best = { record, el, hops };
+      for (let hop = 0; hop < chain.length; hop++) {
+        if (chain[hop].matches(anchor)) {
+          if (!best || hop < best.hops) {
+            best = { record, el: chain[hop], hops: hop };
+          }
+          break;
+        }
       }
     });
   });
+  if (best) {
+    matchCache.set(video, best);
+  }
   return best;
 }
 

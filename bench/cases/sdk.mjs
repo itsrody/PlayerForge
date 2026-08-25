@@ -27,13 +27,27 @@ function buildTree() {
 
 const { video, winner } = buildTree();
 
+/** Unmemoized twin of `video` - fresh identity per full-scan iteration. */
+const freshVideo = () => buildTree().video;
+
+// Warm the WeakMap memo once so the repeat-query case measures hits only.
+findSdkForVideo(video);
+
 export default [
   measure("findSdkForVideo full scan (Plyr tree)", () => {
     let sink;
     return () => {
-      sink = findSdkForVideo(video);
+      sink = findSdkForVideo(freshVideo());
       if (!sink || !sink.name.includes("Plyr")) throw new Error(`unexpected winner: ${JSON.stringify(sink)}`);
       void winner;
+    };
+  }),
+
+  measure("findSdkForVideo repeat query (memo hit)", () => {
+    let sink;
+    return () => {
+      sink = findSdkForVideo(video);
+      if (!sink || !sink.name.includes("Plyr")) throw new Error("memo lost");
     };
   }),
 
