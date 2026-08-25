@@ -5,7 +5,7 @@ import { attachInputActions } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
 import { SubtitlesSection } from "./subtitles/section.js";
 import { SettingsPanel } from "./chrome/panel.js";
-import { addSettingsSection } from "./chrome/config.js";
+import { addSettingsSection, getSetting } from "./chrome/config.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls } from "./media.js";
 import { SHELL_MARKER, ensureStyles, injectShell, watchShellHost } from "./chrome/inject.js";
@@ -81,6 +81,7 @@ export class Shell {
     });
     this.#watchFullscreen();
     this.#watchWakeLock();
+    this.#setupAutoPiP();
     this.#markManaged();
     logger.log("shell", `Shell "${id}" constructed (${sdkName})`);
   }
@@ -328,6 +329,27 @@ export class Shell {
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible" && !video.paused && !video.ended) {
         acquire();
+      }
+    }, { signal });
+  }
+
+  /** Auto-PiP on visibility change: when "Mobile PiP" is enabled and the user
+   *  leaves the app while a video is playing, request PiP automatically. */
+  #setupAutoPiP() {
+    const video = this.video;
+    if (!video) {
+      return;
+    }
+    const { signal } = this.#scope;
+    document.addEventListener("visibilitychange", () => {
+      if (
+        document.hidden &&
+        getSetting("video.pip") &&
+        !video.paused &&
+        !video.ended &&
+        !document.pictureInPictureElement
+      ) {
+        video.requestPictureInPicture().catch(() => {});
       }
     }, { signal });
   }

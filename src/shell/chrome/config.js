@@ -121,7 +121,7 @@ const SETTINGS_SCHEMA = [
   {
     key: "video.pip",
     type: "bool",
-    label: "Picture-in-Picture",
+    label: "Mobile PiP",
     default: false,
     group: "Video"
   }
@@ -278,20 +278,10 @@ export function addSettingsSection(panel, shell) {
         checked: getSetting(definition.key),
         onChange: (checked) => {
           setSetting(definition.key, checked);
-          // Live PiP toggle: request or exit PiP immediately.
-          if (definition.key === "video.pip" && shell) {
-            applyPipState(checked, shell);
-          }
         }
       });
       checkbox.setAttribute("aria-label", definition.label);
       panel.el("span", {}, toggleLabel).textContent = definition.label;
-
-      // Reverse-sync: native PiP events (e.g. user clicks native PiP button)
-      // flip the checkbox to match reality.
-      if (definition.key === "video.pip" && shell) {
-        watchPipState(checkbox, shell);
-      }
     } else {
       panel.addStepper(groupGrid, {
         label: definition.label,
@@ -309,49 +299,6 @@ export function addSettingsSection(panel, shell) {
     }
   }
   logger.log("settings", "Settings section ready");
-}
-
-/** Request or exit PiP to match a boolean state. */
-async function applyPipState(wantPip, shell) {
-  const video = shell.video;
-  if (!video) {
-    return;
-  }
-  try {
-    if (wantPip) {
-      if (!document.pictureInPictureElement) {
-        await video.requestPictureInPicture();
-      }
-    } else if (document.pictureInPictureElement) {
-      await document.exitPictureInPicture();
-    }
-  } catch (err) {
-    if (err.name !== "AbortError") {
-      logger.warn("settings", `PiP toggle failed: ${err.message}`);
-    }
-    // Revert setting to actual state.
-    setSetting("video.pip", !wantPip);
-  }
-}
-
-/** Sync checkbox when PiP changes outside our toggle (e.g. native PiP button). */
-function watchPipState(checkbox, shell) {
-  const video = shell.video;
-  if (!video) {
-    return;
-  }
-  video.addEventListener("enterpictureinpicture", () => {
-    if (!getSetting("video.pip")) {
-      setSetting("video.pip", true);
-      checkbox.checked = true;
-    }
-  });
-  video.addEventListener("leavepictureinpicture", () => {
-    if (getSetting("video.pip")) {
-      setSetting("video.pip", false);
-      checkbox.checked = false;
-    }
-  });
 }
 
 /** Add an "Audio output" button that opens the native device picker. */
