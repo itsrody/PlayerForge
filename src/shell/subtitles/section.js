@@ -1,10 +1,15 @@
 import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/storage.js";
 import { TUNING } from "../chrome/config.js";
 import { srtToVtt, ensureVttHeader, parseSubtitles } from "./forgevtt.js";
+import { findActiveCues } from "./active-cues.js";
 import { debounce } from "../../shared/time.js";
 import { logger } from "../../shared/logger.js";
 
 const SUBTITLE_FILE_ACCEPT = ".srt,.vtt";
+
+// Shared lookup buffer for the timeupdate path - findActiveCues fills it
+// in place, render consumes it before the next tick.
+const activeCueBuffer = [];
 
 const SETTING_KEYS = {
   size: "subtitles.style.size",
@@ -85,29 +90,7 @@ export class SubtitlesSection {
       cues.clear();
       return;
     }
-    cues.render(this.#findActiveCues(this.#track.cues, currentTime));
-  }
-
-  /** Binary search for all cues overlapping `time` (cues sorted by start). */
-  #findActiveCues(cues, time) {
-    let low = 0;
-    let high = cues.length;
-    while (low < high) {
-      const mid = low + high >> 1;
-      if (cues[mid].start <= time) {
-        low = mid + 1;
-      } else {
-        high = mid;
-      }
-    }
-    const active = [];
-    for (let i = low - 1; i >= 0; i--) {
-      if (cues[i].end > time) {
-        active.push(cues[i]);
-      }
-    }
-    active.reverse();
-    return active;
+    cues.render(findActiveCues(this.#track.cues, currentTime, activeCueBuffer));
   }
 
   #buildPanelUi(shell) {
