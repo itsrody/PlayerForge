@@ -705,6 +705,27 @@ pf-toast .pf-toast-actions button svg {
   background: rgba(255, 255, 255, 0.09);
 }
 
+.pf-options-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.pf-options-btn {
+  flex: 1;
+  padding: 6px 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.09);
+  color: inherit;
+  border-radius: 6px;
+}
+.pf-options-btn:hover { background: rgba(255, 255, 255, 0.18); }
+.pf-options-active {
+  background: var(--pf-accent) !important;
+  color: #fff;
+}
+
 /* Shell-true density - the panel adapts to its own width (~ the video
    container), not the viewport: wide panels keep the two-column grid,
    very narrow players collapse it to one column. */

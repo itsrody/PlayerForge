@@ -20,9 +20,24 @@ const { addSettingsSection, getSetting, setSetting } = await import("../src/shel
 function makeFakePanel() {
   const calls = { sections: [], labels: [], checkboxes: [], steppers: [] };
   const node = (tag, attrs = {}, parent = null) => {
+    const classSet = new Set(attrs.class ? attrs.class.split(" ") : []);
     const el = { tag, attrs, parent, children: [], textContent: "", ariaLabel: null };
     el.setAttribute = (name, value) => {
       if (name === "aria-label") el.ariaLabel = value;
+      if (name === "class") {
+        classSet.clear();
+        value.split(" ").forEach(c => classSet.add(c));
+      }
+    };
+    el.addEventListener = () => {};
+    el.classList = {
+      toggle: (cls, force) => {
+        if (force === undefined) force = !classSet.has(cls);
+        if (force) classSet.add(cls); else classSet.delete(cls);
+      },
+      has: (cls) => classSet.has(cls),
+      add: (cls) => classSet.add(cls),
+      remove: (cls) => classSet.delete(cls)
     };
     if (parent) parent.children.push(el);
     return el;
@@ -59,7 +74,7 @@ test("renders one labeled section per unique schema group", () => {
   const panel = makeFakePanel();
   addSettingsSection(panel);
   assert.deepEqual(panel.calls.sections.map((s) => s.title), ["Settings"]);
-  assert.deepEqual(panel.calls.labels, ["Playback", "Gestures", "Video"]);
+  assert.deepEqual(panel.calls.labels, ["Playback", "Skip Step", "Gestures", "Video"]);
 });
 
 test("bool settings render toggles with labels and aria", () => {

@@ -13,13 +13,11 @@ export const DEBUG_LOGS_KEY = "debug.logs";
 const SETTINGS_SCHEMA = [
   {
     key: "controller.stepSeek",
-    type: "number",
-    label: "Arrow skip step",
-    min: 1,
-    max: 30,
-    step: 1,
-    default: 5,
+    type: "options",
+    label: "Skip Step",
+    options: [5, 10, 15],
     fmt: (v) => `${v}s`,
+    default: 5,
     group: "Playback"
   },
   {
@@ -230,6 +228,24 @@ export function addSettingsSection(panel) {
       });
       checkbox.setAttribute("aria-label", definition.label);
       panel.el("span", {}, toggleLabel).textContent = definition.label;
+    } else if (definition.type === "options") {
+      const cell = panel.el("div", { class: "pf-panel-cell" }, groupGrid);
+      panel.addLabel(cell, definition.label);
+      const row = panel.el("div", { class: "pf-options-row" }, cell);
+      const current = getSetting(definition.key);
+      for (const opt of definition.options) {
+        const btn = panel.el("button", {
+          type: "button",
+          class: opt === current ? "pf-btn pf-options-btn pf-options-active" : "pf-btn pf-options-btn"
+        }, row);
+        btn.textContent = definition.fmt(opt);
+        btn.addEventListener("click", () => {
+          setSetting(definition.key, opt);
+          for (const b of row.children) {
+            b.classList.toggle("pf-options-active", b === btn);
+          }
+        });
+      }
     } else {
       panel.addStepper(groupGrid, {
         label: definition.label,
