@@ -138,6 +138,8 @@ export function hashEntry(domainKey, path, duration) {
 
 /* - 3. Page context - */
 
+const TITLE_TAGS = /(?:^|[- ])(?:uncensored|uncut|leaked|censored|raw|bd|hdrip|dvdrip|webrip|bluray|remux|cam|reduc(?:ing)?\s*mosaic|english\s*subtitle)/gi;
+
 /**
  * Strip non-Latin script characters and common video-title tags from a page
  * title, keeping only the show name and episode number.
@@ -147,10 +149,9 @@ export function hashEntry(domainKey, path, duration) {
 function stripNonAscii(raw) {
   if (!raw) return "";
   let s = raw;
-  // Remove bracketed tags: [Reducing Mosaic], [English Subtitle], [RAW], etc.
   s = s.replace(/\[[^\]]*\]/g, " ");
-  // Remove dash-prefixed tags (no space after dash): -Uncensored-Leaked, -WEBRip, etc.
-  s = s.replace(/(?:^|\s)-(?! )[\w]+(?:-[\w]+)*(?=\s|$)/g, " ");
+  s = s.replace(TITLE_TAGS, " ");
+  s = s.replace(/[\u2013\u2014]/g, " ");
   s = s.replace(/[^\p{Script=Latin}\p{Script=Common}]+/gu, " ");
   s = s.replace(/\s{2,}/g, " ").replace(/^[\s\-–—|·:,/]+/, "").replace(/[\s\-–—|·:,/]+$/, "").trim();
   return s || raw;

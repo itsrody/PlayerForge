@@ -99,12 +99,12 @@ test("getPageContext strips bracketed tags and dash-prefixed tags from titles", 
 
 test("getPageContext does not strip title words separated by dash-space", async () => {
   const { window } = dom("");
-  window.document.title = "My-Show - Episode 1 - Uncensored";
+  window.document.title = "My-Show - Episode 1 - Something";
   globalThis.window = window;
   globalThis.location = window.location;
   globalThis.document = window.document;
   const context = await getPageContext();
-  assert.equal(context.title, "My-Show - Episode 1 - Uncensored");
+  assert.equal(context.title, "My-Show - Episode 1 - Something");
 });
 
 test("getPageContext keeps original when title is entirely non-ASCII", async () => {
