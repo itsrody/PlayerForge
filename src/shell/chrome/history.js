@@ -54,6 +54,9 @@ export function addHistorySection(panel, shell) {
     resetBtn.appendChild(createIconElement("reload"));
     resetBtn.addEventListener("click", () => {
       shell.resume?.resetEntry(entry.id);
+      resetBtn.classList.remove("pf-flash");
+      void resetBtn.offsetWidth;
+      resetBtn.classList.add("pf-flash");
       shell.toast({
         icon: "resume",
         text: `Reset "${entry.title || entry.domain}"`,
