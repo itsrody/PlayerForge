@@ -70,9 +70,9 @@ export class Shell {
     this.#inputs = new InputForge(this.video, this.container, this.shellHost);
     attachInputActions(this, this.shellHost, this.#inputs.signal);
     this.#resume = new ResumeTracker(this);
-    addSettingsSection(this.#panel);
-    addHistorySection(this.#panel, this);
     this.#subtitles = new SubtitlesSection(this);
+    addHistorySection(this.#panel, this);
+    addSettingsSection(this.#panel);
     this.#setupFocusManagement();
     this.#suppressContextMenu();
     this.#forwardMediaEvents();
