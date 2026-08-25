@@ -794,8 +794,8 @@ pf-toast .pf-toast-actions button svg {
    container), not the viewport: wide panels keep the two-column grid,
    very narrow players collapse it to one column. */
 @container pf-panel (max-width: 330px) {
-   .pf-panel-header { padding: 6px; gap: 6px; }
-   .pf-panel-body { padding: 6px; }
+  .pf-panel-header { padding: 6px; gap: 6px; }
+  .pf-panel-body { padding: 6px; }
   .pf-panel-grid { grid-template-columns: minmax(0, 1fr); }
   .pf-history-card { padding: 5px 6px; gap: 6px; }
   .pf-history-title { font-size: 11px; }
@@ -880,6 +880,7 @@ pf-toast .pf-toast-actions button svg {
   .pf-panel.pf-open {
     translate: none;
   }
+  .pf-history-list { max-height: 220px; }
 }
 
 /* Landscape phones (touch): the viewport is short and wide, so the
@@ -912,6 +913,18 @@ pf-toast .pf-toast-actions button svg {
   .pf-history-title { font-size: 11px; }
   .pf-history-meta { font-size: 10px; }
   .pf-history-list { max-height: 144px; }
+  .pf-panel-actions .pf-btn.pf-btn-icon,
+  .pf-panel-section-head .pf-btn.pf-btn-icon,
+  .pf-history-actions .pf-btn.pf-btn-icon {
+    width: 32px;
+    height: 32px;
+  }
+  .pf-panel-actions .pf-btn.pf-btn-icon svg,
+  .pf-panel-section-head .pf-btn.pf-btn-icon svg,
+  .pf-history-actions .pf-btn.pf-btn-icon svg {
+    width: 16px;
+    height: 16px;
+  }
 }
 
 /* Reset-button flash: a quick accent-colored glow that fades out. */
