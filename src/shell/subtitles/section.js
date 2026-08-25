@@ -7,8 +7,8 @@ import { logger } from "../../shared/logger.js";
 
 const SUBTITLE_FILE_ACCEPT = ".srt,.vtt";
 
-// Shared lookup buffer for the timeupdate path - findActiveCues fills it
-// in place, render consumes it before the next tick.
+// Shared lookup buffer for the render path - findActiveCues fills it
+// in place, render consumes it before the next lookup.
 const activeCueBuffer = [];
 
 const SETTING_KEYS = {
@@ -40,9 +40,8 @@ export class SubtitlesSection {
   #urlButton = null;
   #scope = new AbortController();
   #destroyed = false;
-  /** Tick listener rides only while a track has cues - see #syncTickSubscription. */
-  #onTick = null;
-  #tickListening = false;
+  /** Boundary-aware render timer: next setTimeout id (0 = none pending). */
+  #nextWake = 0;
 
   constructor(shell) {
     this.#shell = shell;
@@ -59,6 +58,7 @@ export class SubtitlesSection {
       return;
     }
     this.#destroyed = true;
+    this.#cancelWake();
     this.#scope.abort();
     this.#fileInput?.remove();
     this.#fileInput = null;
@@ -72,44 +72,66 @@ export class SubtitlesSection {
 
   #startListening() {
     const { signal } = this.#scope;
-    this.#onTick = (event) => {
-      if (event.detail.shellId === this.#shell.id) {
-        this.#render();
-      }
-    };
     const video = this.#shell.video;
-    video?.addEventListener("seeked", () => this.#render(), { signal });
-    video?.addEventListener("ended", () => this.#shell?.cues?.clear(), { signal });
+    video?.addEventListener("seeked", () => this.#onSeeked(), { signal, passive: true });
+    video?.addEventListener("ended", () => this.#shell?.cues?.clear(), { signal, passive: true });
+    video?.addEventListener("play", () => this.#scheduleNext(), { signal, passive: true });
+    video?.addEventListener("pause", () => this.#cancelWake(), { signal, passive: true });
+    video?.addEventListener("ratechange", () => {
+      this.#cancelWake();
+      this.#scheduleNext();
+    }, { signal, passive: true });
   }
 
   /**
-   * Attach/detach the pf:shell-timeupdate listener to match cue presence.
-   * Without a track the section previously sat on every tick of every shell
-   * just to early-return in render - now trackless pages cost nothing. The
-   * load path rejects zero-cue files, so track presence implies cues there;
-   * offset shifts can empty an existing track's cues, hence re-syncing here
-   * too. Registered under #scope.signal so destroy() stays leak-free.
+   * Schedule the next render at the nearest cue boundary after currentTime.
+   * The timer fires in video-time, but setTimeout is wall-clock, so we
+   * divide the delta by playbackRate. Between boundaries: zero work.
    */
-  #syncTickSubscription() {
-    if (this.#destroyed) {
+  #scheduleNext() {
+    if (this.#destroyed || !this.#track?.cues?.length) {
       return;
     }
-    const shouldListen = !!(this.#track?.cues?.length);
-    if (shouldListen === this.#tickListening) {
+    const video = this.#shell?.video;
+    if (!video || video.paused || video.ended) {
       return;
     }
-    this.#tickListening = shouldListen;
-    const bus = this.#shell?.bus;
-    if (!bus) {
+    const time = video.currentTime;
+    if (!(time >= 0)) {
       return;
     }
-    if (shouldListen) {
-      bus.addEventListener("pf:shell-timeupdate", this.#onTick, { signal: this.#scope.signal });
-      // Catch-up so text shows on the first frame after load.
+    let next = Infinity;
+    for (const cue of this.#track.cues) {
+      if (cue.start > time && cue.start < next) {
+        next = cue.start;
+      }
+      if (cue.end > time && cue.end < next) {
+        next = cue.end;
+      }
+    }
+    if (!isFinite(next)) {
+      return;
+    }
+    const videoDelta = next - time;
+    const wallDelta = Math.max(0, videoDelta / (video.playbackRate || 1)) * 1000;
+    this.#nextWake = setTimeout(() => {
+      this.#nextWake = 0;
       this.#render();
-    } else {
-      bus.removeEventListener("pf:shell-timeupdate", this.#onTick);
+      this.#scheduleNext();
+    }, wallDelta);
+  }
+
+  #cancelWake() {
+    if (this.#nextWake) {
+      clearTimeout(this.#nextWake);
+      this.#nextWake = 0;
     }
+  }
+
+  #onSeeked() {
+    this.#render();
+    this.#cancelWake();
+    this.#scheduleNext();
   }
 
   #render() {
@@ -261,9 +283,8 @@ export class SubtitlesSection {
       if (this.#track) {
         this.#track.cues = parseSubtitles(this.#track.text, offset);
       }
-      // A large offset can shift every cue out - drop the tick listener
-      // when that leaves an empty track.
-      this.#syncTickSubscription();
+      this.#cancelWake();
+      this.#scheduleNext();
       this.#render();
       setConfigValue(SETTING_KEYS.syncOffset, offset);
     }, TUNING.subtitles.syncDebounceMs);
@@ -484,7 +505,8 @@ export class SubtitlesSection {
       return;
     }
     this.#track = { name, text: normalizedText, cues };
-    this.#syncTickSubscription();
+    this.#cancelWake();
+    this.#scheduleNext();
     this.#refreshHint();
     this.#render();
     this.#toast({
@@ -514,7 +536,7 @@ export class SubtitlesSection {
 
   #removeTrack() {
     this.#track = null;
-    this.#syncTickSubscription();
+    this.#cancelWake();
     this.#shell?.cues?.clear();
     this.#refreshHint();
   }

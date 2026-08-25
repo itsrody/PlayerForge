@@ -228,8 +228,8 @@ export class ResumeStore {
 /**
  * Shell-owned playback tracker: persists progress per (domain, path, duration)
  * and resumes where the user left off, with a "Start over" toast action.
- * Saves are event-driven - throttled timeupdate ticks plus pause flushes -
- * never a polling timer.
+ * Saves are event-driven: a dynamic setInterval gated on play/pause plus
+ * an immediate flush on pause and destroy.
  */
 export class ResumeTracker {
   #shell;
@@ -238,7 +238,7 @@ export class ResumeTracker {
   /** Every media listener this tracker attaches dies with this signal. */
   #scope = new AbortController();
   #lastSavedPosition = 0;
-  #lastSaveAt = 0;
+  #progressTimer = 0;
   #destroyed = false;
 
   constructor(shell) {
@@ -334,14 +334,8 @@ export class ResumeTracker {
           }
         }
       };
-      const onTimeUpdate = () => {
-        if (!shell.paused) {
-          trySeek();
-        }
-      };
       const onPlay = () => trySeek();
-      video.addEventListener("timeupdate", onTimeUpdate, { signal: this.#scope.signal });
-      video.addEventListener("play", onPlay, { signal: this.#scope.signal });
+      video.addEventListener("play", onPlay, { signal: this.#scope.signal, passive: true });
     }
 
     this.#lastSavedPosition = startAt;
@@ -363,19 +357,34 @@ export class ResumeTracker {
 
   #startProgressWatch(shell) {
     const video = shell.video;
-    this.#lastSaveAt = Date.now();
 
-    const onTimeUpdate = () => {
-      if (!shell.paused && Date.now() - this.#lastSaveAt >= TUNING.resume.saveIntervalMs) {
-        this.#lastSaveAt = Date.now();
+    const saveIfDue = () => {
+      if (!shell.paused) {
         this.#saveProgress(shell.currentTime);
       }
     };
+
+    const onPlay = () => {
+      if (!this.#progressTimer) {
+        this.#progressTimer = setInterval(saveIfDue, TUNING.resume.saveIntervalMs);
+      }
+    };
+
     const onPause = () => {
+      if (this.#progressTimer) {
+        clearInterval(this.#progressTimer);
+        this.#progressTimer = 0;
+      }
       this.#saveProgress(shell.currentTime);
     };
-    video.addEventListener("timeupdate", onTimeUpdate, { signal: this.#scope.signal });
-    video.addEventListener("pause", onPause, { signal: this.#scope.signal });
+
+    video.addEventListener("play", onPlay, { signal: this.#scope.signal, passive: true });
+    video.addEventListener("pause", onPause, { signal: this.#scope.signal, passive: true });
+
+    // Catch autoplay or already-playing videos.
+    if (!video.paused) {
+      this.#progressTimer = setInterval(saveIfDue, TUNING.resume.saveIntervalMs);
+    }
   }
 
   /** Clipboard bridge passthroughs (see ResumeStore exportData/importData). */
@@ -388,6 +397,10 @@ export class ResumeTracker {
   }
 
   destroy() {
+    if (this.#progressTimer) {
+      clearInterval(this.#progressTimer);
+      this.#progressTimer = 0;
+    }
     this.#scope.abort();
     if (this.#entry && !this.#destroyed) {
       this.#saveProgress(this.#shell?.currentTime || 0);

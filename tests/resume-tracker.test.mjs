@@ -107,11 +107,12 @@ test("a saved position past the threshold seeks and toasts on play", async () =>
     }]
   };
   const { dom, video, shell } = makeEnv(600);
-  new ResumeTracker(shell);
+  const tracker = new ResumeTracker(shell);
   await flush();
   await flush();
   video.dispatchEvent(new dom.window.Event("play"));
   await flush();
   assert.deepEqual(shell.seeks, [42]);
   assert.equal(shell.toasts.length, 1);
+  tracker.destroy();
 });
