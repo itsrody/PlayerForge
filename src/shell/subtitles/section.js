@@ -40,6 +40,9 @@ export class SubtitlesSection {
   #urlButton = null;
   #scope = new AbortController();
   #destroyed = false;
+  /** Tick listener rides only while a track has cues - see #syncTickSubscription. */
+  #onTick = null;
+  #tickListening = false;
 
   constructor(shell) {
     this.#shell = shell;
@@ -69,15 +72,44 @@ export class SubtitlesSection {
 
   #startListening() {
     const { signal } = this.#scope;
-    const onTick = (event) => {
+    this.#onTick = (event) => {
       if (event.detail.shellId === this.#shell.id) {
         this.#render();
       }
     };
-    this.#shell.bus.addEventListener("pf:shell-timeupdate", onTick, { signal });
     const video = this.#shell.video;
     video?.addEventListener("seeked", () => this.#render(), { signal });
     video?.addEventListener("ended", () => this.#shell?.cues?.clear(), { signal });
+  }
+
+  /**
+   * Attach/detach the pf:shell-timeupdate listener to match cue presence.
+   * Without a track the section previously sat on every tick of every shell
+   * just to early-return in render - now trackless pages cost nothing. The
+   * load path rejects zero-cue files, so track presence implies cues there;
+   * offset shifts can empty an existing track's cues, hence re-syncing here
+   * too. Registered under #scope.signal so destroy() stays leak-free.
+   */
+  #syncTickSubscription() {
+    if (this.#destroyed) {
+      return;
+    }
+    const shouldListen = !!(this.#track?.cues?.length);
+    if (shouldListen === this.#tickListening) {
+      return;
+    }
+    this.#tickListening = shouldListen;
+    const bus = this.#shell?.bus;
+    if (!bus) {
+      return;
+    }
+    if (shouldListen) {
+      bus.addEventListener("pf:shell-timeupdate", this.#onTick, { signal: this.#scope.signal });
+      // Catch-up so text shows on the first frame after load.
+      this.#render();
+    } else {
+      bus.removeEventListener("pf:shell-timeupdate", this.#onTick);
+    }
   }
 
   #render() {
@@ -229,6 +261,9 @@ export class SubtitlesSection {
       if (this.#track) {
         this.#track.cues = parseSubtitles(this.#track.text, offset);
       }
+      // A large offset can shift every cue out - drop the tick listener
+      // when that leaves an empty track.
+      this.#syncTickSubscription();
       this.#render();
       setConfigValue(SETTING_KEYS.syncOffset, offset);
     }, TUNING.subtitles.syncDebounceMs);
@@ -449,6 +484,7 @@ export class SubtitlesSection {
       return;
     }
     this.#track = { name, text: normalizedText, cues };
+    this.#syncTickSubscription();
     this.#refreshHint();
     this.#render();
     this.#toast({
@@ -478,6 +514,7 @@ export class SubtitlesSection {
 
   #removeTrack() {
     this.#track = null;
+    this.#syncTickSubscription();
     this.#shell?.cues?.clear();
     this.#refreshHint();
   }

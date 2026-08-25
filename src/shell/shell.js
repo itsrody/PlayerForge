@@ -23,6 +23,15 @@ const MEDIA_SESSION_SYNC_EVENTS = new Set([
 ]);
 
 /**
+ * Media events relayed onto the kernel bus. All VIDEO_EVENTS keep native
+ * listeners (media-session sync needs them internally), but only these get
+ * a pf:shell-* emission - previously every buffering/readyState tick was
+ * relayed into a bus where nothing listened. New consumers: add the event
+ * name here and subscribe normally.
+ */
+const RELAYED_MEDIA_EVENTS = new Set(["timeupdate"]);
+
+/**
  * Per-video facade: wraps the media element with a stable API, injects the
  * HUD, hosts the input layer, playback tracking, subtitles, and settings
  * panel, tracks fullscreen state, and wires MediaSession.
@@ -288,12 +297,16 @@ export class Shell {
 
   #forwardMediaEvents() {
     const video = this.video;
+    // Register pattern: one detail object mutated per relay instead of a
+    // fresh allocation every tick. Per-shell register, so multi-shell pages
+    // never share state. Consumers must read it synchronously - retaining
+    // .event across ticks reads the next tick's event.
+    const relayDetail = { shellId: this.id, event: null, video };
     const makeHandler = (name) => (event) => {
-      this.#bus.emit(`pf:shell-${name}`, {
-        shellId: this.id,
-        event,
-        video
-      });
+      if (RELAYED_MEDIA_EVENTS.has(name)) {
+        relayDetail.event = event;
+        this.#bus.emit(`pf:shell-${name}`, relayDetail);
+      }
       if (MEDIA_SESSION_SYNC_EVENTS.has(name)) {
         this.#mediaSession?.sync();
       }
