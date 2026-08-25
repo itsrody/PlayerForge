@@ -709,6 +709,7 @@ pf-toast .pf-toast-actions button svg {
 
 .pf-options-cell {
   display: flex;
+  flex-direction: row;
   align-items: center;
   justify-content: flex-start;
   gap: 10px;
@@ -716,6 +717,7 @@ pf-toast .pf-toast-actions button svg {
 }
 .pf-options-cell .pf-panel-label {
   min-width: 0;
+  margin-bottom: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
