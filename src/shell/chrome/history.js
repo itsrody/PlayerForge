@@ -1,4 +1,5 @@
 import { formatTime } from "../../shared/time.js";
+import { createIconElement } from "./icons.js";
 
 function formatDomain(domain) {
   if (!domain) return "";
@@ -47,12 +48,14 @@ export function addHistorySection(panel, shell) {
 
     const actions = panel.el("div", { class: "pf-history-actions" }, card);
 
-    panel.el("button", {
+    const resetBtn = panel.el("button", {
       class: "pf-btn pf-btn-icon pf-btn-ghost",
       type: "button",
       title: "Reset",
       "aria-label": "Reset resume position"
-    }, actions).addEventListener("click", () => {
+    }, actions);
+    resetBtn.appendChild(createIconElement("reload"));
+    resetBtn.addEventListener("click", () => {
       shell.resume?.resetEntry(entry.id);
       entry.resume = 0;
       card.classList.add("pf-history-done");
@@ -63,12 +66,14 @@ export function addHistorySection(panel, shell) {
       });
     });
 
-    panel.el("button", {
+    const removeBtn = panel.el("button", {
       class: "pf-btn pf-btn-icon pf-btn-ghost",
       type: "button",
       title: "Remove",
       "aria-label": "Remove from history"
-    }, actions).addEventListener("click", () => {
+    }, actions);
+    removeBtn.appendChild(createIconElement("trash"));
+    removeBtn.addEventListener("click", () => {
       shell.resume?.removeEntry(entry.id);
       card.remove();
       if (!list.children.length) {
