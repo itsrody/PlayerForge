@@ -58,6 +58,7 @@ function bootstrap() {
 
     const debugMode = location.hash.includes("pf-debug");
     if (debugMode) {
+      logger.enable();
       kernel.bus.debug = true;
       logger.log("entry", "Debug mode enabled");
     }
