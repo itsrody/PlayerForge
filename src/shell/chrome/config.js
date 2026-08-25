@@ -12,17 +12,6 @@ export const DEBUG_LOGS_KEY = "debug.logs";
 
 const SETTINGS_SCHEMA = [
   {
-    key: "controller.holdSpeed",
-    type: "number",
-    label: "Hold speed",
-    min: 1.5,
-    max: 4,
-    step: 0.5,
-    default: 2,
-    fmt: (v) => `${v}x`,
-    group: "Playback"
-  },
-  {
     key: "controller.stepSeek",
     type: "number",
     label: "Arrow skip step",
@@ -31,30 +20,6 @@ const SETTINGS_SCHEMA = [
     step: 1,
     default: 5,
     fmt: (v) => `${v}s`,
-    group: "Playback"
-  },
-  {
-    key: "controller.streakMax",
-    type: "number",
-    label: "Max skip streak",
-    min: 1,
-    max: 30,
-    step: 1,
-    default: 10,
-    fmt: (v) => `${v}x`,
-    group: "Playback"
-  },
-  {
-    // Stored raw around the 150 anchor; shown as the effective multiplier
-    // the scrub model actually applies (see actions.js).
-    key: "controller.scrubSensitivity",
-    type: "number",
-    label: "Scrub sensitivity",
-    min: 50,
-    max: 500,
-    step: 10,
-    default: 150,
-    fmt: (v) => `${(v / 150).toFixed(1)}x`,
     group: "Playback"
   },
   {
@@ -138,6 +103,12 @@ export const TUNING = {
     swipeExitMinPx: 100,
     /** Idle time that resets the double-tap skip streak. */
     streakResetMs: 600
+  },
+  controller: {
+    holdSpeed: 2,
+    streakMax: 10,
+    /** Stored raw around the 150 anchor; effective multiplier = value / 150. */
+    scrubSensitivity: 100
   },
   scrub: {
     /**

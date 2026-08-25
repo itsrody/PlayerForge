@@ -93,19 +93,11 @@ test("storage change events live-reload the cache", () => {
   // Another tab replaced pf:configs behind our back.
   writes["pf:configs"] = {
     version: 1,
-    settings: { controller: { holdSpeed: 3 } }
+    settings: { controller: { stepSeek: 15 } }
   };
-  assert.notEqual(getSetting("controller.holdSpeed"), 3);
+  assert.notEqual(getSetting("controller.stepSeek"), 15);
   configsListener?.("pf:configs", null, null, true);
-  assert.equal(getSetting("controller.holdSpeed"), 3);
+  assert.equal(getSetting("controller.stepSeek"), 15);
   // Keys absent from the foreign doc fall back to defaults.
-  assert.equal(getSetting("controller.stepSeek"), 5);
-});
-
-test("scrub sensitivity displays its effective multiplier", () => {
-  const panel = makeFakePanel();
-  addSettingsSection(panel);
-  const stepper = panel.calls.steppers.find((s) => s.label === "Scrub sensitivity");
-  assert.equal(stepper.format(150), "1.0x");
-  assert.equal(stepper.format(300), "2.0x");
+  assert.equal(getSetting("gestures.hotkeys"), true);
 });

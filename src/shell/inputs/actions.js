@@ -123,7 +123,7 @@ const stateFor = (() => {
 })();
 
 function performSkip(shell, state, direction) {
-  const streakMax = getSetting("controller.streakMax");
+  const streakMax = TUNING.controller.streakMax;
   if (direction === state.lastSkipDirection) {
     state.streakCount = Math.min(state.streakCount + 1, streakMax);
   } else {
@@ -250,7 +250,7 @@ export function attachInputActions(shell, host, signal) {
     if (state.activeHolds.has(source) || (state.activeHolds.add(source), state.activeHolds.size > 1)) {
       return;
     }
-    const speed = getSetting("controller.holdSpeed");
+    const speed = TUNING.controller.holdSpeed;
     state.savedRate = shell.playbackRate;
     shell.media.beginBoost(speed);
     shell.toast({ icon: "right-arrows", text: `${speed}x`, group: "hold" });
@@ -285,7 +285,7 @@ export function attachInputActions(shell, host, signal) {
       state.scrubbing = true;
       state.scrubDuration = duration;
       state.scrubPixelsPerSecond =
-        (duration * TUNING.scrub.strokeFraction * (getSetting("controller.scrubSensitivity") / 150)) / width;
+        (duration * TUNING.scrub.strokeFraction * (TUNING.controller.scrubSensitivity / 150)) / width;
       state.scrubDirectionMomentum = 0;
       state.scrubTravelPx = 0;
     }
