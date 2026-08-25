@@ -35,6 +35,7 @@ export class SubtitlesSection {
   #urlButton = null;
   #styleControls = null;
   #positionControls = null;
+  #resetBtn = null;
   #scope = new AbortController();
   #destroyed = false;
 
@@ -64,6 +65,7 @@ export class SubtitlesSection {
     this.#urlButton = null;
     this.#styleControls = null;
     this.#positionControls = null;
+    this.#resetBtn = null;
     this.#trackMeta = null;
     this.#cueLayer = null;
   }
@@ -263,7 +265,7 @@ export class SubtitlesSection {
     this.#styleControls = { size: sizeStepper, color: colorField, shadow: shadowStepper, sync: syncStepper };
     this.#positionControls = { vertical: verticalStepper, horizontal: horizontalStepper };
 
-    const resetBtn = panel.addButton(styleHead, {
+    this.#resetBtn = panel.addButton(styleHead, {
       icon: "reload",
       title: "Reset all",
       ariaLabel: "Reset all",
@@ -275,9 +277,9 @@ export class SubtitlesSection {
         syncStepper.setValue(0);
         verticalStepper.setValue(85);
         horizontalStepper.setValue(50);
-        resetBtn.classList.remove("pf-flash");
-        void resetBtn.offsetWidth;
-        resetBtn.classList.add("pf-flash");
+        this.#resetBtn.classList.remove("pf-flash");
+        void this.#resetBtn.offsetWidth;
+        this.#resetBtn.classList.add("pf-flash");
         this.#toast({ icon: "reload", text: "Style reset", duration: TUNING.toast.flashMs, group: "subtitles" });
       }
     });
@@ -439,6 +441,9 @@ export class SubtitlesSection {
       const disabled = !hasTrack;
       this.#positionControls.vertical.setDisabled(disabled);
       this.#positionControls.horizontal.setDisabled(disabled);
+    }
+    if (this.#resetBtn) {
+      this.#resetBtn.disabled = !hasTrack;
     }
   }
 

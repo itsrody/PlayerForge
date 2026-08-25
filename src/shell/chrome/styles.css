@@ -501,8 +501,8 @@ pf-toast .pf-toast-actions button svg {
 }
 .pf-panel-grid-compact .pf-panel-cell .pf-panel-label {
   flex: none;
+  width: 48px;
   min-width: 0;
-  max-width: 45%;
   margin-bottom: 0;
   white-space: nowrap;
   overflow: hidden;
