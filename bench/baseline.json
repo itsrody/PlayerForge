@@ -1,6 +1,4 @@
 {
-  "activeCues legacy (alloc+reverse per tick)": 177798.14402618658,
-  "activeCues shared buffer (no alloc)": 269582.45789473684,
   "hashEntry (djb2, domain-seeded)": 16811.950063613232,
   "getDomainKey typical hosts": 32958.174396442184,
   "domainsMatch boundary checks": 9450.869423076923,
