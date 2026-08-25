@@ -100,24 +100,6 @@ const SETTINGS_SCHEMA = [
     group: "Gestures"
   },
   {
-    key: "resume.enabled",
-    type: "bool",
-    label: "Remember playback position",
-    default: true,
-    group: "Resume"
-  },
-  {
-    key: "resume.durationFuzz",
-    type: "number",
-    label: "Resume tolerance",
-    min: 0,
-    max: 10,
-    step: 1,
-    default: 2,
-    fmt: (v) => `${v}s`,
-    group: "Resume"
-  },
-  {
     key: "video.pip",
     type: "bool",
     label: "Mobile PiP",
@@ -180,6 +162,7 @@ export const TUNING = {
     completionRatio: 0.95,
     /** Ignore tiny drifts between saves. */
     saveEpsilonSeconds: 3,
+    durationFuzz: 2,
     /** Only auto-seek when the saved position is meaningful. */
     minPosition: 5,
     staleDays: 14,

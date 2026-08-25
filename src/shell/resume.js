@@ -1,5 +1,5 @@
 import { getPageContext, domainsMatch, domainScore, hashEntry } from "../shared/context.js";
-import { getSetting, TUNING } from "./chrome/config.js";
+import { TUNING } from "./chrome/config.js";
 import { KEYS, gmGetValue, gmSetValue, loadJsonObject } from "../shared/storage.js";
 import { formatTime } from "../shared/time.js";
 import { logger } from "../shared/logger.js";
@@ -121,7 +121,7 @@ export class ResumeStore {
   findMatch(domainKey, path, duration) {
     this.#ensureLoaded();
     const targetDuration = duration || 0;
-    const maxFuzz = getSetting("resume.durationFuzz");
+    const maxFuzz = TUNING.resume.durationFuzz;
     let best = null;
     let bestScore = -Infinity;
     for (const entry of this.#state.entries) {
@@ -251,10 +251,6 @@ export class ResumeTracker {
     const context = await getPageContext();
     if (!context) {
       logger.log("resume", "Top context unavailable - skipping");
-      return;
-    }
-    if (!getSetting("resume.enabled")) {
-      logger.log("resume", "Resume disabled by setting - skipping");
       return;
     }
 
