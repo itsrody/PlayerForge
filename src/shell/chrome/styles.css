@@ -710,7 +710,7 @@ pf-toast .pf-toast-actions button svg {
 .pf-options-cell {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 10px;
   grid-column: 1 / -1;
 }
@@ -743,7 +743,7 @@ pf-toast .pf-toast-actions button svg {
 /* Narrow screens: prevent options label + buttons from overflowing. */
 @media (max-width: 520px) {
   .pf-options-cell { gap: 6px; }
-  .pf-options-row { justify-content: center; flex-shrink: 0; }
+  .pf-options-row { flex-shrink: 0; }
 }
 
 /* History tab - card rows */
