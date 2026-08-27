@@ -29,6 +29,7 @@ const PINCH_BASELINE_DELAY_MS = TUNING.gestures.pinchBaselineDelayMs;
 const TRACKPAD_COOLDOWN_MS = TUNING.gestures.trackpadCooldownMs;
 const SUPPRESS_WINDOW_MS = TUNING.gestures.suppressWindowMs;
 const DOUBLE_TAP_WINDOW_MS = TUNING.gestures.doubleTapWindowMs;
+const SCRUB_VELOCITY_TAU_S = TUNING.scrub.velocityFilterMs / 1000;
 
 /** All live input engines, used for keyboard focus arbitration. */
 const activeForges = new Set();
@@ -472,12 +473,14 @@ export class InputForge {
       return;
     }
     lastActiveForge = this;
+    const t = event.timeStamp;
     const existing = this.#pointers.get(event.pointerId);
     if (existing) {
       existing.x = event.clientX;
       existing.y = event.clientY;
+      existing.t = t;
     } else {
-      this.#pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      this.#pointers.set(event.pointerId, { x: event.clientX, y: event.clientY, t });
     }
 
     if (this.#pointers.size === 2) {
@@ -526,6 +529,7 @@ export class InputForge {
     if (pointer) {
       pointer.x = x;
       pointer.y = y;
+      pointer.t = event.timeStamp;
     }
     if (this.#pointers.size === 2 && this.#pinchStartDistance > 0) {
       this.#checkPinch();
@@ -569,7 +573,7 @@ export class InputForge {
       }
       if (this.#scrubbing) {
         event.stopImmediatePropagation();
-        this.#advanceScrub(event, x, now);
+        this.#advanceScrub(event);
       }
       if (this.#swiping && this.#swipeDirection === "down") {
         event.stopImmediatePropagation();
@@ -582,8 +586,16 @@ export class InputForge {
   /**
    * Consume every coalesced sample of the move so high-rate Gecko pointer
    * streams scrub at full fidelity; one semantic event is emitted per move.
+   *
+   * Velocity is measured per sample from true event timestamps (each
+   * PointerEvent carries its own DOMHighResTimeStamp in the same epoch as
+   * performance.now()), then smoothed with a first-order time-based filter,
+   * alpha = 1 - exp(-dt/tau). Because alpha derives from real elapsed time
+   * rather than event count, the smoothing window is the same absolute time
+   * at any display rate - adaptive-refresh correct - and stays responsive
+   * enough to track speed changes mid-stroke.
    */
-  #advanceScrub(event, x, now) {
+  #advanceScrub(event) {
     let totalStep = 0;
     let lastSampleTime = this.#scrubLastTime;
     const hasCoalesced = typeof event.getCoalescedEvents === "function";
@@ -594,20 +606,23 @@ export class InputForge {
     const count = samples.length > 0 ? samples.length + 1 : 1;
     for (let i = 0; i < count; i++) {
       const sample = i < samples.length ? samples[i] : event;
+      const sampleTime = sample.timeStamp || lastSampleTime;
       const step = sample.clientX - this.#scrubLastX;
       this.#scrubLastX = sample.clientX;
       totalStep += step;
-      const dt = (now - lastSampleTime) / 1000;
+      const dt = (sampleTime - lastSampleTime) / 1000;
       const instantVelocity = dt > 0.001 ? step / dt : 0;
-      this.#scrubVelocity = this.#scrubVelocity * 0.7 + instantVelocity * 0.3;
-      lastSampleTime = now;
+      const alpha = 1 - Math.exp(-dt / SCRUB_VELOCITY_TAU_S);
+      this.#scrubVelocity += alpha * (instantVelocity - this.#scrubVelocity);
+      lastSampleTime = sampleTime;
     }
-    this.#scrubLastTime = now;
+    this.#scrubLastTime = lastSampleTime;
     this.#dispatch(GESTURE_EVENTS.scrub, {
       zone: this.#gestureZone || "screen",
       method: "pointer",
       dx: totalStep,
-      velocity: this.#scrubVelocity
+      velocity: this.#scrubVelocity,
+      timestamp: event.timeStamp
     });
   }
 

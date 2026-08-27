@@ -134,6 +134,8 @@ const stateFor = (() => {
         scrubSlowGain: 0,
         scrubFastGain: 0,
         scrubSensitivity: 0,
+        scrubCursor: null,
+        scrubCursorAnim: null,
         scrubDirectionMomentum: 0,
         lastScrubToastAt: 0,
         streakCount: 0,
@@ -316,6 +318,32 @@ export function attachInputActions(shell, host, signal) {
         TUNING.scrub.velocity.fastFullWidthSeconds / width;
       state.scrubSensitivity = TUNING.controller.scrubSensitivity / 150;
       state.scrubDirectionMomentum = 0;
+      state.scrubCursorAnim = null;
+      state.scrubCursor = null;
+      // Native scrub indicator: a WAAPI animation (compositor clock) drives
+      // the on-screen fill, like ForgeTrack leans on TextTrack - we only feed
+      // it the computed seek ratio, Gecko renders/moves it. playbackRate 0
+      // keeps it at our manually-set currentTime for gap-free control.
+      const container = shell.container;
+      const doc = container && container.ownerDocument;
+      if (doc && typeof doc.createElement === "function" && typeof container.appendChild === "function") {
+        const el = doc.createElement("div");
+        el.className = "pf-scrub-cursor";
+        container.appendChild(el);
+        const anim = typeof el.animate === "function"
+          ? el.animate(
+              [{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }],
+              { duration: 1, fill: "forwards", playbackRate: 0, easing: "linear" }
+            )
+          : null;
+        if (anim) {
+          anim.currentTime = 0;
+          state.scrubCursor = el;
+          state.scrubCursorAnim = anim;
+        } else {
+          el.remove();
+        }
+      }
     }
 
     if (Math.abs(detail.dx) < TUNING.scrub.deadZonePx) {
@@ -330,6 +358,13 @@ export function attachInputActions(shell, host, signal) {
     const gain = state.scrubSlowGain + (state.scrubFastGain - state.scrubSlowGain) * t;
     const deltaSeconds = detail.dx * gain * state.scrubSensitivity;
     shell.scrubTo(shell.currentTime + deltaSeconds);
+    // Feed the native WAAPI cursor the seek ratio; Gecko animates it on the
+    // compositor (display-synced at any refresh rate), so the on-screen fill
+    // tracks the actual scrub target without a custom animation loop.
+    if (state.scrubCursorAnim) {
+      const ratio = Math.min(1, Math.max(0, shell.video.currentTime / state.scrubDuration));
+      state.scrubCursorAnim.currentTime = ratio * 1000;
+    }
     const instantDirection = detail.dx > 1 ? 1 : detail.dx < -1 ? -1 : 0;
     state.scrubDirectionMomentum = state.scrubDirectionMomentum * 0.6 + instantDirection * 0.4;
 
@@ -355,6 +390,14 @@ export function attachInputActions(shell, host, signal) {
     state.scrubSlowGain = 0;
     state.scrubFastGain = 0;
     state.scrubSensitivity = 0;
+    if (state.scrubCursorAnim) {
+      state.scrubCursorAnim.cancel();
+      state.scrubCursorAnim = null;
+    }
+    if (state.scrubCursor) {
+      state.scrubCursor.remove();
+      state.scrubCursor = null;
+    }
     shell.hideToast("scrub");
   }, { signal });
 

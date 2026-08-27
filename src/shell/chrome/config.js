@@ -129,7 +129,17 @@ export const TUNING = {
       exponent: 1.5
     },
     /** Sub-pixel moves are ignored so a holding finger doesn't micro-shimmer. */
-    deadZonePx: 0.5
+    deadZonePx: 0.5,
+    /**
+     * Time constant (ms) of the velocity low-pass filter. The forge measures
+     * true per-sample velocity (Δpx / ΔtimeStamp, refresh-rate independent)
+     * and smooths it with alpha = 1 - exp(-dt/tau). Because alpha derives from
+     * real elapsed time rather than event count, the smoothing window is the
+     * same absolute time at any display rate - adaptive-refresh correct - and
+     * a small tau keeps the signal responsive enough to track speed changes
+     * mid-stroke.
+     */
+    velocityFilterMs: 80
   },
   resume: {
     saveIntervalMs: 60000,
