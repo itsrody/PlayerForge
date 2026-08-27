@@ -1,4 +1,4 @@
-import { allowsIntent, armedKeys, GESTURE_EVENTS, easeTransformTo } from "./actions.js";
+import { allowsIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo } from "./actions.js";
 import { TUNING } from "../chrome/config.js";
 import { SHELL_MARKER } from "../chrome/inject.js";
 import { deepestActiveElement, isInsideShell } from "../../shared/shadow.js";
@@ -13,9 +13,51 @@ import { deepestActiveElement, isInsideShell } from "../../shared/shadow.js";
 const PASSIVE_CAPTURE = { capture: true, passive: true };
 const WHEEL_CAPTURE = { capture: true, passive: false };
 
+// Gesture calibration hoisted to module consts. TUNING is static (read-only
+// after load), so binding these at module scope lets WarpJIT treat them as
+// invariant values and fold them, instead of re-running shape-guarded
+// property loads on every high-frequency pointer/keyboard event.
+const EDGE_ZONE_RATIO = TUNING.gestures.edgeZoneRatio;
+const EDGE_ZONE_START = 1 - TUNING.gestures.edgeZoneRatio;
+const HOLD_TIMEOUT_MS = TUNING.gestures.holdTimeoutMs;
+const HOLD_CANCEL_MOVE_PX = TUNING.gestures.holdCancelMovePx;
+const SCROLL_START_PX = TUNING.gestures.scrollStartPx;
+const AXIS_DOMINANCE_RATIO = TUNING.gestures.axisDominanceRatio;
+const PINCH_MIN_DISTANCE_PX = TUNING.gestures.pinchMinDistancePx;
+const PINCH_SCALE_THRESHOLD = TUNING.gestures.pinchScaleThreshold;
+const PINCH_BASELINE_DELAY_MS = TUNING.gestures.pinchBaselineDelayMs;
+const TRACKPAD_COOLDOWN_MS = TUNING.gestures.trackpadCooldownMs;
+const SUPPRESS_WINDOW_MS = TUNING.gestures.suppressWindowMs;
+const DOUBLE_TAP_WINDOW_MS = TUNING.gestures.doubleTapWindowMs;
+
 /** All live input engines, used for keyboard focus arbitration. */
 const activeForges = new Set();
 let lastActiveForge = null;
+
+/**
+ * Reusable scratch for the first two live pointers. The pinch path runs on
+ * every two-finger move, so reading the pair into this single object (instead
+ * of [...values()].slice(0,2) - two array allocations per move) keeps the hot
+ * loop allocation-free for the JIT. Mutated in place; callers must read it
+ * immediately.
+ */
+const firstTwoPointers = { x0: 0, y0: 0, x1: 0, y1: 0 };
+
+function captureFirstTwo(pointers, out) {
+  let n = 0;
+  for (const point of pointers.values()) {
+    if (n === 0) {
+      out.x0 = point.x;
+      out.y0 = point.y;
+    } else {
+      out.x1 = point.x;
+      out.y1 = point.y;
+      return true;
+    }
+    n = 1;
+  }
+  return false;
+}
 
 /**
  * InputForge engine: pure recognition transport. Turns pointer/keyboard/
@@ -212,7 +254,7 @@ export class InputForge {
       this.#clickSuppressTimer = null;
       this.#suppressClickPending = false;
       this.#suppressDblclickPending = false;
-    }, TUNING.gestures.suppressWindowMs);
+    }, SUPPRESS_WINDOW_MS);
   }
 
   #resetKeyboardHold() {
@@ -230,9 +272,9 @@ export class InputForge {
 
   #zoneForPoint(pointerEvent) {
     const viewportWidth = window.innerWidth;
-    if (pointerEvent.clientX < viewportWidth * TUNING.gestures.edgeZoneRatio) {
+    if (pointerEvent.clientX < viewportWidth * EDGE_ZONE_RATIO) {
       return "left-edge";
-    } else if (pointerEvent.clientX > viewportWidth * (1 - TUNING.gestures.edgeZoneRatio)) {
+    } else if (pointerEvent.clientX > viewportWidth * EDGE_ZONE_START) {
       return "right-edge";
     } else {
       return "screen";
@@ -287,23 +329,24 @@ export class InputForge {
       if (this.#destroyed || this.#pointers.size < 2) {
         return;
       }
-      const points = [...this.#pointers.values()].slice(0, 2);
-      this.#pinchStartDistance = Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y);
-    }, TUNING.gestures.pinchBaselineDelayMs);
+      captureFirstTwo(this.#pointers, firstTwoPointers);
+      this.#pinchStartDistance =
+        Math.hypot(firstTwoPointers.x1 - firstTwoPointers.x0, firstTwoPointers.y1 - firstTwoPointers.y0);
+    }, PINCH_BASELINE_DELAY_MS);
   }
 
   #checkPinch() {
-    if (!this.#isFullscreen() || this.#pinchFired || this.#pinchStartDistance < TUNING.gestures.pinchMinDistancePx) {
+    if (!this.#isFullscreen() || this.#pinchFired || this.#pinchStartDistance < PINCH_MIN_DISTANCE_PX) {
       return;
     }
-    const points = [...this.#pointers.values()].slice(0, 2);
-    if (points.length < 2) {
+    if (!captureFirstTwo(this.#pointers, firstTwoPointers)) {
       return;
     }
     const scaleDelta =
-      (Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y) - this.#pinchStartDistance) /
+      (Math.hypot(firstTwoPointers.x1 - firstTwoPointers.x0, firstTwoPointers.y1 - firstTwoPointers.y0) -
+        this.#pinchStartDistance) /
       this.#pinchStartDistance;
-    if (scaleDelta > TUNING.gestures.pinchScaleThreshold || scaleDelta < -TUNING.gestures.pinchScaleThreshold) {
+    if (scaleDelta > PINCH_SCALE_THRESHOLD || scaleDelta < -PINCH_SCALE_THRESHOLD) {
       this.#pinchFired = true;
       this.#suppressNextActivations();
       this.#dispatch(GESTURE_EVENTS.pinch, {
@@ -472,7 +515,7 @@ export class InputForge {
             duration: performance.now() - this.#startTime
           });
         }
-      }, TUNING.gestures.holdTimeoutMs);
+      }, HOLD_TIMEOUT_MS);
     }
   }
 
@@ -496,7 +539,7 @@ export class InputForge {
     const dx = Math.abs(x - this.#startX);
     const dy = Math.abs(y - this.#startY);
 
-    if (dx > TUNING.gestures.holdCancelMovePx || dy > TUNING.gestures.holdCancelMovePx) {
+    if (dx > HOLD_CANCEL_MOVE_PX || dy > HOLD_CANCEL_MOVE_PX) {
       this.#clearHoldTimer();
     }
 
@@ -504,13 +547,13 @@ export class InputForge {
       if (!this.#scrubbing && !this.#swiping) {
         // Intent gates are sampled live: toggling a setting mid-session
         // applies to the very next move.
-        if (allowsIntent("scrub") && dx > TUNING.gestures.scrollStartPx && dx > dy * TUNING.gestures.axisDominanceRatio) {
+        if (allowsIntent("scrub") && dx > SCROLL_START_PX && dx > dy * AXIS_DOMINANCE_RATIO) {
           this.#scrubbing = true;
           this.#capturePointerSafe(this.#primaryPointerId);
           this.#scrubLastX = x;
           this.#scrubLastTime = now;
           this.#scrubVelocity = 0;
-        } else if (allowsIntent("swipe") && dy > TUNING.gestures.scrollStartPx && dy > dx * TUNING.gestures.axisDominanceRatio) {
+        } else if (allowsIntent("swipe") && dy > SCROLL_START_PX && dy > dx * AXIS_DOMINANCE_RATIO) {
           this.#swiping = true;
           this.#swipeDirection = y > this.#startY ? "down" : "up";
           this.#swipeBaseTransform = this.#video.style.transform || "";
@@ -543,11 +586,14 @@ export class InputForge {
   #advanceScrub(event, x, now) {
     let totalStep = 0;
     let lastSampleTime = this.#scrubLastTime;
-    const samples = typeof event.getCoalescedEvents === "function"
-      ? event.getCoalescedEvents()
-      : [];
-    const stream = samples.length > 0 ? [...samples, event] : [event];
-    for (const sample of stream) {
+    const hasCoalesced = typeof event.getCoalescedEvents === "function";
+    const samples = hasCoalesced ? event.getCoalescedEvents() : [];
+    // Coalesced samples then the live event, without materializing a combined
+    // array: high-rate Gecko pointer streams land here every move, so a
+    // [[...samples, event]] spread per frame would allocate needlessly.
+    const count = samples.length > 0 ? samples.length + 1 : 1;
+    for (let i = 0; i < count; i++) {
+      const sample = i < samples.length ? samples[i] : event;
       const step = sample.clientX - this.#scrubLastX;
       this.#scrubLastX = sample.clientX;
       totalStep += step;
@@ -614,12 +660,12 @@ export class InputForge {
       });
       this.#swipeDirection = null;
     } else if (
-      elapsed < TUNING.gestures.holdTimeoutMs &&
+      elapsed < HOLD_TIMEOUT_MS &&
       this.#gestureZone !== null &&
       allowsIntent("dbltap")
     ) {
       const now = performance.now();
-      if (now - this.#lastTapTime < TUNING.gestures.doubleTapWindowMs) {
+      if (now - this.#lastTapTime < DOUBLE_TAP_WINDOW_MS) {
         this.#lastTapTime = -Infinity;
         this.#suppressNextActivations();
         this.#dispatch(GESTURE_EVENTS.dbltap, { zone: this.#gestureZone, method: "pointer" });
@@ -661,7 +707,7 @@ export class InputForge {
         this.#trackpadPinchCooldown = true;
         setTimeout(() => {
           this.#trackpadPinchCooldown = false;
-        }, TUNING.gestures.trackpadCooldownMs);
+        }, TRACKPAD_COOLDOWN_MS);
         this.#suppressNextActivations();
         this.#dispatch(GESTURE_EVENTS.pinch, {
           zone: "screen",
@@ -700,12 +746,15 @@ export class InputForge {
               duration: performance.now() - this.#keyboardHoldStart
             });
           }
-        }, TUNING.gestures.holdTimeoutMs);
+        }, HOLD_TIMEOUT_MS);
       }
       return;
     }
-    for (const binding of armedKeys()) {
+    for (const binding of KEY_BINDINGS) {
       if (binding.code !== event.code) {
+        continue;
+      }
+      if (!isKeyArmed(binding)) {
         continue;
       }
       if (!this.#shouldHandleKeys(!!binding.allowControlFocus)) {

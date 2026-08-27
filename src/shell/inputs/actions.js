@@ -112,8 +112,11 @@ export function allowsIntent(gesture) {
 }
 
 /** Armed key bindings, in table order - sampled live per keystroke. */
-export function armedKeys() {
-  return BY_GESTURE.get("key")?.filter((binding) => gateOpen(binding)) ?? [];
+export const KEY_BINDINGS = BY_GESTURE.get("key");
+
+/** Whether a key binding's gates are open right now (live per read). */
+export function isKeyArmed(binding) {
+  return gateOpen(binding);
 }
 
 /* - Per-shell action state - */
