@@ -119,6 +119,21 @@ export function isKeyArmed(binding) {
   return gateOpen(binding);
 }
 
+/*
+ * Scrub tuning hoisted to module scope. The velocity-curve seek runs once
+ * per coalesced pointer move (up to display rate), so the deep TUNING lookups
+ * below would otherwise resolve several property chains per frame. Freezing
+ * the curve shape, the dead zone, and the sensitivity multiplier as plain
+ * constants keeps the hot path to flat scalar reads - matching the forge's
+ * adaptive-refresh treatment of the gesture table.
+ */
+const SCRUB_KNEE_PX_PER_S = TUNING.scrub.velocity.kneeVelocityPxS;
+const SCRUB_EXPONENT = TUNING.scrub.velocity.exponent;
+const SCRUB_DEAD_ZONE_PX = TUNING.scrub.deadZonePx;
+const SCRUB_SLOW_FULL_WIDTH_SECONDS = TUNING.scrub.velocity.slowFullWidthSeconds;
+const SCRUB_FAST_FULL_WIDTH_FRACTION = TUNING.scrub.velocity.fastFullWidthFraction;
+const SCRUB_SENSITIVITY = TUNING.controller.scrubSensitivity / 150;
+
 /* - Per-shell action state - */
 
 const stateFor = (() => {
@@ -342,14 +357,12 @@ export function attachInputActions(shell, host, signal) {
       // so a fast stroke traverses a fraction of the runtime on any length,
       // while the slow floor stays a deliberate ~1s.
       const width = shell.container?.clientWidth || shell.video?.clientWidth || 640;
-      const fastCeiling = duration * TUNING.scrub.velocity.fastFullWidthFraction;
+      const fastCeiling = duration * SCRUB_FAST_FULL_WIDTH_FRACTION;
       state.scrubbing = true;
       state.scrubDuration = duration;
-      state.scrubSlowGain =
-        TUNING.scrub.velocity.slowFullWidthSeconds / width;
-      state.scrubFastGain =
-        fastCeiling / width;
-      state.scrubSensitivity = TUNING.controller.scrubSensitivity / 150;
+      state.scrubSlowGain = SCRUB_SLOW_FULL_WIDTH_SECONDS / width;
+      state.scrubFastGain = fastCeiling / width;
+      state.scrubSensitivity = SCRUB_SENSITIVITY;
       state.scrubDirectionMomentum = 0;
       // Mute during the drag: save the pre-scrub audio state, cancel any
       // residual fade-in from a previous scrub, and fade to silence quickly.
@@ -362,7 +375,7 @@ export function attachInputActions(shell, host, signal) {
       );
     }
 
-    if (Math.abs(detail.dx) < TUNING.scrub.deadZonePx) {
+    if (Math.abs(detail.dx) < SCRUB_DEAD_ZONE_PX) {
       return;
     }
 
@@ -372,7 +385,7 @@ export function attachInputActions(shell, host, signal) {
     // Sampled live each move, the seek amount tracks the hand's current
     // velocity in real time and scales with content length.
     const v = Math.abs(detail.velocity);
-    const t = Math.min(1, (v / TUNING.scrub.velocity.kneeVelocityPxS) ** TUNING.scrub.velocity.exponent);
+    const t = Math.min(1, (v / SCRUB_KNEE_PX_PER_S) ** SCRUB_EXPONENT);
     const gain = state.scrubSlowGain + (state.scrubFastGain - state.scrubSlowGain) * t;
     const deltaSeconds = detail.dx * gain * state.scrubSensitivity;
     shell.scrubTo(shell.currentTime + deltaSeconds);
