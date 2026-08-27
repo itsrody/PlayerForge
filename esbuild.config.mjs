@@ -15,6 +15,13 @@ const minify = process.argv.includes("-m") || process.argv.includes("--min");
 // The banner below is the single version source. Runtime reads the installed
 // script's real version through GM_info.script.version, so bumping @version
 // here is all a release takes.
+//
+// Instant-injection note: @run-at document-start + @sandbox raw are what make
+// real document-start work. In Tampermonkey 5.5 on Firefox, enable the user
+// setting "Content Script API" -> "UserScripts API Dynamic" (the legacy
+// "Instant" injection radio is a documented hack; API-Dynamic is the mode that
+// actually delivers instant page-context injection). PF never assumes the DOM
+// is ready at eval, so it is safe under instant injection.
 const banner = `// ==UserScript==
 // @name         PlayerForge
 // @namespace    https://github.com/PlayerForge
@@ -60,7 +67,6 @@ const banner = `// ==UserScript==
 // @exclude      *://*.reddit.com/*
 // @exclude      *://reddit.com/*
 // @exclude      *://*.tumblr.com/*
-// @exclude      *://*.twitter.com/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_deleteValue
