@@ -4,11 +4,11 @@ import { JSDOM } from "jsdom";
 
 // load the module fresh per test so the cached style-load state resets
 async function loadInject() {
-  const { ensureStyles } = await import(`../src/shell/chrome/inject.js?t=${Date.now()}`);
-  return ensureStyles;
+  const { warmStyles, ensureStyles } = await import(`../src/shell/chrome/inject.js?t=${Date.now()}`);
+  return { warmStyles, ensureStyles };
 }
 
-function setupDom() {
+function setupDom(resourceCss) {
   const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>");
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
@@ -24,6 +24,16 @@ function setupDom() {
       this.synced = true;
     }
   };
+  if (resourceCss !== undefined) {
+    globalThis.GM_getResourceText = async (name) => {
+      if (name === "pfStyle") {
+        return resourceCss;
+      }
+      throw new Error("unknown resource");
+    };
+  } else {
+    delete globalThis.GM_getResourceText;
+  }
   const appends = [];
   Object.defineProperty(dom.window.document, "adoptedStyleSheets", {
     set: (v) => appends.push(v),
@@ -33,44 +43,52 @@ function setupDom() {
   return { dom, appends };
 }
 
-test("ensureStyles loads styles from the @resource text when available", async () => {
-  const { appends } = setupDom();
-  globalThis.GM_getResourceText = async () => ".pf-shell{}";
-  const ensureStyles = await loadInject();
-  const sheet = await ensureStyles();
+test("warmStyles applies embedded css synchronously (no network block)", async () => {
+  const { appends } = setupDom(".pf-other{}");
+  const { warmStyles } = await loadInject();
+  const sheet = warmStyles();
+  // Synchronous: live sheet returned immediately without awaiting the resource.
+  assert.ok(sheet.synced, "embedded sheet synced synchronously");
+  assert.equal(sheet.css, "", "embedded css is the empty-string test-hook value");
+  assert.equal(appends.length, 1, "sheet adopted into the document synchronously");
+});
 
-  assert.ok(sheet, "style sheet created");
-  assert.equal(sheet.css, ".pf-shell{}", "replaceSync got resource css");
-  assert.ok(sheet.synced, "replaceSync called");
-  assert.equal(appends.length, 1, "stylesheet adopted once");
-  delete globalThis.GM_getResourceText;
+test("resource text upgrades the embedded sheet in place", async () => {
+  setupDom(".pf-shell{}");
+  const { warmStyles, ensureStyles } = await loadInject();
+  const live = warmStyles();
+  assert.equal(live.css, "", "starts with embedded css");
+  const authoritative = await ensureStyles();
+  assert.equal(authoritative, live, "upgrade happens on the SAME sheet instance");
+  assert.equal(live.css, ".pf-shell{}", "replaceSync upgraded in place, adopted refs update");
 });
 
 test("ensureStyles falls back to embedded css when the resource fetch fails", async () => {
-  setupDom();
+  setupDom(null);
   globalThis.GM_getResourceText = async () => {
     throw new Error("offline");
   };
-  const ensureStyles = await loadInject();
+  const { warmStyles, ensureStyles } = await loadInject();
+  warmStyles();
   const sheet = await ensureStyles();
   assert.ok(sheet.synced, "fallback sheet synced");
-  delete globalThis.GM_getResourceText;
+  assert.equal(sheet.css, "", "kept embedded css on failure");
 });
 
 test("ensureStyles falls back to embedded css when GM_getResourceText is absent", async () => {
-  setupDom();
-  delete globalThis.GM_getResourceText;
-  const ensureStyles = await loadInject();
+  setupDom(undefined);
+  const { warmStyles, ensureStyles } = await loadInject();
+  warmStyles();
   const sheet = await ensureStyles();
   assert.ok(sheet.synced, "fallback sheet synced");
 });
 
 test("ensureStyles is idempotent across callers", async () => {
-  setupDom();
-  delete globalThis.GM_getResourceText;
-  const ensureStyles = await loadInject();
-  const a = ensureStyles();
-  const b = ensureStyles();
-  assert.equal(a, b, "same cached promise returned");
-  assert.equal(await a, await b, "same sheet resolved");
+  setupDom(undefined);
+  const { warmStyles, ensureStyles } = await loadInject();
+  const a = warmStyles();
+  const b = warmStyles();
+  assert.equal(a, b, "same cached sheet returned");
+  assert.equal(await ensureStyles(), a, "same authoritative sheet resolved");
+  assert.equal(await ensureStyles(), a, "repeated ensureStyles stable");
 });

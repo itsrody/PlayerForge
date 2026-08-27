@@ -6,32 +6,60 @@ import { onDomMutations } from "../../kernel/dom-watch.js";
 export const SHELL_MARKER = "data-pf-shell";
 
 let sharedSheet = null;
+let adopted = false;
 let styleLoad = null;
 
+function adopt() {
+  if (adopted) {
+    return;
+  }
+  adopted = true;
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, sharedSheet];
+}
+
 /**
- * Load the shell stylesheet exactly once. Preferred source is the @resource
- * text (served out-of-band from the bundle by Tampermonkey and cached), with
- * the embedded string as a resilient offline/failure fallback. Idempotent and
- * cached; safe to await from multiple callers before shells are built.
+ * Apply the shell stylesheet as early as possible - ideally from document-start
+ * under Tampermonkey instant injection - so first-video dimming never waits on
+ * a network round trip. The embedded string is applied synchronously first
+ * (it is always available), then the @resource text is fetched in the
+ * background and the SAME sheet is upgraded in place via replaceSync, which
+ * propagates to every already-adopted reference (document + shadow roots).
+ * Synchronous; returns the live sheet immediately. Idempotent; safe to call
+ * from bootstrap() and again from shells.
+ */
+export function warmStyles() {
+  if (sharedSheet) {
+    return sharedSheet;
+  }
+  sharedSheet = new CSSStyleSheet();
+  sharedSheet.replaceSync(SHELL_CSS);
+  adopt();
+
+  styleLoad = (async () => {
+    let css = null;
+    if (typeof GM_getResourceText === "function") {
+      try {
+        css = await GM_getResourceText("pfStyle");
+      } catch (err) {
+        logger.error("inject", "Failed to load @resource stylesheet:", err);
+      }
+    }
+    if (css) {
+      // Replace in place: adopted sheets everywhere see the upgrade.
+      sharedSheet.replaceSync(css);
+    }
+    return sharedSheet;
+  })();
+  return sharedSheet;
+}
+
+/**
+ * Resolve the authoritative (post-@resource) stylesheet. Never rejects; a
+ * failed/absent fetch resolves to the embedded sheet. NOT the shell's critical
+ * path - shells should adopt via warmStyles() so dimming never blocks.
  */
 export function ensureStyles() {
-  if (!styleLoad) {
-    styleLoad = (async () => {
-      const sheet = new CSSStyleSheet();
-      let css = null;
-      if (typeof GM_getResourceText === "function") {
-        try {
-          css = await GM_getResourceText("pfStyle");
-        } catch (err) {
-          logger.error("inject", "Failed to load @resource stylesheet:", err);
-        }
-      }
-      sheet.replaceSync(css ?? SHELL_CSS);
-      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-      sharedSheet = sheet;
-      return sheet;
-    })();
-  }
+  warmStyles();
   return styleLoad;
 }
 

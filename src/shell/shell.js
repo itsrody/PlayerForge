@@ -11,7 +11,7 @@ import { TUNING } from "./chrome/config.js";
 import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls } from "./media.js";
-import { SHELL_MARKER, ensureStyles, injectShell, watchShellHost } from "./chrome/inject.js";
+import { SHELL_MARKER, warmStyles, injectShell, watchShellHost } from "./chrome/inject.js";
 import { requestFullscreenProvision } from "../shared/context.js";
 
 const VIDEO_EVENTS = [
@@ -282,7 +282,10 @@ export class Shell {
   }
 
   async #injectDom() {
-    await ensureStyles();
+    // warmStyles() is synchronous - the embedded sheet is adopted immediately,
+    // so shell construction never blocks on the @resource fetch. A warm
+    // background upgrade later propagates through the same shared sheet.
+    warmStyles();
     this.#shellDom = injectShell(this.container);
     if (!this.#shellDom) {
       logger.error("shell", "Failed to inject shell DOM");
