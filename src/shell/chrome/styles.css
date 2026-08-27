@@ -1,10 +1,46 @@
+/* ------------------------------------------------------------------
+   PlayerForge HUD styles - Gecko 154+ native: CSS nesting, @container,
+   @starting-style, :has, color-mix. Design tokens live on the shell
+   root; every surface derives from them, so theming/contrast tuning is
+   one edit. Components are grouped per tree with native nesting (&).
+   ------------------------------------------------------------------ */
 .pf-shell {
-  /* Palette base - ink and accent custom properties for the flat HUD.
-     --pf-bg is kept as a hook for consumers; surfaces use fixed rgba(). */
-  --pf-fg: #fff;
-  --pf-bg: #000;
-  --pf-accent: #4a9eff;
+  /* -- Tokens: palette, borders, radii, type, motion, z-ladder -- */
+  --pf-fg: #fff;                    /* primary text            */
+  --pf-bg: #000;                    /* base ink                */
+  --pf-accent: #4a9eff;             /* interaction accent      */
 
+  --pf-surface: rgba(0, 0, 0, 0.8);              /* toast + panel sheets        */
+  --pf-surface-soft: rgba(255, 255, 255, 0.04);  /* cells, stepper, toggle bg   */
+  --pf-surface-mid: rgba(255, 255, 255, 0.09);   /* ghost btn, hover cells      */
+  --pf-surface-strong: rgba(255, 255, 255, 0.16);/* toast actions, ghost hover  */
+  --pf-border: rgba(255, 255, 255, 0.14);        /* strong outlines             */
+  --pf-border-soft: rgba(255, 255, 255, 0.1);    /* hairline dividers           */
+  --pf-border-control: rgba(255, 255, 255, 0.18);/* inputs, switches            */
+  --pf-border-input: rgba(255, 255, 255, 0.2);   /* color wells, selects        */
+
+  --pf-text-dim: rgba(255, 255, 255, 0.6);       /* secondary text              */
+  --pf-text-mid: rgba(255, 255, 255, 0.7);       /* meta / hint emphasis        */
+  --pf-text-soft: rgba(255, 255, 255, 0.65);     /* uppercase labels            */
+
+  --pf-radius-pill: 999px;
+  --pf-radius-lg: 12px;
+  --pf-radius-md: 8px;
+  --pf-radius-sm: 6px;
+  --pf-radius-xs: 7px;
+
+  --pf-font-xs: 11px;
+  --pf-font-sm: 12px;
+  --pf-font-md: 13px;
+  --pf-font-lg: 14px;
+
+  --pf-ease: 0.15s ease;
+
+  --pf-z-hud: 2;
+  --pf-z-toast: 3;
+  --pf-z-panel: 4;
+
+  /* -- Reset + base -- */
   position: absolute;
   top: 0;
   left: 0;
@@ -17,17 +53,14 @@
      the SDK paints inside the player. */
   z-index: 2147483647;
   outline: none;
-  /* system-ui first: the platform font path Firefox actually resolves;
-     the -apple-system tokens remain as Safari/Chrome fallbacks. */
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  font-size: 14px;
+  font-size: var(--pf-font-lg);
   color: var(--pf-fg);
   box-sizing: border-box;
-}
-.pf-shell *,
-.pf-shell *::before,
-.pf-shell *::after {
-  box-sizing: border-box;
+
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
 }
 
 /* Neutralize the inline 'position: relative' we set on the container
@@ -44,10 +77,17 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 2;
-}
-.pf-hud-layer > * {
-  pointer-events: auto;
+  z-index: var(--pf-z-hud);
+
+  /* Re-enable pointer events on every HUD child - but keep the caption
+     layer click-transparent via the more specific rule below. */
+  > * {
+    pointer-events: auto;
+  }
+
+  > .pf-cue-layer {
+    pointer-events: none;
+  }
 }
 
 /* - Cue Layer (reusable caption DOM) - */
@@ -68,16 +108,12 @@
   inset: 0;
   overflow: hidden;
   pointer-events: none;
-  z-index: 2;
+  z-index: var(--pf-z-hud);
   /* Caption swaps are our hottest DOM churn - keep their layout and paint
      isolated inside this fixed-size layer so the player tree never pays. */
   contain: layout paint;
 }
-/* .pf-hud-layer > * re-enables pointer events on every HUD child -
-   this more-specific rule keeps the caption layer click-transparent. */
-.pf-hud-layer > .pf-cue-layer {
-  pointer-events: none;
-}
+
 .pf-cue {
   position: absolute;
   top: var(--pf-cue-top, 85%);
@@ -93,9 +129,10 @@
   white-space: pre-wrap;
   text-align: center;
   pointer-events: none;
-}
-.pf-cue[hidden] {
-  display: none !important;
+
+  &[hidden] {
+    display: none !important;
+  }
 }
 
 /* - Toast (singleton <pf-toast>) - */
@@ -103,9 +140,9 @@
    Rides the HUD layer under the host's z-index doctrine - above captions,
    below the panel. */
 pf-toast {
-  --pf-toast-bg: rgba(0, 0, 0, 0.8);
+  --pf-toast-bg: var(--pf-surface);
   --pf-toast-color: var(--pf-fg);
-  --pf-toast-radius: 999px;
+  --pf-toast-radius: var(--pf-radius-pill);
 
   display: inline-flex;
   align-items: center;
@@ -113,7 +150,7 @@ pf-toast {
   position: absolute;
   top: 12px;
   left: 50%;
-  z-index: 3;
+  z-index: var(--pf-z-toast);
   /* Dedicated translate property (Chrome 104+) - keeps centering out of
      the transform property, so transform-based animations on the toast
      never clobber it. */
@@ -122,12 +159,9 @@ pf-toast {
   color: var(--pf-toast-color);
   padding: 6px 16px;
   border-radius: var(--pf-toast-radius);
-  font-size: 14px;
+  font-size: var(--pf-font-lg);
   font-weight: 500;
   line-height: 1;
-  /* One geometry for every toast - pill, single line, width capped with
-     ellipsis - whether or not action buttons ride along; their metrics
-     already match the text row. */
   max-width: min(92%, 440px);
   white-space: nowrap;
   overflow: hidden;
@@ -139,70 +173,74 @@ pf-toast {
   opacity: 0;
   transform: translateY(-4px);
   transition:
-    opacity 0.15s ease,
-    transform 0.15s ease;
-}
+    opacity var(--pf-ease),
+    transform var(--pf-ease);
 
-pf-toast.pf-visible {
-  opacity: 1;
-  transform: translateY(0);
-}
+  &.pf-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
 
-/* Icon inside toast */
-pf-toast .pf-toast-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.1em;
-  height: 1.1em;
-  flex-shrink: 0;
-  fill: currentColor;
-}
+  /* Icon inside toast */
+  .pf-toast-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.1em;
+    height: 1.1em;
+    flex-shrink: 0;
+    fill: currentColor;
+  }
 
-/* Text inside toast - clips with an ellipsis when a message exceeds the
-   pill cap instead of spilling out of the shell. */
-pf-toast .pf-toast-text {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+  /* Text inside toast - clips with an ellipsis when a message exceeds the
+     pill cap instead of spilling out of the shell. */
+  .pf-toast-text {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
-/* Action buttons (interactive toasts - e.g. resume prompt) */
-pf-toast .pf-toast-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: 4px;
-}
-pf-toast .pf-toast-actions button {
-  border: none;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
-  color: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1;
-  padding: 6px 10px;
-  cursor: pointer;
-}
-pf-toast .pf-toast-actions button:hover {
-  background: rgba(255, 255, 255, 0.28);
-}
-/* Icon-only action buttons - pill, sized to the toast text line */
-pf-toast .pf-toast-actions button:has(svg) {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-}
-pf-toast .pf-toast-actions button svg {
-  display: block;
-  width: 14px;
-  height: 14px;
-  fill: currentColor;
+  /* Action buttons (interactive toasts - e.g. resume prompt) */
+  .pf-toast-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 4px;
+
+    button {
+      border: none;
+      border-radius: var(--pf-radius-pill);
+      background: var(--pf-surface-strong);
+      color: inherit;
+      font-size: var(--pf-font-sm);
+      font-weight: 600;
+      line-height: 1;
+      padding: 6px 10px;
+      cursor: pointer;
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.28);
+      }
+
+      /* Icon-only action buttons - pill, sized to the toast text line */
+      &:has(svg) {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        padding: 0;
+      }
+
+      svg {
+        display: block;
+        width: 14px;
+        height: 14px;
+        fill: currentColor;
+      }
+    }
+  }
 }
 
 /* - Panel (universal plugin panel) - */
@@ -217,7 +255,7 @@ pf-toast .pf-toast-actions button svg {
   container-name: pf-panel;
 
   position: absolute;
-  z-index: 4;
+  z-index: var(--pf-z-panel);
   padding: 0;
 
   /* Closed by default; @starting-style keys off the display flip. Centered
@@ -234,14 +272,14 @@ pf-toast .pf-toast-actions button svg {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+  scrollbar-color: var(--pf-text-mid) transparent;
 
-  background: rgba(0, 0, 0, 0.8);
+  background: var(--pf-surface);
   color: var(--pf-fg);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 12px;
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-lg);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  font-size: 13px;
+  font-size: var(--pf-font-md);
   line-height: 1.4;
 
   opacity: 0;
@@ -249,464 +287,553 @@ pf-toast .pf-toast-actions button svg {
     opacity 0.14s ease,
     translate 0.14s ease,
     display 0.14s allow-discrete;
-}
-.pf-panel.pf-open {
-  display: block;
-  opacity: 1;
-  translate: -50% -50%;
-}
-@starting-style {
-  .pf-panel.pf-open {
-    opacity: 0;
-    translate: -50% calc(-50% - 6px);
+
+  &.pf-open {
+    display: block;
+    opacity: 1;
+    translate: -50% -50%;
+  }
+
+  /* Single header row: [segmented tabs] [close]. */
+  .pf-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border-bottom: 1px solid var(--pf-border-soft);
+  }
+
+  /* Segmented tab strip - icon + label, active label accent-tinted. Tabs
+     are content-sized (uniform internal padding, no equal-width stretch)
+     and the strip distributes them with space-evenly. */
+  .pf-panel-tabs {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    justify-content: space-evenly;
+    padding: 3px;
+    border: 1px solid var(--pf-border-soft);
+    border-radius: 10px;
+    background: var(--pf-surface-mid);
+
+    .pf-panel-tab {
+      flex: 0 1 auto;
+      min-width: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      padding: 6px 7px;
+      border: none;
+      border-radius: var(--pf-radius-xs);
+      background: transparent;
+      color: var(--pf-text-mid);
+      font-size: var(--pf-font-xs);
+      white-space: nowrap;
+      cursor: pointer;
+      outline: none;
+
+      svg {
+        width: 13px;
+        height: 13px;
+        flex: none;
+        fill: currentColor;
+      }
+
+      &:hover {
+        background: transparent;
+        color: var(--pf-fg);
+      }
+
+      &:focus-visible {
+        outline: 2px solid var(--pf-accent);
+        outline-offset: -2px;
+      }
+    }
+  }
+
+  .pf-panel-close {
+    flex: none;
+    border: none;
+    background: transparent;
+    color: var(--pf-text-mid);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 5px 8px;
+    border-radius: var(--pf-radius-xs);
+
+    &:hover {
+      background: var(--pf-border);
+      color: var(--pf-fg);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--pf-accent);
+      outline-offset: -2px;
+    }
+  }
+
+  .pf-panel-body {
+    padding: 6px 8px 10px;
+  }
+
+  .pf-panel-section {
+    margin-bottom: 6px;
+
+    &[hidden] {
+      display: none;
+    }
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+
+    /* Drag-and-drop target (Subtitles tab) */
+    &.pf-drop-active {
+      outline: 2px dashed var(--pf-accent);
+      outline-offset: -4px;
+      border-radius: var(--pf-radius-md);
+      background: rgba(74, 158, 255, 0.06);
+    }
+  }
+
+  /* Section header - label on the left, an icon action on the right. */
+  .pf-panel-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+
+    .pf-panel-label {
+      margin-bottom: 0;
+    }
+  }
+
+  .pf-panel-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+
+  .pf-panel-label {
+    display: block;
+    font-size: var(--pf-font-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--pf-text-soft);
+    margin-bottom: 4px;
+  }
+
+  .pf-panel-field .pf-panel-label {
+    flex: 1;
+    margin-bottom: 0;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--pf-fg);
+    font-size: var(--pf-font-md);
+  }
+
+  .pf-panel-value {
+    min-width: 34px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--pf-text-soft);
+  }
+
+  .pf-panel-hint {
+    font-size: var(--pf-font-sm);
+    color: var(--pf-text-dim);
+    margin: 6px 0;
+  }
+
+  /* Subtitles tab - upload / remove buttons on the left, the status line
+     beside them (single line, truncated). */
+  .pf-panel-load-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    .pf-panel-actions {
+      flex: none;
+      margin-bottom: 0;
+    }
+
+    .pf-panel-hint {
+      flex: 1;
+      min-width: 0;
+      margin: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+
+  /* Generic paired-action row (e.g. Reset / Preview in the Colors tab). */
+  .pf-panel-actions {
+    display: flex;
+    align-items: stretch;
+    gap: 6px;
+    margin-bottom: 6px;
+
+    .pf-btn {
+      width: auto;
+      flex: 1 1 0;
+      margin-bottom: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .pf-btn svg {
+      width: 16px;
+      height: 16px;
+    }
+  }
+
+  /* Icon-only action buttons - square, centered glyph, tooltip via title. */
+  .pf-panel-actions .pf-btn.pf-btn-icon,
+  .pf-panel-section-head .pf-btn.pf-btn-icon,
+  .pf-history-actions .pf-btn.pf-btn-icon {
+    flex: none;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    margin-bottom: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .pf-panel-actions .pf-btn.pf-btn-icon svg,
+  .pf-panel-section-head .pf-btn.pf-btn-icon svg,
+  .pf-history-actions .pf-btn.pf-btn-icon svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  /* Compact 2-column grid (Colors / Subtitles tabs) - minmax(0, 1fr)
+     lets columns shrink below a control's intrinsic width so the grid
+     never overflows the panel (no horizontal scroll). */
+  .pf-panel-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 4px 8px;
+    margin-bottom: 4px;
+  }
+
+  .pf-panel-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .pf-panel-cell-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 6px;
+
+    .pf-panel-label {
+      margin-bottom: 0;
+      font-size: var(--pf-font-xs);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--pf-text-soft);
+    }
+
+    .pf-panel-value {
+      min-width: 0;
+      font-size: var(--pf-font-xs);
+    }
+  }
+
+  /* Compact inline cells (Subtitles style grid) - label | control |
+     value on one line. Long labels ellipsize before the control starves. */
+  .pf-panel-grid-compact {
+    gap: 4px 8px;
+
+    .pf-panel-cell {
+      flex-direction: row;
+      align-items: center;
+      gap: 6px;
+
+      .pf-panel-label {
+        flex: none;
+        width: 48px;
+        min-width: 0;
+        margin-bottom: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .pf-panel-value {
+        flex: none;
+        min-width: 30px;
+        font-size: var(--pf-font-xs);
+      }
+
+      /* Color-swatch cell has no filling element - spread label / swatch /
+         hex so the value still lands on the right edge like the steppers. */
+      &:has(> input[type="color"]) {
+        justify-content: space-between;
+      }
+    }
+  }
+
+  /* Steppers in one-line cells take the flexible middle slot. */
+  .pf-panel-grid-compact .pf-panel-cell .pf-stepper {
+    flex: 1;
+    width: auto;
+  }
+
+  /* Color swatch - keeps the native picker, gets a rounded cap. */
+  input[type="color"] {
+    width: 28px;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--pf-border-input);
+    border-radius: var(--pf-radius-sm);
+    background: transparent;
+    cursor: pointer;
+  }
+
+  /* Toggle switch - appearance:none keeps real checkbox semantics. */
+  input[type="checkbox"] {
+    appearance: none;
+    flex: none;
+    width: 34px;
+    height: 20px;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--pf-border-control);
+    border-radius: var(--pf-radius-pill);
+    background: var(--pf-surface-strong);
+    position: relative;
+    cursor: pointer;
+    transition: background var(--pf-ease), border-color var(--pf-ease);
+
+    &::before {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--pf-fg);
+      transition: translate var(--pf-ease);
+    }
+
+    &:checked {
+      background: var(--pf-accent);
+      border-color: var(--pf-accent);
+
+      &::before {
+        translate: 14px 0;
+      }
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--pf-accent);
+      outline-offset: 2px;
+    }
+  }
+
+  select.pf-select {
+    flex: 1;
+    padding: 4px 6px;
+    border: 1px solid var(--pf-border-input);
+    border-radius: var(--pf-radius-sm);
+    background: var(--pf-surface-soft);
+    color: var(--pf-fg);
+    font-size: var(--pf-font-md);
+
+    &:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+  }
+
+  /* Grid cells stretch controls full-width */
+  .pf-panel-cell .pf-stepper,
+  .pf-panel-cell select.pf-select {
+    flex: none;
+    width: 100%;
+  }
+
+  .pf-panel-cell input[type="color"] {
+    width: 100%;
+    height: 22px;
+    padding: 0;
+    border: 1px solid var(--pf-border-input);
+    border-radius: var(--pf-radius-sm);
+    background: transparent;
+    cursor: pointer;
   }
 }
 
-/* Single header row: [segmented tabs] [close]. */
-.pf-panel-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-/* Segmented tab strip - icon + label, active label accent-tinted. Tabs are
-   content-sized (uniform internal padding, no equal-width stretch) and the
-   strip distributes them with space-evenly, so every tab keeps the same
-   internal breathing room and tab separation is wider than the icon-label
-   gap (label pairs with its own icon, not the neighbour's). */
-.pf-panel-tabs {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  justify-content: space-evenly;
-  padding: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.05);
-}
-.pf-panel-tab {
-  flex: 0 1 auto;
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  padding: 6px 7px;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.6);
-  font-size: 11px;
-  white-space: nowrap;
-  cursor: pointer;
-  outline: none;
-}
-.pf-panel-tab svg {
-  width: 13px;
-  height: 13px;
-  flex: none;
-  fill: currentColor;
-}
-.pf-panel-tab:hover { background: transparent; color: var(--pf-fg); }
-.pf-panel-tab:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: -2px; }
-.pf-panel-tab-active {
-  background: transparent;
-  color: var(--pf-accent);
-  font-weight: 600;
-}
-.pf-panel-close {
-  flex: none;
-  border: none;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 5px 8px;
-  border-radius: 7px;
-}
-.pf-panel-close:hover { background: rgba(255, 255, 255, 0.14); color: var(--pf-fg); }
-.pf-panel-close:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: -2px; }
-
-.pf-panel-body { padding: 6px 8px 10px; }
-
-.pf-panel-section { margin-bottom: 6px; }
-.pf-panel-section[hidden] { display: none; }
-.pf-panel-section:last-child { margin-bottom: 0; }
-
-/* Section header - label on the left, an icon action (e.g. Reset style)
-   on the right. */
-.pf-panel-section-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-.pf-panel-section-head .pf-panel-label { margin-bottom: 0; }
-
-/* Icon-only action buttons - square, centered glyph, tooltip via title. */
-.pf-panel-actions .pf-btn.pf-btn-icon,
-.pf-panel-section-head .pf-btn.pf-btn-icon,
-.pf-history-actions .pf-btn.pf-btn-icon {
-  flex: none;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  margin-bottom: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.pf-panel-actions .pf-btn.pf-btn-icon svg,
-.pf-panel-section-head .pf-btn.pf-btn-icon svg,
-.pf-history-actions .pf-btn.pf-btn-icon svg {
-  width: 16px;
-  height: 16px;
-}
-.pf-panel-field {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-.pf-panel-label {
-  display: block;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: rgba(255, 255, 255, 0.65);
-  margin-bottom: 4px;
-}
-.pf-panel-field .pf-panel-label {
-  flex: 1;
-  margin-bottom: 0;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--pf-fg);
-  font-size: 13px;
-}
-/* One-line toggle + preset row (Colors tab) - the label hugs the switch
-   instead of stretching, so the preset select fills the rest. */
-.pf-panel-top .pf-panel-label {
-  flex: none;
-}
-/* Reset / Preview buttons ride the right edge of the preset row. */
-.pf-panel-top .pf-panel-actions {
-  flex: none;
-  margin-bottom: 0;
-}
-.pf-panel-value {
-  min-width: 34px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.8);
-}
-.pf-panel-hint {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
-  margin: 6px 0;
-}
-
-/* Subtitles tab - upload / remove buttons on the left, the status line
-   beside them (single line, truncated). */
-.pf-panel-load-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.pf-panel-load-row .pf-panel-actions {
-  flex: none;
-  margin-bottom: 0;
-}
-.pf-panel-load-row .pf-panel-hint {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Drag-and-drop target (Subtitles tab) - highlighted while dragging files */
-.pf-panel-section.pf-drop-active {
-  outline: 2px dashed var(--pf-accent);
-  outline-offset: -4px;
-  border-radius: 8px;
-  background: rgba(74, 158, 255, 0.06);
-}
-
-/* Generic paired-action row (e.g. Reset / Preview in the Colors tab).
-   Equal-width buttons stretch to fill the row. */
-.pf-panel-actions {
-  display: flex;
-  align-items: stretch;
-  gap: 6px;
-  margin-bottom: 6px;
-}
-.pf-panel-actions .pf-btn {
-  width: auto;
-  flex: 1 1 0;
-  margin-bottom: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-.pf-panel-actions .pf-btn svg { width: 16px; height: 16px; }
-
-/* Compact 2-column grid (Colors / Subtitles tabs) - minmax(0, 1fr)
-   lets columns shrink below a control's intrinsic width so the grid never
-   overflows the panel (no horizontal scroll). */
-.pf-panel-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 4px 8px;
-  margin-bottom: 4px;
-}
-.pf-panel-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.pf-panel-cell-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 6px;
-}
-.pf-panel-cell-head .pf-panel-label {
-  margin-bottom: 0;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: rgba(255, 255, 255, 0.65);
-}
-.pf-panel-cell-head .pf-panel-value {
-  min-width: 0;
-  font-size: 11px;
-}
-
-/* Compact inline cells (Subtitles style grid) - label | control | value
-   on one line, so each control is a single row instead of label-over-input.
-   Long labels ellipsize before the control starves. */
-.pf-panel-grid-compact { gap: 4px 8px; }
-.pf-panel-grid-compact .pf-panel-cell {
-  flex-direction: row;
-  align-items: center;
-  gap: 6px;
-}
-.pf-panel-grid-compact .pf-panel-cell .pf-panel-label {
-  flex: none;
-  width: 48px;
-  min-width: 0;
-  margin-bottom: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.pf-panel-grid-compact .pf-panel-cell .pf-panel-value {
-  flex: none;
-  min-width: 30px;
-  font-size: 11px;
-}
-/* Color-swatch cell has no filling element - spread label / swatch / hex
-   so the value still lands on the right edge like the stepper cells. */
-.pf-panel-grid-compact .pf-panel-cell:has(> input[type="color"]) {
-  justify-content: space-between;
-}
-
-/* Numeric stepper - text input with stacked up/down chevron buttons.
-   Replaces the old range sliders; fills its cell, or the flexible middle
-   slot in inline rows. */
-.pf-stepper {
-  display: flex;
-  align-items: stretch;
-  width: 100%;
-  min-width: 0;
-  height: 26px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  overflow: hidden;
-  transition: border-color 0.12s ease;
-}
-.pf-stepper:focus-within { border-color: var(--pf-accent); }
-.pf-stepper-input {
-  flex: 1;
-  min-width: 0;
-  width: 100%;
-  padding: 0 8px;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--pf-fg);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-.pf-stepper-arrows {
-  display: flex;
-  flex-direction: column;
-  flex: none;
-  width: 18px;
-  border-left: 1px solid rgba(255, 255, 255, 0.1);
-}
-.pf-stepper-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.6);
-  cursor: pointer;
-  touch-action: none;
-}
-.pf-stepper-btn svg { width: 11px; height: 11px; fill: currentColor; }
-.pf-stepper-btn:hover { color: var(--pf-fg); background: rgba(255, 255, 255, 0.09); }
-.pf-stepper-btn:first-child { border-bottom: 1px solid rgba(255, 255, 255, 0.1); }
-.pf-stepper-disabled { opacity: 0.45; pointer-events: none; }
-
-/* Steppers in one-line cells (Subtitles style grid) take the same flexible
-   middle slot the range inputs used to occupy. */
-.pf-panel-grid-compact .pf-panel-cell .pf-stepper {
-  flex: 1;
-  width: auto;
-}
-
-/* Color swatch - keeps the native picker, gets a rounded cap. */
-.pf-panel input[type="color"] {
-  width: 28px;
-  height: 22px;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 6px;
-  background: transparent;
-  cursor: pointer;
-}
-
-/* Toggle switch - appearance:none keeps real checkbox semantics. */
-.pf-panel input[type="checkbox"] {
-  appearance: none;
-  flex: none;
-  width: 34px;
-  height: 20px;
-  margin: 0;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
-  position: relative;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-.pf-panel input[type="checkbox"]::before {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--pf-fg);
-  transition: translate 0.15s ease;
-}
-.pf-panel input[type="checkbox"]:checked {
-  background: var(--pf-accent);
-  border-color: var(--pf-accent);
-}
-.pf-panel input[type="checkbox"]:checked::before { translate: 14px 0; }
-.pf-panel input[type="checkbox"]:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
-
-/* Settings tab - compact toggle cards (whole card is the label) */
-.pf-settings-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  padding: 6px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
-  cursor: pointer;
-  user-select: none;
-  font-size: 12px;
-  line-height: 1.3;
-}
-.pf-settings-toggle:hover { background: rgba(255, 255, 255, 0.09); }
-.pf-settings-toggle input { margin: 0; flex: none; }
-.pf-settings-toggle span {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.pf-panel select.pf-select {
-  flex: 1;
-  padding: 4px 6px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--pf-fg);
-  font-size: 13px;
-}
-.pf-panel select.pf-select:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* Grid cells stretch controls full-width */
-.pf-panel-cell .pf-stepper,
-.pf-panel-cell select.pf-select {
-  flex: none;
-  width: 100%;
-}
-.pf-panel-cell input[type="color"] {
-  width: 100%;
-  height: 22px;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 6px;
-  background: transparent;
-  cursor: pointer;
-}
-
+/* - Buttons - */
 .pf-btn {
   display: block;
   width: 100%;
   padding: 6px 10px;
   margin-bottom: 6px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--pf-radius-md);
   background: var(--pf-accent);
   color: var(--pf-fg);
-  font-size: 13px;
+  font-size: var(--pf-font-md);
   font-weight: 500;
   cursor: pointer;
+
+  &:focus-visible {
+    outline: 2px solid var(--pf-accent);
+    outline-offset: 2px;
+  }
+
+  &:disabled,
+  &:disabled:hover {
+    opacity: 0.35;
+    cursor: not-allowed;
+    background: var(--pf-accent);
+  }
 }
-.pf-btn:focus-visible { outline: 2px solid var(--pf-accent); outline-offset: 2px; }
 
 .pf-btn-ghost {
-  background: rgba(255, 255, 255, 0.09);
+  background: var(--pf-surface-mid);
   color: inherit;
-}
-.pf-btn-ghost:hover { background: rgba(255, 255, 255, 0.16); }
-.pf-btn:disabled,
-.pf-btn:disabled:hover {
-  opacity: 0.35;
-  cursor: not-allowed;
-  background: var(--pf-accent);
-}
-.pf-btn-ghost:disabled,
-.pf-btn-ghost:disabled:hover {
-  background: rgba(255, 255, 255, 0.09);
+
+  &:hover {
+    background: var(--pf-surface-strong);
+  }
+
+  &:disabled,
+  &:disabled:hover {
+    background: var(--pf-surface-mid);
+  }
 }
 
+/* - Numeric stepper - */
+.pf-stepper {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius-md);
+  background: var(--pf-surface-soft);
+  overflow: hidden;
+  transition: border-color 0.12s ease;
+
+  &:focus-within {
+    border-color: var(--pf-accent);
+  }
+
+  .pf-stepper-input {
+    flex: 1;
+    min-width: 0;
+    width: 100%;
+    padding: 0 8px;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--pf-fg);
+    font-size: var(--pf-font-sm);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .pf-stepper-arrows {
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    width: 18px;
+    border-left: 1px solid var(--pf-border-soft);
+  }
+
+  .pf-stepper-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--pf-text-dim);
+    cursor: pointer;
+    touch-action: none;
+
+    svg {
+      width: 11px;
+      height: 11px;
+      fill: currentColor;
+    }
+
+    &:hover {
+      color: var(--pf-fg);
+      background: var(--pf-surface-mid);
+    }
+
+    &:first-child {
+      border-bottom: 1px solid var(--pf-border-soft);
+    }
+  }
+}
+
+/* Active state rules kept flat to preserve their original specificity
+   (0,1,0): the active-tab hue must still yield to the tab hover rule, and
+   the stepper's inactive state must not outrank a focused stepper. */
+.pf-panel-tab-active {
+  background: transparent;
+  color: var(--pf-accent);
+  font-weight: 600;
+}
+
+.pf-stepper-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* - Settings tab - compact toggle cards (whole card is the label) */
+.pf-settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--pf-border-soft);
+  border-radius: var(--pf-radius-sm);
+  background: var(--pf-surface-soft);
+  cursor: pointer;
+  user-select: none;
+  font-size: var(--pf-font-sm);
+  line-height: 1.3;
+
+  &:hover {
+    background: var(--pf-surface-mid);
+  }
+
+  input {
+    margin: 0;
+    flex: none;
+  }
+
+  span {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* - Options (Skip Step) segmented buttons - */
 .pf-options-cell {
   display: flex;
   flex-direction: row;
@@ -714,41 +841,42 @@ pf-toast .pf-toast-actions button svg {
   justify-content: flex-start;
   gap: 10px;
   grid-column: 1 / -1;
+
+  .pf-panel-label {
+    min-width: 0;
+    margin-bottom: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
-.pf-options-cell .pf-panel-label {
-  min-width: 0;
-  margin-bottom: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+
 .pf-options-row {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
 }
+
 .pf-options-btn {
   padding: 5px 10px;
-  font-size: 13px;
+  font-size: var(--pf-font-md);
   font-weight: 600;
   text-align: center;
-  background: rgba(255, 255, 255, 0.09);
+  background: var(--pf-surface-mid);
   color: inherit;
-  border-radius: 6px;
+  border-radius: var(--pf-radius-sm);
+
+  &:hover {
+    background: var(--pf-surface-strong);
+  }
 }
-.pf-options-btn:hover { background: rgba(255, 255, 255, 0.18); }
+
 .pf-options-active {
   background: var(--pf-accent) !important;
   color: #fff;
 }
 
-/* Narrow screens: prevent options label + buttons from overflowing. */
-@media (max-width: 520px) {
-  .pf-options-cell { gap: 6px; }
-  .pf-options-row { flex-shrink: 0; }
-}
-
-/* History tab - card rows */
+/* - History tab - card rows */
 .pf-history-list {
   display: flex;
   flex-direction: column;
@@ -756,18 +884,23 @@ pf-toast .pf-toast-actions button svg {
   max-height: 168px;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+  scrollbar-color: var(--pf-text-mid) transparent;
 }
+
 .pf-history-card {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--pf-border-soft);
+  border-radius: var(--pf-radius-sm);
+  background: var(--pf-surface-soft);
+
+  &:hover {
+    background: var(--pf-surface-mid);
+  }
 }
-.pf-history-card:hover { background: rgba(255, 255, 255, 0.09); }
+
 .pf-history-info {
   flex: 1;
   min-width: 0;
@@ -775,60 +908,60 @@ pf-toast .pf-toast-actions button svg {
   flex-direction: column;
   gap: 1px;
 }
+
 .pf-history-title {
-  font-size: 12px;
+  font-size: var(--pf-font-sm);
   line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .pf-history-meta {
-  font-size: 11px;
+  font-size: var(--pf-font-xs);
   opacity: 0.6;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .pf-history-actions {
   display: flex;
   gap: 2px;
   flex-shrink: 0;
 }
 
-/* Shell-true density - the panel adapts to its own width (~ the video
-   container), not the viewport: wide panels keep the two-column grid,
-   very narrow players collapse it to one column. */
+/* - Shell-true density - the panel adapts to its own width (~ the video
+     container), not the viewport: wide panels keep the two-column grid,
+     very narrow players collapse it to one column. */
 @container pf-panel (max-width: 330px) {
   .pf-panel-header { padding: 6px; gap: 6px; }
   .pf-panel-body { padding: 6px; }
   .pf-panel-grid { grid-template-columns: minmax(0, 1fr); }
   .pf-history-card { padding: 5px 6px; gap: 6px; }
-  .pf-history-title { font-size: 11px; }
+  .pf-history-title { font-size: var(--pf-font-xs); }
   .pf-history-meta { font-size: 10px; }
   .pf-history-list { max-height: 152px; }
 }
-
-/* - Mobile-only controls - */
-[data-pf-pip] { display: none; }
 
 /* - Mobile & touch - */
 /* Touch devices (phones/tablets): enlarge hit targets toward
    thumb-sized (~40px) tap areas. */
 @media (pointer: coarse) {
   [data-pf-pip] { display: block; }
-  .pf-options-btn { padding: 7px 14px; font-size: 14px; }
+  .pf-options-btn { padding: 7px 14px; font-size: var(--pf-font-lg); }
   .pf-options-row { gap: 8px; }
   .pf-panel-body { padding: 10px 12px 12px; }
   .pf-panel-close { padding: 6px 10px; font-size: 18px; }
-  .pf-panel-tab { padding: 9px 10px; font-size: 12px; }
-  .pf-btn { padding: 11px 12px; font-size: 14px; }
+  .pf-panel-tab { padding: 9px 10px; font-size: var(--pf-font-sm); }
+  .pf-btn { padding: 11px 12px; font-size: var(--pf-font-lg); }
   .pf-panel .pf-stepper { height: 32px; }
   .pf-panel input[type="color"] { height: 28px; }
   .pf-panel input[type="checkbox"] { width: 40px; height: 24px; }
   .pf-panel input[type="checkbox"]::before { width: 18px; height: 18px; }
   .pf-panel input[type="checkbox"]:checked::before { translate: 18px 0; }
-  .pf-settings-toggle { padding: 9px 10px; font-size: 13px; }
-  .pf-panel select.pf-select { padding: 9px 8px; font-size: 14px; }
+  .pf-settings-toggle { padding: 9px 10px; font-size: var(--pf-font-md); }
+  .pf-panel select.pf-select { padding: 9px 8px; font-size: var(--pf-font-lg); }
   .pf-panel-actions .pf-btn.pf-btn-icon,
   .pf-panel-section-head .pf-btn.pf-btn-icon,
   .pf-history-actions .pf-btn.pf-btn-icon {
@@ -842,14 +975,13 @@ pf-toast .pf-toast-actions button svg {
     height: 18px;
   }
   .pf-history-card { padding: 8px 10px; gap: 8px; }
-  .pf-history-title { font-size: 13px; }
-  .pf-history-meta { font-size: 12px; }
+  .pf-history-title { font-size: var(--pf-font-md); }
+  .pf-history-meta { font-size: var(--pf-font-sm); }
   .pf-history-list { max-height: 184px; }
 }
 
-/* Narrow screens (portrait phones): a fixed 344px panel would
-   swallow the whole video - span edge-to-edge instead (video is
-   typically fullscreen here, so the shell covers the viewport). */
+/* Narrow screens (portrait phones): a fixed 344px panel would swallow the
+   whole video - span edge-to-edge instead. */
 @media (max-width: 520px) {
   .pf-panel {
     width: auto;
@@ -889,9 +1021,9 @@ pf-toast .pf-toast-actions button svg {
 }
 
 /* Landscape phones (touch): the viewport is short and wide, so the
-   centered dialog would swallow the height. Compact right-edge
-   sheet instead - spans the full height, narrow enough to leave the
-   video's center clear, with icon-only tabs. */
+   centered dialog would swallow the height. Compact right-edge sheet
+   instead - spans the full height, narrow enough to leave the video's
+   center clear, with icon-only tabs. */
 @media (orientation: landscape) and (pointer: coarse) and (max-height: 480px) {
   .pf-panel {
     top: 8px;
@@ -901,7 +1033,7 @@ pf-toast .pf-toast-actions button svg {
     margin: 0;
     width: min(340px, 45vw);
     max-height: none;
-    border-radius: 14px;
+    border-radius: var(--pf-radius-lg);
   }
   .pf-panel,
   .pf-panel.pf-open {
@@ -915,7 +1047,7 @@ pf-toast .pf-toast-actions button svg {
   .pf-tab-label { display: none; }
   .pf-panel-tab { padding: 8px 10px; }
   .pf-history-card { padding: 6px 8px; gap: 6px; }
-  .pf-history-title { font-size: 11px; }
+  .pf-history-title { font-size: var(--pf-font-xs); }
   .pf-history-meta { font-size: 10px; }
   .pf-history-list { max-height: 144px; }
   .pf-panel-actions .pf-btn.pf-btn-icon,
@@ -932,6 +1064,15 @@ pf-toast .pf-toast-actions button svg {
   }
 }
 
+/* Responsive options label/buttons spacing for narrow screens. */
+@media (max-width: 520px) {
+  .pf-options-cell { gap: 6px; }
+  .pf-options-row { flex-shrink: 0; }
+}
+
+/* - Mobile-only controls - */
+[data-pf-pip] { display: none; }
+
 /* Reset-button flash: a quick accent-colored glow that fades out. */
 @keyframes pf-reset-flash {
   0% { background-color: transparent; }
@@ -940,4 +1081,13 @@ pf-toast .pf-toast-actions button svg {
 }
 .pf-flash {
   animation: pf-reset-flash 0.4s ease-out;
+}
+
+/* @starting-style for the panel's open transition. Keyed separately so it
+   parses cleanly whether the browser supports the display transition or not. */
+@starting-style {
+  .pf-panel.pf-open {
+    opacity: 0;
+    translate: -50% calc(-50% - 6px);
+  }
 }
