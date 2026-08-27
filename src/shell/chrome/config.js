@@ -59,7 +59,7 @@ const SETTINGS_SCHEMA = [
     key: "gestures.pinch",
     type: "bool",
     label: "Pinch to Fill",
-    default: false,
+    default: true,
     group: "Features"
   },
   {
