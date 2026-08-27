@@ -26,7 +26,8 @@ const ICONS = {
   link: svgIcon("M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"),
   "chevron-up": svgIcon("M12 7.6l6.3 6.3-1.06 1.06L12 9.72l-5.24 5.24L5.7 13.9z"),
   "chevron-down": svgIcon("M12 16.4L5.7 10.1l1.06-1.06L12 14.28l5.24-5.24 1.06 1.06z"),
-  pip: svgIcon("M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98V5c0-1.1-.9-2-2-2zm0 16.01H3V4.98h18v14.03z")
+  pip: svgIcon("M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98V5c0-1.1-.9-2-2-2zm0 16.01H3V4.98h18v14.03z"),
+  lock: svgIcon("M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5zm-3 8V7a3 3 0 0 1 6 0v3H9z")
 };
 
 const ALIASES = {
@@ -46,6 +47,7 @@ const ALIASES = {
   "fs-enter": "fullscreen",
   "fs-exit": "exit-fullscreen",
   "fs-exiting": "down-arrow",
+  "fs-block": "lock",
   cc: "captions",
   restart: "reload",
   gear: "settings",

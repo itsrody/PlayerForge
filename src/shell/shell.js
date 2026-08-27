@@ -7,10 +7,12 @@ import { SubtitlesSection } from "./subtitles/section.js";
 import { VideoFilter } from "./filter.js";
 import { SettingsPanel } from "./chrome/panel.js";
 import { addSettingsSection, getSetting } from "./chrome/config.js";
+import { TUNING } from "./chrome/config.js";
 import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls } from "./media.js";
 import { SHELL_MARKER, ensureStyles, injectShell, watchShellHost } from "./chrome/inject.js";
+import { requestFullscreenProvision } from "../shared/context.js";
 
 const VIDEO_EVENTS = [
   "play", "pause", "playing", "waiting", "seeking", "seeked", "timeupdate",
@@ -314,6 +316,26 @@ export class Shell {
       }
     };
     document.addEventListener("fullscreenchange", onChange, { signal: this.#scope.signal });
+    // An attempt to enter fullscreen was rejected (typically because an
+    // ancestor embed lacks allowfullscreen - Firefox requires it on every
+    // frame edge, bug 1608358). Surface a hint and re-provision the chain
+    // (idempotent) so a retry succeeds if the attributes were just granted,
+    // e.g. an SDK iframe created after our boot-time provisioning.
+    document.addEventListener("fullscreenerror", () => {
+      if (this.#destroyed || document.fullscreenElement) {
+        return;
+      }
+      this.#bus.emit("pf:shell-fullscreen-blocked", { shellId: this.id });
+      this.#toasts?.show({
+        icon: "fs-block",
+        text: "Fullscreen blocked by embed",
+        duration: TUNING.toast.infoMs,
+        group: "fs-block"
+      });
+      if (window.top !== window) {
+        requestFullscreenProvision();
+      }
+    }, { signal: this.#scope.signal });
   }
 
   /** Keep screen awake while video is playing; release on pause/ended/hidden. */

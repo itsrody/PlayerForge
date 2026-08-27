@@ -141,3 +141,34 @@ test("a destroyed shell no longer reacts to fullscreen transitions", () => {
   );
   teardown();
 });
+
+test("rejected fullscreen request surfaces a hint and emits the blocked event", () => {
+  const env = makeShell();
+  const { dom, shell, emissions, teardown } = env;
+
+  dom.window.document.dispatchEvent(new dom.window.Event("fullscreenerror"));
+
+  const blocked = emissions.filter((entry) => entry.type === "pf:shell-fullscreen-blocked");
+  assert.equal(blocked.length, 1);
+  assert.deepEqual(blocked[0].detail, { shellId: "t" });
+
+  const toast = shell.shellDom.hudLayer.querySelector("pf-toast");
+  assert.ok(toast, "toast surface exists");
+  assert.equal(toast.classList.contains("pf-visible"), true);
+  assert.match(toast.textContent, /Fullscreen blocked/);
+  teardown();
+});
+
+test("rejected fullscreen while already fullscreen emits nothing", () => {
+  const env = makeShell();
+  const { dom, shell, container, setFullscreenEl, emissions, teardown } = env;
+
+  setFullscreenEl(container);
+  dom.window.document.dispatchEvent(new dom.window.Event("fullscreenerror"));
+
+  assert.equal(
+    emissions.filter((entry) => entry.type === "pf:shell-fullscreen-blocked").length,
+    0
+  );
+  teardown();
+});
