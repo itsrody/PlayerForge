@@ -268,16 +268,23 @@ function clearFillMode(shell, state, animate = true) {
   }
 }
 
-/** Scale factor needed for the video's rendered box to cover the visual viewport. */
-function computeCoverScale(video) {
+/**
+ * Scale factor needed for the video's rendered box to cover the device screen.
+ * Fill mode is fullscreen-only (pinch binding is fs-gated), so the target is
+ * the physical screen, read straight off `screen.width/height` rather than the
+ * window - the two coincide in fullscreen, but the intent is unambiguous here:
+ * cover the whole display. Guards return 0 so the caller skips fill when the
+ * video or screen size isn't known yet.
+ */
+export function computeCoverScale(video) {
   const videoWidth = video.videoWidth;
   const videoHeight = video.videoHeight;
   if (!videoWidth || !videoHeight) {
     return 0;
   }
-  const viewportWidth = window.innerWidth;
-  const viewportHeight = window.innerHeight;
-  if (!viewportWidth || !viewportHeight) {
+  const screenWidth = screen.width;
+  const screenHeight = screen.height;
+  if (!screenWidth || !screenHeight) {
     return 0;
   }
   const rect = video.getBoundingClientRect();
@@ -287,7 +294,7 @@ function computeCoverScale(video) {
   const aspect = videoWidth / videoHeight;
   const fittedWidth = Math.min(rect.width, rect.height * aspect);
   const fittedHeight = Math.min(rect.height, rect.width / aspect);
-  return Math.max(viewportWidth / fittedWidth, viewportHeight / fittedHeight);
+  return Math.max(screenWidth / fittedWidth, screenHeight / fittedHeight);
 }
 
 function volumeIcon(volume, muted) {

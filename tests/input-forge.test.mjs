@@ -6,7 +6,7 @@ globalThis.GM_getValue = (key, fallback) => fallback;
 globalThis.GM_setValue = () => {};
 
 const { InputForge } = await import("../src/shell/inputs/forge.js");
-const { GESTURE_EVENTS } = await import("../src/shell/inputs/actions.js");
+const { GESTURE_EVENTS, computeCoverScale } = await import("../src/shell/inputs/actions.js");
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -353,3 +353,33 @@ test("typing targets outside the container never trigger hotkeys", () => {
   assert.equal(keystroke.defaultPrevented, false);
   controller.destroy();
 });
+
+test("computeCoverScale covers the device screen from the rendered box", () => {
+  const { dom, video } = makeEnv();
+  // Landscape 16:9 screen, like a fullscreened display.
+  globalThis.screen = { width: 1920, height: 1080 };
+
+  // 16:9 video boxed (letterboxed) into the 800x300 zone -> contained box.
+  Object.defineProperty(video, "videoWidth", { value: 1920, configurable: true });
+  Object.defineProperty(video, "videoHeight", { value: 1080, configurable: true });
+  video.getBoundingClientRect = () => ({
+    left: 0, right: 800, top: 0, bottom: 300, width: 800, height: 300
+  });
+
+  // Contain-fit: the video sits at min(800, 300*16/9)=533x300, aspect 16:9.
+  // Cover the 1920x1080 screen -> scale = max(1920/533, 1080/300) = 3.6.
+  assert.ok(Math.abs(computeCoverScale(video) - 3.6) < 1e-9);
+
+  // Tighter letterbox (4:3 content in a wide box): higher width stretch wins.
+  Object.defineProperty(video, "videoWidth", { value: 640, configurable: true });
+  Object.defineProperty(video, "videoHeight", { value: 480, configurable: true });
+  video.getBoundingClientRect = () => ({
+    left: 0, right: 800, top: 0, bottom: 800, width: 800, height: 800
+  });
+  // fitted 800x600 (min(800, 800*4/3)=800), cover = max(1920/800, 1080/600)=2.4.
+  assert.ok(Math.abs(computeCoverScale(video) - 2.4) < 1e-9);
+
+  delete globalThis.screen;
+  dom.window.close();
+});
+
