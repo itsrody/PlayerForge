@@ -305,15 +305,18 @@ export function attachInputActions(shell, host, signal) {
         return;
       }
       // Velocity-proportional seek: gain (seconds per pixel) rises with the
-      // finger's real-time speed. Both are normalized by container width so
-      // the "1s slow" / "minutes fast" feels are width-independent.
+      // finger's real-time speed. Width-normalized so the feel is independent
+      // of container size; the fast ceiling scales with the playback DURATION
+      // so a fast stroke traverses a fraction of the runtime on any length,
+      // while the slow floor stays a deliberate ~1s.
       const width = shell.container?.clientWidth || shell.video?.clientWidth || 640;
+      const fastCeiling = duration * TUNING.scrub.velocity.fastFullWidthFraction;
       state.scrubbing = true;
       state.scrubDuration = duration;
       state.scrubSlowGain =
         TUNING.scrub.velocity.slowFullWidthSeconds / width;
       state.scrubFastGain =
-        TUNING.scrub.velocity.fastFullWidthSeconds / width;
+        fastCeiling / width;
       state.scrubSensitivity = TUNING.controller.scrubSensitivity / 150;
       state.scrubDirectionMomentum = 0;
     }
@@ -324,8 +327,9 @@ export function attachInputActions(shell, host, signal) {
 
     // Proportional velocity curve: t in [0,1] as |velocity| rises past the
     // knee, so slow scrubbing stays near the 1s floor while fast scrubbing
-    // eases toward the minutes ceiling. Sampled live each move, the seek
-    // amount tracks the hand's current velocity in real time.
+    // eases toward the duration-scaled ceiling (a fraction of the runtime).
+    // Sampled live each move, the seek amount tracks the hand's current
+    // velocity in real time and scales with content length.
     const v = Math.abs(detail.velocity);
     const t = Math.min(1, (v / TUNING.scrub.velocity.kneeVelocityPxS) ** TUNING.scrub.velocity.exponent);
     const gain = state.scrubSlowGain + (state.scrubFastGain - state.scrubSlowGain) * t;

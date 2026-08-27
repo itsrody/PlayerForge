@@ -114,17 +114,21 @@ export const TUNING = {
      * monotonic saturating function of the finger's real-time speed (measured
      * px/s by the forge at move granularity and updated live): a slow stroke
      * moves ~slowFullWidthSeconds across the container width, a fast stroke
-     * ~fastFullWidthSeconds. The curve rises smoothly past the knee, then
-     * saturates so high-speed scrubbing stays stable (scrubTo clamps to
-     * [0, duration]). Because it follows the hand's current velocity rather
-     * than hold time, the seek amount is proportional to velocity in real
-     * time - signed by drag direction.
+     * covers fastFullWidthFraction of the playback DURATION. The curve rises
+     * smoothly past the knee, then saturates so high-speed scrubbing stays
+     * stable (scrubTo clamps to [0, duration]). Because it follows the hand's
+     * current velocity rather than hold time, and scales the ceiling with the
+     * runtime, the seek amount is proportional to velocity in real time and
+     * traverses any content length uniformly - signed by drag direction.
      */
     velocity: {
-      /** Full-width stroke at near-zero speed: the "1s" slow floor. */
+      /** Full-width stroke at near-zero speed: the "1s" deliberate floor. */
       slowFullWidthSeconds: 1,
-      /** Full-width stroke at high speed: the "minutes" ceiling. */
-      fastFullWidthSeconds: 90,
+      /** Fraction of the PLAYBACK DURATION a full-width fast stroke can cover.
+       *  The fast ceiling scales with content length so the same gesture
+       *  traverses a short clip or a long movie proportionally (regular-player
+       *  feel) - 0.5 = up to half the runtime per full-width fast stroke. */
+      fastFullWidthFraction: 0.5,
       /** Velocity (px/s) at which the gain sits ~halfway between slow and fast. */
       kneeVelocityPxS: 400,
       /** Curve shape; >1 rises later and punchier, <1 hurries to the ceiling. */
