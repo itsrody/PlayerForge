@@ -197,7 +197,7 @@ export function setSetting(key, value) {
 }
 
 /**
- * Live reload across tabs: pf:configs lives in shared Violentmonkey storage,
+ * Live reload across tabs: pf:configs lives in shared manager storage,
  * so a write from any other tab re-seeds this cache and every event-time
  * getSetting() consumer picks it up on its next read. Our own writes echo
  * back through the same path and land as no-ops.

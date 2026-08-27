@@ -15,7 +15,7 @@ function installGm(initial) {
     if (key !== STORE_KEY) {
       return fallback;
     }
-    // Violentmonkey hands back a fresh deserialization per read - mimic it
+    // The manager hands back a fresh deserialization per read - mimic it
     // so shared-reference bugs between "disk" and memory cannot hide.
     return data == null ? fallback : JSON.parse(JSON.stringify(data));
   };

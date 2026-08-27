@@ -18,8 +18,8 @@ const minify = process.argv.includes("-m") || process.argv.includes("--min");
 const banner = `// ==UserScript==
 // @name         PlayerForge
 // @namespace    https://github.com/PlayerForge
-// @version      0.7.0
-// @description  Firefox 154+ / Violentmonkey 2.48+ exclusive HTML5 video player enhancer with gestures, hotkeys, progress resume, subtitles, and an extensible plugin system
+// @version      0.7.1
+// @description  Firefox 154+ / Tampermonkey 5.5+ (MV2) exclusive HTML5 video player enhancer with gestures, hotkeys, progress resume, subtitles, and an extensible plugin system
 // @author       PlayerForge
 // @match        *://*/*
 // @exclude      *://*.youtube.com/*
@@ -69,6 +69,7 @@ const banner = `// ==UserScript==
 // @grant        GM_setClipboard
 // @grant        GM_addValueChangeListener
 // @grant        GM_xmlhttpRequest
+// @sandbox      raw
 // @run-at       document-start
 // @license      MIT
 // ==/UserScript==

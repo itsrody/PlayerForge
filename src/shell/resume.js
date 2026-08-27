@@ -17,8 +17,8 @@ export class ResumeStore {
   constructor() {
     // Live reload across tabs: whoever writes pf:resume elsewhere triggers a
     // merge-only adoption here (never written back - the writer owns that
-    // round trip). This is also the seam where Violentmonkey's eventual value
-    // sync would land for free.
+    // round trip). This is also the seam where a future value-sync transport
+    // would land for free.
     if (typeof GM_addValueChangeListener === "function") {
       GM_addValueChangeListener(KEYS.resume, () => this.#adoptExternal());
     }

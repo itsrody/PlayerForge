@@ -11,7 +11,7 @@ globalThis.GM_addValueChangeListener = (key, cb) => {
 };
 globalThis.GM_setValue = (key, value) => {
   writes[key] = value;
-  // Violentmonkey fires the listener for own-tab writes too.
+  // The manager fires the listener for own-tab writes too.
   configsListener?.(key, null, value, false);
 };
 
