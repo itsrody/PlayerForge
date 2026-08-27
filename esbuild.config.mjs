@@ -68,6 +68,7 @@ const banner = `// ==UserScript==
 // @grant        GM_unregisterMenuCommand
 // @grant        GM_setClipboard
 // @grant        GM_addValueChangeListener
+// @grant        GM_removeValueChangeListener
 // @grant        GM_getResourceText
 // @grant        GM_xmlhttpRequest
 // @resource     pfStyle https://raw.githubusercontent.com/itsrody/PlayerForge/main/src/shell/chrome/styles.css

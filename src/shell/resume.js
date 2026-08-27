@@ -13,6 +13,7 @@ import { logger } from "../shared/logger.js";
 export class ResumeStore {
   #state = null;
   #loaded = false;
+  #listenerId = null;
 
   constructor() {
     // Live reload across tabs: whoever writes pf:resume elsewhere triggers a
@@ -20,7 +21,15 @@ export class ResumeStore {
     // round trip). This is also the seam where a future value-sync transport
     // would land for free.
     if (typeof GM_addValueChangeListener === "function") {
-      GM_addValueChangeListener(KEYS.resume, () => this.#adoptExternal());
+      this.#listenerId = GM_addValueChangeListener(KEYS.resume, () => this.#adoptExternal());
+    }
+  }
+
+  /** Release the cross-tab change subscription (SPA re-entry / shell teardown). */
+  destroy() {
+    if (this.#listenerId != null && typeof GM_removeValueChangeListener === "function") {
+      GM_removeValueChangeListener(this.#listenerId);
+      this.#listenerId = null;
     }
   }
 
@@ -426,5 +435,6 @@ export class ResumeTracker {
       this.#saveProgress(this.#shell?.currentTime || 0);
     }
     this.#destroyed = true;
+    this.#store.destroy();
   }
 }

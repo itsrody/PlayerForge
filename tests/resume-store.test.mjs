@@ -209,6 +209,20 @@ test("value change listener hot-reloads foreign writes", () => {
   }
 });
 
+test("destroy unregisters the change listener", () => {
+  let removed;
+  globalThis.GM_addValueChangeListener = () => "listener-1";
+  globalThis.GM_removeValueChangeListener = (id) => { removed = id; };
+  try {
+    const store = new ResumeStore();
+    store.destroy();
+    assert.equal(removed, "listener-1", "destroy frees the cross-tab subscription");
+  } finally {
+    delete globalThis.GM_addValueChangeListener;
+    delete globalThis.GM_removeValueChangeListener;
+  }
+});
+
 test("foreign versions and malformed entries are adopted instead of reset", () => {
   const good = entry({ id: "keep" });
   const gm = installGm({ version: 99, note: "future writer", entries: [good, null, { broken: true }] });
