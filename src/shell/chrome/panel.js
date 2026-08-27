@@ -222,6 +222,7 @@ export class SettingsPanel {
   #sectionCounter = 0;
   /** All panel subscriptions die with this signal. */
   #scope = new AbortController();
+  #backdrop = null;
   #destroyed = false;
 
   constructor(shell, bus) {
@@ -515,6 +516,8 @@ export class SettingsPanel {
       this.#scope.abort();
       this.#root?.remove();
       this.#root = null;
+      this.#backdrop?.remove();
+      this.#backdrop = null;
       this.#body = null;
       this.#tabList = null;
       this.#sections.clear();
@@ -523,6 +526,24 @@ export class SettingsPanel {
   }
 
   #buildDom() {
+    // Transparent modal shield: while the panel is open it covers the whole
+    // shell (pointer-events: auto gated by .pf-open via :has in CSS), so a
+    // click outside the panel closes it and is swallowed - it never passes
+    // through to the SDK/video. Sits below the panel (z-hud) so panel controls
+    // stay interactive. Because it lives in the host's shadow, the forge's
+    // composedPath guard already ignores it; the stopPropagation below also
+    // keeps it from bubbling to page/SDK handlers. Only animation/state lives
+    // here - visibility is pure CSS, keyed on the single .pf-open source.
+    const backdrop = document.createElement("div");
+    backdrop.className = "pf-panel-backdrop";
+    backdrop.setAttribute("aria-hidden", "true");
+    backdrop.addEventListener("pointerdown", (event) => {
+      event.stopPropagation();
+      this.close();
+    }, { signal: this.#scope.signal });
+    this.#hudLayer.appendChild(backdrop);
+    this.#backdrop = backdrop;
+
     const root = document.createElement("div");
     root.className = "pf-panel";
     root.setAttribute("role", "dialog");

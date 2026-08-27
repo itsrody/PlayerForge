@@ -93,6 +93,24 @@
   }
 }
 
+/* - Panel backdrop - */
+/* Transparent modal shield for the open settings panel. Covers the whole shell
+   (inset 0) but sits below the panel, so the panel stays interactive while a
+   press anywhere outside it is swallowed and never passes through to the SDK/
+   video. Off by default; the :has gate keys off the single .pf-open source so
+   nothing in JS has to track visibility. Strictly more specific than the
+   `.pf-hud-layer > *` auto rule, so it wins regardless of source order. */
+.pf-hud-layer > .pf-panel-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: var(--pf-z-hud);
+  pointer-events: none;
+}
+
+.pf-hud-layer:has(.pf-panel.pf-open) > .pf-panel-backdrop {
+  pointer-events: auto;
+}
+
 /* - Cue Layer (reusable caption DOM) - */
 /* Captions render here - above the video, so filters/transforms on the
    <video> never touch them, and the cue pool diffs slots per transition. */
