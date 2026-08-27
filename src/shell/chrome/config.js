@@ -139,7 +139,7 @@ export const TUNING = {
      * a small tau keeps the signal responsive enough to track speed changes
      * mid-stroke.
      */
-    velocityFilterMs: 80
+    velocityFilterMs: 60
   },
   resume: {
     saveIntervalMs: 60000,

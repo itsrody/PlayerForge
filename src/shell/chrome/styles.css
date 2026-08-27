@@ -90,22 +90,6 @@
   }
 }
 
-/* - Scrub Cursor (native WAAPI indicator) - */
-/* Full-width fill bar driven by a compositor-tracked WAAPI animation; the
-   transform is applied on Gecko's compositor so it stays GPU-smooth and
-   display-synced at any adaptive refresh rate. scaleX(0..1) from the left. */
-.pf-scrub-cursor {
-  position: absolute;
-  left: 0;
-  bottom: 0;
-  width: 100%;
-  height: 3px;
-  transform-origin: left center;
-  background: var(--pf-accent, #1e90ff);
-  pointer-events: none;
-  opacity: 0.9;
-}
-
 /* - Cue Layer (reusable caption DOM) - */
 /* Captions render here - above the video, so filters/transforms on the
    <video> never touch them, and the cue pool diffs slots per transition. */

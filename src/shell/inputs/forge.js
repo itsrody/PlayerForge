@@ -473,14 +473,12 @@ export class InputForge {
       return;
     }
     lastActiveForge = this;
-    const t = event.timeStamp;
     const existing = this.#pointers.get(event.pointerId);
     if (existing) {
       existing.x = event.clientX;
       existing.y = event.clientY;
-      existing.t = t;
     } else {
-      this.#pointers.set(event.pointerId, { x: event.clientX, y: event.clientY, t });
+      this.#pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     }
 
     if (this.#pointers.size === 2) {
@@ -529,7 +527,6 @@ export class InputForge {
     if (pointer) {
       pointer.x = x;
       pointer.y = y;
-      pointer.t = event.timeStamp;
     }
     if (this.#pointers.size === 2 && this.#pinchStartDistance > 0) {
       this.#checkPinch();
@@ -587,42 +584,42 @@ export class InputForge {
    * Consume every coalesced sample of the move so high-rate Gecko pointer
    * streams scrub at full fidelity; one semantic event is emitted per move.
    *
-   * Velocity is measured per sample from true event timestamps (each
-   * PointerEvent carries its own DOMHighResTimeStamp in the same epoch as
-   * performance.now()), then smoothed with a first-order time-based filter,
-   * alpha = 1 - exp(-dt/tau). Because alpha derives from real elapsed time
-   * rather than event count, the smoothing window is the same absolute time
-   * at any display rate - adaptive-refresh correct - and stays responsive
-   * enough to track speed changes mid-stroke.
+   * Velocity is measured at move granularity from true event timestamps (the
+   * live event's own DOMHighResTimeStamp, same epoch as performance.now()),
+   * then smoothed with a first-order time-based filter, alpha = 1 - exp(-dt/
+   * tau). Because alpha derives from the real interval between moves, the
+   * smoothing window is the same absolute time at any display rate -
+   * adaptive-refresh correct - while the per-move dt keeps the filter
+   * responsive enough to track speed changes mid-stroke.
    */
   #advanceScrub(event) {
     let totalStep = 0;
-    let lastSampleTime = this.#scrubLastTime;
     const hasCoalesced = typeof event.getCoalescedEvents === "function";
     const samples = hasCoalesced ? event.getCoalescedEvents() : [];
     // Coalesced samples then the live event, without materializing a combined
     // array: high-rate Gecko pointer streams land here every move, so a
     // [[...samples, event]] spread per frame would allocate needlessly.
     const count = samples.length > 0 ? samples.length + 1 : 1;
+    let lastX = this.#scrubLastX;
     for (let i = 0; i < count; i++) {
       const sample = i < samples.length ? samples[i] : event;
-      const sampleTime = sample.timeStamp || lastSampleTime;
-      const step = sample.clientX - this.#scrubLastX;
-      this.#scrubLastX = sample.clientX;
-      totalStep += step;
-      const dt = (sampleTime - lastSampleTime) / 1000;
-      const instantVelocity = dt > 0.001 ? step / dt : 0;
-      const alpha = 1 - Math.exp(-dt / SCRUB_VELOCITY_TAU_S);
-      this.#scrubVelocity += alpha * (instantVelocity - this.#scrubVelocity);
-      lastSampleTime = sampleTime;
+      totalStep += sample.clientX - lastX;
+      lastX = sample.clientX;
     }
-    this.#scrubLastTime = lastSampleTime;
+    this.#scrubLastX = lastX;
+
+    const now = event.timeStamp;
+    const dt = (now - this.#scrubLastTime) / 1000;
+    this.#scrubLastTime = now;
+    const instantVelocity = dt > 0.001 ? totalStep / dt : 0;
+    const alpha = dt > 0 ? 1 - Math.exp(-dt / SCRUB_VELOCITY_TAU_S) : 0;
+    this.#scrubVelocity += alpha * (instantVelocity - this.#scrubVelocity);
     this.#dispatch(GESTURE_EVENTS.scrub, {
       zone: this.#gestureZone || "screen",
       method: "pointer",
       dx: totalStep,
       velocity: this.#scrubVelocity,
-      timestamp: event.timeStamp
+      timestamp: now
     });
   }
 
