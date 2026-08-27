@@ -82,6 +82,10 @@ export class InputForge {
   #originalPlay;
   #originalPause;
 
+  // Cached <video> box for hit-testing, invalidated on resize/fullscreen so
+  // pointerdown never forces a synchronous layout flush with getBoundingClientRect.
+  #videoRect = null;
+  #videoRectObserver = null;
   // Keyboard Space-hold interception.
   #spaceHoldIntercepting = false;
 
@@ -165,7 +169,15 @@ export class InputForge {
 
     document.addEventListener("fullscreenchange", () => {
       this.setTrackpadPinchEnabled(this.#isFullscreen());
+      this.#videoRect = null;
     }, { signal });
+
+    if (typeof ResizeObserver !== "undefined" && video) {
+      this.#videoRectObserver = new ResizeObserver(() => {
+        this.#videoRect = null;
+      });
+      this.#videoRectObserver.observe(video);
+    }
 
     activeForges.add(this);
   }
@@ -229,10 +241,14 @@ export class InputForge {
       this.#pinchInitTimer = null;
       clearTimeout(this.#clickSuppressTimer);
       this.#clickSuppressTimer = null;
+      this.#videoRectObserver?.disconnect();
+      this.#videoRectObserver = null;
+      this.#videoRect = null;
       this.#pointers.clear();
       this.#spaceHoldIntercepting = false;
       this.#video.style.transition = "";
       this.#video.style.transform = "";
+      this.#video.style.willChange = "";
       this.#zone.style.touchAction = this.#savedTouchAction;
       this.#video.play = this.#originalPlay;
       this.#video.pause = this.#originalPause;
@@ -266,7 +282,13 @@ export class InputForge {
   }
 
   #hitTestVideo(pointerEvent) {
-    const rect = this.#video.getBoundingClientRect();
+    // Cache the box so a pointerdown outside the HUD doesn't force a sync
+    // layout flush (getBoundingClientRect) on Gecko; the cache is dropped on
+    // resize and fullscreen change so it never goes stale.
+    if (!this.#videoRect) {
+      this.#videoRect = this.#video.getBoundingClientRect();
+    }
+    const rect = this.#videoRect;
     return pointerEvent.clientX >= rect.left && pointerEvent.clientX <= rect.right &&
       pointerEvent.clientY >= rect.top && pointerEvent.clientY <= rect.bottom;
   }

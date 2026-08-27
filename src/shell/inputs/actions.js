@@ -199,12 +199,24 @@ const pendingEase = new WeakMap();
 
 export function easeTransformTo(video, transform) {
   pendingEase.get(video)?.();
+  // Promote the video to its own compositor layer while a transform is live
+  // (fill-mode, swipe/pinch restore): Gecko composites the scale/translate on
+  // the compositor instead of re-rasterizing the media surface every frame.
+  // The layer is released once the eased snap settles (or is cancelled), so
+  // the idle player never carries a lingering will-change.
+  const promoting = !!transform;
+  if (promoting) {
+    video.style.willChange = "transform";
+  }
   const stop = () => {
     video.removeEventListener("transitionend", onEnd);
     video.removeEventListener("transitioncancel", onCancel);
     if (pendingEase.get(video) === stop) {
       pendingEase.delete(video);
       video.style.transition = "";
+      if (promoting) {
+        video.style.willChange = "";
+      }
     }
   };
   const onEnd = (event) => {
@@ -263,6 +275,7 @@ function clearFillMode(shell, state, animate = true) {
     } else {
       video.style.transition = "none";
       video.style.transform = "";
+      video.style.willChange = "";
       video.style.transition = "";
     }
   }
