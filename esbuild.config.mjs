@@ -1,7 +1,16 @@
 import { build, context } from "esbuild";
 import { readFileSync } from "node:fs";
 
-const watch = process.argv.includes("--watch");
+// Readable-by-default, minified on request (-m / --min). Minification is
+// SpiderMonkey/WarpJIT-aware by construction: esbuild only does the safe
+// transforms (whitespace, local-identifier mangling, syntax compression) that
+// keep functions Warp-compilable - it never introduces eval/with, never mangles
+// property names, and its bytecode cost per op is unchanged, so Warp's
+// CacheIR/shape-driven optimization is untouched. The embedded stylesheet is
+// minified separately (esbuild's JS minifier would not shrink a text-loaded
+// string); the CSS pass below is deliberately conservative so calc()/content
+// and selector whitespace survive intact.
+const minify = process.argv.includes("-m") || process.argv.includes("--min");
 
 // The banner below is the single version source. Runtime reads the installed
 // script's real version through GM_info.script.version, so bumping @version
@@ -51,6 +60,7 @@ const banner = `// ==UserScript==
 // @exclude      *://*.reddit.com/*
 // @exclude      *://reddit.com/*
 // @exclude      *://*.tumblr.com/*
+// @exclude      *://*.twitter.com/*
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_deleteValue
@@ -64,7 +74,43 @@ const banner = `// ==UserScript==
 // ==/UserScript==
 `;
 
-const options = {
+/**
+ * Conservative CSS minifier. Safe for this stylesheet's constructs (var(),
+ * calc(), min(), content:'', @starting-style): comments are dropped, whitespace
+ * runs collapse to one space, and whitespace is stripped only when adjacent to a
+ * structural delimiter ({ } ; : , ( )). Whitespace that separates two tokens -
+ * notably calc("100% - 24px") arithmetic and descendant selectors - is left
+ * alone, so collapsing can never merge tokens into a different rule.
+ */
+function minifyCss(css) {
+  const noComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const collapsed = noComments.replace(/\s+/g, " ");
+  const slim = collapsed
+    .replace(/\s*([{};:,(])\s*/g, "$1")
+    .replace(/\s*\)\s*/g, ")");
+  return slim.trim();
+}
+
+/** esbuild plugin: serve .css text imports through the minifier above. */
+function minifyCssPlugin() {
+  const cache = new Map();
+  return {
+    name: "pf-minify-css",
+    setup(build) {
+      build.onLoad({ filter: /\.css$/ }, async (args) => {
+        let out = cache.get(args.path);
+        if (out === undefined) {
+          const raw = readFileSync(args.path, "utf8");
+          out = minifyCss(raw);
+          cache.set(args.path, out);
+        }
+        return { contents: out, loader: "text" };
+      });
+    }
+  };
+}
+
+const shared = {
   entryPoints: ["src/entry.js"],
   bundle: true,
   format: "iife",
@@ -72,20 +118,24 @@ const options = {
   outfile: "dist/playerforge.user.js",
   banner: { js: banner },
   loader: { ".css": "text" },
+  plugins: [minifyCssPlugin()],
   // Emit real UTF-8 instead of \uXXXX escapes: the three intentional UI
   // glyphs (close X, settings gear, toast separator) stay readable and the
   // bundle stops paying six bytes per code point.
   charset: "utf8",
   legalComments: "none",
-  minify: false,
   sourcemap: false,
   logLevel: "info",
 };
 
+const watch = process.argv.includes("--watch");
+const options = { ...shared, minify };
+
 if (watch) {
   const ctx = await context(options);
   await ctx.watch();
-  console.log("[PlayerForge] watching for changes...");
+  console.log(`[PlayerForge] watching (${minify ? "minified" : "readable"})...`);
 } else {
   await build(options);
+  console.log(`[PlayerForge] built ${minify ? "minified" : "readable"} bundle`);
 }

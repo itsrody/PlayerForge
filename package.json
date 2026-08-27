@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "build": "node esbuild.config.mjs",
+    "build:min": "node esbuild.config.mjs --min",
     "dev": "node esbuild.config.mjs --watch",
+    "dev:min": "node esbuild.config.mjs --watch --min",
     "test": "node --import ./tests/loader.mjs --test",
     "bench": "node bench/run.mjs",
     "bench:record": "node bench/run.mjs --record"
