@@ -11,6 +11,10 @@ import {
   createFrameRelay,
   installContextBridge,
   installVideoProbe,
+  requestFullscreenProvision,
+  createTopFrameProvisioner,
+  createFrameProvisioner,
+  FS_REQUEST_TYPE,
   CTX_REQUEST_TIMEOUT_MS
 } from "../src/shared/context.js";
 
@@ -338,4 +342,125 @@ test("stopped presence probe never fires", async () => {
 
 test("context timeout constant stays sane", () => {
   assert.ok(CTX_REQUEST_TIMEOUT_MS >= 1000 && CTX_REQUEST_TIMEOUT_MS <= 10000);
+});
+
+test("requestFullscreenProvision posts a provisioning request to the parent", () => {
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.parent = win.parent;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  let sent = null;
+  const original = win.parent.postMessage.bind(win.parent);
+  win.parent.postMessage = (msg, target) => { sent = { msg, target }; };
+  try {
+    requestFullscreenProvision();
+    assert.deepEqual(sent.msg, { type: FS_REQUEST_TYPE });
+  } finally {
+    win.parent.postMessage = original;
+  }
+});
+
+test("top-frame provisioner grants allowfullscreen on the direct child only and halts", () => {
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.parent = win.parent;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  const child = win.document.createElement("iframe");
+  win.document.body.append(child);
+
+  let forwarded = false;
+  const original = win.parent.postMessage.bind(win.parent);
+  win.parent.postMessage = () => { forwarded = true; };
+  try {
+    const provision = createTopFrameProvisioner();
+
+    provision({ data: { type: FS_REQUEST_TYPE }, source: child.contentWindow, origin: "https://kid.test" });
+    assert.equal(child.hasAttribute("allowfullscreen"), true);
+    assert.match(child.getAttribute("allow"), /\bfullscreen\b/);
+    // The forwarded flag must stay false: the top frame has no parent to relay to.
+    assert.equal(forwarded, false);
+  } finally {
+    win.parent.postMessage = original;
+  }
+});
+
+test("top-frame provisioner ignores a foreign window not owned by this document", () => {
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.parent = win.parent;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  const stranger = { postMessage() {} };
+  const provision = createTopFrameProvisioner();
+  provision({ data: { type: FS_REQUEST_TYPE }, source: stranger, origin: "https://evil.test" });
+  assert.equal(win.document.querySelectorAll("iframe").length, 0);
+});
+
+test("relay provisioner grants on its child then forwards up to the parent", () => {
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.parent = win.parent;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  const videoFrame = win.document.createElement("iframe");
+  win.document.body.append(videoFrame);
+
+  let relayed = null;
+  const original = win.parent.postMessage.bind(win.parent);
+  win.parent.postMessage = (msg, target) => { relayed = { msg, target }; };
+  try {
+    const provision = createFrameProvisioner();
+    provision({ data: { type: FS_REQUEST_TYPE }, source: videoFrame.contentWindow, origin: "https://video.test" });
+    assert.equal(videoFrame.hasAttribute("allowfullscreen"), true);
+    assert.match(videoFrame.getAttribute("allow"), /\bfullscreen\b/);
+    assert.deepEqual(relayed.msg, { type: FS_REQUEST_TYPE });
+  } finally {
+    win.parent.postMessage = original;
+  }
+});
+
+test("relay provisioner does not forward for an unowned source", () => {
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.parent = win.parent;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  let relayed = false;
+  const original = win.parent.postMessage.bind(win.parent);
+  win.parent.postMessage = () => { relayed = true; };
+  try {
+    const provision = createFrameProvisioner();
+    provision({ data: { type: FS_REQUEST_TYPE }, source: { postMessage() {} }, origin: "https://evil.test" });
+    assert.equal(relayed, false);
+  } finally {
+    win.parent.postMessage = original;
+  }
+});
+
+test("granting is idempotent and merges into an existing allow list", () => {
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.parent = win.parent;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  const child = win.document.createElement("iframe");
+  child.setAttribute("allow", "autoplay");
+  win.document.body.append(child);
+
+  const provision = createTopFrameProvisioner();
+  provision({ data: { type: FS_REQUEST_TYPE }, source: child.contentWindow });
+  provision({ data: { type: FS_REQUEST_TYPE }, source: child.contentWindow });
+
+  assert.equal(child.hasAttribute("allowfullscreen"), true);
+  const tokens = child.getAttribute("allow").split(/\s+/);
+  assert.ok(tokens.includes("autoplay"));
+  assert.equal(tokens.filter((t) => t === "fullscreen").length, 1);
 });

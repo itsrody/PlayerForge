@@ -1,6 +1,6 @@
 import { Kernel } from "./kernel/kernel.js";
 import { installMenuCommands } from "./kernel/menus.js";
-import { installContextBridge, installVideoProbe } from "./shared/context.js";
+import { installContextBridge, installVideoProbe, requestFullscreenProvision } from "./shared/context.js";
 import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/sdk.js";
 import { logger } from "./shared/logger.js";
 import { shouldSkipUrl } from "./kernel/guard.js";
@@ -47,6 +47,13 @@ function bootstrap() {
     kernel.bus.addEventListener("pf:shell-created", (event) => {
       const shell = event.detail;
       logger.log("entry", `Shell ready: ${shell.id} (${shell.sdkName})`);
+      // Nested embeds can silently lose fullscreen (Firefox requires
+      // allowfullscreen on every ancestor iframe, bug 1608358). A shell in a
+      // frame pushes a provisioning request up the chain so our SDk's own
+      // fullscreen button - and PF's fs-gated gestures - can engage.
+      if (window.top !== window) {
+        requestFullscreenProvision();
+      }
       if (!welcomePending) {
         return;
       }

@@ -362,21 +362,120 @@ function isOwnFrame(source) {
   return scan(document, 0);
 }
 
+/* - 4b. Fullscreen provisioning - */
+
 /**
- * Install the context bridge for this frame and return its teardown. Top
- * frames answer; nested frames relay. Idempotent per frame - the userscript
- * evaluates exactly once per document sandbox.
+ * Firefox requires `allowfullscreen`/`allow="fullscreen"` on EVERY ancestor
+ * iframe for requestFullscreen() to succeed in a nested frame (bug 1608358).
+ * A video parked behind a cross-origin iframe therefore silently loses
+ * fullscreen - and with it PlayerForge's fullscreen-gated gestures - unless we
+ * provision it. The video frame pushes a `pf:req-fullscreen` hop up the chain;
+ * each frame grants `allowfullscreen` on the DIRECT child iframe it received
+ * the request from (event.source is always the immediate child, readable even
+ * across origins), then forwards to its own parent. Granting is scoped to that
+ * one child, so a hostile foreign window cannot punch allowfullscreen for
+ * frames it does not own: every grant is vouched by an own-<iframe> match.
+ */
+export const FS_REQUEST_TYPE = "pf:req-fullscreen";
+
+/** The direct <iframe> child of THIS document whose contentWindow is `win`, or null. */
+function iframeElementForWindow(win) {
+  if (!win) {
+    return null;
+  }
+  for (const iframe of document.querySelectorAll("iframe")) {
+    if (iframe.contentWindow === win) {
+      return iframe;
+    }
+  }
+  return null;
+}
+
+/** Grant allowfullscreen on an iframe element when it lacks it (idempotent). */
+function grantFullscreen(frameElement) {
+  if (!frameElement.hasAttribute("allowfullscreen")) {
+    frameElement.setAttribute("allowfullscreen", "");
+  }
+  const allow = frameElement.getAttribute("allow") || "";
+  if (!/(?:^|\s)fullscreen(?:\s|$)/.test(allow)) {
+    frameElement.setAttribute("allow", `${allow ? `${allow} ` : ""}fullscreen`);
+  }
+  return frameElement;
+}
+
+/**
+ * Sender side, called by a video-bearing frame: request fullscreen provisioning
+ * (allowfullscreen + allow="fullscreen") on every ancestor iframe up the chain.
+ * Cheap and safe to repeat; the frame may or may not be top-level (a top-level
+ * video needs no provisioning - callers should still guard).
+ */
+export function requestFullscreenProvision() {
+  window.parent?.postMessage({ type: FS_REQUEST_TYPE }, "*");
+}
+
+/**
+ * Handler for the top frame: grant allowfullscreen on the direct child iframe
+ * that asked, then stop (no parent). Vouched by an own-child match.
+ */
+export function createTopFrameProvisioner() {
+  return (event) => {
+    const data = event && event.data;
+    if (!data || typeof data !== "object" || data.type !== FS_REQUEST_TYPE) {
+      return;
+    }
+    const frameElement = iframeElementForWindow(event.source);
+    if (frameElement) {
+      grantFullscreen(frameElement);
+    }
+  };
+}
+
+/**
+ * Handler for relay frames: grant allowfullscreen on the direct child that
+ * asked, then forward the request to our own parent so the chain continues.
+ * The child is vouched the same way - only an iframe this document owns gets
+ * its allowlist expanded.
+ */
+export function createFrameProvisioner() {
+  return (event) => {
+    const data = event && event.data;
+    if (!data || typeof data !== "object" || data.type !== FS_REQUEST_TYPE) {
+      return;
+    }
+    const frameElement = iframeElementForWindow(event.source);
+    if (frameElement) {
+      grantFullscreen(frameElement);
+      window.parent?.postMessage(data, "*");
+    }
+  };
+}
+
+/**
+ * Install the frame bridge (context + fullscreen provisioning) for this frame
+ * and return a single teardown. Top frames answer and provision; nested frames
+ * relay both. Idempotent per frame - the userscript evaluates exactly once per
+ * document sandbox.
  */
 export function installContextBridge() {
-  const handler = window === window.top
-    ? createTopFrameResponder(() => ({
-        domain: getDomainKey(location.hostname),
-        path: location.pathname,
-        title: stripNonAscii(document.title)
-      }))
-    : createFrameRelay();
-  window.addEventListener("message", handler);
-  return () => window.removeEventListener("message", handler);
+  const handlers = window === window.top ? [
+    createTopFrameResponder(() => ({
+      domain: getDomainKey(location.hostname),
+      path: location.pathname,
+      title: stripNonAscii(document.title)
+    })),
+    createTopFrameProvisioner()
+  ] : [
+    createFrameRelay(),
+    createFrameProvisioner()
+  ];
+  for (const handler of handlers) {
+    window.addEventListener("message", handler);
+  }
+  return () => {
+    for (const handler of handlers) {
+      window.removeEventListener("message", handler);
+    }
+  };
 }
 
 /* - 5. Presence probe - */
