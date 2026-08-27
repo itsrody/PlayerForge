@@ -61,6 +61,14 @@ function makeFakePanel() {
         get value() { return val; },
         set value(v) { val = v; }
       };
+    },
+    addControl: (parent, { type, ...opts }) => {
+      switch (type) {
+        case "select": return panel.addSelect(parent, opts);
+        case "button": return panel.addButton(parent, opts);
+        case "stepper": return panel.addStepper(parent, opts);
+        default: return null;
+      }
     }
   };
   return panel;

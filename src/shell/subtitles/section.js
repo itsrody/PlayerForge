@@ -134,14 +134,16 @@ export class SubtitlesSection {
     const loadRow = panel.el("div", { class: "pf-panel-load-row" }, loadSection);
     const actions = panel.el("div", { class: "pf-panel-actions" }, loadRow);
 
-    this.#loadButton = panel.addButton(actions, {
+    this.#loadButton = panel.addControl(actions, {
+      type: "button",
       icon: "upload",
       title: "Load subtitles (.srt / .vtt)",
       ariaLabel: "Load subtitles",
       onClick: () => this.#fileInput?.click()
     });
 
-    this.#urlButton = panel.addButton(actions, {
+    this.#urlButton = panel.addControl(actions, {
+      type: "button",
       icon: "link",
       title: "Load subtitles from URL",
       ariaLabel: "Load subtitles from URL",
@@ -149,7 +151,8 @@ export class SubtitlesSection {
       onClick: () => this.#promptForUrl()
     });
 
-    this.#removeButton = panel.addButton(actions, {
+    this.#removeButton = panel.addControl(actions, {
+      type: "button",
       icon: "trash",
       title: "Remove subtitles",
       ariaLabel: "Remove subtitles",
@@ -166,7 +169,8 @@ export class SubtitlesSection {
     const styleGrid = panel.el("div", { class: "pf-panel-grid pf-panel-grid-compact" }, styleSection);
 
     const applyCueSize = (v) => this.#setCueVar("--pf-cue-font-size", `${v}em`);
-    const sizeStepper = panel.addStepper(styleGrid, {
+    const sizeStepper = panel.addControl(styleGrid, {
+      type: "stepper",
       label: "Size",
       min: 0.6,
       max: 3,
@@ -180,7 +184,8 @@ export class SubtitlesSection {
     });
     applyCueSize(sizeStepper.getValue());
 
-    const colorField = panel.addColor(styleGrid, {
+    const colorField = panel.addControl(styleGrid, {
+      type: "color",
       label: "Color",
       value: getConfigValue(SETTING_KEYS.color, "#ffffff"),
       onChange: (hex) => {
@@ -193,7 +198,8 @@ export class SubtitlesSection {
     const applyCueShadow = (strength) => this.#setCueVar("--pf-cue-text-shadow", strength
       ? `1px 1px ${Math.round(strength / 6)}px rgba(0, 0, 0, ${(0.4 + strength / 100 * 0.6).toFixed(2)})`
       : "none");
-    const shadowStepper = panel.addStepper(styleGrid, {
+    const shadowStepper = panel.addControl(styleGrid, {
+      type: "stepper",
       label: "Shadow",
       min: 0,
       max: 100,
@@ -214,7 +220,8 @@ export class SubtitlesSection {
       }
       setConfigValue(SETTING_KEYS.syncOffset, offset);
     }, TUNING.subtitles.syncDebounceMs);
-    const syncStepper = panel.addStepper(styleGrid, {
+    const syncStepper = panel.addControl(styleGrid, {
+      type: "stepper",
       label: "Sync",
       min: -20,
       max: 20,
@@ -235,7 +242,8 @@ export class SubtitlesSection {
       };
     };
 
-    const verticalStepper = panel.addStepper(styleGrid, {
+    const verticalStepper = panel.addControl(styleGrid, {
+      type: "stepper",
       label: "V",
       min: 0,
       max: 100,
@@ -247,7 +255,8 @@ export class SubtitlesSection {
         applyPosition();
       }
     });
-    const horizontalStepper = panel.addStepper(styleGrid, {
+    const horizontalStepper = panel.addControl(styleGrid, {
+      type: "stepper",
       label: "H",
       min: 0,
       max: 100,
@@ -265,7 +274,8 @@ export class SubtitlesSection {
     this.#styleControls = { size: sizeStepper, color: colorField, shadow: shadowStepper, sync: syncStepper };
     this.#positionControls = { vertical: verticalStepper, horizontal: horizontalStepper };
 
-    this.#resetBtn = panel.addButton(styleHead, {
+    this.#resetBtn = panel.addControl(styleHead, {
+      type: "button",
       icon: "reload",
       title: "Reset all",
       ariaLabel: "Reset all",

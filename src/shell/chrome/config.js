@@ -224,7 +224,8 @@ export function addSettingsSection(panel) {
       }
       const cell = panel.el("div", cellAttrs, groupGrid);
       const toggleLabel = panel.el("label", { class: "pf-settings-toggle" }, cell);
-      const checkbox = panel.addCheckbox(toggleLabel, {
+      const checkbox = panel.addControl(toggleLabel, {
+        type: "checkbox",
         checked: getSetting(definition.key),
         onChange: (checked) => {
           setSetting(definition.key, checked);
@@ -251,7 +252,8 @@ export function addSettingsSection(panel) {
         });
       }
     } else {
-      panel.addStepper(groupGrid, {
+      panel.addControl(groupGrid, {
+        type: "stepper",
         label: definition.label,
         min: definition.min,
         max: definition.max,

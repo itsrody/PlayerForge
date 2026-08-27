@@ -42,7 +42,7 @@ function makeFakePanel() {
     if (parent) parent.children.push(el);
     return el;
   };
-  return {
+  const panel = {
     calls,
     body: {},
     el: (tag, attrs, parent) => node(tag, attrs, parent),
@@ -66,8 +66,16 @@ function makeFakePanel() {
     addStepper: (grid, options) => {
       calls.steppers.push(options);
       return {};
+    },
+    addControl: (parent, { type, ...opts }) => {
+      switch (type) {
+        case "checkbox": return panel.addCheckbox(opts, opts);
+        case "stepper": return panel.addStepper(parent, opts);
+        default: return null;
+      }
     }
   };
+  return panel;
 }
 
 test("renders one labeled section per unique schema group", () => {

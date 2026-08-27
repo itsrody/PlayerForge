@@ -360,7 +360,43 @@ export class SettingsPanel {
     return node;
   }
 
-  addButton(parent, { icon, title, ariaLabel, ghost, onClick } = {}) {
+  /**
+   * Unified declarative control builder - the routing core behind the
+   * single-purpose add* wrappers. `type` selects the widget; every other
+   * option is one key in one superset object, so callers pass exactly the
+   * fields their control reads (unused keys are ignored).
+   *
+   *   Common        label, onChange, disabled
+   *   button:       icon, title, ariaLabel, ghost
+   *   checkbox:     checked
+   *   color:        value (hex)
+   *   select:       options ([value] or [value,label]), value
+   *   stepper:      min, max, step, value, format, deferTextInput, head, class
+   *
+   * Returns the same per-widget handle the matching add* wrapper returns:
+   * button -> <button>, checkbox -> <input>, select -> <select>,
+   * color   -> { input, getValue, setValue },
+   * stepper -> { root, input, getValue, setValue, setDisabled }.
+   */
+  addControl(parent, { type, ...opts } = {}) {
+    switch (type) {
+      case "button":
+        return this.addButton(parent, opts);
+      case "checkbox":
+        return this.addCheckbox(parent, opts);
+      case "color":
+        return this.addColor(parent, opts);
+      case "select":
+        return this.addSelect(parent, opts);
+      case "stepper":
+        return this.addStepper(parent, opts);
+      default:
+        logger.warn("panel", `addControl: unknown type "${type}"`);
+        return null;
+    }
+  }
+
+  addButton(parent, { icon, title, ariaLabel, ghost, onClick, disabled } = {}) {
     const button = this.el("button", {
       class: ghost ? "pf-btn pf-btn-ghost pf-btn-icon" : "pf-btn pf-btn-icon",
       type: "button"
@@ -376,6 +412,9 @@ export class SettingsPanel {
     }
     if (ariaLabel) {
       button.setAttribute("aria-label", ariaLabel);
+    }
+    if (disabled) {
+      button.disabled = true;
     }
     button.addEventListener("click", onClick);
     return button;
@@ -396,7 +435,8 @@ export class SettingsPanel {
     onChange,
     deferTextInput = false,
     class: className,
-    head
+    head,
+    disabled = false
   } = {}) {
     const cell = this.el("div", { class: className || "pf-panel-cell" }, parent);
     const stepper = createStepper({
@@ -416,20 +456,27 @@ export class SettingsPanel {
       this.addLabel(cell, label);
       cell.appendChild(stepper.root);
     }
+    if (disabled) {
+      stepper.setDisabled(true);
+    }
     return stepper;
   }
 
-  addCheckbox(parent, { checked = false, onChange } = {}) {
-    const input = this.el("input", { type: "checkbox" }, parent);
+  addCheckbox(parent, { checked = false, onChange, disabled = false } = {}) {
+    const attrs = { type: "checkbox" };
+    if (disabled) attrs.disabled = "";
+    const input = this.el("input", attrs, parent);
     input.checked = checked;
     input.addEventListener("change", () => onChange?.(input.checked));
     return input;
   }
 
-  addColor(parent, { label, value = "#ffffff", onChange } = {}) {
+  addColor(parent, { label, value = "#ffffff", onChange, disabled = false } = {}) {
     const cell = this.el("div", { class: "pf-panel-cell" }, parent);
     this.addLabel(cell, label);
-    const input = this.el("input", { type: "color", value }, cell);
+    const attrs = { type: "color", value };
+    if (disabled) attrs.disabled = "";
+    const input = this.el("input", attrs, cell);
     const apply = (v) => {
       onChange?.(v);
     };
@@ -446,8 +493,10 @@ export class SettingsPanel {
     };
   }
 
-  addSelect(parent, { options = [], value, onChange } = {}) {
-    const select = this.el("select", { class: "pf-select" }, parent);
+  addSelect(parent, { options = [], value, onChange, disabled = false } = {}) {
+    const attrs = { class: "pf-select" };
+    if (disabled) attrs.disabled = "";
+    const select = this.el("select", attrs, parent);
     for (const entry of options) {
       const [optValue, optLabel] = Array.isArray(entry) ? entry : [entry, entry];
       const option = document.createElement("option");

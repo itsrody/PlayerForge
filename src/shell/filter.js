@@ -93,14 +93,16 @@ export class VideoFilter {
     const head = panel.el("div", { class: "pf-panel-section-head" }, sectionRoot);
 
     const presetOptions = Object.keys(PRESETS).concat(["Custom"]);
-    this.#presetSelect = panel.addSelect(head, {
+    this.#presetSelect = panel.addControl(head, {
+      type: "select",
       options: presetOptions,
       value: "Default",
       onChange: (name) => this.#onPresetChange(name)
     });
     this.#presetSelect.style.marginLeft = "auto";
 
-    this.#resetBtn = panel.addButton(head, {
+    this.#resetBtn = panel.addControl(head, {
+      type: "button",
       icon: "reload",
       title: "Reset all",
       ariaLabel: "Reset all",
@@ -146,7 +148,8 @@ export class VideoFilter {
 
     for (const key of ALL_KEYS) {
       const [min, max, step] = rangeMap[key];
-      const stepper = panel.addStepper(grid, {
+      const stepper = panel.addControl(grid, {
+        type: "stepper",
         label: labelMap[key],
         min,
         max,
