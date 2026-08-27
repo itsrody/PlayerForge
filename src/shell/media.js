@@ -20,6 +20,16 @@ export function createMediaControls({ video, bus, shellId }) {
     bus.emit("pf:media-command", { shellId, type, ...detail });
   };
 
+  /**
+   * Gate: every control stays inert until metadata is loaded (readyState
+   * HAVE_METADATA, the point where duration is known). Before that the video
+   * has no established timeline, so seeking/skipping is meaningless and a
+   * play request could fight an in-flight load. Commands then no-op without
+   * emitting, so the whole control surface - gestures, hotkeys, MediaSession
+   * OS keys - simply does nothing until playback is ready.
+   */
+  const isReady = () => video.readyState >= 1;
+
   /** Canonical absolute-position clamp: inside duration when we know it. */
   const clampTarget = (time) => {
     if (!Number.isFinite(time)) {
@@ -32,6 +42,9 @@ export function createMediaControls({ video, bus, shellId }) {
 
   return {
     async play() {
+      if (!isReady()) {
+        return;
+      }
       try {
         await video.play();
         emit("play");
@@ -45,11 +58,17 @@ export function createMediaControls({ video, bus, shellId }) {
     },
 
     pause() {
+      if (!isReady()) {
+        return;
+      }
       video.pause();
       emit("pause");
     },
 
     togglePlay() {
+      if (!isReady()) {
+        return;
+      }
       if (video.paused) {
         return this.play();
       }
@@ -57,49 +76,76 @@ export function createMediaControls({ video, bus, shellId }) {
     },
 
     stop() {
+      if (!isReady()) {
+        return;
+      }
       video.pause();
       video.currentTime = 0;
       emit("stop");
     },
 
     seekTo(time) {
+      if (!isReady()) {
+        return;
+      }
       video.currentTime = clampTarget(time);
       emit("seek", { to: video.currentTime });
     },
 
     /** Silent primitive for scrub drags: clamp without command chatter. */
     scrubTo(time) {
+      if (!isReady()) {
+        return;
+      }
       video.currentTime = clampTarget(time);
     },
 
     skip(delta) {
+      if (!isReady()) {
+        return;
+      }
       this.seekTo(video.currentTime + delta);
       emit("skip", { delta });
     },
 
     nudgeVolume(direction) {
+      if (!isReady()) {
+        return;
+      }
       const step = direction === "up" ? VOLUME_STEP : -VOLUME_STEP;
       video.volume = Math.max(0, Math.min(1, video.volume + step));
       emit("volume", { volume: video.volume });
     },
 
     setVolume(value) {
+      if (!isReady()) {
+        return;
+      }
       video.volume = Math.max(0, Math.min(1, value));
       emit("volume", { volume: video.volume });
     },
 
     toggleMute() {
+      if (!isReady()) {
+        return;
+      }
       video.muted = !video.muted;
       emit("mute", { muted: video.muted });
     },
 
     /** Hold-to-fast-forward pair; `speed` is restored verbatim on release. */
     beginBoost(speed) {
+      if (!isReady()) {
+        return;
+      }
       video.playbackRate = speed;
       emit("boost-start", { speed });
     },
 
     endBoost(speed) {
+      if (!isReady()) {
+        return;
+      }
       video.playbackRate = speed;
       emit("boost-end", { speed });
     }
