@@ -53,10 +53,6 @@
      the SDK paints inside the player. */
   z-index: 2147483647;
   outline: none;
-  /* Isolate the HUD subtree from the SDK: its DOM churn (toasts, panel,
-     cues) ref lows and repaints only inside this overlay box, never re-layout
-     or repaint the <video>/SDK tree below on Gecko. */
-  contain: layout paint;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: var(--pf-font-lg);
   color: var(--pf-fg);
@@ -67,9 +63,17 @@
   }
 }
 
-/* The host's :fullscreen fix lives in the document-scope stylesheet
-   (chrome/inject.js) - the host is a light-DOM element, so its top-layer
-   rule must not be shadow-scoped. Do not reintroduce it here. */
+/* Neutralize the inline 'position: relative' we set on the container
+   while it is the native fullscreen element. The UA's ':fullscreen'
+   rule uses 'position: fixed' (non-important), which an inline style
+   would otherwise override - leaving the top-layer element sized to its
+   parent instead of covering the viewport. */
+[data-pf-shell]:fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
 
 /* - HUD Layer - */
 .pf-hud-layer {
@@ -77,9 +81,6 @@
   inset: 0;
   pointer-events: none;
   z-index: var(--pf-z-hud);
-  /* The HUD is the hot repaint region (toast/panel/cues) - containing its
-     layout and paint keeps that churn scoped to the overlay, off the media. */
-  contain: layout paint;
 
   /* Re-enable pointer events on every HUD child - but keep the caption
      layer click-transparent via the more specific rule below. */

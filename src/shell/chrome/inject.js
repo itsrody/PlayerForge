@@ -6,22 +6,12 @@ import { onDomMutations } from "../../kernel/dom-watch.js";
 export const SHELL_MARKER = "data-pf-shell";
 
 let sharedSheet = null;
-let documentSheet = null;
-
-/** The one rule that must live in the document (light-DOM) stylesheet: the
- *  shell host is a light-DOM element, so its :fullscreen fix must be a page-
- *  scope rule. Everything else is shadow-scoped and stays out of the page. */
-const FULLSCREEN_RULE = "[data-pf-shell]:fullscreen{position:fixed!important;inset:0!important;width:100%!important;height:100%!important}";
 
 export function ensureStyles() {
   if (!sharedSheet) {
     sharedSheet = new CSSStyleSheet();
     sharedSheet.replaceSync(SHELL_CSS);
-  }
-  if (!documentSheet) {
-    documentSheet = new CSSStyleSheet();
-    documentSheet.replaceSync(FULLSCREEN_RULE);
-    document.adoptedStyleSheets = [...document.adoptedStyleSheets, documentSheet];
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sharedSheet];
   }
 }
 
