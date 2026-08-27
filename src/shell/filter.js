@@ -1,4 +1,5 @@
 import { getConfigValue, setConfigValue } from "../shared/storage.js";
+import { flashElement } from "../shared/flash.js";
 import { TUNING } from "./chrome/config.js";
 
 const CONFIG_PREFIX = "filter";
@@ -225,9 +226,7 @@ export class VideoFilter {
     this.#persist();
     this.#syncPresetMenu();
     if (this.#resetBtn) {
-      this.#resetBtn.classList.remove("pf-flash");
-      void this.#resetBtn.offsetWidth;
-      this.#resetBtn.classList.add("pf-flash");
+      flashElement(this.#resetBtn);
     }
     this.#shell?.toast({ icon: "reload", text: "Color Reset", duration: TUNING.toast.flashMs, group: "filter" });
   }

@@ -3,6 +3,7 @@ import { TUNING } from "../chrome/config.js";
 import { srtToVtt, ensureVttHeader, parseSubtitles } from "./forgevtt.js";
 import { ForgeTrack } from "./forge-track.js";
 import { debounce } from "../../shared/time.js";
+import { flashElement } from "../../shared/flash.js";
 import { logger } from "../../shared/logger.js";
 
 const SUBTITLE_FILE_ACCEPT = ".srt,.vtt";
@@ -287,9 +288,7 @@ export class SubtitlesSection {
         syncStepper.setValue(0);
         verticalStepper.setValue(85);
         horizontalStepper.setValue(50);
-        this.#resetBtn.classList.remove("pf-flash");
-        void this.#resetBtn.offsetWidth;
-        this.#resetBtn.classList.add("pf-flash");
+        flashElement(this.#resetBtn);
         this.#toast({ icon: "reload", text: "Subtitle Style Reset", duration: TUNING.toast.flashMs, group: "subtitles" });
       }
     });

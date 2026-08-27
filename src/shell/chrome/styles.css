@@ -1073,16 +1073,6 @@ pf-toast {
 /* - Mobile-only controls - */
 [data-pf-pip] { display: none; }
 
-/* Reset-button flash: a quick accent-colored glow that fades out. */
-@keyframes pf-reset-flash {
-  0% { background-color: transparent; }
-  30% { background-color: var(--pf-accent); }
-  100% { background-color: transparent; }
-}
-.pf-flash {
-  animation: pf-reset-flash 0.4s ease-out;
-}
-
 /* @starting-style for the panel's open transition. Keyed separately so it
    parses cleanly whether the browser supports the display transition or not. */
 @starting-style {

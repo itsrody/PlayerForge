@@ -272,10 +272,17 @@ export class InputForge {
   }
 
   #zoneForPoint(pointerEvent) {
-    const viewportWidth = window.innerWidth;
-    if (pointerEvent.clientX < viewportWidth * EDGE_ZONE_RATIO) {
+    // Edge zones only steer fullscreen gestures (dbltap edge-skip, swipe-down
+    // exit - both fs-gated), so the reference is the physical display. screen
+    // also sidesteps innerWidth's scrollbar-inclusive quirk on Gecko. Guard to
+    // the window when the screen reports no size (headless/test environs).
+    const screenWidth =
+      typeof screen !== "undefined" && screen.width > 0
+        ? screen.width
+        : window.innerWidth;
+    if (pointerEvent.clientX < screenWidth * EDGE_ZONE_RATIO) {
       return "left-edge";
-    } else if (pointerEvent.clientX > viewportWidth * EDGE_ZONE_START) {
+    } else if (pointerEvent.clientX > screenWidth * EDGE_ZONE_START) {
       return "right-edge";
     } else {
       return "screen";

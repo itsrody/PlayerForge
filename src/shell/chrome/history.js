@@ -1,4 +1,5 @@
 import { formatTime } from "../../shared/time.js";
+import { flashElement } from "../../shared/flash.js";
 import { createIconElement } from "./icons.js";
 import { TUNING } from "./config.js";
 
@@ -54,9 +55,7 @@ export function addHistorySection(panel, shell) {
     resetBtn.appendChild(createIconElement("reload"));
     resetBtn.addEventListener("click", () => {
       shell.resume?.resetEntry(entry.id);
-      resetBtn.classList.remove("pf-flash");
-      void resetBtn.offsetWidth;
-      resetBtn.classList.add("pf-flash");
+      flashElement(resetBtn);
       shell.toast({
         icon: "reload",
         text: "Resume Entry Reset",

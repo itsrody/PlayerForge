@@ -379,7 +379,6 @@ test("computeCoverScale covers the device screen from the rendered box", () => {
   // fitted 800x600 (min(800, 800*4/3)=800), cover = max(1920/800, 1080/600)=2.4.
   assert.ok(Math.abs(computeCoverScale(video) - 2.4) < 1e-9);
 
-  delete globalThis.screen;
   dom.window.close();
 });
 

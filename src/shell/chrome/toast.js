@@ -1,4 +1,5 @@
 import { delay } from "../../shared/time.js";
+import { flashElement } from "../../shared/flash.js";
 import { iconMarkup } from "./icons.js";
 
 /**
@@ -66,9 +67,7 @@ export class ToastManager {
         button.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
-          button.classList.remove("pf-flash");
-          void button.offsetWidth;
-          button.classList.add("pf-flash");
+          flashElement(button);
           action.onClick?.();
         });
         this.#actions.appendChild(button);
