@@ -131,6 +131,7 @@ const stateFor = (() => {
         activeHolds: new Set(),
         scrubbing: false,
         scrubDuration: 0,
+        scrubStartTime: 0,
         scrubSlowGain: 0,
         scrubFastGain: 0,
         scrubSensitivity: 0,
@@ -304,16 +305,18 @@ export function attachInputActions(shell, host, signal) {
       if (!duration || !Number.isFinite(duration)) {
         return;
       }
-      // Velocity curve: gain (seconds per pixel) rises from the slow floor to
-      // the fast ceiling as speed increases. Both are normalized by container
-      // width so the "1s slow" / "minutes fast" feels are width-independent.
+      // VLC cruise: gain (seconds per pixel) rises from the deliberate floor
+      // to the minutes ceiling as the hold persists. Both are normalized by
+      // container width so the "1s slow" / "minutes fast" feels are
+      // width-independent.
       const width = shell.container?.clientWidth || shell.video?.clientWidth || 640;
       state.scrubbing = true;
       state.scrubDuration = duration;
+      state.scrubStartTime = now;
       state.scrubSlowGain =
-        TUNING.scrub.velocity.slowFullWidthSeconds / width;
+        TUNING.scrub.cruise.slowFullWidthSeconds / width;
       state.scrubFastGain =
-        TUNING.scrub.velocity.fastFullWidthSeconds / width;
+        TUNING.scrub.cruise.fastFullWidthSeconds / width;
       state.scrubSensitivity = TUNING.controller.scrubSensitivity / 150;
       state.scrubDirectionMomentum = 0;
     }
@@ -322,11 +325,12 @@ export function attachInputActions(shell, host, signal) {
       return;
     }
 
-    // Saturating power curve: t in [0,1] as |velocity| rises past the knee,
-    // so slow scrubbing stays near the 1s floor while fast scrubbing eases
-    // toward the minutes ceiling without overshoot or discontinuity.
-    const v = Math.abs(detail.velocity);
-    const t = Math.min(1, (v / TUNING.scrub.velocity.kneeVelocityPxS) ** TUNING.scrub.velocity.exponent);
+    // Cruise ramp: t in [0,1] grows with real elapsed hold time, so a fresh
+    // stroke scrubs precisely near the floor while a sustained hold
+    // accelerates toward the minutes ceiling - refresh-rate independent and
+    // tracking the hand, not the display.
+    const held = (now - state.scrubStartTime) / 1000;
+    const t = Math.min(1, (held / TUNING.scrub.cruise.rampSeconds) ** TUNING.scrub.cruise.exponent);
     const gain = state.scrubSlowGain + (state.scrubFastGain - state.scrubSlowGain) * t;
     const deltaSeconds = detail.dx * gain * state.scrubSensitivity;
     shell.scrubTo(shell.currentTime + deltaSeconds);
@@ -352,6 +356,7 @@ export function attachInputActions(shell, host, signal) {
     state.scrubbing = false;
     state.scrubDirectionMomentum = 0;
     state.scrubDuration = 0;
+    state.scrubStartTime = 0;
     state.scrubSlowGain = 0;
     state.scrubFastGain = 0;
     state.scrubSensitivity = 0;

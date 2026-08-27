@@ -29,7 +29,6 @@ const PINCH_BASELINE_DELAY_MS = TUNING.gestures.pinchBaselineDelayMs;
 const TRACKPAD_COOLDOWN_MS = TUNING.gestures.trackpadCooldownMs;
 const SUPPRESS_WINDOW_MS = TUNING.gestures.suppressWindowMs;
 const DOUBLE_TAP_WINDOW_MS = TUNING.gestures.doubleTapWindowMs;
-const SCRUB_VELOCITY_TAU_S = TUNING.scrub.velocityFilterMs / 1000;
 
 /** All live input engines, used for keyboard focus arbitration. */
 const activeForges = new Set();
@@ -104,8 +103,6 @@ export class InputForge {
   // Scrub state.
   #scrubbing = false;
   #scrubLastX = 0;
-  #scrubLastTime = 0;
-  #scrubVelocity = 0;
 
   // Swipe state.
   #swiping = false;
@@ -295,11 +292,9 @@ export class InputForge {
     }
     if (this.#scrubbing) {
       this.#scrubbing = false;
-      this.#scrubVelocity = 0;
       this.#dispatch(GESTURE_EVENTS.scrubEnd, {
         zone: this.#gestureZone || "screen",
-        method: "pointer",
-        velocity: 0
+        method: "pointer"
       });
     }
     if (this.#swiping) {
@@ -499,8 +494,6 @@ export class InputForge {
       this.#gestureZone = this.#zoneForPoint(event);
       this.#scrubbing = false;
       this.#scrubLastX = event.clientX;
-      this.#scrubLastTime = this.#startTime;
-      this.#scrubVelocity = 0;
       this.#swiping = false;
       this.#swipeDirection = null;
       this.#clearHoldTimer();
@@ -536,7 +529,6 @@ export class InputForge {
       return;
     }
 
-    const now = performance.now();
     const dx = Math.abs(x - this.#startX);
     const dy = Math.abs(y - this.#startY);
 
@@ -552,8 +544,6 @@ export class InputForge {
           this.#scrubbing = true;
           this.#capturePointerSafe(this.#primaryPointerId);
           this.#scrubLastX = x;
-          this.#scrubLastTime = now;
-          this.#scrubVelocity = 0;
         } else if (allowsIntent("swipe") && dy > SCROLL_START_PX && dy > dx * AXIS_DOMINANCE_RATIO) {
           this.#swiping = true;
           this.#swipeDirection = y > this.#startY ? "down" : "up";
@@ -583,14 +573,9 @@ export class InputForge {
   /**
    * Consume every coalesced sample of the move so high-rate Gecko pointer
    * streams scrub at full fidelity; one semantic event is emitted per move.
-   *
-   * Velocity is measured at move granularity from true event timestamps (the
-   * live event's own DOMHighResTimeStamp, same epoch as performance.now()),
-   * then smoothed with a first-order time-based filter, alpha = 1 - exp(-dt/
-   * tau). Because alpha derives from the real interval between moves, the
-   * smoothing window is the same absolute time at any display rate -
-   * adaptive-refresh correct - while the per-move dt keeps the filter
-   * responsive enough to track speed changes mid-stroke.
+   * The signed per-move step (dx) is the whole signal: the action layer
+   * applies the VLC cruise ramp in real hold-time, so no velocity state is
+   * needed here.
    */
   #advanceScrub(event) {
     let totalStep = 0;
@@ -608,18 +593,11 @@ export class InputForge {
     }
     this.#scrubLastX = lastX;
 
-    const now = event.timeStamp;
-    const dt = (now - this.#scrubLastTime) / 1000;
-    this.#scrubLastTime = now;
-    const instantVelocity = dt > 0.001 ? totalStep / dt : 0;
-    const alpha = dt > 0 ? 1 - Math.exp(-dt / SCRUB_VELOCITY_TAU_S) : 0;
-    this.#scrubVelocity += alpha * (instantVelocity - this.#scrubVelocity);
     this.#dispatch(GESTURE_EVENTS.scrub, {
       zone: this.#gestureZone || "screen",
       method: "pointer",
       dx: totalStep,
-      velocity: this.#scrubVelocity,
-      timestamp: now
+      timestamp: event.timeStamp
     });
   }
 
@@ -650,14 +628,11 @@ export class InputForge {
       });
     } else if (this.#scrubbing) {
       this.#scrubbing = false;
-      const finalVelocity = this.#scrubVelocity;
-      this.#scrubVelocity = 0;
       this.#suppressNextActivations();
       event.stopImmediatePropagation();
       this.#dispatch(GESTURE_EVENTS.scrubEnd, {
         zone: this.#gestureZone || "screen",
-        method: "pointer",
-        velocity: finalVelocity
+        method: "pointer"
       });
     } else if (this.#swiping) {
       this.#swiping = false;
