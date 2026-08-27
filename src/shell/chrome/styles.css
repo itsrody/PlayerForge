@@ -67,17 +67,9 @@
   }
 }
 
-/* Neutralize the inline 'position: relative' we set on the container
-   while it is the native fullscreen element. The UA's ':fullscreen'
-   rule uses 'position: fixed' (non-important), which an inline style
-   would otherwise override - leaving the top-layer element sized to its
-   parent instead of covering the viewport. */
-[data-pf-shell]:fullscreen {
-  position: fixed !important;
-  inset: 0 !important;
-  width: 100% !important;
-  height: 100% !important;
-}
+/* The host's :fullscreen fix lives in the document-scope stylesheet
+   (chrome/inject.js) - the host is a light-DOM element, so its top-layer
+   rule must not be shadow-scoped. Do not reintroduce it here. */
 
 /* - HUD Layer - */
 .pf-hud-layer {
