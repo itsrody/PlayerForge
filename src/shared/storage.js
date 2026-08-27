@@ -69,8 +69,25 @@ export function loadJsonObject(key, fallback) {
   return raw && typeof raw === "object" ? raw : fallback;
 }
 
+let configCache = null;
+
+/**
+ * The whole configs document, parsed at most once and served from a module
+ * cache afterwards. GM storage is a sync localStorage parse per call - the
+ * hot read paths (repeated getConfigValue, the cross-tab refresh loop) were
+ * re-parsing the entire doc every time. Writers refresh the cache in place;
+ * external (cross-tab) writes invalidate it via invalidateConfigCache().
+ */
 function readConfigDoc() {
-  return loadJsonObject(KEYS.configs, { version: 1 });
+  if (configCache == null) {
+    configCache = loadJsonObject(KEYS.configs, { version: 1 });
+  }
+  return configCache;
+}
+
+/** Drop the cached configs doc after an external (cross-tab) write. */
+export function invalidateConfigCache() {
+  configCache = null;
 }
 
 function isSafeKeySegment(key) {
@@ -104,7 +121,10 @@ export function setConfigValue(path, value) {
  * re-serializes the whole doc).
  */
 export function setConfigFields(fields) {
-  const doc = readConfigDoc();
+  // Work on a copy: successful batches commit to cache+storage atomically, a
+  // defensive early-return (unsafe segment) never leaks a partial mutation
+  // into the live cache the way mutating the cached doc in place would.
+  const doc = structuredClone(readConfigDoc());
   for (const [path, value] of Object.entries(fields)) {
     const segments = path.split(".");
     let node = doc;
@@ -130,7 +150,9 @@ export function setConfigFields(fields) {
     gmSetValue(KEYS.configs, doc);
   } catch (err) {
     logger.error("storage", "Failed to persist config:", err);
+    return;
   }
+  configCache = doc;
 }
 
 /**
@@ -138,7 +160,7 @@ export function setConfigFields(fields) {
  * No-op when any intermediate segment or the leaf itself is missing.
  */
 export function deleteConfigField(path) {
-  const doc = readConfigDoc();
+  const doc = structuredClone(readConfigDoc());
   const segments = path.split(".");
   let node = doc;
   for (let i = 0; i < segments.length - 1; i++) {
@@ -160,5 +182,7 @@ export function deleteConfigField(path) {
     gmSetValue(KEYS.configs, doc);
   } catch (err) {
     logger.error("storage", "Failed to persist config:", err);
+    return;
   }
+  configCache = doc;
 }

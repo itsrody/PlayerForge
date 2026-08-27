@@ -1,11 +1,13 @@
-import test from "node:test";
+import test, { beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 let stored = {};
 globalThis.GM_getValue = (key, fallback) => (key in stored ? stored[key] : fallback);
 globalThis.GM_setValue = (key, value) => { stored[key] = value; };
 
-const { KEYS, getConfigValue, setConfigValue, setConfigFields, deleteConfigField } = await import("../src/shared/storage.js");
+const { KEYS, getConfigValue, setConfigValue, setConfigFields, deleteConfigField, invalidateConfigCache } = await import("../src/shared/storage.js");
+
+beforeEach(() => invalidateConfigCache());
 
 test("getConfigValue resolves dotted paths with fallbacks", () => {
   stored = { [KEYS.configs]: { version: 1, ui: { volume: 0.5 } } };
@@ -78,4 +80,48 @@ test("setConfigValue delegates to setConfigFields (single write)", () => {
   globalThis.GM_setValue = realSet;
   assert.equal(setCalls, 1);
   assert.equal(stored[KEYS.configs].ui.volume, 0.8);
+});
+
+test("config reads are cached until invalidated", () => {
+  stored = { [KEYS.configs]: { ui: { volume: 0.5 } } };
+  invalidateConfigCache();
+
+  let reads = 0;
+  const realGet = globalThis.GM_getValue;
+  globalThis.GM_getValue = (key, fallback) => {
+    reads += 1;
+    return realGet(key, fallback);
+  };
+  try {
+    assert.equal(getConfigValue("ui.volume"), 0.5);
+    const afterWarm = reads;
+    getConfigValue("ui.volume");
+    getConfigValue("ui.missing", -1);
+    assert.equal(reads, afterWarm, "further reads served from cache, no GM re-read");
+  } finally {
+    globalThis.GM_getValue = realGet;
+  }
+});
+
+test("invalidateConfigCache forces a fresh read from storage", () => {
+  stored = { [KEYS.configs]: { ui: { volume: 0.5 } } };
+  invalidateConfigCache();
+  getConfigValue("ui.volume"); // warm cache
+
+  // Something (another tab) replaced the doc behind our back.
+  stored = { [KEYS.configs]: { ui: { volume: 0.9 } } };
+  assert.equal(getConfigValue("ui.volume"), 0.5, "stale cached value before invalidation");
+
+  invalidateConfigCache();
+  assert.equal(getConfigValue("ui.volume"), 0.9, "fresh value after invalidation");
+});
+
+test("setConfigFields commits the cache in sync with storage", () => {
+  stored = { [KEYS.configs]: { filter: { brightness: 100 } } };
+  invalidateConfigCache();
+  setConfigFields({ "filter.brightness": 150, "filter.contrast": 110 });
+  // Reads come from the committed cache - no need to re-read storage.
+  assert.equal(getConfigValue("filter.brightness"), 150);
+  assert.equal(getConfigValue("filter.contrast"), 110);
+  assert.equal(stored[KEYS.configs].filter.brightness, 150);
 });

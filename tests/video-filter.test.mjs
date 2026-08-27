@@ -7,6 +7,7 @@ globalThis.GM_setValue = (key, value) => { writes[key] = value; };
 globalThis.GM_addValueChangeListener = () => {};
 
 const { VideoFilter } = await import("../src/shell/filter.js");
+const { invalidateConfigCache } = await import("../src/shared/storage.js");
 
 function makeFakeVideo() {
   return { style: { filter: "" }, closest: () => null };
@@ -78,6 +79,8 @@ function cleanWrites() {
   for (const key of Object.keys(writes)) {
     delete writes[key];
   }
+  // Drop the storage read-cache so the next test seeds from a clean doc.
+  invalidateConfigCache();
 }
 
 test("applies default filter as 'none'", () => {

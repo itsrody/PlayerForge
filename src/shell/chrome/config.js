@@ -2,7 +2,7 @@
  * User-settings engine: defaults, schema, cached accessors, and the generic
  * panel renderer for that schema.
  */
-import { KEYS, getConfigValue, setConfigValue } from "../../shared/storage.js";
+import { KEYS, getConfigValue, setConfigValue, invalidateConfigCache } from "../../shared/storage.js";
 import { logger } from "../../shared/logger.js";
 
 const SETTINGS_PREFIX = "settings";
@@ -203,6 +203,9 @@ export function setSetting(key, value) {
  * back through the same path and land as no-ops.
  */
 function refreshSettingsCache() {
+  // A cross-tab writer replaced pf:configs behind our back - drop the cached
+  // doc so the per-key re-reads below come from the fresh manager value.
+  invalidateConfigCache();
   let changed = 0;
   for (const key of Object.keys(cache)) {
     const fresh = getConfigValue(`${SETTINGS_PREFIX}.${key}`, DEFAULT_SETTINGS[key]);
