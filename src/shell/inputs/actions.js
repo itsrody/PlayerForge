@@ -82,17 +82,38 @@ function gateOpen(binding) {
     (!binding.fs || !!document.fullscreenElement);
 }
 
+/** Bindings pre-bucketed by gesture so decision-point scans skip the mass of
+ *  unrelated records. Keys stay in table order. Gate sampling stays live. */
+const BY_GESTURE = new Map();
+for (const binding of INPUT_BINDINGS) {
+  let list = BY_GESTURE.get(binding.gesture);
+  if (!list) {
+    list = [];
+    BY_GESTURE.set(binding.gesture, list);
+  }
+  list.push(binding);
+}
+
 /**
  * True when at least one binding for the pointer-intent family is armed.
  * Sampled live at every decision point so toggles apply mid-session.
  */
 export function allowsIntent(gesture) {
-  return INPUT_BINDINGS.some((binding) => binding.gesture === gesture && gateOpen(binding));
+  const bindings = BY_GESTURE.get(gesture);
+  if (!bindings) {
+    return false;
+  }
+  for (const binding of bindings) {
+    if (gateOpen(binding)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Armed key bindings, in table order - sampled live per keystroke. */
 export function armedKeys() {
-  return INPUT_BINDINGS.filter((binding) => binding.gesture === "key" && gateOpen(binding));
+  return BY_GESTURE.get("key")?.filter((binding) => gateOpen(binding)) ?? [];
 }
 
 /* - Per-shell action state - */

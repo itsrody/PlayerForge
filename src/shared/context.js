@@ -22,39 +22,56 @@ import { watchDocumentVideos, meetsMinSize } from "../kernel/sdk.js";
 
 /* - 1. Domain identity - */
 
-/**
- * Reduce a hostname to its registrable-domain key (best effort, no PSL).
- * IP addresses become dash-separated so they are safe as identifiers.
- */
-export function getDomainKey(hostname) {
-  if (!hostname) {
-    return "";
-  }
-  if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname)) {
-    return hostname.replace(/\./g, "-");
-  }
-  // Bracketed IPv6 ([::1]) or bare forms - the TLD walk would mangle them
-  // into garbage keys, so collapse to one dash-safe identifier like IPv4.
-  if (hostname.includes(":")) {
-    return hostname.replace(/[\[\]:]+/g, "-").replace(/^-+|-+$/g, "") || "ipv6";
-  }
-  const parts = hostname.toLowerCase().replace(/^www\./, "").split(".");
-  const multiPartTlds = new Set(["co", "com", "org", "net", "gov", "edu", "ac", "mil"]);
-  const singleLabelTlds = new Set([
+const DOMAIN_TLDS = {
+  multi: new Set(["co", "com", "org", "net", "gov", "edu", "ac", "mil"]),
+  single: new Set([
     "biz", "info", "name", "mobi", "asia", "tel", "travel", "jobs", "museum", "coop", "aero",
     "app", "blog", "dev", "fun", "game", "host", "live", "love", "new", "news", "one", "online",
     "page", "park", "plus", "pro", "shop", "site", "store", "tech", "video", "work", "xyz",
     "club", "life", "world", "today", "tools", "social", "beer", "email", "space", "cool",
     "social", "games", "legal", "luxury", "fans", "buzz", "country", "kim", "pub", "rest"
-  ]);
-  let idx = parts.length - 1;
-  if (parts[idx] && (parts[idx].length <= 3 || singleLabelTlds.has(parts[idx]))) {
-    idx--;
+  ])
+};
+const IPV4_RE = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+/** Memoized domain keys: pages resolve their hostname repeatedly (kernel +
+ *  probe + responder), and the TLD walk is pure over hostname.
+ */
+const domainKeyCache = new Map();
+
+/**
+ * Reduce a hostname to its registrable-domain key (best effort, no PSL).
+ * IP addresses become dash-separated so they are safe as identifiers.
+ * Pure over hostname, so identical inputs share one cached result.
+ */
+export function getDomainKey(hostname) {
+  if (!hostname) {
+    return "";
   }
-  if (parts[idx] && multiPartTlds.has(parts[idx])) {
-    idx--;
+  if (domainKeyCache.has(hostname)) {
+    return domainKeyCache.get(hostname);
   }
-  return parts[Math.max(0, idx)] || "";
+  let key = "";
+  if (IPV4_RE.test(hostname)) {
+    key = hostname.replace(/\./g, "-");
+  } else if (hostname.includes(":")) {
+    // Bracketed IPv6 ([::1]) or bare forms - the TLD walk would mangle them
+    // into garbage keys, so collapse to one dash-safe identifier like IPv4.
+    key = hostname.replace(/[\[\]:]+/g, "-").replace(/^-+|-+$/g, "") || "ipv6";
+  } else {
+    const parts = hostname.toLowerCase().replace(/^www\./, "").split(".");
+    const multiPartTlds = DOMAIN_TLDS.multi;
+    const singleLabelTlds = DOMAIN_TLDS.single;
+    let idx = parts.length - 1;
+    if (parts[idx] && (parts[idx].length <= 3 || singleLabelTlds.has(parts[idx]))) {
+      idx--;
+    }
+    if (parts[idx] && multiPartTlds.has(parts[idx])) {
+      idx--;
+    }
+    key = parts[Math.max(0, idx)] || "";
+  }
+  domainKeyCache.set(hostname, key);
+  return key;
 }
 
 /** Label-boundary containment: subdomains count, substrings do not. */
@@ -63,26 +80,42 @@ function boundaryContains(a, b) {
     || b.startsWith(`${a}.`) || b.endsWith(`.${a}`);
 }
 
+/** Reusable distance rows for the bounded Levenshtein below. Domain keys are
+ *  short and ranking scans many candidates, so two scratch rows equal to the
+ *  longest operand avoid per-call allocation on the hot ranking path.
+ */
+let distRows = null;
+let distRowLen = 0;
+
+function ensureDistRows(lenB) {
+  if (!distRows || distRowLen < lenB + 1) {
+    distRows = [new Int32Array(lenB + 1), new Int32Array(lenB + 1)];
+    distRowLen = lenB + 1;
+  }
+}
+
 function boundedLevenshtein(a, b, max = Infinity) {
   const lenA = a.length;
   const lenB = b.length;
   if (Math.abs(lenA - lenB) > max) {
     return max + 1;
   }
-  let prev = new Array(lenB + 1);
+  ensureDistRows(lenB);
+  let prev = distRows[0];
+  let curr = distRows[1];
   for (let j = 0; j <= lenB; j++) {
     prev[j] = j;
   }
-  let curr = new Array(lenB + 1);
   for (let i = 1; i <= lenA; i++) {
     curr[0] = i;
     let rowMin = i;
     const chA = a[i - 1];
     for (let j = 1; j <= lenB; j++) {
       const cost = chA === b[j - 1] ? 0 : 1;
-      curr[j] = cost === 0 ? prev[j - 1] : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
-      if (curr[j] < rowMin) {
-        rowMin = curr[j];
+      const v = cost === 0 ? prev[j - 1] : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
+      curr[j] = v;
+      if (v < rowMin) {
+        rowMin = v;
       }
     }
     if (rowMin > max) {
