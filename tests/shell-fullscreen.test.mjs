@@ -7,7 +7,7 @@ globalThis.GM_setValue = () => {};
 
 const { Shell } = await import("../src/shell/shell.js");
 
-function makeShell(id = "t") {
+async function makeShell(id = "t") {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", {
     url: "https://www.youtube.com/watch?v=1"
   });
@@ -52,6 +52,7 @@ function makeShell(id = "t") {
   const changes = () => emissions.filter((entry) => entry.type === "pf:shell-fullscreen-change");
 
   const shell = new Shell({ id, video, container, sdk: {}, sdkName: "test-sdk", bus });
+  await shell.ready;
   const teardown = () => {
     setFullscreenEl(null);
     fireChange();
@@ -62,14 +63,14 @@ function makeShell(id = "t") {
   return { dom, shell, container, video, emissions, setFullscreenEl, fireChange, changes, teardown };
 }
 
-test("checkmark is false until an element goes fullscreen", () => {
-  const { shell, teardown } = makeShell();
+test("checkmark is false until an element goes fullscreen", async () => {
+  const { shell, teardown } = await makeShell();
   assert.equal(shell.fullscreen, false);
   teardown();
 });
 
-test("entering fullscreen on our container flips the checkmark and emits one change", () => {
-  const env = makeShell();
+test("entering fullscreen on our container flips the checkmark and emits one change", async () => {
+  const env = await makeShell();
   const { shell, container, setFullscreenEl, fireChange, changes, teardown } = env;
 
   setFullscreenEl(container);
@@ -82,8 +83,8 @@ test("entering fullscreen on our container flips the checkmark and emits one cha
   teardown();
 });
 
-test("any document fullscreen element marks this shell", () => {
-  const env = makeShell();
+test("any document fullscreen element marks this shell", async () => {
+  const env = await makeShell();
   const { dom, shell, setFullscreenEl, fireChange, changes, teardown } = env;
 
   const stranger = dom.window.document.createElement("section");
@@ -98,8 +99,8 @@ test("any document fullscreen element marks this shell", () => {
   teardown();
 });
 
-test("exiting fullscreen emits exactly one false transition", () => {
-  const env = makeShell();
+test("exiting fullscreen emits exactly one false transition", async () => {
+  const env = await makeShell();
   const { shell, container, setFullscreenEl, fireChange, changes, teardown } = env;
 
   setFullscreenEl(container);
@@ -113,8 +114,8 @@ test("exiting fullscreen emits exactly one false transition", () => {
   teardown();
 });
 
-test("repeated change events without a state flip are deduped", () => {
-  const env = makeShell();
+test("repeated change events without a state flip are deduped", async () => {
+  const env = await makeShell();
   const { shell, container, setFullscreenEl, fireChange, changes, teardown } = env;
 
   setFullscreenEl(container);
@@ -126,8 +127,8 @@ test("repeated change events without a state flip are deduped", () => {
   teardown();
 });
 
-test("a destroyed shell no longer reacts to fullscreen transitions", () => {
-  const env = makeShell();
+test("a destroyed shell no longer reacts to fullscreen transitions", async () => {
+  const env = await makeShell();
   const { shell, container, emissions, setFullscreenEl, fireChange, teardown } = env;
 
   shell.destroy();
@@ -142,8 +143,8 @@ test("a destroyed shell no longer reacts to fullscreen transitions", () => {
   teardown();
 });
 
-test("rejected fullscreen request surfaces a hint and emits the blocked event", () => {
-  const env = makeShell();
+test("rejected fullscreen request surfaces a hint and emits the blocked event", async () => {
+  const env = await makeShell();
   const { dom, shell, emissions, teardown } = env;
 
   dom.window.document.dispatchEvent(new dom.window.Event("fullscreenerror"));
@@ -159,8 +160,8 @@ test("rejected fullscreen request surfaces a hint and emits the blocked event", 
   teardown();
 });
 
-test("rejected fullscreen while already fullscreen emits nothing", () => {
-  const env = makeShell();
+test("rejected fullscreen while already fullscreen emits nothing", async () => {
+  const env = await makeShell();
   const { dom, shell, container, setFullscreenEl, emissions, teardown } = env;
 
   setFullscreenEl(container);

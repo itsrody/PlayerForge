@@ -7,7 +7,7 @@ globalThis.GM_setValue = () => {};
 
 const { Shell } = await import("../src/shell/shell.js");
 
-function makeShell() {
+async function makeShell() {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", {
     url: "https://www.youtube.com/watch?v=1",
   });
@@ -31,18 +31,19 @@ function makeShell() {
 
   const bus = { emit() {}, addEventListener() {}, removeEventListener() {} };
   const shell = new Shell({ id: "lazy-test", video, container, sdk: {}, sdkName: "test-sdk", bus });
+  await shell.ready;
 
   return { dom, shell, container, video };
 }
 
-test("shell constructs without bus subscription for timeupdate", () => {
-  const { shell } = makeShell();
+test("shell constructs without bus subscription for timeupdate", async () => {
+  const { shell } = await makeShell();
   assert.ok(shell, "shell created");
   shell.destroy();
 });
 
 test("track load via file input, then destroy — no leak", async () => {
-  const { shell, container, dom } = makeShell();
+  const { shell, container, dom } = await makeShell();
 
   const vtt = "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nHello";
   const file = new File([vtt], "sub.vtt", { type: "text/vtt" });
@@ -57,8 +58,8 @@ test("track load via file input, then destroy — no leak", async () => {
   shell.destroy();
 });
 
-test("destroy without any track is clean", () => {
-  const { shell } = makeShell();
+test("destroy without any track is clean", async () => {
+  const { shell } = await makeShell();
   shell.destroy();
   // Calling destroy again is a no-op.
   shell.destroy();

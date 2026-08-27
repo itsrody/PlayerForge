@@ -65,11 +65,16 @@ export class Shell {
     this.sdkName = sdkName;
     this.#bus = bus;
     this.#media = createMediaControls({ video, bus, shellId: id });
-    this.#injectDom();
+    this.ready = this.#boot();
+  }
+
+  /** Resolves when the shell DOM and HUD are live. Styles load is awaited. */
+  async #boot() {
+    await this.#injectDom();
     if (!this.#shellDom) {
-      throw new Error(`Shell "${id}": failed to inject shell DOM`);
+      throw new Error(`Shell "${this.id}": failed to inject shell DOM`);
     }
-    this.#panel = new SettingsPanel(this, bus);
+    this.#panel = new SettingsPanel(this, this.#bus);
     this.#toasts = new ToastManager(this.#shellDom.hudLayer);
     this.#inputs = new InputForge(this.video, this.container, this.shellHost);
     attachInputActions(this, this.shellHost, this.#inputs.signal);
@@ -83,14 +88,14 @@ export class Shell {
     this.#forwardMediaEvents();
     this.#mediaSession = claimMediaSession({
       controls: this.#media,
-      video,
+      video: this.video,
       signal: this.#scope.signal
     });
     this.#watchFullscreen();
     this.#watchWakeLock();
     this.#setupAutoPiP();
     this.#markManaged();
-    logger.log("shell", `Shell "${id}" constructed (${sdkName})`);
+    logger.log("shell", `Shell "${this.id}" constructed (${this.sdkName})`);
   }
 
   get volume() {
@@ -276,8 +281,8 @@ export class Shell {
     return this.#media;
   }
 
-  #injectDom() {
-    ensureStyles();
+  async #injectDom() {
+    await ensureStyles();
     this.#shellDom = injectShell(this.container);
     if (!this.#shellDom) {
       logger.error("shell", "Failed to inject shell DOM");

@@ -6,13 +6,33 @@ import { onDomMutations } from "../../kernel/dom-watch.js";
 export const SHELL_MARKER = "data-pf-shell";
 
 let sharedSheet = null;
+let styleLoad = null;
 
+/**
+ * Load the shell stylesheet exactly once. Preferred source is the @resource
+ * text (served out-of-band from the bundle by Tampermonkey and cached), with
+ * the embedded string as a resilient offline/failure fallback. Idempotent and
+ * cached; safe to await from multiple callers before shells are built.
+ */
 export function ensureStyles() {
-  if (!sharedSheet) {
-    sharedSheet = new CSSStyleSheet();
-    sharedSheet.replaceSync(SHELL_CSS);
-    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sharedSheet];
+  if (!styleLoad) {
+    styleLoad = (async () => {
+      const sheet = new CSSStyleSheet();
+      let css = null;
+      if (typeof GM_getResourceText === "function") {
+        try {
+          css = await GM_getResourceText("pfStyle");
+        } catch (err) {
+          logger.error("inject", "Failed to load @resource stylesheet:", err);
+        }
+      }
+      sheet.replaceSync(css ?? SHELL_CSS);
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+      sharedSheet = sheet;
+      return sheet;
+    })();
   }
+  return styleLoad;
 }
 
 /**

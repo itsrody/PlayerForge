@@ -85,6 +85,7 @@ export class LifecycleManager {
     }
     try {
       const shell = this.#shellFactory({ id, video, container, sdk, sdkName });
+      await shell?.ready;
       this.#bus.emit("pf:shell-created", shell);
       logger.log("lifecycle", `Shell created for ${sdkName}: ${id}`);
     } catch (err) {
