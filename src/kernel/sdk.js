@@ -161,29 +161,42 @@ export function meetsMinSize(video, minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_
 }
 
 /**
- * The one document-level discovery tap: capture-phase media events plus the
- * shared dom-watch dispatcher, multiplexed to every subscriber. Both riders -
- * the boot probe and the kernel's permanent watch - get identical signal
- * from this single wiring instead of installing their own.
- * Returns the unsubscribe function.
+ * Capture-phase media-event tap with NO mutation observer - the cheap signal
+ * used by the two-phase boot probe before it commits to a full-document
+ * observer. Media events travel the composed path to document, so even
+ * shadow-hosted SDK videos surface here without any subtree observer.
  */
-export function watchDocumentVideos(onVideo) {
+export function watchMediaEvents(onVideo) {
   const onMediaEvent = (event) => {
     const video = videoFromEvent(event);
     if (video) {
       onVideo(video);
     }
   };
+  document.addEventListener("loadeddata", onMediaEvent, true);
+  document.addEventListener("play", onMediaEvent, true);
+  return () => {
+    document.removeEventListener("loadeddata", onMediaEvent, true);
+    document.removeEventListener("play", onMediaEvent, true);
+  };
+}
+
+/**
+ * Full discovery tap used by the kernel's permanent rider: capture media
+ * events plus the shared dom-watch dispatcher, multiplexed to a subscriber.
+ * This is the heavier signal (it keeps a full-document childList+subtree
+ * observer alive while subscribed); the boot probe prefers watchMediaEvents.
+ * Returns the unsubscribe function.
+ */
+export function watchDocumentVideos(onVideo) {
+  const offEvents = watchMediaEvents(onVideo);
   const offMutations = onDomMutations((mutations) => {
     for (const video of videosFromMutations(mutations)) {
       onVideo(video);
     }
   });
-  document.addEventListener("loadeddata", onMediaEvent, true);
-  document.addEventListener("play", onMediaEvent, true);
   return () => {
+    offEvents();
     offMutations();
-    document.removeEventListener("loadeddata", onMediaEvent, true);
-    document.removeEventListener("play", onMediaEvent, true);
   };
 }

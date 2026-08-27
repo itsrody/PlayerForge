@@ -340,6 +340,56 @@ test("stopped presence probe never fires", async () => {
   assert.equal(fires, 0);
 });
 
+test("video-less documents never open a mutation observer", async () => {
+  const { window: win } = dom("<p>no player here</p>", "https://example.com/article");
+  globalThis.window = win;
+  globalThis.document = win.document;
+
+  // Instrument: any full-document observer dom-watch would create shows up here.
+  const RealMO = win.MutationObserver;
+  let constructions = 0;
+  class CountingMO extends RealMO {
+    constructor(cb) {
+      super(cb);
+      constructions++;
+    }
+  }
+  globalThis.MutationObserver = CountingMO;
+  win.MutationObserver = CountingMO;
+
+  let fires = 0;
+  installVideoProbe({ minWidth: 100, minHeight: 60, onCandidate: () => fires++ });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  assert.equal(fires, 0, "no candidate on a video-less page");
+  assert.equal(constructions, 0, "two-phase probe stays in cheap phase - no observer opened");
+});
+
+test("a present-but-small video commits the probe to the observer", async () => {
+  const { window: win } = dom("<video></video>", "https://example.com/player");
+  globalThis.window = win;
+  globalThis.document = win.document;
+
+  const RealMO = win.MutationObserver;
+  let constructions = 0;
+  class CountingMO extends RealMO {
+    constructor(cb) {
+      super(cb);
+      constructions++;
+    }
+  }
+  globalThis.MutationObserver = CountingMO;
+  win.MutationObserver = CountingMO;
+
+  let fires = 0;
+  // min sizes above jsdom's always-0 rect -> the static video never qualifies,
+  // so the probe escalates (opens the observer) rather than closing early.
+  installVideoProbe({ minWidth: 100, minHeight: 60, onCandidate: () => fires++ });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(fires, 0, "no candidate - video never reaches player size");
+  assert.ok(constructions >= 1, "present video escalated the probe to the observer");
+});
+
 test("context timeout constant stays sane", () => {
   assert.ok(CTX_REQUEST_TIMEOUT_MS >= 1000 && CTX_REQUEST_TIMEOUT_MS <= 10000);
 });
