@@ -94,26 +94,38 @@ export function getConfigValue(path, fallback) {
 }
 
 export function setConfigValue(path, value) {
+  setConfigFields({ [path]: value });
+}
+
+/**
+ * Apply several dotted config fields (and their values) in one read-modify-
+ * write of the configs document. Preset/flush paths that touch many fields at
+ * once avoid N serialized gmSetValue round trips (each of which re-reads and
+ * re-serializes the whole doc).
+ */
+export function setConfigFields(fields) {
   const doc = readConfigDoc();
-  const segments = path.split(".");
-  let node = doc;
-  for (let i = 0; i < segments.length - 1; i++) {
-    const segment = segments[i];
-    if (!isSafeKeySegment(segment)) {
+  for (const [path, value] of Object.entries(fields)) {
+    const segments = path.split(".");
+    let node = doc;
+    for (let i = 0; i < segments.length - 1; i++) {
+      const segment = segments[i];
+      if (!isSafeKeySegment(segment)) {
+        return;
+      }
+      if (node[segment] == null) {
+        node[segment] = {};
+      } else if (typeof node[segment] !== "object" || Array.isArray(node[segment])) {
+        return;
+      }
+      node = node[segment];
+    }
+    const last = segments.at(-1);
+    if (!isSafeKeySegment(last)) {
       return;
     }
-    if (node[segment] == null) {
-      node[segment] = {};
-    } else if (typeof node[segment] !== "object" || Array.isArray(node[segment])) {
-      return;
-    }
-    node = node[segment];
+    node[last] = value;
   }
-  const last = segments.at(-1);
-  if (!isSafeKeySegment(last)) {
-    return;
-  }
-  node[last] = value;
   try {
     gmSetValue(KEYS.configs, doc);
   } catch (err) {

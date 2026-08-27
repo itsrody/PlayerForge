@@ -5,7 +5,7 @@ let stored = {};
 globalThis.GM_getValue = (key, fallback) => (key in stored ? stored[key] : fallback);
 globalThis.GM_setValue = (key, value) => { stored[key] = value; };
 
-const { KEYS, getConfigValue, setConfigValue, deleteConfigField } = await import("../src/shared/storage.js");
+const { KEYS, getConfigValue, setConfigValue, setConfigFields, deleteConfigField } = await import("../src/shared/storage.js");
 
 test("getConfigValue resolves dotted paths with fallbacks", () => {
   stored = { [KEYS.configs]: { version: 1, ui: { volume: 0.5 } } };
@@ -38,4 +38,44 @@ test("deleteConfigField removes leaves and tolerates missing paths", () => {
   deleteConfigField("__proto__.x");
   deleteConfigField("");
   assert.equal(JSON.stringify(stored[KEYS.configs]), before);
+});
+
+test("setConfigFields applies many fields in one write", () => {
+  let setCalls = 0;
+  const realSet = globalThis.GM_setValue;
+  globalThis.GM_setValue = (key, value) => {
+    setCalls += 1;
+    stored[key] = value;
+  };
+  stored = { [KEYS.configs]: { filter: {} } };
+
+  setConfigFields({
+    "filter.brightness": 150,
+    "filter.contrast": 110,
+    "filter.saturation": 90,
+    "ui.gestures": false
+  });
+
+  globalThis.GM_setValue = realSet;
+  assert.equal(setCalls, 1, "single write for the whole batch");
+  assert.equal(stored[KEYS.configs].filter.brightness, 150);
+  assert.equal(stored[KEYS.configs].filter.contrast, 110);
+  assert.equal(stored[KEYS.configs].filter.saturation, 90);
+  assert.equal(stored[KEYS.configs].ui.gestures, false);
+});
+
+test("setConfigValue delegates to setConfigFields (single write)", () => {
+  stored = {};
+  let setCalls = 0;
+  const realSet = globalThis.GM_setValue;
+  globalThis.GM_setValue = (key, value) => {
+    setCalls += 1;
+    stored[key] = value;
+  };
+
+  setConfigValue("ui.volume", 0.8);
+
+  globalThis.GM_setValue = realSet;
+  assert.equal(setCalls, 1);
+  assert.equal(stored[KEYS.configs].ui.volume, 0.8);
 });

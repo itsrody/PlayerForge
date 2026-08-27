@@ -1,4 +1,4 @@
-import { getConfigValue, setConfigValue } from "../shared/storage.js";
+import { getConfigValue, setConfigFields } from "../shared/storage.js";
 import { flashElement } from "../shared/flash.js";
 import { TUNING } from "./chrome/config.js";
 
@@ -212,9 +212,11 @@ export class VideoFilter {
   }
 
   #persist() {
+    const fields = {};
     for (const key of ALL_KEYS) {
-      setConfigValue(`${CONFIG_PREFIX}.${key}`, this.#values[key]);
+      fields[`${CONFIG_PREFIX}.${key}`] = this.#values[key];
     }
+    setConfigFields(fields);
   }
 
   reset() {

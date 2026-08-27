@@ -250,3 +250,23 @@ test("tint persists to config", () => {
   assert.equal(writes["pf:configs"]?.filter?.tint, -20);
   filter.destroy();
 });
+
+test("preset apply persists all fields in a single write", () => {
+  cleanWrites();
+  const video = makeFakeVideo();
+  const panel = makeFakePanel();
+  const filter = new VideoFilter(makeFakeShell(video), panel);
+  let setCalls = 0;
+  const realSet = globalThis.GM_setValue;
+  globalThis.GM_setValue = (key, value) => {
+    setCalls += 1;
+    writes[key] = value;
+  };
+
+  panel.calls.selects[0].onChange("Cinematic");
+
+  globalThis.GM_setValue = realSet;
+  assert.equal(setCalls, 1, "all preset fields coalesce into a single write");
+  assert.equal(Object.keys(writes["pf:configs"]?.filter ?? {}).length, 9, "all color fields persisted in one doc");
+  filter.destroy();
+});
