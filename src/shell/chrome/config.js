@@ -110,27 +110,36 @@ export const TUNING = {
   },
   scrub: {
     /**
-     * VLC-style cruise scrub. Holding + sliding seeks continuously and the
-     * rate accelerates the longer you hold: a fresh, deliberate stroke stays
-     * near the slow floor (a full-width swipe of ~slowFullWidthSeconds), and
-     * a sustained hold ramps the gain up to the fast ceiling (a full-width
-     * swipe of ~fastFullWidthSeconds) so long material is traversable in one
-     * gesture. The ramp is driven by real elapsed hold time, so it is
-     * refresh-rate independent and tracks the hand, not the display. Signed
-     * by drag direction; scrubTo clamps to [0, duration].
+     * Velocity-proportional scrub. The amount of time moved per pixel is a
+     * monotonic saturating function of the finger's real-time speed (measured
+     * px/s by the forge at move granularity and updated live): a slow stroke
+     * moves ~slowFullWidthSeconds across the container width, a fast stroke
+     * ~fastFullWidthSeconds. The curve rises smoothly past the knee, then
+     * saturates so high-speed scrubbing stays stable (scrubTo clamps to
+     * [0, duration]). Because it follows the hand's current velocity rather
+     * than hold time, the seek amount is proportional to velocity in real
+     * time - signed by drag direction.
      */
-    cruise: {
-      /** Full-width stroke at the start of a hold: the "1s" deliberate floor. */
+    velocity: {
+      /** Full-width stroke at near-zero speed: the "1s" slow floor. */
       slowFullWidthSeconds: 1,
-      /** Full-width stroke once fully ramped up: the "minutes" ceiling. */
+      /** Full-width stroke at high speed: the "minutes" ceiling. */
       fastFullWidthSeconds: 90,
-      /** Hold time (s) at which the gain sits ~halfway between slow and fast. */
-      rampSeconds: 1.5,
-      /** Ramp shape; >1 rises later and punchier, <1 cruises up sooner. */
-      exponent: 2
+      /** Velocity (px/s) at which the gain sits ~halfway between slow and fast. */
+      kneeVelocityPxS: 400,
+      /** Curve shape; >1 rises later and punchier, <1 hurries to the ceiling. */
+      exponent: 1.5
     },
     /** Sub-pixel moves are ignored so a holding finger doesn't micro-shimmer. */
-    deadZonePx: 0.5
+    deadZonePx: 0.5,
+    /**
+     * Time constant (ms) of the velocity low-pass filter in the forge:
+     * alpha = 1 - exp(-dt/tau). Because alpha derives from real elapsed time
+     * rather than event count, the smoothing window is the same absolute time
+     * at any display rate - adaptive-refresh correct - and the small tau keeps
+     * the signal responsive enough to track speed changes mid-stroke.
+     */
+    velocityFilterMs: 60
   },
   resume: {
     saveIntervalMs: 60000,

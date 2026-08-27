@@ -29,6 +29,7 @@ const PINCH_BASELINE_DELAY_MS = TUNING.gestures.pinchBaselineDelayMs;
 const TRACKPAD_COOLDOWN_MS = TUNING.gestures.trackpadCooldownMs;
 const SUPPRESS_WINDOW_MS = TUNING.gestures.suppressWindowMs;
 const DOUBLE_TAP_WINDOW_MS = TUNING.gestures.doubleTapWindowMs;
+const SCRUB_VELOCITY_TAU_S = TUNING.scrub.velocityFilterMs / 1000;
 
 /** All live input engines, used for keyboard focus arbitration. */
 const activeForges = new Set();
@@ -103,6 +104,8 @@ export class InputForge {
   // Scrub state.
   #scrubbing = false;
   #scrubLastX = 0;
+  #scrubLastTime = 0;
+  #scrubVelocity = 0;
 
   // Swipe state.
   #swiping = false;
@@ -494,6 +497,8 @@ export class InputForge {
       this.#gestureZone = this.#zoneForPoint(event);
       this.#scrubbing = false;
       this.#scrubLastX = event.clientX;
+      this.#scrubLastTime = this.#startTime;
+      this.#scrubVelocity = 0;
       this.#swiping = false;
       this.#swipeDirection = null;
       this.#clearHoldTimer();
@@ -529,6 +534,7 @@ export class InputForge {
       return;
     }
 
+    const now = performance.now();
     const dx = Math.abs(x - this.#startX);
     const dy = Math.abs(y - this.#startY);
 
@@ -544,6 +550,8 @@ export class InputForge {
           this.#scrubbing = true;
           this.#capturePointerSafe(this.#primaryPointerId);
           this.#scrubLastX = x;
+          this.#scrubLastTime = now;
+          this.#scrubVelocity = 0;
         } else if (allowsIntent("swipe") && dy > SCROLL_START_PX && dy > dx * AXIS_DOMINANCE_RATIO) {
           this.#swiping = true;
           this.#swipeDirection = y > this.#startY ? "down" : "up";
@@ -573,31 +581,49 @@ export class InputForge {
   /**
    * Consume every coalesced sample of the move so high-rate Gecko pointer
    * streams scrub at full fidelity; one semantic event is emitted per move.
-   * The signed per-move step (dx) is the whole signal: the action layer
-   * applies the VLC cruise ramp in real hold-time, so no velocity state is
-   * needed here.
+   *
+   * Real-time velocity is measured at move granularity from true event
+   * timestamps (the live event's own DOMHighResTimeStamp, same epoch as
+   * performance.now()) and smoothed with a first-order time-based filter,
+   * alpha = 1 - exp(-dt/tau). Because alpha derives from the real interval
+   * between moves, the smoothing window is the same absolute time at any
+   * display rate - adaptive-refresh correct - while the small tau keeps the
+   * signal responsive enough to track speed changes mid-stroke, so the seek
+   * amount stays proportional to the hand in real time.
    */
   #advanceScrub(event) {
     let totalStep = 0;
     const hasCoalesced = typeof event.getCoalescedEvents === "function";
-    const samples = hasCoalesced ? event.getCoalescedEvents() : [];
+    const samples = hasCoalesced ? event.getCoalescedEvents() : null;
     // Coalesced samples then the live event, without materializing a combined
     // array: high-rate Gecko pointer streams land here every move, so a
     // [[...samples, event]] spread per frame would allocate needlessly.
-    const count = samples.length > 0 ? samples.length + 1 : 1;
-    let lastX = this.#scrubLastX;
-    for (let i = 0; i < count; i++) {
-      const sample = i < samples.length ? samples[i] : event;
-      totalStep += sample.clientX - lastX;
-      lastX = sample.clientX;
+    if (samples) {
+      const count = samples.length + 1;
+      let lastX = this.#scrubLastX;
+      for (let i = 0; i < count; i++) {
+        const sample = i < samples.length ? samples[i] : event;
+        totalStep += sample.clientX - lastX;
+        lastX = sample.clientX;
+      }
+      this.#scrubLastX = lastX;
+    } else {
+      totalStep = event.clientX - this.#scrubLastX;
+      this.#scrubLastX = event.clientX;
     }
-    this.#scrubLastX = lastX;
 
+    const now = event.timeStamp;
+    const dt = (now - this.#scrubLastTime) / 1000;
+    this.#scrubLastTime = now;
+    const instantVelocity = dt > 0.001 ? totalStep / dt : 0;
+    const alpha = dt > 0 ? 1 - Math.exp(-dt / SCRUB_VELOCITY_TAU_S) : 0;
+    this.#scrubVelocity += alpha * (instantVelocity - this.#scrubVelocity);
     this.#dispatch(GESTURE_EVENTS.scrub, {
       zone: this.#gestureZone || "screen",
       method: "pointer",
       dx: totalStep,
-      timestamp: event.timeStamp
+      velocity: this.#scrubVelocity,
+      timestamp: now
     });
   }
 
