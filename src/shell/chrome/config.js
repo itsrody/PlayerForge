@@ -110,19 +110,26 @@ export const TUNING = {
   },
   scrub: {
     /**
-     * Scrub calibration follows the desktop-player reference (mpv's
-     * {1s,5s,60s} arrows, VLC's {3s,10s,60s,300s} jumps): a deliberate
-     * action spans a consistent FRACTION of the runtime, never an absolute
-     * time across content lengths. One full-width stroke at rest covers
-     * strokeFraction of the video; distance escalation tops out so a capped
-     * stroke spans ~10% - every video is traversable end-to-end in roughly
-     * ten capped strokes, on a phone thumbnail or a fullscreen monitor
-     * alike (width-normalized).
+     * Velocity-proportional scrub. The amount of time moved per pixel is a
+     * monotonic saturating function of the finger's instantaneous speed
+     * (measured px/s by the forge): a slow stroke moves ~slowFullWidthSeconds
+     * across the container width, a fast stroke ~fastFullWidthSeconds. The
+     * curve rises smoothly between them past the knee, then saturates so
+     * high-speed scrubbing stays stable and never overshoots (scrubTo clamps
+     * to [0, duration]). Signed by drag direction.
      */
-    strokeFraction: 0.01,
-    /** Path-length doubling distance: escalation is speed- and pause-free. */
-    escalationPx: 150,
-    maxMultiplier: 10
+    velocity: {
+      /** Full-width stroke at near-zero speed: the "1s" slow floor. */
+      slowFullWidthSeconds: 1,
+      /** Full-width stroke at high speed: the "minutes" ceiling. */
+      fastFullWidthSeconds: 90,
+      /** Velocity (px/s) at which the gain sits ~halfway between slow and fast. */
+      kneeVelocityPxS: 400,
+      /** Curve shape; >1 rises later and punchier, <1 hurries to the ceiling. */
+      exponent: 1.5
+    },
+    /** Sub-pixel moves are ignored so a holding finger doesn't micro-shimmer. */
+    deadZonePx: 0.5
   },
   resume: {
     saveIntervalMs: 60000,

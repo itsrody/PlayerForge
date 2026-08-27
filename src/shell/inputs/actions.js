@@ -131,9 +131,10 @@ const stateFor = (() => {
         activeHolds: new Set(),
         scrubbing: false,
         scrubDuration: 0,
-        scrubPixelsPerSecond: 0,
+        scrubSlowGain: 0,
+        scrubFastGain: 0,
+        scrubSensitivity: 0,
         scrubDirectionMomentum: 0,
-        scrubTravelPx: 0,
         lastScrubToastAt: 0,
         streakCount: 0,
         lastSkipDirection: null,
@@ -303,27 +304,31 @@ export function attachInputActions(shell, host, signal) {
       if (!duration || !Number.isFinite(duration)) {
         return;
       }
-      // Base rate: TUNING.scrub.strokeFraction of the runtime per full-width
-      // stroke, scaled by the sensitivity setting around its 150 default.
+      // Velocity curve: gain (seconds per pixel) rises from the slow floor to
+      // the fast ceiling as speed increases. Both are normalized by container
+      // width so the "1s slow" / "minutes fast" feels are width-independent.
       const width = shell.container?.clientWidth || shell.video?.clientWidth || 640;
       state.scrubbing = true;
       state.scrubDuration = duration;
-      state.scrubPixelsPerSecond =
-        (duration * TUNING.scrub.strokeFraction * (TUNING.controller.scrubSensitivity / 150)) / width;
+      state.scrubSlowGain =
+        TUNING.scrub.velocity.slowFullWidthSeconds / width;
+      state.scrubFastGain =
+        TUNING.scrub.velocity.fastFullWidthSeconds / width;
+      state.scrubSensitivity = TUNING.controller.scrubSensitivity / 150;
       state.scrubDirectionMomentum = 0;
-      state.scrubTravelPx = 0;
     }
 
-    // Distance escalation: every TUNING.scrub.escalationPx of path length doubles
-    // the step, capping at TUNING.scrub.maxMultiplier. Sustained strokes earn
-    // range regardless of speed, reversals count as travel, and pauses cost
-    // nothing because nothing here is time-based.
-    state.scrubTravelPx += Math.abs(detail.dx);
-    const multiplier = Math.min(
-      2 ** (state.scrubTravelPx / TUNING.scrub.escalationPx),
-      TUNING.scrub.maxMultiplier
-    );
-    const deltaSeconds = (detail.dx / state.scrubPixelsPerSecond) * multiplier;
+    if (Math.abs(detail.dx) < TUNING.scrub.deadZonePx) {
+      return;
+    }
+
+    // Saturating power curve: t in [0,1] as |velocity| rises past the knee,
+    // so slow scrubbing stays near the 1s floor while fast scrubbing eases
+    // toward the minutes ceiling without overshoot or discontinuity.
+    const v = Math.abs(detail.velocity);
+    const t = Math.min(1, (v / TUNING.scrub.velocity.kneeVelocityPxS) ** TUNING.scrub.velocity.exponent);
+    const gain = state.scrubSlowGain + (state.scrubFastGain - state.scrubSlowGain) * t;
+    const deltaSeconds = detail.dx * gain * state.scrubSensitivity;
     shell.scrubTo(shell.currentTime + deltaSeconds);
     const instantDirection = detail.dx > 1 ? 1 : detail.dx < -1 ? -1 : 0;
     state.scrubDirectionMomentum = state.scrubDirectionMomentum * 0.6 + instantDirection * 0.4;
@@ -347,8 +352,9 @@ export function attachInputActions(shell, host, signal) {
     state.scrubbing = false;
     state.scrubDirectionMomentum = 0;
     state.scrubDuration = 0;
-    state.scrubPixelsPerSecond = 0;
-    state.scrubTravelPx = 0;
+    state.scrubSlowGain = 0;
+    state.scrubFastGain = 0;
+    state.scrubSensitivity = 0;
     shell.hideToast("scrub");
   }, { signal });
 
