@@ -136,6 +136,11 @@ export const TUNING = {
     },
     /** Sub-pixel moves are ignored so a holding finger doesn't micro-shimmer. */
     deadZonePx: 0.5,
+    /** Fade (ms) down to silence when a scrub begins - quick so audio never
+     *  blips during the drag, smooth so it doesn't cut. */
+    muteFadeMs: 120,
+    /** Fade (ms) back up to the pre-scrub volume on release - seamless. */
+    unmuteFadeMs: 250,
     /**
      * Time constant (ms) of the velocity low-pass filter in the forge:
      * alpha = 1 - exp(-dt/tau). Because alpha derives from real elapsed time
