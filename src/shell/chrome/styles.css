@@ -36,16 +36,16 @@
 
   --pf-ease: 0.15s ease;
 
-  /* Dark-tinted glass - layered translucency + a luminous top "specular"
-     edge, with a low-cost backdrop blur on the panel so the video beneath
-     softly diffuses through the sheet. Kept cheap on purpose: a small blur
-     radius, no saturate(), and a mostly-opaque base so the sampled region
-     stays pinched to the sheet footprint. */
+  /* Real dark glass - a low-cost backdrop blur on the panel so the video
+     beneath softly diffuses through a translucent sheet. An elevated blue-
+     tinted "night" gradient lightens the surface, countering the dark base
+     that otherwise reads as dimming, while staying light enough that the
+     blurred backdrop still carries through. Kept cheap on purpose: a small
+     blur radius, no saturate(), and a mostly-opaque base so the sampled
+     region stays pinched to the sheet footprint. */
   --pf-glass-edge: rgba(255, 255, 255, 0.26);    /* sheet outer hairline      */
-  --pf-glass-sheen: rgba(255, 255, 255, 0.04);   /* faint inner rim           */
-  --pf-glass-specular-top: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0) 32%);
-  --pf-glass-tint-dark: linear-gradient(180deg, #14171c, #0c0e11); /* dark base */
   --pf-glass-blur: blur(8px);                    /* low-cost panel blur       */
+  --pf-glass-night: linear-gradient(180deg, rgba(70, 92, 120, 0.7), rgba(22, 28, 38, 0.8)); /* blue night tone */
 
   --pf-z-hud: 2;
   --pf-z-toast: 3;
@@ -187,19 +187,16 @@ pf-toast {
      the transform property, so transform-based animations on the toast
      never clobber it. */
   translate: -50%;
-  /* Fake dark-tinted glass pill - brighter specular than the panel since the
-     small footprint reads better with more top-light. Left blur-free (non-
-     sampling): the toast is small and transient, so real glass here would add
-     GPU cost for a barely-seen effect. The panel carries the blur instead. */
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04) 60%),
-    var(--pf-glass-tint-dark);
+  /* Plain dark pill - solid blue night surface, no fake glass. Left
+     blur-free (non-sampling): the toast is small and transient, so real
+     glass here would add GPU cost for a barely-seen effect. The panel
+     carries the blur instead. */
+  background: var(--pf-glass-night);
   border: 1px solid var(--pf-glass-edge);
   color: var(--pf-toast-color);
   padding: 6px 16px;
   border-radius: var(--pf-toast-radius);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.18),
     0 4px 16px rgba(0, 0, 0, 0.4);
   font-size: var(--pf-font-lg);
   font-weight: 500;
@@ -316,21 +313,17 @@ pf-toast {
   scrollbar-width: thin;
   scrollbar-color: var(--pf-text-mid) transparent;
 
-  /* Dark-tinted glass sheet: top specular + tinted base, hairline rim,
-     inner sheen, elevation shadow. Rounded corners clip the gradients. A
-     single low-cost backdrop blur lets the video diffuse through the fairly
-     opaque sheet; radius and no-saturate keep it cheap. */
-  background:
-    var(--pf-glass-specular-top),
-    var(--pf-glass-tint-dark);
+  /* Real dark glass sheet: a blue-tinted "night" gradient surface with a
+     single low-cost backdrop blur so the video beneath diffuses through.
+     The lighter gradient lifts the tone so the sheet reads as glass rather
+     than dimmed; radius and no-saturate keep it cheap. */
+  background: var(--pf-glass-night);
   -webkit-backdrop-filter: var(--pf-glass-blur);
   backdrop-filter: var(--pf-glass-blur);
   color: var(--pf-fg);
   border: 1px solid var(--pf-glass-edge);
   border-radius: var(--pf-radius-lg);
   box-shadow:
-    inset 0 1px 0 var(--pf-glass-specular-top),
-    inset 0 0 0 1px var(--pf-glass-sheen),
     0 8px 24px rgba(0, 0, 0, 0.45);
   font-size: var(--pf-font-md);
   line-height: 1.4;
