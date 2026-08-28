@@ -1028,10 +1028,11 @@ pf-toast {
    icon-only tabs. */
 @media (orientation: landscape) and (pointer: coarse) and (max-height: 480px) {
   .pf-panel {
-    top: 8px;
+    top: 50%;
     right: 8px;
     bottom: auto;
     left: auto;
+    translate: 0 -50%;
     margin: 0;
     width: min(340px, 45vw);
     max-height: 70vh;
