@@ -371,11 +371,6 @@ pf-toast {
         background: transparent;
         color: var(--pf-fg);
       }
-
-      &:focus-visible {
-        outline: 2px solid var(--pf-accent);
-        outline-offset: -2px;
-      }
     }
   }
 
@@ -808,6 +803,10 @@ pf-toast {
   background: transparent;
   color: var(--pf-accent);
   font-weight: 600;
+
+  .pf-tab-label {
+    color: var(--pf-accent);
+  }
 }
 
 .pf-stepper-disabled {
