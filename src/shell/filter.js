@@ -15,14 +15,7 @@ const PRESETS = {
   "B&W": { brightness: 100, contrast: 110, saturate: 0, hue: 0, grayscale: 100, sepia: 0, invert: 0, temperature: 0, tint: 0 },
   Sepia: { brightness: 100, contrast: 100, saturate: 60, hue: 0, grayscale: 0, sepia: 80, invert: 0, temperature: 15, tint: 0 },
   Night: { brightness: 90, contrast: 120, saturate: 90, hue: 0, grayscale: 0, sepia: 0, invert: 0, temperature: -20, tint: -5 },
-  Inverted: { brightness: 100, contrast: 100, saturate: 100, hue: 0, grayscale: 0, sepia: 0, invert: 100, temperature: 0, tint: 0 },
-  "Teal & Orange": { brightness: 102, contrast: 108, saturate: 105, hue: 0, grayscale: 0, sepia: 5, invert: 0, temperature: 15, tint: -3 },
-  "Film Kodak": { brightness: 103, contrast: 105, saturate: 95, hue: 0, grayscale: 0, sepia: 10, invert: 0, temperature: 8, tint: 4 },
-  "Bleach Bypass": { brightness: 98, contrast: 130, saturate: 55, hue: 0, grayscale: 25, sepia: 5, invert: 0, temperature: -5, tint: 0 },
-  "Cross Process": { brightness: 105, contrast: 110, saturate: 120, hue: 0, grayscale: 0, sepia: 0, invert: 0, temperature: 20, tint: -10 },
-  Vintage: { brightness: 102, contrast: 95, saturate: 80, hue: 0, grayscale: 15, sepia: 25, invert: 0, temperature: 12, tint: 5 },
-  "Cold Tone": { brightness: 100, contrast: 105, saturate: 90, hue: 0, grayscale: 0, sepia: 0, invert: 0, temperature: -25, tint: -3 },
-  "Warm Tone": { brightness: 102, contrast: 102, saturate: 105, hue: 0, grayscale: 0, sepia: 5, invert: 0, temperature: 20, tint: 3 }
+  Vintage: { brightness: 102, contrast: 95, saturate: 80, hue: 0, grayscale: 15, sepia: 25, invert: 0, temperature: 12, tint: 5 }
 };
 
 const DEFAULTS = PRESETS.Default;

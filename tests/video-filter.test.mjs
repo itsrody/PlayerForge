@@ -122,14 +122,7 @@ test("preset dropdown has all presets plus Custom", () => {
   assert.ok(opts.includes("B&W"));
   assert.ok(opts.includes("Sepia"));
   assert.ok(opts.includes("Night"));
-  assert.ok(opts.includes("Inverted"));
-  assert.ok(opts.includes("Teal & Orange"));
-  assert.ok(opts.includes("Film Kodak"));
-  assert.ok(opts.includes("Bleach Bypass"));
-  assert.ok(opts.includes("Cross Process"));
   assert.ok(opts.includes("Vintage"));
-  assert.ok(opts.includes("Cold Tone"));
-  assert.ok(opts.includes("Warm Tone"));
   assert.ok(opts.includes("Custom"));
 });
 
