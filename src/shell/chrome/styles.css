@@ -36,14 +36,16 @@
 
   --pf-ease: 0.15s ease;
 
-  /* Simulated dark-tinted glass - layered translucency + a luminous top
-     "specular" edge that fakes light catching the sheet. No backdrop-filter,
-     so the video beneath is never sampled, blurred or dimmed - identical in
-     every browser (FF103+ and older alike), free GPU-wise. */
+  /* Dark-tinted glass - layered translucency + a luminous top "specular"
+     edge, with a low-cost backdrop blur on the panel so the video beneath
+     softly diffuses through the sheet. Kept cheap on purpose: a small blur
+     radius, no saturate(), and a mostly-opaque base so the sampled region
+     stays pinched to the sheet footprint. */
   --pf-glass-edge: rgba(255, 255, 255, 0.26);    /* sheet outer hairline      */
   --pf-glass-sheen: rgba(255, 255, 255, 0.04);   /* faint inner rim           */
   --pf-glass-specular-top: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0) 32%);
   --pf-glass-tint-dark: linear-gradient(180deg, #14171c, #0c0e11); /* dark base */
+  --pf-glass-blur: blur(8px);                    /* low-cost panel blur       */
 
   --pf-z-hud: 2;
   --pf-z-toast: 3;
@@ -186,7 +188,9 @@ pf-toast {
      never clobber it. */
   translate: -50%;
   /* Fake dark-tinted glass pill - brighter specular than the panel since the
-     small footprint reads better with more top-light; same non-sampling trick. */
+     small footprint reads better with more top-light. Left blur-free (non-
+     sampling): the toast is small and transient, so real glass here would add
+     GPU cost for a barely-seen effect. The panel carries the blur instead. */
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04) 60%),
     var(--pf-glass-tint-dark);
@@ -312,16 +316,20 @@ pf-toast {
   scrollbar-width: thin;
   scrollbar-color: var(--pf-text-mid) transparent;
 
-  /* Fake dark-tinted glass sheet: top specular + tinted base, hairline rim,
-     inner sheen, elevation shadow. Rounded corners clip the gradients. */
+  /* Dark-tinted glass sheet: top specular + tinted base, hairline rim,
+     inner sheen, elevation shadow. Rounded corners clip the gradients. A
+     single low-cost backdrop blur lets the video diffuse through the fairly
+     opaque sheet; radius and no-saturate keep it cheap. */
   background:
     var(--pf-glass-specular-top),
     var(--pf-glass-tint-dark);
+  -webkit-backdrop-filter: var(--pf-glass-blur);
+  backdrop-filter: var(--pf-glass-blur);
   color: var(--pf-fg);
   border: 1px solid var(--pf-glass-edge);
   border-radius: var(--pf-radius-lg);
   box-shadow:
-    inset 0 1px 0 var(--pf-glass-specular),
+    inset 0 1px 0 var(--pf-glass-specular-top),
     inset 0 0 0 1px var(--pf-glass-sheen),
     0 8px 24px rgba(0, 0, 0, 0.45);
   font-size: var(--pf-font-md);
@@ -456,13 +464,6 @@ pf-toast {
     }
   }
 
-  .pf-panel-field {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 4px;
-  }
-
   .pf-panel-label {
     display: block;
     font-size: var(--pf-font-xs);
@@ -470,22 +471,6 @@ pf-toast {
     letter-spacing: 0.04em;
     color: var(--pf-text-soft);
     margin-bottom: 4px;
-  }
-
-  .pf-panel-field .pf-panel-label {
-    flex: 1;
-    margin-bottom: 0;
-    text-transform: none;
-    letter-spacing: 0;
-    color: var(--pf-fg);
-    font-size: var(--pf-font-md);
-  }
-
-  .pf-panel-value {
-    min-width: 34px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-    color: var(--pf-text-soft);
   }
 
   .pf-panel-hint {
