@@ -313,12 +313,14 @@ pf-toast {
   transition:
     opacity 0.14s ease,
     translate 0.14s ease,
+    transform 0.14s ease,
     display 0.14s allow-discrete;
 
   &.pf-open {
     display: block;
     opacity: 1;
     translate: -50% -50%;
+    transform: none;
   }
 
   /* Single header row: [segmented tabs] [close]. */
@@ -1001,10 +1003,19 @@ pf-toast {
     left: 8px;
     bottom: auto;
     margin: 0;
+    transform: translateY(-12px);
+  }
+  .pf-panel.pf-open {
+    transform: translateY(0);
   }
   .pf-panel,
   .pf-panel.pf-open {
     translate: none;
+  }
+  @starting-style {
+    .pf-panel.pf-open {
+      transform: translateY(-12px);
+    }
   }
 }
 
@@ -1022,10 +1033,19 @@ pf-toast {
     border-left: none;
     border-right: none;
     border-bottom: none;
+    transform: translateY(16px);
+  }
+  .pf-panel.pf-open {
+    transform: translateY(0);
   }
   .pf-panel,
   .pf-panel.pf-open {
     translate: none;
+  }
+  @starting-style {
+    .pf-panel.pf-open {
+      transform: translateY(16px);
+    }
   }
   .pf-history-list { max-height: 220px; }
 }
@@ -1044,6 +1064,10 @@ pf-toast {
     width: min(340px, 45vw);
     max-height: none;
     border-radius: var(--pf-radius-lg);
+    transform: translateX(16px);
+  }
+  .pf-panel.pf-open {
+    transform: translateX(0);
   }
   .pf-panel,
   .pf-panel.pf-open {
@@ -1051,7 +1075,7 @@ pf-toast {
   }
   @starting-style {
     .pf-panel.pf-open {
-      translate: none;
+      transform: translateX(16px);
     }
   }
   .pf-tab-label { display: none; }
