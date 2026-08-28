@@ -1,5 +1,6 @@
 import { build, context } from "esbuild";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 
 // Readable-by-default, minified on request (-m / --min). Minification is
 // SpiderMonkey/WarpJIT-aware by construction: esbuild only does the safe
@@ -115,6 +116,17 @@ function minifyCssPlugin() {
           cache.set(args.path, out);
         }
         return { contents: out, loader: "text" };
+      });
+      // Report a SHA-256 fingerprint of each shipped stylesheet after the
+      // build. This is a release-time paranoia check (an accidental dirty or
+      // regenerated stylesheet is caught before it ships), NOT runtime SRI -
+      // the live @resource stays un-pinned so CSS hot-fixes never invalidate
+      // an installed script's hash.
+      build.onEnd(() => {
+        for (const [path, css] of cache) {
+          const digest = createHash("sha256").update(css).digest("hex");
+          console.log(`[PlayerForge] css fingerprint ${path}: sha256=${digest.slice(0, 16)}…`);
+        }
       });
     }
   };

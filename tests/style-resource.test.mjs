@@ -92,3 +92,42 @@ test("ensureStyles is idempotent across callers", async () => {
   assert.equal(await ensureStyles(), a, "same authoritative sheet resolved");
   assert.equal(await ensureStyles(), a, "repeated ensureStyles stable");
 });
+
+test("empty @resource text never clobbers the embedded sheet", async () => {
+  setupDom("");
+  const { warmStyles, ensureStyles } = await loadInject();
+  warmStyles();
+  const sheet = await ensureStyles();
+  assert.equal(sheet.css, "", "kept embedded css when resource is empty");
+});
+
+test("whitespace-only @resource text is rejected (no blank upgrade)", async () => {
+  setupDom("   \n\t  ");
+  const { warmStyles, ensureStyles } = await loadInject();
+  warmStyles();
+  const sheet = await ensureStyles();
+  assert.equal(sheet.css, "", "whitespace-only resource left embedded css intact");
+});
+
+test("malformed @resource text that throws on replaceSync keeps embedded css", async () => {
+  setupDom(".pf-shell{}");
+  // Fail only the SECOND replaceSync (the resource upgrade, not the trusted
+  // embedded sync at warmStyles()): simulates invalid CSS the sheet rejects.
+  const original = globalThis.CSSStyleSheet.prototype.replaceSync;
+  let calls = 0;
+  globalThis.CSSStyleSheet.prototype.replaceSync = function (css) {
+    calls++;
+    if (calls === 1) {
+      return original.call(this, css);
+    }
+    throw new Error("invalid css");
+  };
+  try {
+    const { warmStyles, ensureStyles } = await loadInject();
+    warmStyles();
+    const sheet = await ensureStyles();
+    assert.equal(sheet.css, "", "failed replaceSync preserved embedded css");
+  } finally {
+    globalThis.CSSStyleSheet.prototype.replaceSync = original;
+  }
+});

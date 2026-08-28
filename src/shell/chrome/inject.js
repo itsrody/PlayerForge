@@ -44,9 +44,18 @@ export function warmStyles() {
         logger.error("inject", "Failed to load @resource stylesheet:", err);
       }
     }
-    if (css) {
-      // Replace in place: adopted sheets everywhere see the upgrade.
-      sharedSheet.replaceSync(css);
+    // Parity guard: only ever swap in STRICTLY better CSS. An empty or
+    // malformed resource must not clobber the working embedded sheet - the
+    // upgrade is strictly-monotonic, so the shell can never go blank from a
+    // pathological fetch. replaceSync throws on invalid CSS; catch it and
+    // keep the last-good sheet rather than risk a blank UI.
+    if (css && css.trim().length > 0) {
+      try {
+        // Replace in place: adopted sheets everywhere see the upgrade.
+        sharedSheet.replaceSync(css);
+      } catch (err) {
+        logger.error("inject", "Rejected malformed @resource stylesheet:", err);
+      }
     }
     return sharedSheet;
   })();
