@@ -163,13 +163,10 @@ let sessionOwner = null;
 
 /**
  * Rich metadata for OS media surfaces: page title, host as artist, poster as
- * artwork. Returns null when there is nothing to show or the constructor is
- * unavailable (jsdom, hardened profiles).
+ * artwork. Returns null when there is nothing to show or the poster URL is
+ * malformed.
  */
 function buildSessionMetadata(video) {
-  if (typeof MediaMetadata !== "function") {
-    return null;
-  }
   let artwork;
   try {
     artwork = video.poster ? [{ src: new URL(video.poster, location.href).href }] : [];
@@ -195,7 +192,7 @@ function buildSessionMetadata(video) {
  * MediaSession implementation.
  */
 export function claimMediaSession({ controls, video, signal, session = navigator.mediaSession }) {
-  if (!session || typeof session.setActionHandler !== "function") {
+  if (!session) {
     return null;
   }
   sessionOwner?.dispose();
@@ -228,7 +225,7 @@ class MediaSessionBridge {
     session.setActionHandler("seekforward", (details) => controls.skip(details?.seekOffset || 10));
     session.setActionHandler("seekto", (details) => {
       if (details?.seekTime != null) {
-        if (details.fastSeek && typeof video.fastSeek === "function") {
+        if (details.fastSeek) {
           video.fastSeek(details.seekTime);
         } else {
           controls.seekTo(details.seekTime);

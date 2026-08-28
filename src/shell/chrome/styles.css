@@ -36,6 +36,15 @@
 
   --pf-ease: 0.15s ease;
 
+  /* Simulated dark-tinted glass - layered translucency + a luminous top
+     "specular" edge that fakes light catching the sheet. No backdrop-filter,
+     so the video beneath is never sampled, blurred or dimmed - identical in
+     every browser (FF103+ and older alike), free GPU-wise. */
+  --pf-glass-edge: rgba(255, 255, 255, 0.26);    /* sheet outer hairline      */
+  --pf-glass-sheen: rgba(255, 255, 255, 0.04);   /* faint inner rim           */
+  --pf-glass-specular-top: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0) 32%);
+  --pf-glass-tint-dark: linear-gradient(180deg, #14171c, #0c0e11); /* dark base */
+
   --pf-z-hud: 2;
   --pf-z-toast: 3;
   --pf-z-panel: 4;
@@ -176,10 +185,18 @@ pf-toast {
      the transform property, so transform-based animations on the toast
      never clobber it. */
   translate: -50%;
-  background: var(--pf-toast-bg);
+  /* Fake dark-tinted glass pill - brighter specular than the panel since the
+     small footprint reads better with more top-light; same non-sampling trick. */
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04) 60%),
+    var(--pf-glass-tint-dark);
+  border: 1px solid var(--pf-glass-edge);
   color: var(--pf-toast-color);
   padding: 6px 16px;
   border-radius: var(--pf-toast-radius);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 4px 16px rgba(0, 0, 0, 0.4);
   font-size: var(--pf-font-lg);
   font-weight: 500;
   line-height: 1;
@@ -295,11 +312,18 @@ pf-toast {
   scrollbar-width: thin;
   scrollbar-color: var(--pf-text-mid) transparent;
 
-  background: var(--pf-surface);
+  /* Fake dark-tinted glass sheet: top specular + tinted base, hairline rim,
+     inner sheen, elevation shadow. Rounded corners clip the gradients. */
+  background:
+    var(--pf-glass-specular-top),
+    var(--pf-glass-tint-dark);
   color: var(--pf-fg);
-  border: 1px solid var(--pf-border);
+  border: 1px solid var(--pf-glass-edge);
   border-radius: var(--pf-radius-lg);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow:
+    inset 0 1px 0 var(--pf-glass-specular),
+    inset 0 0 0 1px var(--pf-glass-sheen),
+    0 8px 24px rgba(0, 0, 0, 0.45);
   font-size: var(--pf-font-md);
   line-height: 1.4;
 

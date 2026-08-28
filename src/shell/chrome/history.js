@@ -20,7 +20,7 @@ export function addHistorySection(panel, shell) {
 
   function render() {
     const entries = shell.resume?.getEntries() || [];
-    list.innerHTML = "";
+    list.replaceChildren();
     if (entries.length === 0) {
       hint.hidden = false;
       return;

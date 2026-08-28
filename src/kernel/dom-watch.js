@@ -35,7 +35,7 @@ function flush() {
 
 function ensureObserver() {
   const doc = globalThis.document;
-  if (!doc?.documentElement || typeof MutationObserver === "undefined") {
+  if (!doc?.documentElement) {
     return;
   }
   if (observer && observedDoc === doc) {

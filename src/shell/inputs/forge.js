@@ -172,7 +172,7 @@ export class InputForge {
       this.#videoRect = null;
     }, { signal });
 
-    if (typeof ResizeObserver !== "undefined" && video) {
+    if (video) {
       this.#videoRectObserver = new ResizeObserver(() => {
         this.#videoRect = null;
       });
