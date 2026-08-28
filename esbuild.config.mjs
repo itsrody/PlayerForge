@@ -77,6 +77,7 @@ const banner = `// ==UserScript==
 // @grant        GM_removeValueChangeListener
 // @grant        GM_getResourceText
 // @grant        GM_xmlhttpRequest
+// @connect      *
 // @resource     pfStyle https://raw.githubusercontent.com/itsrody/PlayerForge/main/src/shell/chrome/styles.css
 // @sandbox      raw
 // @run-at       document-start

@@ -41,8 +41,10 @@ export function gmSetClipboard(data, type) {
 
 /**
  * Cross-origin text fetch through the manager - CORS cannot block it.
- * No @connect metadata is declared, so the manager asks once per new
- * domain and remembers the answer; that is the consent UI, for free.
+ * The banner declares @connect * because subtitle URLs are user-supplied
+ * from arbitrary hosts; a per-domain consent gate would be friction on the
+ * hot subtitle-loading path. Request errors still surface normally, so a
+ * dead link fails loudly rather than silently.
  */
 export function gmRequestText(url, { timeoutMs = 30000 } = {}) {
   const { promise, resolve, reject } = Promise.withResolvers();
