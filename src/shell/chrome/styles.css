@@ -798,15 +798,13 @@ pf-toast {
 
 /* Active state rules kept flat to preserve their original specificity
    (0,1,0): the active-tab hue must still yield to the tab hover rule, and
-   the stepper's inactive state must not outrank a focused stepper. */
+   the stepper's inactive state must not outrank a focused stepper. The
+   accent color on the tab sets currentColor, so both the label and the
+   inline icon (fill: currentColor) light up in accent. */
 .pf-panel-tab-active {
   background: transparent;
   color: var(--pf-accent);
   font-weight: 600;
-
-  .pf-tab-label {
-    color: var(--pf-accent);
-  }
 }
 
 .pf-stepper-disabled {
