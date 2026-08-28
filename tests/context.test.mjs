@@ -107,6 +107,36 @@ test("getPageContext strips bracketed tags and dash-prefixed tags from titles", 
   assert.equal(context.title, "Show-Name - Episode 1");
 });
 
+test("getPageContext keeps a leading recording-code bracket and strips its qualifier", async () => {
+  const { window } = dom("");
+  window.document.title = "[MIMK-278-SUBS] Repentance";
+  globalThis.window = window;
+  globalThis.location = window.location;
+  globalThis.document = window.document;
+  const context = await getPageContext();
+  assert.equal(context.title, "[MIMK-278] Repentance");
+});
+
+test("getPageContext trims any qualifier off the leading code bracket (e.g. [C-123-MR])", async () => {
+  const { window } = dom("");
+  window.document.title = "[ABC-123-MR] Episode Title";
+  globalThis.window = window;
+  globalThis.location = window.location;
+  globalThis.document = window.document;
+  const context = await getPageContext();
+  assert.equal(context.title, "[ABC-123] Episode Title");
+});
+
+test("getPageContext keeps a plain leading code bracket with no qualifier", async () => {
+  const { window } = dom("");
+  window.document.title = "[ABC-123] A Show";
+  globalThis.window = window;
+  globalThis.location = window.location;
+  globalThis.document = window.document;
+  const context = await getPageContext();
+  assert.equal(context.title, "[ABC-123] A Show");
+});
+
 test("getPageContext does not strip title words separated by dash-space", async () => {
   const { window } = dom("");
   window.document.title = "My-Show - Episode 1 - Something";

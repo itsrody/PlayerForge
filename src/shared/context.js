@@ -182,12 +182,27 @@ const TITLE_TAGS = /(?:^|[- ])(?:uncensored|uncut|leaked|censored|raw|bd|hdrip|d
  */
 function stripNonAscii(raw) {
   if (!raw) return "";
+  // Leading recording-code brackets are identifiers worth keeping, so pull
+  // them out whole first. A code is CAPS-NUMBER; anything after that in the
+  // same bracket is a qualifier (subtitle group, remux, ...) and is dropped:
+  // "[MIMK-278-SUBS] Repentance" -> "[MIMK-278] Repentance". A plain
+  // "[ABC-123]" is kept too; non-code brackets still go through the blanket
+  // strip below. The preserved [CODE] is reattached after that pass.
+  let code = "";
+  const codeMatch = raw.match(/^\[([A-Z]+-\d+)(?:-[^\]]*)?\]/);
+  if (codeMatch) {
+    code = `[${codeMatch[1]}]`;
+    raw = raw.slice(codeMatch[0].length);
+  }
   let s = raw;
   s = s.replace(/\[[^\]]*\]/g, " ");
   s = s.replace(TITLE_TAGS, " ");
   s = s.replace(/[\u2013\u2014]/g, " ");
   s = s.replace(/[^\p{Script=Latin}\p{Script=Common}]+/gu, " ");
   s = s.replace(/\s{2,}/g, " ").replace(/^[\s\-–—|·:,/]+/, "").replace(/[\s\-–—|·:,/]+$/, "").trim();
+  if (code) {
+    return `${code} ${s}`.trim();
+  }
   return s || raw;
 }
 
