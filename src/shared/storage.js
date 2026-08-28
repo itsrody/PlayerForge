@@ -41,7 +41,7 @@ export function gmUnregisterMenu(handle) {
  * notification (configs/resume), CORS-bypassing XHR (@connect * subtitle
  * fetch), manager-cached resource warm-load, TM menu, GM_info. Everything
  * DOM/media/styling-side (MutationObserver, TextTrack/VTTCue,
- * adoptedStyleSheets, fullscreen, PIP) stays native; the efficient,
+ * adoptedStyleSheets, fullscreen) stays native; the efficient,
  * reliable implementation wins, and for those domains the native one always
  * does. GM_setClipboard is deliberately NOT granted/used: no feature calls
  * it, so the grant is dead permission surface. Any future clipboard write
