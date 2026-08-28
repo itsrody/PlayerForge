@@ -35,10 +35,18 @@ export function gmUnregisterMenu(handle) {
   GM_unregisterMenuCommand(handle);
 }
 
-export function gmSetClipboard(data, type) {
-  GM_setClipboard(data, type);
-}
-
+/**
+ * TM-API policy: a manager API is used only where it uniquely supplies a
+ * capability native Firefox lacks - multi-tab manager storage + change
+ * notification (configs/resume), CORS-bypassing XHR (@connect * subtitle
+ * fetch), manager-cached resource warm-load, TM menu, GM_info. Everything
+ * DOM/media/styling-side (MutationObserver, TextTrack/VTTCue,
+ * adoptedStyleSheets, fullscreen, PIP) stays native; the efficient,
+ * reliable implementation wins, and for those domains the native one always
+ * does. GM_setClipboard is deliberately NOT granted/used: no feature calls
+ * it, so the grant is dead permission surface. Any future clipboard write
+ * should go through the native navigator.clipboard path, not the manager.
+ */
 /**
  * Cross-origin text fetch through the manager - CORS cannot block it.
  * The banner declares @connect * because subtitle URLs are user-supplied
