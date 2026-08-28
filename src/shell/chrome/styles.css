@@ -36,13 +36,10 @@
 
   --pf-ease: 0.15s ease;
 
-  /* Real dark glass - a low-cost backdrop blur on the panel so the video
-     beneath softly diffuses through a translucent sheet. A deep blue-tinted
-     "night" gradient. Kept cheap on purpose: a small blur radius, no
-     saturate(), and a mostly-opaque base so the sampled region stays
-     pinched to the sheet footprint. */
-  --pf-glass-blur: blur(4px);                    /* low-cost panel blur       */
-  --pf-glass-night: linear-gradient(180deg, rgba(40, 52, 68, 0.78), rgba(14, 18, 24, 0.85)); /* deep blue night */
+  /* Flat dark surfaces - simple, predictable, GPU-free. No backdrop blur or
+     gradients, so a video color filter never interferes with the HUD. */
+  --pf-panel-bg: rgba(0, 0, 0, 0.9);   /* panel sheet (90%)                */
+  --pf-toast-bg: rgba(0, 0, 0, 0.75);  /* toast pill (75%)                 */
 
   --pf-z-hud: 2;
   --pf-z-toast: 3;
@@ -184,10 +181,8 @@ pf-toast {
      the transform property, so transform-based animations on the toast
      never clobber it. */
   translate: -50%;
-  /* Plain dark pill - blue night surface with the same low-cost backdrop
-     blur as the panel, so the video beneath diffuses through it too. */
-  background: var(--pf-glass-night);
-  backdrop-filter: var(--pf-glass-blur);
+  /* Flat dark pill - simple translucent surface, no blur (GPU-free). */
+  background: var(--pf-toast-bg);
   color: var(--pf-toast-color);
   padding: 6px 16px;
   border-radius: var(--pf-toast-radius);
@@ -306,12 +301,9 @@ pf-toast {
   scrollbar-width: thin;
   scrollbar-color: var(--pf-text-mid) transparent;
 
-  /* Real dark glass sheet: a blue-tinted "night" gradient surface with a
-     single low-cost backdrop blur so the video beneath diffuses through.
-     The lighter gradient lifts the tone so the sheet reads as glass rather
-     than dimmed; radius and no-saturate keep it cheap. */
-  background: var(--pf-glass-night);
-  backdrop-filter: var(--pf-glass-blur);
+  /* Flat dark sheet - simple translucent surface, no blur (GPU-free, and a
+     video color filter can never interfere with the HUD). */
+  background: var(--pf-panel-bg);
   color: var(--pf-fg);
   border-radius: var(--pf-radius-lg);
   font-size: var(--pf-font-md);
