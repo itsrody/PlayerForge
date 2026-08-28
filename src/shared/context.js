@@ -53,7 +53,7 @@ export function getDomainKey(hostname) {
   }
   let key = "";
   if (IPV4_RE.test(hostname)) {
-    key = hostname.replace(/\./g, "-");
+    key = hostname.replaceAll(".", "-");
   } else if (hostname.includes(":")) {
     // Bracketed IPv6 ([::1]) or bare forms - the TLD walk would mangle them
     // into garbage keys, so collapse to one dash-safe identifier like IPv4.
@@ -220,6 +220,7 @@ export async function getPageContext() {
 function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   const deadline = Date.now() + timeoutMs;
   const { promise, resolve } = Promise.withResolvers();
+  const ac = new AbortController();
   let nonce = null;
   let retryTimer = null;
 
@@ -232,7 +233,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
       && typeof data.domain === "string"
     ) {
       clearTimeout(retryTimer);
-      window.removeEventListener("message", onMessage);
+      ac.abort();
       resolve({
         domain: data.domain,
         path: data.path,
@@ -241,7 +242,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
     }
   };
 
-  window.addEventListener("message", onMessage);
+  window.addEventListener("message", onMessage, { signal: ac.signal });
 
   const sendRequest = () => {
     nonce = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -251,7 +252,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
     if (Date.now() >= deadline) {
       // The pending retry would fire into a torn-down request otherwise.
       clearTimeout(retryTimer);
-      window.removeEventListener("message", onMessage);
+      ac.abort();
       resolve(null);
       return;
     }
@@ -458,6 +459,7 @@ export function createFrameProvisioner() {
  * document sandbox.
  */
 export function installContextBridge() {
+  const ac = new AbortController();
   const handlers = window === window.top ? [
     createTopFrameResponder(() => ({
       domain: getDomainKey(location.hostname),
@@ -470,13 +472,9 @@ export function installContextBridge() {
     createFrameProvisioner()
   ];
   for (const handler of handlers) {
-    window.addEventListener("message", handler);
+    window.addEventListener("message", handler, { signal: ac.signal });
   }
-  return () => {
-    for (const handler of handlers) {
-      window.removeEventListener("message", handler);
-    }
-  };
+  return () => ac.abort();
 }
 
 /* - 5. Presence probe - */

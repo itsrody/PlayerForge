@@ -61,7 +61,7 @@ const ALIASES = {
 };
 
 function canonicalName(name) {
-  return ALIASES[name] ?? (name in ICONS ? name : null);
+  return ALIASES[name] ?? (Object.hasOwn(ICONS, name) ? name : null);
 }
 
 /**

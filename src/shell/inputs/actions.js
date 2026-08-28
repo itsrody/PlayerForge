@@ -103,12 +103,7 @@ export function allowsIntent(gesture) {
   if (!bindings) {
     return false;
   }
-  for (const binding of bindings) {
-    if (gateOpen(binding)) {
-      return true;
-    }
-  }
-  return false;
+  return bindings.some(gateOpen);
 }
 
 /** Armed key bindings, in table order - sampled live per keystroke. */

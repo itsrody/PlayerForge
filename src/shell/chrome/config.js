@@ -183,8 +183,8 @@ export const TUNING = {
 };
 
 const cache = {};
-for (const key of Object.keys(DEFAULT_SETTINGS)) {
-  cache[key] = getConfigValue(`${SETTINGS_PREFIX}.${key}`, DEFAULT_SETTINGS[key]);
+for (const [key, def] of Object.entries(DEFAULT_SETTINGS)) {
+  cache[key] = getConfigValue(`${SETTINGS_PREFIX}.${key}`, def);
 }
 
 export function getSetting(key) {

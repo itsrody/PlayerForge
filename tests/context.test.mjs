@@ -18,8 +18,14 @@ import {
   CTX_REQUEST_TIMEOUT_MS
 } from "../src/shared/context.js";
 
-const dom = (html = "", url = "https://www.youtube.com/watch?v=1") =>
-  new JSDOM(`<!doctype html><html><head><title>Page</title></head><body>${html}</body></html>`, { url });
+const dom = (html = "", url = "https://www.youtube.com/watch?v=1") => {
+  const jsdom = new JSDOM(`<!doctype html><html><head><title>Page</title></head><body>${html}</body></html>`, { url });
+  // jsdom validates addEventListener's `signal` option against its own
+  // AbortSignal class, so the production AbortController bindings must resolve
+  // to the current window's constructor rather than Node's.
+  globalThis.AbortController = jsdom.window.AbortController;
+  return jsdom;
+};
 
 test("getDomainKey reduces hostnames to registrable keys", () => {
   assert.equal(getDomainKey("www.youtube.com"), "youtube");

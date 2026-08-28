@@ -184,7 +184,7 @@ export function deleteConfigField(path) {
     node = node[segment];
   }
   const last = segments.at(-1);
-  if (!isSafeKeySegment(last) || node == null || typeof node !== "object" || !(last in node)) {
+  if (!isSafeKeySegment(last) || node == null || typeof node !== "object" || !Object.hasOwn(node, last)) {
     return;
   }
   delete node[last];
