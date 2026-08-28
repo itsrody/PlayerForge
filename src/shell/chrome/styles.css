@@ -295,6 +295,7 @@ pf-toast {
   bottom: 0;
   margin: auto;
   width: min(380px, calc(100% - 24px));
+  height: fit-content;
   max-height: calc(100% - 24px);
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -1022,17 +1023,18 @@ pf-toast {
 
 /* Landscape phones (touch): the viewport is short and wide, so the
    centered dialog would swallow the height. Compact right-edge sheet
-   instead - spans the full height, narrow enough to leave the video's
-   center clear, with icon-only tabs. */
+   instead - anchored to the top, capped at 70vh so it never fills the
+   short viewport, narrow enough to leave the video's center clear, with
+   icon-only tabs. */
 @media (orientation: landscape) and (pointer: coarse) and (max-height: 480px) {
   .pf-panel {
     top: 8px;
     right: 8px;
-    bottom: 8px;
+    bottom: auto;
     left: auto;
     margin: 0;
     width: min(340px, 45vw);
-    max-height: none;
+    max-height: 70vh;
     border-radius: var(--pf-radius-lg);
   }
   .pf-tab-label { display: none; }
