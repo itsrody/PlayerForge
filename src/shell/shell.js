@@ -6,7 +6,7 @@ import { ResumeTracker } from "./resume.js";
 import { SubtitlesSection } from "./subtitles/section.js";
 import { VideoFilter } from "./filter.js";
 import { SettingsPanel } from "./chrome/panel.js";
-import { addSettingsSection, getSetting } from "./chrome/config.js";
+import { addSettingsSection } from "./chrome/config.js";
 import { TUNING } from "./chrome/config.js";
 import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
@@ -93,7 +93,6 @@ export class Shell {
     });
     this.#watchFullscreen();
     this.#watchWakeLock();
-    this.#setupAutoPiP();
     this.#markManaged();
     logger.log("shell", `Shell "${this.id}" constructed (${this.sdkName})`);
   }
@@ -372,27 +371,6 @@ export class Shell {
     }, { signal });
   }
 
-  /** Auto-PiP on visibility change: when "Mobile PiP" is enabled and the user
-   *  leaves the app while a video is playing, request PiP automatically. */
-  #setupAutoPiP() {
-    const video = this.video;
-    if (!video) {
-      return;
-    }
-    const { signal } = this.#scope;
-    document.addEventListener("visibilitychange", () => {
-      if (
-        document.hidden &&
-        getSetting("video.pip") &&
-        !video.paused &&
-        !video.ended &&
-        !document.pictureInPictureElement
-      ) {
-        video.requestPictureInPicture().catch(() => {});
-      }
-    }, { signal });
-  }
-
   exitFullscreen() {
     if (document.fullscreenElement) {
       document.exitFullscreen()?.catch(() => {});
@@ -416,11 +394,6 @@ export class Shell {
       this.#filter = null;
       this.#wakeLock?.release();
       this.#wakeLock = null;
-      // Exit PiP if the shell owned it — the video outlives the shell in
-      // SPAs, but the user expects the floating window to close with the HUD.
-      if (document.pictureInPictureElement === this.video) {
-        document.exitPictureInPicture().catch(() => {});
-      }
       // One abort tears down every platform subscription: media event
       // forwarding, fullscreen watch, focus management, host watchdog,
       // MediaSession ownership.

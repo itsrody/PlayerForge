@@ -1004,7 +1004,6 @@ pf-toast {
 /* Touch devices (phones/tablets): enlarge hit targets toward
    thumb-sized (~40px) tap areas. */
 @media (pointer: coarse) {
-  [data-pf-pip] { display: block; }
   .pf-options-btn { padding: 7px 14px; font-size: var(--pf-font-lg); }
   .pf-options-row { gap: 8px; }
   .pf-panel-body { padding: 10px 12px 12px; }
@@ -1125,9 +1124,6 @@ pf-toast {
   .pf-options-cell { gap: 6px; }
   .pf-options-row { flex-shrink: 0; }
 }
-
-/* - Mobile-only controls - */
-[data-pf-pip] { display: none; }
 
 /* @starting-style for the panel's open transition. Keyed separately so it
    parses cleanly whether the browser supports the display transition or not. */

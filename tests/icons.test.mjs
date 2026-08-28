@@ -35,7 +35,7 @@ test("iconMarkup returns null for an unknown icon", () => {
 
 test("every icon markup carries aria-hidden, focusable=false, and the pf-icon class", () => {
   makeDom();
-  for (const name of ["volume-1", "play", "captions", "settings", "trash", "pip", "lock", "reload", "fullscreen", "resume", "color", "link"]) {
+  for (const name of ["volume-1", "play", "captions", "settings", "trash", "lock", "reload", "fullscreen", "resume", "color", "link"]) {
     const markup = iconMarkup(name);
     assert.ok(markup, `icon ${name} exists`);
     assert.match(markup, /aria-hidden="true"/, `${name}: aria-hidden`);

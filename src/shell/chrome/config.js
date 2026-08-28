@@ -61,13 +61,6 @@ const SETTINGS_SCHEMA = [
     label: "Pinch to Fill",
     default: true,
     group: "Features"
-  },
-  {
-    key: "video.pip",
-    type: "bool",
-    label: "Mobile PiP",
-    default: false,
-    group: "Features"
   }
 ];
 
@@ -248,9 +241,6 @@ export function addSettingsSection(panel) {
     }
     if (definition.type === "bool") {
       const cellAttrs = { class: "pf-panel-cell" };
-      if (definition.key === "video.pip") {
-        cellAttrs["data-pf-pip"] = "";
-      }
       const cell = panel.el("div", cellAttrs, groupGrid);
       const toggleLabel = panel.el("label", { class: "pf-settings-toggle" }, cell);
       const checkbox = panel.addControl(toggleLabel, {
