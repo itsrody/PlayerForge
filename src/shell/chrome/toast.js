@@ -1,6 +1,6 @@
 import { delay } from "../../shared/time.js";
 import { flashElement } from "../../shared/flash.js";
-import { iconMarkup } from "./icons.js";
+import { createIconElement } from "./icons.js";
 
 /**
  * Single toast surface hosted in the shell HUD layer: icon + text +
@@ -46,9 +46,14 @@ export class ToastManager {
 
   show({ icon, text, duration = 0, color, group, actions } = {}) {
     this.#activeGroup = group ?? null;
-    const markup = icon ? iconMarkup(icon) : null;
-    this.#icon.innerHTML = markup || "";
-    this.#icon.style.display = markup ? "" : "none";
+    // Clone from the cached icon template: a repeated icon is a cheap
+    // cloneNode, not an HTML re-parse. aria-hidden lives on the template.
+    this.#icon.textContent = "";
+    const iconEl = icon ? createIconElement(icon, this.#icon.ownerDocument) : null;
+    if (iconEl) {
+      this.#icon.appendChild(iconEl);
+    }
+    this.#icon.style.display = iconEl ? "" : "none";
     this.#text.textContent = text || "";
     this.#text.style.display = text ? "" : "none";
     if (actions && actions.length) {
@@ -57,9 +62,9 @@ export class ToastManager {
       for (const action of actions) {
         const button = doc.createElement("button");
         button.type = "button";
-        const actionMarkup = action.icon ? iconMarkup(action.icon) : null;
-        if (actionMarkup) {
-          button.innerHTML = actionMarkup;
+        const actionIcon = action.icon ? createIconElement(action.icon, doc) : null;
+        if (actionIcon) {
+          button.appendChild(actionIcon);
         } else {
           button.textContent = action.label;
         }

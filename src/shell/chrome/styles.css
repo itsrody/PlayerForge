@@ -726,6 +726,17 @@ pf-toast {
   }
 }
 
+/* Icon glyphs: Font Awesome-style sizing at 1em, never squished in flex rows.
+   Context rules (e.g. .pf-btn svg, .pf-stepper-btn svg) size them finer where
+   needed; aria-hidden/focusable live on the markup, not here. */
+.pf-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  flex: 0 0 auto;
+  vertical-align: middle;
+}
+
 .pf-btn-ghost {
   background: var(--pf-surface-mid);
   color: inherit;

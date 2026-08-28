@@ -1,5 +1,5 @@
 const svgIcon = (path, viewBox = "24 24") =>
-  `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 ${viewBox}" fill="currentColor"><path d="${path}"/></svg>`;
+  `<svg class="pf-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewBox}" aria-hidden="true" focusable="false" fill="currentColor"><path d="${path}"/></svg>`;
 
 const ICONS = {
   "volume-1": svgIcon("M3 9h4l5-5v16l-5-5H3V9zm18 3a9.003 9.003 0 0 1-7 8.777V18.71a7.003 7.003 0 0 0 0-13.42V3.223c4.008.91 7 4.494 7 8.777zm-4 0a5.001 5.001 0 0 1-3 4.584V7.416c1.766.772 3 2.534 3 4.584z"),
@@ -64,27 +64,55 @@ function canonicalName(name) {
   return ALIASES[name] ?? (name in ICONS ? name : null);
 }
 
+/**
+ * One cached entry per canonical icon: the SVG markup string AND a template
+ * element parsed from it once, in the caller's document. iconMarkup and
+ * createIconElement both read from this single store, so a repeated icon
+ * never re-parses whether it is shipped as a string (toast) or a DOM element
+ * (panel/history); the only cost for the element path after the first use is
+ * a cheap cloneNode. The template is parsed in the document it is first
+ * requested in, which is correct whether that is the top document or a shell
+ * shadow-root document.
+ */
+const cache = new Map();
+
+function entryFor(canonical, doc) {
+  let entry = cache.get(canonical);
+  if (!entry || entry.doc !== doc) {
+    const markup = ICONS[canonical];
+    const holder = doc.createElement("div");
+    holder.innerHTML = markup;
+    const el = holder.firstElementChild;
+    if (el) {
+      holder.removeChild(el);
+    }
+    entry = { markup, el, doc };
+    cache.set(canonical, entry);
+  }
+  return entry;
+}
+
+/**
+ * SVG markup string for an icon, or null for an unknown name. Provided for
+ * callers that must inject markup directly (e.g. templates); DOM-inserting
+ * callers should prefer createIconElement, which clones a parsed template
+ * instead of re-parsing HTML on every use.
+ */
 export function iconMarkup(name) {
   const canonical = canonicalName(name);
   return canonical ? ICONS[canonical] : null;
 }
 
-const elementCache = new Map();
-
+/**
+ * A detached, ready-to-append copy of the icon element, or null for an
+ * unknown name. Clones the single parsed template per canonical name (and per
+ * document); the clone is independent and safe to append wherever the caller
+ * is targeting.
+ */
 export function createIconElement(name, doc = document) {
   const canonical = canonicalName(name);
   if (!canonical) {
     return null;
   }
-  if (elementCache.has(canonical)) {
-    return elementCache.get(canonical).cloneNode(true);
-  }
-  const holder = doc.createElement("div");
-  holder.innerHTML = ICONS[canonical];
-  const el = holder.firstElementChild;
-  if (el) {
-    holder.removeChild(el);
-  }
-  elementCache.set(canonical, el);
-  return el.cloneNode(true);
+  return entryFor(canonical, doc).el.cloneNode(true);
 }
