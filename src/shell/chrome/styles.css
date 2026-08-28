@@ -271,12 +271,11 @@ pf-toast {
 }
 
 /* - Panel (universal plugin panel) - */
-/* Glassy, floating sheet centered on the shell on both axes. Open/close
-   flips display via the pf-open class (allow-discrete), so the open/close
-   slide folds into the translate chain (calc(-50% - 6px) start) exactly as
-   before; Esc and outside-click dismissal are JS-owned in panel.js.
-   Density adapts to the *shell* (not the viewport) via the container
-   query at the bottom of this block. */
+/* Dark sheet centered on the shell on both axes via auto margins. Open/close
+   flips display via the pf-open class (allow-discrete) and fades opacity in
+   place - a pure fade, no motion; Esc and outside-click dismissal are
+   JS-owned in panel.js. Density adapts to the *shell* (not the viewport)
+   via the container query at the bottom of this block. */
 .pf-panel {
   container-type: inline-size;
   container-name: pf-panel;
@@ -286,14 +285,15 @@ pf-toast {
   padding: 0;
 
   /* Closed by default; @starting-style keys off the display flip. Centered
-     on the shell host; translate self-centers and carries the slide.
-     Breakpoint modes override left/top directly. */
+     on the shell host via auto margins (no translate), so the open/close
+     animation is a pure opacity fade. Breakpoint modes override the
+     inset placement directly. */
   display: none;
-  left: 50%;
-  right: auto;
-  top: 50%;
-  margin: 0;
-  translate: -50% -6px;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  margin: auto;
   width: min(380px, calc(100% - 24px));
   max-height: calc(100% - 24px);
   overflow-y: auto;
@@ -312,15 +312,11 @@ pf-toast {
   opacity: 0;
   transition:
     opacity 0.14s ease,
-    translate 0.14s ease,
-    transform 0.14s ease,
     display 0.14s allow-discrete;
 
   &.pf-open {
     display: block;
     opacity: 1;
-    translate: -50% -50%;
-    transform: none;
   }
 
   /* Single header row: [segmented tabs] [close]. */
@@ -1003,19 +999,6 @@ pf-toast {
     left: 8px;
     bottom: auto;
     margin: 0;
-    transform: translateY(-12px);
-  }
-  .pf-panel.pf-open {
-    transform: translateY(0);
-  }
-  .pf-panel,
-  .pf-panel.pf-open {
-    translate: none;
-  }
-  @starting-style {
-    .pf-panel.pf-open {
-      transform: translateY(-12px);
-    }
   }
 }
 
@@ -1033,19 +1016,6 @@ pf-toast {
     border-left: none;
     border-right: none;
     border-bottom: none;
-    transform: translateY(16px);
-  }
-  .pf-panel.pf-open {
-    transform: translateY(0);
-  }
-  .pf-panel,
-  .pf-panel.pf-open {
-    translate: none;
-  }
-  @starting-style {
-    .pf-panel.pf-open {
-      transform: translateY(16px);
-    }
   }
   .pf-history-list { max-height: 220px; }
 }
@@ -1064,19 +1034,6 @@ pf-toast {
     width: min(340px, 45vw);
     max-height: none;
     border-radius: var(--pf-radius-lg);
-    transform: translateX(16px);
-  }
-  .pf-panel.pf-open {
-    transform: translateX(0);
-  }
-  .pf-panel,
-  .pf-panel.pf-open {
-    translate: none;
-  }
-  @starting-style {
-    .pf-panel.pf-open {
-      transform: translateX(16px);
-    }
   }
   .pf-tab-label { display: none; }
   .pf-panel-tab { padding: 8px 10px; }
@@ -1109,6 +1066,5 @@ pf-toast {
 @starting-style {
   .pf-panel.pf-open {
     opacity: 0;
-    translate: -50% calc(-50% - 6px);
   }
 }
