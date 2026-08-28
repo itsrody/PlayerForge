@@ -37,15 +37,12 @@
   --pf-ease: 0.15s ease;
 
   /* Real dark glass - a low-cost backdrop blur on the panel so the video
-     beneath softly diffuses through a translucent sheet. An elevated blue-
-     tinted "night" gradient lightens the surface, countering the dark base
-     that otherwise reads as dimming, while staying light enough that the
-     blurred backdrop still carries through. Kept cheap on purpose: a small
-     blur radius, no saturate(), and a mostly-opaque base so the sampled
-     region stays pinched to the sheet footprint. */
-  --pf-glass-edge: rgba(255, 255, 255, 0.26);    /* sheet outer hairline      */
-  --pf-glass-blur: blur(8px);                    /* low-cost panel blur       */
-  --pf-glass-night: linear-gradient(180deg, rgba(70, 92, 120, 0.7), rgba(22, 28, 38, 0.8)); /* blue night tone */
+     beneath softly diffuses through a translucent sheet. A deep blue-tinted
+     "night" gradient. Kept cheap on purpose: a small blur radius, no
+     saturate(), and a mostly-opaque base so the sampled region stays
+     pinched to the sheet footprint. */
+  --pf-glass-blur: blur(4px);                    /* low-cost panel blur       */
+  --pf-glass-night: linear-gradient(180deg, rgba(40, 52, 68, 0.78), rgba(14, 18, 24, 0.85)); /* deep blue night */
 
   --pf-z-hud: 2;
   --pf-z-toast: 3;
@@ -187,17 +184,13 @@ pf-toast {
      the transform property, so transform-based animations on the toast
      never clobber it. */
   translate: -50%;
-  /* Plain dark pill - solid blue night surface, no fake glass. Left
-     blur-free (non-sampling): the toast is small and transient, so real
-     glass here would add GPU cost for a barely-seen effect. The panel
-     carries the blur instead. */
+  /* Plain dark pill - blue night surface with the same low-cost backdrop
+     blur as the panel, so the video beneath diffuses through it too. */
   background: var(--pf-glass-night);
-  border: 1px solid var(--pf-glass-edge);
+  backdrop-filter: var(--pf-glass-blur);
   color: var(--pf-toast-color);
   padding: 6px 16px;
   border-radius: var(--pf-toast-radius);
-  box-shadow:
-    0 4px 16px rgba(0, 0, 0, 0.4);
   font-size: var(--pf-font-lg);
   font-weight: 500;
   line-height: 1;
@@ -318,13 +311,9 @@ pf-toast {
      The lighter gradient lifts the tone so the sheet reads as glass rather
      than dimmed; radius and no-saturate keep it cheap. */
   background: var(--pf-glass-night);
-  -webkit-backdrop-filter: var(--pf-glass-blur);
   backdrop-filter: var(--pf-glass-blur);
   color: var(--pf-fg);
-  border: 1px solid var(--pf-glass-edge);
   border-radius: var(--pf-radius-lg);
-  box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.45);
   font-size: var(--pf-font-md);
   line-height: 1.4;
 
