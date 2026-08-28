@@ -206,10 +206,6 @@ export class ResumeStore {
 
   cleanStale(days = TUNING.resume.staleDays) {
     this.#ensureLoaded();
-    const raw = loadJsonObject(KEYS.resume, null);
-    if (raw && Array.isArray(raw.entries)) {
-      this.#mergeRaw(raw);
-    }
     const before = this.#state.entries.length;
     this.#state.entries = this.#enforceBounds(days);
     const removed = before - this.#state.entries.length;

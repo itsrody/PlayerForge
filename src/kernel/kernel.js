@@ -6,7 +6,7 @@ import { SHELL_MARKER } from "../shell/chrome/inject.js";
 import { EventBus } from "./bus.js";
 import { ShellRegistry } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
-import { findSdkForVideo, findContainer, meetsMinSize, watchDocumentVideos } from "./sdk.js";
+import { findSdkForVideo, findContainer, meetsMinSize, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
 import { Shell } from "../shell/shell.js";
 import { TUNING, DEBUG_LOGS_KEY } from "../shell/chrome/config.js";
 
@@ -35,6 +35,8 @@ export class Kernel {
   #removalTimers = new Map();
   /** Unsubscribe for the shared discovery tap; dropped at pagehide. */
   #stopDiscoveryTap = null;
+  /** True once the full-document discovery tap has been downgraded. */
+  #discoveryDowngraded = false;
   #scope = new AbortController();
 
   #onPageShow = (event) => {
@@ -100,6 +102,24 @@ export class Kernel {
     logger.log("kernel", "Kernel ready - discovery tap active");
   }
 
+  /**
+   * After the first successful adoption, drop the full-document discovery tap
+   * (the heavier childList+subtree observer) and fall back to the cheap
+   * capture-mode media-event tap. On MPA pages there is no second player to
+   * surface, so keeping the per-mutation scan alive for the whole page taxes
+   * every DOM change for nothing; the media-event tap still catches a
+   * script-lazy SDK player that fires loadeddata/play, so discovery never goes
+   * fully quiet. Idempotent; pagehide still tears the remaining tap down.
+   */
+  #downgradeDiscoveryTap() {
+    if (this.#discoveryDowngraded) {
+      return;
+    }
+    this.#discoveryDowngraded = true;
+    this.#stopDiscoveryTap?.();
+    this.#stopDiscoveryTap = watchMediaEvents((video) => this.#adoptVideo(video));
+  }
+
   /** Adopt the video, emit discovery and start removal watching. */
   #adoptVideo(video) {
     if (this.#seenVideos.has(video) || video.hasAttribute(SHELL_MARKER)) {
@@ -127,6 +147,7 @@ export class Kernel {
       id: makeId()
     });
     this.#watchVideoRemoval(video, container);
+    this.#downgradeDiscoveryTap();
   }
 
   #watchVideoRemoval(video, container) {

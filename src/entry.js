@@ -6,7 +6,6 @@ import { logger } from "./shared/logger.js";
 import { shouldSkipUrl } from "./kernel/guard.js";
 import { KEYS, getConfigValue, setConfigValue, deleteConfigField } from "./shared/storage.js";
 import { TUNING } from "./shell/chrome/config.js";
-import { warmStyles } from "./shell/chrome/inject.js";
 
 // The version lives in the banner and is read from the installed script at
 // runtime via GM_info, so what the UI reports is always what the manager
@@ -19,10 +18,11 @@ function bootstrap() {
     return;
   }
 
-  // Warm the shell stylesheet synchronously (embedded rules) and kick off the
-  // @resource fetch now, so the first shell to build adopts live CSS without
-  // waiting on the network - critical under instant-injection document-start.
-  warmStyles();
+  // The shell stylesheet is warmed lazily at first shell construction
+  // (shell.js #injectDom): the embedded sheet is adopted synchronously there,
+  // and the @resource fetch is a background async upgrade - so first-video
+  // dimming never waits on the network, and non-video / skipped pages never
+  // pay for a pointless adopted-sheet injection or remote CSS fetch.
 
   // GM menu commands exist from script eval - not from first video
   // discovery. Registration used to live inside kernel.init(), so pages
