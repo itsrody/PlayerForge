@@ -145,9 +145,6 @@ const stateFor = (() => {
         scrubSlowGain: 0,
         scrubFastGain: 0,
         scrubSensitivity: 0,
-        scrubFadeCancel: null,
-        scrubSavedVolume: 0,
-        scrubWasMuted: false,
         scrubDirectionMomentum: 0,
         lastScrubToastAt: 0,
         streakCount: 0,
@@ -236,29 +233,6 @@ export function easeTransformTo(video, transform) {
  * independent, and lands exactly on `to`. Returns a stop() that cancels the
  * fade (leaving volume where it is) so an interrupting action can take over.
  */
-function fadeVideoVolume(video, from, to, duration) {
-  let raf = 0;
-  let cancelled = false;
-  const start = performance.now();
-  const stop = () => {
-    cancelled = true;
-    if (raf) {
-      cancelAnimationFrame(raf);
-      raf = 0;
-    }
-  };
-  const tick = (now) => {
-    if (cancelled) {
-      return;
-    }
-    const p = duration > 0 ? Math.min(1, (now - start) / duration) : 1;
-    video.volume = from + (to - from) * p;
-    raf = p < 1 ? requestAnimationFrame(tick) : 0;
-  };
-  raf = requestAnimationFrame(tick);
-  return stop;
-}
-
 function clearFillMode(shell, state, animate = true) {
   if (!state.fillActive) {
     return;
@@ -378,15 +352,6 @@ export function attachInputActions(shell, host, signal) {
       state.scrubFastGain = fastCeiling / width;
       state.scrubSensitivity = SCRUB_SENSITIVITY;
       state.scrubDirectionMomentum = 0;
-      // Mute during the drag: save the pre-scrub audio state, cancel any
-      // residual fade-in from a previous scrub, and fade to silence quickly.
-      const videoEl = shell.video;
-      state.scrubWasMuted = videoEl.muted;
-      state.scrubSavedVolume = videoEl.volume;
-      state.scrubFadeCancel?.();
-      state.scrubFadeCancel = fadeVideoVolume(
-        videoEl, videoEl.volume, 0, TUNING.scrub.muteFadeMs
-      );
     }
 
     if (Math.abs(detail.dx) < SCRUB_DEAD_ZONE_PX) {
@@ -428,21 +393,6 @@ export function attachInputActions(shell, host, signal) {
     state.scrubSlowGain = 0;
     state.scrubFastGain = 0;
     state.scrubSensitivity = 0;
-    // Seamless fade-in: cancel the scrub mute and ramp back to the saved
-    // volume. If the user had intentionally muted, keep it muted (just return
-    // the volume field to its pre-scrub level, harmless while muted).
-    state.scrubFadeCancel?.();
-    state.scrubFadeCancel = null;
-    const videoEl = shell.video;
-    if (videoEl && !state.scrubWasMuted) {
-      state.scrubFadeCancel = fadeVideoVolume(
-        videoEl, videoEl.volume, state.scrubSavedVolume, TUNING.scrub.unmuteFadeMs
-      );
-    } else if (videoEl) {
-      videoEl.volume = state.scrubSavedVolume;
-    }
-    state.scrubSavedVolume = 0;
-    state.scrubWasMuted = false;
     shell.hideToast("scrub");
   }, { signal });
 
