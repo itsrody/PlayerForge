@@ -20,6 +20,7 @@
 import { logger } from "./logger.js";
 import { watchMediaEvents, meetsMinSize, videosFromMutations } from "../kernel/sdk.js";
 import { onDomMutations } from "../kernel/dom-watch.js";
+import { CTX_REQUEST_TYPE, CTX_RESPONSE_TYPE, FS_REQUEST_TYPE } from "./events.js";
 
 /* - 1. Domain identity - */
 
@@ -258,7 +259,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
     if (
       event.source === window.parent
       && data && typeof data === "object"
-      && data.type === "pf:ctx" && data.nonce === nonce
+      && data.type === CTX_RESPONSE_TYPE && data.nonce === nonce
       && typeof data.domain === "string"
     ) {
       clearTimeout(retryTimer);
@@ -275,7 +276,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
 
   const sendRequest = () => {
     nonce = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    window.parent.postMessage({ type: "pf:ctx-request", nonce }, "*");
+    window.parent.postMessage({ type: CTX_REQUEST_TYPE, nonce }, "*");
   };
   const attempt = () => {
     if (Date.now() >= deadline) {
@@ -313,7 +314,7 @@ export function createTopFrameResponder(resolveContext, ownOrigin = location.ori
     const data = event && event.data;
     if (
       !data || typeof data !== "object"
-      || data.type !== "pf:ctx-request" || typeof data.nonce !== "string"
+      || data.type !== CTX_REQUEST_TYPE || typeof data.nonce !== "string"
       || !event.source
     ) {
       return;
@@ -323,7 +324,7 @@ export function createTopFrameResponder(resolveContext, ownOrigin = location.ori
     }
     const { domain, path, title } = resolveContext();
     post(event.source, {
-      type: "pf:ctx",
+      type: CTX_RESPONSE_TYPE,
       nonce: data.nonce,
       domain,
       path,
@@ -344,14 +345,14 @@ export function createFrameRelay() {
     if (!data || typeof data !== "object") {
       return;
     }
-    if (data.type === "pf:ctx-request" && typeof data.nonce === "string" && event.source) {
+    if (data.type === CTX_REQUEST_TYPE && typeof data.nonce === "string" && event.source) {
       // Remember who asked AND from which origin: the answer must travel back
       // down addressed to the requester's origin - this hop's upstream origin
       // would get the delivery dropped whenever the two differ.
       pending.set(data.nonce, { source: event.source, origin: event.origin });
       setTimeout(() => pending.delete(data.nonce), NONCE_TTL_MS);
       window.parent.postMessage(data, "*");
-    } else if (data.type === "pf:ctx" && pending.has(data.nonce)) {
+    } else if (data.type === CTX_RESPONSE_TYPE && pending.has(data.nonce)) {
       // Answers may only come from the parent we relayed to - a sibling or
       // nested frame that guesses a live nonce must not inject context.
       if (event.source !== window.parent) {
@@ -407,7 +408,7 @@ function isOwnFrame(source) {
  * one child, so a hostile foreign window cannot punch allowfullscreen for
  * frames it does not own: every grant is vouched by an own-<iframe> match.
  */
-export const FS_REQUEST_TYPE = "pf:req-fullscreen";
+export { FS_REQUEST_TYPE };
 
 /** The direct <iframe> child of THIS document whose contentWindow is `win`, or null. */
 function iframeElementForWindow(win) {

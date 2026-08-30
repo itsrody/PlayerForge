@@ -7,6 +7,7 @@ import { shouldSkipUrl } from "./kernel/guard.js";
 import { KEYS, getConfigValue, setConfigValue, deleteConfigField } from "./shared/storage.js";
 import { TUNING } from "./shell/chrome/config.js";
 import { initFullscreenGate } from "./shared/shadow.js";
+import { BUS_EVENTS } from "./shared/events.js";
 
 // The version lives in the banner and is read from the installed script at
 // runtime via GM_info, so what the UI reports is always what the manager
@@ -56,7 +57,7 @@ function bootstrap() {
     if (legacyFirstRun !== undefined) {
       deleteConfigField("firstRun");
     }
-    kernel.bus.addEventListener("pf:shell-created", (event) => {
+    kernel.bus.addEventListener(BUS_EVENTS.shellCreated, (event) => {
       const shell = event.detail;
       logger.log("entry", `Shell ready: ${shell.id} (${shell.sdkName})`);
       // Nested embeds can silently lose fullscreen (Firefox requires

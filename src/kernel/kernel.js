@@ -9,6 +9,7 @@ import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, findContainer, meetsMinSize, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
 import { Shell } from "../shell/shell.js";
 import { TUNING, DEBUG_LOGS_KEY } from "../shell/chrome/config.js";
+import { BUS_EVENTS } from "../shared/events.js";
 
 /**
  * crypto.randomUUID() exists only in secure contexts; userscripts match
@@ -139,7 +140,7 @@ export class Kernel {
     }
     this.#seenVideos.add(video);
     logger.log("kernel", `${sdk.name} adopted (${video.videoWidth}x${video.videoHeight}, ${Math.round(video.duration)}s)`);
-    this.bus.emit("pf:video-found", {
+    this.bus.emit(BUS_EVENTS.videoFound, {
       video,
       container,
       sdk,
@@ -191,7 +192,7 @@ export class Kernel {
           this.#removalTimers.delete(video);
           if (!video.isConnected) {
             stopWatching();
-            this.bus.emit("pf:video-removed", { video });
+            this.bus.emit(BUS_EVENTS.videoRemoved, { video });
           } else {
             reanchorObservers();
           }

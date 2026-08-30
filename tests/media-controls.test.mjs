@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { createMediaControls } from "../src/shell/media.js";
+import { BUS_EVENTS } from "../src/shared/events.js";
 
 function makeEnv(readyState = 0) {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", {
@@ -18,7 +19,7 @@ function makeEnv(readyState = 0) {
     }
   };
   const controls = createMediaControls({ video, bus, shellId: "s1" });
-  const commands = () => emissions.filter((entry) => entry.type === "pf:media-command");
+  const commands = () => emissions.filter((entry) => entry.type === BUS_EVENTS.mediaCommand);
   return { dom, video, controls, commands, emissions };
 }
 

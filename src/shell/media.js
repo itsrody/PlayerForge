@@ -1,4 +1,5 @@
 import { logger } from "../shared/logger.js";
+import { BUS_EVENTS } from "../shared/events.js";
 
 /** Volume delta applied by nudgeVolume, shared with UI feedback layers. */
 export const VOLUME_STEP = 0.1;
@@ -17,7 +18,7 @@ export const VOLUME_STEP = 0.1;
  */
 export function createMediaControls({ video, bus, shellId }) {
   const emit = (type, detail) => {
-    bus.emit("pf:media-command", { shellId, type, ...detail });
+    bus.emit(BUS_EVENTS.mediaCommand, { shellId, type, ...detail });
   };
 
   /**

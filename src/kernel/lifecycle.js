@@ -1,4 +1,5 @@
 import { logger } from "../shared/logger.js";
+import { BUS_EVENTS } from "../shared/events.js";
 
 /**
  * Resolve once the container's child list has been quiet for a run of
@@ -52,8 +53,8 @@ export class LifecycleManager {
     this.#bus = bus;
     this.#registry = registry;
     const { signal } = this.#scope;
-    this.#bus.addEventListener("pf:video-found", (event) => this.#onVideoFound(event.detail), { signal });
-    this.#bus.addEventListener("pf:video-removed", (event) => this.#onVideoRemoved(event.detail), { signal });
+    this.#bus.addEventListener(BUS_EVENTS.videoFound, (event) => this.#onVideoFound(event.detail), { signal });
+    this.#bus.addEventListener(BUS_EVENTS.videoRemoved, (event) => this.#onVideoRemoved(event.detail), { signal });
   }
 
   setShellFactory(factory) {
@@ -86,7 +87,7 @@ export class LifecycleManager {
     try {
       const shell = this.#shellFactory({ id, video, container, sdk, sdkName });
       await shell?.ready;
-      this.#bus.emit("pf:shell-created", shell);
+      this.#bus.emit(BUS_EVENTS.shellCreated, shell);
       logger.log("lifecycle", `Shell created for ${sdkName}: ${id}`);
     } catch (err) {
       logger.error("lifecycle", `Failed to create shell for ${id}:`, err);

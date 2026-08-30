@@ -17,6 +17,7 @@ import {
   FS_REQUEST_TYPE,
   CTX_REQUEST_TIMEOUT_MS
 } from "../src/shared/context.js";
+import { CTX_REQUEST_TYPE, CTX_RESPONSE_TYPE } from "../src/shared/events.js";
 
 const dom = (html = "", url = "https://www.youtube.com/watch?v=1") => {
   const jsdom = new JSDOM(`<!doctype html><html><head><title>Page</title></head><body>${html}</body></html>`, { url });
@@ -174,20 +175,20 @@ test("top-frame responder validates shape and answers with fresh context", () =>
     return { domain: "example", path: "/v/1", title: "T" };
   }, "https://site.test", post);
 
-  respond({ data: { type: "pf:ctx-request", nonce: "n1" }, origin: "https://embed.net", source: iframe.contentWindow });
+  respond({ data: { type: CTX_REQUEST_TYPE, nonce: "n1" }, origin: "https://embed.net", source: iframe.contentWindow });
   assert.equal(calls, 1);
   assert.equal(sent.source, iframe.contentWindow);
-  assert.deepEqual(sent.msg, { type: "pf:ctx", nonce: "n1", domain: "example", path: "/v/1", title: "T" });
+  assert.deepEqual(sent.msg, { type: CTX_RESPONSE_TYPE, nonce: "n1", domain: "example", path: "/v/1", title: "T" });
   assert.equal(sent.target, "https://embed.net");
 
   sent = null; calls = 0;
-  respond({ data: { type: "pf:ctx-request", nonce: "n4" }, origin: "https://site.test", source: {} });
+  respond({ data: { type: CTX_REQUEST_TYPE, nonce: "n4" }, origin: "https://site.test", source: {} });
   assert.equal(calls, 1);
 
   sent = null;
-  respond({ data: { type: "pf:ctx-request" }, origin: "https://embed.net", source: iframe.contentWindow });
+  respond({ data: { type: CTX_REQUEST_TYPE }, origin: "https://embed.net", source: iframe.contentWindow });
   respond({ data: { type: "other", nonce: "n2" }, origin: "https://embed.net", source: iframe.contentWindow });
-  respond({ data: { type: "pf:ctx-request", nonce: "n3" }, origin: "https://embed.net", source: null });
+  respond({ data: { type: CTX_REQUEST_TYPE, nonce: "n3" }, origin: "https://embed.net", source: null });
   respond(null);
   assert.equal(sent, null);
 });
@@ -196,7 +197,7 @@ test("top-frame responder rejects foreign frames on foreign origins", () => {
   let sent = null;
   const stranger = { postMessage: (msg) => { sent = msg; } };
   const respond = createTopFrameResponder(() => ({ domain: "x", path: "/", title: "" }), "https://site.test");
-  respond({ data: { type: "pf:ctx-request", nonce: "nx" }, origin: "https://evil.test", source: stranger });
+  respond({ data: { type: CTX_REQUEST_TYPE, nonce: "nx" }, origin: "https://evil.test", source: stranger });
   assert.equal(sent, null);
 });
 
@@ -219,13 +220,13 @@ test("top-frame responder vouches for grandchildren through readable frame trees
   const respond = createTopFrameResponder(() => ({ domain: "x", path: "/", title: "" }), "https://site.test", post);
 
   // Grandchild is not a direct iframe child but sits in the visible tree.
-  respond({ data: { type: "pf:ctx-request", nonce: "g1" }, origin: "https://embed.net", source: grandchild.contentWindow });
+  respond({ data: { type: CTX_REQUEST_TYPE, nonce: "g1" }, origin: "https://embed.net", source: grandchild.contentWindow });
   assert.equal(sent.source, grandchild.contentWindow);
   assert.equal(sent.msg.nonce, "g1");
 
   // A stranger window still gets nothing.
   sent = null;
-  respond({ data: { type: "pf:ctx-request", nonce: "g2" }, origin: "https://evil.test", source: { postMessage() {} } });
+  respond({ data: { type: CTX_REQUEST_TYPE, nonce: "g2" }, origin: "https://evil.test", source: { postMessage() {} } });
   assert.equal(sent, null);
 });
 
@@ -244,21 +245,21 @@ test("frame relay forwards requests up and routes answers back down", () => {
     const relay = createFrameRelay();
     const child = { postMessage: (msg, target) => { child.sent = { msg, target }; } };
 
-    relay({ data: { type: "pf:ctx-request", nonce: "r1" }, origin: "https://kid.test", source: child });
-    assert.deepEqual(relayedUp.msg, { type: "pf:ctx-request", nonce: "r1" });
+    relay({ data: { type: CTX_REQUEST_TYPE, nonce: "r1" }, origin: "https://kid.test", source: child });
+    assert.deepEqual(relayedUp.msg, { type: CTX_REQUEST_TYPE, nonce: "r1" });
 
     // Answers are only accepted from the parent this hop relayed to.
-    const answer = { type: "pf:ctx", nonce: "r1", domain: "site", path: "/", title: "" };
+    const answer = { type: CTX_RESPONSE_TYPE, nonce: "r1", domain: "site", path: "/", title: "" };
     const impostor = { postMessage: () => { throw new Error("impostor answered"); } };
     relay({ data: answer, origin: "https://top.test", source: impostor });
     assert.equal(child.sent, undefined);
 
     relay({ data: answer, origin: "https://top.test", source: win.parent });
-    assert.deepEqual(child.sent.msg, { type: "pf:ctx", nonce: "r1", domain: "site", path: "/", title: "" });
+    assert.deepEqual(child.sent.msg, { type: CTX_RESPONSE_TYPE, nonce: "r1", domain: "site", path: "/", title: "" });
     assert.equal(child.sent.target, "https://kid.test");
 
     child.sent = null;
-    relay({ data: { type: "pf:ctx", nonce: "unknown", domain: "site", path: "/", title: "" }, origin: "https://top.test", source: win.parent });
+    relay({ data: { type: CTX_RESPONSE_TYPE, nonce: "unknown", domain: "site", path: "/", title: "" }, origin: "https://top.test", source: win.parent });
     assert.equal(child.sent, null);
     win.parent.postMessage = originalPostMessage;
   } finally {
@@ -297,8 +298,8 @@ test("nested relays address every down-leg with its own requester origin", () =>
     const innerWindow = { postMessage: (msg, target) => { innerWindow.sent = { msg, target }; } };
 
     // Leaf asks up through the inner relay (inner globals active).
-    relayInner({ data: { type: "pf:ctx-request", nonce: "nn" }, origin: "https://kid.test", source: leaf });
-    assert.deepEqual(inner.up.msg, { type: "pf:ctx-request", nonce: "nn" });
+    relayInner({ data: { type: CTX_REQUEST_TYPE, nonce: "nn" }, origin: "https://kid.test", source: leaf });
+    assert.deepEqual(inner.up.msg, { type: CTX_REQUEST_TYPE, nonce: "nn" });
 
     // Inner window's message arrives at the outer relay - reactivate the
     // outer globals first, since relays read window.parent per event.
@@ -307,7 +308,7 @@ test("nested relays address every down-leg with its own requester origin", () =>
     assert.ok(outer.up);
 
     // Top answers; each relay routes down with the origin it stored per hop.
-    const answer = { type: "pf:ctx", nonce: "nn", domain: "site", path: "/", title: "" };
+    const answer = { type: CTX_RESPONSE_TYPE, nonce: "nn", domain: "site", path: "/", title: "" };
     relayOuter({ data: answer, origin: "https://top.test", source: outer.win.parent });
     assert.equal(innerWindow.sent.target, "https://inner.test");
 
@@ -333,7 +334,7 @@ test("installContextBridge registers a top-frame message listener", () => {
   const stop = installContextBridge();
 
   const request = new win.MessageEvent("message", {
-    data: { type: "pf:ctx-request", nonce: "z9" },
+    data: { type: CTX_REQUEST_TYPE, nonce: "z9" },
     origin: "null",
     source: win
   });

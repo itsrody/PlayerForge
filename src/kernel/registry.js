@@ -1,4 +1,5 @@
 import { logger } from "../shared/logger.js";
+import { BUS_EVENTS } from "../shared/events.js";
 
 /** Tracks live shells by id and by video element. */
 export class ShellRegistry {
@@ -14,8 +15,8 @@ export class ShellRegistry {
 
   #wire() {
     const { signal } = this.#scope;
-    this.#bus.addEventListener("pf:shell-created", (event) => this.#register(event.detail), { signal });
-    this.#bus.addEventListener("pf:shell-destroyed", (event) => this.#unregister(event.detail), { signal });
+    this.#bus.addEventListener(BUS_EVENTS.shellCreated, (event) => this.#register(event.detail), { signal });
+    this.#bus.addEventListener(BUS_EVENTS.shellDestroyed, (event) => this.#unregister(event.detail), { signal });
   }
 
   #register(shell) {
