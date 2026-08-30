@@ -6,6 +6,7 @@ import {
   findContainer,
   resolveContainer,
   videoFromEvent,
+  meetsMinSize,
   MIN_VIDEO_WIDTH,
   MIN_VIDEO_HEIGHT
 } from "../src/kernel/sdk.js";
@@ -95,6 +96,36 @@ test("findContainer returns the nearest matched anchor", () => {
 test("video size gates stay intact", () => {
   assert.equal(MIN_VIDEO_WIDTH, 100);
   assert.equal(MIN_VIDEO_HEIGHT, 60);
+});
+
+function sizedVideo(doc, rect) {
+  const video = doc.createElement("video");
+  video.getBoundingClientRect = () => rect;
+  return video;
+}
+
+test("meetsMinSize falls back to the rect gate without checkVisibility", () => {
+  const doc = dom("");
+  assert.equal(meetsMinSize(sizedVideo(doc, { width: 200, height: 100 })), true);
+  assert.equal(meetsMinSize(sizedVideo(doc, { width: 50, height: 50 })), false);
+});
+
+test("meetsMinSize rejects hidden players before paying for layout", () => {
+  const doc = dom("");
+  const video = sizedVideo(doc, { width: 800, height: 450 });
+  video.checkVisibility = () => false;
+  assert.equal(meetsMinSize(video), false, "hidden player rejected despite size");
+});
+
+test("meetsMinSize still size-gates after a visibility pass", () => {
+  const doc = dom("");
+  const big = sizedVideo(doc, { width: 800, height: 450 });
+  big.checkVisibility = () => true;
+  assert.equal(meetsMinSize(big), true, "visible oversized player admitted");
+
+  const small = sizedVideo(doc, { width: 40, height: 40 });
+  small.checkVisibility = () => true;
+  assert.equal(meetsMinSize(small), false, "visible undersized player still rejected");
 });
 
 test("videoFromEvent prefers an explicit video target", () => {
