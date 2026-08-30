@@ -1,48 +1,35 @@
 import { logger } from "../shared/logger.js";
 
-/** Tracks live shells by id and by video element. */
+/** Holds the single live shell. PlayerForge is one-shell-per-session by design. */
 export class ShellRegistry {
-  #byId = new Map();
-  #idByVideo = new WeakMap();
+  #current = null;
 
   register(shell) {
-    this.#byId.set(shell.id, shell);
-    this.#idByVideo.set(shell.video, shell.id);
-    logger.log("registry", `Shell registered: ${shell.id} (${shell.sdkName})`);
+    this.#current = shell;
+    logger.log("registry", `Shell registered: ${shell.sdkName}`);
   }
 
   unregister(shell) {
-    this.#byId.delete(shell.id);
-    logger.log("registry", `Shell unregistered: ${shell.id}`);
-  }
-
-  get(id) {
-    return this.#byId.get(id) || null;
+    if (this.#current === shell) {
+      this.#current = null;
+    }
+    logger.log("registry", `Shell unregistered: ${shell.sdkName}`);
   }
 
   getByVideo(video) {
-    const id = this.#idByVideo.get(video);
-    return id ? this.#byId.get(id) : null;
+    return this.#current?.video === video ? this.#current : null;
   }
 
   getAll() {
-    return [...this.#byId.values()];
-  }
-
-  getBySDK(sdkName) {
-    return this.getAll().filter((shell) => shell.sdkName === sdkName);
-  }
-
-  get size() {
-    return this.#byId.size;
+    return this.#current ? [this.#current] : [];
   }
 
   destroyAll() {
-    const shells = this.getAll();
-    for (const shell of shells) {
+    const shell = this.#current;
+    this.#current = null;
+    if (shell) {
       shell.destroy();
+      logger.log("registry", "Destroyed shell");
     }
-    this.#byId.clear();
-    logger.log("registry", `Destroyed ${shells.length} shell(s)`);
   }
 }

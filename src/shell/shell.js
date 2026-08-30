@@ -55,8 +55,7 @@ export class Shell {
   #mediaSession = null;
   #savedPositionStyle = null;
 
-  constructor({ id, video, container, sdk, sdkName, onDestroy }) {
-    this.id = id;
+  constructor({ video, container, sdk, sdkName, onDestroy }) {
     this.video = video;
     this.container = container;
     this.sdk = sdk;
@@ -70,7 +69,7 @@ export class Shell {
   async #boot() {
     await this.#injectDom();
     if (!this.#shellDom) {
-      throw new Error(`Shell "${this.id}": failed to inject shell DOM`);
+      throw new Error(`Shell "${this.sdkName}": failed to inject shell DOM`);
     }
     this.#panel = new SettingsPanel(this);
     this.#toasts = new ToastManager(this.#shellDom.hudLayer);
@@ -92,7 +91,7 @@ export class Shell {
     this.#watchFullscreen();
     this.#watchWakeLock();
     this.#markManaged();
-    logger.log("shell", `Shell "${this.id}" constructed (${this.sdkName})`);
+    logger.log("shell", `Shell "${this.sdkName}" constructed`);
   }
 
   get volume() {
@@ -286,7 +285,7 @@ export class Shell {
       logger.error("shell", "Failed to inject shell DOM");
       return;
     }
-    this.#shellDom.host.setAttribute(SHELL_MARKER, this.id);
+    this.#shellDom.host.setAttribute(SHELL_MARKER, "");
     const style = getComputedStyle(this.container);
     if (style.position === "static") {
       this.#savedPositionStyle = style.position;
@@ -361,14 +360,14 @@ export class Shell {
   }
 
   #markManaged() {
-    this.video.setAttribute(SHELL_MARKER, this.id);
-    this.container.setAttribute(SHELL_MARKER, this.id);
+    this.video.setAttribute(SHELL_MARKER, "");
+    this.container.setAttribute(SHELL_MARKER, "");
   }
 
   destroy() {
     if (!this.#destroyed) {
       this.#destroyed = true;
-      logger.log("shell", `Destroying shell "${this.id}"`);
+      logger.log("shell", `Destroying shell "${this.sdkName}"`);
       this.#resume?.destroy();
       this.#resume = null;
       this.#subtitles?.destroy();

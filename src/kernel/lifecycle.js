@@ -58,8 +58,8 @@ export class LifecycleManager {
     this.#shellFactory = factory;
   }
 
-  async onVideoFound({ video, container, sdk, sdkName, id }) {
-    logger.log("lifecycle", `video:found - ${sdkName} (${id})`);
+  async onVideoFound({ video, container, sdk, sdkName }) {
+    logger.log("lifecycle", `video:found - ${sdkName}`);
     if (this.#registry.getByVideo(video)) {
       logger.log("lifecycle", "Video already has a shell, skipping");
       return;
@@ -75,19 +75,19 @@ export class LifecycleManager {
     await whenDomSettled(container);
     this.#pending.delete(video);
     if (!video.isConnected || !container.isConnected) {
-      logger.log("lifecycle", `Video ${id} left the document before settle - skipping`);
+      logger.log("lifecycle", `${sdkName} video left the document before settle - skipping`);
       return;
     }
     if (this.#registry.getByVideo(video)) {
       return;
     }
     try {
-      const shell = this.#shellFactory({ id, video, container, sdk, sdkName });
+      const shell = this.#shellFactory({ video, container, sdk, sdkName });
       await shell?.ready;
       this.#onShellCreated(shell);
-      logger.log("lifecycle", `Shell created for ${sdkName}: ${id}`);
+      logger.log("lifecycle", `Shell created for ${sdkName}`);
     } catch (err) {
-      logger.error("lifecycle", `Failed to create shell for ${id}:`, err);
+      logger.error("lifecycle", `Failed to create shell for ${sdkName}:`, err);
     }
   }
 
@@ -95,7 +95,7 @@ export class LifecycleManager {
     const shell = this.#registry.getByVideo(video);
     if (shell) {
       shell.destroy();
-      logger.log("lifecycle", `Shell destroyed: ${shell.id}`);
+      logger.log("lifecycle", `Shell destroyed: ${shell.sdkName}`);
     }
   }
 }

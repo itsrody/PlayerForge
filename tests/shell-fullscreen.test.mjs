@@ -9,7 +9,7 @@ const { Shell } = await import("../src/shell/shell.js");
 const { initFsGate, setFullscreen } = await import("./fs-gate.mjs");
 const { subscribeFullscreen } = await import("../src/shared/shadow.js");
 
-async function makeShell(id = "t") {
+async function makeShell() {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", {
     url: "https://www.youtube.com/watch?v=1"
   });
@@ -37,7 +37,7 @@ async function makeShell(id = "t") {
   const video = dom.window.document.createElement("video");
   container.appendChild(video);
 
-  const shell = new Shell({ id, video, container, sdk: {}, sdkName: "test-sdk" });
+  const shell = new Shell({ video, container, sdk: {}, sdkName: "test-sdk" });
   await shell.ready;
   const teardown = () => {
     setFullscreen(dom, null);

@@ -10,14 +10,6 @@ import { Shell } from "../shell/shell.js";
 import { TUNING, DEBUG_LOGS_KEY } from "../shell/chrome/config.js";
 
 /**
- * crypto.randomUUID() exists only in secure contexts; userscripts match
- * plain http pages too, so discovery needs a fallback id.
- */
-function makeId() {
-  return crypto.randomUUID?.() ?? `pf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-}
-
-/**
  * Top-level orchestrator: watches for <video> elements, identifies the player
  * SDK, drives discovery, and owns the registry/lifecycle pair.
  * Under @run-at document-start nothing pre-exists us: the kernel rides the
@@ -48,7 +40,7 @@ export class Kernel {
       if (!shell.video.isConnected) {
         this.#seenVideos.delete(shell.video);
         shell.destroy();
-        logger.log("kernel", `Reconciled orphaned shell: ${shell.id}`);
+        logger.log("kernel", `Reconciled orphaned shell: ${shell.sdkName}`);
       }
     }
   };
@@ -156,8 +148,7 @@ export class Kernel {
       video,
       container,
       sdk,
-      sdkName: sdk.name,
-      id: makeId()
+      sdkName: sdk.name
     });
     this.#watchVideoRemoval(video, container);
     this.#downgradeDiscoveryTap();
@@ -219,10 +210,9 @@ export class Kernel {
     reanchorObservers();
   }
 
-  #createShell({ id, video, container, sdk, sdkName }) {
+  #createShell({ video, container, sdk, sdkName }) {
     let shell;
     shell = new Shell({
-      id,
       video,
       container,
       sdk,

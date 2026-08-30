@@ -29,8 +29,7 @@ async function makeShell() {
   const video = dom.window.document.createElement("video");
   container.appendChild(video);
 
-  const bus = { emit() {}, addEventListener() {}, removeEventListener() {} };
-  const shell = new Shell({ id: "lazy-test", video, container, sdk: {}, sdkName: "test-sdk", bus });
+  const shell = new Shell({ video, container, sdk: {}, sdkName: "test-sdk" });
   await shell.ready;
 
   return { dom, shell, container, video };
