@@ -68,6 +68,26 @@ const matchCache = new WeakMap();
  */
 const chain = [];
 
+/**
+ * The single composed-ancestry walk, shared by anchor matching and container
+ * resolution. Fills the reusable `chain` with the element nodes from `start`
+ * upwards (crossing shadow boundaries via `.host`), and returns the filled
+ * length. Flat indexed loop, no closure per call - the JIT's most reliably
+ * optimized shape for this one-pass discovery walk. Chain index doubles as the
+ * hop count. Callers must keep only what they read from `chain[0..len)`; the
+ * scratch buffer never escapes.
+ */
+function fillComposedChain(start) {
+  let len = 0;
+  for (let node = start; node; ) {
+    if (node.nodeType === 1) {
+      chain[len++] = node;
+    }
+    node = node.parentNode ?? node.host ?? null;
+  }
+  return len;
+}
+
 function matchSdk(video) {
   const cached = matchCache.get(video);
   if (cached) {
@@ -78,18 +98,7 @@ function matchSdk(video) {
   // again per hit to count hops. Chain index IS the hop count, so one pass
   // serves every anchor. Selection semantics unchanged: fewest hops wins,
   // ties keep registry order then anchor order (strict < keeps the first).
-  //
-  // Flat indexed loops instead of forEach/generator closures: each full-scan
-  // (cache-miss) call previously allocated an arrow closure per record and
-  // per anchor. Indexed for-loops are the JIT's most reliably optimized shape
-  // - no closure allocations on the discovery hot path.
-  let len = 0;
-  for (let node = video; node; ) {
-    if (node.nodeType === 1) {
-      chain[len++] = node;
-    }
-    node = node.parentNode ?? node.host ?? null;
-  }
+  const len = fillComposedChain(video);
   let best = null;
   for (let r = 0; r < REGISTRY.length; r++) {
     const record = REGISTRY[r];
@@ -152,11 +161,11 @@ export function resolveContainer({ record, el }) {
   }
   // Composed-ancestry walk mirroring anchor matching: the host override may
   // target an element above the matched anchor and across shadow boundaries.
-  for (let node = el; node; ) {
-    if (node.nodeType === 1 && node.matches(record.host)) {
-      return node;
+  const len = fillComposedChain(el);
+  for (let hop = 0; hop < len; hop++) {
+    if (chain[hop].matches(record.host)) {
+      return chain[hop];
     }
-    node = node.parentNode ?? node.host ?? null;
   }
   return el;
 }

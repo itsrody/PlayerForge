@@ -1,6 +1,7 @@
 import { getConfigValue, setConfigFields } from "../shared/storage.js";
 import { flashElement } from "./chrome/animate.js";
 import { debounce } from "../shared/time.js";
+import { clamp } from "../shared/clamp.js";
 import { TUNING } from "./chrome/config.js";
 
 const CONFIG_PREFIX = "filter";
@@ -45,7 +46,7 @@ function buildFilterString(values) {
     parts.push(`contrast(${values.contrast}%)`);
   }
   if (totalSat !== DEFAULTS.saturate) {
-    parts.push(`saturate(${Math.min(200, Math.max(0, totalSat))}%)`);
+    parts.push(`saturate(${clamp(totalSat, 0, 200)}%)`);
   }
   if (totalHue !== 0) {
     parts.push(`hue-rotate(${totalHue}deg)`);

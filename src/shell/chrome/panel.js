@@ -2,9 +2,12 @@ import { logger } from "../../shared/logger.js";
 import { createIconElement } from "./icons.js";
 import { GESTURE_EVENTS } from "../inputs/actions.js";
 import { deepestActiveElement, subscribeFullscreen } from "../../shared/shadow.js";
+import { clamp } from "../../shared/clamp.js";
+import { el } from "./elements.js";
 
 const HOLD_DELAY_MS = 400;
 const HOLD_REPEAT_MS = 75;
+const TAB_NAV_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End"]);
 
 function decimalsOf(step) {
   const str = String(step);
@@ -36,7 +39,7 @@ function createStepper({
   const by = Math.abs(Number(step)) || 1;
   const decimals = Math.max(decimalsOf(by), 0);
 
-  let committed = roundTo(Math.min(hi, Math.max(lo, Number(value ?? min))), decimals);
+  let committed = roundTo(clamp(Number(value ?? min), lo, hi), decimals);
 
   const root = document.createElement("span");
   root.className = "pf-stepper";
@@ -112,7 +115,7 @@ function createStepper({
       showCommitted();
       return committed;
     }
-    const next = roundTo(Math.min(hi, Math.max(lo, parsed)), decimals);
+    const next = roundTo(clamp(parsed, lo, hi), decimals);
     showCommitted();
     if (next !== committed) {
       committed = next;
@@ -141,7 +144,7 @@ function createStepper({
     if (!Number.isFinite(parsed)) {
       return;
     }
-    const next = roundTo(Math.min(hi, Math.max(lo, parsed)), decimals);
+    const next = roundTo(clamp(parsed, lo, hi), decimals);
     if (next !== committed) {
       committed = next;
       syncAria();
@@ -179,7 +182,7 @@ function createStepper({
     input,
     getValue: () => committed,
     setValue(next) {
-      const nextValue = roundTo(Math.min(hi, Math.max(lo, Number(next))), decimals);
+      const nextValue = roundTo(clamp(Number(next), lo, hi), decimals);
       if (nextValue === committed) {
         showCommitted();
         return committed;
@@ -333,16 +336,7 @@ export class SettingsPanel {
 
   /** Generic escape hatch: create + attribute + append in one call. */
   el(tag, attrs = {}, parent = this.#body) {
-    const node = document.createElement(tag);
-    for (const [key, value] of Object.entries(attrs)) {
-      if (key === "style" && typeof value === "object") {
-        Object.assign(node.style, value);
-      } else {
-        node.setAttribute(key, value);
-      }
-    }
-    parent?.appendChild(node);
-    return node;
+    return el(tag, attrs, parent);
   }
 
   addLabel(parent, text) {
@@ -610,32 +604,47 @@ export class SettingsPanel {
     }, { signal, capture: true });
 
     this.#tabList.addEventListener("keydown", (event) => {
-      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+      if (!TAB_NAV_KEYS.has(event.key)) {
         return;
       }
-      const tabs = [...this.#tabList.querySelectorAll(".pf-panel-tab")];
-      if (!tabs.length) {
+      // Index the NodeList directly; no [...querySelectorAll] copy per press.
+      const tabNodes = this.#tabList.querySelectorAll(".pf-panel-tab");
+      if (!tabNodes.length) {
         return;
       }
-      const currentIndex = tabs.indexOf(deepestActiveElement(this.#shellHost));
+      let currentIndex = -1;
+      const active = deepestActiveElement(this.#shellHost);
+      for (let i = 0; i < tabNodes.length; i++) {
+        if (tabNodes[i] === active) {
+          currentIndex = i;
+          break;
+        }
+      }
       if (currentIndex === -1) {
         return;
       }
       event.preventDefault();
       let nextIndex = currentIndex;
       if (event.key === "ArrowLeft") {
-        nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+        nextIndex = (currentIndex - 1 + tabNodes.length) % tabNodes.length;
       } else if (event.key === "ArrowRight") {
-        nextIndex = (currentIndex + 1) % tabs.length;
+        nextIndex = (currentIndex + 1) % tabNodes.length;
       } else if (event.key === "Home") {
         nextIndex = 0;
       } else if (event.key === "End") {
-        nextIndex = tabs.length - 1;
+        nextIndex = tabNodes.length - 1;
       }
-      const targetSection = [...this.#sections].find(([, tab]) => tab === tabs[nextIndex])?.[0];
-      tabs[nextIndex].focus();
+      const nextTab = tabNodes[nextIndex];
+      let targetSection = null;
+      for (const [section, tab] of this.#sections) {
+        if (tab === nextTab) {
+          targetSection = section;
+          break;
+        }
+      }
+      nextTab.focus();
       if (targetSection) {
-        this.#activateSection(targetSection, tabs[nextIndex]);
+        this.#activateSection(targetSection, nextTab);
       }
     }, { signal });
   }

@@ -4,6 +4,30 @@ import { KEYS, gmGetValue, gmSetValue, loadJsonObject } from "../shared/storage.
 import { formatTime } from "../shared/time.js";
 import { logger } from "../shared/logger.js";
 
+/** Sort entries by updatedAt - ascending (oldest-first, for eviction) or
+ *  descending (newest-first, for history display). */
+function sortByUpdatedAt(entries, descending = false) {
+  return [...entries].sort((a, b) => {
+    const diff = (a.updatedAt || 0) - (b.updatedAt || 0);
+    return descending ? -diff : diff;
+  });
+}
+
+// Hoisted TUNING.resume.* scalars: mutation-free calibration, so Warp folds
+// them as invariants on the media-clock path rather than re-resolving the
+// deep TUNING chain on every timeupdate/save decision.
+const RESUME_STALE_DAYS = TUNING.resume.staleDays;
+const RESUME_MAX_ENTRIES = TUNING.resume.maxEntries;
+const RESUME_DURATION_FUZZ = TUNING.resume.durationFuzz;
+const RESUME_METADATA_WAIT_MS = TUNING.resume.metadataWaitMs;
+const RESUME_MIN_POSITION = TUNING.resume.minPosition;
+const RESUME_SAVE_EPSILON_S = TUNING.resume.saveEpsilonSeconds;
+const RESUME_COMPLETION_RATIO = TUNING.resume.completionRatio;
+const TOAST_ACTION_MS = TUNING.toast.actionMs;
+// NOTE: saveIntervalMs is deliberately NOT hoisted - tests mutate
+// TUNING.resume.saveIntervalMs at runtime to set the wall floor, so it must
+// stay a live object read on the save-decision path.
+
 /**
  * Persistent store of per-video entries (keyed by path+duration hash) holding
  * the resume position. Owned by ResumeTracker; per-entry last-write-wins
@@ -123,12 +147,12 @@ export class ResumeStore {
    * Store-level invariants over the current entries: age pruning plus the
    * hard entry cap (oldest evicted). Returns a fresh array; callers assign.
    */
-  #enforceBounds(days = TUNING.resume.staleDays) {
+  #enforceBounds(days = RESUME_STALE_DAYS) {
     const cutoff = Date.now() - days * 86400000;
     let kept = this.#state.entries.filter((entry) => entry.updatedAt > cutoff);
-    if (kept.length > TUNING.resume.maxEntries) {
-      kept.sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0));
-      kept = kept.slice(kept.length - TUNING.resume.maxEntries);
+    if (kept.length > RESUME_MAX_ENTRIES) {
+      kept = sortByUpdatedAt(kept);
+      kept = kept.slice(kept.length - RESUME_MAX_ENTRIES);
     }
     return kept;
   }
@@ -153,7 +177,7 @@ export class ResumeStore {
   findMatch(domainKey, path, duration) {
     this.#ensureLoaded();
     const targetDuration = duration || 0;
-    const maxFuzz = TUNING.resume.durationFuzz;
+    const maxFuzz = RESUME_DURATION_FUZZ;
     let best = null;
     let bestScore = -Infinity;
     for (const entry of this.#state.entries) {
@@ -215,7 +239,7 @@ export class ResumeStore {
 
   getEntries() {
     this.#ensureLoaded();
-    return [...this.#state.entries].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    return sortByUpdatedAt(this.#state.entries, true);
   }
 
   removeEntry(id) {
@@ -227,7 +251,7 @@ export class ResumeStore {
     }
   }
 
-  cleanStale(days = TUNING.resume.staleDays) {
+  cleanStale(days = RESUME_STALE_DAYS) {
     this.#ensureLoaded();
     const before = this.#state.entries.length;
     this.#state.entries = this.#enforceBounds(days);
@@ -313,7 +337,7 @@ export class ResumeTracker {
       };
       const onLoaded = () => finishWaiting();
       const onError = () => finishWaiting();
-      const timeoutHandle = setTimeout(finishWaiting, TUNING.resume.metadataWaitMs);
+      const timeoutHandle = setTimeout(finishWaiting, RESUME_METADATA_WAIT_MS);
       video.addEventListener("loadedmetadata", onLoaded, { signal });
       video.addEventListener("durationchange", onDurationChange, { signal });
       video.addEventListener("error", onError, { signal });
@@ -345,7 +369,7 @@ export class ResumeTracker {
     }
 
     const savedPosition = this.#entry.resume || 0;
-    if (savedPosition > TUNING.resume.minPosition) {
+    if (savedPosition > RESUME_MIN_POSITION) {
       let seeked = false;
       const applyResume = () => {
         if (seeked) {
@@ -356,7 +380,7 @@ export class ResumeTracker {
         shell.toast({
           icon: "resume",
           text: `Resumed at ${formatTime(savedPosition)}`,
-          duration: TUNING.toast.actionMs,
+          duration: TOAST_ACTION_MS,
           group: "resume",
           actions: [{
             icon: "reload",
@@ -380,14 +404,14 @@ export class ResumeTracker {
   }
 
   #saveProgress(currentTime) {
-    if (Math.abs(currentTime - this.#lastSavedPosition) < TUNING.resume.saveEpsilonSeconds) {
+    if (Math.abs(currentTime - this.#lastSavedPosition) < RESUME_SAVE_EPSILON_S) {
       return;
     }
     this.#lastSavedPosition = currentTime;
     // Every persist resets the cadence floor so the timeupdate path's
     // wall gate starts counting from real writes (including flushes).
     this.#lastSavedWall = Date.now();
-    if (this.#entry.duration > 0 && currentTime / this.#entry.duration >= TUNING.resume.completionRatio) {
+    if (this.#entry.duration > 0 && currentTime / this.#entry.duration >= RESUME_COMPLETION_RATIO) {
       this.#entry.resume = 0;
       this.#store.updateResume(this.#entry.id, 0);
       return;

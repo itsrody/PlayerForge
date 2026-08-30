@@ -169,14 +169,17 @@ export class Shell {
     host.focus();
     const onPointerDown = (event) => {
       if (!this.#destroyed && !isInsideShell(host, event.composedPath()[0])) {
-        queueMicrotask(() => {
-          if (!this.#destroyed && deepestActiveElement(host) !== host) {
-            host.focus();
-          }
-        });
+        queueMicrotask(() => this.#restoreFocusIfNeeded(host));
       }
     };
     this.container.addEventListener("pointerdown", onPointerDown, { capture: true, passive: true, signal: this.#scope.signal });
+  }
+
+  /** Re-focus the host after a pointerdown unless focus already moved inside. */
+  #restoreFocusIfNeeded(host) {
+    if (!this.#destroyed && deepestActiveElement(host) !== host) {
+      host.focus();
+    }
   }
 
   toast(payload) {

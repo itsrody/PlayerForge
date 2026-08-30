@@ -1,3 +1,5 @@
+import { el } from "../chrome/elements.js";
+
 const STACK_OVERLAP_EM = 1.6;
 const MAX_SLOTS = 8;
 
@@ -111,10 +113,7 @@ export class ForgeTrack {
     }
     let slot = this.#slots[index];
     if (!slot) {
-      slot = document.createElement("div");
-      slot.className = "pf-cue";
-      slot.setAttribute("role", "caption");
-      this.#cueLayer.appendChild(slot);
+      slot = el("div", { class: "pf-cue", role: "caption" }, this.#cueLayer);
       this.#slots[index] = slot;
     }
     return slot;

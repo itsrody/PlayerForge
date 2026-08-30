@@ -518,7 +518,7 @@ export class InputForge {
   #handlePointerDown(event) {
     if (
       event.button !== 0 ||
-      this.#eventTarget && event.composedPath().includes(this.#eventTarget) ||
+      this.#eventTarget && isInsideShell(this.#eventTarget, event.target) ||
       this.#pointers.size === 0 && !this.#hitTestVideo(event)
     ) {
       return;

@@ -2,6 +2,7 @@ import SHELL_CSS from "./styles.css";
 import { logger } from "../../shared/logger.js";
 import { onDomMutations } from "../../kernel/dom-watch.js";
 import { SHELL_MARKER } from "../../kernel/contract.js";
+import { el } from "./elements.js";
 
 // Re-export the single contract-sourced marker so shell/forge keep importing
 // it from here - one source of truth, no mirrored literal to drift.
@@ -86,26 +87,16 @@ export function injectShell(container) {
     logger.error("inject", "injectShell: no container");
     return null;
   }
-  const doc = container.ownerDocument;
-  const host = doc.createElement("div");
-  host.className = "pf-shell";
-  host.setAttribute("tabindex", "-1");
+  const host = el("div", { class: "pf-shell", tabindex: "-1" }, container);
 
   const shadow = host.attachShadow({ mode: "open" });
   if (sharedSheet) {
     shadow.adoptedStyleSheets = [sharedSheet];
   }
 
-  const hudLayer = doc.createElement("div");
-  hudLayer.className = "pf-hud-layer";
-  shadow.appendChild(hudLayer);
+  const hudLayer = el("div", { class: "pf-hud-layer" }, shadow);
+  const cueLayer = el("div", { class: "pf-cue-layer", "aria-hidden": "true" }, hudLayer);
 
-  const cueLayer = doc.createElement("div");
-  cueLayer.className = "pf-cue-layer";
-  cueLayer.setAttribute("aria-hidden", "true");
-  hudLayer.appendChild(cueLayer);
-
-  container.appendChild(host);
   logger.log("inject", `Shell DOM built inside ${container.tagName}#${container.id || container.className}`);
 
   return {

@@ -1,5 +1,6 @@
 import { delay } from "../../shared/time.js";
 import { flashElement } from "./animate.js";
+import { button } from "./elements.js";
 import { createIconElement } from "./icons.js";
 
 /**
@@ -58,24 +59,21 @@ export class ToastManager {
     this.#text.style.display = text ? "" : "none";
     if (actions && actions.length) {
       this.#actions.textContent = "";
-      const doc = this.#toast.ownerDocument;
+      const doc = this.#actions.ownerDocument;
       for (const action of actions) {
-        const button = doc.createElement("button");
-        button.type = "button";
-        const actionIcon = action.icon ? createIconElement(action.icon, doc) : null;
-        if (actionIcon) {
-          button.appendChild(actionIcon);
-        } else {
-          button.textContent = action.label;
+        const buttonEl = button({
+          title: action.title ?? action.label ?? "",
+          icon: action.icon ? createIconElement(action.icon, doc) : null
+        }, this.#actions);
+        if (!action.icon) {
+          buttonEl.textContent = action.label;
         }
-        button.title = action.title ?? action.label ?? "";
-        button.addEventListener("click", (event) => {
+        buttonEl.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
-          flashElement(button);
+          flashElement(buttonEl);
           action.onClick?.();
         });
-        this.#actions.appendChild(button);
       }
       this.#actions.style.display = "";
       this.#toast.style.pointerEvents = "auto";

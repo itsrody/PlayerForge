@@ -1,5 +1,6 @@
 import { formatTime } from "../../shared/time.js";
 import { flashElement } from "./animate.js";
+import { button } from "./elements.js";
 import { createIconElement } from "./icons.js";
 import { TUNING } from "./config.js";
 
@@ -46,13 +47,12 @@ export function addHistorySection(panel, shell) {
 
     const actions = panel.el("div", { class: "pf-history-actions" }, card);
 
-    const resetBtn = panel.el("button", {
+    const resetBtn = button({
       class: "pf-btn pf-btn-icon pf-btn-ghost",
-      type: "button",
       title: "Reset",
-      "aria-label": "Reset resume position"
+      "aria-label": "Reset resume position",
+      icon: createIconElement("reload")
     }, actions);
-    resetBtn.appendChild(createIconElement("reload"));
     resetBtn.addEventListener("click", () => {
       shell.resume?.resetEntry(entry.id);
       flashElement(resetBtn);
@@ -64,13 +64,12 @@ export function addHistorySection(panel, shell) {
       });
     });
 
-    const removeBtn = panel.el("button", {
+    const removeBtn = button({
       class: "pf-btn pf-btn-icon pf-btn-ghost",
-      type: "button",
       title: "Remove",
-      "aria-label": "Remove from history"
+      "aria-label": "Remove from history",
+      icon: createIconElement("trash")
     }, actions);
-    removeBtn.appendChild(createIconElement("trash"));
     removeBtn.addEventListener("click", () => {
       shell.resume?.removeEntry(entry.id);
       card.remove();

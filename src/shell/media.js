@@ -1,4 +1,5 @@
 import { logger } from "../shared/logger.js";
+import { clamp } from "../shared/clamp.js";
 
 /** Volume delta applied by nudgeVolume, shared with UI feedback layers. */
 export const VOLUME_STEP = 0.1;
@@ -31,7 +32,7 @@ export function createMediaControls({ video }) {
       return 0;
     }
     return Number.isFinite(video.duration) && video.duration > 0
-      ? Math.max(0, Math.min(time, video.duration))
+      ? clamp(time, 0, video.duration)
       : Math.max(0, time);
   };
 
@@ -89,6 +90,18 @@ export function createMediaControls({ video }) {
       this.seekTo(time);
     },
 
+    /**
+     * Latched scrub seek for an in-progress drag session. Readiness was
+     * already verified and `duration` captured when the stroke latched, so
+     * this skips the per-move isReady() gate and re-reading video.duration
+     * (native getter) - the single most frequent user-facing path.
+     */
+    scrubToLatched(time, duration) {
+      video.currentTime = Number.isFinite(duration) && duration > 0
+        ? clamp(time, 0, duration)
+        : Math.max(0, time);
+    },
+
     skip(delta) {
       if (!isReady()) {
         return;
@@ -101,14 +114,14 @@ export function createMediaControls({ video }) {
         return;
       }
       const step = direction === "up" ? VOLUME_STEP : -VOLUME_STEP;
-      video.volume = Math.max(0, Math.min(1, video.volume + step));
+      video.volume = clamp(video.volume + step, 0, 1);
     },
 
     setVolume(value) {
       if (!isReady()) {
         return;
       }
-      video.volume = Math.max(0, Math.min(1, value));
+      video.volume = clamp(value, 0, 1);
     },
 
     toggleMute() {
@@ -233,6 +246,11 @@ class MediaSessionBridge {
     logger.log("media", "MediaSession claimed - handlers registered");
   }
 
+  /** Reused scratch for setPositionState - the API copies the values, so a
+   *  mutable object reused across sync() calls avoids a per-event allocation
+   *  on the ~4 Hz media clock (same rationale as the forge's pooled event). */
+  #positionState = { duration: 0, playbackRate: 0, position: 0 };
+
   /** playbackState plus guarded position state; safe to call per event batch. */
   sync() {
     if (this.#disposed) {
@@ -240,13 +258,14 @@ class MediaSessionBridge {
     }
     const session = this.#session;
     session.playbackState = this.#video.paused ? "paused" : "playing";
-    if (Number.isFinite(this.#video.duration) && this.#video.duration > 0) {
+    const { duration, playbackRate, currentTime } = this.#video;
+    if (Number.isFinite(duration) && duration > 0) {
       try {
-        session.setPositionState({
-          duration: this.#video.duration,
-          playbackRate: this.#video.playbackRate,
-          position: Math.min(this.#video.currentTime, this.#video.duration)
-        });
+        const state = this.#positionState;
+        state.duration = duration;
+        state.playbackRate = playbackRate;
+        state.position = currentTime < duration ? currentTime : duration;
+        session.setPositionState(state);
       } catch {}
     }
   }

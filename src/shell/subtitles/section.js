@@ -4,9 +4,11 @@ import { srtToVtt, ensureVttHeader, parseSubtitles } from "./forgevtt.js";
 import { ForgeTrack } from "./forge-track.js";
 import { debounce } from "../../shared/time.js";
 import { flashElement } from "../chrome/animate.js";
+import { el } from "../chrome/elements.js";
 import { logger } from "../../shared/logger.js";
 
 const SUBTITLE_FILE_ACCEPT = ".srt,.vtt";
+const SUBTITLE_EXT_RE = /\.(srt|vtt)$/i;
 
 const SETTING_KEYS = {
   size: "subtitles.style.size",
@@ -89,7 +91,7 @@ export class SubtitlesSection {
     }
     const dragCounter = { count: 0 };
     const hasFiles = (event) => [...(event.dataTransfer?.types || [])].includes("Files");
-    const isSubtitleFile = (file) => /\.(srt|vtt)$/i.test(file?.name || "");
+    const isSubtitleFile = (file) => SUBTITLE_EXT_RE.test(file?.name || "");
 
     sectionRoot.addEventListener("dragenter", (event) => {
       if (hasFiles(event)) {
@@ -305,11 +307,11 @@ export class SubtitlesSection {
   }
 
   #createFileInput(shell) {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = SUBTITLE_FILE_ACCEPT;
-    input.style.display = "none";
-    shell.container.appendChild(input);
+    const input = el("input", {
+      type: "file",
+      accept: SUBTITLE_FILE_ACCEPT,
+      style: { display: "none" }
+    }, shell.container);
     input.addEventListener("change", () => {
       const file = input.files?.[0];
       if (file) {
@@ -389,7 +391,7 @@ export class SubtitlesSection {
       if (!last) {
         return "subtitles.vtt";
       }
-      return /\.(srt|vtt)$/i.test(last) ? last : `${last}.vtt`;
+      return SUBTITLE_EXT_RE.test(last) ? last : `${last}.vtt`;
     } catch {
       return "subtitles.vtt";
     }

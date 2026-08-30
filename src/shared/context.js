@@ -147,7 +147,9 @@ function boundedLevenshtein(a, b, max = Infinity) {
     if (rowMin > max) {
       return max + 1;
     }
-    [prev, curr] = [curr, prev];
+    const tmp = prev;
+    prev = curr;
+    curr = tmp;
   }
   return prev[m];
 }

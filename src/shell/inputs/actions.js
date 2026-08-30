@@ -266,6 +266,11 @@ function volumeIcon(volume, muted) {
     : volume > 0.4 ? "volume-2" : "volume-3";
 }
 
+/** Percentage text for a 0..1 volume value (e.g. "42%"). */
+function volumePercent(volume) {
+  return `${Math.round(volume * 100)}%`;
+}
+
 /**
  * Wire the shell-facing side of the bindings onto the shell host: semantic
  * events dispatched by the engine run these handlers. All listeners share
@@ -350,7 +355,9 @@ export function attachInputActions(shell, host, signal) {
     const t = Math.min(1, (v / SCRUB_KNEE_PX_PER_S) ** SCRUB_EXPONENT);
     const gain = state.scrubSlowGain + (state.scrubFastGain - state.scrubSlowGain) * t;
     const deltaSeconds = detail.dx * gain * state.scrubSensitivity;
-    shell.media.scrubTo(shell.currentTime + deltaSeconds);
+    // The stroke latched above, so duration is stable - use the latched-seek
+    // path so each move skips media's readiness gate + duration re-read.
+    shell.media.scrubToLatched(shell.currentTime + deltaSeconds, state.scrubDuration);
     const instantDirection = detail.dx > 1 ? 1 : detail.dx < -1 ? -1 : 0;
     state.scrubDirectionMomentum = state.scrubDirectionMomentum * 0.6 + instantDirection * 0.4;
 
@@ -431,7 +438,7 @@ export function attachInputActions(shell, host, signal) {
     shell.media.nudgeVolume(detail.direction);
     shell.toast({
       icon: volumeIcon(shell.volume, false),
-      text: `${Math.round(shell.volume * 100)}%`,
+      text: volumePercent(shell.volume),
       duration: TUNING.toast.flashMs,
       group: "volume"
     });
@@ -444,7 +451,7 @@ export function attachInputActions(shell, host, signal) {
     shell.media.toggleMute();
     shell.toast({
       icon: volumeIcon(shell.volume, shell.muted),
-      text: shell.muted ? "Muted" : `${Math.round(shell.volume * 100)}%`,
+      text: shell.muted ? "Muted" : volumePercent(shell.volume),
       duration: TUNING.toast.flashMs,
       group: "volume"
     });
