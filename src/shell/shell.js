@@ -1,6 +1,5 @@
 import { logger } from "../shared/logger.js";
 import { deepestActiveElement, isInsideShell, fs } from "../shared/shadow.js";
-import { BUS_EVENTS } from "../shared/events.js";
 import { InputForge } from "./inputs/forge.js";
 import { attachInputActions } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
@@ -38,7 +37,6 @@ export class Shell {
   sdk;
   sdkName;
 
-  #bus;
   #shellDom = null;
   #inputs = null;
   #resume = null;
@@ -47,6 +45,7 @@ export class Shell {
   #panel;
   #toasts = null;
   #wakeLock = null;
+  #onDestroy;
   #destroyed = false;
   /** Every platform subscription this facade makes dies with this signal. */
   #scope = new AbortController();
@@ -56,14 +55,14 @@ export class Shell {
   #mediaSession = null;
   #savedPositionStyle = null;
 
-  constructor({ id, video, container, sdk, sdkName, bus }) {
+  constructor({ id, video, container, sdk, sdkName, onDestroy }) {
     this.id = id;
     this.video = video;
     this.container = container;
     this.sdk = sdk;
     this.sdkName = sdkName;
-    this.#bus = bus;
-    this.#media = createMediaControls({ video, bus, shellId: id });
+    this.#onDestroy = onDestroy;
+    this.#media = createMediaControls({ video });
     this.ready = this.#boot();
   }
 
@@ -73,7 +72,7 @@ export class Shell {
     if (!this.#shellDom) {
       throw new Error(`Shell "${this.id}": failed to inject shell DOM`);
     }
-    this.#panel = new SettingsPanel(this, this.#bus);
+    this.#panel = new SettingsPanel(this);
     this.#toasts = new ToastManager(this.#shellDom.hudLayer);
     this.#inputs = new InputForge(this.video, this.container, this.shellHost);
     attachInputActions(this, this.shellHost, this.#inputs.signal);
@@ -272,10 +271,6 @@ export class Shell {
     return this.#resume?.importResume(text) ?? null;
   }
 
-  get bus() {
-    return this.#bus;
-  }
-
   /** The command plane, for interaction layers that issue media commands. */
   get media() {
     return this.#media;
@@ -399,7 +394,7 @@ export class Shell {
       }
       this.video.removeAttribute(SHELL_MARKER);
       this.container.removeAttribute(SHELL_MARKER);
-      this.#bus.emit(BUS_EVENTS.shellDestroyed, this);
+      this.#onDestroy?.(this);
     }
   }
 }

@@ -3,7 +3,6 @@ import { getConfigValue } from "../shared/storage.js";
 import { delay } from "../shared/time.js";
 import { GESTURE_EVENTS } from "../shell/inputs/actions.js";
 import { SHELL_MARKER } from "../shell/chrome/inject.js";
-import { EventBus } from "./bus.js";
 import { ShellRegistry } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, findContainer, meetsMinSize, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
@@ -20,15 +19,16 @@ function makeId() {
 
 /**
  * Top-level orchestrator: watches for <video> elements, identifies the player
- * SDK, emits discovery events, and owns the bus/registry/lifecycle trio.
+ * SDK, drives discovery, and owns the registry/lifecycle pair.
  * Under @run-at document-start nothing pre-exists us: the kernel rides the
  * shared discovery tap (sdk.js), catching SDK-created players the moment
  * their <video> enters the DOM and readiness transitions on existing ones.
  */
 export class Kernel {
-  bus;
   #registry;
   #lifecycle;
+  /** Shell-ready listeners (direct callbacks, no bus). */
+  #createdListeners = new Set();
   #initialized = false;
   #seenVideos = new Set();
   #removalObservers = new Set();
@@ -72,10 +72,23 @@ export class Kernel {
   };
 
   constructor() {
-    this.bus = new EventBus();
-    this.#registry = new ShellRegistry(this.bus);
-    this.#lifecycle = new LifecycleManager(this.bus, this.#registry);
+    this.#registry = new ShellRegistry();
+    this.#lifecycle = new LifecycleManager(this.#registry, (shell) => this.#notifyShellCreated(shell));
     this.#lifecycle.setShellFactory((discovery) => this.#createShell(discovery));
+  }
+
+  /** Register a shell-ready listener directly; returns an unsubscribe. */
+  onShellCreated(cb) {
+    this.#createdListeners.add(cb);
+    return () => this.#createdListeners.delete(cb);
+  }
+
+  /** Register the shell then fan out to every shell-ready listener. */
+  #notifyShellCreated(shell) {
+    this.#registry.register(shell);
+    for (const cb of this.#createdListeners) {
+      cb(shell);
+    }
   }
 
   init() {
@@ -207,14 +220,16 @@ export class Kernel {
   }
 
   #createShell({ id, video, container, sdk, sdkName }) {
-    return new Shell({
+    let shell;
+    shell = new Shell({
       id,
       video,
       container,
       sdk,
       sdkName,
-      bus: this.bus
+      onDestroy: () => this.#registry.unregister(shell)
     });
+    return shell;
   }
 
   /**
@@ -240,6 +255,5 @@ export class Kernel {
     } else {
       logger.disable();
     }
-    this.bus.debug = on;
   }
 }

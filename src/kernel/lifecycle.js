@@ -1,5 +1,4 @@
 import { logger } from "../shared/logger.js";
-import { BUS_EVENTS } from "../shared/events.js";
 
 /**
  * Resolve once the container's child list has been quiet for a run of
@@ -40,19 +39,19 @@ function whenDomSettled(container, { quietFrames = 2, capMs = 150 } = {}) {
  * lifecycle invokes the shell factory once the SDK's DOM has settled. Creation
  * is deferred (quiescence-capped) so the parasite overlay never lands
  * mid-build, with post-wait guards against videos that vanished or were
- * adopted meanwhile. Shell life is announced over the bus (multicast). Page-
- * unload cleanup is owned by the kernel.
+ * adopted meanwhile. A ready shell is handed to the onShellCreated callback
+ * (the kernel's coordinator). Page-unload cleanup is owned by the kernel.
  */
 export class LifecycleManager {
-  #bus;
   #registry;
+  #onShellCreated;
   #shellFactory = null;
   /** Videos with a settle wait in flight - dedups repeated discovery. */
   #pending = new Set();
 
-  constructor(bus, registry) {
-    this.#bus = bus;
+  constructor(registry, onShellCreated) {
     this.#registry = registry;
+    this.#onShellCreated = onShellCreated;
   }
 
   setShellFactory(factory) {
@@ -85,7 +84,7 @@ export class LifecycleManager {
     try {
       const shell = this.#shellFactory({ id, video, container, sdk, sdkName });
       await shell?.ready;
-      this.#bus.emit(BUS_EVENTS.shellCreated, shell);
+      this.#onShellCreated(shell);
       logger.log("lifecycle", `Shell created for ${sdkName}: ${id}`);
     } catch (err) {
       logger.error("lifecycle", `Failed to create shell for ${id}:`, err);

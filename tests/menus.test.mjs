@@ -32,7 +32,7 @@ function debugMenu() {
 
 test("debug command registers immediately, without any kernel", () => {
   registered.length = 0;
-  const uninstall = installMenuCommands({ getKernel: () => null });
+  const uninstall = installMenuCommands();
   assert.equal(registered.length, 1);
   assert.match(debugMenu().title, /Off$/);
   uninstall();
@@ -42,7 +42,7 @@ test("debug command registers immediately, without any kernel", () => {
 test("debug toggle persists, flips logger, recaptions - all pre-boot", () => {
   registered.length = 0;
   logger.disable();
-  const uninstall = installMenuCommands({ getKernel: () => null });
+  const uninstall = installMenuCommands();
 
   debugMenu().fn();
   assert.equal(getConfigValue("debug.logs", undefined), true);
@@ -56,16 +56,5 @@ test("debug toggle persists, flips logger, recaptions - all pre-boot", () => {
 
   // Exactly one debug command exists at any time (re-caption, no dupes).
   assert.equal(registered.filter((h) => h.title.includes("Debug Logs")).length, 1);
-  uninstall();
-});
-
-test("debug toggle propagates bus state to a live kernel", () => {
-  registered.length = 0;
-  let busDebug = false;
-  const kernel = { bus: { set debug(v) { busDebug = v; } } };
-  const uninstall = installMenuCommands({ getKernel: () => kernel });
-
-  debugMenu().fn();
-  assert.equal(busDebug, true);
   uninstall();
 });

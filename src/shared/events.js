@@ -1,21 +1,13 @@
 /**
- * The whole cross-module event/message namespace in one place. Every bus
- * event type (EventBus over EventTarget) and frame-bridge window message type
- * that PlayerForge emits or listens for lives here as a named constant, so a
- * typo in any of these strings surfaces as a build error instead of a
- * silently-dead listener. Mirror of GESTURE_EVENTS, which already centralizes
- * the gesture event family.
+ * The cross-frame window message namespace in one place. Every postMessage
+ * type PlayerForge sends or receives across iframe edges lives here as a named
+ * constant, so a typo in any of these strings surfaces as a build error
+ * instead of a silently-dead listener.
+ *
+ * Intra-app coordination deliberately has NO message namespace: kernel signals
+ * are direct method calls (discovery, shell created/destroyed) and in-shell
+ * gestures are real events dispatched on the shell host element.
  */
-
-/** Kernel/shell bus event types - emitted and subscribed with these names.
- *  Video discovery is a direct kernel→LifecycleManager call (single listener),
- *  not a bus broadcast. Fullscreen state has NO bus event: consumers read the
- *  single shared `fs` marker (shadow.js) or subscribe to its transitions
- *  directly. */
-export const BUS_EVENTS = {
-  shellCreated: "pf:shell-created",
-  shellDestroyed: "pf:shell-destroyed"
-};
 
 /** Frame-bridge window message types (window.postMessage across frame edges). */
 export const CTX_REQUEST_TYPE = "pf:ctx-request";

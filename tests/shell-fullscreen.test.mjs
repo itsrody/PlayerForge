@@ -32,18 +32,12 @@ async function makeShell(id = "t") {
     value: [], writable: true, configurable: true
   });
 
-  const bus = {
-    emit() {},
-    addEventListener() {},
-    removeEventListener() {}
-  };
-
   const container = dom.window.document.createElement("div");
   dom.window.document.body.appendChild(container);
   const video = dom.window.document.createElement("video");
   container.appendChild(video);
 
-  const shell = new Shell({ id, video, container, sdk: {}, sdkName: "test-sdk", bus });
+  const shell = new Shell({ id, video, container, sdk: {}, sdkName: "test-sdk" });
   await shell.ready;
   const teardown = () => {
     setFullscreen(dom, null);

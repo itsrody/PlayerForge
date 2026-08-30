@@ -7,7 +7,6 @@ import { shouldSkipUrl } from "./kernel/guard.js";
 import { KEYS, getConfigValue, setConfigValue, deleteConfigField } from "./shared/storage.js";
 import { TUNING } from "./shell/chrome/config.js";
 import { initFullscreenGate } from "./shared/shadow.js";
-import { BUS_EVENTS } from "./shared/events.js";
 
 // The version lives in the banner and is read from the installed script at
 // runtime via GM_info, so what the UI reports is always what the manager
@@ -34,11 +33,9 @@ function bootstrap() {
   // GM menu commands exist from script eval - not from first video
   // discovery. Registration used to live inside kernel.init(), so pages
   // without a supported player showed NO menu entries at all.
-  let activeKernel = null;
   if (window.top === window) {
-    installMenuCommands({ getKernel: () => activeKernel });
+    installMenuCommands();
   }
-
   const boot = () => {
     if (window.PlayerForge) {
       logger.warn("entry", "Kernel already initialized");
@@ -46,7 +43,6 @@ function bootstrap() {
     }
     const kernel = new Kernel();
     kernel.init();
-    activeKernel = kernel;
 
     // One subscription serves both duties: readiness log always, first-run
     // welcome toast only until the flag flips. Installs from before the key
@@ -57,8 +53,7 @@ function bootstrap() {
     if (legacyFirstRun !== undefined) {
       deleteConfigField("firstRun");
     }
-    kernel.bus.addEventListener(BUS_EVENTS.shellCreated, (event) => {
-      const shell = event.detail;
+    kernel.onShellCreated((shell) => {
       logger.log("entry", `Shell ready: ${shell.id} (${shell.sdkName})`);
       // Nested embeds can silently lose fullscreen (Firefox requires
       // allowfullscreen on every ancestor iframe, bug 1608358). A shell in a
@@ -87,10 +82,10 @@ function bootstrap() {
     });
 
     // Minimal public surface: pages get the version string only. The kernel
-    // (and through it the bus and shell registry) stays private - handing it
-    // to page scripts would let them forge discovery events or poke shells.
-    // #pf-debug in the hash re-exposes it for console debugging sessions;
-    // log/bus debug state itself lives in the kernel (hash or menu setting).
+    // (and through it the shell registry) stays private - handing it to page
+    // scripts would let them forge discovery events or poke shells. #pf-debug
+    // in the hash re-exposes it for console debugging sessions; debug log
+    // state itself lives in the module-level logger (hash or menu setting).
     const debugMode = location.hash.includes("pf-debug");
     Object.defineProperty(window, "PlayerForge", {
       value: Object.freeze(debugMode

@@ -1,31 +1,17 @@
 import { logger } from "../shared/logger.js";
-import { BUS_EVENTS } from "../shared/events.js";
 
 /** Tracks live shells by id and by video element. */
 export class ShellRegistry {
-  #bus;
   #byId = new Map();
   #idByVideo = new WeakMap();
-  #scope = new AbortController();
 
-  constructor(bus) {
-    this.#bus = bus;
-    this.#wire();
-  }
-
-  #wire() {
-    const { signal } = this.#scope;
-    this.#bus.addEventListener(BUS_EVENTS.shellCreated, (event) => this.#register(event.detail), { signal });
-    this.#bus.addEventListener(BUS_EVENTS.shellDestroyed, (event) => this.#unregister(event.detail), { signal });
-  }
-
-  #register(shell) {
+  register(shell) {
     this.#byId.set(shell.id, shell);
     this.#idByVideo.set(shell.video, shell.id);
     logger.log("registry", `Shell registered: ${shell.id} (${shell.sdkName})`);
   }
 
-  #unregister(shell) {
+  unregister(shell) {
     this.#byId.delete(shell.id);
     logger.log("registry", `Shell unregistered: ${shell.id}`);
   }

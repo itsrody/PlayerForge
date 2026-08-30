@@ -1,5 +1,4 @@
 import { logger } from "../shared/logger.js";
-import { BUS_EVENTS } from "../shared/events.js";
 
 /** Volume delta applied by nudgeVolume, shared with UI feedback layers. */
 export const VOLUME_STEP = 0.1;
@@ -7,27 +6,22 @@ export const VOLUME_STEP = 0.1;
 /**
  * Media command plane. Every way of controlling playback - gestures, hotkeys,
  * panel widgets, OS media keys through MediaSession - funnels through these
- * primitives so clamping, guarding, and observability live in exactly one
- * place. Commands execute immediately against the video and announce one
- * generic `pf:media-command` event; presentation (toasts) stays at the
- * interaction sites that own their context.
+ * primitives so clamping, guarding, and presentation stay in exactly one
+ * place. Commands execute immediately against the video; presentation (toasts)
+ * lives at the interaction sites that own their context.
  *
  * `scrubTo` is deliberately silent: it serves continuous drag streams, not
  * discrete commands, and the resulting position is already broadcast through
  * the regular timeupdate path.
  */
-export function createMediaControls({ video, bus, shellId }) {
-  const emit = (type, detail) => {
-    bus.emit(BUS_EVENTS.mediaCommand, { shellId, type, ...detail });
-  };
-
+export function createMediaControls({ video }) {
   /**
    * Gate: every control stays inert until metadata is loaded (readyState
    * HAVE_METADATA, the point where duration is known). Before that the video
    * has no established timeline, so seeking/skipping is meaningless and a
-   * play request could fight an in-flight load. Commands then no-op without
-   * emitting, so the whole control surface - gestures, hotkeys, MediaSession
-   * OS keys - simply does nothing until playback is ready.
+   * play request could fight an in-flight load. Commands then no-op, so the
+   * whole control surface - gestures, hotkeys, MediaSession OS keys - simply
+   * does nothing until playback is ready.
    */
   const isReady = () => video.readyState >= 1;
 
@@ -48,7 +42,6 @@ export function createMediaControls({ video, bus, shellId }) {
       }
       try {
         await video.play();
-        emit("play");
       } catch (err) {
         // Interruptions by new loads and autoplay-policy rejections are
         // ordinary; anything else is a real error worth surfacing.
@@ -63,7 +56,6 @@ export function createMediaControls({ video, bus, shellId }) {
         return;
       }
       video.pause();
-      emit("pause");
     },
 
     togglePlay() {
@@ -82,7 +74,6 @@ export function createMediaControls({ video, bus, shellId }) {
       }
       video.pause();
       video.currentTime = 0;
-      emit("stop");
     },
 
     seekTo(time) {
@@ -90,7 +81,6 @@ export function createMediaControls({ video, bus, shellId }) {
         return;
       }
       video.currentTime = clampTarget(time);
-      emit("seek", { to: video.currentTime });
     },
 
     /** Silent primitive for scrub drags: clamp without command chatter. */
@@ -106,7 +96,6 @@ export function createMediaControls({ video, bus, shellId }) {
         return;
       }
       this.seekTo(video.currentTime + delta);
-      emit("skip", { delta });
     },
 
     nudgeVolume(direction) {
@@ -115,7 +104,6 @@ export function createMediaControls({ video, bus, shellId }) {
       }
       const step = direction === "up" ? VOLUME_STEP : -VOLUME_STEP;
       video.volume = Math.max(0, Math.min(1, video.volume + step));
-      emit("volume", { volume: video.volume });
     },
 
     setVolume(value) {
@@ -123,7 +111,6 @@ export function createMediaControls({ video, bus, shellId }) {
         return;
       }
       video.volume = Math.max(0, Math.min(1, value));
-      emit("volume", { volume: video.volume });
     },
 
     toggleMute() {
@@ -131,7 +118,6 @@ export function createMediaControls({ video, bus, shellId }) {
         return;
       }
       video.muted = !video.muted;
-      emit("mute", { muted: video.muted });
     },
 
     /** Hold-to-fast-forward pair; `speed` is restored verbatim on release. */
@@ -140,7 +126,6 @@ export function createMediaControls({ video, bus, shellId }) {
         return;
       }
       video.playbackRate = speed;
-      emit("boost-start", { speed });
     },
 
     endBoost(speed) {
@@ -148,7 +133,6 @@ export function createMediaControls({ video, bus, shellId }) {
         return;
       }
       video.playbackRate = speed;
-      emit("boost-end", { speed });
     }
   };
 }

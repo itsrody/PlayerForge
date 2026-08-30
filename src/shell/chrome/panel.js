@@ -211,7 +211,6 @@ function createStepper({
 export class SettingsPanel {
   #hudLayer;
   #shellHost;
-  #bus;
   #shellId;
   #root = null;
   #body = null;
@@ -225,11 +224,10 @@ export class SettingsPanel {
   #backdrop = null;
   #destroyed = false;
 
-  constructor(shell, bus) {
+  constructor(shell) {
     this.#hudLayer = shell.shellDom?.hudLayer;
     this.#shellHost = shell.shellHost;
     this.#shellId = shell.id;
-    this.#bus = bus;
     if (!this.#hudLayer || !this.#shellHost) {
       logger.error("panel", "Missing shell DOM - panel not available");
       return;
