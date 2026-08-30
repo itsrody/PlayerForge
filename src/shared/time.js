@@ -1,15 +1,22 @@
 /**
  * Seconds -> "M:SS" (or "H:MM:SS" past the hour). Shared by toast text,
  * resume prompts, and scrub hints.
+ *
+ * Integer arithmetic + direct string coercion instead of Math.max/Math.floor
+ * modulo chains and padStart (which allocates an intermediate string): runs on
+ * toast and scrub-hint churn and stays allocation-lean on the hot path.
  */
 export function formatTime(seconds) {
-  seconds = Math.max(0, Math.floor(seconds));
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
+  if (!(seconds > 0)) {
+    return "0:00";
+  }
+  seconds = Math.floor(seconds);
+  const h = (seconds / 3600) | 0;
+  const m = ((seconds % 3600) / 60) | 0;
   const s = seconds % 60;
-  return h > 0
-    ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
-    : `${m}:${String(s).padStart(2, "0")}`;
+  const mm = m < 10 ? "0" + m : "" + m;
+  const ss = s < 10 ? "0" + s : "" + s;
+  return h > 0 ? h + ":" + mm + ":" + ss : m + ":" + ss;
 }
 
 /** Cancellable setTimeout: the returned function cancels a pending run. */
