@@ -1,13 +1,10 @@
 import { logger } from "../shared/logger.js";
 import { getConfigValue } from "../shared/storage.js";
 import { delay } from "../shared/time.js";
-import { GESTURE_EVENTS } from "../shell/inputs/actions.js";
-import { SHELL_MARKER } from "../shell/chrome/inject.js";
 import { ShellRegistry } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, meetsMinSize, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
-import { Shell } from "../shell/shell.js";
-import { TUNING, DEBUG_LOGS_KEY } from "../shell/chrome/config.js";
+import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
 
 /**
  * Top-level orchestrator: watches for <video> elements, identifies the player
@@ -35,6 +32,8 @@ export class Kernel {
   /** True once the full-document discovery tap has been downgraded. */
   #discoveryDowngraded = false;
   #scope = new AbortController();
+  /** The shell host provider, registered by the shell plugin (never imported). */
+  #shellProvider = null;
 
   #onPageShow = (event) => {
     if (!event.persisted) {
@@ -72,6 +71,15 @@ export class Kernel {
     this.#registry = new ShellRegistry();
     this.#lifecycle = new LifecycleManager(this.#registry, (shell) => this.#notifyShellCreated(shell));
     this.#lifecycle.setShellFactory((discovery) => this.#createShell(discovery));
+  }
+
+  /**
+   * The shell plugin registers its host provider here; the framework never
+   * imports the shell, it only calls the provider it was handed. Provider
+   * shape: `{ create({ video, container, sdk, onDestroy }) -> host }`.
+   */
+  registerShellProvider(provider) {
+    this.#shellProvider = provider;
   }
 
   /** Register a shell-ready listener directly; returns an unsubscribe. */
@@ -208,7 +216,7 @@ export class Kernel {
           } else {
             reanchorObservers();
           }
-        }, TUNING.kernel.removalGraceMs));
+        }, FRAMEWORK_TUNING.removalGraceMs));
         return;
       }
       if (video.parentElement !== anchors[0]) {
@@ -220,8 +228,13 @@ export class Kernel {
   }
 
   #createShell({ video, container, sdk }) {
+    const provider = this.#shellProvider;
+    if (!provider) {
+      logger.error("kernel", "No shell provider registered");
+      return null;
+    }
     let shell;
-    shell = new Shell({
+    shell = provider.create({
       video,
       container,
       sdk,

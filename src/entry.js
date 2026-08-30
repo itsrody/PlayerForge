@@ -1,4 +1,5 @@
 import { Kernel } from "./kernel/kernel.js";
+import { registerShell } from "./shell/register.js";
 import { installMenuCommands } from "./kernel/menus.js";
 import { installContextBridge, installVideoProbe, requestFullscreenProvision } from "./shared/context.js";
 import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/sdk.js";
@@ -42,6 +43,7 @@ function bootstrap() {
       return;
     }
     const kernel = new Kernel();
+    registerShell(kernel);
     kernel.init();
 
     // One subscription serves both duties: readiness log always, first-run

@@ -1,6 +1,6 @@
 import { logger } from "../shared/logger.js";
 import { gmRegisterMenu, gmUnregisterMenu, getConfigValue, setConfigValue } from "../shared/storage.js";
-import { DEBUG_LOGS_KEY } from "../shell/chrome/config.js";
+import { DEBUG_LOGS_KEY } from "./contract.js";
 
 /**
  * GM menu wiring, owned here instead of the kernel so the debug command
