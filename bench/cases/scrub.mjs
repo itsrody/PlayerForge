@@ -16,6 +16,22 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   };
 }
 
+// The forge builds its gesture events against the ambient global CustomEvent
+// (and stores pooled events at module scope), so bridge the jsdom realm BEFORE
+// the module import runs - otherwise the pooled scrub event is a foreign-realm
+// object that jsdom's dispatchEvent rejects.
+const shared = new JSDOM("<!doctype html><html><body></body></html>", {
+  url: "https://www.youtube.com/watch?v=1"
+});
+globalThis.window = shared.window;
+globalThis.location = shared.window.location;
+globalThis.document = shared.window.document;
+globalThis.CustomEvent = shared.window.CustomEvent;
+globalThis.AbortController = shared.window.AbortController;
+Object.defineProperty(shared.window.document, "fullscreenElement", {
+  value: { __fullscreen: true }, configurable: true
+});
+
 const { InputForge } = await import("../../src/shell/inputs/forge.js");
 const { GESTURE_EVENTS } = await import("../../src/shell/inputs/actions.js");
 
@@ -29,31 +45,19 @@ const { GESTURE_EVENTS } = await import("../../src/shell/inputs/actions.js");
  */
 
 function makeEnv() {
-  const dom = new JSDOM("<!doctype html><html><body></body></html>", {
-    url: "https://www.youtube.com/watch?v=1"
-  });
-  globalThis.window = dom.window;
-  globalThis.location = dom.window.location;
-  globalThis.document = dom.window.document;
-  // jsdom rejects foreign-realm event objects / AbortSignals.
-  globalThis.CustomEvent = dom.window.CustomEvent;
-  globalThis.AbortController = dom.window.AbortController;
-  Object.defineProperty(dom.window.document, "fullscreenElement", {
-    value: { __fullscreen: true }, configurable: true
-  });
-
-  const video = dom.window.document.createElement("video");
-  dom.window.document.body.appendChild(video);
+  const dom = shared.window;
+  const video = document.createElement("video");
+  document.body.appendChild(video);
   video.getBoundingClientRect = () => ({
     left: 0, right: 800, top: 0, bottom: 450, width: 800, height: 450
   });
   Object.defineProperty(video, "readyState", { value: 4, configurable: true });
   Object.defineProperty(video, "paused", { value: false, configurable: true });
 
-  const zone = dom.window.document.createElement("div");
-  dom.window.document.body.appendChild(zone);
-  const host = dom.window.document.createElement("div");
-  dom.window.document.body.appendChild(host);
+  const zone = document.createElement("div");
+  document.body.appendChild(zone);
+  const host = document.createElement("div");
+  document.body.appendChild(host);
 
   return { dom, video, zone, host };
 }

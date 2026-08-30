@@ -61,6 +61,24 @@ function captureFirstTwo(pointers, out) {
 }
 
 /**
+ * Pooled scrub event + detail payload. Scrub fires once per coalesced pointer
+ * move (up to display rate), so allocating a fresh CustomEvent plus a fresh
+ * detail object per move - the old #dispatch shape - churns the young
+ * generation for the whole drag. Same philosophy as firstTwoPointers: mutate
+ * one fixed-shape detail in place and re-dispatch one reused Event.
+ * dispatchEvent runs listeners synchronously and every consumer (actions.js
+ * reads detail.dx/velocity within the scrub handler) observes the payload
+ * before the next move re-mutates it, so a re-dispatched instance is safe -
+ * nothing retains the object past the caller that last read it.
+ */
+const scrubDetail = { zone: "", method: "pointer", dx: 0, velocity: 0, timestamp: 0 };
+const scrubEvent = new CustomEvent(GESTURE_EVENTS.scrub, {
+  detail: scrubDetail,
+  bubbles: false,
+  composed: false
+});
+
+/**
  * InputForge engine: pure recognition transport. Turns pointer/keyboard/
  * wheel physics into semantic GESTURE_EVENTS on the shell host; every policy
  * decision (settings gates, fullscreen requirement) is delegated to the
@@ -647,13 +665,17 @@ export class InputForge {
     const instantVelocity = dt > 0.001 ? totalStep / dt : 0;
     const alpha = dt > 0 ? 1 - Math.exp(-dt / SCRUB_VELOCITY_TAU_S) : 0;
     this.#scrubVelocity += alpha * (instantVelocity - this.#scrubVelocity);
-    this.#dispatch(GESTURE_EVENTS.scrub, {
-      zone: this.#gestureZone || "screen",
-      method: "pointer",
-      dx: totalStep,
-      velocity: this.#scrubVelocity,
-      timestamp: now
-    });
+    // Emit via the pooled event: the payload and the Event both ride reused
+    // objects, so no per-move allocation (dispatchEvent runs synchronously and
+    // consumers read before the next move re-mutates them).
+    scrubDetail.zone = this.#gestureZone || "screen";
+    scrubDetail.method = "pointer";
+    scrubDetail.dx = totalStep;
+    scrubDetail.velocity = this.#scrubVelocity;
+    scrubDetail.timestamp = now;
+    if (!this.#destroyed && !!this.#eventTarget) {
+      this.#eventTarget.dispatchEvent(scrubEvent);
+    }
   }
 
   #handlePointerUp(event) {
