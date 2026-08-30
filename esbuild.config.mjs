@@ -154,11 +154,60 @@ const shared = {
 const watch = process.argv.includes("--watch");
 const options = { ...shared, minify };
 
+/**
+ * Release-time verification for the minified bundle. Minification is
+ * SpiderMonkey/WarpJIT-safe by construction (esbuild never emits eval/with,
+ * never mangles property names), but a broken minifier would violate exactly
+ * those promises - or silently corrupt the metadata block Tampermonkey reads
+ * to install the script. This gate fails the build rather than ship a bundle
+ * that is unsafe to interpret or won't install.
+ */
+function verifyMinified(text) {
+  const body = text.slice(text.indexOf("==/UserScript==") + 16);
+  // The metadata block must remain the very first thing in the file - TM
+  // parses it before evaluating any JS. minify, mangling, and iife-wrapping
+  // must never displace or duplicate it.
+  if (!text.startsWith("// ==UserScript==")) {
+    throw new Error("min build: metadata banner displaced from file head");
+  }
+  for (const needle of ["@name         PlayerForge", "@version", "@grant        GM_setValue"]) {
+    if (!text.includes(needle)) {
+      throw new Error(`min build: metadata line missing: ${needle.trim().split(/\s+/)[0]}`);
+    }
+  }
+  // WarpJIT/cache safety: these constructs would block compilation or rely on
+  // dynamic property access. Their presence means a future minifier change
+  // regressed the guarantees this build exists to preserve.
+  const forbidden = [
+    [/\beval\s*\(/, "eval"],
+    [/\bnew\s+Function\s*\(/, "new Function"],
+    [/\bwith\s*\(/, "with"],
+  ];
+  for (const [re, label] of forbidden) {
+    if (re.test(body)) {
+      throw new Error(`min build: forbidden construct '${label}' in body`);
+    }
+  }
+}
+
 if (watch) {
   const ctx = await context(options);
   await ctx.watch();
   console.log(`[PlayerForge] watching (${minify ? "minified" : "readable"})...`);
 } else {
-  await build(options);
+  const result = await build(options);
   console.log(`[PlayerForge] built ${minify ? "minified" : "readable"} bundle`);
+  if (minify) {
+    // Rebuild in-memory and assert byte-equality against what was written to
+    // disk: reproducible releases depend on esbuild's deterministic output
+    // (stable mangle, no timestamps, no absolute-path seed).
+    const second = await build({ ...options, write: false });
+    const onDisk = readFileSync(shared.outfile, "utf8");
+    const inMemory = second.outputFiles[0].text;
+    if (onDisk !== inMemory) {
+      throw new Error("min build: non-deterministic output (disk vs rebuild mismatch)");
+    }
+    verifyMinified(inMemory);
+    console.log(`[PlayerForge] min build verified: TM header intact, no eval/with/new Function, deterministic`);
+  }
 }
