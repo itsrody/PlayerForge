@@ -8,14 +8,13 @@
  */
 
 /** Kernel/shell bus event types - emitted and subscribed with these names.
- *  Fullscreen state has NO bus event: consumers read the single shared `fs`
- *  marker (shadow.js) or subscribe to its transitions directly. */
+ *  Video discovery is a direct kernel→LifecycleManager call (single listener),
+ *  not a bus broadcast. Fullscreen state has NO bus event: consumers read the
+ *  single shared `fs` marker (shadow.js) or subscribe to its transitions
+ *  directly. */
 export const BUS_EVENTS = {
-  videoFound: "pf:video-found",
-  videoRemoved: "pf:video-removed",
   shellCreated: "pf:shell-created",
-  shellDestroyed: "pf:shell-destroyed",
-  mediaCommand: "pf:media-command"
+  shellDestroyed: "pf:shell-destroyed"
 };
 
 /** Frame-bridge window message types (window.postMessage across frame edges). */

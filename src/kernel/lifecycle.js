@@ -35,33 +35,31 @@ function whenDomSettled(container, { quietFrames = 2, capMs = 150 } = {}) {
 }
 
 /**
- * Bridges video discovery to shell creation: listens for `video:found` /
- * `video:removed` and invokes the shell factory once the SDK's DOM has
- * settled. Creation is deferred (quiescence-capped) so the parasite overlay
- * never lands mid-build, with post-wait guards against videos that vanished
- * or were adopted meanwhile. Page-unload cleanup is owned by the kernel.
+ * Bridges video discovery to shell creation: the kernel calls onVideoFound /
+ * onVideoRemoved directly (single listener - no bus broadcast needed) and the
+ * lifecycle invokes the shell factory once the SDK's DOM has settled. Creation
+ * is deferred (quiescence-capped) so the parasite overlay never lands
+ * mid-build, with post-wait guards against videos that vanished or were
+ * adopted meanwhile. Shell life is announced over the bus (multicast). Page-
+ * unload cleanup is owned by the kernel.
  */
 export class LifecycleManager {
   #bus;
   #registry;
   #shellFactory = null;
-  #scope = new AbortController();
   /** Videos with a settle wait in flight - dedups repeated discovery. */
   #pending = new Set();
 
   constructor(bus, registry) {
     this.#bus = bus;
     this.#registry = registry;
-    const { signal } = this.#scope;
-    this.#bus.addEventListener(BUS_EVENTS.videoFound, (event) => this.#onVideoFound(event.detail), { signal });
-    this.#bus.addEventListener(BUS_EVENTS.videoRemoved, (event) => this.#onVideoRemoved(event.detail), { signal });
   }
 
   setShellFactory(factory) {
     this.#shellFactory = factory;
   }
 
-  async #onVideoFound({ video, container, sdk, sdkName, id }) {
+  async onVideoFound({ video, container, sdk, sdkName, id }) {
     logger.log("lifecycle", `video:found - ${sdkName} (${id})`);
     if (this.#registry.getByVideo(video)) {
       logger.log("lifecycle", "Video already has a shell, skipping");
@@ -94,7 +92,7 @@ export class LifecycleManager {
     }
   }
 
-  #onVideoRemoved({ video }) {
+  onVideoRemoved({ video }) {
     const shell = this.#registry.getByVideo(video);
     if (shell) {
       shell.destroy();
