@@ -134,6 +134,15 @@ export class InputForge {
   #swipeDirection = null;
   #swipeBaseTransform = "";
 
+  /**
+   * Once a scrub/swipe session latches, the gesture already started fullscreen
+   * (both intents are fs-gated), so this flag replaces the per-move
+   * document.fullscreenElement probe and the live intent-gate scans - the
+   * session keeps running even if the page loses fullscreen mid-stroke, which
+   * matches the pre-existing behavior. Reset at the session's end.
+   */
+  #gestureFsActive = false;
+
   // Pinch state.
   #pointers = new Map();
   #pinchStartDistance = 0;
@@ -352,6 +361,7 @@ export class InputForge {
       this.#swipeDirection = null;
       this.#restoreTransform();
     }
+    this.#gestureFsActive = false;
     this.#suppressNextActivations();
   }
 
@@ -589,18 +599,25 @@ export class InputForge {
       this.#clearHoldTimer();
     }
 
-    if (this.#isFullscreen() && !this.#holding) {
+    // The fullscreen probe and the intent gates drive the session only until
+    // it latches: once a scrub/swipe starts (both are fs-gated intents that
+    // began fullscreen), #gestureFsActive replaces the per-move
+    // document.fullscreenElement read and the allowsIntent scans for the rest
+    // of the move stream - the same decisions stay fixed mid-session.
+    if ((this.#gestureFsActive || this.#isFullscreen()) && !this.#holding) {
       if (!this.#scrubbing && !this.#swiping) {
         // Intent gates are sampled live: toggling a setting mid-session
         // applies to the very next move.
         if (allowsIntent("scrub") && dx > SCROLL_START_PX && dx > dy * AXIS_DOMINANCE_RATIO) {
           this.#scrubbing = true;
+          this.#gestureFsActive = true;
           this.#capturePointerSafe(this.#primaryPointerId);
           this.#scrubLastX = x;
           this.#scrubLastTime = now;
           this.#scrubVelocity = 0;
         } else if (allowsIntent("swipe") && dy > SCROLL_START_PX && dy > dx * AXIS_DOMINANCE_RATIO) {
           this.#swiping = true;
+          this.#gestureFsActive = true;
           this.#swipeDirection = y > this.#startY ? "down" : "up";
           this.#swipeBaseTransform = this.#video.style.transform || "";
           this.#capturePointerSafe(this.#primaryPointerId);
@@ -705,6 +722,7 @@ export class InputForge {
       });
     } else if (this.#scrubbing) {
       this.#scrubbing = false;
+      this.#gestureFsActive = false;
       this.#suppressNextActivations();
       event.stopImmediatePropagation();
       this.#dispatch(GESTURE_EVENTS.scrubEnd, {
@@ -713,6 +731,7 @@ export class InputForge {
       });
     } else if (this.#swiping) {
       this.#swiping = false;
+      this.#gestureFsActive = false;
       this.#suppressNextActivations();
       event.stopImmediatePropagation();
       this.#restoreTransform();
