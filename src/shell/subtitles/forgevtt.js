@@ -2,7 +2,6 @@
 const SRT_TIMECODE_RE = /(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})/g;
 const SRT_BLOCK_RE = /(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})\s*-->/;
 const CUE_LINE_RE = /^((?:\d+:\d{1,2}:\d{2}|\d{1,2}:\d{2})[.,]\d{1,3})\s+-->\s+((?:\d+:\d{1,2}:\d{2}|\d{1,2}:\d{2})[.,]\d{1,3})(.*)$/;
-const TIMECODE_RE = /^(?:(\d+):)?(\d{1,2}):(\d{2})[.,](\d{1,3})$/;
 const METADATA_BLOCK_RE = /^(NOTE|STYLE|REGION)(?:[ \t]|$)/;
 const TAG_RE = /<\/?[a-zA-Z][^>]*>/g;
 const ENTITY_MAP = {
@@ -64,17 +63,96 @@ export function ensureVttHeader(raw) {
 /**
  * Parse a WebVTT/SRT timecode ("HH:MM:SS.mmm", "MM:SS.mmm"; comma also
  * accepted as the fractional separator) into seconds.
+ *
+ * Manual charCode scanner instead of the anchored-regex + Number() shape:
+ * the regex allocated a capture array (up to 4 groups) plus a Number() call
+ * per field, and this runs a couple of times per cue line on track load.
+ * Semantic match with the previous /^(?:(\d+):)?(\d{1,2}):(\d{2})[.,](\d{1,3})$/
+ * - the same inputs parse, the same garbage returns null.
  */
+const ZERO = 48, NINE = 57, COLON = 58, DOT = 46, COMMA = 44;
+
+function isDigitCode(c) {
+  return c >= ZERO && c <= NINE;
+}
+
 export function timecodeToSeconds(timecode) {
-  const match = TIMECODE_RE.exec(timecode);
-  if (!match) {
+  const n = timecode.length;
+  let f = -1;
+  let colons = 0;
+  for (let k = 0; k < n; k++) {
+    const c = timecode.charCodeAt(k);
+    if (c === DOT || c === COMMA) {
+      if (f !== -1) {
+        return null;
+      }
+      f = k;
+    } else if (c === COLON) {
+      if (f !== -1) {
+        return null;
+      }
+      colons++;
+    } else if (!isDigitCode(c)) {
+      return null;
+    }
+  }
+  if (f === -1 || colons < 1 || colons > 2) {
     return null;
   }
-  const hours = Number(match[1] || 0);
-  const minutes = Number(match[2]);
-  const seconds = Number(match[3]);
-  const millis = Number(match[4]) / 1000;
-  return hours * 3600 + minutes * 60 + seconds + millis;
+  const fdigits = n - f - 1;
+  if (fdigits < 1 || fdigits > 3) {
+    return null;
+  }
+
+  let i = 0;
+  const field = (max) => {
+    let val = 0;
+    let count = 0;
+    while (i < f && isDigitCode(timecode.charCodeAt(i))) {
+      val = val * 10 + (timecode.charCodeAt(i) - ZERO);
+      i++;
+      count++;
+    }
+    return { val, count };
+  };
+
+  // H:M:S (2 colons) or M:S (1 colon). Two colons put the first group in hours.
+  if (colons === 2) {
+    const h = field(Number.MAX_SAFE_INTEGER); // \d+
+    if (h.count === 0 || i >= f || timecode.charCodeAt(i) !== COLON) {
+      return null;
+    }
+    i++;
+    const m = field(2); // \d{1,2}
+    if (m.count < 1 || m.count > 2 || i >= f || timecode.charCodeAt(i) !== COLON) {
+      return null;
+    }
+    i++;
+    const s = field(2); // \d{2} exactly
+    if (s.count !== 2 || i < f) {
+      return null;
+    }
+    let ms = 0;
+    for (let k = f + 1; k < n; k++) {
+      ms = ms * 10 + (timecode.charCodeAt(k) - ZERO);
+    }
+    return h.val * 3600 + m.val * 60 + s.val + ms / 1000;
+  }
+
+  const m = field(2); // \d{1,2}
+  if (m.count < 1 || m.count > 2 || i >= f || timecode.charCodeAt(i) !== COLON) {
+    return null;
+  }
+  i++;
+  const s = field(2); // \d{2} exactly
+  if (s.count !== 2 || i < f) {
+    return null;
+  }
+  let ms = 0;
+  for (let k = f + 1; k < n; k++) {
+    ms = ms * 10 + (timecode.charCodeAt(k) - ZERO);
+  }
+  return m.val * 60 + s.val + ms / 1000;
 }
 
 function decodeNumericEntity(entity) {
