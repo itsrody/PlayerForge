@@ -35,7 +35,6 @@ export class Shell {
   video;
   container;
   sdk;
-  sdkName;
 
   #shellDom = null;
   #inputs = null;
@@ -55,11 +54,10 @@ export class Shell {
   #mediaSession = null;
   #savedPositionStyle = null;
 
-  constructor({ video, container, sdk, sdkName, onDestroy }) {
+  constructor({ video, container, sdk, onDestroy }) {
     this.video = video;
     this.container = container;
     this.sdk = sdk;
-    this.sdkName = sdkName;
     this.#onDestroy = onDestroy;
     this.#media = createMediaControls({ video });
     this.ready = this.#boot();
@@ -69,7 +67,7 @@ export class Shell {
   async #boot() {
     await this.#injectDom();
     if (!this.#shellDom) {
-      throw new Error(`Shell "${this.sdkName}": failed to inject shell DOM`);
+      throw new Error(`Shell "${this.sdk.name}": failed to inject shell DOM`);
     }
     this.#panel = new SettingsPanel(this);
     this.#toasts = new ToastManager(this.#shellDom.hudLayer);
@@ -91,7 +89,7 @@ export class Shell {
     this.#watchFullscreen();
     this.#watchWakeLock();
     this.#markManaged();
-    logger.log("shell", `Shell "${this.sdkName}" constructed`);
+    logger.log("shell", `Shell "${this.sdk.name}" constructed`);
   }
 
   get volume() {
@@ -367,7 +365,7 @@ export class Shell {
   destroy() {
     if (!this.#destroyed) {
       this.#destroyed = true;
-      logger.log("shell", `Destroying shell "${this.sdkName}"`);
+      logger.log("shell", `Destroying shell "${this.sdk.name}"`);
       this.#resume?.destroy();
       this.#resume = null;
       this.#subtitles?.destroy();

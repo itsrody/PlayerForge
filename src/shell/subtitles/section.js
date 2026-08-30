@@ -47,7 +47,7 @@ export class SubtitlesSection {
     this.#fileInput = this.#createFileInput(shell);
     this.#buildPanelUi(shell);
     this.#startListening();
-    logger.log("subtitles", `Ready (${shell.sdkName})`);
+    logger.log("subtitles", `Ready (${shell.sdk.name})`);
   }
 
   destroy() {

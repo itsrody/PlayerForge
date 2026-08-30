@@ -13,8 +13,13 @@
  *   anchors - selectors resolved against the video's composed ancestry
  *             (closest(), shadow-boundary aware). Each must be SDK-namespaced;
  *             ordered most specific first.
- *   host    - optional selector overriding which element hosts the shell;
- *             defaults to the matched element itself.
+ *   host    - optional selector overriding which element hosts the shell's
+ *             DOM; resolved against the matched element's composed ancestry
+ *             (overriding default of the matched element itself). Not yet set
+ *             by any record - kept as the extensible placement hook.
+ *
+ * The shell-facing descriptor carries name + the resolved container, so the
+ * kernel has one source of truth for SDK identity AND shell placement.
  *
  * Reserved for future needs (not implemented): corroborating selectors,
  * version gates. Adding an SDK = one record plus one fixture test.
@@ -107,20 +112,38 @@ function matchSdk(video) {
 /** Identify the SDK owning a video, or null when unregistered. */
 export function findSdkForVideo(video) {
   const match = matchSdk(video);
-  return match ? { name: match.record.name } : null;
+  if (!match) return null;
+  return {
+    name: match.record.name,
+    host: match.record.host ?? null,
+    container: resolveContainer(match)
+  };
 }
 
 /**
- * Resolve the element that should host the shell DOM: the matched anchor, or
- * the record's host override. Null when the video belongs to no registered
- * SDK - callers gate this behind findSdkForVideo().
+ * Resolve the element that hosts the shell DOM: the matched record's `host`
+ * override, else the matched element itself. Exported solely so the
+ * host-resolution branch (unexercised by the current registry) can be driven
+ * by a synthetic match in the sdk-engine test.
  */
+export function resolveContainer({ record, el }) {
+  if (!record.host) {
+    return el;
+  }
+  // Composed-ancestry walk mirroring anchor matching: the host override may
+  // target an element above the matched anchor and across shadow boundaries.
+  for (let node = el; node; ) {
+    if (node.nodeType === 1 && node.matches(record.host)) {
+      return node;
+    }
+    node = node.parentNode ?? node.host ?? null;
+  }
+  return el;
+}
+
+/** @deprecated Use the descriptor's `container` field instead. */
 export function findContainer(video) {
-  const match = matchSdk(video);
-  if (!match) return null;
-  // No registry record defines a `host` override today - the old
-  // record.host ternary always took the plain-anchor branch.
-  return match.el;
+  return findSdkForVideo(video)?.container ?? null;
 }
 
 /**

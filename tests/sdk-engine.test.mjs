@@ -4,6 +4,7 @@ import { JSDOM } from "jsdom";
 import {
   findSdkForVideo,
   findContainer,
+  resolveContainer,
   videoFromEvent,
   MIN_VIDEO_WIDTH,
   MIN_VIDEO_HEIGHT
@@ -114,4 +115,40 @@ test("videoFromEvent yields null without any video in the path", () => {
   const host = doc.querySelector(".host");
   assert.equal(videoFromEvent({ target: host, composedPath: () => [host] }), null);
   assert.equal(videoFromEvent({ target: host }), null);
+});
+
+test("resolveContainer defaults to the matched element without a host override", () => {
+  const doc = dom('<div class="plyr__video-wrapper"><video></video></div>');
+  const el = doc.querySelector(".plyr__video-wrapper");
+  assert.equal(resolveContainer({ record: { name: "Plyr" }, el }), el);
+});
+
+test("resolveContainer honors a host override targeting an ancestor", () => {
+  const doc = dom('<div class="site-player"><div class="plyr"><video></video></div></div>');
+  const el = doc.querySelector(".plyr");
+  const host = doc.querySelector(".site-player");
+  assert.equal(resolveContainer({ record: { name: "Plyr", host: ".site-player" }, el }), host);
+});
+
+test("resolveContainer falls back to the matched element when host is absent", () => {
+  const doc = dom('<div class="plyr"><div class="site-player"><video></video></div></div>');
+  const el = doc.querySelector(".plyr");
+  assert.equal(resolveContainer({ record: { name: "Plyr", host: ".missing" }, el }), el);
+});
+
+test("resolveContainer crosses open shadow boundaries for a host override", () => {
+  const doc = dom("<site-player></site-player>");
+  const host = doc.querySelector("site-player");
+  const video = doc.createElement("video");
+  host.attachShadow({ mode: "open" }).append(video);
+  assert.equal(resolveContainer({ record: { name: "Plyr", host: "site-player" }, el: video }), host);
+});
+
+test("findSdkForVideo returns a structured descriptor with container and host", () => {
+  const doc = dom('<div class="plyr__video-wrapper"><video></video></div>');
+  const video = doc.querySelector("video");
+  const sdk = findSdkForVideo(video);
+  assert.equal(sdk.name, "Plyr");
+  assert.equal(sdk.host, null);
+  assert.equal(sdk.container, findContainer(video));
 });

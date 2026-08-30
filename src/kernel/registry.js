@@ -6,14 +6,14 @@ export class ShellRegistry {
 
   register(shell) {
     this.#current = shell;
-    logger.log("registry", `Shell registered: ${shell.sdkName}`);
+    logger.log("registry", `Shell registered: ${shell.sdk.name}`);
   }
 
   unregister(shell) {
     if (this.#current === shell) {
       this.#current = null;
     }
-    logger.log("registry", `Shell unregistered: ${shell.sdkName}`);
+    logger.log("registry", `Shell unregistered: ${shell.sdk.name}`);
   }
 
   getByVideo(video) {

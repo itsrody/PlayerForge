@@ -5,7 +5,7 @@ import { GESTURE_EVENTS } from "../shell/inputs/actions.js";
 import { SHELL_MARKER } from "../shell/chrome/inject.js";
 import { ShellRegistry } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
-import { findSdkForVideo, findContainer, meetsMinSize, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
+import { findSdkForVideo, meetsMinSize, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
 import { Shell } from "../shell/shell.js";
 import { TUNING, DEBUG_LOGS_KEY } from "../shell/chrome/config.js";
 
@@ -40,7 +40,7 @@ export class Kernel {
       if (!shell.video.isConnected) {
         this.#seenVideos.delete(shell.video);
         shell.destroy();
-        logger.log("kernel", `Reconciled orphaned shell: ${shell.sdkName}`);
+        logger.log("kernel", `Reconciled orphaned shell: ${shell.sdk.name}`);
       }
     }
   };
@@ -137,7 +137,7 @@ export class Kernel {
     if (!meetsMinSize(video)) {
       return;
     }
-    const container = findContainer(video);
+    const container = sdk.container;
     if (!container) {
       logger.warn("kernel", "No container for video - skipping");
       return;
@@ -147,8 +147,7 @@ export class Kernel {
     this.#lifecycle.onVideoFound({
       video,
       container,
-      sdk,
-      sdkName: sdk.name
+      sdk
     });
     this.#watchVideoRemoval(video, container);
     this.#downgradeDiscoveryTap();
@@ -210,13 +209,12 @@ export class Kernel {
     reanchorObservers();
   }
 
-  #createShell({ video, container, sdk, sdkName }) {
+  #createShell({ video, container, sdk }) {
     let shell;
     shell = new Shell({
       video,
       container,
       sdk,
-      sdkName,
       onDestroy: () => this.#registry.unregister(shell)
     });
     return shell;

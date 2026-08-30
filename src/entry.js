@@ -54,7 +54,7 @@ function bootstrap() {
       deleteConfigField("firstRun");
     }
     kernel.onShellCreated((shell) => {
-      logger.log("entry", `Shell ready: ${shell.sdkName}`);
+      logger.log("entry", `Shell ready: ${shell.sdk.name}`);
       // Nested embeds can silently lose fullscreen (Firefox requires
       // allowfullscreen on every ancestor iframe, bug 1608358). A shell in a
       // frame pushes a provisioning request up the chain so our SDk's own
