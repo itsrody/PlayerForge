@@ -144,11 +144,16 @@ test("resolveContainer crosses open shadow boundaries for a host override", () =
   assert.equal(resolveContainer({ record: { name: "Plyr", host: "site-player" }, el: video }), host);
 });
 
-test("findSdkForVideo returns a structured descriptor with container and host", () => {
-  const doc = dom('<div class="plyr__video-wrapper"><video></video></div>');
+test("findSdkForVideo returns a cached descriptor with anchor and hops", () => {
+  const doc = dom('<div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div>');
   const video = doc.querySelector("video");
   const sdk = findSdkForVideo(video);
   assert.equal(sdk.name, "Plyr");
   assert.equal(sdk.host, null);
   assert.equal(sdk.container, findContainer(video));
+  // anchor is the actually-matched element; hops = distance video -> anchor.
+  assert.equal(sdk.anchor, doc.querySelector(".plyr__video-wrapper"));
+  assert.equal(sdk.hops >= 1, true);
+  // Every re-query returns the identical cached object - no per-call churn.
+  assert.equal(findSdkForVideo(video), sdk);
 });

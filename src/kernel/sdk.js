@@ -18,8 +18,11 @@
  *             (overriding default of the matched element itself). Not yet set
  *             by any record - kept as the extensible placement hook.
  *
- * The shell-facing descriptor carries name + the resolved container, so the
- * kernel has one source of truth for SDK identity AND shell placement.
+ * The shell-facing descriptor carries name + the resolved container (plus the
+ * matched anchor element and its hop distance, both computed free during the
+ * scan), so the kernel has one source of truth for SDK identity AND shell
+ * placement. The descriptor is cached - same object per video on every
+ * re-query.
  *
  * Reserved for future needs (not implemented): corroborating selectors,
  * version gates. Adding an SDK = one record plus one fixture test.
@@ -109,15 +112,32 @@ function matchSdk(video) {
   return best;
 }
 
+/**
+ * Fully-resolved descriptor per video. Cached alongside the raw match so the
+ * hot re-query path (probe/kernel re-asking about surviving videos) returns
+ * the SAME object instead of re-wrapping + re-allocating every call.
+ * "Fewer APIs, same facts": the scan already computes `el` and `hops`, so they
+ * are surfaced at zero extra cost rather than recomputed downstream.
+ */
+const descriptorCache = new WeakMap();
+
 /** Identify the SDK owning a video, or null when unregistered. */
 export function findSdkForVideo(video) {
+  const cached = descriptorCache.get(video);
+  if (cached !== undefined) {
+    return cached;
+  }
   const match = matchSdk(video);
   if (!match) return null;
-  return {
+  const descriptor = {
     name: match.record.name,
     host: match.record.host ?? null,
-    container: resolveContainer(match)
+    container: resolveContainer(match),
+    anchor: match.el,
+    hops: match.hops
   };
+  descriptorCache.set(video, descriptor);
+  return descriptor;
 }
 
 /**
