@@ -16,6 +16,11 @@ import { TUNING, DEBUG_LOGS_KEY } from "../shell/chrome/config.js";
  * shared discovery tap (sdk.js), catching SDK-created players the moment
  * their <video> enters the DOM and readiness transitions on existing ones.
  */
+/** Skyline the removal watchdog never exceeds regardless of nesting. */
+const MAX_REMOVAL_DEPTH = 8;
+/** Extra ancestors (beyond the matched anchor) the removal watch observes. */
+const REMOVAL_DEPTH_MARGIN = 1;
+
 export class Kernel {
   #registry;
   #lifecycle;
@@ -149,12 +154,17 @@ export class Kernel {
       container,
       sdk
     });
-    this.#watchVideoRemoval(video, container);
+    this.#watchVideoRemoval(video, container, sdk.hops);
     this.#downgradeDiscoveryTap();
   }
 
-  #watchVideoRemoval(video, container) {
+  #watchVideoRemoval(video, container, hops) {
     const observers = [];
+
+    /** Adaptive watch depth: the matched anchor + a margin, never unbounded. */
+    const watchDepth = Number.isInteger(hops) && hops > 0
+      ? Math.min(hops + REMOVAL_DEPTH_MARGIN, MAX_REMOVAL_DEPTH)
+      : MAX_REMOVAL_DEPTH;
 
     const stopWatching = () => {
       for (const observer of observers) {
@@ -174,7 +184,7 @@ export class Kernel {
       observers.length = 0;
       anchors.length = 0;
       let anchor = video.parentElement || container;
-      for (let depth = 0; anchor && depth < 5; depth++, anchor = anchor.parentElement) {
+      for (let depth = 0; anchor && depth < watchDepth; depth++, anchor = anchor.parentElement) {
         const observer = new MutationObserver(checkAnchors);
         observer.observe(anchor, { childList: true });
         observers.push(observer);
