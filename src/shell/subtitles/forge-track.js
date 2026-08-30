@@ -9,7 +9,6 @@ const MAX_SLOTS = 8;
  * per-cue stacking for simultaneous lines.
  */
 export class ForgeTrack {
-  #video;
   #cueLayer;
   #cueLayerStyle;
   #track;
@@ -18,10 +17,15 @@ export class ForgeTrack {
   #destroyed = false;
 
   constructor(video, cueLayer) {
-    this.#video = video;
     this.#cueLayer = cueLayer;
     this.#cueLayerStyle = cueLayer?.style;
-    this.#track = video.addTextTrack("subtitles", "Subtitles", "en");
+    // addTextTrack is undefined on non-media elements; fail the constructor
+    // with a clear error so the section's own catch surfaces a "Failed to
+    // load subtitles" toast instead of a bare TypeError on mode.
+    this.#track = video?.addTextTrack?.("subtitles", "Subtitles", "en");
+    if (!this.#track) {
+      throw new Error("This element cannot host a subtitle track");
+    }
     this.#track.mode = "hidden";
     this.#track.addEventListener("cuechange", () => {
       this.#render();
@@ -49,7 +53,7 @@ export class ForgeTrack {
   }
 
   #render() {
-    if (this.#destroyed) {
+    if (this.#destroyed || !this.#cueLayer) {
       return;
     }
     const active = this.#track.activeCues;
@@ -102,6 +106,9 @@ export class ForgeTrack {
   }
 
   #ensureSlot(index) {
+    if (!this.#cueLayer) {
+      return null;
+    }
     let slot = this.#slots[index];
     if (!slot) {
       slot = document.createElement("div");

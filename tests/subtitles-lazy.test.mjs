@@ -6,6 +6,7 @@ globalThis.GM_getValue = (key, fallback) => fallback;
 globalThis.GM_setValue = () => {};
 
 const { Shell } = await import("../src/shell/shell.js");
+const { ForgeTrack } = await import("../src/shell/subtitles/forge-track.js");
 
 async function makeShell() {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", {
@@ -62,4 +63,16 @@ test("destroy without any track is clean", async () => {
   shell.destroy();
   // Calling destroy again is a no-op.
   shell.destroy();
+});
+
+test("ForgeTrack throws a clear error when the video cannot host a track", () => {
+  assert.throws(() => new ForgeTrack({}, null), /cannot host a subtitle track/i);
+  assert.throws(() => new ForgeTrack(null, null), /cannot host a subtitle track/i);
+});
+
+test("ForgeTrack accepts a video exposing addTextTrack", () => {
+  const track = { mode: "showing", cues: [], addEventListener() {}, addCue() {}, removeCue() {} };
+  const forgeTrack = new ForgeTrack({ addTextTrack: () => track }, null);
+  forgeTrack.destroy();
+  assert.equal(track.mode, "disabled", "destroy disables the browser track");
 });
