@@ -124,3 +124,18 @@ test("storage change events live-reload the cache", () => {
   // Keys absent from the foreign doc fall back to defaults.
   assert.equal(getSetting("gestures.hotkeys"), true);
 });
+
+test("live-reload coerces type-violating foreign values", () => {
+  // A foreign writer stored a string where the schema says boolean.
+  writes["pf:configs"] = { version: 1, settings: { gestures: { hotkeys: "yes" } } };
+  assert.notEqual(getSetting("gestures.hotkeys"), "yes");
+  configsListener?.("pf:configs", null, null, true);
+  assert.equal(getSetting("gestures.hotkeys"), true, "bool fields fall back to the schema default");
+});
+
+test("live-reload rejects option values outside the schema set", () => {
+  // A 7-second skip step is not a member of the allowed [5, 10, 15] enum.
+  writes["pf:configs"] = { version: 1, settings: { controller: { stepSeek: 7 } } };
+  configsListener?.("pf:configs", null, null, true);
+  assert.equal(getSetting("controller.stepSeek"), 5, "out-of-enum values fall back to the schema default");
+});

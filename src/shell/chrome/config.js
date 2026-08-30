@@ -67,6 +67,22 @@ const DEFAULT_SETTINGS = Object.fromEntries(
 );
 
 /**
+ * Coerce a stored value back to its schema type, falling back to the default.
+ * pf:configs lives in shared manager storage where any tab or a hand edit can
+ * write - a foreign writer must not smuggle e.g. a string into a boolean gate
+ * (event-time consumers trust getSetting() without a type check).
+ */
+function coerceSetting(definition, value) {
+  if (definition.type === "bool") {
+    return typeof value === "boolean" ? value : definition.default;
+  }
+  if (definition.type === "options") {
+    return definition.options.includes(value) ? value : definition.default;
+  }
+  return value;
+}
+
+/**
  * Engineering calibration - every tunable value in the codebase lives here,
  * beside the user schema. These are behavior constants, not preferences:
  * no panel controls, no storage. Grouped by subsystem, units embedded.
@@ -150,6 +166,10 @@ export const TUNING = {
     /** Hard ceiling for stored entries regardless of age pruning. */
     maxEntries: 1000
   },
+  filter: {
+    /** Trailing flush for color steppers: preview is instant, storage waits. */
+    persistDebounceMs: 300
+  },
   subtitles: {
     syncDebounceMs: 150
   },
@@ -162,15 +182,12 @@ export const TUNING = {
     actionMs: 4000,
     /** Onboarding hints. */
     hintMs: 5000
-  },
-  kernel: {
-    removalGraceMs: 500
   }
 };
 
 const cache = {};
-for (const [key, def] of Object.entries(DEFAULT_SETTINGS)) {
-  cache[key] = getConfigValue(`${SETTINGS_PREFIX}.${key}`, def);
+for (const definition of SETTINGS_SCHEMA) {
+  cache[definition.key] = coerceSetting(definition, getConfigValue(`${SETTINGS_PREFIX}.${definition.key}`, definition.default));
 }
 
 export function getSetting(key) {
@@ -193,8 +210,9 @@ function refreshSettingsCache() {
   // doc so the per-key re-reads below come from the fresh manager value.
   invalidateConfigCache();
   let changed = 0;
-  for (const key of Object.keys(cache)) {
-    const fresh = getConfigValue(`${SETTINGS_PREFIX}.${key}`, DEFAULT_SETTINGS[key]);
+  for (const definition of SETTINGS_SCHEMA) {
+    const key = definition.key;
+    const fresh = coerceSetting(definition, getConfigValue(`${SETTINGS_PREFIX}.${key}`, DEFAULT_SETTINGS[key]));
     if (cache[key] !== fresh) {
       cache[key] = fresh;
       changed++;
