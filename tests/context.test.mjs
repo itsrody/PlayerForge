@@ -15,9 +15,10 @@ import {
   createTopFrameProvisioner,
   createFrameProvisioner,
   FS_REQUEST_TYPE,
+  CTX_REQUEST_TYPE,
+  CTX_RESPONSE_TYPE,
   CTX_REQUEST_TIMEOUT_MS
 } from "../src/shared/context.js";
-import { CTX_REQUEST_TYPE, CTX_RESPONSE_TYPE } from "../src/shared/events.js";
 
 const dom = (html = "", url = "https://www.youtube.com/watch?v=1") => {
   const jsdom = new JSDOM(`<!doctype html><html><head><title>Page</title></head><body>${html}</body></html>`, { url });

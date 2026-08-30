@@ -20,7 +20,17 @@
 import { logger } from "./logger.js";
 import { watchMediaEvents, meetsMinSize, videosFromMutations } from "../kernel/sdk.js";
 import { onDomMutations } from "../kernel/dom-watch.js";
-import { CTX_REQUEST_TYPE, CTX_RESPONSE_TYPE, FS_REQUEST_TYPE } from "./events.js";
+
+/* - Window message types - */
+
+/**
+ * The postMessage types the frame bridge sends and receives across iframe
+ * edges. Inlined here - they are used only by this module, so a shared
+ * namespace would just add indirection.
+ */
+export const CTX_REQUEST_TYPE = "pf:ctx-request";
+export const CTX_RESPONSE_TYPE = "pf:ctx";
+export const FS_REQUEST_TYPE = "pf:req-fullscreen";
 
 /* - 1. Domain identity - */
 
@@ -408,7 +418,6 @@ function isOwnFrame(source) {
  * one child, so a hostile foreign window cannot punch allowfullscreen for
  * frames it does not own: every grant is vouched by an own-<iframe> match.
  */
-export { FS_REQUEST_TYPE };
 
 /** The direct <iframe> child of THIS document whose contentWindow is `win`, or null. */
 function iframeElementForWindow(win) {
