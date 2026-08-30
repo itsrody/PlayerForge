@@ -139,6 +139,15 @@ export function createMediaControls({ video }) {
 
 /* - MediaSession facet - */
 
+/** Media events that push position state to the OS surface. `timeupdate` is
+ *  the media clock (fires ~4 Hz while the playhead advances), so OS/mediaSession
+ *  progress stays live without a frame callback or a poll; the boundary events
+ *  cover starts, stops, seeks, and metadata/duration changes. */
+export const MEDIA_SESSION_SYNC_EVENTS = new Set([
+  "play", "pause", "playing", "ended", "seeked", "durationchange", "ratechange",
+  "volumechange", "loadedmetadata", "timeupdate"
+]);
+
 const SESSION_ACTIONS = ["play", "pause", "stop", "seekbackward", "seekforward", "seekto"];
 /** Cleared defensively on teardown: managers remember stale handlers. */
 const CLEAR_ACTIONS = [...SESSION_ACTIONS, "previoustrack", "nexttrack"];

@@ -10,7 +10,7 @@ import { addSettingsSection } from "./chrome/config.js";
 import { TUNING } from "./chrome/config.js";
 import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
-import { claimMediaSession, createMediaControls } from "./media.js";
+import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
 import { SHELL_MARKER, warmStyles, injectShell, watchShellHost } from "./chrome/inject.js";
 import { requestFullscreenProvision } from "../shared/context.js";
 
@@ -19,11 +19,6 @@ const VIDEO_EVENTS = [
   "durationchange", "loadedmetadata", "loadeddata", "canplay", "canplaythrough",
   "ended", "volumechange", "ratechange", "progress", "stalled", "emptied", "error"
 ];
-
-const MEDIA_SESSION_SYNC_EVENTS = new Set([
-  "play", "pause", "playing", "ended", "seeked", "durationchange", "ratechange",
-  "volumechange", "loadedmetadata"
-]);
 
 /**
  * Per-video facade: wraps the media element with a stable API, injects the
