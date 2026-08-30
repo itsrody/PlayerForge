@@ -261,3 +261,32 @@ test("importData merges, dedupes, and rejects invalid documents", () => {
   assert.equal(store.importData("not json"), null);
   assert.equal(store.importData("{}"), null);
 });
+
+test("onChange flags structural vs position-only updates", () => {
+  installGm({ version: 1, entries: [] });
+  const store = new ResumeStore();
+  const seen = [];
+  const unsub = store.onChange((structural) => seen.push(structural));
+
+  const created = store.createEntry("youtube", "/watch", "T", 600);
+  assert.deepEqual(seen, [true], "a new entry is structural");
+
+  seen.length = 0;
+  store.updateResume(created.id, 25);
+  assert.deepEqual(seen, [false], "a position save is not structural");
+
+  seen.length = 0;
+  store.removeEntry(created.id);
+  assert.deepEqual(seen, [true], "a removal is structural");
+
+  seen.length = 0;
+  store.importData(JSON.stringify({ version: 1, entries: [{ ...entry(), id: "imp" }] }));
+  assert.deepEqual(seen, [true], "an import that changes the set is structural");
+
+  unsub();
+  seen.length = 0;
+  store.updateResume("imp", 1);
+  assert.deepEqual(seen, [], "unsubscribed listeners are ignored");
+
+  store.destroy();
+});

@@ -14,6 +14,25 @@ export class ResumeStore {
   #state = null;
   #loaded = false;
   #listenerId = null;
+  #listeners = new Set();
+
+  /**
+   * Subscribe to store changes. The callback receives a `structural` flag -
+   * true when the entry SET changed (create/remove/import/cross-tab merge),
+   * false for pure position/timestamp updates. Returns an unsubscribe fn.
+   * Consumers that snapshot the whole list (History) re-render on structural
+   * changes only; position-only persists stay invisible to them.
+   */
+  onChange(cb) {
+    this.#listeners.add(cb);
+    return () => this.#listeners.delete(cb);
+  }
+
+  #notify(structural = false) {
+    for (const cb of this.#listeners) {
+      cb(structural);
+    }
+  }
 
   constructor() {
     // Live reload across tabs: whoever writes pf:resume elsewhere triggers a
@@ -39,7 +58,10 @@ export class ResumeStore {
     }
     const raw = loadJsonObject(KEYS.resume, null);
     if (raw && Array.isArray(raw.entries)) {
-      this.#mergeRaw(raw);
+      const { added, updated } = this.#mergeRaw(raw);
+      if (added || updated) {
+        this.#notify(true);
+      }
     }
   }
 
@@ -111,7 +133,7 @@ export class ResumeStore {
     return kept;
   }
 
-  #persist() {
+  #persist(structural = false) {
     try {
       const raw = loadJsonObject(KEYS.resume, null);
       if (raw && Array.isArray(raw.entries)) {
@@ -122,6 +144,7 @@ export class ResumeStore {
       this.#state.entries = this.#enforceBounds();
       this.#state.updatedAt = Date.now();
       gmSetValue(KEYS.resume, this.#state);
+      this.#notify(structural);
     } catch (err) {
       logger.error("resume", "Failed to persist resume store:", err);
     }
@@ -176,7 +199,7 @@ export class ResumeStore {
       updatedAt: Date.now()
     };
     this.#state.entries.push(entry);
-    this.#persist();
+    this.#persist(true);
     return entry;
   }
 
@@ -200,7 +223,7 @@ export class ResumeStore {
     const before = this.#state.entries.length;
     this.#state.entries = this.#state.entries.filter((entry) => entry.id !== id);
     if (this.#state.entries.length < before) {
-      this.#persist();
+      this.#persist(true);
     }
   }
 
@@ -210,7 +233,7 @@ export class ResumeStore {
     this.#state.entries = this.#enforceBounds(days);
     const removed = before - this.#state.entries.length;
     if (removed > 0) {
-      this.#persist();
+      this.#persist(true);
       logger.log("resume", `Pruned ${removed} resume entries`);
     }
   }
@@ -238,7 +261,7 @@ export class ResumeStore {
     }
     const result = this.#mergeRaw(raw);
     if (result.added || result.updated) {
-      this.#persist();
+      this.#persist(true);
     }
     return result;
   }
@@ -419,6 +442,11 @@ export class ResumeTracker {
 
   resetEntry(id) {
     this.#store.updateResume(id, 0);
+  }
+
+  /** Subscribe to store changes (see ResumeStore#onChange). */
+  onChange(cb) {
+    return this.#store.onChange(cb);
   }
 
   destroy() {

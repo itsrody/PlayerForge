@@ -87,5 +87,14 @@ export function addHistorySection(panel, shell) {
   }
 
   render();
+  // The store gains entries throughout the session (new videos watched) and
+  // on cross-tab imports; re-render when the entry SET changes so the open
+  // History tab never shows a boot-time snapshot. Position-only persists are
+  // not structural and stay invisible - the cards don't display position.
+  shell.resume?.onChange?.((structural) => {
+    if (structural) {
+      render();
+    }
+  });
   return { render };
 }
