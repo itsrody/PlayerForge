@@ -28,9 +28,15 @@ globalThis.location = shared.window.location;
 globalThis.document = shared.window.document;
 globalThis.CustomEvent = shared.window.CustomEvent;
 globalThis.AbortController = shared.window.AbortController;
+// Wire the shared `fs` gate to this realm, then latch it open: the forge now
+// reads `fs` (shadow.js), not document.fullscreenElement, so the scrub path
+// needs the gate driven through the real fullscreenchange event.
+const { initFullscreenGate } = await import("../../src/shared/shadow.js");
+initFullscreenGate(shared.window.document);
 Object.defineProperty(shared.window.document, "fullscreenElement", {
   value: { __fullscreen: true }, configurable: true
 });
+shared.window.document.dispatchEvent(new shared.window.Event("fullscreenchange"));
 
 const { InputForge } = await import("../../src/shell/inputs/forge.js");
 const { GESTURE_EVENTS } = await import("../../src/shell/inputs/actions.js");

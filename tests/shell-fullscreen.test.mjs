@@ -6,6 +6,7 @@ globalThis.GM_getValue = (key, fallback) => fallback;
 globalThis.GM_setValue = () => {};
 
 const { Shell } = await import("../src/shell/shell.js");
+const { initFsGate } = await import("./fs-gate.mjs");
 
 async function makeShell(id = "t") {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", {
@@ -14,6 +15,10 @@ async function makeShell(id = "t") {
   globalThis.window = dom.window;
   globalThis.location = dom.window.location;
   globalThis.document = dom.window.document;
+  // Wire the shared fs gate to this environment BEFORE the shell's
+  // fullscreenchange listener attaches, so on a change the gate latches `fs`
+  // first and the shell's watcher reports the fresh boolean.
+  initFsGate(dom);
   globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
   globalThis.MutationObserver = dom.window.MutationObserver;
   // jsdom rejects foreign-realm AbortSignals in listener options.
@@ -162,9 +167,10 @@ test("rejected fullscreen request surfaces a hint and emits the blocked event", 
 
 test("rejected fullscreen while already fullscreen emits nothing", async () => {
   const env = await makeShell();
-  const { dom, shell, container, setFullscreenEl, emissions, teardown } = env;
+  const { dom, shell, container, setFullscreenEl, fireChange, emissions, teardown } = env;
 
   setFullscreenEl(container);
+  fireChange();
   dom.window.document.dispatchEvent(new dom.window.Event("fullscreenerror"));
 
   assert.equal(

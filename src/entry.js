@@ -6,6 +6,7 @@ import { logger } from "./shared/logger.js";
 import { shouldSkipUrl } from "./kernel/guard.js";
 import { KEYS, getConfigValue, setConfigValue, deleteConfigField } from "./shared/storage.js";
 import { TUNING } from "./shell/chrome/config.js";
+import { initFullscreenGate } from "./shared/shadow.js";
 
 // The version lives in the banner and is read from the installed script at
 // runtime via GM_info, so what the UI reports is always what the manager
@@ -17,6 +18,11 @@ function bootstrap() {
   if (shouldSkipUrl()) {
     return;
   }
+
+  // Build the single fullscreen gate (src/shared/shadow.js `fs`) off the
+  // native fullscreenchange event. Runs before any shell exists so fs-gated
+  // paths have a live boolean the moment they first query it.
+  initFullscreenGate();
 
   // The shell stylesheet is warmed lazily at first shell construction
   // (shell.js #injectDom): the embedded sheet is adopted synchronously there,

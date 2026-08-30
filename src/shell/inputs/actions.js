@@ -1,5 +1,6 @@
 import { getSetting, TUNING } from "../chrome/config.js";
 import { formatTime } from "../../shared/time.js";
+import { fs } from "../../shared/shadow.js";
 
 /**
  * The gesture event contract: semantic CustomEvents dispatched by the
@@ -79,7 +80,7 @@ export const INPUT_BINDINGS = [
 /** Whether a binding's gates are open right now. */
 function gateOpen(binding) {
   return (!binding.setting || getSetting(binding.setting)) &&
-    (!binding.fs || !!document.fullscreenElement);
+    (!binding.fs || fs);
 }
 
 /** Bindings pre-bucketed by gesture so decision-point scans skip the mass of

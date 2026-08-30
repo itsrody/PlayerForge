@@ -1,7 +1,7 @@
 import { allowsIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo } from "./actions.js";
 import { TUNING } from "../chrome/config.js";
 import { SHELL_MARKER } from "../chrome/inject.js";
-import { deepestActiveElement, isInsideShell } from "../../shared/shadow.js";
+import { deepestActiveElement, isInsideShell, fs } from "../../shared/shadow.js";
 
 /**
  * Pointer handlers never preventDefault - native pan/scroll over the zone is
@@ -86,8 +86,8 @@ const scrubEvent = new CustomEvent(GESTURE_EVENTS.scrub, {
  *
  * Gecko 154+ native by design: one AbortSignal owns the entire listener
  * lifetime (destroy() === scope.abort()), all pointer listeners are passive,
- * scrub sampling consumes getCoalescedEvents(), and fullscreen truth is read
- * straight off document.fullscreenElement.
+ * scrub sampling consumes getCoalescedEvents(), and fullscreen truth is the
+ * single shared `fs` gate (shadow.js), built on the native fullscreen event.
  */
 export class InputForge {
   #video;
@@ -136,10 +136,10 @@ export class InputForge {
 
   /**
    * Once a scrub/swipe session latches, the gesture already started fullscreen
-   * (both intents are fs-gated), so this flag replaces the per-move
-   * document.fullscreenElement probe and the live intent-gate scans - the
-   * session keeps running even if the page loses fullscreen mid-stroke, which
-   * matches the pre-existing behavior. Reset at the session's end.
+   * (both intents are fs-gated), so this flag replaces the per-move `fs` gate
+   * read and the live intent-gate scans - the session keeps running even if
+   * the page loses fullscreen mid-stroke, which matches the pre-existing
+   * behavior. Reset at the session's end.
    */
   #gestureFsActive = false;
 
@@ -195,7 +195,7 @@ export class InputForge {
     window.addEventListener("blur", () => this.#finishKeyboardHold(false), { signal });
 
     document.addEventListener("fullscreenchange", () => {
-      this.setTrackpadPinchEnabled(this.#isFullscreen());
+      this.setTrackpadPinchEnabled(fs);
       this.#videoRect = null;
     }, { signal });
 
@@ -212,10 +212,6 @@ export class InputForge {
   /** Engine lifetime signal - action wiring shares it and dies with it. */
   get signal() {
     return this.#scope.signal;
-  }
-
-  #isFullscreen() {
-    return !!document.fullscreenElement;
   }
 
   /**
@@ -392,7 +388,7 @@ export class InputForge {
   }
 
   #checkPinch() {
-    if (!this.#isFullscreen() || this.#pinchFired || this.#pinchStartDistance < PINCH_MIN_DISTANCE_PX) {
+    if (!fs || this.#pinchFired || this.#pinchStartDistance < PINCH_MIN_DISTANCE_PX) {
       return;
     }
     if (!captureFirstTwo(this.#pointers, firstTwoPointers)) {
@@ -599,12 +595,12 @@ export class InputForge {
       this.#clearHoldTimer();
     }
 
-    // The fullscreen probe and the intent gates drive the session only until
-    // it latches: once a scrub/swipe starts (both are fs-gated intents that
-    // began fullscreen), #gestureFsActive replaces the per-move
-    // document.fullscreenElement read and the allowsIntent scans for the rest
-    // of the move stream - the same decisions stay fixed mid-session.
-    if ((this.#gestureFsActive || this.#isFullscreen()) && !this.#holding) {
+    // The `fs` gate and the intent gates drive the session only until it
+    // latches: once a scrub/swipe starts (both are fs-gated intents that began
+    // fullscreen), #gestureFsActive replaces the per-move `fs` read and the
+    // allowsIntent scans for the rest of the move stream - the same decisions
+    // stay fixed mid-session.
+    if ((this.#gestureFsActive || fs) && !this.#holding) {
       if (!this.#scrubbing && !this.#swiping) {
         // Intent gates are sampled live: toggling a setting mid-session
         // applies to the very next move.
@@ -783,7 +779,7 @@ export class InputForge {
   }
 
   #handleWheelCapture(event) {
-    if (this.#isFullscreen() && event.ctrlKey && !event.momentum && allowsIntent("pinch")) {
+    if (fs && event.ctrlKey && !event.momentum && allowsIntent("pinch")) {
       event.preventDefault();
       event.stopImmediatePropagation();
       if (!this.#trackpadPinchCooldown) {

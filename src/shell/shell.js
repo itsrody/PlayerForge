@@ -1,5 +1,5 @@
 import { logger } from "../shared/logger.js";
-import { deepestActiveElement, isInsideShell } from "../shared/shadow.js";
+import { deepestActiveElement, isInsideShell, fs } from "../shared/shadow.js";
 import { InputForge } from "./inputs/forge.js";
 import { attachInputActions } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
@@ -162,11 +162,13 @@ export class Shell {
   }
 
   /**
-   * Pure platform truth: one main video page, so the document's fullscreen
-   * element is ours by definition. No cached state, no SDK heuristics.
+   * Sole fullscreen condition, read straight off the shared `fs` gate
+   * (shadow.js) - built on the native fullscreen event by initFullscreenGate().
+   * The shell lives inside the SDK's frame, so an SDK fullscreen IS a document
+   * fullscreen; `fs` is the single boolean that gates fs features codebase-wide.
    */
   get fullscreen() {
-    return !!document.fullscreenElement;
+    return fs;
   }
 
   async play() {
@@ -329,7 +331,7 @@ export class Shell {
     // (idempotent) so a retry succeeds if the attributes were just granted,
     // e.g. an SDK iframe created after our boot-time provisioning.
     document.addEventListener("fullscreenerror", () => {
-      if (this.#destroyed || document.fullscreenElement) {
+      if (this.#destroyed || fs) {
         return;
       }
       this.#bus.emit("pf:shell-fullscreen-blocked", { shellId: this.id });
@@ -372,7 +374,7 @@ export class Shell {
   }
 
   exitFullscreen() {
-    if (document.fullscreenElement) {
+    if (fs) {
       document.exitFullscreen()?.catch(() => {});
     }
   }

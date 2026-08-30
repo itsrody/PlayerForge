@@ -7,6 +7,7 @@ globalThis.GM_setValue = () => {};
 
 const { InputForge } = await import("../src/shell/inputs/forge.js");
 const { GESTURE_EVENTS, computeCoverScale } = await import("../src/shell/inputs/actions.js");
+const { initFsGate, setFullscreen } = await import("./fs-gate.mjs");
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -23,6 +24,8 @@ function makeEnv() {
   globalThis.CustomEvent = dom.window.CustomEvent;
   // jsdom rejects foreign-realm AbortSignals in listener options.
   globalThis.AbortController = dom.window.AbortController;
+  // Wire the shared fs gate to this environment before the forge reads it.
+  initFsGate(dom);
 
   const video = dom.window.document.createElement("video");
   dom.window.document.body.appendChild(video);
@@ -48,11 +51,9 @@ function pointerEvent(win, type, { id = 1, x = 0, y = 0 } = {}) {
   return event;
 }
 
-/** Force document.fullscreenElement for fullscreen-gated gesture paths. */
+/** Force fullscreen on through the real gate: set the marker + fire the event. */
 function stubFullscreen(dom, value) {
-  Object.defineProperty(dom.window.document, "fullscreenElement", {
-    value, configurable: true
-  });
+  setFullscreen(dom, value);
 }
 
 function wheelEvent(win, { deltaY, ctrlKey }) {
