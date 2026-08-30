@@ -1,5 +1,5 @@
 import { delay } from "../../shared/time.js";
-import { flashElement } from "../../shared/flash.js";
+import { flashElement } from "./animate.js";
 import { createIconElement } from "./icons.js";
 
 /**

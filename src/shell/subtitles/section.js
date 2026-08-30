@@ -3,7 +3,7 @@ import { TUNING } from "../chrome/config.js";
 import { srtToVtt, ensureVttHeader, parseSubtitles } from "./forgevtt.js";
 import { ForgeTrack } from "./forge-track.js";
 import { debounce } from "../../shared/time.js";
-import { flashElement } from "../../shared/flash.js";
+import { flashElement } from "../chrome/animate.js";
 import { logger } from "../../shared/logger.js";
 
 const SUBTITLE_FILE_ACCEPT = ".srt,.vtt";

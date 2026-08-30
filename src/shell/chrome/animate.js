@@ -6,6 +6,10 @@
  * flush, and guarantees a clean restart by cancelling any prior background
  * animation on the element. Mirrors the retired @keyframes pf-reset-flash
  * rule (transparent -> accent -> transparent, 0.4s ease-out).
+ *
+ * Shell-owned UI effect; lives here (not in shared/) because every consumer
+ * is chrome/subtitles, so shared/ stays limited to modules the framework and
+ * the app use together.
  */
 export function flashElement(el, { duration = 400 } = {}) {
   if (!el || typeof el.animate !== "function") {

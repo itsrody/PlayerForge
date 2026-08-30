@@ -1,5 +1,5 @@
 import { getConfigValue, setConfigFields } from "../shared/storage.js";
-import { flashElement } from "../shared/flash.js";
+import { flashElement } from "./chrome/animate.js";
 import { debounce } from "../shared/time.js";
 import { TUNING } from "./chrome/config.js";
 
