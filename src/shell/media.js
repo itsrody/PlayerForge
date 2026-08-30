@@ -76,6 +76,7 @@ export function createMediaControls({ video }) {
       video.currentTime = 0;
     },
 
+    /** Seek to an absolute position, clamped to the playable range. */
     seekTo(time) {
       if (!isReady()) {
         return;
@@ -83,12 +84,9 @@ export function createMediaControls({ video }) {
       video.currentTime = clampTarget(time);
     },
 
-    /** Silent primitive for scrub drags: clamp without command chatter. */
+    /** Silent seek alias for scrub drags - same clamp, no command chatter. */
     scrubTo(time) {
-      if (!isReady()) {
-        return;
-      }
-      video.currentTime = clampTarget(time);
+      this.seekTo(time);
     },
 
     skip(delta) {

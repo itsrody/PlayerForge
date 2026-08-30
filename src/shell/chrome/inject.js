@@ -1,9 +1,11 @@
 import SHELL_CSS from "./styles.css";
 import { logger } from "../../shared/logger.js";
 import { onDomMutations } from "../../kernel/dom-watch.js";
+import { SHELL_MARKER } from "../../kernel/contract.js";
 
-/** DOM contract: marks videos/containers/shell hosts this script manages. */
-export const SHELL_MARKER = "data-pf-shell";
+// Re-export the single contract-sourced marker so shell/forge keep importing
+// it from here - one source of truth, no mirrored literal to drift.
+export { SHELL_MARKER };
 
 let sharedSheet = null;
 let adopted = false;
