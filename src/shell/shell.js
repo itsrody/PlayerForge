@@ -1,5 +1,6 @@
 import { logger } from "../shared/logger.js";
 import { deepestActiveElement, isInsideShell, fs } from "../shared/shadow.js";
+import { BUS_EVENTS } from "../shared/events.js";
 import { InputForge } from "./inputs/forge.js";
 import { attachInputActions } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
@@ -53,8 +54,6 @@ export class Shell {
   #media;
   /** OS media-key facet, null without MediaSession support. */
   #mediaSession = null;
-  /** Mirror of the fullscreen checkmark, used only to dedup change events. */
-  #lastFullscreen = false;
   #savedPositionStyle = null;
 
   constructor({ id, video, container, sdk, sdkName, bus }) {
@@ -311,20 +310,8 @@ export class Shell {
     }
   }
 
-  /** Emit shell:fullscreen-change whenever this shell's checkmark flips. */
+  /** Surface a hint + re-provision when a fullscreen entry is rejected. */
   #watchFullscreen() {
-    const onChange = () => {
-      const active = this.fullscreen;
-      if (active !== this.#lastFullscreen) {
-        this.#lastFullscreen = active;
-        this.#bus.emit("pf:shell-fullscreen-change", {
-          shellId: this.id,
-          fullscreen: active
-        });
-        logger.log("shell", `Fullscreen: ${active}`);
-      }
-    };
-    document.addEventListener("fullscreenchange", onChange, { signal: this.#scope.signal });
     // An attempt to enter fullscreen was rejected (typically because an
     // ancestor embed lacks allowfullscreen - Firefox requires it on every
     // frame edge, bug 1608358). Surface a hint and re-provision the chain
@@ -334,7 +321,6 @@ export class Shell {
       if (this.#destroyed || fs) {
         return;
       }
-      this.#bus.emit("pf:shell-fullscreen-blocked", { shellId: this.id });
       this.#toasts?.show({
         icon: "fs-block",
         text: "Fullscreen blocked by embed",
@@ -413,7 +399,7 @@ export class Shell {
       }
       this.video.removeAttribute(SHELL_MARKER);
       this.container.removeAttribute(SHELL_MARKER);
-      this.#bus.emit("pf:shell-destroyed", this);
+      this.#bus.emit(BUS_EVENTS.shellDestroyed, this);
     }
   }
 }

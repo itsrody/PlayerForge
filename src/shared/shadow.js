@@ -43,14 +43,44 @@ export function isInsideShell(host, node) {
  */
 export let fs = false;
 
+/** Subscribers notified on a fullscreen state transition (subscribed from a
+ *  single underlying native listener; see initFullscreenGate). */
+const fsSubscribers = new Set();
+
 /**
- * Build the `fs` gate off the native fullscreen event. Call once at startup.
- * `doc` is injectable for jsdom tests so they drive the real mechanism.
+ * Build the `fs` gate off the native fullscreen event and fan out transitions.
+ * Call once at startup. `doc` is injectable for jsdom tests so they drive the
+ * real mechanism.
+ *
+ * This is the ONLY place that touches fullscreen: it owns the `fs` value AND
+ * the single underlying `fullscreenchange` listener. Every other fs-conditioned
+ * path reads `fs` directly or subscribes to transitions via subscribeFullscreen,
+ * so there is one gate and one transition source regardless of shell count.
  */
 export function initFullscreenGate(doc = document) {
+  fs = !!doc.fullscreenElement;
   const update = () => {
-    fs = !!doc.fullscreenElement;
+    const next = !!doc.fullscreenElement;
+    if (next === fs) {
+      return;
+    }
+    fs = next;
+    for (const cb of fsSubscribers) {
+      cb(next);
+    }
   };
   doc.addEventListener("fullscreenchange", update);
-  update();
+}
+
+/**
+ * Subscribe to fullscreen state transitions (fires only on an actual flip,
+ * before the gates' consumers observe the new `fs`). Returns an unsubscribe
+ * function; pass `signal` to have it torn down automatically.
+ */
+export function subscribeFullscreen(cb, signal) {
+  fsSubscribers.add(cb);
+  if (signal) {
+    signal.addEventListener("abort", () => fsSubscribers.delete(cb), { once: true });
+  }
+  return () => fsSubscribers.delete(cb);
 }

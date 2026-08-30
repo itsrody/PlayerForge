@@ -6,7 +6,8 @@ globalThis.GM_getValue = (key, fallback) => fallback;
 globalThis.GM_setValue = () => {};
 
 const { Shell } = await import("../src/shell/shell.js");
-const { initFsGate } = await import("./fs-gate.mjs");
+const { initFsGate, setFullscreen } = await import("./fs-gate.mjs");
+const { subscribeFullscreen } = await import("../src/shared/shadow.js");
 
 async function makeShell(id = "t") {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", {
@@ -15,9 +16,8 @@ async function makeShell(id = "t") {
   globalThis.window = dom.window;
   globalThis.location = dom.window.location;
   globalThis.document = dom.window.document;
-  // Wire the shared fs gate to this environment BEFORE the shell's
-  // fullscreenchange listener attaches, so on a change the gate latches `fs`
-  // first and the shell's watcher reports the fresh boolean.
+  // Wire the shared fs gate to this environment BEFORE any shell/forge
+  // subscribes, so subscriptions see the one shared transition source.
   initFsGate(dom);
   globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
   globalThis.MutationObserver = dom.window.MutationObserver;
@@ -32,11 +32,8 @@ async function makeShell(id = "t") {
     value: [], writable: true, configurable: true
   });
 
-  const emissions = [];
   const bus = {
-    emit(type, detail) {
-      emissions.push({ type, detail });
-    },
+    emit() {},
     addEventListener() {},
     removeEventListener() {}
   };
@@ -46,26 +43,15 @@ async function makeShell(id = "t") {
   const video = dom.window.document.createElement("video");
   container.appendChild(video);
 
-  const setFullscreenEl = (el) => {
-    Object.defineProperty(dom.window.document, "fullscreenElement", {
-      value: el, configurable: true
-    });
-  };
-  const fireChange = () => {
-    dom.window.document.dispatchEvent(new dom.window.Event("fullscreenchange"));
-  };
-  const changes = () => emissions.filter((entry) => entry.type === "pf:shell-fullscreen-change");
-
   const shell = new Shell({ id, video, container, sdk: {}, sdkName: "test-sdk", bus });
   await shell.ready;
   const teardown = () => {
-    setFullscreenEl(null);
-    fireChange();
+    setFullscreen(dom, null);
     shell.destroy();
     delete globalThis.CSSStyleSheet;
   };
 
-  return { dom, shell, container, video, emissions, setFullscreenEl, fireChange, changes, teardown };
+  return { dom, shell, container, video, teardown };
 }
 
 test("checkmark is false until an element goes fullscreen", async () => {
@@ -74,89 +60,73 @@ test("checkmark is false until an element goes fullscreen", async () => {
   teardown();
 });
 
-test("entering fullscreen on our container flips the checkmark and emits one change", async () => {
-  const env = await makeShell();
-  const { shell, container, setFullscreenEl, fireChange, changes, teardown } = env;
-
-  setFullscreenEl(container);
-  fireChange();
-
-  assert.equal(shell.fullscreen, true);
-  assert.deepEqual(changes(), [
-    { type: "pf:shell-fullscreen-change", detail: { shellId: "t", fullscreen: true } }
-  ]);
+test("entering fullscreen on our container flips the shared marker and checkmark", async () => {
+  const { dom, shell, container, teardown } = await makeShell();
+  const seen = [];
+  subscribeFullscreen((active) => seen.push(active));
+  setFullscreen(dom, container);
+  assert.deepEqual(seen, [true], "shared fs gate flips open");
+  assert.equal(shell.fullscreen, true, "shell checkmark reflects the shared marker");
   teardown();
 });
 
 test("any document fullscreen element marks this shell", async () => {
   const env = await makeShell();
-  const { dom, shell, setFullscreenEl, fireChange, changes, teardown } = env;
+  const { dom, shell, teardown } = env;
 
   const stranger = dom.window.document.createElement("section");
   dom.window.document.body.appendChild(stranger);
-  setFullscreenEl(stranger);
-  fireChange();
+  setFullscreen(dom, stranger);
 
-  assert.equal(shell.fullscreen, true);
-  assert.deepEqual(changes(), [
-    { type: "pf:shell-fullscreen-change", detail: { shellId: "t", fullscreen: true } }
-  ]);
+  assert.equal(shell.fullscreen, true, "shared gate tracks any fullscreen element");
   teardown();
 });
 
-test("exiting fullscreen emits exactly one false transition", async () => {
-  const env = await makeShell();
-  const { shell, container, setFullscreenEl, fireChange, changes, teardown } = env;
+test("exiting fullscreen flips the marker back closed", async () => {
+  const { dom, shell, container, teardown } = await makeShell();
 
-  setFullscreenEl(container);
-  fireChange();
-  setFullscreenEl(null);
-  fireChange();
+  const seen = [];
+  subscribeFullscreen((active) => seen.push(active));
+  setFullscreen(dom, container);
+  setFullscreen(dom, null);
 
+  assert.deepEqual(seen, [true, false], "shared fs gate opens then closes");
   assert.equal(shell.fullscreen, false);
-  const states = changes().map((entry) => entry.detail.fullscreen);
-  assert.deepEqual(states, [true, false]);
   teardown();
 });
 
-test("repeated change events without a state flip are deduped", async () => {
-  const env = await makeShell();
-  const { shell, container, setFullscreenEl, fireChange, changes, teardown } = env;
+test("subscribeFullscreen fires once per actual transition, deduping repeat events", async () => {
+  const { dom, container, teardown } = await makeShell();
+  const seen = [];
+  subscribeFullscreen((active) => seen.push(active));
 
-  setFullscreenEl(container);
-  fireChange();
-  fireChange();
-  fireChange();
+  setFullscreen(dom, container);
+  setFullscreen(dom, container); // no state flip: same element, gated already
+  setFullscreen(dom, container);
+  setFullscreen(dom, null);
+  setFullscreen(dom, null);
 
-  assert.equal(changes().length, 1, "no spurious re-emits");
+  assert.deepEqual(seen, [true, false], "only real flips notify subscribers");
   teardown();
 });
 
-test("a destroyed shell no longer reacts to fullscreen transitions", async () => {
-  const env = await makeShell();
-  const { shell, container, emissions, setFullscreenEl, fireChange, teardown } = env;
+test("a fullscreen subscription is torn down on its signal", async () => {
+  const { dom, container, teardown } = await makeShell();
 
-  shell.destroy();
-  setFullscreenEl(container);
-  fireChange();
+  const seen = [];
+  const scope = new AbortController();
+  subscribeFullscreen((active) => seen.push(active), scope.signal);
+  scope.abort();
+  setFullscreen(dom, container);
 
-  assert.equal(
-    emissions.filter((entry) => entry.type === "pf:shell-fullscreen-change").length,
-    0,
-    "listener removed with the shell"
-  );
+  assert.equal(seen.length, 0, "subscription removed on abort");
   teardown();
 });
 
-test("rejected fullscreen request surfaces a hint and emits the blocked event", async () => {
-  const env = await makeShell();
-  const { dom, shell, emissions, teardown } = env;
+test("rejected fullscreen request surfaces a blocked hint", async () => {
+  const { dom, shell, teardown } = await makeShell();
 
   dom.window.document.dispatchEvent(new dom.window.Event("fullscreenerror"));
-
-  const blocked = emissions.filter((entry) => entry.type === "pf:shell-fullscreen-blocked");
-  assert.equal(blocked.length, 1);
-  assert.deepEqual(blocked[0].detail, { shellId: "t" });
 
   const toast = shell.shellDom.hudLayer.querySelector("pf-toast");
   assert.ok(toast, "toast surface exists");
@@ -165,17 +135,13 @@ test("rejected fullscreen request surfaces a hint and emits the blocked event", 
   teardown();
 });
 
-test("rejected fullscreen while already fullscreen emits nothing", async () => {
-  const env = await makeShell();
-  const { dom, shell, container, setFullscreenEl, fireChange, emissions, teardown } = env;
+test("rejected fullscreen while already fullscreen shows no hint", async () => {
+  const { dom, shell, container, teardown } = await makeShell();
 
-  setFullscreenEl(container);
-  fireChange();
+  setFullscreen(dom, container);
   dom.window.document.dispatchEvent(new dom.window.Event("fullscreenerror"));
 
-  assert.equal(
-    emissions.filter((entry) => entry.type === "pf:shell-fullscreen-blocked").length,
-    0
-  );
+  const toasts = shell.shellDom.hudLayer.querySelectorAll("pf-toast.pf-visible");
+  assert.equal(toasts.length, 0, "no blocked hint while already fullscreen");
   teardown();
 });

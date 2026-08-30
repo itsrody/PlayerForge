@@ -1,6 +1,6 @@
 import { getSetting, TUNING } from "../chrome/config.js";
 import { formatTime } from "../../shared/time.js";
-import { fs } from "../../shared/shadow.js";
+import { fs, subscribeFullscreen } from "../../shared/shadow.js";
 
 /**
  * The gesture event contract: semantic CustomEvents dispatched by the
@@ -319,15 +319,14 @@ function volumeIcon(volume, muted) {
  */
 export function attachInputActions(shell, host, signal) {
   /** Fullscreen exit also collapses fill mode - the one cross-feature rule. */
-  shell.bus.addEventListener("pf:shell-fullscreen-change", (event) => {
-    const { shellId, fullscreen } = event.detail;
-    if (shellId === shell.id && !fullscreen) {
+  subscribeFullscreen((active) => {
+    if (!active) {
       const state = stateFor(shell);
       if (state.fillActive) {
         clearFillMode(shell, state, false);
       }
     }
-  }, { signal });
+  }, signal);
 
   host.addEventListener(GESTURE_EVENTS.hold, ({ detail }) => {
     if (!shell.video) {

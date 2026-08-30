@@ -1,7 +1,7 @@
 import { logger } from "../../shared/logger.js";
 import { createIconElement } from "./icons.js";
 import { GESTURE_EVENTS } from "../inputs/actions.js";
-import { deepestActiveElement } from "../../shared/shadow.js";
+import { deepestActiveElement, subscribeFullscreen } from "../../shared/shadow.js";
 
 const HOLD_DELAY_MS = 400;
 const HOLD_REPEAT_MS = 75;
@@ -593,11 +593,9 @@ export class SettingsPanel {
       }
     }, { signal });
 
-    this.#bus?.addEventListener("pf:shell-fullscreen-change", (event) => {
-      if (event.detail.shellId === this.#shellId) {
-        this.close();
-      }
-    }, { signal });
+    // Any fullscreen transition dismisses the panel; the shared transition
+    // source (shadow.js) drives it - no bus event needed.
+    subscribeFullscreen(() => this.close(), this.#scope.signal);
 
     // Dismissal is ours since the popover left: Esc closes, and a press
     // outside the shell closes. The whole host counts as "inside" so our

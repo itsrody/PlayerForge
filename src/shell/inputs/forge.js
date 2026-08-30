@@ -1,7 +1,7 @@
 import { allowsIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo } from "./actions.js";
 import { TUNING } from "../chrome/config.js";
 import { SHELL_MARKER } from "../chrome/inject.js";
-import { deepestActiveElement, isInsideShell, fs } from "../../shared/shadow.js";
+import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../../shared/shadow.js";
 
 /**
  * Pointer handlers never preventDefault - native pan/scroll over the zone is
@@ -194,10 +194,10 @@ export class InputForge {
     // through the normal release path so playback rate never stays boosted.
     window.addEventListener("blur", () => this.#finishKeyboardHold(false), { signal });
 
-    document.addEventListener("fullscreenchange", () => {
+    subscribeFullscreen(() => {
       this.setTrackpadPinchEnabled(fs);
       this.#videoRect = null;
-    }, { signal });
+    }, this.#scope.signal);
 
     if (video) {
       this.#videoRectObserver = new ResizeObserver(() => {
