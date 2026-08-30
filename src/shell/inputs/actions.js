@@ -278,29 +278,29 @@ function clearFillMode(shell, state, animate = true) {
 }
 
 /**
- * Scale factor needed for the video to cover the device screen.
- * Fill mode is fullscreen-only (pinch binding is fs-gated), and in fullscreen
- * the reference is always the device screen itself - the video's rendered box
- * is simply the screen. So no getBoundingClientRect (forced layout) is needed:
- * the fill scale is pure aspect-ratio math between the video's intrinsic
- * ratio and the physical screen. Guards return 0 so the caller skips fill when
- * the video or screen size isn't known yet.
+ * Scale factor needed for the video to cover the given reference box.
+ * Fill mode is fullscreen-only (pinch binding is fs-gated), and the reference
+ * (passed from `shell.referenceBox`) is the device screen in fs - the video's
+ * rendered box is simply the screen. No getBoundingClientRect (forced layout)
+ * is needed: the fill scale is pure aspect-ratio math between the video's
+ * intrinsic ratio and the reference box. Guards return 0 so the caller skips
+ * fill when the video size or reference isn't known yet.
  */
-export function computeCoverScale(video) {
+export function computeCoverScale(video, ref) {
   const videoWidth = video.videoWidth;
   const videoHeight = video.videoHeight;
   if (!videoWidth || !videoHeight) {
     return 0;
   }
-  const screenWidth = screen.width;
-  const screenHeight = screen.height;
-  if (!screenWidth || !screenHeight) {
+  const refWidth = ref?.width;
+  const refHeight = ref?.height;
+  if (!refWidth || !refHeight) {
     return 0;
   }
   const aspect = videoWidth / videoHeight;
-  const fittedWidth = Math.min(screenWidth, screenHeight * aspect);
-  const fittedHeight = Math.min(screenHeight, screenWidth / aspect);
-  return Math.max(screenWidth / fittedWidth, screenHeight / fittedHeight);
+  const fittedWidth = Math.min(refWidth, refHeight * aspect);
+  const fittedHeight = Math.min(refHeight, refWidth / aspect);
+  return Math.max(refWidth / fittedWidth, refHeight / fittedHeight);
 }
 
 function volumeIcon(volume, muted) {
@@ -367,8 +367,10 @@ export function attachInputActions(shell, host, signal) {
       // finger's real-time speed. Width-normalized so the feel is independent
       // of container size; the fast ceiling scales with the playback DURATION
       // so a fast stroke traverses a fraction of the runtime on any length,
-      // while the slow floor stays a deliberate ~1s.
-      const width = shell.container?.clientWidth || shell.video?.clientWidth || 640;
+      // while the slow floor stays a deliberate ~1s. The reference is the
+      // unified `shell.referenceBox` (fs -> screen, inline -> container), so
+      // scrub always normalizes against the correct contextual box.
+      const width = shell.referenceBox.width || 640;
       const fastCeiling = duration * SCRUB_FAST_FULL_WIDTH_FRACTION;
       state.scrubbing = true;
       state.scrubDuration = duration;
@@ -522,7 +524,7 @@ export function attachInputActions(shell, host, signal) {
     const state = stateFor(shell);
     const video = shell.video;
     if (detail.direction === "out" && !state.fillActive) {
-      const scale = computeCoverScale(video);
+      const scale = computeCoverScale(video, shell.referenceBox);
       if (scale <= 1) {
         return;
       }

@@ -355,20 +355,20 @@ test("typing targets outside the container never trigger hotkeys", () => {
   controller.destroy();
 });
 
-test("computeCoverScale covers the device screen from aspect ratios alone", () => {
+test("computeCoverScale covers a reference box from aspect ratios alone", () => {
   const { dom, video } = makeEnv();
-  // Landscape 16:9 screen, like a fullscreened display.
-  globalThis.screen = { width: 1920, height: 1080 };
+  // Landscape 16:9 screen, like a fullscreened display - the fs reference box.
+  const ref = { width: 1920, height: 1080 };
 
   // 16:9 video on a 16:9 screen -> exactly fits, scale 1.
   Object.defineProperty(video, "videoWidth", { value: 1920, configurable: true });
   Object.defineProperty(video, "videoHeight", { value: 1080, configurable: true });
-  assert.ok(Math.abs(computeCoverScale(video) - 1) < 1e-9);
+  assert.ok(Math.abs(computeCoverScale(video, ref) - 1) < 1e-9);
 
   // 4:3 video on a 16:9 screen -> contain-fit = max(1920/1440, 1080/1080).
   Object.defineProperty(video, "videoWidth", { value: 640, configurable: true });
   Object.defineProperty(video, "videoHeight", { value: 480, configurable: true });
-  assert.ok(Math.abs(computeCoverScale(video) - 4 / 3) < 1e-9);
+  assert.ok(Math.abs(computeCoverScale(video, ref) - 4 / 3) < 1e-9);
 
   dom.window.close();
 });

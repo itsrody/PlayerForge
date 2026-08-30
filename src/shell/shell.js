@@ -166,6 +166,20 @@ export class Shell {
     return fs;
   }
 
+  /**
+   * Unified contextual reference box, per the PlayerForge geometry rule: in
+   * inline mode the reference is the shell's own container (the SDK container);
+   * in fullscreen mode the reference is the device screen. All geometry-
+   * dependent input logic reads this single marker instead of each consumer
+   * guessing its own container/screen. Returns { width, height }.
+   */
+  get referenceBox() {
+    if (fs) {
+      return { width: screen.width, height: screen.height };
+    }
+    return { width: this.container.clientWidth, height: this.container.clientHeight };
+  }
+
   async play() {
     return this.#media.play();
   }
