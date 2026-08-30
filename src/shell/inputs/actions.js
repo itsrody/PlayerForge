@@ -278,12 +278,13 @@ function clearFillMode(shell, state, animate = true) {
 }
 
 /**
- * Scale factor needed for the video's rendered box to cover the device screen.
- * Fill mode is fullscreen-only (pinch binding is fs-gated), so the target is
- * the physical screen, read straight off `screen.width/height` rather than the
- * window - the two coincide in fullscreen, but the intent is unambiguous here:
- * cover the whole display. Guards return 0 so the caller skips fill when the
- * video or screen size isn't known yet.
+ * Scale factor needed for the video to cover the device screen.
+ * Fill mode is fullscreen-only (pinch binding is fs-gated), and in fullscreen
+ * the reference is always the device screen itself - the video's rendered box
+ * is simply the screen. So no getBoundingClientRect (forced layout) is needed:
+ * the fill scale is pure aspect-ratio math between the video's intrinsic
+ * ratio and the physical screen. Guards return 0 so the caller skips fill when
+ * the video or screen size isn't known yet.
  */
 export function computeCoverScale(video) {
   const videoWidth = video.videoWidth;
@@ -296,13 +297,9 @@ export function computeCoverScale(video) {
   if (!screenWidth || !screenHeight) {
     return 0;
   }
-  const rect = video.getBoundingClientRect();
-  if (!rect.width || !rect.height) {
-    return 0;
-  }
   const aspect = videoWidth / videoHeight;
-  const fittedWidth = Math.min(rect.width, rect.height * aspect);
-  const fittedHeight = Math.min(rect.height, rect.width / aspect);
+  const fittedWidth = Math.min(screenWidth, screenHeight * aspect);
+  const fittedHeight = Math.min(screenHeight, screenWidth / aspect);
   return Math.max(screenWidth / fittedWidth, screenHeight / fittedHeight);
 }
 
