@@ -1,7 +1,8 @@
 import { Kernel } from "./kernel/kernel.js";
 import { registerShell } from "./shell/register.js";
 import { installMenuCommands } from "./kernel/menus.js";
-import { installContextBridge, installVideoProbe, requestFullscreenProvision } from "./shared/context.js";
+import { installContextBridge, requestFullscreenProvision } from "./shared/context.js";
+import { installVideoProbe } from "./kernel/probe.js";
 import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/sdk.js";
 import { logger } from "./shared/logger.js";
 import { shouldSkipUrl } from "./kernel/guard.js";

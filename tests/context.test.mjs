@@ -10,7 +10,6 @@ import {
   createTopFrameResponder,
   createFrameRelay,
   installContextBridge,
-  installVideoProbe,
   requestFullscreenProvision,
   createTopFrameProvisioner,
   createFrameProvisioner,
@@ -19,6 +18,7 @@ import {
   CTX_RESPONSE_TYPE,
   CTX_REQUEST_TIMEOUT_MS
 } from "../src/shared/context.js";
+import { installVideoProbe } from "../src/kernel/probe.js";
 
 const dom = (html = "", url = "https://www.youtube.com/watch?v=1") => {
   const jsdom = new JSDOM(`<!doctype html><html><head><title>Page</title></head><body>${html}</body></html>`, { url });
