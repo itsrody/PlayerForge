@@ -159,15 +159,29 @@ export function domainScore(a, b) {
  * Deterministic djb2-based id for a (domain, path, duration) triple. The
  * domain participates so identical paths on different sites can never
  * collide into one shared entry - /watch/1 on two hosts are different videos.
+ *
+ * Feeds column-separator char codes directly instead of concatenating a seed
+ * string (`${domainKey}::${path}::${duration}`): the old shape allocated the
+ * seed and hashed the same bytes - the produced id is byte-for-byte identical,
+ * so persisted resume entries keep matching, but no seed string is built.
  */
 export function hashEntry(domainKey, path, duration) {
-  const seed = `${domainKey}::${path}::${Math.round(duration)}`;
   let hash = 5381;
-  for (let i = 0; i < seed.length; i++) {
-    hash = (hash << 5) + hash + seed.charCodeAt(i);
-    hash = hash & hash;
+  for (let i = 0; i < domainKey.length; i++) {
+    hash = ((hash << 5) + hash + domainKey.charCodeAt(i)) | 0;
   }
-  return Math.abs(hash).toString(36).substring(0, 8);
+  hash = ((hash << 5) + hash + 58) | 0;
+  hash = ((hash << 5) + hash + 58) | 0;
+  for (let i = 0; i < path.length; i++) {
+    hash = ((hash << 5) + hash + path.charCodeAt(i)) | 0;
+  }
+  hash = ((hash << 5) + hash + 58) | 0;
+  hash = ((hash << 5) + hash + 58) | 0;
+  const dur = String(Math.round(duration));
+  for (let i = 0; i < dur.length; i++) {
+    hash = ((hash << 5) + hash + dur.charCodeAt(i)) | 0;
+  }
+  return (hash < 0 ? -hash : hash).toString(36).substring(0, 8);
 }
 
 /* - 3. Page context - */
