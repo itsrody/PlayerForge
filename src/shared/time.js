@@ -25,11 +25,37 @@ export function delay(fn, ms) {
   return () => clearTimeout(id);
 }
 
-/** Trailing-edge debounce. Re-calling within the window reschedules. */
+/**
+ * Trailing-edge debounce. Re-calling within the window reschedules. The
+ * returned function carries `.flush()` (run a pending call now) and
+ * `.cancel()` (drop a pending call) for teardown paths - a trailing write
+ * must land before e.g. a filter section dies.
+ */
 export function debounce(fn, ms) {
   let cancel = null;
-  return (...args) => {
+  let pendingArgs = null;
+  const debounced = (...args) => {
+    pendingArgs = args;
     cancel?.();
-    cancel = delay(() => fn(...args), ms);
+    cancel = delay(() => {
+      cancel = null;
+      fn(...pendingArgs);
+      pendingArgs = null;
+    }, ms);
   };
+  debounced.flush = () => {
+    if (!cancel) {
+      return;
+    }
+    cancel();
+    cancel = null;
+    fn(...pendingArgs);
+    pendingArgs = null;
+  };
+  debounced.cancel = () => {
+    cancel?.();
+    cancel = null;
+    pendingArgs = null;
+  };
+  return debounced;
 }

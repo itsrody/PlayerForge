@@ -185,6 +185,7 @@ test("reset restores defaults and clears filter", () => {
 
   filter.reset();
   assert.equal(video.style.filter, "none");
+  filter.destroy();
 });
 
 test("destroy clears video filter", () => {
@@ -201,7 +202,9 @@ test("destroy clears video filter", () => {
   assert.equal(video.style.filter, "");
 });
 
-test("persist writes to pf:configs", () => {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test("persist writes to pf:configs after the trailing debounce", async () => {
   cleanWrites();
   const video = makeFakeVideo();
   const panel = makeFakePanel();
@@ -209,8 +212,48 @@ test("persist writes to pf:configs", () => {
 
   const contrastStepper = panel.calls.steppers.find((s) => s.label === "Contrast");
   contrastStepper.onChange(130);
+  assert.equal(writes["pf:configs"]?.filter?.contrast, undefined,
+    "preview is instant but the storage write waits for the drag to settle");
+  await sleep(380);
   assert.equal(writes["pf:configs"]?.filter?.contrast, 130);
   filter.destroy();
+});
+
+test("rapid stepper changes coalesce into a single storage write", async () => {
+  cleanWrites();
+  const video = makeFakeVideo();
+  const panel = makeFakePanel();
+  const filter = new VideoFilter(makeFakeShell(video), panel);
+  let setCalls = 0;
+  const realSet = globalThis.GM_setValue;
+  globalThis.GM_setValue = (key, value) => {
+    setCalls += 1;
+    writes[key] = value;
+  };
+
+  const brightnessStepper = panel.calls.steppers.find((s) => s.label === "Brightness");
+  for (const value of [110, 120, 130]) {
+    brightnessStepper.onChange(value);
+  }
+  await sleep(380);
+
+  globalThis.GM_setValue = realSet;
+  assert.equal(setCalls, 1, "a drag burst settles to exactly one write");
+  assert.equal(writes["pf:configs"]?.filter?.brightness, 130);
+  filter.destroy();
+});
+
+test("destroy flushes a pending persist so the last value lands", () => {
+  cleanWrites();
+  const video = makeFakeVideo();
+  const panel = makeFakePanel();
+  const filter = new VideoFilter(makeFakeShell(video), panel);
+
+  const tintStepper = panel.calls.steppers.find((s) => s.label === "Tint");
+  tintStepper.onChange(-20);
+  assert.equal(writes["pf:configs"], undefined, "nothing persisted until flushed");
+  filter.destroy();
+  assert.equal(writes["pf:configs"]?.filter?.tint, -20);
 });
 
 test("second destroy is a no-op", () => {
@@ -223,7 +266,7 @@ test("second destroy is a no-op", () => {
   assert.equal(video.style.filter, "");
 });
 
-test("temperature persists to config", () => {
+test("temperature persists to config", async () => {
   cleanWrites();
   const video = makeFakeVideo();
   const panel = makeFakePanel();
@@ -231,11 +274,12 @@ test("temperature persists to config", () => {
 
   const tempStepper = panel.calls.steppers.find((s) => s.label === "Temp");
   tempStepper.onChange(30);
+  await sleep(380);
   assert.equal(writes["pf:configs"]?.filter?.temperature, 30);
   filter.destroy();
 });
 
-test("tint persists to config", () => {
+test("tint persists to config", async () => {
   cleanWrites();
   const video = makeFakeVideo();
   const panel = makeFakePanel();
@@ -243,11 +287,12 @@ test("tint persists to config", () => {
 
   const tintStepper = panel.calls.steppers.find((s) => s.label === "Tint");
   tintStepper.onChange(-20);
+  await sleep(380);
   assert.equal(writes["pf:configs"]?.filter?.tint, -20);
   filter.destroy();
 });
 
-test("preset apply persists all fields in a single write", () => {
+test("preset apply persists all fields in a single write", async () => {
   cleanWrites();
   const video = makeFakeVideo();
   const panel = makeFakePanel();
@@ -260,6 +305,7 @@ test("preset apply persists all fields in a single write", () => {
   };
 
   panel.calls.selects[0].onChange("Cinematic");
+  await sleep(380);
 
   globalThis.GM_setValue = realSet;
   assert.equal(setCalls, 1, "all preset fields coalesce into a single write");

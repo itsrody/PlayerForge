@@ -1,5 +1,6 @@
 import { getConfigValue, setConfigFields } from "../shared/storage.js";
 import { flashElement } from "../shared/flash.js";
+import { debounce } from "../shared/time.js";
 import { TUNING } from "./chrome/config.js";
 
 const CONFIG_PREFIX = "filter";
@@ -69,6 +70,10 @@ export class VideoFilter {
   #resetBtn = null;
   #steppers = {};
   #destroyed = false;
+  /** Trailing persist: preview applies instantly, storage lands once the drag
+   *  settles (a slider drag otherwise fires a full config write + cross-tab
+   *  live-reload echo per step). Flushed on destroy. */
+  #schedulePersist = debounce(() => this.#writePersist(), TUNING.filter.persistDebounceMs);
 
   constructor(shell, panel) {
     this.#video = shell.video;
@@ -205,6 +210,10 @@ export class VideoFilter {
   }
 
   #persist() {
+    this.#schedulePersist();
+  }
+
+  #writePersist() {
     const fields = {};
     for (const key of ALL_KEYS) {
       fields[`${CONFIG_PREFIX}.${key}`] = this.#values[key];
@@ -231,6 +240,9 @@ export class VideoFilter {
       return;
     }
     this.#destroyed = true;
+    // Land any trailing persist before the section dies - the last slider
+    // value must not be the one that never got written.
+    this.#schedulePersist.flush();
     if (this.#video) {
       this.#video.style.filter = "";
     }
