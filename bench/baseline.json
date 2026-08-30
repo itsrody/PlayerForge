@@ -1,13 +1,14 @@
 {
-  "hashEntry (djb2, domain-seeded)": 16811.950063613232,
-  "getDomainKey typical hosts": 32958.174396442184,
-  "domainsMatch boundary checks": 9450.869423076923,
-  "resume findMatch over 200 entries": 10615.164967188288,
-  "resume createEntry fresh store (hash+persist)": 53822.8417266187,
-  "findSdkForVideo full scan (Plyr tree)": 1093.5899950306443,
-  "findSdkForVideo repeat query (memo hit)": 18.00570578599377,
-  "findSdkForVideo miss (generic markup)": 305.88792987330606,
-  "timecodeToSeconds cue lines": 49800.82070707071,
-  "formatTime scrub ticks": 11120.809230769231,
-  "parseSubtitles 500-cue VTT": 271150.66964285716
+  "hashEntry (djb2, domain-seeded)": 17695.366208355368,
+  "getDomainKey typical hosts": 1613.7129173639335,
+  "domainsMatch boundary checks": 8794.695480769231,
+  "resume findMatch over 200 entries": 11844.255622265187,
+  "resume createEntry fresh store (hash+persist)": 49742.88846153846,
+  "scrub per-move dispatch (down + 30 moves)": 87729.2247918594,
+  "findSdkForVideo full scan (Plyr tree)": 1065.3004330031438,
+  "findSdkForVideo repeat query (memo hit)": 18.43819539239125,
+  "findSdkForVideo miss (generic markup)": 315.02199111880145,
+  "timecodeToSeconds cue lines": 53757.57945835462,
+  "formatTime scrub ticks": 9746.402211538461,
+  "parseSubtitles 500-cue VTT": 303415.6360424028
 }
