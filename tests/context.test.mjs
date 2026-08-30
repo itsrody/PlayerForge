@@ -6,6 +6,7 @@ import {
   domainsMatch,
   domainScore,
   hashEntry,
+  ownPageContext,
   getPageContext,
   createTopFrameResponder,
   createFrameRelay,
@@ -43,6 +44,16 @@ test("getDomainKey reduces hostnames to registrable keys", () => {
   assert.equal(getDomainKey("a.b.work"), "b");
   assert.equal(getDomainKey("a.b.tech"), "b");
   assert.equal(getDomainKey("a.b.club"), "b");
+});
+
+test("getDomainKey treats unlisted gTLDs as suffixes instead of keys", () => {
+  // No .basketball in the curated TLD lists: the walk must step up one label
+  // instead of collapsing every registrable domain under the suffix label.
+  assert.equal(getDomainKey("a.basketball"), "a");
+  assert.equal(getDomainKey("sub.a.basketball"), "a");
+  assert.equal(getDomainKey("b.basketball"), "b");
+  assert.notEqual(getDomainKey("a.basketball"), getDomainKey("b.basketball"));
+  assert.equal(getDomainKey("a.basketball"), getDomainKey("sub.a.basketball"));
 });
 
 test("hashEntry is deterministic and duration-rounding aware", () => {
@@ -159,6 +170,103 @@ test("getPageContext keeps original when title is entirely non-ASCII", async () 
   assert.equal(context.title, "فلم عربي كامل");
 });
 
+test("ownPageContext resolves context from the given window without a bridge", () => {
+  const { window: win } = dom("<p>hi</p>");
+  assert.deepEqual(ownPageContext(win), { domain: "youtube", path: "/watch", title: "Page" });
+});
+
+// jsdom's `window.top` is non-configurable, so an unreachable ancestor is
+// simulated with a Proxy whose `top` exposes only an unreadable location
+// (SecurityError), exactly like a cross-origin top from inside a frame.
+const crossOriginFrame = (win) => new Proxy(win, {
+  get(target, prop, receiver) {
+    if (prop === "top") {
+      const opaque = {};
+      Object.defineProperty(opaque, "location", {
+        get() {
+          const err = new Error("cross-origin top");
+          err.name = "SecurityError";
+          throw err;
+        }
+      });
+      return opaque;
+    }
+    return Reflect.get(target, prop, receiver);
+  }
+});
+
+test("getPageContext bridges through a parent when the top frame is unreachable", async () => {
+  const { window: win } = dom("<p>hi</p>");
+  globalThis.window = crossOriginFrame(win);
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  let requestNonce = null;
+  const originalPost = win.parent.postMessage.bind(win.parent);
+  win.parent.postMessage = (msg) => { requestNonce = msg.nonce; };
+  try {
+    const contextPromise = getPageContext();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.ok(requestNonce, "bridge request posted to the parent");
+
+    win.dispatchEvent(new win.MessageEvent("message", {
+      data: { type: CTX_RESPONSE_TYPE, nonce: requestNonce, domain: "hub", path: "/legal", title: "Legal Co" },
+      origin: "https://hub.test",
+      source: win.parent
+    }));
+
+    assert.deepEqual(await contextPromise, { domain: "hub", path: "/legal", title: "Legal Co" });
+  } finally {
+    win.parent.postMessage = originalPost;
+  }
+});
+
+test("getPageContext dedupes in-flight bridge requests across callers", async () => {
+  const { window: win } = dom();
+  globalThis.window = crossOriginFrame(win);
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  let requests = 0;
+  let requestNonce = null;
+  const originalPost = win.parent.postMessage.bind(win.parent);
+  win.parent.postMessage = (msg) => { requests++; requestNonce = msg.nonce; };
+  try {
+    const t0 = getPageContext();
+    const t1 = getPageContext();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(requests, 1, "concurrent shells share one bridge round-trip");
+
+    win.dispatchEvent(new win.MessageEvent("message", {
+      data: { type: CTX_RESPONSE_TYPE, nonce: requestNonce, domain: "hub", path: "/", title: "Hub" },
+      origin: "https://hub.test",
+      source: win.parent
+    }));
+
+    const [c0, c1] = await Promise.all([t0, t1]);
+    assert.deepEqual(c0, { domain: "hub", path: "/", title: "Hub" });
+    assert.deepEqual(c1, c0);
+  } finally {
+    win.parent.postMessage = originalPost;
+  }
+});
+
+test("getPageContext falls back to the frame's own context when no frame answers", async () => {
+  const { window: win } = dom("<p>hi</p>");
+  globalThis.window = crossOriginFrame(win);
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  const originalPost = win.parent.postMessage.bind(win.parent);
+  win.parent.postMessage = () => {}; // no ancestor ever answers
+  try {
+    const context = await getPageContext();
+    assert.deepEqual(context, ownPageContext(win), "bridgeless embeds resume from their own frame");
+  } finally {
+    win.parent.postMessage = originalPost;
+  }
+});
+
 test("top-frame responder validates shape and answers with fresh context", () => {
   const { window: win } = dom();
   globalThis.window = win;
@@ -231,20 +339,25 @@ test("top-frame responder vouches for grandchildren through readable frame trees
   assert.equal(sent, null);
 });
 
-test("frame relay forwards requests up and routes answers back down", () => {
+test("frame relay forwards own-child requests up and routes answers back down", () => {
   const { window: win } = dom();
   globalThis.window = win;
   globalThis.parent = win.parent;
   globalThis.location = win.location;
   globalThis.document = win.document;
 
+  const childFrame = win.document.createElement("iframe");
+  win.document.body.append(childFrame);
+  const child = childFrame.contentWindow;
+
   let relayedUp = null;
-  const originalPostMessage = win.parent.postMessage.bind(win.parent);
+  const originalPost = win.parent.postMessage.bind(win.parent);
   win.parent.postMessage = (msg, target) => { relayedUp = { msg, target }; };
+  const originalChildPost = child.postMessage.bind(child);
+  child.postMessage = (msg, target) => { child.sent = { msg, target }; };
 
   try {
     const relay = createFrameRelay();
-    const child = { postMessage: (msg, target) => { child.sent = { msg, target }; } };
 
     relay({ data: { type: CTX_REQUEST_TYPE, nonce: "r1" }, origin: "https://kid.test", source: child });
     assert.deepEqual(relayedUp.msg, { type: CTX_REQUEST_TYPE, nonce: "r1" });
@@ -262,9 +375,14 @@ test("frame relay forwards requests up and routes answers back down", () => {
     child.sent = null;
     relay({ data: { type: CTX_RESPONSE_TYPE, nonce: "unknown", domain: "site", path: "/", title: "" }, origin: "https://top.test", source: win.parent });
     assert.equal(child.sent, null);
-    win.parent.postMessage = originalPostMessage;
+
+    // A request from a window this document does not host is dropped entirely.
+    relayedUp = null;
+    relay({ data: { type: CTX_REQUEST_TYPE, nonce: "rx" }, origin: "https://evil.test", source: { postMessage() {} } });
+    assert.equal(relayedUp, null);
   } finally {
-    win.parent.postMessage = originalPostMessage;
+    win.parent.postMessage = originalPost;
+    child.postMessage = originalChildPost;
   }
 });
 
@@ -272,54 +390,66 @@ test("nested relays address every down-leg with its own requester origin", () =>
   // Chain under test, all origins distinct:
   //   leaf(kid) -> relayInner -> inner window -> relayOuter -> top
   // The top answer must reach the leaf with targetOrigin "kid" at the final
-  // hop even though every upstream leg carries foreign origins.
-  const makeWin = () => {
-    const { window: w } = dom();
-    const original = w.parent.postMessage.bind(w.parent);
-    let up = null;
-    w.parent.postMessage = (msg, target) => { up = { msg, target }; };
-    return { win: w, setUp: () => {
-      globalThis.window = w;
-      globalThis.parent = w.parent;
-      globalThis.location = w.location;
-      globalThis.document = w.document;
-    }, restoreUp: () => { w.parent.postMessage = original; }, get up() { return up; } };
+  // hop even though every upstream leg carries foreign origins. Windows are
+  // REAL jsdom frames (leaf inside the inner document, inner window inside the
+  // outer document) so each relay's own-child vouch legitimately passes.
+  const { window: outerWin } = dom();
+  const innerNode = outerWin.document.createElement("iframe");
+  outerWin.document.body.append(innerNode);
+  const innerWin = innerNode.contentWindow;
+  const leafNode = innerWin.document.createElement("iframe");
+  innerWin.document.body.append(leafNode);
+  const leaf = leafNode.contentWindow;
+
+  const setGlobals = (win) => {
+    globalThis.window = win;
+    globalThis.parent = win.parent;
+    globalThis.location = win.location;
+    globalThis.document = win.document;
   };
 
-  const outer = makeWin();
-  outer.setUp();
-  const relayOuter = createFrameRelay();
-
-  const inner = makeWin();
-  inner.setUp();
-  const relayInner = createFrameRelay();
+  const outerUp = [];
+  const innerUp = [];
+  const originalOuterPost = outerWin.postMessage.bind(outerWin);
+  const originalInnerPost = innerWin.postMessage.bind(innerWin);
+  outerWin.postMessage = (msg, target) => { outerUp.push({ msg, target }); };
+  innerWin.postMessage = (msg, target) => { innerUp.push({ msg, target }); };
 
   try {
-    const leaf = { postMessage: (msg, target) => { leaf.sent = { msg, target }; } };
-    const innerWindow = { postMessage: (msg, target) => { innerWindow.sent = { msg, target }; } };
+    const relayOuter = createFrameRelay();
+    const relayInner = createFrameRelay();
 
-    // Leaf asks up through the inner relay (inner globals active).
-    relayInner({ data: { type: CTX_REQUEST_TYPE, nonce: "nn" }, origin: "https://kid.test", source: leaf });
-    assert.deepEqual(inner.up.msg, { type: CTX_REQUEST_TYPE, nonce: "nn" });
+    // Leaf asks up through the inner relay (inner globals active). Vouched:
+    // leaf is a direct <iframe> child of the inner document. The hop forwards
+    // to innerWin.parent (the outer window) - captured in outerUp.
+    setGlobals(innerWin);
+    const request = { type: CTX_REQUEST_TYPE, nonce: "nn" };
+    relayInner({ data: request, origin: "https://kid.test", source: leaf });
+    assert.equal(outerUp.length, 1);
+    assert.deepEqual(outerUp[0].msg, request);
 
-    // Inner window's message arrives at the outer relay - reactivate the
-    // outer globals first, since relays read window.parent per event.
-    outer.setUp();
-    relayOuter({ data: inner.up.msg, origin: "https://inner.test", source: innerWindow });
-    assert.ok(outer.up);
+    // Inner window's message arrives at the outer relay - reactivate the outer
+    // globals first, since relays read window.parent per event.
+    setGlobals(outerWin);
+    relayOuter({ data: request, origin: "https://inner.test", source: innerWin });
+    assert.equal(outerUp.length, 2, "outer relay forwarded to its own parent");
 
     // Top answers; each relay routes down with the origin it stored per hop.
     const answer = { type: CTX_RESPONSE_TYPE, nonce: "nn", domain: "site", path: "/", title: "" };
-    relayOuter({ data: answer, origin: "https://top.test", source: outer.win.parent });
-    assert.equal(innerWindow.sent.target, "https://inner.test");
+    relayOuter({ data: answer, origin: "https://top.test", source: outerWin.parent });
+    assert.equal(innerUp.length, 1);
+    assert.equal(innerUp[0].target, "https://inner.test");
 
-    inner.setUp();
-    relayInner({ data: answer, origin: "https://inner.test", source: inner.win.parent });
+    setGlobals(innerWin);
+    const originalLeafPost = leaf.postMessage.bind(leaf);
+    leaf.postMessage = (msg, target) => { leaf.sent = { msg, target }; };
+    relayInner({ data: answer, origin: "https://inner.test", source: innerWin.parent });
     assert.equal(leaf.sent.target, "https://kid.test");
     assert.deepEqual(leaf.sent.msg, answer);
+    leaf.postMessage = originalLeafPost;
   } finally {
-    inner.restoreUp();
-    outer.restoreUp();
+    innerWin.postMessage = originalInnerPost;
+    outerWin.postMessage = originalOuterPost;
   }
 });
 
@@ -445,6 +575,12 @@ test("requestFullscreenProvision posts a provisioning request to the parent", ()
   try {
     requestFullscreenProvision();
     assert.deepEqual(sent.msg, { type: FS_REQUEST_TYPE });
+    // Granting is a one-shot, idempotent operation per frame: repeat calls
+    // must not replay the hops.
+    sent = null;
+    requestFullscreenProvision();
+    requestFullscreenProvision();
+    assert.equal(sent, null);
   } finally {
     win.parent.postMessage = original;
   }

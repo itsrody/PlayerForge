@@ -75,6 +75,13 @@ export function getDomainKey(hostname) {
     if (parts[idx] && multiPartTlds.has(parts[idx])) {
       idx--;
     }
+    // Suffixes missing from the curated lists (e.g. .basketball) never moved
+    // `idx`, so without this the suffix LABEL itself would become the key -
+    // collapsing every registrable domain under one unlisted gTLD into a single
+    // entry. Assume the unclassified last label is a TLD and step up one more.
+    if (idx === parts.length - 1 && parts.length >= 2) {
+      idx--;
+    }
     key = parts[Math.max(0, idx)] || "";
   }
   domainKeyCache.set(hostname, key);
@@ -89,15 +96,17 @@ function boundaryContains(a, b) {
 
 /** Reusable distance rows for the bounded Levenshtein below. Domain keys are
  *  short and ranking scans many candidates, so two scratch rows equal to the
- *  longest operand avoid per-call allocation on the hot ranking path.
+ *  shorter operand avoid per-call allocation on the hot ranking path - and
+ *  because operands are swapped to that axis, alternating candidate lengths
+ *  reuse one small pair instead of reallocating per entry.
  */
 let distRows = null;
 let distRowLen = 0;
 
-function ensureDistRows(lenB) {
-  if (!distRows || distRowLen < lenB + 1) {
-    distRows = [new Int32Array(lenB + 1), new Int32Array(lenB + 1)];
-    distRowLen = lenB + 1;
+function ensureDistRows(len) {
+  if (!distRows || distRowLen < len + 1) {
+    distRows = [new Int32Array(len + 1), new Int32Array(len + 1)];
+    distRowLen = len + 1;
   }
 }
 
@@ -107,18 +116,28 @@ function boundedLevenshtein(a, b, max = Infinity) {
   if (Math.abs(lenA - lenB) > max) {
     return max + 1;
   }
-  ensureDistRows(lenB);
+  // Levenshtein is symmetric in its operands: iterate the longer string on the
+  // row axis and keep the SHORTER one as the columns, so scratch-row sizing is
+  // bound by the shorter operand (and the early-exit band stays exact).
+  let rows = a;
+  let cols = b;
+  if (lenB > lenA) {
+    rows = b;
+    cols = a;
+  }
+  const m = cols.length;
+  ensureDistRows(m);
   let prev = distRows[0];
   let curr = distRows[1];
-  for (let j = 0; j <= lenB; j++) {
+  for (let j = 0; j <= m; j++) {
     prev[j] = j;
   }
-  for (let i = 1; i <= lenA; i++) {
+  for (let i = 1; i <= rows.length; i++) {
     curr[0] = i;
     let rowMin = i;
-    const chA = a[i - 1];
-    for (let j = 1; j <= lenB; j++) {
-      const cost = chA === b[j - 1] ? 0 : 1;
+    const ch = rows[i - 1];
+    for (let j = 1; j <= m; j++) {
+      const cost = ch === cols[j - 1] ? 0 : 1;
       const v = cost === 0 ? prev[j - 1] : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
       curr[j] = v;
       if (v < rowMin) {
@@ -130,7 +149,7 @@ function boundedLevenshtein(a, b, max = Infinity) {
     }
     [prev, curr] = [curr, prev];
   }
-  return prev[lenB];
+  return prev[m];
 }
 
 /** Strict equality or label-boundary relation between two domain keys. */
@@ -226,28 +245,51 @@ function stripNonAscii(raw) {
   return s || raw;
 }
 
+/** Reuse one in-flight bridge request across the shells sharing this frame
+ *  (a page hosting several videos boots one shell per video, so without this
+ *  each would round-trip the parent chain to resolve the same context). The
+ *  memo is cleared on settle, never cached: SPA path changes re-resolve.
+ */
+let frameContextBridge = null;
+
+/** Page context resolved from THIS window, without any bridge: the direct
+ *  answer for a top frame, and the fallback for a frame with no reachable
+ *  parent chain (also makes {domain, path, title} testable in isolation).
+ */
+export function ownPageContext(win = window) {
+  return {
+    domain: getDomainKey(win.location.hostname),
+    path: win.location.pathname,
+    title: stripNonAscii(win.document?.title ?? "")
+  };
+}
+
 /**
  * Resolve the page context ({domain, path, title}) this shell belongs to:
  * read the top frame directly when possible, otherwise ask up the parent
- * chain through the frame bridge.
+ * chain through the frame bridge. When no frame answers (bridgeless embed),
+ * fall back to this frame's own context instead of skipping resume entirely.
  */
 export async function getPageContext() {
   if (window.top === window) {
-    return {
-      domain: getDomainKey(location.hostname),
-      path: location.pathname,
-      title: stripNonAscii(document.title)
-    };
+    return ownPageContext();
   }
   try {
-    const top = window.top;
-    return {
-      domain: getDomainKey(top.location.hostname),
-      path: top.location.pathname,
-      title: stripNonAscii(top.document?.title ?? "")
-    };
+    return ownPageContext(window.top);
   } catch {
-    return requestPageContextFromParent();
+    if (!frameContextBridge) {
+      frameContextBridge = requestPageContextFromParent();
+      frameContextBridge.then(
+        () => {
+          frameContextBridge = null;
+        },
+        () => {
+          frameContextBridge = null;
+        }
+      );
+    }
+    const bridged = await frameContextBridge;
+    return bridged ?? ownPageContext();
   }
 }
 
@@ -351,6 +393,14 @@ export function createFrameRelay() {
       return;
     }
     if (data.type === CTX_REQUEST_TYPE && typeof data.nonce === "string" && event.source) {
+      // Only accept from a DIRECT <iframe> child of this document - the same
+      // vouch the fullscreen provisioner demands. A relay may only be asked by
+      // frames it spawned: anything else (sibling, parent, unhosted window)
+      // gets dropped instead of being forwarded up the chain. contentWindow
+      // stays readable across origins, so cross-origin children still pass.
+      if (!iframeElementForWindow(event.source)) {
+        return;
+      }
       // Remember who asked AND from which origin: the answer must travel back
       // down addressed to the requester's origin - this hop's upstream origin
       // would get the delivery dropped whenever the two differ.
@@ -442,10 +492,16 @@ function grantFullscreen(frameElement) {
 /**
  * Sender side, called by a video-bearing frame: request fullscreen provisioning
  * (allowfullscreen + allow="fullscreen") on every ancestor iframe up the chain.
- * Cheap and safe to repeat; the frame may or may not be top-level (a top-level
- * video needs no provisioning - callers should still guard).
+ * Granting is a one-shot, idempotent operation per frame (ancestors install
+ * their provisioners at document start, well before the first request made
+ * here), so further requests would only replay the same hops - latch it.
  */
+let fullscreenProvisionSent = false;
 export function requestFullscreenProvision() {
+  if (fullscreenProvisionSent) {
+    return;
+  }
+  fullscreenProvisionSent = true;
   window.parent?.postMessage({ type: FS_REQUEST_TYPE }, "*");
 }
 
