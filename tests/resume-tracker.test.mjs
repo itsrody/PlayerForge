@@ -9,6 +9,7 @@ globalThis.GM_setValue = (key, value) => {
 };
 
 const { ResumeTracker } = await import("../src/shell/resume.js");
+const { TUNING } = await import("../src/shell/chrome/config.js");
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -144,5 +145,79 @@ test("autoplaying video seeks immediately without waiting for canplay", async ()
   await flush();
   assert.deepEqual(shell.seeks, [100]);
   assert.equal(shell.toasts.length, 1);
+  tracker.destroy();
+});
+
+test("qualifying timeupdate persists progress; sub-epsilon moves do not", async () => {
+  writes["pf:resume"] = {
+    version: 1,
+    entries: [{ id: "aaa", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 42, createdAt: 0, updatedAt: Date.now() }]
+  };
+  const { dom, video, shell } = makeEnv(600);
+  // Floor passes immediately so the test isolates the epsilon gate.
+  TUNING.resume.saveIntervalMs = 0;
+  shell.paused = false;
+  shell.currentTime = 42;
+  const tracker = new ResumeTracker(shell);
+  await flush();
+  await flush();
+  await flush();
+  const stored = () => writes["pf:resume"].entries[0].resume;
+
+  shell.currentTime = 45; // +3 from last save: exactly at epsilon, qualifies
+  video.dispatchEvent(new dom.window.Event("timeupdate"));
+  assert.equal(stored(), 45, "3s of motion persists");
+
+  shell.currentTime = 46; // +1 since the last save: under epsilon, skipped
+  video.dispatchEvent(new dom.window.Event("timeupdate"));
+  assert.equal(stored(), 45, "sub-epsilon drift does not persist");
+  tracker.destroy();
+});
+
+test("wall floor gates incremental timeupdate saves but never the pause flush", async () => {
+  writes["pf:resume"] = {
+    version: 1,
+    entries: [{ id: "bbb", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
+  };
+  const { dom, video, shell } = makeEnv(600);
+  // The real 60s floor: elapsed wall time in a test never reaches it.
+  TUNING.resume.saveIntervalMs = 60000;
+  shell.paused = false;
+  shell.currentTime = 0;
+  const tracker = new ResumeTracker(shell);
+  await flush();
+  await flush();
+  await flush();
+  const stored = () => writes["pf:resume"].entries[0].resume;
+
+  shell.currentTime = 10; // far past epsilon, but inside the wall floor
+  video.dispatchEvent(new dom.window.Event("timeupdate"));
+  assert.equal(stored(), 0, "incremental save blocked by the wall floor");
+
+  shell.paused = true;
+  video.dispatchEvent(new dom.window.Event("pause"));
+  assert.equal(stored(), 10, "pause flush bypasses the wall floor");
+  tracker.destroy();
+});
+
+test("already-playing video persists on its first qualifying timeupdate - no interval", async () => {
+  writes["pf:resume"] = {
+    version: 1,
+    entries: [{ id: "ccc", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
+  };
+  const { dom, video, shell } = makeEnv(600);
+  TUNING.resume.saveIntervalMs = 0;
+  shell.paused = false;
+  shell.currentTime = 0;
+  const tracker = new ResumeTracker(shell);
+  await flush();
+  await flush();
+  await flush();
+  const stored = () => writes["pf:resume"].entries[0].resume;
+  assert.equal(stored(), 0);
+
+  shell.currentTime = 5;
+  video.dispatchEvent(new dom.window.Event("timeupdate"));
+  assert.equal(stored(), 5, "the media clock covers autoplay without a timer");
   tracker.destroy();
 });

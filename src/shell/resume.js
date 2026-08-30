@@ -247,8 +247,8 @@ export class ResumeStore {
 /**
  * Shell-owned playback tracker: persists progress per (domain, path, duration)
  * and resumes where the user left off, with a "Start over" toast action.
- * Saves are event-driven: a dynamic setInterval gated on play/pause plus
- * an immediate flush on pause and destroy.
+ * Saves are media-clock driven: a passive `timeupdate` listener (which only
+ * fires while playback advances) plus an immediate flush on pause and destroy.
  */
 export class ResumeTracker {
   #shell;
@@ -257,7 +257,8 @@ export class ResumeTracker {
   /** Every media listener this tracker attaches dies with this signal. */
   #scope = new AbortController();
   #lastSavedPosition = 0;
-  #progressTimer = 0;
+  /** Wall-clock floor for persists - keeps the write cadence bounded. */
+  #lastSavedWall = 0;
   #destroyed = false;
 
   constructor(shell) {
@@ -360,6 +361,9 @@ export class ResumeTracker {
       return;
     }
     this.#lastSavedPosition = currentTime;
+    // Every persist resets the cadence floor so the timeupdate path's
+    // wall gate starts counting from real writes (including flushes).
+    this.#lastSavedWall = Date.now();
     if (this.#entry.duration > 0 && currentTime / this.#entry.duration >= TUNING.resume.completionRatio) {
       this.#entry.resume = 0;
       this.#store.updateResume(this.#entry.id, 0);
@@ -370,34 +374,30 @@ export class ResumeTracker {
 
   #startProgressWatch(shell) {
     const video = shell.video;
+    const { signal } = this.#scope;
+    // Seed the floor at watch start so the first qualifying persist lands where
+    // the old interval's first tick used to - byte-identical cadence. The
+    // position gate is seeded from the saved position earlier in #init.
+    this.#lastSavedWall = Date.now();
 
+    // `timeupdate` fires while the playhead advances (~4 Hz continuous), so the
+    // media clock itself is the save crank: no interval to keep alive, and a
+    // video that is "playing" but stalled simply stops writing. Position alone
+    // does not bound write frequency - a fast-forward or scrub trips the
+    // epsilon every ~3 s of content - so the wall floor keeps the incremental
+    // cadence where the old interval put it (≤1 write per saveIntervalMs). The
+    // `pause` flush below is fully immediate, so the "pause to pause" contract
+    // still lands the final position regardless of the floor.
     const saveIfDue = () => {
-      if (!shell.paused) {
-        this.#saveProgress(shell.currentTime);
-      }
-    };
-
-    const onPlay = () => {
-      if (!this.#progressTimer) {
-        this.#progressTimer = setInterval(saveIfDue, TUNING.resume.saveIntervalMs);
-      }
-    };
-
-    const onPause = () => {
-      if (this.#progressTimer) {
-        clearInterval(this.#progressTimer);
-        this.#progressTimer = 0;
+      if (shell.paused || Date.now() - this.#lastSavedWall < TUNING.resume.saveIntervalMs) {
+        return;
       }
       this.#saveProgress(shell.currentTime);
     };
-
-    video.addEventListener("play", onPlay, { signal: this.#scope.signal, passive: true });
-    video.addEventListener("pause", onPause, { signal: this.#scope.signal, passive: true });
-
-    // Catch autoplay or already-playing videos.
-    if (!video.paused) {
-      this.#progressTimer = setInterval(saveIfDue, TUNING.resume.saveIntervalMs);
-    }
+    video.addEventListener("timeupdate", saveIfDue, { signal, passive: true });
+    video.addEventListener("pause", () => {
+      this.#saveProgress(shell.currentTime);
+    }, { signal, passive: true });
   }
 
   /** Clipboard bridge passthroughs (see ResumeStore exportData/importData). */
@@ -422,10 +422,6 @@ export class ResumeTracker {
   }
 
   destroy() {
-    if (this.#progressTimer) {
-      clearInterval(this.#progressTimer);
-      this.#progressTimer = 0;
-    }
     this.#scope.abort();
     if (this.#entry && !this.#destroyed) {
       this.#saveProgress(this.#shell?.currentTime || 0);
