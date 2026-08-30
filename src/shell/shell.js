@@ -92,20 +92,13 @@ export class Shell {
     logger.log("shell", `Shell "${this.sdk.name}" constructed`);
   }
 
+  /** Read-only state views; all writes route through `shell.media`. */
   get volume() {
     return this.video.volume;
   }
 
-  set volume(value) {
-    this.video.volume = Math.max(0, Math.min(1, value));
-  }
-
   get currentTime() {
     return this.video.currentTime;
-  }
-
-  set currentTime(value) {
-    this.video.currentTime = value;
   }
 
   get duration() {
@@ -116,44 +109,12 @@ export class Shell {
     return this.video.playbackRate;
   }
 
-  set playbackRate(value) {
-    this.video.playbackRate = value;
-  }
-
   get muted() {
     return this.video.muted;
   }
 
-  set muted(value) {
-    this.video.muted = value;
-  }
-
   get paused() {
     return this.video.paused;
-  }
-
-  get playing() {
-    return !this.video.paused && !this.video.ended && this.video.readyState > 2;
-  }
-
-  get ended() {
-    return this.video.ended;
-  }
-
-  get buffered() {
-    return this.video.buffered;
-  }
-
-  get seekable() {
-    return this.video.seekable;
-  }
-
-  get readyState() {
-    return this.video.readyState;
-  }
-
-  get textTracks() {
-    return this.video.textTracks;
   }
 
   /**
@@ -180,39 +141,6 @@ export class Shell {
     return { width: this.container.clientWidth, height: this.container.clientHeight };
   }
 
-  async play() {
-    return this.#media.play();
-  }
-
-  pause() {
-    this.#media.pause();
-  }
-
-  togglePlay() {
-    return this.#media.togglePlay();
-  }
-
-  stop() {
-    this.#media.stop();
-  }
-
-  toggleMute() {
-    this.#media.toggleMute();
-  }
-
-  seek(time) {
-    this.#media.seekTo(time);
-  }
-
-  /** Continuous drag variant of seek: canonical clamp, no command event. */
-  scrubTo(time) {
-    this.#media.scrubTo(time);
-  }
-
-  skip(delta) {
-    this.#media.skip(delta);
-  }
-
   get shellDom() {
     return this.#shellDom;
   }
@@ -235,10 +163,6 @@ export class Shell {
       event.stopPropagation();
     };
     this.container.addEventListener("contextmenu", handler, { capture: true, signal: this.#scope.signal });
-  }
-
-  focus() {
-    this.shellHost?.focus();
   }
 
   /** Keep focus on the shell host when pointer interactions happen inside it. */
@@ -266,20 +190,6 @@ export class Shell {
 
   hideToast(group) {
     this.#toasts?.hide(group);
-  }
-
-  get toasts() {
-    return this.#toasts;
-  }
-
-  /** Whole-store clipboard export (JSON) for the Data panel section. */
-  exportResume() {
-    return this.#resume?.exportResume() ?? null;
-  }
-
-  /** Merge pasted JSON into the resume store; returns counts or null. */
-  importResume(text) {
-    return this.#resume?.importResume(text) ?? null;
   }
 
   /** The command plane, for interaction layers that issue media commands. */

@@ -328,7 +328,7 @@ export class ResumeTracker {
           return;
         }
         seeked = true;
-        shell.seek(savedPosition);
+        shell.media.seekTo(savedPosition);
         shell.toast({
           icon: "resume",
           text: `Resumed at ${formatTime(savedPosition)}`,
@@ -339,7 +339,7 @@ export class ResumeTracker {
             title: "Start over",
             onClick: () => {
               this.#lastSavedPosition = 0;
-              shell.seek(0);
+              shell.media.seekTo(0);
             }
           }]
         });

@@ -26,18 +26,22 @@ function makeEnv(duration) {
   if (duration != null) {
     Object.defineProperty(video, "duration", { value: duration, configurable: true });
   }
+  const seeks = [];
+  const toasts = [];
   const shell = {
     video,
     currentTime: 0,
     paused: true,
-    seeks: [],
-    toasts: [],
-    seek(time) {
-      this.seeks.push(time);
-      video.currentTime = time;
+    seeks,
+    toasts,
+    media: {
+      seekTo(time) {
+        seeks.push(time);
+        video.currentTime = time;
+      }
     },
     toast(payload) {
-      this.toasts.push(payload);
+      toasts.push(payload);
     }
   };
   return { dom, video, shell };

@@ -176,7 +176,7 @@ function performSkip(shell, state, direction) {
   }, TUNING.gestures.streakResetMs);
 
   const step = getSetting("controller.stepSeek") * state.streakCount;
-  shell.skip(direction === "right" ? step : -step);
+  shell.media.skip(direction === "right" ? step : -step);
   shell.toast({
     icon: direction === "right" ? "right-arrows" : "left-arrows",
     text: `${step}s`,
@@ -402,7 +402,7 @@ export function attachInputActions(shell, host, signal) {
     const t = Math.min(1, (v / SCRUB_KNEE_PX_PER_S) ** SCRUB_EXPONENT);
     const gain = state.scrubSlowGain + (state.scrubFastGain - state.scrubSlowGain) * t;
     const deltaSeconds = detail.dx * gain * state.scrubSensitivity;
-    shell.scrubTo(shell.currentTime + deltaSeconds);
+    shell.media.scrubTo(shell.currentTime + deltaSeconds);
     const instantDirection = detail.dx > 1 ? 1 : detail.dx < -1 ? -1 : 0;
     state.scrubDirectionMomentum = state.scrubDirectionMomentum * 0.6 + instantDirection * 0.4;
 
@@ -483,7 +483,7 @@ export function attachInputActions(shell, host, signal) {
     if (detail.zone === "left-edge" || detail.zone === "right-edge") {
       performSkip(shell, stateFor(shell), detail.zone === "left-edge" ? "left" : "right");
     } else if (detail.zone === "screen") {
-      shell.togglePlay();
+      shell.media.togglePlay();
     }
   }, { signal });
 
