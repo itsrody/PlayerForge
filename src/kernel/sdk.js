@@ -46,25 +46,19 @@ export const MIN_VIDEO_WIDTH = 100;
 export const MIN_VIDEO_HEIGHT = 60;
 
 /**
- * Ancestry of a node toward its document, crossing open shadow boundaries:
- * light-DOM parents continue past a shadow root to its host. Yields element
- * nodes only.
- */
-function* composedAncestry(start) {
-  for (let node = start; node; ) {
-    if (node.nodeType === 1) {
-      yield node;
-    }
-    node = node.parentNode ?? node.host ?? null;
-  }
-}
-
-/**
  * Repeat-query memo: discovery calls findSdkForVideo + findContainer on the
  * same element back to back, and SPA frameworks re-ask about surviving
  * videos. WeakMap keys die with their videos - session-only, never persisted.
  */
 const matchCache = new WeakMap();
+
+/**
+ * Reusable composed-ancestry scratch: the match loop is fully synchronous and
+ * never lets the array escape (callers keep only `el`/`record`/`hops`, never
+ * the chain itself), so one array serves every full-scan instead of allocating
+ * a fresh one per video. `len` is the filled length each pass.
+ */
+const chain = [];
 
 function matchSdk(video) {
   const cached = matchCache.get(video);
@@ -76,14 +70,25 @@ function matchSdk(video) {
   // again per hit to count hops. Chain index IS the hop count, so one pass
   // serves every anchor. Selection semantics unchanged: fewest hops wins,
   // ties keep registry order then anchor order (strict < keeps the first).
-  const chain = [];
-  for (const node of composedAncestry(video)) {
-    chain.push(node);
+  //
+  // Flat indexed loops instead of forEach/generator closures: each full-scan
+  // (cache-miss) call previously allocated an arrow closure per record and
+  // per anchor. Indexed for-loops are the JIT's most reliably optimized shape
+  // - no closure allocations on the discovery hot path.
+  let len = 0;
+  for (let node = video; node; ) {
+    if (node.nodeType === 1) {
+      chain[len++] = node;
+    }
+    node = node.parentNode ?? node.host ?? null;
   }
   let best = null;
-  REGISTRY.forEach((record) => {
-    record.anchors.forEach((anchor) => {
-      for (let hop = 0; hop < chain.length; hop++) {
+  for (let r = 0; r < REGISTRY.length; r++) {
+    const record = REGISTRY[r];
+    const anchors = record.anchors;
+    for (let a = 0; a < anchors.length; a++) {
+      const anchor = anchors[a];
+      for (let hop = 0; hop < len; hop++) {
         if (chain[hop].matches(anchor)) {
           if (!best || hop < best.hops) {
             best = { record, el: chain[hop], hops: hop };
@@ -91,8 +96,8 @@ function matchSdk(video) {
           break;
         }
       }
-    });
-  });
+    }
+  }
   if (best) {
     matchCache.set(video, best);
   }
