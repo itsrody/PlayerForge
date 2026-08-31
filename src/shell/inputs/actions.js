@@ -326,6 +326,10 @@ function clearFillMode(shell, state, animate = true) {
       video.style.willChange = "";
       video.style.transition = "";
     }
+    // Owned on fill entry (see the pinch binding): hand the element box back to
+    // the embed's original object-fit once the transform is released.
+    video.style.objectFit = state.priorObjectFit || "";
+    state.priorObjectFit = "";
   }
 }
 
@@ -333,10 +337,13 @@ function clearFillMode(shell, state, animate = true) {
  * Scale factor needed for the video to cover the given reference box.
  * Fill mode is fullscreen-only (pinch binding is fs-gated), and the reference
  * (passed from `shell.referenceBox`) is the device screen in fs - the video's
- * rendered box is simply the screen. No getBoundingClientRect (forced layout)
- * is needed: the fill scale is pure aspect-ratio math between the video's
- * intrinsic ratio and the reference box. Guards return 0 so the caller skips
- * fill when the video size or reference isn't known yet.
+ * rendered box is simply the screen. The scale models the element's content
+ * letterboxed by its own ratio (object-fit: contain), which the fill binding
+ * (not the embed's possibly-'fill' default) is responsible for setting before
+ * applying this scale. No getBoundingClientRect (forced layout) is needed: the
+ * fill scale is pure aspect-ratio math between the video's intrinsic ratio and
+ * the reference box. Guards return 0 so the caller skips fill when the video
+ * size or reference isn't known yet.
  */
 export function computeCoverScale(video, ref) {
   const videoWidth = video.videoWidth;
@@ -567,6 +574,11 @@ export function attachInputActions(shell, host, signal) {
         return;
       }
       gestureHaptic("pinch");
+      // Own object-fit: computeCoverScale models the element content letterboxed
+      // by its own ratio (contain). The embed may use the UA default 'fill', so
+      // normalize to 'contain' here; clearFillMode restores the prior value.
+      state.priorObjectFit = video.style.objectFit;
+      video.style.objectFit = "contain";
       easeTransformTo(video, `scale(${scale})`);
       state.fillActive = true;
       shell.toast({

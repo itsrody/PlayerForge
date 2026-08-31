@@ -6,7 +6,7 @@ globalThis.GM_getValue = (key, fallback) => fallback;
 globalThis.GM_setValue = () => {};
 
 const { InputForge } = await import("../src/shell/inputs/forge.js");
-const { GESTURE_EVENTS, computeCoverScale } = await import("../src/shell/inputs/actions.js");
+const { GESTURE_EVENTS, computeCoverScale, attachInputActions } = await import("../src/shell/inputs/actions.js");
 const { initFsGate, setFullscreen } = await import("./fs-gate.mjs");
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -451,6 +451,39 @@ test("swipe-down drag promotes a compositor layer, released on restore", () => {
     "restore released the compositor layer once the ease settled"
   );
   controller.destroy();
+  dom.window.close();
+});
+
+test("fill pinch owns object-fit: contain and restores it on clear", () => {
+  const { dom, video, zone, host } = makeEnv();
+  stubFullscreen(dom, true);
+  Object.defineProperty(video, "videoWidth", { value: 1920, configurable: true });
+  Object.defineProperty(video, "videoHeight", { value: 1080, configurable: true });
+  const shell = {
+    video,
+    sdk: { name: "test" },
+    referenceBox: { width: 1080, height: 2400 },
+    toast() {}
+  };
+  const ac = new AbortController();
+  attachInputActions(shell, host, ac.signal);
+
+  // Embed had no inline object-fit; the UA default is 'fill'. On fill entry
+  // PlayerForge must normalize to 'contain' (computeCoverScale models that).
+  assert.equal(video.style.objectFit, "", "embed object-fit untouched before fill");
+  host.dispatchEvent(new dom.window.CustomEvent(GESTURE_EVENTS.pinch, {
+    detail: { direction: "out" }
+  }));
+  assert.equal(video.style.objectFit, "contain", "fill owns object-fit: contain");
+  assert.match(video.style.transform, /scale\(/, "cover scale applied to the element");
+
+  // Pinch-in clears fill and hands the embed's object-fit back.
+  host.dispatchEvent(new dom.window.CustomEvent(GESTURE_EVENTS.pinch, {
+    detail: { direction: "in" }
+  }));
+  assert.equal(video.style.objectFit, "", "object-fit restored on clear");
+
+  ac.abort();
   dom.window.close();
 });
 
