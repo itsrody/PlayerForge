@@ -600,12 +600,12 @@ export class SettingsPanel {
     // Block every native pointer/touch/click event from crossing the panel
     // boundary into the SDK. The backdrop covers the rest of the shell, but
     // clicks that land ON the panel itself would otherwise bubble up through
-    // the composed path to page-level handlers. capture:true so we intercept
-    // before any SDK listener sees them.
+    // the composed path to page-level handlers. Bubble phase so panel controls
+    // (tabs, buttons) receive events first.
     for (const type of ["pointerdown", "pointerup", "click", "touchstart", "touchend"]) {
       this.#root.addEventListener(type, (event) => {
         event.stopPropagation();
-      }, { signal, capture: true });
+      }, { signal });
     }
 
     // Any fullscreen transition dismisses the panel; the shared transition
