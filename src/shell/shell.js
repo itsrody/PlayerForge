@@ -6,12 +6,13 @@ import { ResumeTracker } from "./resume.js";
 import { SubtitlesSection } from "./subtitles/section.js";
 import { VideoFilter } from "./filter.js";
 import { SettingsPanel } from "./chrome/panel.js";
-import { addSettingsSection } from "./chrome/config.js";
+import { addSettingsSection, getSetting } from "./chrome/config.js";
 import { TUNING } from "./chrome/config.js";
 import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
 import { SHELL_MARKER, warmStyles, injectShell, watchShellHost } from "./chrome/inject.js";
+import { ensureViewportFitCover } from "./chrome/viewport.js";
 import { requestFullscreenProvision } from "../shared/context.js";
 
 const VIDEO_EVENTS = [
@@ -124,10 +125,14 @@ export class Shell {
 
   /**
    * Unified contextual reference box, per the PlayerForge geometry rule: in
-   * inline mode the reference is the shell's own container (the SDK container);
-   * in fullscreen mode the reference is the device screen. All geometry-
-   * dependent input logic reads this single marker instead of each consumer
-   * guessing its own container/screen. Returns { width, height }.
+   * inline mode the reference is the shell's own container (the SDK container).
+   * Fullscreen reference box used for fill-mode cover scaling and scrub
+   * normalization. With the edge-to-edge bypass (see viewport.js) the
+   * fullscreen iframe draws behind the cutout edge-to-edge, so the SDK's
+   * rendered box IS the physical screen - `screen.width/height`. No env-based
+   * safe-rect narrowing is needed (or possible: env(safe-area-inset-*) does
+   * not resolve inside iframes, Chromium #467970444) - the bypass already puts
+   * the frame at the screen. Returns { width, height }.
    */
   get referenceBox() {
     if (fs) {
@@ -200,6 +205,14 @@ export class Shell {
     // so shell construction never blocks on the @resource fetch. A warm
     // background upgrade later propagates through the same shared sheet.
     warmStyles();
+    // Document-level (idempotent): make the SDK's own viewport report
+    // viewport-fit=cover so the fullscreen frame can draw behind the Android
+    // cutout edge-to-edge (see viewport.js). Gated by fullscreen.edgeToEdge:
+    // when disabled we leave the iframe at the default (Chrome letterboxes to
+    // the safe area itself) and fill simply covers the letterboxed frame.
+    if (getSetting("fullscreen.edgeToEdge") !== false) {
+      ensureViewportFitCover();
+    }
     this.#shellDom = injectShell(this.container);
     if (!this.#shellDom) {
       logger.error("shell", "Failed to inject shell DOM");

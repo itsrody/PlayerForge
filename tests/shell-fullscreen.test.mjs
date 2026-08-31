@@ -8,6 +8,7 @@ globalThis.GM_setValue = () => {};
 const { Shell } = await import("../src/shell/shell.js");
 const { initFsGate, setFullscreen } = await import("./fs-gate.mjs");
 const { subscribeFullscreen } = await import("../src/shared/shadow.js");
+const { getSetting, setSetting } = await import("../src/shell/chrome/config.js");
 
 async function makeShell() {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", {
@@ -137,5 +138,18 @@ test("rejected fullscreen while already fullscreen shows no hint", async () => {
 
   const toasts = shell.shellDom.hudLayer.querySelectorAll("pf-toast.pf-visible");
   assert.equal(toasts.length, 0, "no blocked hint while already fullscreen");
+  teardown();
+});
+
+test("referenceBox in fullscreen is the physical screen (edge-to-edge bypass)", async () => {
+  const { dom, shell, container, teardown } = await makeShell();
+  globalThis.screen = { width: 1080, height: 2400 };
+  // Post-bypass (viewport-fit=cover injection): the fullscreen iframe fills
+  // the whole screen behind the cutout, so the reference is screen.* - no
+  // env-based safe-rect narrowing applies inside the iframe.
+  setFullscreen(dom, container);
+  assert.deepEqual(shell.referenceBox, { width: 1080, height: 2400 });
+  setFullscreen(dom, null);
+  delete globalThis.screen;
   teardown();
 });
