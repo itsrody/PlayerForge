@@ -454,11 +454,11 @@ function isOwnFrame(source) {
 /* - 4b. Fullscreen provisioning - */
 
 /**
- * Firefox requires `allowfullscreen`/`allow="fullscreen"` on EVERY ancestor
- * iframe for requestFullscreen() to succeed in a nested frame (bug 1608358).
- * A video parked behind a cross-origin iframe therefore silently loses
- * fullscreen - and with it PlayerForge's fullscreen-gated gestures - unless we
- * provision it. The video frame pushes a `pf:req-fullscreen` hop up the chain;
+ * Browsers require `allowfullscreen`/`allow="fullscreen"` on EVERY ancestor
+ * iframe for requestFullscreen() to succeed in a nested frame. A video parked
+ * behind a cross-origin iframe therefore silently loses fullscreen - and with
+ * it PlayerForge's fullscreen-gated gestures - unless we provision it. The
+ * video frame pushes a `pf:req-fullscreen` hop up the chain;
  * each frame grants `allowfullscreen` on the DIRECT child iframe it received
  * the request from (event.source is always the immediate child, readable even
  * across origins), then forwards to its own parent. Granting is scoped to that

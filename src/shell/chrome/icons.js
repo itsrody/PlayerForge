@@ -79,12 +79,23 @@ function entryFor(canonical, doc) {
   let entry = cache.get(canonical);
   if (!entry || entry.doc !== doc) {
     const markup = ICONS[canonical];
-    const holder = doc.createElement("div");
-    holder.innerHTML = markup;
-    const el = holder.firstElementChild;
-    if (el) {
-      holder.removeChild(el);
-    }
+    // Parse the static SVG markup via DOMParser, never innerHTML: on MV3 /
+    // strict-CSP sites that enforce Trusted Types, innerHTML would be blocked
+    // at runtime. The markup is a fixed, trusted build-time string - not user
+    // input - so parsing it into a detached element is the safe equivalent.
+    // DOMParser is resolved from the target document's realm so the parsed
+    // node comes back in the same world, regardless of which window first
+    // requested the icon (top document or a shell shadow-root document).
+    let el = null;
+    const Parser = doc.defaultView?.DOMParser;
+    try {
+      if (Parser) {
+        const parsed = new Parser().parseFromString(markup, "image/svg+xml").documentElement;
+        if (parsed) {
+          el = doc.importNode(parsed, true);
+        }
+      }
+    } catch {}
     entry = { markup, el, doc };
     cache.set(canonical, entry);
   }

@@ -1,6 +1,6 @@
 import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/storage.js";
 import { TUNING } from "../chrome/config.js";
-import { srtToVtt, ensureVttHeader, parseSubtitles } from "./forgevtt.js";
+import { srtToVtt, ensureVttHeader, parseSubtitles, parseSubtitlesAsync } from "./forgevtt.js";
 import { ForgeTrack } from "./forge-track.js";
 import { debounce } from "../../shared/time.js";
 import { flashElement } from "../chrome/animate.js";
@@ -402,7 +402,9 @@ export class SubtitlesSection {
       return;
     }
     const normalizedText = /\.srt$/i.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
-    const cues = parseSubtitles(normalizedText, this.#syncOffset);
+    // Cooperative parse: yields to the browser on large tracks so ingesting a
+    // big VTT never blocks playback (see forgevtt.parseSubtitlesAsync).
+    const cues = await parseSubtitlesAsync(normalizedText, this.#syncOffset);
     if (!cues.length) {
       this.#toast({
         icon: "captions",

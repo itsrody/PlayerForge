@@ -227,8 +227,8 @@ export class Shell {
   /** Surface a hint + re-provision when a fullscreen entry is rejected. */
   #watchFullscreen() {
     // An attempt to enter fullscreen was rejected (typically because an
-    // ancestor embed lacks allowfullscreen - Firefox requires it on every
-    // frame edge, bug 1608358). Surface a hint and re-provision the chain
+    // ancestor embed lacks allowfullscreen - Chromium requires it on every
+    // frame edge). Surface a hint and re-provision the chain
     // (idempotent) so a retry succeeds if the attributes were just granted,
     // e.g. an SDK iframe created after our boot-time provisioning.
     document.addEventListener("fullscreenerror", () => {

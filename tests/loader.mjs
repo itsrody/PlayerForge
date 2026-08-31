@@ -2,10 +2,10 @@ import { register } from "node:module";
 register("./css-hook.mjs", import.meta.url);
 
 /**
- * jsdom 29 lacks several platform APIs the Gecko-only production code uses
+ * jsdom 29 lacks several platform APIs the Chromium-only production code uses
  * unconditionally. Rather than scatter feature-detects through src/ to appease
  * a headless test host, the absence is shimmed here - in the ONE place the
- * harness bootstraps - so production code stays pure Firefox 154. These shims
+ * harness bootstraps - so production code stays pure Chromium 152. These shims
  * are no-ops; they exist only so constructor/import paths don't throw.
  *
  * Only BARE-GLOBAL identifiers are shimmed (src/ resolves them via globalThis
@@ -18,6 +18,28 @@ if (typeof globalThis.ResizeObserver === "undefined") {
     observe() {}
     unobserve() {}
     disconnect() {}
+  };
+}
+if (typeof globalThis.IntersectionObserver === "undefined") {
+  // Minimal no-op shim so the on-screen gate in resume.js is reachable in
+  // tests; it keeps `onScreen` true (the safe default) since it never fires a
+  // callback, matching the real browser before the first observation lands.
+  globalThis.IntersectionObserver = class IntersectionObserver {
+    constructor() {}
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+    takeRecords() {
+      return [];
+    }
+  };
+}
+if (typeof globalThis.scheduler === "undefined") {
+  // Minimal cooperative scheduler shim so parseSubtitlesAsync's yield branch
+  // is reachable under Node. yield() resolves on a microtask, matching the
+  // real Chromium hand-back without needing a real task-dispatch scheduler.
+  globalThis.scheduler = {
+    yield: () => Promise.resolve()
   };
 }
 if (typeof globalThis.MediaMetadata === "undefined") {

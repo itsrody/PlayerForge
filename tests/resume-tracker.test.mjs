@@ -221,3 +221,56 @@ test("already-playing video persists on its first qualifying timeupdate - no int
   assert.equal(stored(), 5, "the media clock covers autoplay without a timer");
   tracker.destroy();
 });
+
+test("off-screen IntersectionObserver observation gates incremental resume saves", async () => {
+  writes["pf:resume"] = {
+    version: 1,
+    entries: [{ id: "ddd", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
+  };
+  // Install a controllable IO whose callbacks we fire manually, driving the
+  // on-screen gate the production code consults on every timeupdate.
+  const RealIO = globalThis.IntersectionObserver;
+  let callback = null;
+  globalThis.IntersectionObserver = class {
+    constructor(cb) {
+      callback = cb;
+    }
+    observe() {}
+    disconnect() {}
+  };
+  try {
+    const { dom, video, shell } = makeEnv(600);
+    TUNING.resume.saveIntervalMs = 0;
+    shell.paused = false;
+    shell.currentTime = 0;
+    const tracker = new ResumeTracker(shell);
+    await flush();
+    await flush();
+    await flush();
+    const stored = () => writes["pf:resume"].entries[0].resume;
+    assert.equal(stored(), 0);
+
+    // Player scrolls off-screen: subsequent media-clock saves are suppressed.
+    callback([{ isIntersecting: false }]);
+    shell.currentTime = 7;
+    video.dispatchEvent(new dom.window.Event("timeupdate"));
+    assert.equal(stored(), 0, "off-screen video did not persist on timeupdate");
+
+    // Back on-screen: saves resume.
+    callback([{ isIntersecting: true }]);
+    shell.currentTime = 9;
+    video.dispatchEvent(new dom.window.Event("timeupdate"));
+    assert.equal(stored(), 9, "on-screen video persisted once visible");
+
+    // The pause flush still lands even while off-screen (never loses final pos).
+    callback([{ isIntersecting: false }]);
+    shell.paused = true;
+    shell.currentTime = 15; // >3s past 9 => clears the epsilon gate
+    video.dispatchEvent(new dom.window.Event("pause"));
+    assert.equal(stored(), 15, "pause flush bypasses the visibility gate");
+
+    tracker.destroy();
+  } finally {
+    globalThis.IntersectionObserver = RealIO;
+  }
+});

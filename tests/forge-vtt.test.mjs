@@ -6,6 +6,7 @@ import {
   ensureVttHeader,
   timecodeToSeconds,
   parseSubtitles,
+  parseSubtitlesAsync,
   sortCues
 } from "../src/shell/subtitles/forgevtt.js";
 
@@ -58,6 +59,38 @@ test("parseSubtitles skips STYLE and REGION blocks", () => {
   const cues = parseSubtitles(vtt);
   assert.equal(cues.length, 1);
   assert.equal(cues[0].text, "hello");
+});
+
+test("parseSubtitlesAsync matches parseSubtitles (fallback path, no scheduler)", async () => {
+  const vtt = [
+    "WEBVTT",
+    "",
+    "NOTE a comment",
+    "",
+    "00:00:01.000 --> 00:00:02.000",
+    "first",
+    "",
+    "00:00:03.000 --> 00:00:04.000",
+    "second",
+    "",
+    "STYLE",
+    "::cue { color: red }"
+  ].join("\n");
+  const cues = await parseSubtitlesAsync(vtt, 0);
+  assert.deepEqual(cues, parseSubtitles(vtt));
+});
+
+test("parseSubtitlesAsync applies the offset like the sync path", async () => {
+  const vtt = [
+    "WEBVTT",
+    "",
+    "00:00:05.000 --> 00:00:06.000",
+    "shifted"
+  ].join("\n");
+  const cues = await parseSubtitlesAsync(vtt, 2);
+  assert.equal(cues.length, 1);
+  assert.equal(cues[0].start, 7);
+  assert.equal(cues[0].text, "shifted");
 });
 
 test("timing-looking payload lines stay cue text (one timing per block)", () => {

@@ -13,7 +13,7 @@ function sortByUpdatedAt(entries, descending = false) {
   });
 }
 
-// Hoisted TUNING.resume.* scalars: mutation-free calibration, so Warp folds
+// Hoisted TUNING.resume.* scalars: mutation-free calibration, so V8 folds
 // them as invariants on the media-clock path rather than re-resolving the
 // deep TUNING chain on every timeupdate/save decision.
 const RESUME_STALE_DAYS = TUNING.resume.staleDays;
@@ -441,7 +441,29 @@ export class ResumeTracker {
       }
       this.#saveProgress(shell.currentTime);
     };
-    video.addEventListener("timeupdate", saveIfDue, { signal, passive: true });
+    // Gate persistent saves while the player scrolls out of the viewport
+    // (carousel / off-screen embeds): an IntersectionObserver drives a
+    // layout-free "is this player on screen" boolean, so the media-clock saves
+    // stop churning GM storage writes for a video the user cannot see. The
+    // pause flush above still runs whenever playback actually pauses, so the
+    // final position is never lost by this gate. Chromium supports `signal` in
+    // IntersectionObserver options for automatic teardown; feature-detect for
+    // hosts (jsdom) without it.
+    let onScreen = true;
+    if (typeof IntersectionObserver === "function") {
+      try {
+        const io = new IntersectionObserver(([entry]) => {
+          onScreen = entry.isIntersecting;
+        }, { signal });
+        io.observe(video);
+      } catch {}
+    }
+    const gatedSaveIfDue = () => {
+      if (onScreen) {
+        saveIfDue();
+      }
+    };
+    video.addEventListener("timeupdate", gatedSaveIfDue, { signal, passive: true });
     video.addEventListener("pause", () => {
       this.#saveProgress(shell.currentTime);
     }, { signal, passive: true });

@@ -15,12 +15,23 @@ export class ForgeTrack {
   #cueLayerStyle;
   #track;
   #slots = [];
+  /** Fixed, shape-stable scratch per slot (pooled, never reallocated on
+   *  render); #lastActive mirrors which slots currently hold a live cue so a
+   *  `null` entry never needs to be stored. Same discipline as the forge's
+   *  pooled scrub payload: mutate in place, read immediately. */
   #lastRender = [];
+  #lastActive = [];
   #destroyed = false;
 
   constructor(video, cueLayer) {
     this.#cueLayer = cueLayer;
     this.#cueLayerStyle = cueLayer?.style;
+    // Preallocate the pooled per-slot scratch now so cuechange renders (the
+    // hot subtitle path) stay completely allocation-free.
+    for (let i = 0; i < MAX_SLOTS; i++) {
+      this.#lastRender[i] = { text: null, top: null, left: null, x: null };
+      this.#lastActive[i] = false;
+    }
     // addTextTrack is undefined on non-media elements; fail the constructor
     // with a clear error so the section's own catch surfaces a "Failed to
     // load subtitles" toast instead of a bare TypeError on mode.
@@ -69,7 +80,7 @@ export class ForgeTrack {
       const top = `calc(${line}% - ${i * STACK_OVERLAP_EM}em)`;
       const left = `${position}%`;
       const x = align === "start" ? "0" : align === "end" ? "-100%" : "-50%";
-      const prev = this.#lastRender[i] || {};
+      const prev = this.#lastRender[i];
       if (prev.text !== cue.text) {
         slot.textContent = cue.text;
       }
@@ -83,26 +94,30 @@ export class ForgeTrack {
         slot.style.setProperty("--pf-cue-x", x);
       }
       slot.hidden &&= false;
-      this.#lastRender[i] = { text: cue.text, top, left, x };
+      prev.text = cue.text;
+      prev.top = top;
+      prev.left = left;
+      prev.x = x;
+      this.#lastActive[i] = true;
     }
     for (let i = count; i < this.#slots.length; i++) {
       const slot = this.#slots[i];
       if (!slot.hidden) {
         slot.hidden = true;
-        this.#lastRender[i] = null;
+        this.#lastActive[i] = false;
       }
     }
   }
 
   clear() {
-    if (this.#destroyed || !this.#lastRender.some(Boolean)) {
+    if (this.#destroyed || !this.#lastActive.some(Boolean)) {
       return;
     }
     for (let i = 0; i < this.#slots.length; i++) {
       const slot = this.#slots[i];
       if (!slot.hidden) {
         slot.hidden = true;
-        this.#lastRender[i] = null;
+        this.#lastActive[i] = false;
       }
     }
   }
@@ -136,6 +151,6 @@ export class ForgeTrack {
       slot.remove();
     }
     this.#slots = [];
-    this.#lastRender = [];
+    this.#lastActive = [];
   }
 }

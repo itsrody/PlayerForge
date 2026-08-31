@@ -3,11 +3,11 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 
 // Readable-by-default, minified on request (-m / --min). Minification is
-// SpiderMonkey/WarpJIT-aware by construction: esbuild only does the safe
-// transforms (whitespace, local-identifier mangling, syntax compression) that
-// keep functions Warp-compilable - it never introduces eval/with, never mangles
-// property names, and its bytecode cost per op is unchanged, so Warp's
-// CacheIR/shape-driven optimization is untouched. The embedded stylesheet is
+// V8/TurboFan-aware by construction: esbuild only does the safe transforms
+// (whitespace, local-identifier mangling, syntax compression) that keep
+// functions Maglev/TurboFan-compilable - it never introduces eval/with, never
+// mangles property names, and its bytecode cost per op is unchanged, so V8's
+// hidden-class/IC-driven optimization is untouched. The embedded stylesheet is
 // minified separately (esbuild's JS minifier would not shrink a text-loaded
 // string); the CSS pass below is deliberately conservative so calc()/content
 // and selector whitespace survive intact.
@@ -16,18 +16,14 @@ const minify = process.argv.includes("-m") || process.argv.includes("--min");
 // The banner below is the single version source. Runtime reads the installed
 // script's real version through GM_info.script.version, so bumping @version
 // here is all a release takes.
-//
 // Instant-injection note: @run-at document-start + @sandbox raw are what make
-// real document-start work. In Tampermonkey 5.5 on Firefox, enable the user
-// setting "Content Script API" -> "UserScripts API Dynamic" (the legacy
-// "Instant" injection radio is a documented hack; API-Dynamic is the mode that
-// actually delivers instant page-context injection). PF never assumes the DOM
-// is ready at eval, so it is safe under instant injection.
+// real document-start work under Tampermonkey's MV3 userScripts API. PF never
+// assumes the DOM is ready at eval, so it is safe under instant injection.
 const banner = `// ==UserScript==
-// @name         PlayerForge
+// @name         PlayerForge (Chromium)
 // @namespace    https://github.com/PlayerForge
 // @version      0.7.1
-// @description  Firefox 154+ / Tampermonkey 5.5+ (MV2) exclusive HTML5 video player enhancer with gestures, hotkeys, progress resume, subtitles, and an extensible plugin system
+// @description  Chromium 152+ / Tampermonkey 5.5+ (MV3) exclusive HTML5 video player enhancer with gestures, hotkeys, progress resume, subtitles, and an extensible plugin system
 // @author       PlayerForge
 // @match        *://*/*
 // @exclude      *://*.youtube.com/*
@@ -79,7 +75,7 @@ const banner = `// ==UserScript==
 // @grant        GM_xmlhttpRequest
 // @connect      *
 // @connect      https://www.subtitlecat.com
-// @resource     pfStyle https://raw.githubusercontent.com/itsrody/PlayerForge/main/src/shell/chrome/styles.css
+// @resource     pfStyle https://raw.githubusercontent.com/itsrody/PlayerForge/chromium/src/shell/chrome/styles.css
 // @sandbox      raw
 // @run-at       document-start
 // @license      MIT
@@ -137,7 +133,7 @@ const shared = {
   entryPoints: ["src/entry.js"],
   bundle: true,
   format: "iife",
-  target: ["firefox154"],
+  target: ["chrome152"],
   outfile: "dist/playerforge.user.js",
   banner: { js: banner },
   loader: { ".css": "text" },
@@ -156,8 +152,8 @@ const options = { ...shared, minify };
 
 /**
  * Release-time verification for the minified bundle. Minification is
- * SpiderMonkey/WarpJIT-safe by construction (esbuild never emits eval/with,
- * never mangles property names), but a broken minifier would violate exactly
+ * V8/TurboFan-safe by construction (esbuild never emits eval/with, never
+ * mangles property names), but a broken minifier would violate exactly
  * those promises - or silently corrupt the metadata block Tampermonkey reads
  * to install the script. This gate fails the build rather than ship a bundle
  * that is unsafe to interpret or won't install.
@@ -175,9 +171,10 @@ function verifyMinified(text) {
       throw new Error(`min build: metadata line missing: ${needle.trim().split(/\s+/)[0]}`);
     }
   }
-  // WarpJIT/cache safety: these constructs would block compilation or rely on
-  // dynamic property access. Their presence means a future minifier change
-  // regressed the guarantees this build exists to preserve.
+  // V8/TurboFan + MV3 safety: these constructs would block compilation or rely
+  // on dynamic property access - and remote/dynamic code is banned by MV3 CSP.
+  // Their presence means a future minifier change regressed the guarantees
+  // this build exists to preserve.
   const forbidden = [
     [/\beval\s*\(/, "eval"],
     [/\bnew\s+Function\s*\(/, "new Function"],

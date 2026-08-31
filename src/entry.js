@@ -58,9 +58,9 @@ function bootstrap() {
     }
     kernel.onShellCreated((shell) => {
       logger.log("entry", `Shell ready: ${shell.sdk.name}`);
-      // Nested embeds can silently lose fullscreen (Firefox requires
-      // allowfullscreen on every ancestor iframe, bug 1608358). A shell in a
-      // frame pushes a provisioning request up the chain so our SDk's own
+      // Nested embeds can silently lose fullscreen (browsers require
+      // allowfullscreen on every ancestor iframe). A shell in a
+      // frame pushes a provisioning request up the chain so our SDK's own
       // fullscreen button - and PF's fs-gated gestures - can engage.
       if (window.top !== window) {
         requestFullscreenProvision();

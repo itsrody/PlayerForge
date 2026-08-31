@@ -198,6 +198,13 @@ export function videoFromEvent(event) {
 export function* videosFromMutations(mutations) {
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
+      // Cheap element guard: text/comment nodes and the subtree we already
+      // know is empty of videos can't yield a <video>, so skip the
+      // querySelectorAll scan (which would otherwise run per added node on
+      // every mutation batch of an SPA page).
+      if (node.nodeType !== 1) {
+        continue;
+      }
       if (node.localName === "video") {
         yield node;
       } else if (node.querySelectorAll) {

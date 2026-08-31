@@ -1,6 +1,6 @@
 /* ------------------------------------------------------------------
-   PlayerForge HUD styles - Gecko 154+ native: CSS nesting, @container,
-   @starting-style, :has, color-mix. Design tokens live on the shell
+   PlayerForge HUD styles - Chromium 152+ native: CSS nesting, @container,
+   @starting-style, @property, :has, color-mix. Design tokens live on the shell
    root; every surface derives from them, so theming/contrast tuning is
    one edit. Components are grouped per tree with native nesting (&).
 
@@ -17,7 +17,7 @@
      In the document realm the scope root never exists, so a page that
      happens to use `.pf-panel`, `pf-toast`, `.pf-btn`, etc. can never be
      styled by PlayerForge, and PF rules can never escape the HUD subtree
-     into second SDK content. @scope is Firefox 146+; on the 154 baseline
+     into second SDK content. @scope is Chromium 118+; on the 152 baseline
      that needs no @supports fallback.
    ------------------------------------------------------------------ */
 .pf-shell {
@@ -94,6 +94,27 @@
   inset: 0 !important;
   width: 100% !important;
   height: 100% !important;
+}
+
+/* Register the cue-position custom properties as syntax-typed so Blink can
+   reason about them as layout/percentage values instead of opaque strings.
+   The cue pool sets these per cuechange (our hottest DOM churn); typed
+   registration lets the style engine invalidate only the affected
+   descendants and opens the door to compositor-friendly transitions. */
+@property --pf-cue-top {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: 85%;
+}
+@property --pf-cue-left {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: 50%;
+}
+@property --pf-cue-x {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: -50%;
 }
 
 /* - Component surface (parasite chrome) ------------------------------------
@@ -909,6 +930,10 @@
     }
 
     /* - History tab - card rows */
+    /* History can hold up to ~1000 cards (cap in resume.js). content-visibility
+       lets Blink skip layout/style/paint for rows scrolled out of the list's
+       own overflow box; contain-intrinsic-size keeps the scroll geometry stable
+       so the viewport never jumps while skipping. */
     .pf-history-list {
       display: flex;
       flex-direction: column;
@@ -917,6 +942,8 @@
       overflow-y: auto;
       scrollbar-width: thin;
       scrollbar-color: var(--pf-text-mid) transparent;
+      content-visibility: auto;
+      contain-intrinsic-size: auto 168px;
     }
 
     .pf-history-card {
@@ -1093,6 +1120,16 @@
     @starting-style {
       .pf-panel.pf-open {
         opacity: 0;
+      }
+    }
+
+    /* Respect OS reduced-motion: collapse the panel/toast transitions to
+       instant swaps. Removes animation work and honors the a11y preference. */
+    @media (prefers-reduced-motion: reduce) {
+      .pf-panel,
+      .pf-toast,
+      pf-toast {
+        transition: none;
       }
     }
   }

@@ -14,9 +14,10 @@ const PASSIVE_CAPTURE = { capture: true, passive: true };
 const WHEEL_CAPTURE = { capture: true, passive: false };
 
 // Gesture calibration hoisted to module consts. TUNING is static (read-only
-// after load), so binding these at module scope lets WarpJIT treat them as
-// invariant values and fold them, instead of re-running shape-guarded
-// property loads on every high-frequency pointer/keyboard event.
+// after load), so binding these at module scope lets V8 treat them as
+// invariant values and fold them - Maglev/TurboFan raise constants to load,
+// instead of re-running shape-guarded property loads on every high-frequency
+// pointer/keyboard event.
 const EDGE_ZONE_RATIO = TUNING.gestures.edgeZoneRatio;
 const EDGE_ZONE_START = 1 - TUNING.gestures.edgeZoneRatio;
 const HOLD_TIMEOUT_MS = TUNING.gestures.holdTimeoutMs;
@@ -84,7 +85,7 @@ const scrubEvent = new CustomEvent(GESTURE_EVENTS.scrub, {
  * decision (settings gates, fullscreen requirement) is delegated to the
  * declarative INPUT_BINDINGS list, sampled live at each decision point.
  *
- * Gecko 154+ native by design: one AbortSignal owns the entire listener
+ * Chromium 152+ native by design: one AbortSignal owns the entire listener
  * lifetime (destroy() === scope.abort()), all pointer listeners are passive,
  * scrub sampling consumes getCoalescedEvents(), and fullscreen truth is the
  * single shared `fs` gate (shadow.js), built on the native fullscreen event.
@@ -97,8 +98,6 @@ export class InputForge {
   #scope = new AbortController();
   #destroyed = false;
   #savedTouchAction;
-  #originalPlay;
-  #originalPause;
 
   // Cached <video> box for hit-testing, invalidated on resize/fullscreen so
   // pointerdown never forces a synchronous layout flush with getBoundingClientRect.
@@ -170,14 +169,14 @@ export class InputForge {
     this.#savedTouchAction = zone.style.touchAction;
     zone.style.touchAction = "none";
 
-    this.#originalPlay = video.play.bind(video);
-    this.#originalPause = video.pause.bind(video);
-    video.play = () => this.#spaceHoldIntercepting ? Promise.resolve() : this.#originalPlay();
-    video.pause = () => {
-      if (!this.#spaceHoldIntercepting) {
-        return this.#originalPause();
-      }
-    };
+    // NOTE: the native video element is deliberately NEVER patched (no
+    // own-property rewrite of play/pause). Assigning JS functions as own
+    // properties onto HTMLMediaElement mutates the instance's V8 map/expando
+    // shape and would swallow play()/pause() calls from the media command
+    // plane, page autoplay code, and other plugins during a Space hold. The
+    // UA's own Space-activates-video default is cancelled by preventDefault on
+    // the capture-phase keydown handler, so no interception shim is needed;
+    // the bare-tap toggle below calls the native methods directly.
 
     const options = { capture: true, passive: true, signal };
     zone.addEventListener("pointerdown", (event) => this.#handlePointerDown(event), options);
@@ -273,8 +272,6 @@ export class InputForge {
       this.#video.style.transform = "";
       this.#video.style.willChange = "";
       this.#zone.style.touchAction = this.#savedTouchAction;
-      this.#video.play = this.#originalPlay;
-      this.#video.pause = this.#originalPause;
 
       activeForges.delete(this);
       if (lastActiveForge === this) {
@@ -306,7 +303,7 @@ export class InputForge {
 
   #hitTestVideo(pointerEvent) {
     // Cache the box so a pointerdown outside the HUD doesn't force a sync
-    // layout flush (getBoundingClientRect) on Gecko; the cache is dropped on
+    // layout flush (getBoundingClientRect) on Chromium; the cache is dropped on
     // resize and fullscreen change so it never goes stale.
     if (!this.#videoRect) {
       this.#videoRect = this.#video.getBoundingClientRect();
@@ -319,8 +316,8 @@ export class InputForge {
   #zoneForPoint(pointerEvent) {
     // Edge zones only steer fullscreen gestures (dbltap edge-skip, swipe-down
     // exit - both fs-gated), so the reference is the physical display. screen
-    // also sidesteps innerWidth's scrollbar-inclusive quirk on Gecko. Guard to
-    // the window when the screen reports no size (headless/test environs).
+    // also sidesteps innerWidth's scrollbar-inclusive quirk on Chromium. Guard
+    // to the window when the screen reports no size (headless/test environs).
     const screenWidth =
       typeof screen !== "undefined" && screen.width > 0
         ? screen.width
@@ -639,7 +636,7 @@ export class InputForge {
   }
 
   /**
-   * Consume every coalesced sample of the move so high-rate Gecko pointer
+   * Consume every coalesced sample of the move so high-rate Chromium pointer
    * streams scrub at full fidelity; one semantic event is emitted per move.
    *
    * Real-time velocity is measured at move granularity from true event
@@ -656,7 +653,7 @@ export class InputForge {
     const hasCoalesced = typeof event.getCoalescedEvents === "function";
     const samples = hasCoalesced ? event.getCoalescedEvents() : null;
     // Coalesced samples then the live event, without materializing a combined
-    // array: high-rate Gecko pointer streams land here every move, so a
+    // array: high-rate Chromium pointer streams land here every move, so a
     // [[...samples, event]] spread per frame would allocate needlessly.
     if (samples) {
       const count = samples.length + 1;
@@ -799,9 +796,10 @@ export class InputForge {
 
   /**
    * Space is absent from the binding table on purpose: it carries hold-to-
-   * speed semantics and intentionally ignores the hotkeys toggle. While a
-   * Space hold is in progress the video's play/pause are intercepted so the
-   * browser's own Space-activates-video default cannot fight the hold.
+   * speed semantics and intentionally ignores the hotkeys toggle. The
+   * capture-phase keydown preventDefault cancels the UA's own Space-activates-
+   * video default so it cannot fight the hold, and a bare tap toggles play/
+   * pause on the real keyup.
    */
   #handleKeydown(event) {
     if (event.repeat) {
@@ -878,9 +876,9 @@ export class InputForge {
       });
     } else if (shouldToggle) {
       if (this.#video.paused) {
-        this.#originalPlay().catch(() => {});
+        this.#video.play().catch(() => {});
       } else {
-        this.#originalPause();
+        this.#video.pause();
       }
     }
   }
