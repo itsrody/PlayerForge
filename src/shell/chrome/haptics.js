@@ -17,13 +17,11 @@
  *
  * Gates:
  *   - a user setting (gestures.haptics) so it can be turned off entirely;
- *   - prefers-reduced-motion, honoring the same a11y posture as the CSS
- *     (users who silence motion also silence vibration);
  *   - sticky-user-activation + hardware presence via feature detection (all
  *     `vibrate` returns on failure is false / a no-op).
  * Never throws.
  */
-import { getSetting, isReducedMotion } from "./config.js";
+import { getSetting } from "./config.js";
 
 /** Distinct pulse shapes per gesture, in milliseconds (vibrate / pause / ...). */
 const PATTERNS = {
@@ -42,7 +40,7 @@ const canVibrate =
 
 /** Fire the haptic pulse for `type` when armed (setting, motion, activation). */
 export function gestureHaptic(type) {
-  if (!canVibrate || isReducedMotion() || !getSetting("gestures.haptics")) {
+  if (!canVibrate || !getSetting("gestures.haptics")) {
     return;
   }
   const pattern = PATTERNS[type];

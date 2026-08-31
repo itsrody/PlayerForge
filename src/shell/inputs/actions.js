@@ -1,4 +1,4 @@
-import { getSetting, isReducedMotion, TUNING } from "../chrome/config.js";
+import { getSetting, TUNING } from "../chrome/config.js";
 import { formatTime } from "../../shared/time.js";
 import { fs, subscribeFullscreen } from "../../shared/shadow.js";
 import { GESTURE_EVENTS } from "../../kernel/contract.js";
@@ -183,13 +183,9 @@ function performSkip(shell, state, direction) {
  * live (fill-mode, swipe/pinch restore) so Chromium composites the
  * scale/translate instead of re-rasterizing the media surface every frame;
  * the layer is released once the snap settles (or is cancelled).
- *
- * `prefers-reduced-motion` is honored: the transform lands instantly instead
- * of animating. On hosts without WAAPI (jsdom), the current element is re-
- * snapped via the CSS transition fallback, preserving observable behavior.
  */
-const EASE_STYLE = "cubic-bezier(0.2, 0, 0, 1)";
-const EASE_MS = 150;
+const EASE_STYLE = "cubic-bezier(0.16, 1, 0.3, 1)";
+const EASE_MS = 120;
 
 /**
  * One eased snap per video is the invariant; the in-flight cancel handle lives
@@ -222,14 +218,6 @@ export function easeTransformTo(video, transform) {
   }
   if (transform) {
     video.style.willChange = "transform";
-  }
-
-  // Reduced motion: land instantly, no animation, no layer churn.
-  if (isReducedMotion()) {
-    video.style.transition = "none";
-    video.style.transform = transform;
-    dropPromotion(video);
-    return;
   }
 
   // WAAPI path (Chromium baseline): one compositor animation from the current

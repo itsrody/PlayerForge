@@ -50,7 +50,7 @@
   --pf-font-md: 13px;
   --pf-font-lg: 14px;
 
-  --pf-ease: 0.15s ease;
+  --pf-ease: 0.18s cubic-bezier(0.22, 1, 0.36, 1);
 
   /* Flat dark surfaces - simple, predictable, GPU-free. No backdrop blur or
      gradients, so a video color filter never interferes with the HUD. */
@@ -258,8 +258,8 @@
       opacity: 0;
       transform: translateY(-4px);
       transition:
-        opacity var(--pf-ease),
-        transform var(--pf-ease);
+        opacity 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+        transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
 
       &.pf-visible {
         opacity: calc(1 - 0.3 * var(--pf-media-paused, 0));
@@ -369,13 +369,19 @@
       line-height: 1.4;
 
       opacity: 0;
+      translate: 0 12px;
+      scale: 0.98;
       transition:
-        opacity 0.14s ease,
-        display 0.14s allow-discrete;
+        opacity 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+        translate 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+        scale 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+        display 0.18s allow-discrete;
 
       &.pf-open {
         display: block;
         opacity: 1;
+        translate: 0 0;
+        scale: 1;
         view-transition-name: pf-panel;
       }
 
@@ -684,7 +690,7 @@
           height: 14px;
           border-radius: 50%;
           background: var(--pf-fg);
-          transition: translate var(--pf-ease);
+          transition: translate 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
 
         &:checked {
@@ -1139,23 +1145,9 @@
     @starting-style {
       .pf-panel.pf-open {
         opacity: 0;
+        translate: 0 12px;
+        scale: 0.98;
       }
-    }
-
-    /* Respect OS reduced-motion or the user setting: collapse the panel/toast
-       transitions to instant swaps. The class is toggled by JS when the
-       reducedMotion setting is enabled. */
-    @media (prefers-reduced-motion: reduce) {
-      .pf-panel,
-      .pf-toast,
-      pf-toast {
-        transition: none;
-      }
-    }
-    &.pf-reduced-motion .pf-panel,
-    &.pf-reduced-motion .pf-toast,
-    &.pf-reduced-motion pf-toast {
-      transition: none;
     }
   }
 
@@ -1163,10 +1155,10 @@
      view-transition-name on .pf-panel.pf-open; the pseudo-element layers
      cross-fade with a subtle scale on entry and a reverse on exit. */
   ::view-transition-old(pf-panel) {
-    animation: pf-panel-fade-out 0.15s ease-out;
+    animation: pf-panel-fade-out 0.2s cubic-bezier(0.4, 0, 1, 1);
   }
   ::view-transition-new(pf-panel) {
-    animation: pf-panel-fade-in 0.15s ease-in;
+    animation: pf-panel-fade-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
   }
   @keyframes pf-panel-fade-out {
     from { opacity: 1; transform: scale(1); }
@@ -1175,12 +1167,5 @@
   @keyframes pf-panel-fade-in {
     from { opacity: 0; transform: scale(0.96); }
     to   { opacity: 1; transform: scale(1); }
-  }
-  /* Kill view transition animations when the user prefers reduced motion. */
-  @media (prefers-reduced-motion: reduce) {
-    ::view-transition-old(pf-panel),
-    ::view-transition-new(pf-panel) {
-      animation: none;
-    }
   }
 }

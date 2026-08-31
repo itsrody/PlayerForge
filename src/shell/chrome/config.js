@@ -72,13 +72,6 @@ const SETTINGS_SCHEMA = [
     label: "Edge-to-edge Fullscreen",
     default: true,
     group: "Features"
-  },
-  {
-    key: "gestures.reducedMotion",
-    type: "bool",
-    label: "Reduced Motion",
-    default: false,
-    group: "Features"
   }
 ];
 
@@ -213,18 +206,6 @@ for (const definition of SETTINGS_SCHEMA) {
 
 export function getSetting(key) {
   return cache[key];
-}
-
-/**
- * Reactive reduced-motion check: true when the OS prefers reduced motion
- * OR the user has enabled the gesture setting. Unlike a hoisted constant,
- * this reads fresh state on every call so setting toggles take effect
- * immediately (no page reload).
- */
-const osReducedMotion = typeof matchMedia === "function" &&
-  matchMedia("(prefers-reduced-motion: reduce)").matches;
-export function isReducedMotion() {
-  return osReducedMotion || cache["gestures.reducedMotion"] === true;
 }
 
 export function setSetting(key, value) {
