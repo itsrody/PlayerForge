@@ -73,6 +73,9 @@ export class ForgeTrack {
     const count = Math.min(active.length, MAX_SLOTS);
     for (let i = 0; i < count; i++) {
       const slot = this.#ensureSlot(i);
+      if (!slot) {
+        continue;
+      }
       const cue = active[i];
       const line = cue.line;
       const position = cue.position;

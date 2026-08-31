@@ -352,8 +352,8 @@ export class ResumeTracker {
       }
     }
 
-    const duration = Number(video.duration) || NaN;
-    if (duration <= 0) {
+    const duration = Number(video.duration);
+    if (!Number.isFinite(duration) || duration <= 0) {
       logger.log("resume", "No duration available - skipping");
       return;
     }
@@ -399,7 +399,7 @@ export class ResumeTracker {
       }
     }
 
-    this.#lastSavedPosition = savedPosition || shell.currentTime || NaN;
+    this.#lastSavedPosition = Number.isFinite(savedPosition) ? savedPosition : (shell.currentTime || NaN);
     this.#startProgressWatch(shell);
   }
 

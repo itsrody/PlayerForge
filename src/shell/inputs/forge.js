@@ -661,7 +661,10 @@ export class InputForge {
         event.stopImmediatePropagation();
         const drag = y - this.#startY;
         if (drag !== this.#lastSwipeDrag) {
-          this.#video.style.transform = `${this.#swipeBaseTransform} translateY(${drag}px)`;
+          this.#video.style.transform =
+            this.#swipeBaseTransform
+              ? this.#swipeBaseTransform + " translateY(" + drag + "px)"
+              : "translateY(" + drag + "px)";
           this.#lastSwipeDrag = drag;
         }
       }
