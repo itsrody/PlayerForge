@@ -6,7 +6,7 @@ import { ResumeTracker } from "./resume.js";
 import { SubtitlesSection } from "./subtitles/section.js";
 import { VideoFilter } from "./filter.js";
 import { SettingsPanel } from "./chrome/panel.js";
-import { addSettingsSection, getSetting } from "./chrome/config.js";
+import { addSettingsSection, getSetting, isReducedMotion } from "./chrome/config.js";
 import { TUNING } from "./chrome/config.js";
 import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
@@ -14,6 +14,7 @@ import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } fro
 import { SHELL_MARKER, warmStyles, injectShell, watchShellHost } from "./chrome/inject.js";
 import { ensureViewportFitCover } from "./chrome/viewport.js";
 import { requestFullscreenProvision } from "../shared/context.js";
+import { KEYS } from "../shared/storage.js";
 
 const VIDEO_EVENTS = [
   "play", "pause", "playing", "waiting", "seeking", "seeked", "timeupdate",
@@ -85,6 +86,10 @@ export class Shell {
     this.#watchFullscreen();
     this.#watchWakeLock();
     this.#watchOrientation();
+    this.#syncReducedMotion();
+    if (typeof GM_addValueChangeListener === "function") {
+      GM_addValueChangeListener(KEYS.configs, () => this.#syncReducedMotion());
+    }
     this.#markManaged();
     logger.log("shell", `Shell "${this.sdk.name}" constructed`);
   }
@@ -300,6 +305,19 @@ export class Shell {
         acquire();
       }
     }, { signal });
+  }
+
+  /**
+   * Sync the pf-reduced-motion class on the HUD layer so CSS transitions
+   * respect the user setting. Called on boot and re-synced on storage changes
+   * (cross-tab live-reload) so the class stays fresh without a page reload.
+   */
+  #syncReducedMotion() {
+    const layer = this.#shellDom?.hudLayer;
+    if (!layer) {
+      return;
+    }
+    layer.classList.toggle("pf-reduced-motion", isReducedMotion());
   }
 
   /** Lock to landscape on fullscreen entry (Android); unlock on exit. */

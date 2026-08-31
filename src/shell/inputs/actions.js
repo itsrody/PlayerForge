@@ -1,4 +1,4 @@
-import { getSetting, TUNING } from "../chrome/config.js";
+import { getSetting, isReducedMotion, TUNING } from "../chrome/config.js";
 import { formatTime } from "../../shared/time.js";
 import { fs, subscribeFullscreen } from "../../shared/shadow.js";
 import { GESTURE_EVENTS } from "../../kernel/contract.js";
@@ -191,10 +191,6 @@ function performSkip(shell, state, direction) {
 const EASE_STYLE = "cubic-bezier(0.2, 0, 0, 1)";
 const EASE_MS = 150;
 
-/** Reduced-motion check is hoisted once (module const) - static per session. */
-const reducedMotion = typeof matchMedia === "function" &&
-  matchMedia("(prefers-reduced-motion: reduce)").matches;
-
 /**
  * One eased snap per video is the invariant; the in-flight cancel handle lives
  * in a WeakMap keyed by the video element rather than as an expando property so
@@ -229,7 +225,7 @@ export function easeTransformTo(video, transform) {
   }
 
   // Reduced motion: land instantly, no animation, no layer churn.
-  if (reducedMotion) {
+  if (isReducedMotion()) {
     video.style.transition = "none";
     video.style.transform = transform;
     dropPromotion(video);

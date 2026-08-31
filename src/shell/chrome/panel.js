@@ -3,6 +3,7 @@ import { createIconElement } from "./icons.js";
 import { GESTURE_EVENTS } from "../inputs/actions.js";
 import { deepestActiveElement, subscribeFullscreen } from "../../shared/shadow.js";
 import { clamp } from "../../shared/clamp.js";
+import { isReducedMotion } from "./config.js";
 import { el } from "./elements.js";
 
 const HOLD_DELAY_MS = 400;
@@ -261,7 +262,7 @@ export class SettingsPanel {
         activeTab.focus();
       }
     };
-    if (typeof document.startViewTransition === "function") {
+    if (typeof document.startViewTransition === "function" && !isReducedMotion()) {
       document.startViewTransition({ types: ["pf-panel-open"], update: activate });
     } else {
       activate();
@@ -276,7 +277,7 @@ export class SettingsPanel {
           this.#shellHost.focus();
         }
       };
-      if (typeof document.startViewTransition === "function") {
+      if (typeof document.startViewTransition === "function" && !isReducedMotion()) {
         document.startViewTransition({ types: ["pf-panel-close"], update: deactivate });
       } else {
         deactivate();

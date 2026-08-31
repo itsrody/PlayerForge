@@ -23,7 +23,7 @@
  *     `vibrate` returns on failure is false / a no-op).
  * Never throws.
  */
-import { getSetting } from "./config.js";
+import { getSetting, isReducedMotion } from "./config.js";
 
 /** Distinct pulse shapes per gesture, in milliseconds (vibrate / pause / ...). */
 const PATTERNS = {
@@ -37,16 +37,12 @@ const PATTERNS = {
   dbltap: [14, 40, 14]
 };
 
-/** Reduced-motion is static per session; gate vibration the same way as CSS. */
-const reducedMotion =
-  typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-
 const canVibrate =
   typeof navigator !== "undefined" && typeof navigator.vibrate === "function";
 
 /** Fire the haptic pulse for `type` when armed (setting, motion, activation). */
 export function gestureHaptic(type) {
-  if (!canVibrate || reducedMotion || !getSetting("gestures.haptics")) {
+  if (!canVibrate || isReducedMotion() || !getSetting("gestures.haptics")) {
     return;
   }
   const pattern = PATTERNS[type];

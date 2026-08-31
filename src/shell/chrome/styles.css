@@ -1142,14 +1142,20 @@
       }
     }
 
-    /* Respect OS reduced-motion: collapse the panel/toast transitions to
-       instant swaps. Removes animation work and honors the a11y preference. */
+    /* Respect OS reduced-motion or the user setting: collapse the panel/toast
+       transitions to instant swaps. The class is toggled by JS when the
+       reducedMotion setting is enabled. */
     @media (prefers-reduced-motion: reduce) {
       .pf-panel,
       .pf-toast,
       pf-toast {
         transition: none;
       }
+    }
+    &.pf-reduced-motion .pf-panel,
+    &.pf-reduced-motion .pf-toast,
+    &.pf-reduced-motion pf-toast {
+      transition: none;
     }
   }
 
