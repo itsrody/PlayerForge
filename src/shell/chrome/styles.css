@@ -53,7 +53,18 @@
   --pf-font-md: 13px;
   --pf-font-lg: 14px;
 
-  --pf-ease: 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  --pf-ease-duration: 0.18s;
+  --pf-ease-curve: cubic-bezier(0.22, 1, 0.36, 1);
+  --pf-ease-bounce: 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  --pf-ease-out: 0.2s cubic-bezier(0.4, 0, 1, 1);
+
+  --pf-blur-sm: blur(12px) saturate(1.3);
+  --pf-blur-lg: blur(16px) saturate(1.4);
+
+  --pf-space-xs: 4px;
+  --pf-space-sm: 6px;
+  --pf-space-md: 8px;
+  --pf-space-lg: 10px;
 
   /* Flat dark surfaces - simple, predictable, GPU-free. No backdrop blur or
      gradients, so a video color filter never interferes with the HUD. */
@@ -233,7 +244,7 @@
 
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: var(--pf-space-sm);
       position: absolute;
       top: 12px;
       left: 50%;
@@ -244,7 +255,7 @@
       translate: -50%;
       /* Dark tinted glass - color-mix backdrop + blur. */
       background: var(--pf-toast-bg);
-      backdrop-filter: blur(12px) saturate(1.3);
+      backdrop-filter: var(--pf-blur-sm);
       color: var(--pf-toast-color);
       padding: 6px 16px;
       border-radius: var(--pf-toast-radius);
@@ -262,8 +273,8 @@
       opacity: 0;
       transform: translateY(-4px);
       transition:
-        opacity var(--pf-ease),
-        transform var(--pf-ease);
+        opacity var(--pf-ease-duration) var(--pf-ease-curve),
+        transform var(--pf-ease-duration) var(--pf-ease-curve);
 
       &.pf-visible {
         opacity: calc(1 - 0.3 * var(--pf-media-paused, 0));
@@ -294,8 +305,8 @@
       .pf-toast-actions {
         display: inline-flex;
         align-items: center;
-        gap: 4px;
-        margin-left: 4px;
+        gap: var(--pf-space-xs);
+        margin-left: var(--pf-space-xs);
 
         button {
           border: none;
@@ -366,7 +377,7 @@
 
       /* Flat dark glass - color-mix backdrop + blur for depth. */
       background: var(--pf-panel-bg);
-      backdrop-filter: blur(16px) saturate(1.4);
+      backdrop-filter: var(--pf-blur-lg);
       color: var(--pf-fg);
       border-radius: var(--pf-radius-lg);
       font-size: var(--pf-font-md);
@@ -376,10 +387,10 @@
       translate: 0 12px;
       scale: 0.98;
       transition:
-        opacity var(--pf-ease),
-        translate var(--pf-ease),
-        scale var(--pf-ease),
-        display 0.18s allow-discrete;
+        opacity var(--pf-ease-duration) var(--pf-ease-curve),
+        translate var(--pf-ease-duration) var(--pf-ease-curve),
+        scale var(--pf-ease-duration) var(--pf-ease-curve),
+        display var(--pf-ease-duration) allow-discrete;
 
       &.pf-open {
         display: block;
@@ -395,8 +406,8 @@
       .pf-panel-header {
         display: flex;
         align-items: center;
-        gap: 8px;
-        padding: 8px;
+        gap: var(--pf-space-md);
+        padding: var(--pf-space-md);
         border-bottom: 1px solid var(--pf-border-soft);
       }
 
@@ -410,7 +421,7 @@
         justify-content: space-evenly;
         padding: 3px;
         border: 1px solid var(--pf-border-soft);
-        border-radius: 10px;
+        border-radius: var(--pf-space-lg);
         background: var(--pf-surface-mid);
 
         .pf-panel-tab {
@@ -467,11 +478,11 @@
       }
 
       .pf-panel-body {
-        padding: 6px 8px 10px;
+        padding: var(--pf-space-sm) var(--pf-space-md) var(--pf-space-lg);
       }
 
       .pf-panel-section {
-        margin-bottom: 6px;
+        margin-bottom: var(--pf-space-sm);
 
         &[hidden] {
           display: none;
@@ -495,8 +506,8 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 8px;
-        margin-bottom: 4px;
+        gap: var(--pf-space-md);
+        margin-bottom: var(--pf-space-xs);
 
         .pf-panel-label {
           margin-bottom: 0;
@@ -509,13 +520,13 @@
         text-transform: uppercase;
         letter-spacing: 0.04em;
         color: var(--pf-text-soft);
-        margin-bottom: 4px;
+        margin-bottom: var(--pf-space-xs);
       }
 
       .pf-panel-hint {
         font-size: var(--pf-font-sm);
         color: var(--pf-text-dim);
-        margin: 6px 0;
+        margin: var(--pf-space-sm) 0;
       }
 
       /* Subtitles tab - upload / remove buttons on the left, the status line
@@ -590,8 +601,8 @@
       .pf-panel-grid {
         display: grid;
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        gap: 4px 8px;
-        margin-bottom: 4px;
+        gap: var(--pf-space-xs) var(--pf-space-md);
+        margin-bottom: var(--pf-space-xs);
       }
 
       .pf-panel-cell {
@@ -685,7 +696,7 @@
         background: var(--pf-surface-strong);
         position: relative;
         cursor: pointer;
-        transition: background var(--pf-ease), border-color var(--pf-ease);
+        transition: background var(--pf-ease-duration) var(--pf-ease-curve), border-color var(--pf-ease-duration) var(--pf-ease-curve);
 
         &::before {
           content: '';
@@ -696,7 +707,7 @@
           height: 14px;
           border-radius: 50%;
           background: var(--pf-fg);
-          transition: translate 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+          transition: translate var(--pf-ease-bounce);
         }
 
         &:checked {
@@ -1022,10 +1033,10 @@
          container), not the viewport: wide panels keep the two-column grid,
          very narrow players collapse it to one column. */
     @container pf-panel (max-width: 330px) {
-      .pf-panel-header { padding: 6px; gap: 6px; }
-      .pf-panel-body { padding: 6px; }
+      .pf-panel-header { padding: var(--pf-space-sm); gap: var(--pf-space-sm); }
+      .pf-panel-body { padding: var(--pf-space-sm); }
       .pf-panel-grid { grid-template-columns: minmax(0, 1fr); }
-      .pf-history-card { padding: 5px 6px; gap: 6px; }
+      .pf-history-card { padding: 5px var(--pf-space-sm); gap: var(--pf-space-sm); }
       .pf-history-title { font-size: var(--pf-font-xs); }
       .pf-history-meta { font-size: 10px; }
       .pf-history-list { max-height: 152px; }
@@ -1036,7 +1047,7 @@
        thumb-sized (~40px) tap areas. */
     @media (pointer: coarse) {
       .pf-options-btn { padding: 7px 14px; font-size: var(--pf-font-lg); }
-      .pf-options-row { gap: 8px; }
+      .pf-options-row { gap: var(--pf-space-md); }
       .pf-panel-body { padding: 10px 12px 12px; }
       .pf-panel-close { padding: 6px 10px; font-size: 18px; }
       .pf-panel-tab { padding: 9px 10px; font-size: var(--pf-font-sm); }
@@ -1072,9 +1083,9 @@
       .pf-panel {
         width: auto;
         max-height: calc(100% - 16px);
-        top: 8px;
-        right: 8px;
-        left: 8px;
+        top: var(--pf-space-md);
+        right: var(--pf-space-md);
+        left: var(--pf-space-md);
         bottom: auto;
         margin: 0;
       }
@@ -1087,9 +1098,9 @@
     @media (max-width: 520px) and (pointer: coarse) {
       .pf-panel {
         top: auto;
-        bottom: 8px;
-        left: 8px;
-        right: 8px;
+        bottom: var(--pf-space-md);
+        left: var(--pf-space-md);
+        right: var(--pf-space-md);
         max-height: 62vh;
         margin: 0;
         padding-bottom: env(safe-area-max-inset-bottom, 0px);
@@ -1109,7 +1120,7 @@
     @media (orientation: landscape) and (pointer: coarse) and (max-height: 480px) {
       .pf-panel {
         top: 50%;
-        right: 8px;
+        right: var(--pf-space-md);
         bottom: auto;
         left: auto;
         translate: 0 -50%;
@@ -1161,10 +1172,10 @@
      view-transition-name on .pf-panel.pf-open; the pseudo-element layers
      cross-fade with a subtle scale on entry and a reverse on exit. */
   ::view-transition-old(pf-panel) {
-    animation: pf-panel-fade-out 0.2s cubic-bezier(0.4, 0, 1, 1);
+    animation: pf-panel-fade-out var(--pf-ease-out);
   }
   ::view-transition-new(pf-panel) {
-    animation: pf-panel-fade-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    animation: pf-panel-fade-in var(--pf-ease-bounce);
   }
   @keyframes pf-panel-fade-out {
     from { opacity: 1; transform: scale(1); }

@@ -3,6 +3,7 @@ import { formatTime } from "../../shared/time.js";
 import { fs, subscribeFullscreen } from "../../shared/shadow.js";
 import { GESTURE_EVENTS } from "../../kernel/contract.js";
 import { gestureHaptic } from "../chrome/haptics.js";
+import { EASE_SNAPPY_CURVE, EASE_SNAPPY_MS } from "../../shared/timing.js";
 
 export { GESTURE_EVENTS };
 
@@ -184,8 +185,8 @@ function performSkip(shell, state, direction) {
  * scale/translate instead of re-rasterizing the media surface every frame;
  * the layer is released once the snap settles (or is cancelled).
  */
-const EASE_STYLE = "cubic-bezier(0.16, 1, 0.3, 1)";
-const EASE_MS = 120;
+const EASE_STYLE = EASE_SNAPPY_CURVE;
+const EASE_MS = EASE_SNAPPY_MS;
 
 /**
  * One eased snap per video is the invariant; the in-flight cancel handle lives

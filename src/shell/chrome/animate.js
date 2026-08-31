@@ -1,3 +1,5 @@
+import { FLASH_MS, FLASH_EASING } from "../../shared/timing.js";
+
 /**
  * Restart the accent "flash" on an element natively via the Web Animations
  * API (Element.animate). This replaces the classic
@@ -11,7 +13,7 @@
  * is chrome/subtitles, so shared/ stays limited to modules the framework and
  * the app use together.
  */
-export function flashElement(el, { duration = 400 } = {}) {
+export function flashElement(el, { duration = FLASH_MS } = {}) {
   if (!el || typeof el.animate !== "function") {
     return;
   }
@@ -30,6 +32,6 @@ export function flashElement(el, { duration = 400 } = {}) {
       { backgroundColor: "var(--pf-accent)" },
       { backgroundColor: "transparent" }
     ],
-    { duration, easing: "ease-out" }
+    { duration, easing: FLASH_EASING }
   );
 }
