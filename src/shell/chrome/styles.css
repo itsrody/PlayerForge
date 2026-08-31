@@ -26,6 +26,9 @@
   --pf-bg: #000;                    /* base ink                */
   --pf-accent: #4a9eff;             /* interaction accent      */
 
+  --pf-hud-glass: color-mix(in srgb, var(--pf-bg) 82%, transparent);
+  /* Dark tinted glass: backdrop-blur + saturate applied at element level. */
+
   --pf-surface: rgba(0, 0, 0, 0.8);              /* toast + panel sheets        */
   --pf-surface-soft: rgba(255, 255, 255, 0.04);  /* cells, stepper, toggle bg   */
   --pf-surface-mid: rgba(255, 255, 255, 0.09);   /* ghost btn, hover cells      */
@@ -54,8 +57,8 @@
 
   /* Flat dark surfaces - simple, predictable, GPU-free. No backdrop blur or
      gradients, so a video color filter never interferes with the HUD. */
-  --pf-panel-bg: rgba(0, 0, 0, 0.9);   /* panel sheet (90%)                */
-  --pf-toast-bg: rgba(0, 0, 0, 0.75);  /* toast pill (75%)                 */
+  --pf-panel-bg: var(--pf-hud-glass);   /* panel glass (inherits --pf-hud-glass) */
+  --pf-toast-bg: var(--pf-hud-glass);   /* toast glass (inherits --pf-hud-glass) */
 
   --pf-z-hud: 2;
   --pf-z-toast: 3;
@@ -239,8 +242,9 @@
          the transform property, so transform-based animations on the toast
          never clobber it. */
       translate: -50%;
-      /* Flat dark pill - simple translucent surface, no blur (GPU-free). */
+      /* Dark tinted glass - color-mix backdrop + blur. */
       background: var(--pf-toast-bg);
+      backdrop-filter: blur(12px) saturate(1.3);
       color: var(--pf-toast-color);
       padding: 6px 16px;
       border-radius: var(--pf-toast-radius);
@@ -360,9 +364,9 @@
       scrollbar-width: thin;
       scrollbar-color: var(--pf-text-mid) transparent;
 
-      /* Flat dark sheet - simple translucent surface, no blur (GPU-free, and a
-         video color filter can never interfere with the HUD). */
+      /* Flat dark glass - color-mix backdrop + blur for depth. */
       background: var(--pf-panel-bg);
+      backdrop-filter: blur(16px) saturate(1.4);
       color: var(--pf-fg);
       border-radius: var(--pf-radius-lg);
       font-size: var(--pf-font-md);
