@@ -262,7 +262,7 @@ export class SettingsPanel {
       }
     };
     if (typeof document.startViewTransition === "function") {
-      document.startViewTransition({ types: ["pf-panel-open"] }, activate);
+      document.startViewTransition({ types: ["pf-panel-open"], update: activate });
     } else {
       activate();
     }
@@ -277,7 +277,7 @@ export class SettingsPanel {
         }
       };
       if (typeof document.startViewTransition === "function") {
-        document.startViewTransition({ types: ["pf-panel-close"] }, deactivate);
+        document.startViewTransition({ types: ["pf-panel-close"], update: deactivate });
       } else {
         deactivate();
       }
