@@ -258,8 +258,8 @@
       opacity: 0;
       transform: translateY(-4px);
       transition:
-        opacity 0.18s cubic-bezier(0.22, 1, 0.36, 1),
-        transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+        opacity var(--pf-ease),
+        transform var(--pf-ease);
 
       &.pf-visible {
         opacity: calc(1 - 0.3 * var(--pf-media-paused, 0));
@@ -372,9 +372,9 @@
       translate: 0 12px;
       scale: 0.98;
       transition:
-        opacity 0.18s cubic-bezier(0.22, 1, 0.36, 1),
-        translate 0.18s cubic-bezier(0.22, 1, 0.36, 1),
-        scale 0.18s cubic-bezier(0.22, 1, 0.36, 1),
+        opacity var(--pf-ease),
+        translate var(--pf-ease),
+        scale var(--pf-ease),
         display 0.18s allow-discrete;
 
       &.pf-open {
