@@ -597,6 +597,17 @@ export class SettingsPanel {
       }
     }, { signal });
 
+    // Block every native pointer/touch/click event from crossing the panel
+    // boundary into the SDK. The backdrop covers the rest of the shell, but
+    // clicks that land ON the panel itself would otherwise bubble up through
+    // the composed path to page-level handlers. capture:true so we intercept
+    // before any SDK listener sees them.
+    for (const type of ["pointerdown", "pointerup", "click", "touchstart", "touchend"]) {
+      this.#root.addEventListener(type, (event) => {
+        event.stopPropagation();
+      }, { signal, capture: true });
+    }
+
     // Any fullscreen transition dismisses the panel; the shared transition
     // source (shadow.js) drives it - no bus event needed.
     subscribeFullscreen(() => this.close(), this.#scope.signal);
