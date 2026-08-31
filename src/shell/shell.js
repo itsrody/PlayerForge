@@ -99,7 +99,7 @@ export class Shell {
   }
 
   get duration() {
-    return this.video.duration || 0;
+    return Number(this.video.duration) || NaN;
   }
 
   get playbackRate() {

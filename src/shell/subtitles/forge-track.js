@@ -29,7 +29,7 @@ export class ForgeTrack {
     // Preallocate the pooled per-slot scratch now so cuechange renders (the
     // hot subtitle path) stay completely allocation-free.
     for (let i = 0; i < MAX_SLOTS; i++) {
-      this.#lastRender[i] = { text: null, top: null, left: null, x: null };
+      this.#lastRender[i] = { text: null, top: null, left: null, x: null, prevLine: NaN, prevPosition: NaN, prevI: -1 };
       this.#lastActive[i] = false;
     }
     // addTextTrack is undefined on non-media elements; fail the constructor
@@ -56,8 +56,8 @@ export class ForgeTrack {
     }
     for (const cue of cues) {
       const vtt = new VTTCue(cue.start, cue.end, cue.text);
-      vtt.line = cue.line ?? 85;
-      vtt.position = cue.position ?? 50;
+      vtt.line = cue.line;
+      vtt.position = cue.position;
       if (cue.align) {
         vtt.align = cue.align;
       }
@@ -74,29 +74,41 @@ export class ForgeTrack {
     for (let i = 0; i < count; i++) {
       const slot = this.#ensureSlot(i);
       const cue = active[i];
-      const line = cue.line ?? 85;
-      const position = cue.position ?? 50;
+      const line = cue.line;
+      const position = cue.position;
       const align = cue.align || "center";
-      const top = `calc(${line}% - ${i * STACK_OVERLAP_EM}em)`;
-      const left = `${position}%`;
-      const x = align === "start" ? "0" : align === "end" ? "-100%" : "-50%";
       const prev = this.#lastRender[i];
-      if (prev.text !== cue.text) {
-        slot.textContent = cue.text;
+      // Numeric dirty checks: skip string construction when values match
+      // the previous render — avoids template-literal allocation per slot
+      // per cuechange on the hot subtitle path.
+      const lineChanged = line !== prev.prevLine || i !== prev.prevI;
+      const positionChanged = position !== prev.prevPosition;
+      if (lineChanged) {
+        const top = `calc(${line}% - ${i * STACK_OVERLAP_EM}em)`;
+        if (prev.top !== top) {
+          slot.style.setProperty("--pf-cue-top", top);
+        }
+        prev.top = top;
+        prev.prevLine = line;
+        prev.prevI = i;
       }
-      if (prev.top !== top) {
-        slot.style.setProperty("--pf-cue-top", top);
+      if (positionChanged) {
+        const left = `${position}%`;
+        if (prev.left !== left) {
+          slot.style.setProperty("--pf-cue-left", left);
+        }
+        prev.left = left;
+        prev.prevPosition = position;
       }
-      if (prev.left !== left) {
-        slot.style.setProperty("--pf-cue-left", left);
-      }
+      const x = align === "start" ? "0" : align === "end" ? "-100%" : "-50%";
       if (prev.x !== x) {
         slot.style.setProperty("--pf-cue-x", x);
       }
+      if (prev.text !== cue.text) {
+        slot.textContent = cue.text;
+      }
       slot.hidden &&= false;
       prev.text = cue.text;
-      prev.top = top;
-      prev.left = left;
       prev.x = x;
       this.#lastActive[i] = true;
     }

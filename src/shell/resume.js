@@ -176,7 +176,7 @@ export class ResumeStore {
 
   findMatch(domainKey, path, duration) {
     this.#ensureLoaded();
-    const targetDuration = duration || 0;
+    const targetDuration = Number(duration) || NaN;
     const maxFuzz = RESUME_DURATION_FUZZ;
     let best = null;
     let bestScore = -Infinity;
@@ -185,7 +185,7 @@ export class ResumeStore {
         continue;
       }
       const fuzz = Math.abs(entry.duration - targetDuration);
-      if (fuzz > maxFuzz) {
+      if (fuzz > maxFuzz || Number.isNaN(fuzz)) {
         continue;
       }
       const score = 4000000 + domainScore(entry.domain, domainKey) * 1000 - Math.min(fuzz, 999);
@@ -217,7 +217,7 @@ export class ResumeStore {
       path,
       // NFC so stored titles compare equal regardless of source encoding.
       title: (title || "").normalize("NFC"),
-      duration: duration || 0,
+      duration: Number(duration) || NaN,
       resume: 0,
       createdAt: Date.now(),
       updatedAt: Date.now()
@@ -352,7 +352,7 @@ export class ResumeTracker {
       }
     }
 
-    const duration = video.duration || 0;
+    const duration = Number(video.duration) || NaN;
     if (duration <= 0) {
       logger.log("resume", "No duration available - skipping");
       return;
@@ -368,7 +368,7 @@ export class ResumeTracker {
       logger.log("resume", `Created ${this.#entry.id} for ${context.domain}${context.path}`);
     }
 
-    const savedPosition = this.#entry.resume || 0;
+    const savedPosition = Number(this.#entry.resume) || NaN;
     if (savedPosition > RESUME_MIN_POSITION) {
       let seeked = false;
       const applyResume = () => {
@@ -399,7 +399,7 @@ export class ResumeTracker {
       }
     }
 
-    this.#lastSavedPosition = savedPosition || shell.currentTime || 0;
+    this.#lastSavedPosition = savedPosition || shell.currentTime || NaN;
     this.#startProgressWatch(shell);
   }
 
@@ -508,7 +508,7 @@ export class ResumeTracker {
   destroy() {
     this.#scope.abort();
     if (this.#entry && !this.#destroyed) {
-      this.#saveProgress(this.#shell?.currentTime || 0);
+      this.#saveProgress(this.#shell?.currentTime || NaN);
     }
     this.#destroyed = true;
     this.#store.destroy();

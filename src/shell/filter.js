@@ -33,10 +33,10 @@ function matchPreset(values) {
 
 function buildFilterString(values) {
   const parts = [];
-  const tempHue = (values.temperature || 0) * 0.3;
-  const tempSat = Math.abs(values.temperature || 0) * 0.15;
-  const tintHue = (values.tint || 0) * 0.2;
-  const totalHue = (values.hue || 0) + tempHue + tintHue;
+  const tempHue = (Number(values.temperature) || 0) * 0.3;
+  const tempSat = Math.abs(Number(values.temperature) || 0) * 0.15;
+  const tintHue = (Number(values.tint) || 0) * 0.2;
+  const totalHue = (Number(values.hue) || 0) + tempHue + tintHue;
   const totalSat = (values.saturate || DEFAULTS.saturate) + tempSat;
 
   if (values.brightness !== DEFAULTS.brightness) {

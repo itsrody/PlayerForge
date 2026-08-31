@@ -174,7 +174,7 @@ function decodeCueText(text) {
 }
 
 function parseCueSettings(settings) {
-  const parsed = {};
+  const parsed = { line: 85, position: 50 };
   for (const token of settings.trim().split(/\s+/)) {
     if (!token) {
       continue;

@@ -131,6 +131,9 @@ const stateFor = (() => {
         scrubSensitivity: 0,
         scrubDirectionMomentum: 0,
         lastScrubToastAt: 0,
+        scrubToastText: null,
+        scrubToastSecDuration: NaN,
+        scrubToastSecCurrent: NaN,
         streakCount: 0,
         lastSkipDirection: null,
         streakResetTimer: null,
@@ -469,9 +472,19 @@ export function attachInputActions(shell, host, signal) {
       return;
     }
     state.lastScrubToastAt = now;
+    // Cache the formatted time string: rebuild only when the visible second
+    // changes, not every 100ms tick — avoids 3 string allocations per display
+    // tick during scrub.
+    const secDuration = Math.floor(state.scrubDuration);
+    const secCurrent = Math.floor(shell.video.currentTime);
+    if (secDuration !== state.scrubToastSecDuration || secCurrent !== state.scrubToastSecCurrent) {
+      state.scrubToastText = `${formatTime(state.scrubDuration)} / ${formatTime(shell.video.currentTime)}`;
+      state.scrubToastSecDuration = secDuration;
+      state.scrubToastSecCurrent = secCurrent;
+    }
     shell.toast({
       icon: state.scrubDirectionMomentum >= 0 ? "right-arrows" : "left-arrows",
-      text: `${formatTime(state.scrubDuration)} / ${formatTime(shell.video.currentTime)}`,
+      text: state.scrubToastText,
       group: "scrub"
     });
   }, { signal });
@@ -487,6 +500,9 @@ export function attachInputActions(shell, host, signal) {
     state.scrubSlowGain = 0;
     state.scrubFastGain = 0;
     state.scrubSensitivity = 0;
+    state.scrubToastText = null;
+    state.scrubToastSecDuration = NaN;
+    state.scrubToastSecCurrent = NaN;
     shell.hideToast("scrub");
   }, { signal });
 
