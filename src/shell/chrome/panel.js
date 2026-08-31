@@ -254,18 +254,32 @@ export class SettingsPanel {
     if (!this.#root || this.#destroyed || !this.#body.childElementCount || this.isOpen) {
       return;
     }
-    this.#root.classList.add("pf-open");
-    const activeTab = this.#root.querySelector(".pf-panel-tab-active") || this.#closeButton;
-    if (activeTab && deepestActiveElement(this.#shellHost) !== activeTab) {
-      activeTab.focus();
+    const activate = () => {
+      this.#root.classList.add("pf-open");
+      const activeTab = this.#root.querySelector(".pf-panel-tab-active") || this.#closeButton;
+      if (activeTab && deepestActiveElement(this.#shellHost) !== activeTab) {
+        activeTab.focus();
+      }
+    };
+    if (typeof document.startViewTransition === "function") {
+      document.startViewTransition({ types: ["pf-panel-open"] }, activate);
+    } else {
+      activate();
     }
   }
 
   close() {
     if (this.#root && !this.#destroyed && this.isOpen) {
-      this.#root.classList.remove("pf-open");
-      if (this.#shellHost && this.#root.contains(deepestActiveElement(this.#shellHost))) {
-        this.#shellHost.focus();
+      const deactivate = () => {
+        this.#root.classList.remove("pf-open");
+        if (this.#shellHost && this.#root.contains(deepestActiveElement(this.#shellHost))) {
+          this.#shellHost.focus();
+        }
+      };
+      if (typeof document.startViewTransition === "function") {
+        document.startViewTransition({ types: ["pf-panel-close"] }, deactivate);
+      } else {
+        deactivate();
       }
     }
   }

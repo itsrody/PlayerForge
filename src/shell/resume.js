@@ -465,7 +465,17 @@ export class ResumeTracker {
     };
     video.addEventListener("timeupdate", gatedSaveIfDue, { signal, passive: true });
     video.addEventListener("pause", () => {
-      this.#saveProgress(shell.currentTime);
+      // requestVideoFrameCallback gives the exact mediaTime of the last rendered
+      // frame — the position the user actually saw — whereas currentTime is the
+      // decoder position which may lead or lag the display. Falls back to
+      // currentTime when the API is unavailable (non-Chromium, test harness).
+      if (typeof video.requestVideoFrameCallback === "function") {
+        video.requestVideoFrameCallback((_now, metadata) => {
+          this.#saveProgress(metadata.mediaTime);
+        });
+      } else {
+        this.#saveProgress(shell.currentTime);
+      }
     }, { signal, passive: true });
   }
 

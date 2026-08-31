@@ -1,5 +1,5 @@
 import { logger } from "../shared/logger.js";
-import { deepestActiveElement, isInsideShell, fs } from "../shared/shadow.js";
+import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../shared/shadow.js";
 import { InputForge } from "./inputs/forge.js";
 import { attachInputActions } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
@@ -84,6 +84,7 @@ export class Shell {
     });
     this.#watchFullscreen();
     this.#watchWakeLock();
+    this.#watchOrientation();
     this.#markManaged();
     logger.log("shell", `Shell "${this.sdk.name}" constructed`);
   }
@@ -229,11 +230,26 @@ export class Shell {
 
   #forwardMediaEvents() {
     const video = this.video;
+    const host = this.#shellDom?.host;
     const handler = () => {
       this.#mediaSession?.sync();
     };
     for (const name of MEDIA_SESSION_SYNC_EVENTS) {
       video.addEventListener(name, handler, { signal: this.#scope.signal, passive: true });
+    }
+    // Expose media state as CSS custom properties on the host so the shadow
+    // DOM can style based on playing/paused/muted without crossing the realm
+    // boundary. Chromium 152+ :playing/:paused/:muted pseudo-classes exist but
+    // cannot reach into shadow roots; custom properties bridge the gap.
+    if (host) {
+      const sync = () => {
+        host.style.setProperty("--pf-media-paused", video.paused ? "1" : "0");
+        host.style.setProperty("--pf-media-muted", video.muted ? "1" : "0");
+      };
+      sync();
+      for (const evt of ["play", "pause", "volumechange"]) {
+        video.addEventListener(evt, sync, { signal: this.#scope.signal, passive: true });
+      }
     }
   }
 
@@ -284,6 +300,23 @@ export class Shell {
         acquire();
       }
     }, { signal });
+  }
+
+  /** Lock to landscape on fullscreen entry (Android); unlock on exit. */
+  #watchOrientation() {
+    const { signal } = this.#scope;
+    subscribeFullscreen(async (active) => {
+      if (this.#destroyed) {
+        return;
+      }
+      try {
+        if (active && screen.orientation?.lock) {
+          await screen.orientation.lock("landscape");
+        } else if (!active && screen.orientation?.unlock) {
+          screen.orientation.unlock();
+        }
+      } catch {}
+    }, signal);
   }
 
   exitFullscreen() {

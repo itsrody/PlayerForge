@@ -141,6 +141,21 @@
       }
     }
 
+    /* - Media state styling - */
+    /* --pf-media-paused / --pf-media-muted are set on the .pf-shell host by
+       shell.js and inherit into the shadow root. Registered as <number> so
+       they can drive calc()-based conditional opacity. */
+    @property --pf-media-paused {
+      syntax: "<number>";
+      inherits: true;
+      initial-value: 0;
+    }
+    @property --pf-media-muted {
+      syntax: "<number>";
+      inherits: true;
+      initial-value: 0;
+    }
+
     /* - Panel backdrop - */
     /* Transparent modal shield for the open settings panel. Covers the whole shell
        (inset 0) but sits below the panel, so the panel stays interactive while a
@@ -247,7 +262,7 @@
         transform var(--pf-ease);
 
       &.pf-visible {
-        opacity: 1;
+        opacity: calc(1 - 0.3 * var(--pf-media-paused, 0));
         transform: translateY(0);
       }
 
@@ -361,6 +376,7 @@
       &.pf-open {
         display: block;
         opacity: 1;
+        view-transition-name: pf-panel;
       }
 
       /* Single header row: [segmented tabs] [close]. */
@@ -1053,7 +1069,9 @@
     }
 
     /* Portrait phones (touch): anchor the panel as a bottom sheet - it sits
-       within thumb reach and never covers the whole video. */
+       within thumb reach and never covers the whole video. safe-area-max-inset-
+       bottom (Chrome 135+) lifts the sheet above the Android gesture bar when
+       viewport-fit=cover is active; the env() falls back to 0 when unset. */
     @media (max-width: 520px) and (pointer: coarse) {
       .pf-panel {
         top: auto;
@@ -1062,6 +1080,7 @@
         right: 8px;
         max-height: 62vh;
         margin: 0;
+        padding-bottom: env(safe-area-max-inset-bottom, 0px);
         border-radius: 16px 16px 0 0;
         border-left: none;
         border-right: none;
@@ -1131,6 +1150,31 @@
       pf-toast {
         transition: none;
       }
+    }
+  }
+
+  /* View Transition for the settings panel (Chrome 140+). Scoped via
+     view-transition-name on .pf-panel.pf-open; the pseudo-element layers
+     cross-fade with a subtle scale on entry and a reverse on exit. */
+  ::view-transition-old(pf-panel) {
+    animation: pf-panel-fade-out 0.15s ease-out;
+  }
+  ::view-transition-new(pf-panel) {
+    animation: pf-panel-fade-in 0.15s ease-in;
+  }
+  @keyframes pf-panel-fade-out {
+    from { opacity: 1; transform: scale(1); }
+    to   { opacity: 0; transform: scale(0.96); }
+  }
+  @keyframes pf-panel-fade-in {
+    from { opacity: 0; transform: scale(0.96); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+  /* Kill view transition animations when the user prefers reduced motion. */
+  @media (prefers-reduced-motion: reduce) {
+    ::view-transition-old(pf-panel),
+    ::view-transition-new(pf-panel) {
+      animation: none;
     }
   }
 }
