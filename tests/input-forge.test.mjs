@@ -373,3 +373,84 @@ test("computeCoverScale covers a reference box from aspect ratios alone", () => 
   dom.window.close();
 });
 
+/** A scrub pointermove whose (fake) Chromium sample streams we control. */
+function scrubMoveEvent(win, { x, y, coalesced, predicted, ts }) {
+  const event = pointerEvent(win, "pointermove", { x, y });
+  Object.defineProperty(event, "timeStamp", { value: ts });
+  if (coalesced) {
+    Object.defineProperty(event, "getCoalescedEvents", { value: () => coalesced });
+  }
+  if (predicted) {
+    Object.defineProperty(event, "getPredictedEvents", { value: () => predicted });
+  }
+  return event;
+}
+
+test("predicted pointer travel lifts scrub velocity but never the confirmed delta", () => {
+  const { dom, video, zone, host } = makeEnv();
+  stubFullscreen(dom, true);
+  Object.defineProperty(video, "currentTime", { value: 0, writable: true, configurable: true });
+  const controller = new InputForge(video, zone, host);
+  const seen = collect(host, dom.window);
+
+  // pointerdown at x=100 latches the start; then two scrub moves to the right.
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 100, y: 200 }));
+  // Move 1: confirmed 20px travel, no prediction -> dx is exactly 20.
+  zone.dispatchEvent(scrubMoveEvent(dom.window, {
+    x: 120, y: 205, ts: 1000, coalesced: [{ clientX: 120, clientY: 205 }]
+  }));
+  // Move 2: confirmed +10px, predicted +9px further ahead (same sign, capped).
+  zone.dispatchEvent(scrubMoveEvent(dom.window, {
+    x: 130, y: 208, ts: 1050,
+    coalesced: [{ clientX: 130, clientY: 208 }],
+    predicted: [{ clientX: 139, clientY: 211 }]
+  }));
+
+  const scrubs = seen.filter((entry) => entry.type === GESTURE_EVENTS.scrub);
+  // The confirmed dx payload is grounded in real samples (10px here, plus the
+  // 20px from move 1 -> this event's dx is the 10px move).
+  assert.equal(scrubs[1].detail.dx, 10, "dx stays pinned to confirmed motion");
+  // The prediction only shapes velocity: a +9px prediction on a +10px step
+  // must raise the velocity estimate above the confirmed-only value.
+  const dtSec = 0.05;
+  const confirmedOnlyVelocity = 10 / dtSec;
+  assert.ok(
+    scrubs[1].detail.velocity > confirmedOnlyVelocity,
+    `prediction raised velocity (${scrubs[1].detail.velocity} > ${confirmedOnlyVelocity})`
+  );
+  controller.destroy();
+  dom.window.close();
+});
+
+test("swipe-down drag promotes a compositor layer, released on restore", () => {
+  const { dom, video, zone, host } = makeEnv();
+  stubFullscreen(dom, true);
+  const controller = new InputForge(video, zone, host);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 405, y: 260 }));
+  assert.equal(
+    video.style.willChange, "transform",
+    "layer promoted the moment a down-drag latches"
+  );
+
+  // Drag further, then release (no fullscreen exit distance).
+  zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 405, y: 280 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 405, y: 300 }));
+  // The restore eases the video back (layer stays active during the ease); in
+  // jsdom the WAAPI finish never runs, so the CSS-transition end releases it.
+  assert.equal(
+    video.style.willChange, "transform",
+    "layer persists while the restore ease is in flight"
+  );
+  video.dispatchEvent(Object.assign(new dom.window.Event("transitionend", { bubbles: true }), {
+    propertyName: "transform"
+  }));
+  assert.equal(
+    video.style.willChange, "",
+    "restore released the compositor layer once the ease settled"
+  );
+  controller.destroy();
+  dom.window.close();
+});
+

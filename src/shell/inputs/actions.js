@@ -2,6 +2,7 @@ import { getSetting, TUNING } from "../chrome/config.js";
 import { formatTime } from "../../shared/time.js";
 import { fs, subscribeFullscreen } from "../../shared/shadow.js";
 import { GESTURE_EVENTS } from "../../kernel/contract.js";
+import { gestureHaptic } from "../chrome/haptics.js";
 
 export { GESTURE_EVENTS };
 
@@ -167,46 +168,134 @@ function performSkip(shell, state, direction) {
 
 /**
  * Eased snap for inline video transforms: one curve, shared by fill-mode
- * exit, pinch fill, and swipe/pinch restore. The eased style is stripped by
- * the transition's own end/cancel event - never by a timer - and a newer
- * snap invalidates the previous waiter so no cleanup lands mid-gesture.
+ * exit, pinch fill, and swipe/pinch restore. A newer snap cancels the previous
+ * in-flight animation so no cleanup can land mid-gesture.
+ *
+ * Where Element.animate (Web Animations API) is available -
+ * Chromium 69+, i.e. this fork's baseline - the snap runs a WAAPI animation
+ * on the compositor: one deterministic compositor animation with a real
+ * finish/cancel, replacing the will-change + CSS-transition + transitionend
+ * listener puzzle that could race when the transition shorthand was flipped
+ * off. The video is promoted to its own compositor layer while a transform is
+ * live (fill-mode, swipe/pinch restore) so Chromium composites the
+ * scale/translate instead of re-rasterizing the media surface every frame;
+ * the layer is released once the snap settles (or is cancelled).
+ *
+ * `prefers-reduced-motion` is honored: the transform lands instantly instead
+ * of animating. On hosts without WAAPI (jsdom), the current element is re-
+ * snapped via the CSS transition fallback, preserving observable behavior.
+ */
+const EASE_STYLE = "cubic-bezier(0.2, 0, 0, 1)";
+const EASE_MS = 150;
+
+/** Reduced-motion check is hoisted once (module const) - static per session. */
+const reducedMotion = typeof matchMedia === "function" &&
+  matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/**
+ * One eased snap per video is the invariant; the in-flight cancel handle lives
+ * in a WeakMap keyed by the video element rather than as an expando property so
+ * the framework never mints new fields on native media elements (same posture
+ * as barring video monkey-patches upstream).
  */
 const pendingEase = new WeakMap();
 
+/** Cancel any in-flight ease on `video` (used when the element is torn down). */
+export function cancelEase(video) {
+  const prior = pendingEase.get(video);
+  if (prior) {
+    prior();
+  }
+}
+
+/** Release the video's compositor layer when this ease owns it. */
+function dropPromotion(video) {
+  if (video.style.willChange === "transform") {
+    video.style.willChange = "";
+  }
+}
+
 export function easeTransformTo(video, transform) {
-  pendingEase.get(video)?.();
-  // Promote the video to its own compositor layer while a transform is live
-  // (fill-mode, swipe/pinch restore): Chromium composites the scale/translate
-  // on the compositor instead of re-rasterizing the media surface every frame.
-  // The layer is released once the eased snap settles (or is cancelled), so
-  // the idle player never carries a lingering will-change.
-  const promoting = !!transform;
-  if (promoting) {
+  // Cancel any previous snap so a newer one takes sole ownership of the video.
+  const prior = pendingEase.get(video);
+  if (prior) {
+    prior();
+  }
+  if (transform) {
     video.style.willChange = "transform";
   }
-  const stop = () => {
-    video.removeEventListener("transitionend", onEnd);
-    video.removeEventListener("transitioncancel", onCancel);
-    if (pendingEase.get(video) === stop) {
+
+  // Reduced motion: land instantly, no animation, no layer churn.
+  if (reducedMotion) {
+    video.style.transition = "none";
+    video.style.transform = transform;
+    dropPromotion(video);
+    return;
+  }
+
+  // WAAPI path (Chromium baseline): one compositor animation from the current
+  // computed transform to the target. On finish the final value is committed
+  // to an inline style and the animation is cancelled so its fill gives way;
+  // on cancel (via stop() or supersession) the layer is dropped immediately.
+  if (typeof video.animate === "function") {
+    const animation = video.animate(
+      [
+        { transform: getComputedStyle(video).transform || "none" },
+        { transform: transform || "none" }
+      ],
+      { duration: EASE_MS, easing: EASE_STYLE, fill: "both" }
+    );
+    const stop = () => {
+      if (pendingEase.get(video) !== stop) {
+        return;
+      }
       pendingEase.delete(video);
       video.style.transition = "";
-      if (promoting) {
-        video.style.willChange = "";
+      animation.cancel();
+    };
+    pendingEase.set(video, stop);
+    animation.addEventListener("finish", () => {
+      if (pendingEase.get(video) !== stop) {
+        return;
       }
+      // Commit the final transform as inline style, then cancel the animation's
+      // fill so the committed style owns the element from here on.
+      video.style.transition = "";
+      video.style.transform = transform;
+      animation.cancel();
+      pendingEase.delete(video);
+      dropPromotion(video);
+    });
+    animation.addEventListener("cancel", () => {
+      if (pendingEase.get(video) === stop) {
+        pendingEase.delete(video);
+        dropPromotion(video);
+      }
+    });
+    return;
+  }
+
+  // CSS transition fallback (hosts without WAAPI, e.g. jsdom): the eased style
+  // is stripped by the transition's own end/cancel event - never by a timer.
+  const pendingStop = () => {
+    video.removeEventListener("transitionend", onEnd);
+    video.removeEventListener("transitioncancel", onCancel);
+    if (pendingEase.get(video) === pendingStop) {
+      pendingEase.delete(video);
+      dropPromotion(video);
     }
   };
   const onEnd = (event) => {
     if (event.propertyName === "transform") {
-      stop();
+      pendingStop();
     }
   };
-  const onCancel = () => stop();
+  const onCancel = () => pendingStop();
+  pendingEase.set(video, pendingStop);
   // Listeners first, styles second: no completion event can slip past us.
   video.addEventListener("transitionend", onEnd);
   video.addEventListener("transitioncancel", onCancel);
-  pendingEase.set(video, stop);
-
-  video.style.transition = "transform 0.15s cubic-bezier(0.2, 0, 0, 1)";
+  video.style.transition = `transform ${EASE_MS}ms ${EASE_STYLE}`;
   video.style.transform = transform;
 }
 
@@ -226,6 +315,12 @@ function clearFillMode(shell, state, animate = true) {
     if (animate) {
       easeTransformTo(video, "");
     } else {
+      // Cancel any in-flight WAAPI ease first: its fill:'both' would otherwise
+      // keep re-applying a scale after the inline style is cleared below.
+      const prior = pendingEase.get(video);
+      if (prior) {
+        prior();
+      }
       video.style.transition = "none";
       video.style.transform = "";
       video.style.willChange = "";
@@ -299,6 +394,7 @@ export function attachInputActions(shell, host, signal) {
     const speed = TUNING.controller.holdSpeed;
     state.savedRate = shell.playbackRate;
     shell.media.beginBoost(speed);
+    gestureHaptic("hold");
     shell.toast({ icon: "right-arrows", text: `${speed}x`, group: "hold" });
   }, { signal });
 
@@ -340,6 +436,7 @@ export function attachInputActions(shell, host, signal) {
       state.scrubFastGain = fastCeiling / width;
       state.scrubSensitivity = SCRUB_SENSITIVITY;
       state.scrubDirectionMomentum = 0;
+      gestureHaptic("scrub");
     }
 
     if (Math.abs(detail.dx) < SCRUB_DEAD_ZONE_PX) {
@@ -420,6 +517,7 @@ export function attachInputActions(shell, host, signal) {
    * playback. Inline double-taps belong to the browser/player natively.
    */
   host.addEventListener(GESTURE_EVENTS.dbltap, ({ detail }) => {
+    gestureHaptic("dbltap");
     if (detail.zone === "left-edge" || detail.zone === "right-edge") {
       performSkip(shell, stateFor(shell), detail.zone === "left-edge" ? "left" : "right");
     } else if (detail.zone === "screen") {
@@ -468,6 +566,7 @@ export function attachInputActions(shell, host, signal) {
       if (scale <= 1) {
         return;
       }
+      gestureHaptic("pinch");
       easeTransformTo(video, `scale(${scale})`);
       state.fillActive = true;
       shell.toast({

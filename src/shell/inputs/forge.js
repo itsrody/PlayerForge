@@ -1,4 +1,4 @@
-import { allowsIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo } from "./actions.js";
+import { allowsIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo, cancelEase } from "./actions.js";
 import { TUNING } from "../chrome/config.js";
 import { SHELL_MARKER } from "../chrome/inject.js";
 import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../../shared/shadow.js";
@@ -71,13 +71,31 @@ function captureFirstTwo(pointers, out) {
  * reads detail.dx/velocity within the scrub handler) observes the payload
  * before the next move re-mutates it, so a re-dispatched instance is safe -
  * nothing retains the object past the caller that last read it.
+ *
+ * The pooled Event is built lazily (not at module load) so it is constructed
+ * in the same realm as the surface it is dispatched onto: the bare
+ * `globalThis.CustomEvent` is resolved at first use, which keeps it valid
+ * across jsdom's realm bridging in tests and identical to the page realm in
+ * the browser. One pool services the whole engine; only a single scrub can be
+ * in flight at a time, so sharing is safe.
  */
 const scrubDetail = { zone: "", method: "pointer", dx: 0, velocity: 0, timestamp: 0 };
-const scrubEvent = new CustomEvent(GESTURE_EVENTS.scrub, {
-  detail: scrubDetail,
-  bubbles: false,
-  composed: false
-});
+let scrubPool = null;
+function pooledScrubEvent() {
+  const Ctor = globalThis.CustomEvent;
+  if (scrubPool && scrubPool.Ctor === Ctor) {
+    return scrubPool.event;
+  }
+  scrubPool = {
+    Ctor,
+    event: new Ctor(GESTURE_EVENTS.scrub, {
+      detail: scrubDetail,
+      bubbles: false,
+      composed: false
+    })
+  };
+  return scrubPool.event;
+}
 
 /**
  * InputForge engine: pure recognition transport. Turns pointer/keyboard/
@@ -268,6 +286,7 @@ export class InputForge {
       this.#videoRect = null;
       this.#pointers.clear();
       this.#spaceHoldIntercepting = false;
+      cancelEase(this.#video);
       this.#video.style.transition = "";
       this.#video.style.transform = "";
       this.#video.style.willChange = "";
@@ -613,6 +632,14 @@ export class InputForge {
           this.#gestureFsActive = true;
           this.#swipeDirection = y > this.#startY ? "down" : "up";
           this.#swipeBaseTransform = this.#video.style.transform || "";
+          // Promote the video to a compositor layer the moment a down-drag
+          // latches so the per-move translateY below tracks on the compositor
+          // (pointer rate) instead of forcing a re-rasterizing style recalc
+          // every move. Dropped again by easeTransformTo when the stroke's
+          // snap settles (down) or the restore eases back (up/cancel).
+          if (this.#swipeDirection === "down") {
+            this.#video.style.willChange = "transform";
+          }
           this.#capturePointerSafe(this.#primaryPointerId);
           this.#suppressNextActivations();
           event.stopImmediatePropagation();
@@ -647,6 +674,17 @@ export class InputForge {
    * display rate - adaptive-refresh correct - while the small tau keeps the
    * signal responsive enough to track speed changes mid-stroke, so the seek
    * amount stays proportional to the hand in real time.
+   *
+   * Chromium's PointerEvent.getPredictedEvents() returns extrapolated FUTURE
+   * positions. We speculatively "draw ahead" with them, matching the drawing
+   * idiom in the Pointer Events spec (predict, then discard once real points
+   * arrive): predicted travel feeds the VELOCITY estimate only, never the
+   * confirmed seek delta (#scrubLastX stays pinned to real samples). Because
+   * scrub's amount is a monotonic function of velocity, a fresher, higher
+   * velocity read makes the response feel ahead of the hand - lower perceived
+   * latency - while the absolute position stays grounded in real motion, so a
+   * prediction can never overshoot or drift a fast flick. Prediction is
+   * bounded: only the first predicted sample, capped to the confirmed travel.
    */
   #advanceScrub(event) {
     let totalStep = 0;
@@ -669,10 +707,24 @@ export class InputForge {
       this.#scrubLastX = event.clientX;
     }
 
+    // Speculative velocity wash: the first predicted pointer beats the live
+    // event just enough to pull the velocity estimate forward, but is clamped
+    // to a fraction of the confirmed step so it can never dominate or reverse
+    // against a correcting hand. Purely a velocity-shaping signal.
+    const hasPredicted = hasCoalesced && typeof event.getPredictedEvents === "function";
+    let velocityStep = totalStep;
+    if (hasPredicted) {
+      const predicted = event.getPredictedEvents();
+      if (predicted && predicted.length) {
+        velocityStep += Math.sign(totalStep) *
+          Math.min(Math.abs(predicted[0].clientX - event.clientX), Math.abs(totalStep));
+      }
+    }
+
     const now = event.timeStamp;
     const dt = (now - this.#scrubLastTime) / 1000;
     this.#scrubLastTime = now;
-    const instantVelocity = dt > 0.001 ? totalStep / dt : 0;
+    const instantVelocity = dt > 0.001 ? velocityStep / dt : 0;
     const alpha = dt > 0 ? 1 - Math.exp(-dt / SCRUB_VELOCITY_TAU_S) : 0;
     this.#scrubVelocity += alpha * (instantVelocity - this.#scrubVelocity);
     // Emit via the pooled event: the payload and the Event both ride reused
@@ -684,7 +736,7 @@ export class InputForge {
     scrubDetail.velocity = this.#scrubVelocity;
     scrubDetail.timestamp = now;
     if (!this.#destroyed && !!this.#eventTarget) {
-      this.#eventTarget.dispatchEvent(scrubEvent);
+      this.#eventTarget.dispatchEvent(pooledScrubEvent());
     }
   }
 

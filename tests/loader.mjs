@@ -45,3 +45,12 @@ if (typeof globalThis.scheduler === "undefined") {
 if (typeof globalThis.MediaMetadata === "undefined") {
   globalThis.MediaMetadata = class MediaMetadata {};
 }
+// Chromium's Vibration API - absent on Node. Stubbed so gestureHaptic's
+// feature-detect is true and tests can assert the haptic pulse pattern; the
+// stub records the last pattern for inspection.
+if (typeof globalThis.navigator?.vibrate !== "function") {
+  globalThis.navigator.vibrate = (pattern) => {
+    globalThis.__lastHapticPattern = pattern;
+    return true;
+  };
+}
