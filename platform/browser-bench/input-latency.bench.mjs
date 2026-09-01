@@ -28,6 +28,13 @@ export default async function runInputLatencyBench(bundle = DEFAULT_BUNDLE) {
     await waitForShell(driver, 8000);
 
     // Benchmark: keyboard event → gesture dispatch.
+    // The keyboard path requires video.readyState > 0 (the #isActive gate
+    // in forge.js), so we mock it on the test video which has no src.
+    await driver.eval(() => {
+      const video = document.getElementById("test-video");
+      Object.defineProperty(video, "readyState", { value: 4, configurable: true });
+    });
+
     const keyTimes = [];
     for (let b = 0; b < BATCHES; b++) {
       const timings = [];
