@@ -120,7 +120,7 @@ export class ForgeTrack {
       if (prev.text !== cue.text) {
         slot.textContent = cue.text;
       }
-      slot.hidden &&= false;
+      slot.hidden = false;
       prev.text = cue.text;
       prev.x = x;
       this.#lastActive[i] = true;

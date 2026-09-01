@@ -381,7 +381,7 @@ export class InputForge {
     this.#endPointerSession();
     this.#primaryPointerId = null;
     for (const pointerId of this.#pointers.keys()) {
-      this.#releasePointerCaptureSafe(pointerId);
+      this.#pointerOp("releasePointerCapture", pointerId);
     }
     this.#pinchStartDistance = 0;
     this.#pinchFired = false;
@@ -501,7 +501,7 @@ export class InputForge {
   }
 
   #dispatch(eventName, detail) {
-    if (!this.#destroyed && !!this.#eventTarget) {
+    if (!this.#destroyed && this.#eventTarget) {
       this.#eventTarget.dispatchEvent(new CustomEvent(eventName, {
         detail,
         bubbles: false,
@@ -510,18 +510,10 @@ export class InputForge {
     }
   }
 
-  #capturePointerSafe(pointerId) {
+  #pointerOp(op, pointerId) {
     if (pointerId != null) {
       try {
-        this.#zone.setPointerCapture(pointerId);
-      } catch {}
-    }
-  }
-
-  #releasePointerCaptureSafe(pointerId) {
-    if (pointerId != null) {
-      try {
-        this.#zone.releasePointerCapture(pointerId);
+        this.#zone[op](pointerId);
       } catch {}
     }
   }
@@ -573,7 +565,7 @@ export class InputForge {
         this.#holdTimer = null;
         if (this.#primaryPointerId !== null && !this.#video.paused && allowsIntent("hold")) {
           this.#holding = true;
-          this.#capturePointerSafe(this.#primaryPointerId);
+          this.#pointerOp("setPointerCapture", this.#primaryPointerId);
           this.#dispatch(GESTURE_EVENTS.hold, {
             zone: this.#gestureZone,
             method: "pointer",
@@ -620,7 +612,7 @@ export class InputForge {
         if (allowsIntent("scrub") && dx > SCROLL_START_PX && dx > dy * AXIS_DOMINANCE_RATIO) {
           this.#scrubbing = true;
           this.#gestureFsActive = true;
-          this.#capturePointerSafe(this.#primaryPointerId);
+          this.#pointerOp("setPointerCapture", this.#primaryPointerId);
           this.#scrubLastX = x;
           this.#scrubLastTime = now;
           this.#scrubVelocity = 0;
@@ -637,7 +629,7 @@ export class InputForge {
           if (this.#swipeDirection === "down") {
             this.#video.style.willChange = "transform";
           }
-          this.#capturePointerSafe(this.#primaryPointerId);
+          this.#pointerOp("setPointerCapture", this.#primaryPointerId);
           this.#suppressNextActivations();
           event.stopImmediatePropagation();
           this.#dispatch(GESTURE_EVENTS.swipeStart, {
@@ -741,7 +733,7 @@ export class InputForge {
     scrubDetail.dx = totalStep;
     scrubDetail.velocity = this.#scrubVelocity;
     scrubDetail.timestamp = now;
-    if (!this.#destroyed && !!this.#eventTarget) {
+    if (!this.#destroyed && this.#eventTarget) {
       this.#eventTarget.dispatchEvent(pooledScrubEvent());
     }
   }

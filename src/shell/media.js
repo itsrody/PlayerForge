@@ -200,7 +200,7 @@ export function claimMediaSession({ controls, video, signal, session = navigator
   if (!session) {
     return null;
   }
-  sessionOwner?.dispose();
+  sessionOwner?.destroy();
   const bridge = new MediaSessionBridge(session, controls, video);
   sessionOwner = bridge;
   bridge.attach(signal);
@@ -211,7 +211,7 @@ class MediaSessionBridge {
   #session;
   #controls;
   #video;
-  #disposed = false;
+  #destroyed = false;
 
   constructor(session, controls, video) {
     this.#session = session;
@@ -243,7 +243,7 @@ class MediaSessionBridge {
     // Posters often arrive with metadata; refresh once it exists.
     this.#video.addEventListener("loadedmetadata", () => this.#refreshMetadata(), { signal });
     this.#refreshMetadata();
-    signal.addEventListener("abort", () => this.dispose(), { once: true });
+    signal.addEventListener("abort", () => this.destroy(), { once: true });
     logger.log("media", "MediaSession claimed - handlers registered");
   }
 
@@ -254,7 +254,7 @@ class MediaSessionBridge {
 
   /** playbackState plus guarded position state; safe to call per event batch. */
   sync() {
-    if (this.#disposed) {
+    if (this.#destroyed) {
       return;
     }
     const session = this.#session;
@@ -271,11 +271,11 @@ class MediaSessionBridge {
     }
   }
 
-  dispose() {
-    if (this.#disposed) {
+  destroy() {
+    if (this.#destroyed) {
       return;
     }
-    this.#disposed = true;
+    this.#destroyed = true;
     if (sessionOwner === this) {
       sessionOwner = null;
     }
@@ -290,7 +290,7 @@ class MediaSessionBridge {
   }
 
   #refreshMetadata() {
-    if (this.#disposed) {
+    if (this.#destroyed) {
       return;
     }
     try {

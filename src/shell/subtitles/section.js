@@ -232,10 +232,6 @@ export class SubtitlesSection {
       }
     });
 
-    const applyPosition = () => {
-      // Position values are read from the steppers directly when needed.
-    };
-
     const verticalStepper = panel.addControl(styleGrid, {
       type: "stepper",
       label: "V",
@@ -246,7 +242,6 @@ export class SubtitlesSection {
       format: (v) => `${v}%`,
       onChange: (v) => {
         setConfigValue(SETTING_KEYS.line, v);
-        applyPosition();
       }
     });
     const horizontalStepper = panel.addControl(styleGrid, {
@@ -259,11 +254,8 @@ export class SubtitlesSection {
       format: (v) => `${v}%`,
       onChange: (v) => {
         setConfigValue(SETTING_KEYS.horizontal, v);
-        applyPosition();
       }
     });
-
-    applyPosition();
 
     this.#styleControls = { size: sizeStepper, color: colorField, shadow: shadowStepper, sync: syncStepper };
     this.#positionControls = { vertical: verticalStepper, horizontal: horizontalStepper };
@@ -423,9 +415,8 @@ export class SubtitlesSection {
       this.#styleControls.sync.setDisabled(disabled);
     }
     if (this.#positionControls) {
-      const disabled = !hasTrack;
-      this.#positionControls.vertical.setDisabled(disabled);
-      this.#positionControls.horizontal.setDisabled(disabled);
+      this.#positionControls.vertical.setDisabled(!hasTrack);
+      this.#positionControls.horizontal.setDisabled(!hasTrack);
     }
     if (this.#resetBtn) {
       this.#resetBtn.disabled = !hasTrack;
