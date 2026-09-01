@@ -151,6 +151,7 @@ export class InputForge {
   #swipeDirection = null;
   #swipeBaseTransform = "";
   #lastSwipeDrag = NaN;
+  #lastSwipeTransform = "";
 
   /**
    * Once a scrub/swipe session latches, the gesture already started fullscreen
@@ -373,6 +374,7 @@ export class InputForge {
       this.#swiping = false;
       this.#swipeDirection = null;
       this.#lastSwipeDrag = NaN;
+      this.#lastSwipeTransform = "";
       this.#restoreTransform();
     }
     this.#gestureFsActive = false;
@@ -573,6 +575,7 @@ export class InputForge {
       this.#swiping = false;
       this.#swipeDirection = null;
       this.#lastSwipeDrag = NaN;
+      this.#lastSwipeTransform = "";
       this.#clearHoldTimer();
 
       this.#holdTimer = setTimeout(() => {
@@ -661,10 +664,13 @@ export class InputForge {
         event.stopImmediatePropagation();
         const drag = y - this.#startY;
         if (drag !== this.#lastSwipeDrag) {
-          this.#video.style.transform =
-            this.#swipeBaseTransform
-              ? this.#swipeBaseTransform + " translateY(" + drag + "px)"
-              : "translateY(" + drag + "px)";
+          const t = this.#swipeBaseTransform
+            ? this.#swipeBaseTransform + " translateY(" + drag + "px)"
+            : "translateY(" + drag + "px)";
+          if (t !== this.#lastSwipeTransform) {
+            this.#video.style.transform = t;
+            this.#lastSwipeTransform = t;
+          }
           this.#lastSwipeDrag = drag;
         }
       }
@@ -797,6 +803,7 @@ export class InputForge {
       });
       this.#swipeDirection = null;
       this.#lastSwipeDrag = NaN;
+      this.#lastSwipeTransform = "";
     } else if (
       elapsed < HOLD_TIMEOUT_MS &&
       this.#gestureZone !== null &&

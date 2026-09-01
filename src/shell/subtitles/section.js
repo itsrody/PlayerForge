@@ -90,7 +90,7 @@ export class SubtitlesSection {
       return;
     }
     const dragCounter = { count: 0 };
-    const hasFiles = (event) => [...(event.dataTransfer?.types || [])].includes("Files");
+    const hasFiles = (event) => event.dataTransfer?.types?.includes("Files") ?? false;
     const isSubtitleFile = (file) => SUBTITLE_EXT_RE.test(file?.name || "");
 
     sectionRoot.addEventListener("dragenter", (event) => {

@@ -297,11 +297,23 @@ export async function getPageContext() {
 
 /** Ask the parent chain for page context via postMessage (cross-origin iframes). */
 function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
-  const deadline = Date.now() + timeoutMs;
   const { promise, resolve } = Promise.withResolvers();
   const ac = new AbortController();
   let nonce = null;
   let retryTimer = null;
+
+  // AbortSignal.any() + AbortSignal.timeout() is the ideal path (Chromium 103+),
+  // but Node's brand-check can reject timeout signals in older runtimes.
+  // Feature-detect and fall back to manual deadline tracking.
+  let signal;
+  let useSignalAny = false;
+  try {
+    signal = AbortSignal.any([ac.signal, AbortSignal.timeout(timeoutMs)]);
+    useSignalAny = true;
+  } catch {
+    signal = ac.signal;
+  }
+  const deadline = useSignalAny ? 0 : Date.now() + timeoutMs;
 
   const onMessage = (event) => {
     const data = event.data;
@@ -321,17 +333,23 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
     }
   };
 
-  window.addEventListener("message", onMessage, { signal: ac.signal });
+  if (useSignalAny) {
+    signal.addEventListener("abort", () => {
+      clearTimeout(retryTimer);
+      resolve(null);
+    }, { once: true });
+  }
+
+  window.addEventListener("message", onMessage, { signal });
 
   const sendRequest = () => {
     nonce = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     window.parent.postMessage({ type: CTX_REQUEST_TYPE, nonce }, "*");
   };
   const attempt = () => {
-    if (Date.now() >= deadline) {
-      // The pending retry would fire into a torn-down request otherwise.
+    if (useSignalAny ? signal.aborted : Date.now() >= deadline) {
       clearTimeout(retryTimer);
-      ac.abort();
+      if (!useSignalAny) ac.abort();
       resolve(null);
       return;
     }

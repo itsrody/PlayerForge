@@ -65,6 +65,11 @@ export class Shell {
     if (!this.#shellDom) {
       throw new Error(`Shell "${this.sdk.name}": failed to inject shell DOM`);
     }
+
+    // Yield between DOM injection and component construction so the browser
+    // can process pending layout/paint work before the panel builds its tree.
+    await scheduler.yield();
+
     this.#panel = new SettingsPanel(this);
     this.#toasts = new ToastManager(this.#shellDom.hudLayer);
     this.#inputs = new InputForge(this.video, this.container, this.shellHost);
@@ -74,6 +79,11 @@ export class Shell {
     this.#filter = new VideoFilter(this, this.#panel);
     addHistorySection(this.#panel, this);
     addSettingsSection(this.#panel);
+
+    // Yield again before wiring event listeners so the constructed panel
+    // tree is painted before we attach the media/keyboard/fullscreen handlers.
+    await scheduler.yield();
+
     this.#setupFocusManagement();
     this.#suppressContextMenu();
     this.#forwardMediaEvents();

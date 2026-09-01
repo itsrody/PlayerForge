@@ -249,6 +249,7 @@
       top: 12px;
       left: 50%;
       z-index: var(--pf-z-toast);
+      will-change: opacity, translate;
       /* Dedicated translate property (Chrome 104+) - keeps centering out of
          the transform property, so transform-based animations on the toast
          never clobber it. */
@@ -356,6 +357,7 @@
       position: absolute;
       z-index: var(--pf-z-panel);
       padding: 0;
+      will-change: opacity, translate, scale;
 
       /* Closed by default; @starting-style keys off the display flip. Centered
          on the shell host via auto margins (no translate), so the open/close
