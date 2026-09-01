@@ -710,3 +710,196 @@ export async function createMultiOriginServers() {
   await serverB.start();
   return { serverA, serverB };
 }
+
+/**
+ * Create N TestServer instances on different ports (all different origins).
+ * @param {number} count
+ * @returns {Promise<TestServer[]>}
+ */
+export async function createMultiOriginServersN(count) {
+  const servers = [];
+  for (let i = 0; i < count; i++) {
+    const s = new TestServer();
+    await s.start();
+    servers.push(s);
+  }
+  return servers;
+}
+
+/**
+ * Build a Plyr-style child page for switchboard embedding.
+ * @param {TestServer} server
+ * @param {object} [options]
+ * @param {string} [options.name] - Server display name.
+ * @returns {string} URL to the child page.
+ */
+export function createSwitchboardChildPage(server, options = {}) {
+  const { name = "Server" } = options;
+  const html = `<!DOCTYPE html>
+<html>
+<head><title>${name}</title></head>
+<body>
+  <div class="plyr" data-plyr>
+    <div class="plyr__video-wrapper">
+      <video id="test-video" preload="metadata"></video>
+    </div>
+  </div>
+</body>
+</html>`;
+  const path = `/sb-child-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`;
+  server.addPage(path, html);
+  return `${server.url}${path}`;
+}
+
+/**
+ * Build a switchboard parent page with dynamic iframe loading/unloading controls.
+ *
+ * The page includes:
+ * - A server list UI with placeholder cards
+ * - JavaScript controls: __loadIframe(i), __unloadIframe(), __switchTo(i), __rapidCycle(n, ms)
+ * - State tracking: __getActiveIndex(), __getLoadedCount(), __waitForIframeLoad(i, timeoutMs)
+ *
+ * @param {TestServer} parentServer - Parent page server.
+ * @param {Array<{ name: string, url: string }>} childServers - Child server entries.
+ * @param {object} [options]
+ * @param {number} [options.width]
+ * @param {number} [options.height]
+ * @returns {string} URL to the parent page.
+ */
+export function createSwitchboardPage(parentServer, childServers, options = {}) {
+  const { width = 1280, height = 720 } = options;
+  const serversJson = JSON.stringify(childServers);
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Switchboard</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #111; color: #eee; font-family: system-ui; }
+    #server-list { display: flex; gap: 8px; padding: 12px; flex-wrap: wrap; }
+    .server-card {
+      cursor: pointer; border: 1px solid #333; border-radius: 6px;
+      padding: 10px 16px; min-width: 120px; text-align: center;
+      transition: border-color 0.15s, opacity 0.15s;
+    }
+    .server-card:hover { border-color: #666; }
+    .server-card.active { border-color: #4caf50; opacity: 1; }
+    .server-card.placeholder { opacity: 0.5; }
+    #iframe-slot {
+      width: ${width}px; height: ${height}px; margin: 0 auto;
+      background: #000; position: relative;
+    }
+    #iframe-slot iframe { border: none; width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <div id="server-list"></div>
+  <div id="iframe-slot"></div>
+  <script>
+    const SERVERS = ${serversJson};
+    const slot = document.getElementById("iframe-slot");
+    const list = document.getElementById("server-list");
+    let activeIndex = -1;
+    let activeIframe = null;
+    let activeLoadPromise = null;
+
+    // Build server cards.
+    SERVERS.forEach((srv, i) => {
+      const card = document.createElement("div");
+      card.className = "server-card placeholder";
+      card.textContent = srv.name;
+      card.dataset.index = i;
+      card.addEventListener("click", () => {
+        if (activeIndex === i) {
+          window.__unloadIframe();
+        } else {
+          window.__switchTo(i);
+        }
+      });
+      list.appendChild(card);
+    });
+
+    function updateCards() {
+      const cards = list.querySelectorAll(".server-card");
+      cards.forEach((card, i) => {
+        card.className = "server-card " + (i === activeIndex ? "active" : "placeholder");
+      });
+    }
+
+    window.__loadIframe = (index) => {
+      if (activeIframe) return false;
+      const srv = SERVERS[index];
+      if (!srv) return false;
+      const iframe = document.createElement("iframe");
+      iframe.id = "active-frame";
+      iframe.src = srv.url;
+      iframe.allowFullscreen = true;
+      iframe.setAttribute("frameborder", "0");
+      slot.appendChild(iframe);
+      activeIframe = iframe;
+      activeIndex = index;
+      // Track the load event.
+      activeLoadPromise = new Promise((resolve) => {
+        iframe.addEventListener("load", () => resolve(true), { once: true });
+        // Fallback: resolve after a short delay if load event doesn't fire.
+        setTimeout(() => resolve(true), 3000);
+      });
+      updateCards();
+      return true;
+    };
+
+    window.__unloadIframe = () => {
+      if (!activeIframe) return false;
+      activeIframe.remove();
+      activeIframe = null;
+      activeLoadPromise = null;
+      activeIndex = -1;
+      updateCards();
+      return true;
+    };
+
+    window.__switchTo = (index) => {
+      window.__unloadIframe();
+      return window.__loadIframe(index);
+    };
+
+    window.__getActiveIndex = () => activeIndex;
+
+    window.__getLoadedCount = () => activeIframe ? 1 : 0;
+
+    window.__waitForIframeLoad = (index, timeoutMs = 10000) => {
+      return new Promise((resolve, reject) => {
+        if (!activeIframe || activeIndex !== index) {
+          reject(new Error("waitForIframeLoad: no active iframe at index " + index));
+          return;
+        }
+        const timer = setTimeout(() => reject(new Error("waitForIframeLoad timed out")), timeoutMs);
+        const onLoaded = () => {
+          clearTimeout(timer);
+          resolve(true);
+        };
+        // Use the tracked load promise.
+        if (activeLoadPromise) {
+          activeLoadPromise.then(onLoaded);
+        } else {
+          // Fallback: just resolve after a short delay.
+          setTimeout(onLoaded, 500);
+        }
+      });
+    };
+
+    window.__rapidCycle = async (count, intervalMs) => {
+      for (let i = 0; i < count; i++) {
+        window.__switchTo(i % SERVERS.length);
+        await new Promise(r => setTimeout(r, intervalMs));
+      }
+    };
+  </script>
+</body>
+</html>`;
+
+  const path = `/sb-parent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`;
+  parentServer.addPage(path, html);
+  return `${parentServer.url}${path}`;
+}
