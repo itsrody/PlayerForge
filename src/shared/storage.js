@@ -104,6 +104,17 @@ function isSafeKeySegment(key) {
   return key !== "__proto__" && key !== "constructor" && key !== "prototype";
 }
 
+function persistConfig(doc) {
+  try {
+    gmSetValue(KEYS.configs, doc);
+  } catch (err) {
+    logger.error("storage", "Failed to persist config:", err);
+    return false;
+  }
+  configCache = doc;
+  return true;
+}
+
 export function getConfigValue(path, fallback) {
   let node = readConfigDoc();
   for (const segment of path.split(".")) {
@@ -159,13 +170,9 @@ export function setConfigFields(fields) {
     }
     node[last] = value;
   }
-  try {
-    gmSetValue(KEYS.configs, doc);
-  } catch (err) {
-    logger.error("storage", "Failed to persist config:", err);
+  if (!persistConfig(doc)) {
     return;
   }
-  configCache = doc;
 }
 
 /**
@@ -191,11 +198,7 @@ export function deleteConfigField(path) {
     return;
   }
   delete node[last];
-  try {
-    gmSetValue(KEYS.configs, doc);
-  } catch (err) {
-    logger.error("storage", "Failed to persist config:", err);
+  if (!persistConfig(doc)) {
     return;
   }
-  configCache = doc;
 }

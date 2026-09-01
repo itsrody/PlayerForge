@@ -40,6 +40,10 @@ const RESUME_ENTRY_FIELDS = new Set([
   "createdAt", "updatedAt", "pending"
 ]);
 
+function isValidStore(raw) {
+  return raw && typeof raw === "object" && Array.isArray(raw.entries);
+}
+
 /**
  * Persistent store of per-video entries (keyed by path+duration hash) holding
  * the resume position. Owned by ResumeTracker; per-entry last-write-wins
@@ -93,7 +97,7 @@ export class ResumeStore {
       return;
     }
     const raw = loadJsonObject(KEYS.resume, null);
-    if (raw && Array.isArray(raw.entries)) {
+    if (isValidStore(raw)) {
       const { added, updated } = this.#mergeRaw(raw);
       if (added || updated) {
         this.#notify(true);
@@ -144,7 +148,7 @@ export class ResumeStore {
       return;
     }
     const raw = loadJsonObject(KEYS.resume, null);
-    if (raw && Array.isArray(raw.entries)) {
+    if (isValidStore(raw)) {
       // Tolerate foreign or future writers: adopt their entries as-is and
       // restamp our schema version - resetting would destroy history.
       const valid = raw.entries.filter((entry) => entry && typeof entry === "object" && typeof entry.id === "string");
@@ -191,7 +195,7 @@ export class ResumeStore {
   #persist(structural = false) {
     try {
       const raw = loadJsonObject(KEYS.resume, null);
-      if (raw && Array.isArray(raw.entries)) {
+      if (isValidStore(raw)) {
         this.#mergeRaw(raw);
       }
       // Bounds run AFTER the merge so a stale disk copy can never resurrect
@@ -311,7 +315,7 @@ export class ResumeStore {
     } catch {
       return null;
     }
-    if (!raw || typeof raw !== "object" || !Array.isArray(raw.entries)) {
+    if (!isValidStore(raw)) {
       return null;
     }
     const result = this.#mergeRaw(raw);

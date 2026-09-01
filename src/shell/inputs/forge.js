@@ -2,6 +2,7 @@ import { allowsIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo
 import { TUNING } from "../../shared/tuning.js";
 import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../../shared/shadow.js";
 import { DOMManager } from "../../shared/dom-manager.js";
+import { logger } from "../../shared/logger.js";
 
 /**
  * Pointer handlers never preventDefault - native pan/scroll over the zone is
@@ -935,7 +936,7 @@ export class InputForge {
       if (this.#video.paused) {
         this.#video.play().catch((err) => {
           if (err.name !== "AbortError" && err.name !== "NotAllowedError") {
-            console.debug("[PlayerForge] bare-tap play rejected:", err.name);
+            logger.log("forge", "bare-tap play rejected:", err.name);
           }
         });
       } else {

@@ -91,6 +91,7 @@ export class SubtitlesSection {
     const dragCounter = { count: 0 };
     const hasFiles = (event) => event.dataTransfer?.types?.includes("Files") ?? false;
     const isSubtitleFile = (file) => SUBTITLE_EXT_RE.test(file?.name || "");
+    const { signal } = this.#scope;
 
     sectionRoot.addEventListener("dragenter", (event) => {
       if (hasFiles(event)) {
@@ -98,20 +99,20 @@ export class SubtitlesSection {
         dragCounter.count++;
         sectionRoot.classList.add("pf-drop-active");
       }
-    });
+    }, { signal });
     sectionRoot.addEventListener("dragover", (event) => {
       if (hasFiles(event)) {
         event.preventDefault();
         event.dataTransfer.dropEffect = "copy";
       }
-    });
+    }, { signal });
     sectionRoot.addEventListener("dragleave", () => {
       dragCounter.count--;
       if (dragCounter.count <= 0) {
         dragCounter.count = 0;
         sectionRoot.classList.remove("pf-drop-active");
       }
-    });
+    }, { signal });
     sectionRoot.addEventListener("drop", (event) => {
       event.preventDefault();
       dragCounter.count = 0;
@@ -124,7 +125,7 @@ export class SubtitlesSection {
       for (const file of files) {
         this.load(file);
       }
-    });
+    }, { signal });
 
     // Load row: upload button, remove button, hint text.
     const loadSection = panel.el("div", { class: "pf-panel-section" }, sectionRoot);
@@ -312,7 +313,7 @@ export class SubtitlesSection {
         this.load(file);
       }
       input.value = "";
-    });
+    }, { signal: this.#scope.signal });
     return input;
   }
 
@@ -324,8 +325,7 @@ export class SubtitlesSection {
       const rawText = await file.text();
       await this.#ingest(file.name, rawText);
     } catch (err) {
-      logger.error("subtitles", `Failed to load ${file.name}:`, err);
-      this.#toastInfo("captions", "Failed to load subtitles", "subtitles");
+      this.#handleLoadError("load", file.name, err);
     }
   }
 
@@ -342,16 +342,19 @@ export class SubtitlesSection {
     try {
       response = await gmRequestText(url);
     } catch (err) {
-      logger.error("subtitles", `Failed to fetch ${url}:`, err);
-      this.#toastInfo("link", "Failed to fetch subtitles", "subtitles");
+      this.#handleLoadError("fetch", url, err);
       return;
     }
     try {
       await this.#ingest(this.#nameFromUrl(response.finalUrl || url), response.responseText);
     } catch (err) {
-      logger.error("subtitles", `Failed to parse subtitles from ${url}:`, err);
-      this.#toastInfo("link", "Failed to load subtitles", "subtitles");
+      this.#handleLoadError("parse", url, err);
     }
+  }
+
+  #handleLoadError(verb, target, err) {
+    logger.error("subtitles", `Failed to ${verb} ${target}:`, err);
+    this.#toastInfo("captions", `Failed to ${verb} subtitles`, "subtitles");
   }
 
   #promptForUrl() {

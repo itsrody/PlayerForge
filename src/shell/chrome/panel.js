@@ -267,34 +267,24 @@ export class SettingsPanel {
     if (!this.#root || this.#destroyed || !this.#body.childElementCount || this.isOpen) {
       return;
     }
-    const activate = () => {
+    this.#runWithViewTransition("pf-panel-open", () => {
       this.#root.classList.toggle("pf-compact", this.#isCompactMode());
       this.#root.classList.add("pf-open");
       const activeTab = this.#root.querySelector(".pf-panel-tab-active") || this.#closeButton;
       if (activeTab && deepestActiveElement(this.#shellHost) !== activeTab) {
         activeTab.focus();
       }
-    };
-    if (typeof document.startViewTransition === "function") {
-      document.startViewTransition({ types: ["pf-panel-open"], update: activate });
-    } else {
-      activate();
-    }
+    });
   }
 
   close() {
     if (this.#root && !this.#destroyed && this.isOpen) {
-      const deactivate = () => {
+      this.#runWithViewTransition("pf-panel-close", () => {
         this.#root.classList.remove("pf-open");
         if (this.#shellHost && this.#root.contains(deepestActiveElement(this.#shellHost))) {
           this.#shellHost.focus();
         }
-      };
-      if (typeof document.startViewTransition === "function") {
-        document.startViewTransition({ types: ["pf-panel-close"], update: deactivate });
-      } else {
-        deactivate();
-      }
+      });
     }
   }
 
@@ -701,5 +691,13 @@ export class SettingsPanel {
       tab.setAttribute("aria-selected", String(isActive));
     }
     this.#activeSection = targetSection;
+  }
+
+  #runWithViewTransition(type, update) {
+    if (typeof document.startViewTransition === "function") {
+      document.startViewTransition({ types: [type], update });
+    } else {
+      update();
+    }
   }
 }
