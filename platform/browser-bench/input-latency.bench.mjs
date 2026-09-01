@@ -64,6 +64,16 @@ export default async function runInputLatencyBench(bundle = DEFAULT_BUNDLE) {
     });
 
     // Benchmark: pointer double-tap recognition.
+    // dbltap is fullscreen-only (fs: true binding), so we must set the
+    // fullscreen gate before dispatching events.
+    await driver.eval(() => {
+      const video = document.getElementById("test-video");
+      Object.defineProperty(document, "fullscreenElement", {
+        value: video, configurable: true
+      });
+      document.dispatchEvent(new Event("fullscreenchange"));
+    });
+
     const pointerTimes = [];
     for (let b = 0; b < BATCHES; b++) {
       const timings = [];

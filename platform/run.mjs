@@ -181,10 +181,10 @@ async function runCompareBundles() {
   separator();
 
   const readablePath = join(PROJECT_ROOT, "dist", "playerforge.readable.js");
-  const minifiedPath = join(PROJECT_ROOT, "dist", "playerforge.minified.js");
+  const minifiedPath = join(PROJECT_ROOT, "dist", "playerforge.user.js");
 
   if (!existsSync(readablePath) || !existsSync(minifiedPath)) {
-    log("Both dist/playerforge.readable.js and dist/playerforge.minified.js must exist.");
+    log("Both dist/playerforge.readable.js and dist/playerforge.user.js must exist.");
     log("Run: node esbuild.config.mjs  (builds both)");
     process.exit(2);
   }
