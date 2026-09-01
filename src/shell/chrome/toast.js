@@ -1,3 +1,4 @@
+import { DomPool } from "../../shared/dom-pool.js";
 import { delay } from "../../shared/time.js";
 import { flashElement } from "./animate.js";
 import { button } from "./elements.js";
@@ -10,6 +11,10 @@ import { createIconElement } from "./icons.js";
  * other. Visibility is a pure opacity morph on pf-visible; stacking above
  * captions and below the panel is plain local z-index.
  *
+ * The toast element is pre-created via DomPool for zero first-show latency.
+ * Only one toast is visible at a time — acquire() always returns the same
+ * pre-built node.
+ *
  * Producer convention: durations come from TUNING.toast (flash for
  * completed actions, info for status, action for toasts with buttons,
  * hint for onboarding); sticky gesture toasts pass 0 explicitly and are
@@ -17,6 +22,7 @@ import { createIconElement } from "./icons.js";
  * `group` (skip, hold, scrub, fs, volume, pinch, resume, data).
  */
 export class ToastManager {
+  #pool;
   #toast;
   #icon;
   #text;
@@ -27,22 +33,37 @@ export class ToastManager {
 
   constructor(hudLayer) {
     const doc = hudLayer.ownerDocument;
-    this.#toast = doc.createElement("pf-toast");
-    this.#icon = doc.createElement("span");
-    this.#icon.className = "pf-toast-icon";
-    this.#text = doc.createElement("span");
-    this.#text.className = "pf-toast-text";
-    this.#actions = doc.createElement("span");
-    this.#actions.className = "pf-toast-actions";
-    this.#toast.appendChild(this.#icon);
-    this.#toast.appendChild(this.#text);
-    this.#toast.appendChild(this.#actions);
-    hudLayer.appendChild(this.#toast);
-    // Inline, not stylesheet: ".pf-hud-layer > *" re-enables pointer events
-    // on every HUD child and would let the hidden pill swallow clicks across
-    // the player's top strip. show() flips this to "auto" only when action
-    // buttons ride along; the hide path resets to "" which lands back here.
-    this.#toast.style.pointerEvents = "none";
+    this.#pool = new DomPool({
+      initial: 1,
+      factory: () => {
+        const toast = doc.createElement("pf-toast");
+        const icon = doc.createElement("span");
+        icon.className = "pf-toast-icon";
+        const text = doc.createElement("span");
+        text.className = "pf-toast-text";
+        const actions = doc.createElement("span");
+        actions.className = "pf-toast-actions";
+        toast.appendChild(icon);
+        toast.appendChild(text);
+        toast.appendChild(actions);
+        // Inline, not stylesheet: ".pf-hud-layer > *" re-enables pointer events
+        // on every HUD child and would let the hidden pill swallow clicks across
+        // the player's top strip. show() flips this to "auto" only when action
+        // buttons ride along; the hide path resets to "" which lands back here.
+        toast.style.pointerEvents = "none";
+        hudLayer.appendChild(toast);
+        return toast;
+      },
+      reset: (toast) => {
+        toast.style.pointerEvents = "none";
+        toast.style.color = "";
+        return toast;
+      }
+    });
+    this.#toast = this.#pool.acquire();
+    this.#icon = this.#toast.querySelector(".pf-toast-icon");
+    this.#text = this.#toast.querySelector(".pf-toast-text");
+    this.#actions = this.#toast.querySelector(".pf-toast-actions");
   }
 
   show({ icon, text, duration = 0, color, group, actions } = {}) {
@@ -104,6 +125,6 @@ export class ToastManager {
   destroy() {
     this.#cancelAutoHide?.();
     this.#cancelAutoHide = null;
-    this.#toast.remove();
+    this.#pool.destroy();
   }
 }

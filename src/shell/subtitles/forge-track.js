@@ -32,6 +32,14 @@ export class ForgeTrack {
       this.#lastRender[i] = { text: null, top: null, left: null, x: null, prevLine: NaN, prevPosition: NaN, prevI: -1 };
       this.#lastActive[i] = false;
     }
+    // Pre-allocate all cue slot elements upfront for zero first-show latency.
+    // Slots are hidden by default and toggled visible by #render().
+    if (cueLayer) {
+      const doc = cueLayer.ownerDocument;
+      for (let i = 0; i < MAX_SLOTS; i++) {
+        this.#slots[i] = el("div", { class: "pf-cue", role: "caption" }, cueLayer);
+      }
+    }
     // addTextTrack is undefined on non-media elements; fail the constructor
     // with a clear error so the section's own catch surfaces a "Failed to
     // load subtitles" toast instead of a bare TypeError on mode.
@@ -72,7 +80,7 @@ export class ForgeTrack {
     const active = this.#track.activeCues;
     const count = Math.min(active.length, MAX_SLOTS);
     for (let i = 0; i < count; i++) {
-      const slot = this.#ensureSlot(i);
+      const slot = this.#slots[i];
       if (!slot) {
         continue;
       }
@@ -135,18 +143,6 @@ export class ForgeTrack {
         this.#lastActive[i] = false;
       }
     }
-  }
-
-  #ensureSlot(index) {
-    if (!this.#cueLayer) {
-      return null;
-    }
-    let slot = this.#slots[index];
-    if (!slot) {
-      slot = el("div", { class: "pf-cue", role: "caption" }, this.#cueLayer);
-      this.#slots[index] = slot;
-    }
-    return slot;
   }
 
   setVar(prop, value) {
