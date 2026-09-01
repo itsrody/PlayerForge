@@ -4,6 +4,7 @@
  */
 import { KEYS, getConfigValue, setConfigValue, invalidateConfigCache } from "../../shared/storage.js";
 import { logger } from "../../shared/logger.js";
+import { fmtSeconds } from "../../shared/formatters.js";
 
 const SETTINGS_PREFIX = "settings";
 
@@ -13,7 +14,7 @@ const SETTINGS_SCHEMA = [
     type: "options",
     label: "Skip Step",
     options: [5, 10, 15],
-    fmt: (v) => `${v}s`,
+    fmt: fmtSeconds,
     default: 5,
     group: "Playback"
   },

@@ -1,5 +1,6 @@
 import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/storage.js";
 import { TUNING } from "../../shared/tuning.js";
+import { fmtPercent, fmtEm } from "../../shared/formatters.js";
 import { srtToVtt, ensureVttHeader, parseSubtitles, parseSubtitlesAsync } from "./forgevtt.js";
 import { ForgeTrack } from "./forge-track.js";
 import { debounce } from "../../shared/time.js";
@@ -174,7 +175,7 @@ export class SubtitlesSection {
       max: 3,
       step: 0.1,
       value: getConfigValue(SETTING_KEYS.size, 1.2),
-      format: (v) => `${v}em`,
+      format: fmtEm,
       onChange: (v) => {
         setConfigValue(SETTING_KEYS.size, v);
         applyCueSize(v);
@@ -239,7 +240,7 @@ export class SubtitlesSection {
       max: 100,
       step: 5,
       value: getConfigValue(SETTING_KEYS.line, 85),
-      format: (v) => `${v}%`,
+      format: fmtPercent,
       onChange: (v) => {
         setConfigValue(SETTING_KEYS.line, v);
       }
@@ -251,7 +252,7 @@ export class SubtitlesSection {
       max: 100,
       step: 5,
       value: getConfigValue(SETTING_KEYS.horizontal, 50),
-      format: (v) => `${v}%`,
+      format: fmtPercent,
       onChange: (v) => {
         setConfigValue(SETTING_KEYS.horizontal, v);
       }

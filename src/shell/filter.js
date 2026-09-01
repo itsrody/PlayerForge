@@ -3,6 +3,7 @@ import { flashElement } from "./chrome/animate.js";
 import { debounce } from "../shared/time.js";
 import { clamp } from "../shared/clamp.js";
 import { TUNING } from "../shared/tuning.js";
+import { fmtPercent } from "../shared/formatters.js";
 
 const CONFIG_PREFIX = "filter";
 
@@ -113,13 +114,13 @@ export class VideoFilter {
     const grid = panel.el("div", { class: "pf-panel-grid pf-panel-grid-compact" }, sectionRoot);
 
     const formatMap = {
-      brightness: (v) => `${v}%`,
-      contrast: (v) => `${v}%`,
-      saturate: (v) => `${v}%`,
+      brightness: fmtPercent,
+      contrast: fmtPercent,
+      saturate: fmtPercent,
       hue: (v) => `${v}°`,
-      grayscale: (v) => `${v}%`,
-      sepia: (v) => `${v}%`,
-      invert: (v) => `${v}%`,
+      grayscale: fmtPercent,
+      sepia: fmtPercent,
+      invert: fmtPercent,
       temperature: (v) => `${v > 0 ? "+" : ""}${v}`,
       tint: (v) => `${v > 0 ? "+" : ""}${v}`
     };
