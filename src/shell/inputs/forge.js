@@ -1,6 +1,7 @@
 import { allowsIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo, cancelEase } from "./actions.js";
 import { TUNING } from "../chrome/config.js";
 import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../../shared/shadow.js";
+import { DOMManager } from "../../shared/dom-manager.js";
 
 /**
  * Pointer handlers never preventDefault - native pan/scroll over the zone is
@@ -111,14 +112,15 @@ export class InputForge {
   #zone;
   #eventTarget;
 
+  /** DOM lifecycle manager: listeners, observers, style rollbacks. */
+  #dom = new DOMManager();
+  /** Sub-component scope: signal exposed via getter for action wiring. */
   #scope = new AbortController();
   #destroyed = false;
-  #savedTouchAction;
 
   // Cached <video> box for hit-testing, invalidated on resize/fullscreen so
   // pointerdown never forces a synchronous layout flush with getBoundingClientRect.
   #videoRect = null;
-  #videoRectObserver = null;
 
   // Pointer session state.
   #primaryPointerId = null;
@@ -182,8 +184,8 @@ export class InputForge {
     this.#zone = zone;
     this.#eventTarget = eventTarget;
     const { signal } = this.#scope;
-    this.#savedTouchAction = zone.style.touchAction;
-    zone.style.touchAction = "none";
+    // Track touch-action for automatic rollback on destroy.
+    this.#dom.markStyle(zone, "touch-action", "none");
 
     // NOTE: the native video element is deliberately NEVER patched (no
     // own-property rewrite of play/pause). Assigning JS functions as own
@@ -215,10 +217,9 @@ export class InputForge {
     }, this.#scope.signal);
 
     if (video) {
-      this.#videoRectObserver = new ResizeObserver(() => {
+      this.#dom.observeResize(video, () => {
         this.#videoRect = null;
       });
-      this.#videoRectObserver.observe(video);
     }
 
     activeForges.add(this);
@@ -279,16 +280,11 @@ export class InputForge {
       this.#pinchInitTimer = null;
       clearTimeout(this.#clickSuppressTimer);
       this.#clickSuppressTimer = null;
-      this.#videoRectObserver?.disconnect();
-      this.#videoRectObserver = null;
       this.#videoRect = null;
       this.#pointers.clear();
       cancelEase(this.#video);
-      this.#video.style.transition = "";
-      this.#video.style.transform = "";
-      this.#video.style.willChange = "";
-      this.#zone.style.touchAction = this.#savedTouchAction;
-
+      // DOM lifecycle: disconnect observers, restore styles, remove elements.
+      this.#dom.destroy();
       activeForges.delete(this);
       if (lastActiveForge === this) {
         lastActiveForge = null;

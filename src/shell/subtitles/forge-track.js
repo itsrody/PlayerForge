@@ -1,4 +1,4 @@
-import { el } from "../chrome/elements.js";
+import { DOMManager } from "../../shared/dom-manager.js";
 
 const STACK_OVERLAP_EM = 1.6;
 const MAX_SLOTS = 8;
@@ -15,6 +15,8 @@ export class ForgeTrack {
   #cueLayerStyle;
   #track;
   #slots = [];
+  /** DOM lifecycle manager: cue slot elements auto-removed on destroy. */
+  #dom = new DOMManager();
   /** Fixed, shape-stable scratch per slot (pooled, never reallocated on
    *  render); #lastActive mirrors which slots currently hold a live cue so a
    *  `null` entry never needs to be stored. Same discipline as the forge's
@@ -34,9 +36,10 @@ export class ForgeTrack {
     }
     // Pre-allocate all cue slot elements upfront for zero first-show latency.
     // Slots are hidden by default and toggled visible by #render().
+    // DOMManager tracks them for automatic removal on destroy.
     if (cueLayer) {
       for (let i = 0; i < MAX_SLOTS; i++) {
-        this.#slots[i] = el("div", { class: "pf-cue", role: "caption" }, cueLayer);
+        this.#slots[i] = this.#dom.createElement("div", { class: "pf-cue", role: "caption" }, cueLayer);
       }
     }
     // addTextTrack is undefined on non-media elements; fail the constructor
@@ -157,9 +160,8 @@ export class ForgeTrack {
     while (this.#track.cues.length > 0) {
       this.#track.removeCue(this.#track.cues[0]);
     }
-    for (const slot of this.#slots) {
-      slot.remove();
-    }
+    // DOMManager removes all cue slot elements.
+    this.#dom.destroy();
     this.#slots = [];
     this.#lastActive = [];
   }

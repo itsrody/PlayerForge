@@ -113,10 +113,12 @@ export function injectShell(container) {
  * stream whenever the container itself leaves the DOM, since detach and
  * reattach fire nothing on the container. There are deliberately no timers,
  * delays, or surrender heuristics: a page that keeps fighting gets fought
- * back indefinitely, and a stalemate is the user's to settle. Dies with
- * `signal`.
+ * back indefinitely, and a stalemate is the user's to settle.
+ *
+ * Returns a cleanup function that disconnects all observers and stops the
+ * watchdog. Call it on shell destroy.
  */
-export function watchShellHost(container, host, { signal } = {}) {
+export function watchShellHost(container, host) {
   let scheduled = false;
   /** Armed only while the container is out of the document. */
   let detachWatch = null;
@@ -167,8 +169,8 @@ export function watchShellHost(container, host, { signal } = {}) {
   });
   observer.observe(container, { childList: true });
 
-  signal?.addEventListener("abort", () => {
+  return () => {
     observer.disconnect();
     dropReconnectWatch();
-  }, { once: true });
+  };
 }

@@ -14,6 +14,7 @@ import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } fro
 import { SHELL_MARKER, warmStyles, injectShell, watchShellHost } from "./chrome/inject.js";
 import { ensureViewportFitCover } from "./chrome/viewport.js";
 import { requestFullscreenProvision } from "../shared/context.js";
+import { DOMManager } from "../shared/dom-manager.js";
 
 /**
  * Per-video facade: wraps the media element with a stable API, injects the
@@ -36,13 +37,14 @@ export class Shell {
   #wakeLock = null;
   #onDestroy;
   #destroyed = false;
-  /** Every platform subscription this facade makes dies with this signal. */
+  /** DOM lifecycle manager: listeners, observers, elements, rollbacks. */
+  #dom = new DOMManager();
+  /** Sub-component scope: signal passed to InputForge, MediaSession, etc. */
   #scope = new AbortController();
   /** Command plane: all playback control routes through these primitives. */
   #media;
   /** OS media-key facet, null without MediaSession support. */
   #mediaSession = null;
-  #savedPositionStyle = null;
 
   constructor({ video, container, sdk, onDestroy }) {
     this.video = video;
@@ -162,12 +164,16 @@ export class Shell {
     return this.#resume;
   }
 
+  /** The DOMManager — for sub-components that need lifecycle-tracked artifacts. */
+  get dom() {
+    return this.#dom;
+  }
+
   #suppressContextMenu() {
-    const handler = (event) => {
+    this.#dom.listen(this.container, "contextmenu", (event) => {
       event.preventDefault();
       event.stopPropagation();
-    };
-    this.container.addEventListener("contextmenu", handler, { capture: true, signal: this.#scope.signal });
+    }, { capture: true });
   }
 
   /** Keep focus on the shell host when pointer interactions happen inside it. */
@@ -177,12 +183,11 @@ export class Shell {
       return;
     }
     host.focus();
-    const onPointerDown = (event) => {
+    this.#dom.listen(this.container, "pointerdown", (event) => {
       if (!this.#destroyed && !isInsideShell(host, event.composedPath()[0])) {
         queueMicrotask(() => this.#restoreFocusIfNeeded(host));
       }
-    };
-    this.container.addEventListener("pointerdown", onPointerDown, { capture: true, passive: true, signal: this.#scope.signal });
+    }, { capture: true, passive: true });
   }
 
   /** Re-focus the host after a pointerdown unless focus already moved inside. */
@@ -223,13 +228,17 @@ export class Shell {
       logger.error("shell", "Failed to inject shell DOM");
       return;
     }
-    this.#shellDom.host.setAttribute(SHELL_MARKER, "");
+    // Register host for auto-removal on destroy and mark managed attributes.
+    this.#dom.onCleanup(() => this.#shellDom?.host.remove());
+    this.#dom.markAttribute(this.#shellDom.host, SHELL_MARKER, "");
+    // Restore container position if we changed it from static.
     const style = getComputedStyle(this.container);
     if (style.position === "static") {
-      this.#savedPositionStyle = style.position;
-      this.container.style.position = "relative";
+      this.#dom.markStyle(this.container, "position", "relative");
     }
-    watchShellHost(this.container, this.#shellDom.host, { signal: this.#scope.signal });
+    // Parasite watchdog: re-attach host if evicted by SDK.
+    const dropWatch = watchShellHost(this.container, this.#shellDom.host);
+    this.#dom.onCleanup(dropWatch);
   }
 
   #forwardMediaEvents() {
@@ -239,7 +248,7 @@ export class Shell {
       this.#mediaSession?.sync();
     };
     for (const name of MEDIA_SESSION_SYNC_EVENTS) {
-      video.addEventListener(name, handler, { signal: this.#scope.signal, passive: true });
+      this.#dom.listen(video, name, handler, { passive: true });
     }
     // Expose media state as CSS custom properties on the host so the shadow
     // DOM can style based on playing/paused/muted without crossing the realm
@@ -252,7 +261,7 @@ export class Shell {
       };
       sync();
       for (const evt of ["play", "pause", "volumechange"]) {
-        video.addEventListener(evt, sync, { signal: this.#scope.signal, passive: true });
+        this.#dom.listen(video, evt, sync, { passive: true });
       }
     }
   }
@@ -264,7 +273,7 @@ export class Shell {
     // frame edge). Surface a hint and re-provision the chain
     // (idempotent) so a retry succeeds if the attributes were just granted,
     // e.g. an SDK iframe created after our boot-time provisioning.
-    document.addEventListener("fullscreenerror", () => {
+    this.#dom.listen(document, "fullscreenerror", () => {
       if (this.#destroyed || fs) {
         return;
       }
@@ -277,13 +286,12 @@ export class Shell {
       if (window.top !== window) {
         requestFullscreenProvision();
       }
-    }, { signal: this.#scope.signal });
+    });
   }
 
   /** Keep screen awake while video is playing; release on pause/ended/hidden. */
   #watchWakeLock() {
     const video = this.video;
-    const { signal } = this.#scope;
     const acquire = async () => {
       if (this.#destroyed || video.paused || video.ended) {
         return;
@@ -296,20 +304,19 @@ export class Shell {
       this.#wakeLock?.release();
       this.#wakeLock = null;
     };
-    video.addEventListener("play", acquire, { signal, passive: true });
-    video.addEventListener("pause", release, { signal, passive: true });
-    video.addEventListener("ended", release, { signal, passive: true });
-    document.addEventListener("visibilitychange", () => {
+    this.#dom.listen(video, "play", acquire, { passive: true });
+    this.#dom.listen(video, "pause", release, { passive: true });
+    this.#dom.listen(video, "ended", release, { passive: true });
+    this.#dom.listen(document, "visibilitychange", () => {
       if (document.visibilityState === "visible" && !video.paused && !video.ended) {
         acquire();
       }
-    }, { signal });
+    });
   }
 
   /** Lock to landscape on fullscreen entry (Android); unlock on exit. */
   #watchOrientation() {
-    const { signal } = this.#scope;
-    subscribeFullscreen(async (active) => {
+    const unsub = subscribeFullscreen(async (active) => {
       if (this.#destroyed) {
         return;
       }
@@ -320,7 +327,8 @@ export class Shell {
           screen.orientation.unlock();
         }
       } catch {}
-    }, signal);
+    }, this.#scope.signal);
+    this.#dom.onCleanup(unsub);
   }
 
   exitFullscreen() {
@@ -330,14 +338,15 @@ export class Shell {
   }
 
   #markManaged() {
-    this.video.setAttribute(SHELL_MARKER, "");
-    this.container.setAttribute(SHELL_MARKER, "");
+    this.#dom.markAttribute(this.video, SHELL_MARKER, "");
+    this.#dom.markAttribute(this.container, SHELL_MARKER, "");
   }
 
   destroy() {
     if (!this.#destroyed) {
       this.#destroyed = true;
       logger.log("shell", `Destroying shell "${this.sdk.name}"`);
+      // Destroy sub-components (each manages its own internal state).
       this.#resume?.destroy();
       this.#resume = null;
       this.#subtitles?.destroy();
@@ -346,23 +355,18 @@ export class Shell {
       this.#filter = null;
       this.#wakeLock?.release();
       this.#wakeLock = null;
-      // One abort tears down every platform subscription: media event
-      // forwarding, fullscreen watch, focus management, host watchdog,
-      // MediaSession ownership.
-      this.#scope.abort();
       this.#inputs?.destroy();
       this.#inputs = null;
       this.#panel?.destroy();
       this.#panel = null;
       this.#toasts?.destroy();
       this.#toasts = null;
-      this.#shellDom?.host.remove();
+      // Sub-component scope (InputForge, MediaSession shared signal).
+      this.#scope.abort();
+      // DOM lifecycle: remove elements, disconnect observers, remove
+      // listeners, restore attributes/styles — all in one call.
+      this.#dom.destroy();
       this.#shellDom = null;
-      if (this.#savedPositionStyle != null) {
-        this.container.style.position = this.#savedPositionStyle;
-      }
-      this.video.removeAttribute(SHELL_MARKER);
-      this.container.removeAttribute(SHELL_MARKER);
       this.#onDestroy?.(this);
     }
   }
