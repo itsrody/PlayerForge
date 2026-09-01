@@ -9,12 +9,18 @@
     "build:min": "node esbuild.config.mjs --min",
     "dev": "node esbuild.config.mjs --watch",
     "dev:min": "node esbuild.config.mjs --watch --min",
-    "test": "node --import ./tests/loader.mjs --test",
+    "test": "node --import ./tests/loader.mjs --test tests/*.test.mjs",
     "bench": "node bench/run.mjs",
-    "bench:record": "node bench/run.mjs --record"
+    "bench:record": "node bench/run.mjs --record",
+    "integration": "node platform/run.mjs integration",
+    "browser-bench": "node platform/run.mjs browser-bench",
+    "browser-bench:record": "node platform/run.mjs browser-bench --record",
+    "ci": "node platform/run.mjs ci",
+    "platform": "node platform/run.mjs all"
   },
   "devDependencies": {
     "esbuild": "^0.24.0",
-    "jsdom": "^29.1.1"
+    "jsdom": "^29.1.1",
+    "selenium-webdriver": "^4.48.0"
   }
 }
