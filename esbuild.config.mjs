@@ -1,7 +1,7 @@
 import { build, context } from "esbuild";
-import { readFileSync, copyFileSync } from "node:fs";
-import { writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+import process from "node:process";
 
 // Minified is the default (and only shipping) output. The readable variant
 // is built alongside for the compare-bundles platform mode. Minification is
@@ -189,7 +189,7 @@ if (watch) {
   const readableOpts = { ...shared, minify: false, outfile: "dist/playerforge.readable.js" };
 
   // Primary: minified bundle (what Tampermonkey installs).
-  const result = await build(minifiedOpts);
+  await build(minifiedOpts);
   console.log("[PlayerForge] built minified bundle");
 
   // Verify reproducibility + safety.
