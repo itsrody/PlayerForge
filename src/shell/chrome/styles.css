@@ -399,7 +399,6 @@
         scale: 1;
         view-transition-name: pf-panel;
         pointer-events: auto;
-        touch-action: none;
       }
 
       /* Single header row: [segmented tabs] [close]. */
