@@ -1,6 +1,6 @@
 import { getPageContext, domainsMatch, domainScore, hashEntry } from "../shared/context.js";
 import { TUNING } from "./chrome/config.js";
-import { KEYS, gmGetValue, gmSetValue, loadJsonObject } from "../shared/storage.js";
+import { KEYS, gmSetValue, loadJsonObject } from "../shared/storage.js";
 import { formatTime } from "../shared/time.js";
 import { logger } from "../shared/logger.js";
 
@@ -27,6 +27,19 @@ const TOAST_ACTION_MS = TUNING.toast.actionMs;
 // NOTE: saveIntervalMs is deliberately NOT hoisted - tests mutate
 // TUNING.resume.saveIntervalMs at runtime to set the wall floor, so it must
 // stay a live object read on the save-decision path.
+
+/**
+ * LWW merge of foreign entries into memory. Unknown ids join the store;
+ * known ids keep whichever side carries the newer updatedAt. Known entries
+ * are updated IN PLACE so trackers holding references stay live.
+ *
+ * Only known resume-entry fields are copied to prevent field injection from
+ * cross-tab or import sources with extra properties.
+ */
+const RESUME_ENTRY_FIELDS = new Set([
+  "id", "domain", "path", "title", "duration", "resume",
+  "createdAt", "updatedAt", "pending"
+]);
 
 /**
  * Persistent store of per-video entries (keyed by path+duration hash) holding
@@ -89,37 +102,43 @@ export class ResumeStore {
     }
   }
 
-  /**
-   * LWW merge of foreign entries into memory. Unknown ids join the store;
-   * known ids keep whichever side carries the newer updatedAt. Known entries
-   * are updated IN PLACE so trackers holding references stay live.
-   */
-  #mergeRaw(raw) {
-    let added = 0;
-    let updated = 0;
-    const byId = new Map();
-    for (const entry of this.#state.entries) {
-      byId.set(entry.id, entry);
+#mergeRaw(raw) {
+  let added = 0;
+  let updated = 0;
+  const byId = new Map();
+  for (const entry of this.#state.entries) {
+    byId.set(entry.id, entry);
+  }
+  for (const incoming of raw.entries) {
+    if (!incoming || typeof incoming !== "object" || typeof incoming.id !== "string") {
+      continue;
     }
-    for (const incoming of raw.entries) {
-      if (!incoming || typeof incoming !== "object" || typeof incoming.id !== "string") {
-        continue;
+    const known = byId.get(incoming.id);
+    if (!known) {
+      const filtered = {};
+      for (const key of RESUME_ENTRY_FIELDS) {
+        if (key in incoming) {
+          filtered[key] = incoming[key];
+        }
       }
-      const known = byId.get(incoming.id);
-      if (!known) {
-        byId.set(incoming.id, incoming);
-        added++;
-      } else if ((incoming.updatedAt || 0) > (known.updatedAt || 0)) {
-        Object.assign(known, incoming);
-        updated++;
+      filtered.id = incoming.id;
+      byId.set(incoming.id, filtered);
+      added++;
+    } else if ((incoming.updatedAt || 0) > (known.updatedAt || 0)) {
+      for (const key of RESUME_ENTRY_FIELDS) {
+        if (key in incoming) {
+          known[key] = incoming[key];
+        }
       }
+      updated++;
     }
-    if (added === 0 && updated === 0) {
-      return { added, updated };
-    }
-    this.#state.entries = [...byId.values()];
+  }
+  if (added === 0 && updated === 0) {
     return { added, updated };
   }
+  this.#state.entries = [...byId.values()];
+  return { added, updated };
+}
 
   ensureLoaded() {
     if (this.#loaded) {

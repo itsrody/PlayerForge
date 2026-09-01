@@ -15,12 +15,6 @@ import { SHELL_MARKER, warmStyles, injectShell, watchShellHost } from "./chrome/
 import { ensureViewportFitCover } from "./chrome/viewport.js";
 import { requestFullscreenProvision } from "../shared/context.js";
 
-const VIDEO_EVENTS = [
-  "play", "pause", "playing", "waiting", "seeking", "seeked", "timeupdate",
-  "durationchange", "loadedmetadata", "loadeddata", "canplay", "canplaythrough",
-  "ended", "volumechange", "ratechange", "progress", "stalled", "emptied", "error"
-];
-
 /**
  * Per-video facade: wraps the media element with a stable API, injects the
  * HUD, hosts the input layer, playback tracking, subtitles, and settings

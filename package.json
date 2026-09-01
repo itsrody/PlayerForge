@@ -7,6 +7,7 @@
   "scripts": {
     "build": "node esbuild.config.mjs",
     "dev": "node esbuild.config.mjs --watch",
+    "lint": "eslint src/",
     "test": "node --import ./tests/loader.mjs --test tests/*.test.mjs",
     "bench": "node bench/run.mjs",
     "bench:record": "node bench/run.mjs --record",
@@ -17,7 +18,9 @@
     "platform": "node platform/run.mjs all"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "esbuild": "^0.24.0",
+    "eslint": "^10.9.1",
     "jsdom": "^29.1.1",
     "selenium-webdriver": "^4.48.0"
   }

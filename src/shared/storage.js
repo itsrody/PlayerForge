@@ -141,17 +141,20 @@ export function setConfigFields(fields) {
     for (let i = 0; i < segments.length - 1; i++) {
       const segment = segments[i];
       if (!isSafeKeySegment(segment)) {
+        logger.warn("storage", `Unsafe config path segment "${segment}" in "${path}" — batch dropped`);
         return;
       }
       if (node[segment] == null) {
         node[segment] = {};
       } else if (typeof node[segment] !== "object" || Array.isArray(node[segment])) {
+        logger.warn("storage", `Non-object intermediate at "${path}" — batch dropped`);
         return;
       }
       node = node[segment];
     }
     const last = segments.at(-1);
     if (!isSafeKeySegment(last)) {
+      logger.warn("storage", `Unsafe config leaf segment "${last}" in "${path}" — batch dropped`);
       return;
     }
     node[last] = value;

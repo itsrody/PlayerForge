@@ -461,7 +461,7 @@ export class SettingsPanel {
     max = 100,
     step = 1,
     value,
-    format = String,
+    _format = String,
     onChange,
     deferTextInput = false,
     class: className,
@@ -704,7 +704,7 @@ export class SettingsPanel {
     }, { signal });
   }
 
-  #activateSection(targetSection, targetTab) {
+  #activateSection(targetSection, _targetTab) {
     for (const [section, tab] of this.#sections) {
       const isActive = section === targetSection;
       section.hidden = !isActive;

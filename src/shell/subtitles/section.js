@@ -29,7 +29,6 @@ export class SubtitlesSection {
   #forgeTrack = null;
   #trackMeta = null;
   #cueLayer = null;
-  #positionOverride = null;
   #syncOffset = 0;
   #fileInput = null;
   #hintEl = null;
@@ -238,11 +237,7 @@ export class SubtitlesSection {
     });
 
     const applyPosition = () => {
-      this.#positionOverride = {
-        line: verticalStepper.getValue(),
-        position: horizontalStepper.getValue(),
-        align: "center"
-      };
+      // Position values are read from the steppers directly when needed.
     };
 
     const verticalStepper = panel.addControl(styleGrid, {

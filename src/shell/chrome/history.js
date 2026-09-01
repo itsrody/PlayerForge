@@ -16,7 +16,6 @@ export function addHistorySection(panel, shell) {
     return;
   }
 
-  const doc = sectionRoot.ownerDocument;
   const list = panel.el("div", { class: "pf-history-list" }, sectionRoot);
   const hint = panel.el("div", { class: "pf-panel-hint" }, sectionRoot);
   hint.textContent = "No watch history yet";

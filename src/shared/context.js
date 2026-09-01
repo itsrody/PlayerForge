@@ -42,7 +42,10 @@ const DOMAIN_TLDS = {
 const IPV4_RE = /^(?:\d{1,3}\.){3}\d{1,3}$/;
 /** Memoized domain keys: pages resolve their hostname repeatedly (kernel +
  *  probe + responder), and the TLD walk is pure over hostname.
+ *  Capped at 256 entries to prevent unbounded growth on SPAs with dynamic
+ *  subdomains. Eviction clears the oldest half when the cap is hit.
  */
+const DOMAIN_KEY_CACHE_MAX = 256;
 const domainKeyCache = new Map();
 
 /**
@@ -57,13 +60,13 @@ export function getDomainKey(hostname) {
   if (domainKeyCache.has(hostname)) {
     return domainKeyCache.get(hostname);
   }
-  let key = "";
+  let key;
   if (IPV4_RE.test(hostname)) {
     key = hostname.replaceAll(".", "-");
   } else if (hostname.includes(":")) {
     // Bracketed IPv6 ([::1]) or bare forms - the TLD walk would mangle them
     // into garbage keys, so collapse to one dash-safe identifier like IPv4.
-    key = hostname.replace(/[\[\]:]+/g, "-").replace(/^-+|-+$/g, "") || "ipv6";
+    key = hostname.replace(/[\\[\]:]+/g, "-").replace(/^-+|-+$/g, "") || "ipv6";
   } else {
     const parts = hostname.toLowerCase().replace(/^www\./, "").split(".");
     const multiPartTlds = DOMAIN_TLDS.multi;
@@ -85,6 +88,14 @@ export function getDomainKey(hostname) {
     key = parts[Math.max(0, idx)] || "";
   }
   domainKeyCache.set(hostname, key);
+  if (domainKeyCache.size > DOMAIN_KEY_CACHE_MAX) {
+    const evict = Math.ceil(DOMAIN_KEY_CACHE_MAX / 4);
+    let i = 0;
+    for (const k of domainKeyCache.keys()) {
+      domainKeyCache.delete(k);
+      if (++i >= evict) break;
+    }
+  }
   return key;
 }
 

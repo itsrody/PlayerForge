@@ -223,6 +223,7 @@ class MediaSessionBridge {
   attach(signal) {
     const session = this.#session;
     const controls = this.#controls;
+    const video = this.#video;
     session.setActionHandler("play", () => controls.play());
     session.setActionHandler("pause", () => controls.pause());
     session.setActionHandler("stop", () => controls.stop());

@@ -105,7 +105,7 @@ export function timecodeToSeconds(timecode) {
   }
 
   let i = 0;
-  const field = (max) => {
+  const field = (_max) => {
     let val = 0;
     let count = 0;
     while (i < f && isDigitCode(timecode.charCodeAt(i))) {

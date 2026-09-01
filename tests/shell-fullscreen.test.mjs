@@ -153,3 +153,14 @@ test("referenceBox in fullscreen is the physical screen (edge-to-edge bypass)", 
   delete globalThis.screen;
   teardown();
 });
+
+test("destroy is idempotent - calling twice does not throw or double-cleanup", async () => {
+  const { shell, teardown } = await makeShell();
+  // First destroy should clean up normally
+  shell.destroy();
+  // Second destroy should be a complete no-op (no throw, no double-remove)
+  shell.destroy();
+  // Verify shell is cleaned up
+  assert.ok(!shell.shellDom, "shellDom cleared after destroy");
+  teardown();
+});

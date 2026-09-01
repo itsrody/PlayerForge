@@ -1,7 +1,7 @@
 import { logger } from "../shared/logger.js";
 import { getConfigValue } from "../shared/storage.js";
 import { delay } from "../shared/time.js";
-import { ShellRegistry } from "./registry.js";
+import { ShellSlot } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, meetsMinSize, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
@@ -68,7 +68,7 @@ export class Kernel {
   };
 
   constructor() {
-    this.#registry = new ShellRegistry();
+    this.#registry = new ShellSlot();
     this.#lifecycle = new LifecycleManager(this.#registry, (shell) => this.#notifyShellCreated(shell));
     this.#lifecycle.setShellFactory((discovery) => this.#createShell(discovery));
   }
@@ -92,7 +92,11 @@ export class Kernel {
   #notifyShellCreated(shell) {
     this.#registry.register(shell);
     for (const cb of this.#createdListeners) {
-      cb(shell);
+      try {
+        cb(shell);
+      } catch (err) {
+        logger.error("kernel", "Shell-created listener threw:", err);
+      }
     }
   }
 
@@ -201,7 +205,7 @@ export class Kernel {
       }
     };
 
-    let anchors = [];
+    const anchors = [];
 
     const checkAnchors = () => {
       if (this.#removalTimers.has(video)) {
@@ -233,8 +237,7 @@ export class Kernel {
       logger.error("kernel", "No shell provider registered");
       return null;
     }
-    let shell;
-    shell = provider.create({
+    const shell = provider.create({
       video,
       container,
       sdk,

@@ -1,6 +1,5 @@
 import { allowsIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo, cancelEase } from "./actions.js";
 import { TUNING } from "../chrome/config.js";
-import { SHELL_MARKER } from "../chrome/inject.js";
 import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../../shared/shadow.js";
 
 /**
@@ -10,7 +9,6 @@ import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "..
  * pinch listener (subscribed only while fullscreen) and the click/dblclick
  * suppressors that swallow post-gesture activations.
  */
-const PASSIVE_CAPTURE = { capture: true, passive: true };
 const WHEEL_CAPTURE = { capture: true, passive: false };
 
 // Gesture calibration hoisted to module consts. TUNING is static (read-only
@@ -121,8 +119,6 @@ export class InputForge {
   // pointerdown never forces a synchronous layout flush with getBoundingClientRect.
   #videoRect = null;
   #videoRectObserver = null;
-  // Keyboard Space-hold interception.
-  #spaceHoldIntercepting = false;
 
   // Pointer session state.
   #primaryPointerId = null;
@@ -287,7 +283,6 @@ export class InputForge {
       this.#videoRectObserver = null;
       this.#videoRect = null;
       this.#pointers.clear();
-      this.#spaceHoldIntercepting = false;
       cancelEase(this.#video);
       this.#video.style.transition = "";
       this.#video.style.transform = "";
@@ -316,7 +311,6 @@ export class InputForge {
   }
 
   #resetKeyboardHold() {
-    this.#spaceHoldIntercepting = false;
     this.#keyboardHolding = false;
     clearTimeout(this.#keyboardHoldTimer);
     this.#keyboardHoldTimer = null;
@@ -878,7 +872,6 @@ export class InputForge {
       if (this.#shouldHandleKeys(false)) {
         lastActiveForge = this;
         event.preventDefault();
-        this.#spaceHoldIntercepting = true;
         this.#keyboardHoldStart = performance.now();
         this.#keyboardHolding = false;
         clearTimeout(this.#keyboardHoldTimer);
@@ -935,9 +928,8 @@ export class InputForge {
     const shouldToggle = allowToggle && !wasHolding && this.#shouldHandleKeys();
     clearTimeout(this.#keyboardHoldTimer);
     this.#keyboardHoldTimer = null;
-    this.#keyboardHolding = false;
-    this.#spaceHoldIntercepting = false;
-    if (wasHolding) {
+      this.#keyboardHolding = false;
+      if (wasHolding) {
       this.#dispatch(GESTURE_EVENTS.release, {
         zone: "screen",
         method: "keyboard",
@@ -945,7 +937,11 @@ export class InputForge {
       });
     } else if (shouldToggle) {
       if (this.#video.paused) {
-        this.#video.play().catch(() => {});
+        this.#video.play().catch((err) => {
+          if (err.name !== "AbortError" && err.name !== "NotAllowedError") {
+            console.debug("[PlayerForge] bare-tap play rejected:", err.name);
+          }
+        });
       } else {
         this.#video.pause();
       }

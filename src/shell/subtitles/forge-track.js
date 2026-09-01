@@ -35,7 +35,6 @@ export class ForgeTrack {
     // Pre-allocate all cue slot elements upfront for zero first-show latency.
     // Slots are hidden by default and toggled visible by #render().
     if (cueLayer) {
-      const doc = cueLayer.ownerDocument;
       for (let i = 0; i < MAX_SLOTS; i++) {
         this.#slots[i] = el("div", { class: "pf-cue", role: "caption" }, cueLayer);
       }
