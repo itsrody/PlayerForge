@@ -41,6 +41,25 @@ export async function waitForShell(driver, timeoutMs = 10000) {
 }
 
 /**
+ * Wait for the shell HUD layer inside a specific frame.
+ * @param {import('./chromium.mjs').ChromiumDriver} driver
+ * @param {number|string} frameId - Frame index or name.
+ * @param {number} [timeoutMs=10000]
+ */
+export async function waitForShellInFrame(driver, frameId, timeoutMs = 10000) {
+  return driver.waitForInFrame(
+    frameId,
+    () => {
+      if (document.querySelector(".pf-hud-layer")) return true;
+      const shell = document.querySelector(".pf-shell");
+      return !!shell?.shadowRoot?.querySelector(".pf-hud-layer");
+    },
+    timeoutMs,
+    100
+  );
+}
+
+/**
  * Wait for the settings panel to be present (indicates full shell construction).
  * Checks inside shadow roots.
  *

@@ -85,6 +85,7 @@ export class ChromiumDriver {
       "--disable-default-apps",
       "--disable-sync",
       "--no-first-run",
+      "--disable-web-security",
     ];
     if (headless) {
       args.push("--headless=new");
@@ -307,6 +308,113 @@ export class ChromiumDriver {
   }
 
   /**
+   * Switch to a frame by index or name, execute a function, then switch back.
+   * @param {number|string} frameId - Frame index (0-based) or name attribute.
+   * @param {() => T} fn
+   * @returns {Promise<T>}
+   */
+  async evalInFrame(frameId, fn, ...args) {
+    await this.#driver.switchTo().frame(frameId);
+    try {
+      return await this.#driver.executeScript(fn, ...args);
+    } finally {
+      await this.#driver.switchTo().defaultContent();
+    }
+  }
+
+  /**
+   * Wait for a condition inside a specific frame.
+   * @param {number|string} frameId - Frame index or name.
+   * @param {() => boolean} conditionFn
+   * @param {number} [timeoutMs=10000]
+   * @param {number} [intervalMs=100]
+   */
+  async waitForInFrame(frameId, conditionFn, timeoutMs = 10000, intervalMs = 100) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await this.#driver.switchTo().frame(frameId);
+      let result;
+      try {
+        result = await this.#driver.executeScript(conditionFn);
+      } finally {
+        await this.#driver.switchTo().defaultContent();
+      }
+      if (result) return result;
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+    throw new Error(`waitForInFrame(${frameId}) timed out after ${timeoutMs}ms`);
+  }
+
+  /**
+   * Inject GM stubs + userscript into a specific frame.
+   * Simulates Tampermonkey's per-frame injection.
+   * @param {number|string} frameId - Frame index or name.
+   * @param {object} [gmOptions] - Passed to injectGMStubs.
+   */
+  async injectScriptInFrame(frameId, gmOptions = {}) {
+    await this.#driver.switchTo().frame(frameId);
+    try {
+      // GM stubs first.
+      const stubSource = readFileSync(join(HERE, "gm-stubs.mjs"), "utf8");
+      const initScript = `
+        ${stubSource}
+        window.__pfGMStorage = ${JSON.stringify(gmOptions.storage || {})};
+        window.__pfGMListeners = {};
+        window.GM_getValue = function(key, fallback) {
+          const s = window.__pfGMStorage;
+          return key in s ? s[key] : fallback;
+        };
+        window.GM_setValue = function(key, value) {
+          window.__pfGMStorage[key] = value;
+        };
+        window.GM_deleteValue = function(key) {
+          delete window.__pfGMStorage[key];
+        };
+        window.GM_registerMenuCommand = function(title, fn) {
+          const id = 'menu_' + title;
+          window.__pfGMListeners[id] = fn;
+          return id;
+        };
+        window.GM_unregisterMenuCommand = function(id) {
+          delete window.__pfGMListeners[id];
+        };
+        window.GM_addValueChangeListener = function(key, cb) {
+          const id = ' listener_' + key + '_' + Date.now();
+          window.__pfGMListeners[id] = { key, cb };
+          return id;
+        };
+        window.GM_removeValueChangeListener = function(id) {
+          delete window.__pfGMListeners[id];
+        };
+        window.GM_getResourceText = function(name) {
+          return Promise.resolve('');
+        };
+        window.GM_info = {
+          script: { version: '0.7.1-test' },
+          scriptHandler: 'Tampermonkey',
+          version: '5.5.0'
+        };
+        window.GM_xmlhttpRequest = function() {};
+      `;
+      await this.#driver.executeScript(initScript);
+
+      // Userscript bundle.
+      const source = readBundle();
+      const body = source.slice(source.indexOf("==/UserScript==") + 16);
+      await this.#driver.executeScript(body);
+
+      // Wake probe.
+      await this.#driver.executeScript(`
+        for (const v of document.querySelectorAll("video")) {
+          v.dispatchEvent(new Event("loadeddata", { bubbles: true }));
+        }
+      `);
+    } finally {
+      await this.#driver.switchTo().defaultContent();
+    }
+  }
+
+  /**
    * Take a screenshot (useful for debugging).
    * @param {string} [path] - File path. Returns base64 if omitted.
    */
@@ -345,10 +453,11 @@ export class TestServer {
   constructor() {
     this.#server = createHttpServer((req, res) => {
       const path = req.url || "/";
-      const html = this.#pages.get(path);
-      if (html) {
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(html);
+      const entry = this.#pages.get(path);
+      if (entry) {
+        const headers = { "Content-Type": "text/html; charset=utf-8", ...entry.headers };
+        res.writeHead(200, headers);
+        res.end(entry.html);
       } else {
         res.writeHead(404);
         res.end("Not found");
@@ -368,7 +477,12 @@ export class TestServer {
 
   /** Register an HTML page at a given path. */
   addPage(path, html) {
-    this.#pages.set(path, html);
+    this.#pages.set(path, { html, headers: {} });
+  }
+
+  /** Register an HTML page with custom response headers. */
+  addPageWithHeaders(path, html, headers = {}) {
+    this.#pages.set(path, { html, headers });
   }
 
   /** @returns {string} Base URL for this server. */
@@ -468,4 +582,131 @@ export function createBlankPage(server) {
   const path = `/blank-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`;
   server.addPage(path, html);
   return `${server.url}${path}`;
+}
+
+/**
+ * Build an iframe child page with a Plyr-style video.
+ * @param {TestServer} server
+ * @param {object} [options]
+ * @param {string} [options.title]
+ * @returns {string} URL to the child page.
+ */
+export function createIframeChildPage(server, options = {}) {
+  const { title = "Iframe Video" } = options;
+  const html = `<!DOCTYPE html>
+<html>
+<head><title>${title}</title></head>
+<body>
+  <div class="plyr" data-plyr>
+    <div class="plyr__video-wrapper">
+      <video id="test-video" preload="metadata"></video>
+    </div>
+  </div>
+</body>
+</html>`;
+  const path = `/iframe-child-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`;
+  server.addPage(path, html);
+  return `${server.url}${path}`;
+}
+
+/**
+ * Build a parent page containing an iframe pointing to childUrl.
+ * @param {TestServer} server
+ * @param {string} childUrl - Full URL of the child page.
+ * @param {object} [options]
+ * @param {string} [options.title]
+ * @param {string} [options.iframeId]
+ * @param {number} [options.width]
+ * @param {number} [options.height]
+ * @returns {string} URL to the parent page.
+ */
+export function createIframeParentPage(server, childUrl, options = {}) {
+  const { title = "Parent Page", iframeId = "child-frame", width = 1280, height = 720 } = options;
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <title>${title}</title>
+  <style>
+    * { margin: 0; padding: 0; }
+    body { background: #111; }
+    iframe { border: none; width: ${width}px; height: ${height}px; }
+  </style>
+</head>
+<body>
+  <iframe id="${iframeId}" src="${childUrl}" width="${width}" height="${height}" allowfullscreen></iframe>
+</body>
+</html>`;
+  const path = `/iframe-parent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`;
+  server.addPage(path, html);
+  return `${server.url}${path}`;
+}
+
+/**
+ * Build a nested iframe hierarchy: parent → cross-origin iframe → same-origin iframe → video.
+ *
+ * @param {TestServer} parentServer - Parent page origin.
+ * @param {TestServer} iframeServer - Cross-origin iframe origin (different port).
+ * @returns {{ parentUrl: string, outerIframeUrl: string, innerIframeUrl: string }}
+ */
+export function createNestedIframePages(parentServer, iframeServer) {
+  // Inner iframe: same-origin with iframeServer, contains the video.
+  const innerHtml = `<!DOCTYPE html>
+<html>
+<head><title>Nested Iframe Video</title></head>
+<body>
+  <div class="plyr" data-plyr>
+    <div class="plyr__video-wrapper">
+      <video id="test-video" preload="metadata"></video>
+    </div>
+  </div>
+</body>
+</html>`;
+  const innerPath = `/nested-inner-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`;
+  iframeServer.addPage(innerPath, innerHtml);
+  const innerIframeUrl = `${iframeServer.url}${innerPath}`;
+
+  // Outer iframe: cross-origin (iframeServer), loads the inner iframe.
+  const outerHtml = `<!DOCTYPE html>
+<html>
+<head><title>Cross-Origin Relay Frame</title></head>
+<body>
+  <iframe id="inner-frame" src="${innerIframeUrl}" width="1280" height="720" allowfullscreen></iframe>
+</body>
+</html>`;
+  const outerPath = `/nested-outer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`;
+  iframeServer.addPage(outerPath, outerHtml);
+  const outerIframeUrl = `${iframeServer.url}${outerPath}`;
+
+  // Parent page: parentServer origin, loads the outer iframe.
+  const parentHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Nested Iframe Parent</title>
+  <style>
+    * { margin: 0; padding: 0; }
+    body { background: #111; }
+    iframe { border: none; width: 1280px; height: 720px; }
+  </style>
+</head>
+<body>
+  <iframe id="outer-frame" src="${outerIframeUrl}" width="1280" height="720" allowfullscreen></iframe>
+</body>
+</html>`;
+  const parentPath = `/nested-parent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`;
+  parentServer.addPage(parentPath, parentHtml);
+  const parentUrl = `${parentServer.url}${parentPath}`;
+
+  return { parentUrl, outerIframeUrl, innerIframeUrl };
+}
+
+/**
+ * Create two TestServer instances on different ports (different origins).
+ * @returns {Promise<{ serverA: TestServer, serverB: TestServer }>}
+ */
+export async function createMultiOriginServers() {
+  const serverA = new TestServer();
+  const serverB = new TestServer();
+  await serverA.start();
+  await serverB.start();
+  return { serverA, serverB };
 }
