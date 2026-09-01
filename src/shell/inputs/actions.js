@@ -167,12 +167,11 @@ function performSkip(shell, state, direction) {
 
   const step = getSetting("controller.stepSeek") * state.streakCount;
   shell.media.skip(direction === "right" ? step : -step);
-  shell.toast({
-    icon: direction === "right" ? "right-arrows" : "left-arrows",
-    text: `${step}s`,
-    duration: TUNING.toast.flashMs,
-    group: "skip"
-  });
+  shell.toastFlash(
+    direction === "right" ? "right-arrows" : "left-arrows",
+    `${step}s`,
+    "skip"
+  );
 }
 
 /**
@@ -514,12 +513,7 @@ export function attachInputActions(shell, host, signal) {
     if (detail.distance > TUNING.gestures.swipeExitMinPx) {
       gestureHaptic("swipe");
       clearFillMode(shell, state, false);
-      shell.toast({
-        icon: "fs-exit",
-        text: "Fullscreen Exited",
-        duration: TUNING.toast.flashMs,
-        group: "fs"
-      });
+      shell.toastFlash("fs-exit", "Fullscreen Exited", "fs");
       shell.exitFullscreen();
     } else {
       shell.hideToast("fs");
@@ -548,12 +542,7 @@ export function attachInputActions(shell, host, signal) {
       return;
     }
     shell.media.nudgeVolume(detail.direction);
-    shell.toast({
-      icon: volumeIcon(shell.volume, false),
-      text: volumePercent(shell.volume),
-      duration: TUNING.toast.flashMs,
-      group: "volume"
-    });
+    shell.toastFlash(volumeIcon(shell.volume, false), volumePercent(shell.volume), "volume");
   }, { signal });
 
   host.addEventListener(GESTURE_EVENTS.mute, () => {
@@ -561,12 +550,7 @@ export function attachInputActions(shell, host, signal) {
       return;
     }
     shell.media.toggleMute();
-    shell.toast({
-      icon: volumeIcon(shell.volume, shell.muted),
-      text: shell.muted ? "Muted" : volumePercent(shell.volume),
-      duration: TUNING.toast.flashMs,
-      group: "volume"
-    });
+    shell.toastFlash(volumeIcon(shell.volume, shell.muted), shell.muted ? "Muted" : volumePercent(shell.volume), "volume");
   }, { signal });
 
   host.addEventListener(GESTURE_EVENTS.pinch, ({ detail }) => {
@@ -588,12 +572,7 @@ export function attachInputActions(shell, host, signal) {
       video.style.objectFit = "contain";
       easeTransformTo(video, `scale(${scale})`);
       state.fillActive = true;
-      shell.toast({
-        icon: "fill-aspect",
-        text: "Fill Mode",
-        duration: TUNING.toast.flashMs,
-        group: "pinch"
-      });
+      shell.toastFlash("fill-aspect", "Fill Mode", "pinch");
     } else if (detail.direction === "in" && state.fillActive) {
       clearFillMode(shell, state);
     }

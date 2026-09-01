@@ -201,6 +201,26 @@ export class Shell {
     this.#toasts?.show(payload);
   }
 
+  /** Completion feedback (800ms). */
+  toastFlash(icon, text, group) {
+    this.#toasts?.show({ icon, text, duration: TUNING.toast.flashMs, group });
+  }
+
+  /** Status message (2500ms). */
+  toastInfo(icon, text, group) {
+    this.#toasts?.show({ icon, text, duration: TUNING.toast.infoMs, group });
+  }
+
+  /** Onboarding hint (5000ms). */
+  toastHint(icon, text, group) {
+    this.#toasts?.show({ icon, text, duration: TUNING.toast.hintMs, group });
+  }
+
+  /** Action toast with buttons (4000ms). */
+  toastAction(icon, text, group, actions) {
+    this.#toasts?.show({ icon, text, duration: TUNING.toast.actionMs, group, actions });
+  }
+
   hideToast(group) {
     this.#toasts?.hide(group);
   }
@@ -277,12 +297,7 @@ export class Shell {
       if (this.#destroyed || fs) {
         return;
       }
-      this.#toasts?.show({
-        icon: "fs-block",
-        text: "Fullscreen blocked by embed",
-        duration: TUNING.toast.infoMs,
-        group: "fs-block"
-      });
+      this.toastInfo("fs-block", "Fullscreen blocked by embed", "fs-block");
       if (window.top !== window) {
         requestFullscreenProvision();
       }

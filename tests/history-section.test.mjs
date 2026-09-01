@@ -48,7 +48,8 @@ function makeFakeShell() {
       resetEntry: () => {},
       removeEntry: () => {}
     },
-    toast: () => {}
+    toast: () => {},
+    toastInfo: () => {}
   };
 }
 

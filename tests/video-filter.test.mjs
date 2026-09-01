@@ -14,7 +14,7 @@ function makeFakeVideo() {
 }
 
 function makeFakeShell(video) {
-  return { video, toast: () => {} };
+  return { video, toast: () => {}, toastFlash: () => {}, toastInfo: () => {}, toastHint: () => {}, toastAction: () => {} };
 }
 
 function makeFakePanel() {

@@ -118,12 +118,7 @@ export class SubtitlesSection {
       sectionRoot.classList.remove("pf-drop-active");
       const files = [...(event.dataTransfer?.files || [])].filter(isSubtitleFile);
       if (!files.length) {
-        this.#toast({
-          icon: "captions",
-        text: "Drop a .srt or .vtt file",
-        duration: TUNING.toast.infoMs,
-        group: "subtitles"
-        });
+        this.#toastInfo("captions", "Drop a .srt or .vtt file", "subtitles");
         return;
       }
       for (const file of files) {
@@ -286,7 +281,7 @@ export class SubtitlesSection {
         verticalStepper.setValue(85);
         horizontalStepper.setValue(50);
         flashElement(this.#resetBtn);
-        this.#toast({ icon: "reload", text: "Subtitle Style Reset", duration: TUNING.toast.flashMs, group: "subtitles" });
+        this.#toastFlash("reload", "Subtitle Style Reset", "subtitles");
       }
     });
 
@@ -297,8 +292,12 @@ export class SubtitlesSection {
     this.#forgeTrack?.setVar(prop, value);
   }
 
-  #toast(payload) {
-    this.#shell?.toast(payload);
+  #toastFlash(icon, text, group) {
+    this.#shell?.toastFlash(icon, text, group);
+  }
+
+  #toastInfo(icon, text, group) {
+    this.#shell?.toastInfo(icon, text, group);
   }
 
   #createFileInput(shell) {
@@ -326,12 +325,7 @@ export class SubtitlesSection {
       await this.#ingest(file.name, rawText);
     } catch (err) {
       logger.error("subtitles", `Failed to load ${file.name}:`, err);
-      this.#toast({
-        icon: "captions",
-        text: "Failed to load subtitles",
-        duration: TUNING.toast.infoMs,
-        group: "subtitles"
-      });
+      this.#toastInfo("captions", "Failed to load subtitles", "subtitles");
     }
   }
 
@@ -349,24 +343,14 @@ export class SubtitlesSection {
       response = await gmRequestText(url);
     } catch (err) {
       logger.error("subtitles", `Failed to fetch ${url}:`, err);
-      this.#toast({
-        icon: "link",
-        text: "Failed to fetch subtitles",
-        duration: TUNING.toast.infoMs,
-        group: "subtitles"
-      });
+      this.#toastInfo("link", "Failed to fetch subtitles", "subtitles");
       return;
     }
     try {
       await this.#ingest(this.#nameFromUrl(response.finalUrl || url), response.responseText);
     } catch (err) {
       logger.error("subtitles", `Failed to parse subtitles from ${url}:`, err);
-      this.#toast({
-        icon: "link",
-        text: "Failed to load subtitles",
-        duration: TUNING.toast.infoMs,
-        group: "subtitles"
-      });
+      this.#toastInfo("link", "Failed to load subtitles", "subtitles");
     }
   }
 
@@ -401,12 +385,7 @@ export class SubtitlesSection {
     // big VTT never blocks playback (see forgevtt.parseSubtitlesAsync).
     const cues = await parseSubtitlesAsync(normalizedText, this.#syncOffset);
     if (!cues.length) {
-      this.#toast({
-        icon: "captions",
-        text: "No cues found",
-        duration: TUNING.toast.infoMs,
-        group: "subtitles"
-      });
+      this.#toastInfo("captions", "No cues found", "subtitles");
       return;
     }
     if (!this.#forgeTrack) {
@@ -415,12 +394,7 @@ export class SubtitlesSection {
     this.#trackMeta = { name, text: normalizedText };
     this.#forgeTrack.load(cues);
     this.#refreshHint();
-    this.#toast({
-      icon: "captions",
-      text: name,
-      duration: TUNING.toast.infoMs,
-      group: "subtitles"
-    });
+    this.#toastInfo("captions", name, "subtitles");
     logger.log("subtitles", `Loaded ${name}`);
   }
 

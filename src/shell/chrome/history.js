@@ -3,7 +3,6 @@ import { formatTime } from "../../shared/time.js";
 import { flashElement } from "./animate.js";
 import { button } from "./elements.js";
 import { createIconElement } from "./icons.js";
-import { TUNING } from "./config.js";
 
 function formatDomain(domain) {
   if (!domain) return "";
@@ -55,12 +54,7 @@ export function addHistorySection(panel, shell) {
         if (action === "reset") {
           shell.resume?.resetEntry(id);
           flashElement(btn);
-          shell.toast({
-            icon: "reload",
-            text: "Resume Entry Reset",
-            duration: TUNING.toast.infoMs,
-            group: "history"
-          });
+          shell.toastInfo("reload", "Resume Entry Reset", "history");
         } else if (action === "remove") {
           shell.resume?.removeEntry(id);
           card.remove();
@@ -70,12 +64,7 @@ export function addHistorySection(panel, shell) {
           if (!list.children.length) {
             hint.hidden = false;
           }
-          shell.toast({
-            icon: "trash",
-            text: "Resume Entry Removed",
-            duration: TUNING.toast.infoMs,
-            group: "history"
-          });
+          shell.toastInfo("trash", "Resume Entry Removed", "history");
         }
       });
       return card;

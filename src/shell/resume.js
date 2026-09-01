@@ -23,7 +23,6 @@ const RESUME_METADATA_WAIT_MS = TUNING.resume.metadataWaitMs;
 const RESUME_MIN_POSITION = TUNING.resume.minPosition;
 const RESUME_SAVE_EPSILON_S = TUNING.resume.saveEpsilonSeconds;
 const RESUME_COMPLETION_RATIO = TUNING.resume.completionRatio;
-const TOAST_ACTION_MS = TUNING.toast.actionMs;
 // NOTE: saveIntervalMs is deliberately NOT hoisted - tests mutate
 // TUNING.resume.saveIntervalMs at runtime to set the wall floor, so it must
 // stay a live object read on the save-decision path.
@@ -417,20 +416,14 @@ export class ResumeTracker {
       // data) since seeking is safe at metadata time and the user sees the
       // jump as soon as duration is known.
       shell.media.seekTo(savedPosition);
-      shell.toast({
-        icon: "resume",
-        text: `Resumed at ${formatTime(savedPosition)}`,
-        duration: TOAST_ACTION_MS,
-        group: "resume",
-        actions: [{
-          icon: "reload",
-          title: "Start over",
-          onClick: () => {
-            this.#lastSavedPosition = 0;
-            shell.media.seekTo(0);
-          }
-        }]
-      });
+      shell.toastAction("resume", `Resumed at ${formatTime(savedPosition)}`, "resume", [{
+        icon: "reload",
+        title: "Start over",
+        onClick: () => {
+          this.#lastSavedPosition = 0;
+          shell.media.seekTo(0);
+        }
+      }]);
     }
 
     this.#lastSavedPosition = Number.isFinite(savedPosition) ? savedPosition : (shell.currentTime || NaN);

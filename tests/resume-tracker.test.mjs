@@ -43,6 +43,9 @@ function makeEnv(duration) {
     },
     toast(payload) {
       toasts.push(payload);
+    },
+    toastAction(icon, text, group, actions) {
+      toasts.push({ icon, text, duration: 4000, group, actions });
     }
   };
   return { dom, video, shell };

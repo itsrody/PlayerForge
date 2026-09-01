@@ -207,7 +207,7 @@ export class VideoFilter {
     }
     this.#apply();
     this.#persist();
-    this.#shell?.toast({ icon: "color", text: `Preset: ${name}`, duration: TUNING.toast.flashMs, group: "filter" });
+    this.#shell?.toastFlash("color", `Preset: ${name}`, "filter");
   }
 
   #persist() {
@@ -233,7 +233,7 @@ export class VideoFilter {
     if (this.#resetBtn) {
       flashElement(this.#resetBtn);
     }
-    this.#shell?.toast({ icon: "reload", text: "Color Reset", duration: TUNING.toast.flashMs, group: "filter" });
+    this.#shell?.toastFlash("reload", "Color Reset", "filter");
   }
 
   destroy() {

@@ -7,7 +7,6 @@ import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/sdk.js";
 import { logger } from "./shared/logger.js";
 import { shouldSkipUrl } from "./kernel/guard.js";
 import { KEYS, getConfigValue, setConfigValue, deleteConfigField } from "./shared/storage.js";
-import { TUNING } from "./shell/chrome/config.js";
 import { initFullscreenGate } from "./shared/shadow.js";
 
 // The version lives in the banner and is read from the installed script at
@@ -73,13 +72,12 @@ function bootstrap() {
       const coarsePointer = matchMedia("(pointer: coarse)").matches;
       setTimeout(() => {
         if (shell && !shell.panel?.isOpen) {
-          shell.toast({
-            icon: "captions",
-            text: coarsePointer
+          shell.toastHint(
+            "captions",
+            coarsePointer
               ? "Swipe down to exit fullscreen"
-              : "Press S for settings · Swipe down to exit fullscreen",
-            duration: TUNING.toast.hintMs
-          });
+              : "Press S for settings · Swipe down to exit fullscreen"
+          );
         }
       }, 1200);
     });

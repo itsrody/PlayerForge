@@ -463,7 +463,8 @@ test("fill pinch owns object-fit: contain and restores it on clear", () => {
     video,
     sdk: { name: "test" },
     referenceBox: { width: 1080, height: 2400 },
-    toast() {}
+    toast() {},
+    toastFlash() {}
   };
   const ac = new AbortController();
   attachInputActions(shell, host, ac.signal);
