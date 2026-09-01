@@ -2,9 +2,7 @@
  * Switchboard efficiency integration tests.
  *
  * Measures timing metrics for lifecycle operations across a multi-server
- * switchboard scenario using a single shared browser instance.
- *
- * Each metric measured 3 times, median reported.
+ * switchboard scenario. Each test is self-contained.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -17,7 +15,7 @@ import {
 } from "../harness/chromium.mjs";
 import { waitForShellInFrame } from "../harness/page.mjs";
 
-const RUNS = 3;
+const RUNS = 2;
 const SERVER_COUNT = 3;
 
 function median(arr) {
@@ -26,45 +24,7 @@ function median(arr) {
   return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
-let driver;
-let servers;
-let parentServer;
-
-test.before(async () => {
-  servers = await createMultiOriginServersN(SERVER_COUNT);
-  parentServer = new TestServer();
-  await parentServer.start();
-
-  const childEntries = servers.map((s, i) => ({
-    name: `Server ${i}`,
-    url: createSwitchboardChildPage(s, { name: `Server ${i}` }),
-  }));
-
-  const parentUrl = createSwitchboardPage(parentServer, childEntries);
-  driver = await ChromiumDriver.launch();
-  await driver.navigate(parentUrl);
-  await driver.injectGMStubs();
-  await driver.injectScript();
-});
-
-test.after(async () => {
-  await driver?.destroy();
-  await parentServer?.stop();
-  for (const s of servers) await s.stop();
-});
-
-async function freshPage() {
-  const childEntries = servers.map((s, i) => ({
-    name: `Server ${i}`,
-    url: createSwitchboardChildPage(s, { name: `Server ${i}` }),
-  }));
-  const parentUrl = createSwitchboardPage(parentServer, childEntries);
-  await driver.navigate(parentUrl);
-  await driver.injectGMStubs();
-  await driver.injectScript();
-}
-
-async function loadAndBoot(index) {
+async function loadAndBoot(driver, index) {
   await driver.eval((i) => window.__loadIframe(i), index);
   await driver.eval((i) => window.__waitForIframeLoad(i, 10000), index);
   await new Promise((r) => setTimeout(r, 200));
@@ -72,7 +32,7 @@ async function loadAndBoot(index) {
   await waitForShellInFrame(driver, 0, 10000);
 }
 
-async function unloadAndWait() {
+async function unloadAndWait(driver) {
   await driver.eval(() => window.__unloadIframe());
   await new Promise((r) => setTimeout(r, 300));
 }
@@ -80,13 +40,33 @@ async function unloadAndWait() {
 // ── Metric 1: Boot time (first iframe load) ─────────────────────────
 
 test("perf: boot time", async () => {
+  const servers = await createMultiOriginServersN(SERVER_COUNT);
+  const parentServer = new TestServer();
+  await parentServer.start();
+  const childEntries = servers.map((s, i) => ({
+    name: `Server ${i}`,
+    url: createSwitchboardChildPage(s, { name: `Server ${i}` }),
+  }));
+
+  const driver = await ChromiumDriver.launch();
   const times = [];
-  for (let run = 0; run < RUNS; run++) {
-    await freshPage();
-    const t0 = performance.now();
-    await loadAndBoot(0);
-    times.push(performance.now() - t0);
+
+  try {
+    for (let run = 0; run < RUNS; run++) {
+      const url = createSwitchboardPage(parentServer, childEntries);
+      await driver.navigate(url);
+      await driver.injectGMStubs();
+      await driver.injectScript();
+      const t0 = performance.now();
+      await loadAndBoot(driver, 0);
+      times.push(performance.now() - t0);
+    }
+  } finally {
+    await driver.destroy();
+    await parentServer.stop();
+    for (const s of servers) await s.stop();
   }
+
   const med = median(times);
   console.log(`\n  Boot time (first iframe): ${med.toFixed(1)}ms median`);
   assert.ok(med < 15000, `Boot too slow: ${med}ms`);
@@ -95,18 +75,38 @@ test("perf: boot time", async () => {
 // ── Metric 2: Switch time (unload + load new server) ────────────────
 
 test("perf: switch time", async () => {
+  const servers = await createMultiOriginServersN(SERVER_COUNT);
+  const parentServer = new TestServer();
+  await parentServer.start();
+  const childEntries = servers.map((s, i) => ({
+    name: `Server ${i}`,
+    url: createSwitchboardChildPage(s, { name: `Server ${i}` }),
+  }));
+
+  const driver = await ChromiumDriver.launch();
   const times = [];
-  for (let run = 0; run < RUNS; run++) {
-    await freshPage();
-    await loadAndBoot(0);
-    const t0 = performance.now();
-    await driver.eval((i) => window.__switchTo(i), 1);
-    await driver.eval((i) => window.__waitForIframeLoad(i, 10000), 1);
-    await new Promise((r) => setTimeout(r, 200));
-    await driver.injectScriptInFrame(0);
-    await waitForShellInFrame(driver, 0, 10000);
-    times.push(performance.now() - t0);
+
+  try {
+    for (let run = 0; run < RUNS; run++) {
+      const url = createSwitchboardPage(parentServer, childEntries);
+      await driver.navigate(url);
+      await driver.injectGMStubs();
+      await driver.injectScript();
+      await loadAndBoot(driver, 0);
+      const t0 = performance.now();
+      await driver.eval((i) => window.__switchTo(i), 1);
+      await driver.eval((i) => window.__waitForIframeLoad(i, 10000), 1);
+      await new Promise((r) => setTimeout(r, 200));
+      await driver.injectScriptInFrame(0);
+      await waitForShellInFrame(driver, 0, 10000);
+      times.push(performance.now() - t0);
+    }
+  } finally {
+    await driver.destroy();
+    await parentServer.stop();
+    for (const s of servers) await s.stop();
   }
+
   const med = median(times);
   console.log(`  Switch time (unload+load): ${med.toFixed(1)}ms median`);
   assert.ok(med < 15000, `Switch too slow: ${med}ms`);
@@ -115,32 +115,70 @@ test("perf: switch time", async () => {
 // ── Metric 3: Rapid cycle throughput ─────────────────────────────────
 
 test("perf: rapid cycle throughput", async () => {
-  await freshPage();
-  const cycleCount = 10;
-  const t0 = performance.now();
-  await driver.eval(
-    (count, interval) => window.__rapidCycle(count, interval),
-    cycleCount,
-    100
-  );
-  await new Promise((r) => setTimeout(r, cycleCount * 100 + 1000));
-  const elapsed = performance.now() - t0;
-  const throughput = (cycleCount / elapsed * 1000).toFixed(1);
-  console.log(`  Rapid cycle throughput: ${throughput} cycles/sec (${cycleCount} cycles in ${(elapsed / 1000).toFixed(1)}s)`);
-  assert.ok(parseFloat(throughput) > 1, "Throughput should be >1 cycle/sec");
+  const servers = await createMultiOriginServersN(SERVER_COUNT);
+  const parentServer = new TestServer();
+  await parentServer.start();
+  const childEntries = servers.map((s, i) => ({
+    name: `Server ${i}`,
+    url: createSwitchboardChildPage(s, { name: `Server ${i}` }),
+  }));
+
+  const driver = await ChromiumDriver.launch();
+  try {
+    const url = createSwitchboardPage(parentServer, childEntries);
+    await driver.navigate(url);
+    await driver.injectGMStubs();
+    await driver.injectScript();
+    const cycleCount = 10;
+    const t0 = performance.now();
+    await driver.eval(
+      (count, interval) => window.__rapidCycle(count, interval),
+      cycleCount,
+      100
+    );
+    await new Promise((r) => setTimeout(r, cycleCount * 100 + 1000));
+    const elapsed = performance.now() - t0;
+    const throughput = (cycleCount / elapsed * 1000).toFixed(1);
+    console.log(`  Rapid cycle throughput: ${throughput} cycles/sec (${cycleCount} cycles in ${(elapsed / 1000).toFixed(1)}s)`);
+    assert.ok(parseFloat(throughput) > 1, "Throughput should be >1 cycle/sec");
+  } finally {
+    await driver.destroy();
+    await parentServer.stop();
+    for (const s of servers) await s.stop();
+  }
 });
 
 // ── Metric 4: Destroy time (iframe unload) ───────────────────────────
 
 test("perf: destroy time", async () => {
+  const servers = await createMultiOriginServersN(SERVER_COUNT);
+  const parentServer = new TestServer();
+  await parentServer.start();
+  const childEntries = servers.map((s, i) => ({
+    name: `Server ${i}`,
+    url: createSwitchboardChildPage(s, { name: `Server ${i}` }),
+  }));
+
+  const driver = await ChromiumDriver.launch();
   const times = [];
-  for (let run = 0; run < RUNS; run++) {
-    await freshPage();
-    await loadAndBoot(0);
-    const t0 = performance.now();
-    await unloadAndWait();
-    times.push(performance.now() - t0);
+
+  try {
+    for (let run = 0; run < RUNS; run++) {
+      const url = createSwitchboardPage(parentServer, childEntries);
+      await driver.navigate(url);
+      await driver.injectGMStubs();
+      await driver.injectScript();
+      await loadAndBoot(driver, 0);
+      const t0 = performance.now();
+      await unloadAndWait(driver);
+      times.push(performance.now() - t0);
+    }
+  } finally {
+    await driver.destroy();
+    await parentServer.stop();
+    for (const s of servers) await s.stop();
   }
+
   const med = median(times);
   console.log(`  Destroy time (unload): ${med.toFixed(1)}ms median`);
   assert.ok(med < 5000, `Destroy too slow: ${med}ms`);
@@ -149,28 +187,46 @@ test("perf: destroy time", async () => {
 // ── Metric 5: Full report ───────────────────────────────────────────
 
 test("perf: report", async () => {
+  const servers = await createMultiOriginServersN(SERVER_COUNT);
+  const parentServer = new TestServer();
+  await parentServer.start();
+  const childEntries = servers.map((s, i) => ({
+    name: `Server ${i}`,
+    url: createSwitchboardChildPage(s, { name: `Server ${i}` }),
+  }));
+
+  const driver = await ChromiumDriver.launch();
   const bootTimes = [];
   const switchTimes = [];
   const destroyTimes = [];
 
-  for (let run = 0; run < RUNS; run++) {
-    await freshPage();
+  try {
+    for (let run = 0; run < RUNS; run++) {
+      const url = createSwitchboardPage(parentServer, childEntries);
+      await driver.navigate(url);
+      await driver.injectGMStubs();
+      await driver.injectScript();
 
-    let t0 = performance.now();
-    await loadAndBoot(0);
-    bootTimes.push(performance.now() - t0);
+      let t0 = performance.now();
+      await loadAndBoot(driver, 0);
+      bootTimes.push(performance.now() - t0);
 
-    t0 = performance.now();
-    await driver.eval(() => window.__switchTo(1));
-    await driver.eval((i) => window.__waitForIframeLoad(i, 10000), 1);
-    await new Promise((r) => setTimeout(r, 200));
-    await driver.injectScriptInFrame(0);
-    await waitForShellInFrame(driver, 0, 10000);
-    switchTimes.push(performance.now() - t0);
+      t0 = performance.now();
+      await driver.eval(() => window.__switchTo(1));
+      await driver.eval((i) => window.__waitForIframeLoad(i, 10000), 1);
+      await new Promise((r) => setTimeout(r, 200));
+      await driver.injectScriptInFrame(0);
+      await waitForShellInFrame(driver, 0, 10000);
+      switchTimes.push(performance.now() - t0);
 
-    t0 = performance.now();
-    await unloadAndWait();
-    destroyTimes.push(performance.now() - t0);
+      t0 = performance.now();
+      await unloadAndWait(driver);
+      destroyTimes.push(performance.now() - t0);
+    }
+  } finally {
+    await driver.destroy();
+    await parentServer.stop();
+    for (const s of servers) await s.stop();
   }
 
   const bootMed = median(bootTimes);

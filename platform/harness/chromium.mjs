@@ -752,6 +752,32 @@ export function createSwitchboardChildPage(server, options = {}) {
 }
 
 /**
+ * Build a nested switchboard child: a relay page on relayServer that embeds
+ * videoServer's video page. Creates a 3-deep hierarchy:
+ *   parent → relay (relayServer) → video (videoServer)
+ *
+ * @param {TestServer} relayServer - Server hosting the relay page.
+ * @param {TestServer} videoServer - Server hosting the video page.
+ * @param {object} [options]
+ * @param {string} [options.name] - Display name for the relay page.
+ * @returns {string} URL to the relay page (the entry point for the switchboard).
+ */
+export function createNestedSwitchboardChildPage(relayServer, videoServer, options = {}) {
+  const { name = "Nested" } = options;
+  const videoUrl = createSwitchboardChildPage(videoServer, { name: `${name} (video)` });
+  const html = `<!DOCTYPE html>
+<html>
+<head><title>${name} relay</title></head>
+<body style="margin:0;padding:0;overflow:hidden">
+  <iframe id="inner-frame" src="${videoUrl}" style="width:100%;height:100%;border:none" allowfullscreen></iframe>
+</body>
+</html>`;
+  const path = `/sb-nested-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`;
+  relayServer.addPage(path, html);
+  return `${relayServer.url}${path}`;
+}
+
+/**
  * Build a switchboard parent page with dynamic iframe loading/unloading controls.
  *
  * The page includes:

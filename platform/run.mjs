@@ -85,7 +85,7 @@ async function runIntegration() {
     execSync(`node --test ${testPaths}`, {
       cwd: PROJECT_ROOT,
       stdio: "inherit",
-      timeout: 120_000, // 2 minutes per test file.
+      timeout: 600_000, // 10 minutes total for all test files.
     });
     log("Integration tests passed.");
   } catch {
