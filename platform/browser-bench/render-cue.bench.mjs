@@ -10,12 +10,12 @@ import { ChromiumDriver, TestServer, createTestPage } from "../harness/chromium.
 import { waitForShell } from "../harness/page.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const BUNDLE = readFileSync(join(HERE, "..", "..", "dist", "playerforge.user.js"), "utf8");
+const DEFAULT_BUNDLE = readFileSync(join(HERE, "..", "..", "dist", "playerforge.user.js"), "utf8");
 
 const BATCHES = 7;
 const ITERATIONS = 50;
 
-export default async function runRenderCueBench() {
+export default async function runRenderCueBench(bundle = DEFAULT_BUNDLE) {
   const server = new TestServer();
   await server.start();
   const driver = await ChromiumDriver.launch();
@@ -24,7 +24,7 @@ export default async function runRenderCueBench() {
   try {
     await driver.navigate(createTestPage(server));
     await driver.injectGMStubs();
-    await driver.injectScript(BUNDLE);
+    await driver.injectScript(bundle);
     await waitForShell(driver, 8000);
 
     // Benchmark: cue slot create → mutate → remove.

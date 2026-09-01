@@ -1,5 +1,6 @@
 import { build, context } from "esbuild";
-import { readFileSync } from "node:fs";
+import { readFileSync, copyFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 
 // Readable-by-default, minified on request (-m / --min). Minification is
@@ -194,17 +195,42 @@ if (watch) {
 } else {
   const result = await build(options);
   console.log(`[PlayerForge] built ${minify ? "minified" : "readable"} bundle`);
+
+  // Always produce both readable and minified bundles for comparison.
+  // The primary output (dist/playerforge.user.js) uses the requested mode;
+  // the secondary is written alongside for the compare-bundles platform mode.
+  const readableOpts = { ...shared, minify: false, outfile: "dist/playerforge.readable.js" };
+  const minifiedOpts = { ...shared, minify: true, outfile: "dist/playerforge.minified.js" };
+
   if (minify) {
-    // Rebuild in-memory and assert byte-equality against what was written to
-    // disk: reproducible releases depend on esbuild's deterministic output
-    // (stable mangle, no timestamps, no absolute-path seed).
-    const second = await build({ ...options, write: false });
+    // Primary is minified; also build readable.
+    await build(readableOpts);
+    console.log("[PlayerForge] wrote dist/playerforge.readable.js");
+
+    // Verify minified reproducibility + safety.
+    const second = await build({ ...minifiedOpts, write: false });
     const onDisk = readFileSync(shared.outfile, "utf8");
     const inMemory = second.outputFiles[0].text;
     if (onDisk !== inMemory) {
       throw new Error("min build: non-deterministic output (disk vs rebuild mismatch)");
     }
     verifyMinified(inMemory);
-    console.log(`[PlayerForge] min build verified: TM header intact, no eval/with/new Function, deterministic`);
+    console.log("[PlayerForge] min build verified: TM header intact, no eval/with/new Function, deterministic");
+  } else {
+    // Primary is readable; also build minified, then copy primary to readable path.
+    await build(minifiedOpts);
+    console.log("[PlayerForge] wrote dist/playerforge.minified.js");
+    copyFileSync(shared.outfile, readableOpts.outfile);
+    console.log("[PlayerForge] wrote dist/playerforge.readable.js");
+
+    // Verify the minified build.
+    const second = await build({ ...minifiedOpts, write: false });
+    const onDisk = readFileSync("dist/playerforge.minified.js", "utf8");
+    const inMemory = second.outputFiles[0].text;
+    if (onDisk !== inMemory) {
+      throw new Error("min build: non-deterministic output (disk vs rebuild mismatch)");
+    }
+    verifyMinified(inMemory);
+    console.log("[PlayerForge] min build verified: TM header intact, no eval/with/new Function, deterministic");
   }
 }

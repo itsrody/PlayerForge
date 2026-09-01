@@ -10,11 +10,11 @@ import { ChromiumDriver, TestServer, createTestPage } from "../harness/chromium.
 import { waitForShell } from "../harness/page.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const BUNDLE = readFileSync(join(HERE, "..", "..", "dist", "playerforge.user.js"), "utf8");
+const DEFAULT_BUNDLE = readFileSync(join(HERE, "..", "..", "dist", "playerforge.user.js"), "utf8");
 
 const BATCHES = 7;
 
-export default async function runShellBootBench() {
+export default async function runShellBootBench(bundle = DEFAULT_BUNDLE) {
   const server = new TestServer();
   await server.start();
   const driver = await ChromiumDriver.launch();
@@ -28,7 +28,7 @@ export default async function runShellBootBench() {
       const t0 = performance.now();
       await driver.navigate(url);
       await driver.injectGMStubs();
-      await driver.injectScript(BUNDLE);
+      await driver.injectScript(bundle);
       await waitForShell(driver, 5000);
       bootTimes.push(performance.now() - t0);
     }
@@ -50,7 +50,7 @@ export default async function runShellBootBench() {
       await driver.navigate(url);
       await driver.injectGMStubs();
       const t0 = performance.now();
-      await driver.injectScript(BUNDLE);
+      await driver.injectScript(bundle);
       injectTimes.push(performance.now() - t0);
     }
 
