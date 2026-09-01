@@ -3,7 +3,8 @@ import { readFileSync, copyFileSync } from "node:fs";
 import { writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 
-// Readable-by-default, minified on request (-m / --min). Minification is
+// Minified is the default (and only shipping) output. The readable variant
+// is built alongside for the compare-bundles platform mode. Minification is
 // V8/TurboFan-aware by construction: esbuild only does the safe transforms
 // (whitespace, local-identifier mangling, syntax compression) that keep
 // functions Maglev/TurboFan-compilable - it never introduces eval/with, never
@@ -12,7 +13,6 @@ import { createHash } from "node:crypto";
 // minified separately (esbuild's JS minifier would not shrink a text-loaded
 // string); the CSS pass below is deliberately conservative so calc()/content
 // and selector whitespace survive intact.
-const minify = process.argv.includes("-m") || process.argv.includes("--min");
 
 // The banner below is the single version source. Runtime reads the installed
 // script's real version through GM_info.script.version, so bumping @version
@@ -149,7 +149,6 @@ const shared = {
 };
 
 const watch = process.argv.includes("--watch");
-const options = { ...shared, minify };
 
 /**
  * Release-time verification for the minified bundle. Minification is
@@ -161,9 +160,6 @@ const options = { ...shared, minify };
  */
 function verifyMinified(text) {
   const body = text.slice(text.indexOf("==/UserScript==") + 16);
-  // The metadata block must remain the very first thing in the file - TM
-  // parses it before evaluating any JS. minify, mangling, and iife-wrapping
-  // must never displace or duplicate it.
   if (!text.startsWith("// ==UserScript==")) {
     throw new Error("min build: metadata banner displaced from file head");
   }
@@ -172,10 +168,6 @@ function verifyMinified(text) {
       throw new Error(`min build: metadata line missing: ${needle.trim().split(/\s+/)[0]}`);
     }
   }
-  // V8/TurboFan + MV3 safety: these constructs would block compilation or rely
-  // on dynamic property access - and remote/dynamic code is banned by MV3 CSP.
-  // Their presence means a future minifier change regressed the guarantees
-  // this build exists to preserve.
   const forbidden = [
     [/\beval\s*\(/, "eval"],
     [/\bnew\s+Function\s*\(/, "new Function"],
@@ -189,48 +181,28 @@ function verifyMinified(text) {
 }
 
 if (watch) {
-  const ctx = await context(options);
+  const ctx = await context({ ...shared, minify: true });
   await ctx.watch();
-  console.log(`[PlayerForge] watching (${minify ? "minified" : "readable"})...`);
+  console.log("[PlayerForge] watching (minified)...");
 } else {
-  const result = await build(options);
-  console.log(`[PlayerForge] built ${minify ? "minified" : "readable"} bundle`);
-
-  // Always produce both readable and minified bundles for comparison.
-  // The primary output (dist/playerforge.user.js) uses the requested mode;
-  // the secondary is written alongside for the compare-bundles platform mode.
+  const minifiedOpts = { ...shared, minify: true };
   const readableOpts = { ...shared, minify: false, outfile: "dist/playerforge.readable.js" };
-  const minifiedOpts = { ...shared, minify: true, outfile: "dist/playerforge.minified.js" };
 
-  if (minify) {
-    // Primary is minified; also build readable.
-    await build(readableOpts);
-    console.log("[PlayerForge] wrote dist/playerforge.readable.js");
+  // Primary: minified bundle (what Tampermonkey installs).
+  const result = await build(minifiedOpts);
+  console.log("[PlayerForge] built minified bundle");
 
-    // Verify minified reproducibility + safety.
-    const second = await build({ ...minifiedOpts, write: false });
-    const onDisk = readFileSync(shared.outfile, "utf8");
-    const inMemory = second.outputFiles[0].text;
-    if (onDisk !== inMemory) {
-      throw new Error("min build: non-deterministic output (disk vs rebuild mismatch)");
-    }
-    verifyMinified(inMemory);
-    console.log("[PlayerForge] min build verified: TM header intact, no eval/with/new Function, deterministic");
-  } else {
-    // Primary is readable; also build minified, then copy primary to readable path.
-    await build(minifiedOpts);
-    console.log("[PlayerForge] wrote dist/playerforge.minified.js");
-    copyFileSync(shared.outfile, readableOpts.outfile);
-    console.log("[PlayerForge] wrote dist/playerforge.readable.js");
-
-    // Verify the minified build.
-    const second = await build({ ...minifiedOpts, write: false });
-    const onDisk = readFileSync("dist/playerforge.minified.js", "utf8");
-    const inMemory = second.outputFiles[0].text;
-    if (onDisk !== inMemory) {
-      throw new Error("min build: non-deterministic output (disk vs rebuild mismatch)");
-    }
-    verifyMinified(inMemory);
-    console.log("[PlayerForge] min build verified: TM header intact, no eval/with/new Function, deterministic");
+  // Verify reproducibility + safety.
+  const second = await build({ ...minifiedOpts, write: false });
+  const onDisk = readFileSync(shared.outfile, "utf8");
+  const inMemory = second.outputFiles[0].text;
+  if (onDisk !== inMemory) {
+    throw new Error("min build: non-deterministic output (disk vs rebuild mismatch)");
   }
+  verifyMinified(inMemory);
+  console.log("[PlayerForge] min build verified: TM header intact, no eval/with/new Function, deterministic");
+
+  // Secondary: readable bundle for compare-bundles mode.
+  await build(readableOpts);
+  console.log("[PlayerForge] wrote dist/playerforge.readable.js");
 }
