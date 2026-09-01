@@ -48,7 +48,7 @@ const REGISTRY = [
   { name: "Vidstack", anchors: ["media-player"] },
   { name: "Mux Player", anchors: ["mux-player"] },
   { name: "Radiant Media Player", anchors: ["radiant-media-player"] },
-  { name: "Laravel Video Embed", anchors: ["#app[data-page]"] },
+  { name: "Laravel Video Embed", anchors: ["[data-page] > div:first-child", "#app[data-page]"] },
 ];
 
 export const MIN_VIDEO_WIDTH = 100;
