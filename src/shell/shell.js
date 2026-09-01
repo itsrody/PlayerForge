@@ -71,14 +71,15 @@ export class Shell {
     this.#inputs = new InputForge(this.video, this.container, this.shellHost);
     attachInputActions(this, this.shellHost, this.#inputs.signal);
     this.#resume = new ResumeTracker(this);
-    this.#subtitles = new SubtitlesSection(this);
-    this.#filter = new VideoFilter(this, this.#panel);
-    addHistorySection(this.#panel, this);
-    addSettingsSection(this.#panel);
 
-    // Yield again before wiring event listeners so the constructed panel
-    // tree is painted before we attach the media/keyboard/fullscreen handlers.
-    await scheduler.yield();
+    // Lazy section builder: panel sections (subtitles, filter, history,
+    // settings) are constructed on first open to keep boot fast.
+    this.#panel.setSectionBuilder(() => {
+      this.#subtitles = new SubtitlesSection(this);
+      this.#filter = new VideoFilter(this, this.#panel);
+      addHistorySection(this.#panel, this);
+      addSettingsSection(this.#panel);
+    });
 
     this.#setupFocusManagement();
     this.#suppressContextMenu();

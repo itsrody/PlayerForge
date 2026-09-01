@@ -226,6 +226,7 @@ export class SettingsPanel {
   #scope = new AbortController();
   #backdrop = null;
   #destroyed = false;
+  #sectionBuilder = null;
 
   constructor(shell) {
     this.#hudLayer = shell.shellDom?.hudLayer;
@@ -263,8 +264,21 @@ export class SettingsPanel {
     return !!this.#root && this.#root.classList.contains("pf-open");
   }
 
+  /** Register a lazy builder that populates sections on first open. */
+  setSectionBuilder(fn) {
+    this.#sectionBuilder = fn;
+  }
+
   open() {
-    if (!this.#root || this.#destroyed || !this.#body.childElementCount || this.isOpen) {
+    if (!this.#root || this.#destroyed || this.isOpen) {
+      return;
+    }
+    if (this.#sectionBuilder) {
+      const build = this.#sectionBuilder;
+      this.#sectionBuilder = null;
+      build();
+    }
+    if (!this.#body.childElementCount) {
       return;
     }
     this.#runWithViewTransition("pf-panel-open", () => {
@@ -299,6 +313,11 @@ export class SettingsPanel {
   openSection(title) {
     if (!this.#root || this.#destroyed) {
       return false;
+    }
+    if (this.#sectionBuilder) {
+      const build = this.#sectionBuilder;
+      this.#sectionBuilder = null;
+      build();
     }
     for (const [section, tab] of this.#sections) {
       if (section.dataset.title === title) {
