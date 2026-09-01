@@ -32,7 +32,9 @@ const PATTERNS = {
   /** Pinch-fill engaged or released. */
   pinch: [8, 14, 8, 14, 8],
   /** Fullscreen double-tap committed (skip/toggle). */
-  dbltap: [14, 40, 14]
+  dbltap: [14, 40, 14],
+  /** Swipe gesture committed (exit fullscreen). */
+  swipe: [10, 30, 10]
 };
 
 const canVibrate =

@@ -512,6 +512,7 @@ export function attachInputActions(shell, host, signal) {
       return;
     }
     if (detail.distance > TUNING.gestures.swipeExitMinPx) {
+      gestureHaptic("swipe");
       clearFillMode(shell, state, false);
       shell.toast({
         icon: "fs-exit",
