@@ -1119,12 +1119,11 @@
        icon-only tabs. */
     @media (orientation: landscape) and (pointer: coarse) and (max-height: 480px) {
       .pf-panel {
-        top: 50%;
-        right: var(--pf-space-md);
-        bottom: auto;
-        left: auto;
-        translate: 0 -50%;
-        margin: 0;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        margin: auto;
         width: min(340px, 45vw);
         max-height: 70vh;
         border-radius: var(--pf-radius-lg);
