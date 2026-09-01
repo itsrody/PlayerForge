@@ -1,5 +1,5 @@
 import { build, context } from "esbuild";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import process from "node:process";
 
@@ -67,7 +67,6 @@ const banner = `// ==UserScript==
 // @exclude      *://*.tumblr.com/*
 // @grant        GM_setValue
 // @grant        GM_getValue
-// @grant        GM_setValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_unregisterMenuCommand
 // @grant        GM_addValueChangeListener
@@ -76,7 +75,7 @@ const banner = `// ==UserScript==
 // @grant        GM_xmlhttpRequest
 // @connect      *
 // @connect      https://www.subtitlecat.com
-// @resource     pfStyle https://raw.githubusercontent.com/itsrody/PlayerForge/chromium/src/shell/chrome/styles.css
+// @resource     pfStyle https://raw.githubusercontent.com/itsrody/PlayerForge/chromium/dist/playerforge.css
 // @sandbox      raw
 // @run-at       document-start
 // @license      MIT
@@ -125,6 +124,12 @@ function minifyCssPlugin() {
           const digest = createHash("sha256").update(css).digest("hex");
           console.log(`[PlayerForge] css fingerprint ${path}: sha256=${digest.slice(0, 16)}…`);
         }
+        // Write minified CSS to dist/ so the @resource pfStyle banner URL
+        // can point to this file on GitHub's raw content endpoint.
+        const dir = new URL("./dist/", import.meta.url);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(new URL("./dist/playerforge.css", import.meta.url), cache.values().next().value);
+        console.log("[PlayerForge] wrote dist/playerforge.css");
       });
     }
   };
@@ -163,7 +168,7 @@ function verifyMinified(text) {
   if (!text.startsWith("// ==UserScript==")) {
     throw new Error("min build: metadata banner displaced from file head");
   }
-  for (const needle of ["@name         PlayerForge", "@version", "@grant        GM_setValue"]) {
+  for (const needle of ["@name         PlayerForge", "@version", "@grant        GM_setValue", "@resource     pfStyle https://raw.githubusercontent.com/itsrody/PlayerForge/chromium/dist/playerforge.css"]) {
     if (!text.includes(needle)) {
       throw new Error(`min build: metadata line missing: ${needle.trim().split(/\s+/)[0]}`);
     }
