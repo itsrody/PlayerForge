@@ -10,7 +10,7 @@ export default [
   measure("hashEntry (djb2, domain-seeded)", () => {
     let sink = 0;
     return () => {
-      for (let i = 0; i < 100; i++) {
+      for (let i = 0; i < 1000; i++) {
         sink += hashEntry("youtube", paths[i & 63], 600 + i);
       }
       if (sink === Infinity) throw new Error();

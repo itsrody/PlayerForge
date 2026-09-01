@@ -18,10 +18,11 @@ let minifiedBundle;
 
 try {
   readableBundle = readFileSync(join(DIST, "playerforge.readable.js"), "utf8");
-  minifiedBundle = readFileSync(join(DIST, "playerforge.minified.js"), "utf8");
-} catch {
-  // Bundles not built yet — skip silently.
-}
+} catch {}
+try {
+  // The minified bundle lives at playerforge.user.js (the primary output).
+  minifiedBundle = readFileSync(join(DIST, "playerforge.user.js"), "utf8");
+} catch {}
 
 const cases = [];
 
