@@ -53,5 +53,14 @@ export default [
         store.createEntry(`site${i}.tld`, `/watch/${i}`, `T${i}`, 600);
       }
     };
+  }),
+
+  measure("resume updateResume persist+merge (200 entries)", () => {
+    const freshStore = new ResumeStore();
+    return () => {
+      for (let i = 0; i < 20; i++) {
+        freshStore.updateResume(`e${180 + i}`, 100 + i);
+      }
+    };
   })
 ];

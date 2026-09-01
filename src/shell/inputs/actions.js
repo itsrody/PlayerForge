@@ -89,7 +89,12 @@ export function allowsIntent(gesture) {
   if (!bindings) {
     return false;
   }
-  return bindings.some(gateOpen);
+  for (let i = 0; i < bindings.length; i++) {
+    if (gateOpen(bindings[i])) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Armed key bindings, in table order - sampled live per keystroke. */

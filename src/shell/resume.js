@@ -97,7 +97,10 @@ export class ResumeStore {
   #mergeRaw(raw) {
     let added = 0;
     let updated = 0;
-    const byId = new Map(this.#state.entries.map((entry) => [entry.id, entry]));
+    const byId = new Map();
+    for (const entry of this.#state.entries) {
+      byId.set(entry.id, entry);
+    }
     for (const incoming of raw.entries) {
       if (!incoming || typeof incoming !== "object" || typeof incoming.id !== "string") {
         continue;
@@ -110,6 +113,9 @@ export class ResumeStore {
         Object.assign(known, incoming);
         updated++;
       }
+    }
+    if (added === 0 && updated === 0) {
+      return { added, updated };
     }
     this.#state.entries = [...byId.values()];
     return { added, updated };
@@ -148,13 +154,20 @@ export class ResumeStore {
    * hard entry cap (oldest evicted). Returns a fresh array; callers assign.
    */
   #enforceBounds(days = RESUME_STALE_DAYS) {
-    const cutoff = Date.now() - days * 86400000;
-    let kept = this.#state.entries.filter((entry) => entry.updatedAt > cutoff);
-    if (kept.length > RESUME_MAX_ENTRIES) {
-      kept = sortByUpdatedAt(kept);
-      kept = kept.slice(kept.length - RESUME_MAX_ENTRIES);
+    const entries = this.#state.entries;
+    if (entries.length <= RESUME_MAX_ENTRIES) {
+      const cutoff = Date.now() - days * 86400000;
+      for (let i = 0; i < entries.length; i++) {
+        if (entries[i].updatedAt <= cutoff) {
+          return entries.filter((e) => e.updatedAt > cutoff);
+        }
+      }
+      return entries;
     }
-    return kept;
+    const cutoff = Date.now() - days * 86400000;
+    const kept = entries.filter((entry) => entry.updatedAt > cutoff);
+    kept.sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0));
+    return kept.slice(kept.length - RESUME_MAX_ENTRIES);
   }
 
   #persist(structural = false) {

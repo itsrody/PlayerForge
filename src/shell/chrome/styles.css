@@ -143,6 +143,7 @@
       inset: 0;
       pointer-events: none;
       z-index: var(--pf-z-hud);
+      contain: layout style;
 
       /* Re-enable pointer events on every HUD child - but keep the caption
          layer click-transparent via the more specific rule below. */
@@ -353,11 +354,11 @@
     .pf-panel {
       container-type: inline-size;
       container-name: pf-panel;
+      contain: layout style;
 
       position: absolute;
       z-index: var(--pf-z-panel);
       padding: 0;
-      will-change: opacity, translate, scale;
 
       /* Closed by default; @starting-style keys off the display flip. Centered
          on the shell host via auto margins (no translate), so the open/close
@@ -399,6 +400,7 @@
         opacity: 1;
         translate: 0 0;
         scale: 1;
+        will-change: opacity, translate, scale;
         view-transition-name: pf-panel;
         pointer-events: auto;
       }
