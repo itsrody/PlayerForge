@@ -1157,6 +1157,102 @@
       .pf-options-row { flex-shrink: 0; }
     }
 
+    /* - Compact mode - narrower panel, reduced density, single-column grid.
+       Triggered by the ui.compact setting or auto-detected on narrow touch
+       viewports. Overrides the default sizing tokens inline so the existing
+       responsive breakpoints still cascade on top. */
+    .pf-panel.pf-compact {
+      width: min(300px, calc(100% - 16px));
+      font-size: var(--pf-font-sm);
+
+      .pf-panel-header {
+        padding: var(--pf-space-sm);
+        gap: var(--pf-space-sm);
+      }
+
+      .pf-panel-body {
+        padding: var(--pf-space-xs) var(--pf-space-sm) var(--pf-space-md);
+      }
+
+      .pf-panel-grid {
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--pf-space-xs);
+      }
+
+      .pf-panel-tab {
+        padding: 5px 6px;
+        font-size: var(--pf-font-xs);
+      }
+
+      .pf-panel-tab svg {
+        width: 12px;
+        height: 12px;
+      }
+
+      .pf-panel-close {
+        padding: 4px 6px;
+        font-size: 14px;
+      }
+
+      .pf-btn {
+        padding: 8px 10px;
+        font-size: var(--pf-font-sm);
+      }
+
+      .pf-settings-toggle {
+        padding: 6px 8px;
+        font-size: var(--pf-font-sm);
+      }
+
+      .pf-history-card {
+        padding: 5px 8px;
+        gap: 6px;
+      }
+
+      .pf-history-title {
+        font-size: var(--pf-font-xs);
+      }
+
+      .pf-history-meta {
+        font-size: 10px;
+      }
+
+      .pf-history-list {
+        max-height: 152px;
+      }
+
+      .pf-stepper {
+        height: 28px;
+      }
+    }
+
+    /* Compact mode on touch devices: keep thumb-sized targets. */
+    .pf-panel.pf-compact {
+      @media (pointer: coarse) {
+        .pf-panel-tab { padding: 7px 8px; }
+        .pf-btn { padding: 9px 10px; }
+        .pf-settings-toggle { padding: 7px 8px; }
+        .pf-stepper { height: 30px; }
+      }
+    }
+
+    /* Compact mode bottom-sheet on portrait touch phones. */
+    .pf-panel.pf-compact {
+      @media (max-width: 520px) and (pointer: coarse) {
+        width: auto;
+        top: auto;
+        bottom: var(--pf-space-sm);
+        left: var(--pf-space-sm);
+        right: var(--pf-space-sm);
+        max-height: 56vh;
+        border-radius: 14px 14px 0 0;
+        border-left: none;
+        border-right: none;
+        border-bottom: none;
+        padding-bottom: env(safe-area-max-inset-bottom, 0px);
+      }
+    }
+
     /* @starting-style for the panel's open transition. Keyed separately so it
        parses cleanly whether the browser supports the display transition or not.
        Scoped to the HUD subtree like the rest of the surface, so the starting

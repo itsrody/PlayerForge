@@ -4,6 +4,7 @@ import { GESTURE_EVENTS } from "../inputs/actions.js";
 import { deepestActiveElement, subscribeFullscreen } from "../../shared/shadow.js";
 import { clamp } from "../../shared/clamp.js";
 import { el } from "./elements.js";
+import { getSetting } from "./config.js";
 
 const HOLD_DELAY_MS = 400;
 const HOLD_REPEAT_MS = 75;
@@ -235,7 +236,31 @@ export class SettingsPanel {
     }
     this.#buildDom();
     this.#wireEvents();
+    this.#wireCompactMode();
     logger.log("panel", "Panel ready");
+  }
+
+  /**
+   * Compact mode: explicit setting wins; otherwise auto-detect touch + narrow
+   * viewport (< 480px). The auto-detect is a one-shot at construction — the
+   * user can always override via the Settings toggle.
+   */
+  #isCompactMode() {
+    const explicit = getSetting("ui.compact");
+    if (explicit === true || explicit === false) return explicit;
+    // Auto-detect: narrow touch viewport.
+    return matchMedia("(max-width: 480px) and (pointer: coarse)").matches;
+  }
+
+  #wireCompactMode() {
+    // Live-reload: when the setting changes, toggle the class.
+    if (typeof GM_addValueChangeListener === "function") {
+      GM_addValueChangeListener("pf:configs", () => {
+        if (!this.#root || this.#destroyed) return;
+        const compact = this.#isCompactMode();
+        this.#root.classList.toggle("pf-compact", compact);
+      }, false);
+    }
   }
 
   get element() {
@@ -553,6 +578,11 @@ export class SettingsPanel {
     root.setAttribute("role", "dialog");
     root.setAttribute("aria-modal", "false");
     root.setAttribute("aria-label", "PlayerForge controls");
+
+    // Compact mode: apply class based on setting or auto-detect mobile viewport.
+    if (this.#isCompactMode()) {
+      root.classList.add("pf-compact");
+    }
 
     const header = document.createElement("div");
     header.className = "pf-panel-header";

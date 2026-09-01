@@ -72,6 +72,13 @@ const SETTINGS_SCHEMA = [
     label: "Edge-to-edge Fullscreen",
     default: true,
     group: "Features"
+  },
+  {
+    key: "ui.compact",
+    type: "bool",
+    label: "Compact Panel",
+    default: false,
+    group: "Interface"
   }
 ];
 
