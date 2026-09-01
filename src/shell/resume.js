@@ -115,7 +115,7 @@ export class ResumeStore {
     return { added, updated };
   }
 
-  #ensureLoaded() {
+  ensureLoaded() {
     if (this.#loaded) {
       return;
     }
@@ -175,7 +175,7 @@ export class ResumeStore {
   }
 
   findMatch(domainKey, path, duration) {
-    this.#ensureLoaded();
+    this.ensureLoaded();
     const targetDuration = Number(duration) || NaN;
     const maxFuzz = RESUME_DURATION_FUZZ;
     let best = null;
@@ -198,7 +198,7 @@ export class ResumeStore {
   }
 
   createEntry(domainKey, path, title, duration) {
-    this.#ensureLoaded();
+    this.ensureLoaded();
     const id = hashEntry(domainKey, path, duration);
     // The id is only a cache key - trust it solely when the domain agrees.
     // Legacy ids (hashed without domain) and true collisions fall through to
@@ -228,7 +228,7 @@ export class ResumeStore {
   }
 
   updateResume(id, position) {
-    this.#ensureLoaded();
+    this.ensureLoaded();
     const entry = this.#state.entries.find((candidate) => candidate.id === id);
     if (entry) {
       entry.resume = position;
@@ -238,12 +238,12 @@ export class ResumeStore {
   }
 
   getEntries() {
-    this.#ensureLoaded();
+    this.ensureLoaded();
     return sortByUpdatedAt(this.#state.entries, true);
   }
 
   removeEntry(id) {
-    this.#ensureLoaded();
+    this.ensureLoaded();
     const before = this.#state.entries.length;
     this.#state.entries = this.#state.entries.filter((entry) => entry.id !== id);
     if (this.#state.entries.length < before) {
@@ -252,7 +252,7 @@ export class ResumeStore {
   }
 
   cleanStale(days = RESUME_STALE_DAYS) {
-    this.#ensureLoaded();
+    this.ensureLoaded();
     const before = this.#state.entries.length;
     this.#state.entries = this.#enforceBounds(days);
     const removed = before - this.#state.entries.length;
@@ -264,7 +264,7 @@ export class ResumeStore {
 
   /** Whole-store JSON snapshot for the clipboard bridge and backups. */
   exportData() {
-    this.#ensureLoaded();
+    this.ensureLoaded();
     return JSON.stringify(this.#state);
   }
 
@@ -273,7 +273,7 @@ export class ResumeStore {
    * {added, updated} counts, or null when the text is not a data document.
    */
   importData(text) {
-    this.#ensureLoaded();
+    this.ensureLoaded();
     let raw;
     try {
       raw = JSON.parse(text);
@@ -303,6 +303,8 @@ export class ResumeTracker {
   #entry = null;
   /** Every media listener this tracker attaches dies with this signal. */
   #scope = new AbortController();
+  /** Eagerly resolved context promise — kicked off in the constructor. */
+  #contextPromise;
   #lastSavedPosition = 0;
   /** Wall-clock floor for persists - keeps the write cadence bounded. */
   #lastSavedWall = 0;
@@ -310,12 +312,20 @@ export class ResumeTracker {
 
   constructor(shell) {
     this.#shell = shell;
+    // Kick off context resolution eagerly so the cross-origin bridge request
+    // (if any) runs in parallel with DOM injection and metadata loading.
+    // For top frames this resolves synchronously; for iframes it parallelizes
+    // the postMessage round-trip with the shell construction window.
+    this.#contextPromise = getPageContext();
+    // Warm the store from GM storage now so the read happens during the
+    // shell construction + paint window, not sequentially in #init().
+    this.#store.ensureLoaded();
     this.#init().catch((err) => logger.error("resume", "Init failed:", err));
   }
 
   async #init() {
     const shell = this.#shell;
-    const context = await getPageContext();
+    const context = await this.#contextPromise;
     if (!context) {
       logger.log("resume", "Top context unavailable - skipping");
       return;
@@ -370,33 +380,25 @@ export class ResumeTracker {
 
     const savedPosition = Number(this.#entry.resume) || NaN;
     if (savedPosition > RESUME_MIN_POSITION) {
-      let seeked = false;
-      const applyResume = () => {
-        if (seeked) {
-          return;
-        }
-        seeked = true;
-        shell.media.seekTo(savedPosition);
-        shell.toast({
-          icon: "resume",
-          text: `Resumed at ${formatTime(savedPosition)}`,
-          duration: TOAST_ACTION_MS,
-          group: "resume",
-          actions: [{
-            icon: "reload",
-            title: "Start over",
-            onClick: () => {
-              this.#lastSavedPosition = 0;
-              shell.media.seekTo(0);
-            }
-          }]
-        });
-      };
-      if (!video.paused && video.readyState >= 2) {
-        applyResume();
-      } else {
-        video.addEventListener("canplay", applyResume, { signal: this.#scope.signal, once: true });
-      }
+      // Seek immediately — the browser buffers from the target position in the
+      // background. No need to wait for `canplay` (which requires buffered
+      // data) since seeking is safe at metadata time and the user sees the
+      // jump as soon as duration is known.
+      shell.media.seekTo(savedPosition);
+      shell.toast({
+        icon: "resume",
+        text: `Resumed at ${formatTime(savedPosition)}`,
+        duration: TOAST_ACTION_MS,
+        group: "resume",
+        actions: [{
+          icon: "reload",
+          title: "Start over",
+          onClick: () => {
+            this.#lastSavedPosition = 0;
+            shell.media.seekTo(0);
+          }
+        }]
+      });
     }
 
     this.#lastSavedPosition = Number.isFinite(savedPosition) ? savedPosition : (shell.currentTime || NaN);

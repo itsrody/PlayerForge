@@ -59,17 +59,18 @@ test("finite duration creates the pf:resume entry without waiting", async () => 
   assert.equal(writes["pf:resume"].entries[0].duration, 600);
 });
 
-test("missing duration waits for loadedmetadata before touching the store", async () => {
+test("missing duration waits for loadedmetadata before creating the entry", async () => {
   delete writes["pf:resume"];
   const { dom, video, shell } = makeEnv(null);
   new ResumeTracker(shell);
   await flush();
-  assert.equal(writes["pf:resume"], undefined, "store touched before metadata");
+  assert.ok(writes["pf:resume"], "store was warmed eagerly");
+  assert.equal(writes["pf:resume"].entries.length, 0, "no entry created before metadata");
   Object.defineProperty(video, "duration", { value: 120, configurable: true });
   video.dispatchEvent(new dom.window.Event("loadedmetadata"));
   await flush();
   await flush();
-  assert.ok(writes["pf:resume"]);
+  assert.equal(writes["pf:resume"].entries.length, 1);
   assert.equal(writes["pf:resume"].entries[0].duration, 120);
 });
 
@@ -86,7 +87,7 @@ test("late finite duration also resolves through durationchange", async () => {
   assert.equal(writes["pf:resume"].entries[0].duration, 90);
 });
 
-test("destroy during the metadata wait cancels it without touching the store", async () => {
+test("destroy during the metadata wait cancels it without creating the entry", async () => {
   delete writes["pf:resume"];
   const { shell } = makeEnv(null);
   const tracker = new ResumeTracker(shell);
@@ -94,10 +95,11 @@ test("destroy during the metadata wait cancels it without touching the store", a
   tracker.destroy();
   await flush();
   await flush();
-  assert.equal(writes["pf:resume"], undefined);
+  assert.ok(writes["pf:resume"], "store was warmed eagerly");
+  assert.equal(writes["pf:resume"].entries.length, 0, "no entry created after destroy");
 });
 
-test("a saved position past the threshold seeks and toasts on canplay", async () => {
+test("a saved position past the threshold seeks and toasts immediately", async () => {
   writes["pf:resume"] = {
     version: 1,
     entries: [{
@@ -115,9 +117,7 @@ test("a saved position past the threshold seeks and toasts on canplay", async ()
   const tracker = new ResumeTracker(shell);
   await flush();
   await flush();
-  video.dispatchEvent(new dom.window.Event("canplay"));
-  await flush();
-  assert.deepEqual(shell.seeks, [42]);
+  assert.deepEqual(shell.seeks, [42], "seek fires immediately without waiting for canplay");
   assert.equal(shell.toasts.length, 1);
   tracker.destroy();
 });
@@ -142,8 +142,7 @@ test("autoplaying video seeks immediately without waiting for canplay", async ()
   const tracker = new ResumeTracker(shell);
   await flush();
   await flush();
-  await flush();
-  assert.deepEqual(shell.seeks, [100]);
+  assert.deepEqual(shell.seeks, [100], "seek fires immediately without canplay");
   assert.equal(shell.toasts.length, 1);
   tracker.destroy();
 });
