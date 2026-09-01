@@ -1,5 +1,5 @@
 import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/storage.js";
-import { TUNING } from "../chrome/config.js";
+import { TUNING } from "../../shared/tuning.js";
 import { srtToVtt, ensureVttHeader, parseSubtitles, parseSubtitlesAsync } from "./forgevtt.js";
 import { ForgeTrack } from "./forge-track.js";
 import { debounce } from "../../shared/time.js";

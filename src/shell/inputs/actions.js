@@ -1,4 +1,5 @@
-import { getSetting, TUNING } from "../chrome/config.js";
+import { getSetting } from "../chrome/config.js";
+import { TUNING } from "../../shared/tuning.js";
 import { formatTime } from "../../shared/time.js";
 import { fs, subscribeFullscreen } from "../../shared/shadow.js";
 import { GESTURE_EVENTS } from "../../kernel/contract.js";

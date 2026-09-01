@@ -1,5 +1,5 @@
 import { allowsIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo, cancelEase } from "./actions.js";
-import { TUNING } from "../chrome/config.js";
+import { TUNING } from "../../shared/tuning.js";
 import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../../shared/shadow.js";
 import { DOMManager } from "../../shared/dom-manager.js";
 

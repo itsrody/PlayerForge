@@ -236,7 +236,6 @@ export class SettingsPanel {
     }
     this.#buildDom();
     this.#wireEvents();
-    this.#wireCompactMode();
     logger.log("panel", "Panel ready");
   }
 
@@ -250,17 +249,6 @@ export class SettingsPanel {
     if (explicit === true || explicit === false) return explicit;
     // Auto-detect: narrow touch viewport.
     return matchMedia("(max-width: 480px) and (pointer: coarse)").matches;
-  }
-
-  #wireCompactMode() {
-    // Live-reload: when the setting changes, toggle the class.
-    if (typeof GM_addValueChangeListener === "function") {
-      GM_addValueChangeListener("pf:configs", () => {
-        if (!this.#root || this.#destroyed) return;
-        const compact = this.#isCompactMode();
-        this.#root.classList.toggle("pf-compact", compact);
-      }, false);
-    }
   }
 
   get element() {
@@ -280,6 +268,7 @@ export class SettingsPanel {
       return;
     }
     const activate = () => {
+      this.#root.classList.toggle("pf-compact", this.#isCompactMode());
       this.#root.classList.add("pf-open");
       const activeTab = this.#root.querySelector(".pf-panel-tab-active") || this.#closeButton;
       if (activeTab && deepestActiveElement(this.#shellHost) !== activeTab) {

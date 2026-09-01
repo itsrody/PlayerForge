@@ -2,7 +2,7 @@ import { getConfigValue, setConfigFields } from "../shared/storage.js";
 import { flashElement } from "./chrome/animate.js";
 import { debounce } from "../shared/time.js";
 import { clamp } from "../shared/clamp.js";
-import { TUNING } from "./chrome/config.js";
+import { TUNING } from "../shared/tuning.js";
 
 const CONFIG_PREFIX = "filter";
 

@@ -9,7 +9,7 @@ globalThis.GM_setValue = (key, value) => {
 };
 
 const { ResumeTracker } = await import("../src/shell/resume.js");
-const { TUNING } = await import("../src/shell/chrome/config.js");
+const { TUNING } = await import("../src/shared/tuning.js");
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 

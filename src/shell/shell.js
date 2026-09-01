@@ -7,7 +7,7 @@ import { SubtitlesSection } from "./subtitles/section.js";
 import { VideoFilter } from "./filter.js";
 import { SettingsPanel } from "./chrome/panel.js";
 import { addSettingsSection, getSetting } from "./chrome/config.js";
-import { TUNING } from "./chrome/config.js";
+import { TUNING } from "../shared/tuning.js";
 import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
