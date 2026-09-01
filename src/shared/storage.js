@@ -15,10 +15,6 @@ export function gmSetValue(key, value) {
   GM_setValue(key, value);
 }
 
-export function gmDeleteValue(key) {
-  GM_deleteValue(key);
-}
-
 /** Returns a handle for gmUnregisterMenu, or null when unavailable. */
 export function gmRegisterMenu(title, onClick, options) {
   if (typeof GM_registerMenuCommand !== "function") {
@@ -33,6 +29,27 @@ export function gmUnregisterMenu(handle) {
     return;
   }
   GM_unregisterMenuCommand(handle);
+}
+
+export function gmAddValueChangeListener(key, callback) {
+  if (typeof GM_addValueChangeListener !== "function") {
+    return null;
+  }
+  return GM_addValueChangeListener(key, callback);
+}
+
+export function gmRemoveValueChangeListener(handle) {
+  if (handle == null || typeof GM_removeValueChangeListener !== "function") {
+    return;
+  }
+  GM_removeValueChangeListener(handle);
+}
+
+export function gmGetResourceText(name) {
+  if (typeof GM_getResourceText !== "function") {
+    return null;
+  }
+  return GM_getResourceText(name);
 }
 
 /**

@@ -67,7 +67,7 @@ const banner = `// ==UserScript==
 // @exclude      *://*.tumblr.com/*
 // @grant        GM_setValue
 // @grant        GM_getValue
-// @grant        GM_deleteValue
+// @grant        GM_setValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_unregisterMenuCommand
 // @grant        GM_addValueChangeListener

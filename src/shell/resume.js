@@ -1,6 +1,6 @@
 import { getPageContext, domainsMatch, domainScore, hashEntry } from "../shared/context.js";
 import { TUNING } from "../shared/tuning.js";
-import { KEYS, gmSetValue, loadJsonObject } from "../shared/storage.js";
+import { KEYS, gmSetValue, loadJsonObject, gmAddValueChangeListener, gmRemoveValueChangeListener } from "../shared/storage.js";
 import { formatTime } from "../shared/time.js";
 import { logger } from "../shared/logger.js";
 
@@ -79,17 +79,13 @@ export class ResumeStore {
     // merge-only adoption here (never written back - the writer owns that
     // round trip). This is also the seam where a future value-sync transport
     // would land for free.
-    if (typeof GM_addValueChangeListener === "function") {
-      this.#listenerId = GM_addValueChangeListener(KEYS.resume, () => this.#adoptExternal());
-    }
+    this.#listenerId = gmAddValueChangeListener(KEYS.resume, () => this.#adoptExternal());
   }
 
   /** Release the cross-tab change subscription (SPA re-entry / shell teardown). */
   destroy() {
-    if (this.#listenerId != null && typeof GM_removeValueChangeListener === "function") {
-      GM_removeValueChangeListener(this.#listenerId);
-      this.#listenerId = null;
-    }
+    gmRemoveValueChangeListener(this.#listenerId);
+    this.#listenerId = null;
   }
 
   #adoptExternal() {

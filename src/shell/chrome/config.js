@@ -2,7 +2,7 @@
  * User-settings engine: defaults, schema, cached accessors, and the generic
  * panel renderer for that schema.
  */
-import { KEYS, getConfigValue, setConfigValue, invalidateConfigCache } from "../../shared/storage.js";
+import { KEYS, getConfigValue, setConfigValue, invalidateConfigCache, gmAddValueChangeListener } from "../../shared/storage.js";
 import { logger } from "../../shared/logger.js";
 import { fmtSeconds } from "../../shared/formatters.js";
 
@@ -142,9 +142,7 @@ function refreshSettingsCache() {
   }
 }
 
-if (typeof GM_addValueChangeListener === "function") {
-  GM_addValueChangeListener(KEYS.configs, () => refreshSettingsCache());
-}
+gmAddValueChangeListener(KEYS.configs, () => refreshSettingsCache());
 
 /**
  * Render SETTINGS_SCHEMA into the settings panel: one labeled section per

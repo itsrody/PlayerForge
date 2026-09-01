@@ -3,6 +3,7 @@ import { logger } from "../../shared/logger.js";
 import { onDomMutations } from "../../kernel/dom-watch.js";
 import { SHELL_MARKER } from "../../kernel/contract.js";
 import { el } from "./elements.js";
+import { gmGetResourceText } from "../../shared/storage.js";
 
 // Re-export the single contract-sourced marker so shell/forge keep importing
 // it from here - one source of truth, no mirrored literal to drift.
@@ -40,12 +41,10 @@ export function warmStyles() {
 
   styleLoad = (async () => {
     let css = null;
-    if (typeof GM_getResourceText === "function") {
-      try {
-        css = await GM_getResourceText("pfStyle");
-      } catch (err) {
-        logger.error("inject", "Failed to load @resource stylesheet:", err);
-      }
+    try {
+      css = await gmGetResourceText("pfStyle");
+    } catch (err) {
+      logger.error("inject", "Failed to load @resource stylesheet:", err);
     }
     // Parity guard: only ever swap in STRICTLY better CSS. An empty or
     // malformed resource must not clobber the working embedded sheet - the

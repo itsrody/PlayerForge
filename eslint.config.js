@@ -10,7 +10,6 @@ export default [
         // Tampermonkey API
         GM_getValue: "readonly",
         GM_setValue: "readonly",
-        GM_deleteValue: "readonly",
         GM_addValueChangeListener: "readonly",
         GM_removeValueChangeListener: "readonly",
         GM_registerMenuCommand: "readonly",
