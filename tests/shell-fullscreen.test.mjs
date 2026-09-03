@@ -141,12 +141,11 @@ test("rejected fullscreen while already fullscreen shows no hint", async () => {
   teardown();
 });
 
-test("referenceBox in fullscreen is the physical screen (edge-to-edge bypass)", async () => {
+test("referenceBox in fullscreen is the physical screen", async () => {
   const { dom, shell, container, teardown } = await makeShell();
   globalThis.screen = { width: 1080, height: 2400 };
-  // Post-bypass (viewport-fit=cover injection): the fullscreen iframe fills
-  // the whole screen behind the cutout, so the reference is screen.* - no
-  // env-based safe-rect narrowing applies inside the iframe.
+  // Fullscreen fills the whole screen (Firefox has no display-cutout
+  // letterboxing inside iframes), so the reference is screen.*.
   setFullscreen(dom, container);
   assert.deepEqual(shell.referenceBox, { width: 1080, height: 2400 });
   setFullscreen(dom, null);
