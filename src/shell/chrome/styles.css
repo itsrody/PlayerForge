@@ -29,18 +29,21 @@
   --pf-hud-glass: color-mix(in srgb, var(--pf-bg) 82%, transparent);
   /* Dark tinted glass: backdrop-blur + saturate applied at element level. */
 
-  --pf-surface: rgba(0, 0, 0, 0.8);              /* toast + panel sheets        */
-  --pf-surface-soft: rgba(255, 255, 255, 0.04);  /* cells, stepper, toggle bg   */
-  --pf-surface-mid: rgba(255, 255, 255, 0.09);   /* ghost btn, hover cells      */
-  --pf-surface-strong: rgba(255, 255, 255, 0.16);/* toast actions, ghost hover  */
-  --pf-border: rgba(255, 255, 255, 0.14);        /* strong outlines             */
-  --pf-border-soft: rgba(255, 255, 255, 0.1);    /* hairline dividers           */
-  --pf-border-control: rgba(255, 255, 255, 0.18);/* inputs, switches            */
-  --pf-border-input: rgba(255, 255, 255, 0.2);   /* color wells, selects        */
+  /* Surfaces, borders, and text all derive from the base --pf-fg / --pf-bg
+     tokens via the FF 155+ alpha() relative-color function, so a single theme
+     edit propagates the hue to every translucent variant automatically. */
+  --pf-surface: alpha(from var(--pf-bg) / 0.8); /* toast + panel sheets        */
+  --pf-surface-soft: alpha(from var(--pf-fg) / 0.04);  /* cells, stepper, toggle bg */
+  --pf-surface-mid: alpha(from var(--pf-fg) / 0.09);   /* ghost btn, hover cells  */
+  --pf-surface-strong: alpha(from var(--pf-fg) / 0.16);/* toast actions, ghost h */
+  --pf-border: alpha(from var(--pf-fg) / 0.14);  /* strong outlines             */
+  --pf-border-soft: alpha(from var(--pf-fg) / 0.1);    /* hairline dividers      */
+  --pf-border-control: alpha(from var(--pf-fg) / 0.18);/* inputs, switches       */
+  --pf-border-input: alpha(from var(--pf-fg) / 0.2);   /* color wells, selects   */
 
-  --pf-text-dim: rgba(255, 255, 255, 0.6);       /* secondary text              */
-  --pf-text-mid: rgba(255, 255, 255, 0.7);       /* meta / hint emphasis        */
-  --pf-text-soft: rgba(255, 255, 255, 0.65);     /* uppercase labels            */
+  --pf-text-dim: alpha(from var(--pf-fg) / 0.6); /* secondary text              */
+  --pf-text-mid: alpha(from var(--pf-fg) / 0.7); /* meta / hint emphasis        */
+  --pf-text-soft: alpha(from var(--pf-fg) / 0.65);     /* uppercase labels       */
 
   --pf-radius-pill: 999px;
   --pf-radius-lg: 12px;
