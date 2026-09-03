@@ -45,6 +45,11 @@ test("shell constructs without bus subscription for timeupdate", async () => {
 test("track load via file input, then destroy — no leak", async () => {
   const { shell, container, dom } = await makeShell();
 
+  // The subtitle file input is created lazily when the panel first opens
+  // (the section builder constructs SubtitlesSection on first open), so open
+  // the panel to make construction deterministic before asserting the input.
+  shell.panel.open();
+
   const vtt = "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nHello";
   const file = new File([vtt], "sub.vtt", { type: "text/vtt" });
   const input = container.querySelector('input[type="file"]');
