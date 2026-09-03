@@ -13,12 +13,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  ChromiumDriver,
+  GeckoDriver,
   TestServer,
   createSwitchboardPage,
   createSwitchboardChildPage,
   createMultiOriginServersN,
-} from "../harness/chromium.mjs";
+} from "../harness/firefox.mjs";
 import { waitForShellInFrame } from "../harness/page.mjs";
 
 const SERVER_COUNT = 4;
@@ -36,7 +36,7 @@ test.before(async () => {
     name: `Server ${i}`,
     url: createSwitchboardChildPage(s, { name: `Server ${i}` }),
   }));
-  driver = await ChromiumDriver.launch();
+  driver = await GeckoDriver.launch();
 });
 
 test.after(async () => {

@@ -1,12 +1,12 @@
 /**
  * Input latency browser benchmark.
  *
- * Measures pointer event → gesture CustomEvent dispatch latency in Chromium 152.
+ * Measures pointer event → gesture CustomEvent dispatch latency in Firefox 155.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ChromiumDriver, TestServer, createTestPage } from "../harness/chromium.mjs";
+import { GeckoDriver, TestServer, createTestPage } from "../harness/firefox.mjs";
 import { waitForShell } from "../harness/page.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -18,7 +18,7 @@ const ITERATIONS = 20;
 export default async function runInputLatencyBench(bundle = DEFAULT_BUNDLE) {
   const server = new TestServer();
   await server.start();
-  const driver = await ChromiumDriver.launch();
+  const driver = await GeckoDriver.launch();
   const results = [];
 
   try {

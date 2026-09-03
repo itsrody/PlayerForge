@@ -1,5 +1,5 @@
 /**
- * Browser-side benchmark harness for ChromiumDriver integration.
+ * Browser-side benchmark harness for GeckoDriver integration.
  *
  * Mirrors the adaptive calibration + multi-batch sampling strategy from
  * bench/lib.mjs but runs inside the browser page via Runtime.evaluate.
@@ -38,7 +38,7 @@ async function calibrateBrowser(driver, fn, iters) {
 /**
  * Run a browser benchmark case with adaptive calibration.
  *
- * @param {import('./chromium.mjs').ChromiumDriver} driver
+ * @param {import('./firefox.mjs').GeckoDriver} driver
  * @param {string} name
  * @param {string} fnStr - Function source that returns a measurable value.
  * @param {object} [options]
@@ -49,7 +49,7 @@ async function calibrateBrowser(driver, fn, iters) {
 export async function measureBrowserCase(driver, name, fnStr, options = {}) {
   const { warmupMs = WARMUP_MS, batches = BATCHES } = options;
 
-  // Warmup: run for warmupMs to let V8 JIT compile.
+  // Warmup: run for warmupMs to let the JIT compile.
   await driver.eval(
     (src, ms) => {
       const fn = new Function("return (" + src + ")")();

@@ -1,5 +1,5 @@
 /**
- * Page helpers for ChromiumDriver integration tests.
+ * Page helpers for GeckoDriver integration tests.
  *
  * Utility functions for interacting with the page context, waiting for
  * DOM mutations, and asserting on element state.
@@ -8,7 +8,7 @@
 /**
  * Wait for an element matching a CSS selector to appear in the DOM.
  *
- * @param {import('./chromium.mjs').ChromiumDriver} driver
+ * @param {import('./firefox.mjs').GeckoDriver} driver
  * @param {string} selector
  * @param {number} [timeoutMs=5000]
  * @returns {Promise<boolean>}
@@ -25,7 +25,7 @@ export async function waitForSelector(driver, selector, timeoutMs = 5000) {
  * Wait for the shell HUD layer to appear (indicates shell boot complete).
  * Checks both document and shadow roots since the HUD lives inside pf-shell's shadow.
  *
- * @param {import('./chromium.mjs').ChromiumDriver} driver
+ * @param {import('./firefox.mjs').GeckoDriver} driver
  * @param {number} [timeoutMs=10000]
  */
 export async function waitForShell(driver, timeoutMs = 10000) {
@@ -42,7 +42,7 @@ export async function waitForShell(driver, timeoutMs = 10000) {
 
 /**
  * Wait for the shell HUD layer inside a specific frame.
- * @param {import('./chromium.mjs').ChromiumDriver} driver
+ * @param {import('./firefox.mjs').GeckoDriver} driver
  * @param {number|string} frameId - Frame index or name.
  * @param {number} [timeoutMs=10000]
  */
@@ -63,7 +63,7 @@ export async function waitForShellInFrame(driver, frameId, timeoutMs = 10000) {
  * Wait for the settings panel to be present (indicates full shell construction).
  * Checks inside shadow roots.
  *
- * @param {import('./chromium.mjs').ChromiumDriver} driver
+ * @param {import('./firefox.mjs').GeckoDriver} driver
  * @param {number} [timeoutMs=10000]
  */
 export async function waitForPanel(driver, timeoutMs = 10000) {
@@ -81,7 +81,7 @@ export async function waitForPanel(driver, timeoutMs = 10000) {
 /**
  * Get the count of elements matching a CSS selector.
  *
- * @param {import('./chromium.mjs').ChromiumDriver} driver
+ * @param {import('./firefox.mjs').GeckoDriver} driver
  * @param {string} selector
  * @returns {Promise<number>}
  */
@@ -92,7 +92,7 @@ export async function countElements(driver, selector) {
 /**
  * Get the text content of an element.
  *
- * @param {import('./chromium.mjs').ChromiumDriver} driver
+ * @param {import('./firefox.mjs').GeckoDriver} driver
  * @param {string} selector
  * @returns {Promise<string|null>}
  */
@@ -106,7 +106,7 @@ export async function getTextContent(driver, selector) {
 /**
  * Check if an element has a specific attribute.
  *
- * @param {import('./chromium.mjs').ChromiumDriver} driver
+ * @param {import('./firefox.mjs').GeckoDriver} driver
  * @param {string} selector
  * @param {string} attribute
  * @returns {Promise<boolean>}
@@ -122,7 +122,7 @@ export async function hasAttribute(driver, selector, attribute) {
 /**
  * Get the computed style property of an element.
  *
- * @param {import('./chromium.mjs').ChromiumDriver} driver
+ * @param {import('./firefox.mjs').GeckoDriver} driver
  * @param {string} selector
  * @param {string} property
  * @returns {Promise<string>}
@@ -142,7 +142,7 @@ export async function getComputedStyle(driver, selector, property) {
 /**
  * Click an element by selector.
  *
- * @param {import('./chromium.mjs').ChromiumDriver} driver
+ * @param {import('./firefox.mjs').GeckoDriver} driver
  * @param {string} selector
  */
 export async function clickElement(driver, selector) {
@@ -158,7 +158,7 @@ export async function clickElement(driver, selector) {
 /**
  * Dispatch a custom event on an element.
  *
- * @param {import('./chromium.mjs').ChromiumDriver} driver
+ * @param {import('./firefox.mjs').GeckoDriver} driver
  * @param {string} selector
  * @param {string} eventName
  * @param {object} [detail]
@@ -178,7 +178,7 @@ export async function dispatchCustomEvent(driver, selector, eventName, detail = 
 /**
  * Get all text content of toast notifications.
  *
- * @param {import('./chromium.mjs').ChromiumDriver} driver
+ * @param {import('./firefox.mjs').GeckoDriver} driver
  * @returns {Promise<string[]>}
  */
 export async function getToastTexts(driver) {
@@ -191,7 +191,7 @@ export async function getToastTexts(driver) {
 /**
  * Sleep for a given number of milliseconds (page context).
  *
- * @param {import('./chromium.mjs').ChromiumDriver} driver
+ * @param {import('./firefox.mjs').GeckoDriver} driver
  * @param {number} ms
  */
 export async function sleep(driver, ms) {
@@ -204,7 +204,7 @@ export async function sleep(driver, ms) {
 /**
  * Get performance timing data from the page.
  *
- * @param {import('./chromium.mjs').ChromiumDriver} driver
+ * @param {import('./firefox.mjs').GeckoDriver} driver
  * @returns {Promise<{navigationStart: number, domContentLoaded: number, loadEvent: number}>}
  */
 export async function getPerformanceTimings(driver) {

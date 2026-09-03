@@ -12,14 +12,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  ChromiumDriver,
+  GeckoDriver,
   TestServer,
   createTestPage,
   createIframeChildPage,
   createIframeParentPage,
   createNestedIframePages,
   createMultiOriginServers,
-} from "../harness/chromium.mjs";
+} from "../harness/firefox.mjs";
 import { waitForShell, waitForShellInFrame } from "../harness/page.mjs";
 
 const RUNS = 3;
@@ -130,7 +130,7 @@ let results = {};
 test("measure: direct video", async () => {
   const server = new TestServer();
   await server.start();
-  const driver = await ChromiumDriver.launch();
+  const driver = await GeckoDriver.launch();
   try {
     results.direct = await measureDirect(driver, server);
   } finally {
@@ -142,7 +142,7 @@ test("measure: direct video", async () => {
 test("measure: same-origin iframe", async () => {
   const server = new TestServer();
   await server.start();
-  const driver = await ChromiumDriver.launch();
+  const driver = await GeckoDriver.launch();
   try {
     results.sameOrigin = await measureSameOrigin(driver, server);
   } finally {
@@ -153,7 +153,7 @@ test("measure: same-origin iframe", async () => {
 
 test("measure: cross-origin iframe", async () => {
   const servers = await createMultiOriginServers();
-  const driver = await ChromiumDriver.launch();
+  const driver = await GeckoDriver.launch();
   try {
     results.crossOrigin = await measureCrossOrigin(driver, servers);
   } finally {
@@ -165,7 +165,7 @@ test("measure: cross-origin iframe", async () => {
 
 test("measure: nested iframe", async () => {
   const servers = await createMultiOriginServers();
-  const driver = await ChromiumDriver.launch();
+  const driver = await GeckoDriver.launch();
   try {
     results.nested = await measureNested(driver, servers);
   } finally {

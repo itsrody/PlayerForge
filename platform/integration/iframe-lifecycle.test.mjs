@@ -11,14 +11,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  ChromiumDriver,
+  GeckoDriver,
   TestServer,
   createTestPage,
   createIframeChildPage,
   createIframeParentPage,
   createNestedIframePages,
   createMultiOriginServers,
-} from "../harness/chromium.mjs";
+} from "../harness/firefox.mjs";
 import { waitForShell, waitForShellInFrame, waitForPanel, countElements } from "../harness/page.mjs";
 
 // ── Scenario 1: Direct video (baseline) ──────────────────────────────
@@ -26,7 +26,7 @@ import { waitForShell, waitForShellInFrame, waitForPanel, countElements } from "
 test("direct: shell boots on bare video", async () => {
   const server = new TestServer();
   await server.start();
-  const driver = await ChromiumDriver.launch();
+  const driver = await GeckoDriver.launch();
   try {
     await driver.navigate(createTestPage(server));
     await driver.injectGMStubs();
@@ -42,7 +42,7 @@ test("direct: shell boots on bare video", async () => {
 test("direct: video is marked with data-pf-shell", async () => {
   const server = new TestServer();
   await server.start();
-  const driver = await ChromiumDriver.launch();
+  const driver = await GeckoDriver.launch();
   try {
     await driver.navigate(createTestPage(server));
     await driver.injectGMStubs();
@@ -64,7 +64,7 @@ test("direct: video is marked with data-pf-shell", async () => {
 test("same-origin: shell boots in iframe", async () => {
   const server = new TestServer();
   await server.start();
-  const driver = await ChromiumDriver.launch();
+  const driver = await GeckoDriver.launch();
   try {
     const childUrl = createIframeChildPage(server);
     const parentUrl = createIframeParentPage(server, childUrl);
@@ -83,7 +83,7 @@ test("same-origin: shell boots in iframe", async () => {
 test("same-origin: video is marked in iframe", async () => {
   const server = new TestServer();
   await server.start();
-  const driver = await ChromiumDriver.launch();
+  const driver = await GeckoDriver.launch();
   try {
     const childUrl = createIframeChildPage(server);
     const parentUrl = createIframeParentPage(server, childUrl);
@@ -107,7 +107,7 @@ test("same-origin: video is marked in iframe", async () => {
 
 test("cross-origin: shell boots in iframe", async () => {
   const { serverA, serverB } = await createMultiOriginServers();
-  const driver = await ChromiumDriver.launch();
+  const driver = await GeckoDriver.launch();
   try {
     const childUrl = createIframeChildPage(serverB);
     const parentUrl = createIframeParentPage(serverA, childUrl);
@@ -126,7 +126,7 @@ test("cross-origin: shell boots in iframe", async () => {
 
 test("cross-origin: frame bridge resolves context", async () => {
   const { serverA, serverB } = await createMultiOriginServers();
-  const driver = await ChromiumDriver.launch();
+  const driver = await GeckoDriver.launch();
   try {
     const childUrl = createIframeChildPage(serverB);
     const parentUrl = createIframeParentPage(serverA, childUrl);
@@ -155,7 +155,7 @@ test("cross-origin: frame bridge resolves context", async () => {
 
 test("nested: shell boots via relay", async () => {
   const { serverA, serverB } = await createMultiOriginServers();
-  const driver = await ChromiumDriver.launch();
+  const driver = await GeckoDriver.launch();
   try {
     const { parentUrl } = createNestedIframePages(serverA, serverB);
     await driver.navigate(parentUrl);
@@ -188,7 +188,7 @@ test("nested: shell boots via relay", async () => {
 
 test("nested: video is marked via relay", async () => {
   const { serverA, serverB } = await createMultiOriginServers();
-  const driver = await ChromiumDriver.launch();
+  const driver = await GeckoDriver.launch();
   try {
     const { parentUrl } = createNestedIframePages(serverA, serverB);
     await driver.navigate(parentUrl);

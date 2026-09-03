@@ -8,12 +8,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  ChromiumDriver,
+  GeckoDriver,
   TestServer,
   createSwitchboardPage,
   createSwitchboardChildPage,
   createMultiOriginServersN,
-} from "../harness/chromium.mjs";
+} from "../harness/firefox.mjs";
 import { waitForShellInFrame } from "../harness/page.mjs";
 
 const RUNS = 2;
@@ -36,7 +36,7 @@ test("perf: switchboard efficiency report", async () => {
     url: createSwitchboardChildPage(s, { name: `Server ${i}` }),
   }));
 
-  const driver = await ChromiumDriver.launch();
+  const driver = await GeckoDriver.launch();
   const bootTimes = [];
   const switchTimes = [];
   const destroyTimes = [];
@@ -105,7 +105,7 @@ test("perf: rapid cycle throughput", async () => {
     url: createSwitchboardChildPage(s, { name: `Server ${i}` }),
   }));
 
-  const driver = await ChromiumDriver.launch();
+  const driver = await GeckoDriver.launch();
   try {
     const url = createSwitchboardPage(parentServer, childEntries);
     await driver.navigate(url);

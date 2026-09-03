@@ -1,12 +1,12 @@
 /**
- * ChromiumDriver lifecycle manager.
+ * GeckoDriver lifecycle manager.
  *
- * Launches a headless Chromium/Brave 152 instance via Selenium WebDriver,
- * connects through the ChromeDriver protocol, and exposes helpers for script
- * injection, page navigation, and pointer event dispatch.
+ * Launches a headless Firefox 155 instance via Selenium WebDriver, connects
+ * through the geckodriver protocol, and exposes helpers for script injection,
+ * page navigation, and pointer event dispatch.
  *
  * Usage:
- *   const driver = await ChromiumDriver.launch();
+ *   const driver = await GeckoDriver.launch();
  *   await driver.navigate("data:text/html,<video></video>");
  *   await driver.injectScript(readFileSync("dist/playerforge.user.js", "utf8"));
  *   const hasHud = await driver.eval(() => !!document.querySelector(".pf-hud-layer"));
@@ -22,23 +22,23 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(HERE, "..", "..");
 
 /**
- * Resolve the Chromium/Brave binary path on macOS.
- * Order: BRAVE_PATH env → known macOS locations → fallback error.
+ * Resolve the Firefox binary path on macOS.
+ * Order: FIREFOX_PATH env → known macOS locations → fallback error.
  */
 function resolveBinary() {
-  if (process.env.BRAVE_PATH && existsSync(process.env.BRAVE_PATH)) {
-    return process.env.BRAVE_PATH;
+  if (process.env.FIREFOX_PATH && existsSync(process.env.FIREFOX_PATH)) {
+    return process.env.FIREFOX_PATH;
   }
   const candidates = [
-    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Firefox.app/Contents/MacOS/firefox",
+    "/Applications/Firefox Developer Edition.app/Contents/MacOS/firefox",
+    "/Applications/Firefox Nightly.app/Contents/MacOS/firefox",
   ];
   for (const p of candidates) {
     if (existsSync(p)) return p;
   }
   throw new Error(
-    "No Chromium-based browser found. Set BRAVE_PATH or install Brave/Chrome."
+    "No Firefox binary found. Set FIREFOX_PATH or install Firefox."
   );
 }
 
@@ -55,7 +55,7 @@ function readBundle() {
   return readFileSync(bundle, "utf8");
 }
 
-export class ChromiumDriver {
+export class GeckoDriver {
   /** @type {import('selenium-webdriver').WebDriver} */
   #driver;
   /** @type {boolean} */
@@ -66,47 +66,33 @@ export class ChromiumDriver {
   }
 
   /**
-   * Launch a headless Chromium/Brave 152 instance.
+   * Launch a headless Firefox 155 instance.
    * @param {object} [options]
    * @param {boolean} [options.headless=true] - Run headless.
-   * @param {number} [options.port=0] - ChromeDriver port (0 = auto).
-   * @returns {Promise<ChromiumDriver>}
+   * @param {number} [options.port=0] - geckodriver port (0 = auto).
+   * @returns {Promise<GeckoDriver>}
    */
   static async launch(options = {}) {
-    const { headless = true, port = 0 } = options;
+    const { headless = true } = options;
     const binary = resolveBinary();
 
-    const args = [
-      "--no-sandbox",
-      "--disable-gpu",
-      "--disable-dev-shm-usage",
-      "--disable-extensions",
-      "--disable-background-networking",
-      "--disable-default-apps",
-      "--disable-sync",
-      "--no-first-run",
-      "--disable-web-security",
-    ];
+    const { Options: FirefoxOptions } = await import("selenium-webdriver/firefox.js");
+    const firefoxOptions = new FirefoxOptions()
+      .setBinary(binary)
+      .windowSize({ width: 1280, height: 720 });
     if (headless) {
-      args.push("--headless=new");
+      firefoxOptions.addArguments("-headless");
     }
 
-    const chromeOptions = {
-      binary,
-      args,
-      // Accept insecure certs for test pages.
-      acceptInsecureCerts: true,
-    };
-
     const driver = await new Builder()
-      .forBrowser("chrome")
-      .setChromeOptions(chromeOptions)
-      .setChromeService(
-        new (await import("selenium-webdriver/chrome.js")).ServiceBuilder()
+      .forBrowser("firefox")
+      .setFirefoxOptions(firefoxOptions)
+      .setFirefoxService(
+        new (await import("selenium-webdriver/firefox.js")).ServiceBuilder()
       )
       .build();
 
-    return new ChromiumDriver(driver);
+    return new GeckoDriver(driver);
   }
 
   /** Raw Selenium WebDriver access (for advanced use). */
@@ -238,13 +224,11 @@ export class ChromiumDriver {
    * @param {number} [opts.pointerId=1]
    */
   async dispatchPointer(type, x, y, opts = {}) {
-    const { button = 0, pointerId = 1 } = opts;
+    const { button = 0 } = opts;
     // Use Selenium ActionSequence for pointer events.
-    const { Actions } = await import("selenium-webdriver/lib/input.js");
     const actions = this.#driver.actions({ async: true });
 
     // Map our pointer types to Selenium actions.
-    const coords = { x, y, width: 1, height: 1 };
     if (type === "pointerdown") {
       await actions
         .move({ origin: "viewport", x, y })

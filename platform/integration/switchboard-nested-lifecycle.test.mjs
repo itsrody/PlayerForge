@@ -11,12 +11,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  ChromiumDriver,
+  GeckoDriver,
   TestServer,
   createSwitchboardPage,
   createNestedSwitchboardChildPage,
   createMultiOriginServersN,
-} from "../harness/chromium.mjs";
+} from "../harness/firefox.mjs";
 
 const CHILD_COUNT = 4;
 
@@ -35,7 +35,7 @@ test.before(async () => {
     name: `Relay ${i}`,
     url: createNestedSwitchboardChildPage(relay, videoServers[i], { name: `Slot ${i}` }),
   }));
-  driver = await ChromiumDriver.launch();
+  driver = await GeckoDriver.launch();
 });
 
 test.after(async () => {

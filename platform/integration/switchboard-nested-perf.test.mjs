@@ -8,12 +8,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  ChromiumDriver,
+  GeckoDriver,
   TestServer,
   createSwitchboardPage,
   createNestedSwitchboardChildPage,
   createMultiOriginServersN,
-} from "../harness/chromium.mjs";
+} from "../harness/firefox.mjs";
 
 const RUNS = 2;
 const CHILD_COUNT = 3;
@@ -44,7 +44,7 @@ test("perf: nested switchboard efficiency report", async () => {
     url: createNestedSwitchboardChildPage(relay, videoServers[i], { name: `S${i}` }),
   }));
 
-  const driver = await ChromiumDriver.launch();
+  const driver = await GeckoDriver.launch();
   const bootTimes = [];
   const switchTimes = [];
   const destroyTimes = [];

@@ -1,11 +1,11 @@
 /**
  * Fullscreen integration tests.
  *
- * Tests the real Fullscreen API behavior in Chromium 152.
+ * Tests the real Fullscreen API behavior in Firefox 155.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ChromiumDriver, TestServer, createTestPage } from "../harness/chromium.mjs";
+import { GeckoDriver, TestServer, createTestPage } from "../harness/firefox.mjs";
 import { waitForShell, waitForPanel } from "../harness/page.mjs";
 
 let driver;
@@ -14,7 +14,7 @@ let server;
 test.before(async () => {
   server = new TestServer();
   await server.start();
-  driver = await ChromiumDriver.launch();
+  driver = await GeckoDriver.launch();
 });
 
 test.after(async () => {

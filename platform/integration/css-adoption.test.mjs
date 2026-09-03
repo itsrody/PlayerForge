@@ -1,11 +1,11 @@
 /**
  * CSS adoption integration tests.
  *
- * Verifies the constructable stylesheet injection pipeline in Chromium 152.
+ * Verifies the constructable stylesheet injection pipeline in Firefox 155.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ChromiumDriver, TestServer, createTestPage } from "../harness/chromium.mjs";
+import { GeckoDriver, TestServer, createTestPage } from "../harness/firefox.mjs";
 import { waitForShell, getComputedStyle } from "../harness/page.mjs";
 
 let driver;
@@ -14,7 +14,7 @@ let server;
 test.before(async () => {
   server = new TestServer();
   await server.start();
-  driver = await ChromiumDriver.launch();
+  driver = await GeckoDriver.launch();
 });
 
 test.after(async () => {

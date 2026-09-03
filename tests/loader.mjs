@@ -2,11 +2,12 @@ import { register } from "node:module";
 register("./css-hook.mjs", import.meta.url);
 
 /**
- * jsdom 29 lacks several platform APIs the Chromium-only production code uses
- * unconditionally. Rather than scatter feature-detects through src/ to appease
- * a headless test host, the absence is shimmed here - in the ONE place the
- * harness bootstraps - so production code stays pure Chromium 152. These shims
- * are no-ops; they exist only so constructor/import paths don't throw.
+ * jsdom 29 lacks several platform APIs the production code (targeting Firefox
+ * 155+) uses unconditionally. Rather than scatter feature-detects through src/
+ * to appease a headless test host, the absence is shimmed here - in the ONE
+ * place the harness bootstraps - so production code stays idiomatic for the
+ * real browser. These shims are no-ops; they exist only so constructor/import
+ * paths don't throw.
  *
  * Only BARE-GLOBAL identifiers are shimmed (src/ resolves them via globalThis
  * in Node ESM). Instance-prototype APIs that tests never exercise (Element
@@ -37,7 +38,7 @@ if (typeof globalThis.IntersectionObserver === "undefined") {
 if (typeof globalThis.scheduler === "undefined") {
   // Minimal cooperative scheduler shim so parseSubtitlesAsync's yield branch
   // is reachable under Node. yield() resolves on a microtask, matching the
-  // real Chromium hand-back without needing a real task-dispatch scheduler.
+  // Firefox hand-back without needing a real task-dispatch scheduler.
   globalThis.scheduler = {
     yield: () => Promise.resolve()
   };
@@ -45,7 +46,7 @@ if (typeof globalThis.scheduler === "undefined") {
 if (typeof globalThis.MediaMetadata === "undefined") {
   globalThis.MediaMetadata = class MediaMetadata {};
 }
-// Chromium's Vibration API - absent on Node. Stubbed so gestureHaptic's
+// Firefox's Vibration API - absent on Node. Stubbed so gestureHaptic's
 // feature-detect is true and tests can assert the haptic pulse pattern; the
 // stub records the last pattern for inspection.
 if (typeof globalThis.navigator?.vibrate !== "function") {

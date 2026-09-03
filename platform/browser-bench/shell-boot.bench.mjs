@@ -1,12 +1,12 @@
 /**
  * Shell boot browser benchmark.
  *
- * Measures the time from navigation to HUD ready in a real Chromium 152 instance.
+ * Measures the time from navigation to HUD ready in a real Firefox 155 instance.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ChromiumDriver, TestServer, createTestPage } from "../harness/chromium.mjs";
+import { GeckoDriver, TestServer, createTestPage } from "../harness/firefox.mjs";
 import { waitForShell } from "../harness/page.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -17,7 +17,7 @@ const BATCHES = 7;
 export default async function runShellBootBench(bundle = DEFAULT_BUNDLE) {
   const server = new TestServer();
   await server.start();
-  const driver = await ChromiumDriver.launch();
+  const driver = await GeckoDriver.launch();
   const results = [];
 
   try {
