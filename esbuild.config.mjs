@@ -17,9 +17,16 @@ import process from "node:process";
 // The banner below is the single version source. Runtime reads the installed
 // script's real version through GM_info.script.version, so bumping @version
 // here is all a release takes.
-// Tampermonkey MV2 note: @run-at document-start works under MV2's injection
-// model. PF never assumes the DOM is ready at eval, so it is safe under
-// instant injection.
+// Tampermonkey MV2 note: @run-at document-start only delivers true instant
+// injection on Firefox when the manager's Content Script API is set to
+// "UserScripts API" / "UserScripts API Dynamic" (the native web-ext
+// userScripts_legacy path). Under the default "Content Script" mode, scripts
+// arrive via background messaging with no real document-start. PF never
+// assumes the DOM is ready at eval either way: the probe defers its static
+// <video> scan to DOMContentLoaded while readyState === "loading", the
+// mutation dispatcher guards documentElement absence (dom-watch), and shell
+// DOM injection happens only after a candidate is found - so it is safe under
+// instant injection and degrades gracefully without it.
 const banner = `// ==UserScript==
 // @name         PlayerForge (Firefox)
 // @namespace    https://github.com/PlayerForge
