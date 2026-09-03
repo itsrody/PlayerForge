@@ -1,5 +1,5 @@
 /* ------------------------------------------------------------------
-   PlayerForge HUD styles - Chromium 152+ native: CSS nesting, @container,
+   PlayerForge HUD styles - Firefox 155+ native: CSS nesting, @container,
    @starting-style, @property, :has, color-mix. Design tokens live on the shell
    root; every surface derives from them, so theming/contrast tuning is
    one edit. Components are grouped per tree with native nesting (&).
@@ -17,7 +17,7 @@
      In the document realm the scope root never exists, so a page that
      happens to use `.pf-panel`, `pf-toast`, `.pf-btn`, etc. can never be
      styled by PlayerForge, and PF rules can never escape the HUD subtree
-     into second SDK content. @scope is Chromium 118+; on the 152 baseline
+     into second SDK content. @scope is Firefox 128+; on the 155 baseline
      that needs no @supports fallback.
    ------------------------------------------------------------------ */
 .pf-shell {
