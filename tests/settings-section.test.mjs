@@ -88,11 +88,15 @@ test("renders one labeled section per unique schema group", () => {
 test("bool settings render toggles with labels and aria", () => {
   const panel = makeFakePanel();
   addSettingsSection(panel);
-  assert.equal(panel.calls.checkboxes.length, 8);
+  assert.equal(panel.calls.checkboxes.length, 9);
   assert.ok(panel.calls.checkboxes.every((box) => typeof box.onChange === "function"));
   const hotkeys = panel.calls.checkboxes[0];
   assert.equal(hotkeys.checked, true);
   assert.equal(hotkeys.ariaLabel, "Hotkeys");
+  // Firefox-native keep-awake toggle, default on.
+  const wakeLock = panel.calls.checkboxes[7];
+  assert.equal(wakeLock.ariaLabel, "Keep Screen Awake");
+  assert.equal(wakeLock.checked, true);
 });
 
 test("toggle onChange persists through setSetting", () => {

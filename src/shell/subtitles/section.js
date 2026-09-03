@@ -40,6 +40,10 @@ export class SubtitlesSection {
   #positionControls = null;
   #resetBtn = null;
   #scope = new AbortController();
+  /** Aborts any in-flight cooperative/background subtitle parse when a newer
+   *  track is loaded or the section is destroyed, so a stale large VTT never
+   *  lands after a fresh one. */
+  #parseCtrl = null;
   #destroyed = false;
 
   constructor(shell) {
@@ -58,6 +62,7 @@ export class SubtitlesSection {
     }
     this.#destroyed = true;
     this.#scope.abort();
+    this.#parseCtrl?.abort();
     this.#forgeTrack?.destroy();
     this.#forgeTrack = null;
     this.#fileInput?.remove();
@@ -376,10 +381,19 @@ export class SubtitlesSection {
     if (this.#destroyed) {
       return;
     }
+    // A newer track supersedes any in-flight parse; abort the old one so a
+    // stale large VTT can't overwrite the fresh track when it finally lands.
+    this.#parseCtrl?.abort();
+    const parseCtrl = new AbortController();
+    this.#parseCtrl = parseCtrl;
     const normalizedText = /\.srt$/i.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
-    // Cooperative parse: yields to the browser on large tracks so ingesting a
-    // big VTT never blocks playback (see forgevtt.parseSubtitlesAsync).
-    const cues = await parseSubtitlesAsync(normalizedText, this.#syncOffset);
+    // Cooperative parse: runs under background priority and yields to the
+    // browser on large tracks so ingesting a big VTT never blocks playback
+    // (see forgevtt.parseSubtitlesAsync). Returns null when superseded.
+    const cues = await parseSubtitlesAsync(normalizedText, this.#syncOffset, { signal: parseCtrl.signal });
+    if (this.#destroyed || this.#parseCtrl !== parseCtrl || cues === null) {
+      return;
+    }
     if (!cues.length) {
       this.#toastInfo("captions", "No cues found", "subtitles");
       return;

@@ -68,6 +68,13 @@ const SETTINGS_SCHEMA = [
     group: "Features"
   },
   {
+    key: "features.wakeLock",
+    type: "bool",
+    label: "Keep Screen Awake",
+    default: true,
+    group: "Features"
+  },
+  {
     key: "ui.compact",
     type: "bool",
     label: "Compact Panel",
@@ -109,6 +116,22 @@ export function getSetting(key) {
 export function setSetting(key, value) {
   cache[key] = value;
   setConfigValue(`${SETTINGS_PREFIX}.${key}`, value);
+  notifySetting(key);
+}
+
+/** Per-key change callbacks, fired after cache refresh on reload or set.
+ *  Lets live consumers (e.g. the wake-lock watcher) react to a toggle flip
+ *  without polling. */
+const settingWatchers = new Map();
+export function onSettingChange(key, fn) {
+  const list = settingWatchers.get(key) ?? new Set();
+  list.add(fn);
+  settingWatchers.set(key, list);
+  return () => list.delete(fn);
+}
+
+function notifySetting(key) {
+  settingWatchers.get(key)?.forEach((fn) => fn(cache[key]));
 }
 
 /**
@@ -128,6 +151,7 @@ function refreshSettingsCache() {
     if (cache[key] !== fresh) {
       cache[key] = fresh;
       changed++;
+      notifySetting(key);
     }
   }
   if (changed > 0) {

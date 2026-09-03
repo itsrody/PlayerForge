@@ -262,19 +262,56 @@ export function parseSubtitles(text, offset = 0) {
  * Cooperative variant of parseSubtitles for large track loads. Checks a
  * ~50ms time budget between blocks and, when spent, yields to the browser
  * via scheduler.yield() (native in Firefox 142+, baseline 155) so a huge
- * VTT/SRT parse never blocks video playback or paint. The live feature-detect
- * stays only for jsdom/test hosts without a scheduler. Intentionally separate
- * from parseSubtitles so the hot, on-the-fly sync reparse (sync-offset
- * stepper) keeps its zero-await fast path.
+ * VTT/SRT parse never blocks video playback or paint.
+ *
+ * When scheduler.postTask() is available (Firefox 142+), the whole parse runs
+ * under a "background" priority task so regaining the main thread is
+ * prioritized against user-visible work, and a caller-supplied AbortSignal can
+ * cancel a stale parse mid-way (e.g. the user loads a different subtitle file
+ * while a large one is still ingesting). The live feature-detect stays only
+ * for jsdom/test hosts without a scheduler. Intentionally separate from
+ * parseSubtitles so the hot, on-the-fly sync reparse (sync-offset stepper)
+ * keeps its zero-await fast path.
  */
 const YIELD_BUDGET_MS = 50;
-export async function parseSubtitlesAsync(text, offset = 0) {
+
+function noopSignal() {
+  // A real, never-aborted AbortSignal: postTask rejects with a TypeError for
+  // plain objects masquerading as signals, and this is the cold parse path so
+  // the allocation is inconsequential.
+  return new AbortController().signal;
+}
+
+export async function parseSubtitlesAsync(text, offset = 0, options = {}) {
+  const { signal = noopSignal() } = options;
   const cueText = normalizeText(text);
   const blocks = cueText.split(/\n[ \t]*\n/);
-  const canYield = typeof globalThis.scheduler?.yield === "function";
+
+  // Firefox 142+ (baseline 155) ships postTask; run the whole parse under a
+  // background-priority task so it yields the main thread ahead of page work,
+  // aborting cleanly when the caller cancels (postTask rejects with AbortError).
+  if (typeof scheduler?.postTask === "function") {
+    try {
+      return await scheduler.postTask(() => parseAll(blocks, offset), {
+        priority: "background",
+        signal
+      });
+    } catch (err) {
+      if (err?.name === "AbortError") {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  // jsdom/test hosts (scheduler shims only yield): cooperative budgeted parse.
   const cues = [];
+  const canYield = typeof globalThis.scheduler?.yield === "function";
   let last = performance.now();
   for (let i = 0; i < blocks.length; i++) {
+    if (signal.aborted) {
+      return null;
+    }
     const cue = parseCueBlock(blocks[i], offset);
     if (cue) {
       cues.push(cue);
@@ -282,6 +319,17 @@ export async function parseSubtitlesAsync(text, offset = 0) {
     if (canYield && (i & 127) === 0 && performance.now() - last > YIELD_BUDGET_MS) {
       await globalThis.scheduler.yield();
       last = performance.now();
+    }
+  }
+  return sortCues(cues);
+}
+
+function parseAll(blocks, offset) {
+  const cues = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const cue = parseCueBlock(blocks[i], offset);
+    if (cue) {
+      cues.push(cue);
     }
   }
   return sortCues(cues);

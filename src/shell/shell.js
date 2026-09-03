@@ -6,7 +6,7 @@ import { ResumeTracker } from "./resume.js";
 import { SubtitlesSection } from "./subtitles/section.js";
 import { VideoFilter } from "./filter.js";
 import { SettingsPanel } from "./chrome/panel.js";
-import { addSettingsSection } from "./chrome/config.js";
+import { addSettingsSection, getSetting, onSettingChange } from "./chrome/config.js";
 import { TUNING } from "../shared/tuning.js";
 import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
@@ -294,20 +294,46 @@ export class Shell {
     });
   }
 
-  /** Keep screen awake while video is playing; release on pause/ended/hidden. */
+  /** Keep screen awake while video is playing; release on pause/ended/hidden.
+   *  Firefox (desktop 126+, FF-Android 153+) auto-releases the lock on low
+   *  battery, inactivity, or the document becoming hidden - so we also listen
+   *  for the sentinel's `release` event and re-acquire when the OS drops it
+   *  while playback is still live, instead of waiting for the next media event.
+   *  Gated by the `features.wakeLock` setting (see config.js). */
   #watchWakeLock() {
     const video = this.video;
     const acquire = async () => {
-      if (this.#destroyed || video.paused || video.ended) {
+      if (this.#destroyed || !getSetting("features.wakeLock") || video.paused || video.ended) {
+        return;
+      }
+      // A sentinel still held means the lock is live; only request when null.
+      if (this.#wakeLock) {
         return;
       }
       try {
-        this.#wakeLock = await navigator.wakeLock.request("screen");
+        const sentinel = await navigator.wakeLock.request("screen");
+        // shelf a stale sentinel if the shell was destroyed mid-flight
+        if (this.#destroyed) {
+          sentinel.release()?.catch(() => {});
+          return;
+        }
+        this.#wakeLock = sentinel;
+        // A system-forced drop (low battery / inactivity) fires `release`;
+        // re-acquire while the video is still playing.
+        sentinel.addEventListener("release", () => {
+          if (this.#wakeLock === sentinel) {
+            this.#wakeLock = null;
+          }
+          acquire();
+        });
       } catch {}
     };
     const release = () => {
-      this.#wakeLock?.release();
-      this.#wakeLock = null;
+      if (this.#wakeLock) {
+        const sentinel = this.#wakeLock;
+        this.#wakeLock = null;
+        sentinel.release()?.catch(() => {});
+      }
     };
     this.#dom.listen(video, "play", acquire, { passive: true });
     this.#dom.listen(video, "pause", release, { passive: true });
@@ -317,6 +343,14 @@ export class Shell {
         acquire();
       }
     });
+    // Flip the lock live when the user toggles the setting mid-playback.
+    this.#dom.onCleanup(onSettingChange("features.wakeLock", (enabled) => {
+      if (enabled) {
+        acquire();
+      } else {
+        release();
+      }
+    }));
   }
 
   /** Lock to landscape on fullscreen entry (Android); unlock on exit. */
