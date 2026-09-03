@@ -63,12 +63,9 @@ export class Shell {
 
     // Yield between DOM injection and component construction so the browser
     // can process pending layout/paint work before the panel builds its tree.
-    // scheduler.yield() is Chromium-only; fall back to setTimeout on Firefox.
-    if (typeof scheduler?.yield === "function") {
-      await scheduler.yield();
-    } else {
-      await new Promise(r => { setTimeout(r, 0); });
-    }
+    // scheduler.yield() is native in Firefox 142+ (baseline 155), so the
+    // prioritized continuation keeps the shell ahead of competing page tasks.
+    await scheduler.yield();
 
     this.#panel = new SettingsPanel(this);
     this.#toasts = new ToastManager(this.#shellDom.hudLayer);

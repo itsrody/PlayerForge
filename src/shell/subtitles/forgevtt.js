@@ -261,9 +261,9 @@ export function parseSubtitles(text, offset = 0) {
 /**
  * Cooperative variant of parseSubtitles for large track loads. Checks a
  * ~50ms time budget between blocks and, when spent, yields to the browser
- * via scheduler.yield() (Chromium) so a huge VTT/SRT parse never blocks
- * video playback or paint. Falls back to synchronous parsing when
- * scheduler.yield is unavailable (Firefox, jsdom/test hosts). Intentionally separate
+ * via scheduler.yield() (native in Firefox 142+, baseline 155) so a huge
+ * VTT/SRT parse never blocks video playback or paint. The live feature-detect
+ * stays only for jsdom/test hosts without a scheduler. Intentionally separate
  * from parseSubtitles so the hot, on-the-fly sync reparse (sync-offset
  * stepper) keeps its zero-await fast path.
  */
