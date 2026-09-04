@@ -219,11 +219,10 @@ export function* videosFromMutations(mutations) {
 export function meetsMinSize(video, minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_VIDEO_HEIGHT) {
   // Layout-free visibility pre-gate: hidden-but-sized players (carousels,
   // display:none / visibility:hidden / opacity:0 trees) are rejected without
-  // forcing a layout flush via getBoundingClientRect. Feature-detect keeps
-  // jsdom (no checkVisibility) and any stragglers on the rect-only path - and
-  // the gate is admission-negative only, so discovery can never regress.
-  if (typeof video.checkVisibility === "function" &&
-      !video.checkVisibility({ opacityProperty: true, visibilityProperty: true })) {
+  // forcing a layout flush via getBoundingClientRect. checkVisibility() is
+  // native on Firefox 106+ (baseline 155); the gate is admission-negative
+  // only, so discovery can never regress.
+  if (!video.checkVisibility({ opacityProperty: true, visibilityProperty: true })) {
     return false;
   }
   try {

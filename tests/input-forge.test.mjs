@@ -8,14 +8,21 @@ globalThis.GM_setValue = () => {};
 const { InputForge } = await import("../src/shell/inputs/forge.js");
 const { GESTURE_EVENTS, computeCoverScale, attachInputActions } = await import("../src/shell/inputs/actions.js");
 const { initFsGate, setFullscreen } = await import("./fs-gate.mjs");
+const { installWaapiShim } = await import("./waapi-shim.mjs");
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Animations created by the WAAPI shim, in order; tests settle/cancel the one
+// they just started (easeTransformTo no longer uses a CSS-transition fallback).
+let mockAnimations = [];
 
 function makeEnv() {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", {
     url: "https://www.youtube.com/watch?v=1"
   });
+  mockAnimations = [];
+  installWaapiShim(dom.window, mockAnimations);
   globalThis.window = dom.window;
   globalThis.location = dom.window.location;
   globalThis.document = dom.window.document;
@@ -24,6 +31,9 @@ function makeEnv() {
   globalThis.CustomEvent = dom.window.CustomEvent;
   // jsdom rejects foreign-realm AbortSignals in listener options.
   globalThis.AbortController = dom.window.AbortController;
+  // WAAPI-only easeTransformTo reads the current transform via getComputedStyle
+  // (a browser global), matching how installWaapiShim supplies Element.animate.
+  globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
   // Wire the shared fs gate to this environment before the forge reads it.
   initFsGate(dom);
 
@@ -48,6 +58,11 @@ function pointerEvent(win, type, { id = 1, x = 0, y = 0 } = {}) {
     bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0
   });
   Object.defineProperty(event, "pointerId", { value: id });
+  // FF-faithful PointerEvent methods (FF 155+): every pointer event exposes
+  // them, so the scrub path calls them unconditionally. Configurable so the
+  // scrubMoveEvent helper can swap in controlled sample streams.
+  Object.defineProperty(event, "getCoalescedEvents", { value: () => [], configurable: true });
+  Object.defineProperty(event, "getPredictedEvents", { value: () => [], configurable: true });
   return event;
 }
 
@@ -373,16 +388,12 @@ test("computeCoverScale covers a reference box from aspect ratios alone", () => 
   dom.window.close();
 });
 
-/** A scrub pointermove whose (fake) Chromium sample streams we control. */
-function scrubMoveEvent(win, { x, y, coalesced, predicted, ts }) {
+/** A scrub pointermove whose (fake) FF sample streams we control. */
+function scrubMoveEvent(win, { x, y, coalesced = [], predicted = [], ts }) {
   const event = pointerEvent(win, "pointermove", { x, y });
   Object.defineProperty(event, "timeStamp", { value: ts });
-  if (coalesced) {
-    Object.defineProperty(event, "getCoalescedEvents", { value: () => coalesced });
-  }
-  if (predicted) {
-    Object.defineProperty(event, "getPredictedEvents", { value: () => predicted });
-  }
+  Object.defineProperty(event, "getCoalescedEvents", { value: () => coalesced });
+  Object.defineProperty(event, "getPredictedEvents", { value: () => predicted });
   return event;
 }
 
@@ -438,14 +449,12 @@ test("swipe-down drag promotes a compositor layer, released on restore", () => {
   zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 405, y: 280 }));
   zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 405, y: 300 }));
   // The restore eases the video back (layer stays active during the ease); in
-  // jsdom the WAAPI finish never runs, so the CSS-transition end releases it.
+  // jsdom the WAAPI finish must be driven explicitly to settle it.
   assert.equal(
     video.style.willChange, "transform",
     "layer persists while the restore ease is in flight"
   );
-  video.dispatchEvent(Object.assign(new dom.window.Event("transitionend", { bubbles: true }), {
-    propertyName: "transform"
-  }));
+  mockAnimations.at(-1).finishNow();
   assert.equal(
     video.style.willChange, "",
     "restore released the compositor layer once the ease settled"
@@ -476,6 +485,7 @@ test("fill pinch owns object-fit: contain and restores it on clear", () => {
     detail: { direction: "out" }
   }));
   assert.equal(video.style.objectFit, "contain", "fill owns object-fit: contain");
+  mockAnimations.at(-1).finishNow();
   assert.match(video.style.transform, /scale\(/, "cover scale applied to the element");
 
   // Pinch-in clears fill and hands the embed's object-fit back.

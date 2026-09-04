@@ -11,8 +11,17 @@ import {
   MIN_VIDEO_HEIGHT
 } from "../src/kernel/sdk.js";
 
-const dom = (html) =>
-  new JSDOM(`<!doctype html><html><body>${html}</body></html>`).window.document;
+const dom = (html) => {
+  const { window } = new JSDOM(`<!doctype html><html><body>${html}</body></html>`);
+  // jsdom's Element lacks the FF-native checkVisibility() (FF 106+) that
+  // meetsMinSize calls unconditionally. Default it to VISIBLE - the safe,
+  // admission-negative-default posture - so the rect gate still does the
+  // gating. Instance-level overrides (see the visibility tests below) win.
+  if (typeof window.Element.prototype.checkVisibility !== "function") {
+    window.Element.prototype.checkVisibility = () => true;
+  }
+  return window.document;
+};
 
 test("adopts each registered SDK via its namespaced anchor", () => {
   const fixtures = [
@@ -104,7 +113,7 @@ function sizedVideo(doc, rect) {
   return video;
 }
 
-test("meetsMinSize falls back to the rect gate without checkVisibility", () => {
+test("meetsMinSize admits visible players purely by the rect gate", () => {
   const doc = dom("");
   assert.equal(meetsMinSize(sizedVideo(doc, { width: 200, height: 100 })), true);
   assert.equal(meetsMinSize(sizedVideo(doc, { width: 50, height: 50 })), false);

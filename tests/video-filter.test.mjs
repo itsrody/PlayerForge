@@ -50,7 +50,20 @@ function makeFakePanel() {
     },
     addButton: (parent, opts) => {
       calls.buttons.push(opts);
-      return { classList: { add: () => {}, remove: () => {} }, disabled: false, style: {} };
+      // flashElement (WAAPI, FF-native) runs on the reset button; give the fake
+      // the Element.animate/getAnimations surface it calls unconditionally.
+      return {
+        classList: { add: () => {}, remove: () => {} },
+        disabled: false,
+        style: {},
+        getAnimations: () => [],
+        animate: () => ({
+          playState: "running",
+          effect: { getKeyframes: () => [] },
+          addEventListener: () => {},
+          cancel: () => {}
+        })
+      };
     },
     addStepper: (parent, opts) => {
       calls.steppers.push(opts);

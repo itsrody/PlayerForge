@@ -61,7 +61,7 @@ test("parseSubtitles skips STYLE and REGION blocks", () => {
   assert.equal(cues[0].text, "hello");
 });
 
-test("parseSubtitlesAsync matches parseSubtitles (fallback path, no scheduler)", async () => {
+test("parseSubtitlesAsync matches parseSubtitles via the scheduler.postTask path", async () => {
   const vtt = [
     "WEBVTT",
     "",
@@ -91,6 +91,22 @@ test("parseSubtitlesAsync applies the offset like the sync path", async () => {
   assert.equal(cues.length, 1);
   assert.equal(cues[0].start, 7);
   assert.equal(cues[0].text, "shifted");
+});
+
+test("parseSubtitlesAsync is abortable via the postTask signal", async () => {
+  const vtt = [
+    "WEBVTT",
+    "",
+    "00:00:01.000 --> 00:00:02.000",
+    "first",
+    "",
+    "00:00:03.000 --> 00:00:04.000",
+    "second"
+  ].join("\n");
+  const ac = new AbortController();
+  ac.abort();
+  assert.equal(await parseSubtitlesAsync(vtt, 0, { signal: ac.signal }), null,
+    "a pre-aborted signal cancels the parse (postTask rejects with AbortError)");
 });
 
 test("timing-looking payload lines stay cue text (one timing per block)", () => {

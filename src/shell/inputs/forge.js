@@ -686,37 +686,30 @@ export class InputForge {
    */
   #advanceScrub(event) {
     let totalStep = 0;
-    const hasCoalesced = typeof event.getCoalescedEvents === "function";
-    const samples = hasCoalesced ? event.getCoalescedEvents() : null;
+    // getCoalescedEvents()/getPredictedEvents() are native PointerEvent methods
+    // (FF 59+/89+, baseline 155); every move here is a real PointerEvent.
+    const samples = event.getCoalescedEvents();
     // Coalesced samples then the live event, without materializing a combined
-    // array: high-rate Chromium pointer streams land here every move, so a
+    // array: high-rate pointer streams land here every move, so a
     // [[...samples, event]] spread per frame would allocate needlessly.
-    if (samples) {
-      const count = samples.length + 1;
-      let lastX = this.#scrubLastX;
-      for (let i = 0; i < count; i++) {
-        const sample = i < samples.length ? samples[i] : event;
-        totalStep += sample.clientX - lastX;
-        lastX = sample.clientX;
-      }
-      this.#scrubLastX = lastX;
-    } else {
-      totalStep = event.clientX - this.#scrubLastX;
-      this.#scrubLastX = event.clientX;
+    const count = samples.length + 1;
+    let lastX = this.#scrubLastX;
+    for (let i = 0; i < count; i++) {
+      const sample = i < samples.length ? samples[i] : event;
+      totalStep += sample.clientX - lastX;
+      lastX = sample.clientX;
     }
+    this.#scrubLastX = lastX;
 
     // Speculative velocity wash: the first predicted pointer beats the live
     // event just enough to pull the velocity estimate forward, but is clamped
     // to a fraction of the confirmed step so it can never dominate or reverse
     // against a correcting hand. Purely a velocity-shaping signal.
-    const hasPredicted = hasCoalesced && typeof event.getPredictedEvents === "function";
+    const predicted = event.getPredictedEvents();
     let velocityStep = totalStep;
-    if (hasPredicted) {
-      const predicted = event.getPredictedEvents();
-      if (predicted && predicted.length) {
-        velocityStep += Math.sign(totalStep) *
-          Math.min(Math.abs(predicted[0].clientX - event.clientX), Math.abs(totalStep));
-      }
+    if (predicted && predicted.length) {
+      velocityStep += Math.sign(totalStep) *
+        Math.min(Math.abs(predicted[0].clientX - event.clientX), Math.abs(totalStep));
     }
 
     const now = event.timeStamp;

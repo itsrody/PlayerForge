@@ -14,12 +14,9 @@ import { FLASH_MS, FLASH_EASING } from "../../shared/timing.js";
  * the app use together.
  */
 export function flashElement(el, { duration = FLASH_MS } = {}) {
-  if (!el || typeof el.animate !== "function") {
-    return;
-  }
-  const prior = (el.getAnimations?.() ?? []).filter((anim) => {
+  // Element.animate()/getAnimations() are native (FF 63+/75+); no fallback.
+  const prior = el.getAnimations().filter((anim) => {
     const animatesBackground = anim.effect &&
-      typeof anim.effect.getKeyframes === "function" &&
       anim.effect.getKeyframes().some((kf) => "backgroundColor" in kf);
     return animatesBackground && anim.playState !== "finished";
   });

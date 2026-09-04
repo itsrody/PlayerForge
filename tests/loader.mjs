@@ -36,11 +36,76 @@ if (typeof globalThis.IntersectionObserver === "undefined") {
   };
 }
 if (typeof globalThis.scheduler === "undefined") {
-  // Minimal cooperative scheduler shim so parseSubtitlesAsync's yield branch
-  // is reachable under Node. yield() resolves on a microtask, matching the
+  // Minimal cooperative scheduler shim: yield() resolves on a microtask for the
+  // shell's prioritized DOM-injection continuation (shell.js), matching the
   // Firefox hand-back without needing a real task-dispatch scheduler.
   globalThis.scheduler = {
     yield: () => Promise.resolve()
+  };
+}
+// Firefox's Scheduler.postTask() is used unconditionally by the cold subtitle
+// parse path. Node has no scheduler, so run the callback on a microtask and
+// honor the caller's AbortSignal (abort rejects with AbortError, mirroring the
+// native postTask contract so parseSubtitlesAsync's AbortError handling is
+// exercised the same way it runs in the browser).
+if (typeof globalThis.scheduler?.postTask !== "function") {
+  globalThis.scheduler.postTask = (callback, { signal } = {}) =>
+    new Promise((resolve, reject) => {
+      const fail = () => reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+      if (signal?.aborted) {
+        fail();
+        return;
+      }
+      if (signal && typeof signal.addEventListener === "function") {
+        signal.addEventListener("abort", fail, { once: true });
+      }
+      queueMicrotask(() => {
+        signal?.removeEventListener?.("abort", fail);
+        resolve(callback());
+      });
+    });
+}
+// production context.js uses AbortSignal.any() (FF 124+) and AbortSignal.timeout()
+// (FF 100+) to cap the frame-bridge round-trip. Node's statics brand-check their
+// inputs, so a jsdom AbortController signal (tests swap globalThis.AbortController
+// for the window's) throws inside the native any(). Since this host's elements
+// carry jsdom signals, route both through the CURRENT AbortController at call
+// time so the derived signal is brand-valid for jsdom addEventListener({signal}).
+if (typeof AbortSignal !== "undefined") {
+  const nativeTimeout = AbortSignal.timeout;
+  const nativeAny = AbortSignal.any;
+  // timeout(): prefer the native signal (Node timers + Node brand), else build a
+  // jsdom-valid one from the active global AbortController.
+  AbortSignal.timeout = (ms) => {
+    try {
+      return nativeTimeout(ms);
+    } catch {
+      const ac = new globalThis.AbortController();
+      const id = setTimeout(() => ac.abort(), ms);
+      ac.signal.addEventListener("abort", () => clearTimeout(id), { once: true });
+      return ac.signal;
+    }
+  };
+  // any(): try native first (all-native inputs), else derive a combined signal
+  // from the active global AbortController so it passes jsdom's brand check.
+  AbortSignal.any = (signals) => {
+    try {
+      return nativeAny(signals);
+    } catch {
+      const signalsArr = Array.from(signals);
+      const ac = new globalThis.AbortController();
+      if (signalsArr.some((s) => s && s.aborted)) {
+        ac.abort();
+        return ac.signal;
+      }
+      const fire = () => ac.abort();
+      for (const s of signalsArr) {
+        if (s && typeof s.addEventListener === "function") {
+          s.addEventListener("abort", fire, { once: true });
+        }
+      }
+      return ac.signal;
+    }
   };
 }
 if (typeof globalThis.MediaMetadata === "undefined") {

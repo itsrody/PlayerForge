@@ -310,21 +310,12 @@ export async function getPageContext() {
 function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   const { promise, resolve } = Promise.withResolvers();
   const ac = new AbortController();
+  // Native (FF 124+): the combined signal aborts on the first of the settling
+  // abort OR the caller's timeout. AbortSignal.timeout() (FF 100+) owns the
+  // timeout; there is no manual-clock fallback on the FF 155 baseline.
+  const signal = AbortSignal.any([ac.signal, AbortSignal.timeout(timeoutMs)]);
   let nonce = null;
   let retryTimer = null;
-
-  // AbortSignal.any() + AbortSignal.timeout() is the ideal path (Chromium 103+),
-  // but Node's brand-check can reject timeout signals in older runtimes.
-  // Feature-detect and fall back to manual deadline tracking.
-  let signal;
-  let useSignalAny = false;
-  try {
-    signal = AbortSignal.any([ac.signal, AbortSignal.timeout(timeoutMs)]);
-    useSignalAny = true;
-  } catch {
-    signal = ac.signal;
-  }
-  const deadline = useSignalAny ? 0 : Date.now() + timeoutMs;
 
   const onMessage = (event) => {
     const data = event.data;
@@ -335,21 +326,22 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
       && typeof data.domain === "string"
     ) {
       clearTimeout(retryTimer);
-      ac.abort();
       resolve({
         domain: data.domain,
         path: data.path,
         title: stripNonAscii(typeof data.title === "string" ? data.title : "")
       });
+      // Settle the combined signal for cleanup AFTER resolving: the abort
+      // listener resolves null, so the context must win the promise first.
+      ac.abort();
     }
   };
 
-  if (useSignalAny) {
-    signal.addEventListener("abort", () => {
-      clearTimeout(retryTimer);
-      resolve(null);
-    }, { once: true });
-  }
+  // Whichever leg fires first (settling abort vs. timeout) settles the promise.
+  signal.addEventListener("abort", () => {
+    clearTimeout(retryTimer);
+    resolve(null);
+  }, { once: true });
 
   window.addEventListener("message", onMessage, { signal });
 
@@ -358,9 +350,8 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
     window.parent.postMessage({ type: CTX_REQUEST_TYPE, nonce }, "*");
   };
   const attempt = () => {
-    if (useSignalAny ? signal.aborted : Date.now() >= deadline) {
+    if (signal.aborted) {
       clearTimeout(retryTimer);
-      if (!useSignalAny) ac.abort();
       resolve(null);
       return;
     }

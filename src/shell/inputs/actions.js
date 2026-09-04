@@ -226,70 +226,43 @@ export function easeTransformTo(video, transform) {
     video.style.willChange = "transform";
   }
 
-  // WAAPI path (Chromium baseline): one compositor animation from the current
-  // computed transform to the target. On finish the final value is committed
-  // to an inline style and the animation is cancelled so its fill gives way;
-  // on cancel (via stop() or supersession) the layer is dropped immediately.
-  if (typeof video.animate === "function") {
-    const animation = video.animate(
-      [
-        { transform: getComputedStyle(video).transform || "none" },
-        { transform: transform || "none" }
-      ],
-      { duration: EASE_MS, easing: EASE_STYLE, fill: "both" }
-    );
-    const stop = () => {
-      if (pendingEase.get(video) !== stop) {
-        return;
-      }
-      pendingEase.delete(video);
-      video.style.transition = "";
-      animation.cancel();
-    };
-    pendingEase.set(video, stop);
-    animation.addEventListener("finish", () => {
-      if (pendingEase.get(video) !== stop) {
-        return;
-      }
-      // Commit the final transform as inline style, then cancel the animation's
-      // fill so the committed style owns the element from here on.
-      video.style.transition = "";
-      video.style.transform = transform;
-      animation.cancel();
-      pendingEase.delete(video);
-      dropPromotion(video);
-    });
-    animation.addEventListener("cancel", () => {
-      if (pendingEase.get(video) === stop) {
-        pendingEase.delete(video);
-        dropPromotion(video);
-      }
-    });
-    return;
-  }
-
-  // CSS transition fallback (hosts without WAAPI, e.g. jsdom): the eased style
-  // is stripped by the transition's own end/cancel event - never by a timer.
-  const pendingStop = () => {
-    video.removeEventListener("transitionend", onEnd);
-    video.removeEventListener("transitioncancel", onCancel);
-    if (pendingEase.get(video) === pendingStop) {
+  // Element.animate() (Web Animations API) is native (Firefox 63+, baseline
+  // 155): one compositor animation from the current computed transform to the
+  // target. On finish the final value is committed to an inline style and the
+  // animation is cancelled so its fill gives way; on cancel (via stop() or
+  // supersession) the layer is dropped immediately.
+  const animation = video.animate(
+    [
+      { transform: getComputedStyle(video).transform || "none" },
+      { transform: transform || "none" }
+    ],
+    { duration: EASE_MS, easing: EASE_STYLE, fill: "both" }
+  );
+  const stop = () => {
+    if (pendingEase.get(video) !== stop) {
+      return;
+    }
+    pendingEase.delete(video);
+    animation.cancel();
+  };
+  pendingEase.set(video, stop);
+  animation.addEventListener("finish", () => {
+    if (pendingEase.get(video) !== stop) {
+      return;
+    }
+    // Commit the final transform as inline style, then cancel the animation's
+    // fill so the committed style owns the element from here on.
+    video.style.transform = transform;
+    animation.cancel();
+    pendingEase.delete(video);
+    dropPromotion(video);
+  });
+  animation.addEventListener("cancel", () => {
+    if (pendingEase.get(video) === stop) {
       pendingEase.delete(video);
       dropPromotion(video);
     }
-  };
-  const onEnd = (event) => {
-    if (event.propertyName === "transform") {
-      pendingStop();
-    }
-  };
-  const onCancel = () => pendingStop();
-  pendingEase.set(video, pendingStop);
-  // Listeners first, styles second: no completion event can slip past us.
-  video.addEventListener("transitionend", onEnd);
-  video.addEventListener("transitioncancel", onCancel);
-  video.style.transition = `transform ${EASE_MS}ms ${EASE_STYLE}`;
-  video.style.transform = transform;
+  });
 }
 
 /**

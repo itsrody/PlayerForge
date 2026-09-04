@@ -713,10 +713,9 @@ export class SettingsPanel {
   }
 
   #runWithViewTransition(type, update) {
-    if (typeof document.startViewTransition === "function") {
-      document.startViewTransition({ types: [type], update });
-    } else {
-      update();
-    }
+    // Document.startViewTransition() (FF 144+, baseline 155): run the DOM swap
+    // inside the transition so the panel open/close cross-fades on the
+    // compositor; there is no non-transition fallback on the FF 155 baseline.
+    document.startViewTransition({ types: [type], update });
   }
 }

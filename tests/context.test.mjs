@@ -20,6 +20,7 @@ import {
   CTX_REQUEST_TIMEOUT_MS
 } from "../src/shared/context.js";
 import { installVideoProbe } from "../src/kernel/probe.js";
+import { installWaapiShim } from "./waapi-shim.mjs";
 
 const dom = (html = "", url = "https://www.youtube.com/watch?v=1") => {
   const jsdom = new JSDOM(`<!doctype html><html><head><title>Page</title></head><body>${html}</body></html>`, { url });
@@ -27,6 +28,9 @@ const dom = (html = "", url = "https://www.youtube.com/watch?v=1") => {
   // AbortSignal class, so the production AbortController bindings must resolve
   // to the current window's constructor rather than Node's.
   globalThis.AbortController = jsdom.window.AbortController;
+  // The probe (installVideoProbe) gates adoption via meetsMinSize ->
+  // checkVisibility() (FF-native); jsdom lacks it, so shim the window.
+  installWaapiShim(jsdom.window);
   return jsdom;
 };
 

@@ -24,6 +24,13 @@ async function makeShell() {
     writable: true,
     configurable: true,
   });
+  // jsdom's Document lacks the FF-native startViewTransition() (FF 144+) that
+  // the panel's open/close path calls unconditionally. Default it to run the
+  // DOM-swap update() synchronously - the same net effect as the real
+  // transition completing.
+  if (typeof dom.window.Document.prototype.startViewTransition !== "function") {
+    dom.window.Document.prototype.startViewTransition = ({ update }) => update();
+  }
 
   const container = dom.window.document.createElement("div");
   dom.window.document.body.appendChild(container);
