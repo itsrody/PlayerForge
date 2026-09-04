@@ -15,6 +15,7 @@ export default [
         GM_registerMenuCommand: "readonly",
         GM_unregisterMenuCommand: "readonly",
         GM_xmlhttpRequest: "readonly",
+        GM_webRequest: "readonly",
         GM_info: "readonly",
         // Browser globals not in default env
         scheduler: "readonly",

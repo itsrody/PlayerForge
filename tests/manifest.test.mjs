@@ -7,6 +7,7 @@ import {
   manifestRewrite,
   resolveRef,
   guardXhrBloom,
+  interposeXhrPrototype,
   ManifestFlow,
   ENGAGE_MODE,
   isClaimable
@@ -303,4 +304,41 @@ test("ManifestFlow default mode is auto and setMode clamps unknown values", () =
   assert.equal(flow.mode, ENGAGE_MODE.AUTO);
   flow.setMode(ENGAGE_MODE.ASK);
   assert.equal(flow.mode, ENGAGE_MODE.ASK);
+});
+
+test("interposeXhrPrototype rewrites manifest text through the prototype send", () => {
+  const calls = [];
+  const proto = {
+    send(...args) {
+      calls.push(args);
+      this.sent = true;
+    }
+  };
+  let onload;
+  const inst = {
+    url: "https://cdn.example/master.m3u8",
+    responseURL: "https://cdn.example/master.m3u8",
+    responseType: "",
+    responseText: M3U8,
+    addEventListener: (type, fn) => { if (type === "load") onload = fn; }
+  };
+  Object.setPrototypeOf(inst, proto);
+
+  const { registered } = interposeXhrPrototype(proto, {
+    shouldCapture: (url) => /\.m3u8$/i.test(url),
+    rewrite: (url, body) => ({ text: body.replace("https://cdn.example/", "https://proxy.example/"), decision: { routed: true } })
+  });
+  assert.equal(registered, true);
+
+  inst.send("payload");
+  assert.equal(inst.sent, true, "original send still ran through");
+  assert.deepEqual(calls, [["payload"]]);
+
+  onload();
+  assert.match(inst.responseText, /https:\/\/proxy\.example\/seg\/1\.ts/);
+});
+
+test("interposeXhrPrototype reports registered:false for a non-wrappable seam", () => {
+  assert.deepEqual(interposeXhrPrototype(null, { shouldCapture: () => true, rewrite: () => ({}) }), { registered: false });
+  assert.deepEqual(interposeXhrPrototype({}, { shouldCapture: () => true, rewrite: () => ({}) }), { registered: false });
 });

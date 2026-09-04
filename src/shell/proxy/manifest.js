@@ -139,42 +139,71 @@ export function resolveRef(baseUrl, uri) {
 }
 
 /**
+ * Shared load-hook for the Mode-A XHR interposition (used by both the
+ * per-instance `guardXhrBloom` wrap and the prototype-level interpose). Attaches
+ * a `load` hook that rewrites a manifest-text response in place - byte-identical
+ * when unarmed or unchanged. Operates on the xhr contract (open/send/responseText)
+ * so a fake XHR exercises it headlessly.
+ */
+function hookXhrLoad(xhr, { shouldCapture, rewrite }) {
+  const onLoad = () => {
+    const url = xhr.responseURL ?? xhr.url;
+    if (!shouldCapture(url) || xhr.responseType && xhr.responseType !== "") {
+      return;
+    }
+    const body = typeof xhr.responseText === "string" ? xhr.responseText : "";
+    const { text } = rewrite(url, body);
+    if (text !== body) {
+      logger.log("proxy", "xhr", "manifest responseText rewritten", url);
+      Object.defineProperty(xhr, "responseText", {
+        enumerable: true,
+        configurable: true,
+        get: () => text
+      });
+    }
+  };
+  if (xhr.addEventListener) {
+    xhr.addEventListener("load", onLoad, { once: true });
+  } else if (typeof xhr.onload === "function" || "onload" in xhr) {
+    const prior = xhr.onload;
+    xhr.onload = (event) => {
+      try { if (prior) prior.call(xhr, event); } finally { onLoad(); }
+    };
+  }
+  return xhr;
+}
+
+/**
  * Mode-A wiring for XMLHttpRequest: wraps an XHR-like object's `send` so that
  * a manifest-text response is rewritten in place before the player reads it.
  * Purely explicit in how much it rewrites: an unarmed/no-change response keeps
- * its original `responseText` (byte-identical). Operates on the xhr contract
- * (open/send/responseText) so a fake XHR exercises it headlessly.
+ * its original `responseText` (byte-identical).
  */
 export function guardXhrBloom(xhr, { shouldCapture, rewrite }) {
   const originalSend = xhr.send;
   xhr.send = (...args) => {
-    const onLoad = () => {
-      const url = xhr.responseURL ?? xhr.url;
-      if (!shouldCapture(url) || xhr.responseType && xhr.responseType !== "") {
-        return;
-      }
-      const body = typeof xhr.responseText === "string" ? xhr.responseText : "";
-      const { text } = rewrite(url, body);
-      if (text !== body) {
-        logger.log("proxy", "xhr", "manifest responseText rewritten", url);
-        Object.defineProperty(xhr, "responseText", {
-          enumerable: true,
-          configurable: true,
-          get: () => text
-        });
-      }
-    };
-    if (xhr.addEventListener) {
-      xhr.addEventListener("load", onLoad, { once: true });
-    } else if (typeof xhr.onload === "function" || "onload" in xhr) {
-      const prior = xhr.onload;
-      xhr.onload = (event) => {
-        try { if (prior) prior.call(xhr, event); } finally { onLoad(); }
-      };
-    }
+    hookXhrLoad(xhr, { shouldCapture, rewrite });
     return originalSend.apply(xhr, args);
   };
   return xhr;
+}
+
+/**
+ * Mode-A wiring at the prototype level: wrap `proto.send` so every request on a
+ * page (players using XHR for manifests) is rewritten in place on load. Each
+ * instance gets one load hook per `send`, and responses still pass byte-identical
+ * when unarmed or unchanged.
+ */
+export function interposeXhrPrototype(proto, { shouldCapture, rewrite }) {
+  if (!proto || typeof proto.send !== "function") {
+    return { registered: false };
+  }
+  const originalSend = proto.send;
+  proto.send = function (...args) {
+    hookXhrLoad(this, { shouldCapture, rewrite });
+    return originalSend.apply(this, args);
+  };
+  return { registered: true };
 }
 
 /** §7.4.3 engage modes. */

@@ -8,6 +8,8 @@ import { logger } from "./shared/logger.js";
 import { shouldSkipUrl } from "./kernel/guard.js";
 import { KEYS, getConfigValue, setConfigValue, deleteConfigField } from "./shared/storage.js";
 import { initFullscreenGate } from "./shared/shadow.js";
+import { DEBUG_LOGS_KEY } from "./kernel/contract.js";
+import { installProxyDebug } from "./shell/proxy/bootstrap.js";
 
 // The version lives in the banner and is read from the installed script at
 // runtime via GM_info, so what the UI reports is always what the manager
@@ -24,6 +26,31 @@ function bootstrap() {
   // native fullscreenchange event. Runs before any shell exists so fs-gated
   // paths have a live boolean the moment they first query it.
   initFullscreenGate();
+
+  // Debug-only proxy bootstrap: observe + interpose the manifest surface with
+  // the Gate disabled (byte-identical pass-through, no MSE takeover) so live
+  // `[PlayerForge][proxy]` breadcrumbs are reachable without help. Same debug
+  // signal the kernel uses at init - #pf-debug hash or the persisted toggle.
+  // Split along the kernel's top/frame model: the top frame owns GM_webRequest
+  // (tab-level rules, feature-detected) and every frame - top included -
+  // interposes its own fetch/XHR where page players run.
+  const proxyDebugOn =
+    location.hash.includes("pf-debug") || getConfigValue(DEBUG_LOGS_KEY, false);
+  if (proxyDebugOn) {
+    // The kernel only enables the logger once a video boots; without this the
+    // hash/setting-driven traces from document-start (early manifest captures,
+    // GM_webRequest observations) would be dropped before logger.enable() runs.
+    // Enabling here is idempotent with the kernel and the menu toggle.
+    logger.enable();
+  }
+  const inTopFrame = window.top === window;
+  installProxyDebug({
+    debugOn: proxyDebugOn,
+    role: inTopFrame ? "top" : "frame",
+    gmWebRequest: inTopFrame && typeof GM_webRequest === "function" ? GM_webRequest : null,
+    fetch: globalThis.fetch,
+    xhrPrototype: globalThis.XMLHttpRequest?.prototype
+  });
 
   // The shell stylesheet is warmed lazily at first shell construction
   // (shell.js #injectDom): the embedded sheet is adopted synchronously there,
