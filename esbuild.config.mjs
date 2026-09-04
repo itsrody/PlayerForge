@@ -81,6 +81,7 @@ const banner = `// ==UserScript==
 // @grant        GM_removeValueChangeListener
 // @grant        GM_getResourceText
 // @grant        GM_xmlhttpRequest
+// @grant        GM_webRequest
 // @connect      *
 // @connect      https://www.subtitlecat.com
 // @resource     pfStyle https://raw.githubusercontent.com/itsrody/PlayerForge/firefox/dist/playerforge.css
