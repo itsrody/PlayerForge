@@ -32,12 +32,16 @@ export const STATUS = Object.freeze({
 const ACTIVE = new Set([STATUS.IDLE, STATUS.FETCHING, STATUS.DECRYPTING, STATUS.BUFFERING]);
 
 /** Transport/decrypt failures carry a numbered HTTP status when known; 403/410
- *  are the token-expiry signal. `status` defaults to 0 (non-HTTP fault). */
+ *  are the token-expiry signal. `status` defaults to 0 (non-HTTP fault).
+ *  `retryable` defaults to true; false means "will not heal by retry" (a
+ *  corrupted blob, bad key/IV - a bounded retry loop would only burn calls), so
+ *  the manager skips immediately. */
 export class SegmentError extends Error {
-  constructor(message, { status = 0 } = {}) {
+  constructor(message, { status = 0, retryable = true } = {}) {
     super(message);
     this.name = "SegmentError";
     this.status = status;
+    this.retryable = retryable === false ? false : true;
   }
 }
 
@@ -359,7 +363,7 @@ export class SegmentManager {
       let bytes = await this.#fetch(seg, this.#fetchSignal);
       if (seg.encrypted) {
         if (typeof this.#decrypt !== "function") {
-          throw new SegmentError("no decrypt seam for encrypted segment", {});
+          throw new SegmentError("no decrypt seam for encrypted segment", { retryable: false });
         }
         this.#setStatus(seg, STATUS.DECRYPTING);
         bytes = await this.#decrypt(seg, bytes);
@@ -380,6 +384,7 @@ export class SegmentManager {
     }
     const status = err && typeof err.status === "number" ? err.status : 0;
     const tokenSignal = status === 403 || status === 410;
+    const retryable = !err || err.retryable !== false;
     if (tokenSignal && this.#refresh && seg.refreshes < this.#maxRefreshes) {
       // Credential expired mid-stream is the NORMAL signal, not a media
       // failure: refresh once (bounded by maxRefreshes) with the token seam,
@@ -407,22 +412,24 @@ export class SegmentManager {
       this.#pump();
       return;
     }
-    seg.attempts++;
-    if (seg.attempts < this.#maxRetries) {
-      const delay = Math.min(this.#retryBaseMs * (1 << (seg.attempts - 1)), this.#maxRetryMs);
-      seg.retryAt = this.#clock() + delay;
-      this.#setStatus(seg, STATUS.IDLE);
-      this.#schedule(() => {
-        if (!this.#aborted) {
-          seg.retryAt = null;
-          this.#pump();
-        }
-      }, delay);
-      return;
+    if (retryable) {
+      seg.attempts++;
+      if (seg.attempts < this.#maxRetries) {
+        const delay = Math.min(this.#retryBaseMs * (1 << (seg.attempts - 1)), this.#maxRetryMs);
+        seg.retryAt = this.#clock() + delay;
+        this.#setStatus(seg, STATUS.IDLE);
+        this.#schedule(() => {
+          if (!this.#aborted) {
+            seg.retryAt = null;
+            this.#pump();
+          }
+        }, delay);
+        return;
+      }
     }
     this.#setStatus(seg, STATUS.FAILED);
     this.#setStatus(seg, STATUS.SKIPPED);
-    this.#emit({ type: "skip", id: seg.id, reason: "fail", attempts: seg.attempts });
+    this.#emit({ type: "skip", id: seg.id, reason: retryable ? "fail" : "decode", attempts: seg.attempts });
   }
 
   /** Deliver ready bytes in strict ascending order: one append in flight at a

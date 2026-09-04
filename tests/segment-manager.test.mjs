@@ -110,6 +110,23 @@ test("encrypted segment without a decrypt seam is skipped, not half-appended", a
   assert.ok(log.events.some((e) => e.type === "skip" && e.id === 0));
 });
 
+test("a non-retryable decrypt failure skips immediately - no retry loop", async () => {
+  const { manager, log, sources, drain } = makeManager({
+    sources: new Map([["e", BYTE], ["ok", BYTE]]),
+    decrypt: async () => { throw new SegmentError("corrupt ciphertext", { retryable: false }); },
+    options: { scheduler: (fn) => { log.scheduled.push(fn); }, clock: () => log.now }
+  });
+  manager.enqueue({ id: 0, uri: "e", encrypted: true });
+  manager.enqueue({ id: 1, uri: "ok" });
+  await drain;
+  assert.equal(manager.statusOf(0), STATUS.SKIPPED);
+  const skip = log.events.find((e) => e.type === "skip" && e.id === 0);
+  assert.equal(skip.reason, "decode", "non-retryable failures skip as decode faults");
+  assert.equal(skip.attempts, 0);
+  assert.equal(log.scheduled.length, 0, "never enters retry backoff");
+  assert.deepEqual(log.appended, [1], "the stream continues past the corrupt segment");
+});
+
 test("bounded retries recover a transient failure on a deterministic backoff", async () => {
   let calls = 0;
   const { manager, log, drain } = makeManager({
