@@ -11,6 +11,7 @@
  * wire-up feeds it the token API through the existing `gmRequest*` helpers).
  */
 
+import { logger } from "../../shared/logger.js";
 import { injectPathTokens, injectQueryParams } from "./rewrite.js";
 
 export const TOKEN_STATE = Object.freeze({
@@ -84,6 +85,7 @@ export class TokenManager {
     }
     const from = this.#state;
     this.#state = to;
+    logger.log("proxy", "token", "state", from, "->", to);
     this.#emit({ type: "state", from, to });
   }
 
@@ -131,7 +133,9 @@ export class TokenManager {
    *  leaves the manager IDLE (passive - reactive-only is handled elsewhere). */
   async arm() {
     if (!this.#getToken || this.aborted) {
-      return { refreshed: false, reason: this.#getToken ? "aborted" : "no-provider" };
+      const reason = this.#getToken ? "aborted" : "no-provider";
+      logger.log("proxy", "token", "arm declined", reason);
+      return { refreshed: false, reason };
     }
     if (this.#refreshing) {
       await this.#refreshing.promise;
@@ -148,9 +152,11 @@ export class TokenManager {
   async refresh({ reactive = false } = {}) {
     if (!this.#getToken) {
       this.#setState(TOKEN_STATE.FAILED);
+      logger.warn("proxy", "token", "refresh skipped: no provider");
       return { refreshed: false, reason: "no-provider" };
     }
     if (this.#refreshing) {
+      logger.log("proxy", "token", "refresh coalesced onto in-flight", reactive);
       await this.#refreshing.promise;
       return { refreshed: this.#state === TOKEN_STATE.ARMED, token: this.#token };
     }
@@ -177,6 +183,7 @@ export class TokenManager {
     if (status !== 403 && status !== 410) {
       return { refreshed: false, reason: "not-token-error" };
     }
+    logger.log("proxy", "token", "reactive expiry signal", status);
     if (this.#refreshing) {
       await this.#refreshing.promise;
       return { refreshed: this.#state === TOKEN_STATE.ARMED, token: this.#token };
@@ -224,6 +231,7 @@ export class TokenManager {
     this.#setState(TOKEN_STATE.ARMED);
     this.#scheduleProactive();
     const result = { refreshed: true, token: this.#token };
+    logger.log("proxy", "token", "armed", { reactive, ttl: this.#token.ttl });
     resolve(result);
     this.#emit({ type: "refresh", ok: true, reactive });
     return result;

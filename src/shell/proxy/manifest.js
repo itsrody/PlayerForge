@@ -17,6 +17,7 @@
  * feature-detected (§4); if the grant is stripped the observe layer is skipped
  * and only the inline MSE pass-through works.
  */
+import { logger } from "../../shared/logger.js";
 import { detectManifestKind, sniffManifestKind, rewriteManifest } from "./rewrite.js";
 
 /** Rules fed to `GM_webRequest`: observe-only. TM's MV2 `observe` is
@@ -50,6 +51,7 @@ export function observeManifests({ gmWebRequest, rules = MANIFEST_OBSERVE_RULES,
       tab: details?.tab
     });
   });
+  logger.log("proxy", "observe", "registered GM_webRequest rules", rules.length);
   return { registered: true, rules };
 }
 
@@ -82,6 +84,7 @@ export function interposeFetch({
     if (!shouldCapture(url)) {
       return response;
     }
+    logger.log("proxy", "fetch", "capturing manifest response", url);
     const body = await response
       .clone()
       .text()
@@ -92,10 +95,12 @@ export function interposeFetch({
     const { text, decision } = rewrite(url, body);
     onOutcome({ url, decision });
     if (text === body) {
+      logger.log("proxy", "fetch", "manifest byte-identical (unarmed/no-change)", url, decision);
       return response;
     }
     const { status, headers } = response;
     const init = { status, statusText: response.statusText, headers };
+    logger.log("proxy", "fetch", "manifest rewritten", url, { status, bytes: text.length });
     return makeResponse(text, init);
   };
 }
@@ -104,6 +109,7 @@ export function interposeFetch({
 export function manifestRewrite(url, text, { gate, rewriteUri = null } = {}) {
   const kind = detectManifestKind(url) ?? sniffManifestKind(text);
   const decision = gate.routeDecision(url, kind, text);
+  logger.log("proxy", "gate", "manifest decision", url, decision);
   if (!decision.routed) {
     return { text, decision };
   }
@@ -150,6 +156,7 @@ export function guardXhrBloom(xhr, { shouldCapture, rewrite }) {
       const body = typeof xhr.responseText === "string" ? xhr.responseText : "";
       const { text } = rewrite(url, body);
       if (text !== body) {
+        logger.log("proxy", "xhr", "manifest responseText rewritten", url);
         Object.defineProperty(xhr, "responseText", {
           enumerable: true,
           configurable: true,
@@ -214,6 +221,7 @@ export class ManifestFlow {
     this.#onEngage = typeof onEngage === "function" ? onEngage : () => {};
     this.#onDisengage = typeof onDisengage === "function" ? onDisengage : () => {};
     this.#onStatus = typeof onStatus === "function" ? onStatus : () => {};
+    logger.log("proxy", "flow", "created", { mode: this.#mode, consented: this.#consented });
   }
 
   #setMode(mode) {
@@ -243,11 +251,13 @@ export class ManifestFlow {
   /** First-run / per-context consent. */
   setConsent(value) {
     this.#consented = value === true;
+    logger.log("proxy", "flow", "consent", this.#consented);
     return this;
   }
 
   setMode(mode) {
     this.#setMode(mode);
+    logger.log("proxy", "flow", "mode", this.#mode);
     return this;
   }
 
@@ -264,6 +274,7 @@ export class ManifestFlow {
     const mode = this.#mode;
     const note = (reason, engage) => {
       const outcome = { player, engage, reason, mode, url: manifestUrl };
+      logger.log("proxy", "flow", "decision", outcome);
       if (engage) {
         this.#claimed.set(player, outcome);
         this.#onEngage(outcome);
@@ -274,6 +285,7 @@ export class ManifestFlow {
 
     if (this.decision(player)) {
       const existing = this.#claimed.get(player);
+      logger.log("proxy", "flow", "already claimed", player, existing.reason);
       this.#onStatus(existing);
       return existing;
     }
@@ -307,6 +319,7 @@ export class ManifestFlow {
     }
     this.#claimed.delete(player);
     this.#onDisengage({ player, reason });
+    logger.log("proxy", "flow", "disengage", player, reason);
     return existing;
   }
 
@@ -321,12 +334,14 @@ export class ManifestFlow {
     for (const player of released) {
       this.#onDisengage({ player, reason });
     }
+    logger.warn("proxy", "flow", "downgraded, released players", released, reason);
     return released;
   }
 
   /** Re-arm after a downgrade (feature re-enabled live). */
   rearm() {
     this.#downgraded = false;
+    logger.log("proxy", "flow", "rearmed");
     return this;
   }
 

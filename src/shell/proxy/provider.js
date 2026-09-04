@@ -12,6 +12,7 @@
  * { status, headers, body }. The caller (SegmentManager) owns decode,
  * decrypt, ordering, and backpressure; this module owns only the wire.
  */
+import { logger } from "../../shared/logger.js";
 import { SegmentError } from "./segment-manager.js";
 
 export class ProxyProvider {
@@ -40,6 +41,7 @@ export class ProxyProvider {
 
   /** Fetch a single segment. Returns the provider chosen and the response. */
   async fetch(uri, { signal, headers = {}, timeoutMs = 0 } = {}) {
+    logger.log("proxy", "provider", "fetch", uri, { timeoutMs });
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     if (this.#gmFetch) {
       try {
@@ -51,6 +53,7 @@ export class ProxyProvider {
         // An aborted GM attempt must not spawn a fallback fetch; any other
         // wire failure (setup, network, timeout) is a fallback candidate.
         if (err?.name === "AbortError") throw err;
+        logger.warn("proxy", "provider", "GM request failed, falling back to fetch", uri, err?.message ?? err);
       }
     }
     return { via: "fetch", resp: await this.#fetchRequest(uri, headers, signal) };
@@ -66,10 +69,12 @@ export class ProxyProvider {
         onload: (res) => {
           if (settled) return;
           settle();
+          const body = toUint8(res.response ?? res.responseArrayBuffer);
+          logger.log("proxy", "provider", "GM response", uri, { status: res.status ?? 0, bytes: body.byteLength });
           resolve({
             status: res.status ?? 0,
             headers: new HeadersLike(res.responseHeaders).toObject(),
-            body: toUint8(res.response ?? res.responseArrayBuffer)
+            body
           });
         }
       };
@@ -116,6 +121,7 @@ export class ProxyProvider {
       signal
     });
     const buf = new Uint8Array(await res.arrayBuffer());
+    logger.log("proxy", "provider", "native fetch response", uri, { status: res.status, bytes: buf.byteLength });
     return { status: res.status, headers: headerObject(res.headers), body: buf };
   }
 }

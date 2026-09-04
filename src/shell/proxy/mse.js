@@ -11,6 +11,7 @@
  * injectable seams, so the append chain, ordering guard, and teardown are
  * exercised headlessly without a real MSE stack.
  */
+import { logger } from "../../shared/logger.js";
 import { SegmentError } from "./segment-manager.js";
 
 export class MSEFactory {
@@ -52,10 +53,12 @@ export class MSEFactory {
         video.src = objectURL;
       } catch (err) {
         sink.destroy();
+        logger.error("proxy", "mse", "attach failed", err?.message ?? err);
         throw new SegmentError(`attaching MediaSource failed: ${err?.message ?? err}`, { retryable: false });
       }
     }
     await sink.waitForOpen();
+    logger.log("proxy", "mse", "opened", { mimeType, objectURL });
     return sink;
   }
 }
@@ -125,6 +128,7 @@ export class MediaSink {
     }
     const task = { seq, bytes, startTime, endTime };
     lane.pending.push(task);
+    logger.log("proxy", "mse", "enqueue", seq, bytes?.byteLength ?? bytes?.length ?? 0, "bytes");
     const job = (lane.chain ?? Promise.resolve()).then(() => this.#append(lane, task));
     lane.chain = job.catch(() => {}); // swallowed copy: lane errors surface to the enqueue's await
     await job;
@@ -137,12 +141,14 @@ export class MediaSink {
       this.#mediaSource.endOfStream();
     }
     this.#ended = true;
+    logger.log("proxy", "mse", "end of stream");
   }
 
   /** Release the MediaSource: revoke the object URL and stop all lanes. */
   destroy() {
     if (this.#destroyed) return;
     this.#destroyed = true;
+    logger.log("proxy", "mse", "destroyed", this.#objectURL);
     this.#seams.revokeObjectURL(this.#objectURL);
     this.#lanes.forEach((lane) => {
       lane.pending.length = 0;
@@ -162,6 +168,7 @@ export class MediaSink {
       try {
         sourceBuffer = this.#mediaSource.addSourceBuffer(this.#mimeType);
       } catch (err) {
+        logger.error("proxy", "mse", "addSourceBuffer failed", this.#mimeType, err?.message ?? err);
         throw new SegmentError(
           `addSourceBuffer(${this.#mimeType}) failed: ${err?.message ?? err}`,
           { retryable: false }
@@ -191,12 +198,14 @@ export class MediaSink {
         if (err?.name !== "QuotaExceededError") {
           throw new SegmentError(`appendBuffer failed: ${err?.message ?? err}`, { retryable: false });
         }
+        logger.log("proxy", "mse", "quota backoff", task.seq, `${backoffMs}ms`);
         await this.#seams.delay(backoffMs);
         backoffMs = Math.min(backoffMs * 2, 512);
       }
     }
     await this.#waitUntilIdle(buffer);
     this.#resetWindow(buffer, task);
+    logger.log("proxy", "mse", "appended", lastSeq);
     this.#onStateChange?.({ type: "appended", seq: lastSeq });
   }
 

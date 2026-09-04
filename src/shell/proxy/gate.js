@@ -9,6 +9,7 @@
  * closed to `unknown` - which is NOT routable - so we never engage a path we
  * might misread, and genuine DRM is never touched.
  */
+import { logger } from "../../shared/logger.js";
 
 /** Protection classes. Plain/tokenized/AES-128/ClearKey are the routable
  *  surface; DRM and unknown always fall through to native playback. */
@@ -356,15 +357,19 @@ export class Gate {
    */
   routeDecision(manifestUrl, kind, text) {
     if (!this.#enabled) {
+      logger.log("proxy", "gate", "disabled", manifestUrl);
       return { routed: false, klass: null, reason: "disabled" };
     }
     const klass = classifyStream(kind, text);
     if (!ROUTABLE_CLASSES.has(klass)) {
+      logger.log("proxy", "gate", "non-routable class", manifestUrl, klass);
       return { routed: false, klass, reason: `class:${klass}` };
     }
     if (!this.inScope(manifestUrl)) {
+      logger.log("proxy", "gate", "out of scope", manifestUrl, klass);
       return { routed: false, klass, reason: "site" };
     }
+    logger.log("proxy", "gate", "routable", manifestUrl, klass);
     return { routed: true, klass };
   }
 }

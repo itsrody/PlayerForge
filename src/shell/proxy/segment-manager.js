@@ -15,8 +15,9 @@
  * - retries are bounded and token-path retries are bounded independently;
  * - a 403/410 is the NORMAL "credential expired" signal, routed to the token
  *   refresh seam, never counted as a media failure;
- * - abort (pause/seek/teardown) cancels every in-flight fetch and halts.
+*  - abort (pause/seek/teardown) cancels every in-flight fetch and halts.
  */
+import { logger } from "../../shared/logger.js";
 
 export const STATUS = Object.freeze({
   IDLE: "IDLE",
@@ -186,6 +187,7 @@ export class SegmentManager {
     this.#pending.set(id, seg);
     this.#active++;
     this.#emit({ type: "status", id, from: null, to: STATUS.IDLE });
+    logger.log("proxy", "segment", "enqueue", { id, uri: seg.uri, encrypted: seg.encrypted, byteHint: seg.byteHint });
     this.#pump();
     return true;
   }
@@ -201,10 +203,15 @@ export class SegmentManager {
     if (!Number.isInteger(id)) {
       return;
     }
+    let pruned = 0;
     for (const [seq, seg] of this.#pending) {
       if (seq <= id && !ACTIVE.has(seg.status)) {
         this.#pending.delete(seq);
+        pruned++;
       }
+    }
+    if (pruned > 0) {
+      logger.log("proxy", "segment", "pruned through", id, `${pruned} segments`);
     }
   }
 
@@ -215,6 +222,7 @@ export class SegmentManager {
       return;
     }
     this.#aborted = true;
+    logger.log("proxy", "segment", "abort", { inFlight: this.#inFlight, pending: this.#pending.size });
     this.#internalAc.abort();
     this.#clearSchedules();
     for (const seg of this.#pending.values()) {
@@ -351,6 +359,7 @@ export class SegmentManager {
     this.#pendingBytes += seg.byteHint;
     seg.retryAt = null;
     this.#setStatus(seg, STATUS.FETCHING);
+    logger.log("proxy", "segment", "fetching", seg.id, seg.uri);
     this.#run(seg).catch(() => {}).finally(() => {
       this.#inFlight--;
       this.#pendingBytes = Math.max(0, this.#pendingBytes - seg.byteHint);
@@ -366,10 +375,12 @@ export class SegmentManager {
           throw new SegmentError("no decrypt seam for encrypted segment", { retryable: false });
         }
         this.#setStatus(seg, STATUS.DECRYPTING);
+        logger.log("proxy", "segment", "decrypting", seg.id);
         bytes = await this.#decrypt(seg, bytes);
       }
       seg.bytes = bytes;
       this.#setStatus(seg, STATUS.BUFFERING);
+      logger.log("proxy", "segment", "buffered", seg.id, bytes?.byteLength ?? bytes?.length ?? 0, "bytes");
     } catch (err) {
       await this.#recover(seg, err);
       return;
@@ -393,6 +404,7 @@ export class SegmentManager {
       seg.refreshes++;
       seg.retryAt = null;
       this.#emit({ type: "refresh", id: seg.id });
+      logger.log("proxy", "segment", "token refresh", seg.id, status);
       let outcome = null;
       try {
         outcome = await this.#refresh(seg);
@@ -418,6 +430,7 @@ export class SegmentManager {
         const delay = Math.min(this.#retryBaseMs * (1 << (seg.attempts - 1)), this.#maxRetryMs);
         seg.retryAt = this.#clock() + delay;
         this.#setStatus(seg, STATUS.IDLE);
+        logger.log("proxy", "segment", "retry scheduled", seg.id, `attempt ${seg.attempts}`, `${delay}ms`);
         this.#schedule(() => {
           if (!this.#aborted) {
             seg.retryAt = null;
@@ -430,6 +443,7 @@ export class SegmentManager {
     this.#setStatus(seg, STATUS.FAILED);
     this.#setStatus(seg, STATUS.SKIPPED);
     this.#emit({ type: "skip", id: seg.id, reason: retryable ? "fail" : "decode", attempts: seg.attempts });
+    logger.warn("proxy", "segment", "skip", seg.id, retryable ? "fail" : "decode", `attempts=${seg.attempts}`);
   }
 
   /** Deliver ready bytes in strict ascending order: one append in flight at a
@@ -450,6 +464,7 @@ export class SegmentManager {
           }
           if (now - this.#gapSince >= this.#gapTimeoutMs) {
             this.#emit({ type: "skip", id, reason: "gap" });
+            logger.log("proxy", "segment", "gap skip", id);
             this.#deliverSeq = ++id;
             this.#gapSince = null;
             this.#gapScheduled = false;
@@ -480,6 +495,7 @@ export class SegmentManager {
       await this.#append(seg, seg.bytes);
       this.#setStatus(seg, STATUS.DONE);
       this.#emit({ type: "append", id: seg.id });
+      logger.log("proxy", "segment", "appended", seg.id);
     } catch {
       if (this.#aborted) {
         this.#setStatus(seg, STATUS.SKIPPED);
@@ -487,6 +503,7 @@ export class SegmentManager {
         this.#setStatus(seg, STATUS.FAILED);
         this.#setStatus(seg, STATUS.SKIPPED);
         this.#emit({ type: "skip", id: seg.id, reason: "append" });
+        logger.warn("proxy", "segment", "append skipped", seg.id);
       }
     } finally {
       this.#delivering = false;

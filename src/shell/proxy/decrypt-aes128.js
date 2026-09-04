@@ -10,6 +10,7 @@
  * ciphertext can never reach a source buffer (§11.2).
  */
 
+import { logger } from "../../shared/logger.js";
 import { SegmentError } from "./segment-manager.js";
 
 /** Parse an explicit `IV="0x…"` tag attribute into its 16 bytes. A missing,
@@ -119,24 +120,32 @@ export class Aes128Decrypter {
       if (fetched != null) {
         key = toBytes(fetched);
         this.#keys.set(keyUri, key);
+        logger.log("proxy", "aes128", "key loaded", keyUri);
+      } else {
+        logger.warn("proxy", "aes128", "key unavailable", keyUri);
       }
     }
     if (!key) {
       throw new SegmentError(`no AES-128 key available for ${keyUri}`, { retryable: false });
     }
     const iv = deriveIv({ ivHex, sequence });
+    logger.log("proxy", "aes128", "decrypting", { keyUri, ivHex, sequence });
     let imported;
     try {
       imported = await this.#subtle.importKey("raw", key, { name: "AES-CBC" }, false, ["decrypt"]);
     } catch (err) {
+      logger.warn("proxy", "aes128", "importKey failed", err?.name ?? "error");
       throw new SegmentError(`AES-128 importKey failed: ${err?.name ?? "error"}`, { retryable: false, cause: err });
     }
     let plain;
     try {
       plain = await this.#subtle.decrypt({ name: "AES-CBC", iv }, imported, toBytes(data));
     } catch (err) {
+      logger.warn("proxy", "aes128", "decrypt failed", err?.name ?? "error");
       throw new SegmentError(`AES-128 decrypt failed: ${err?.name ?? "error"}`, { retryable: false, cause: err });
     }
-    return plain instanceof Uint8Array ? plain : new Uint8Array(plain);
+    const out = plain instanceof Uint8Array ? plain : new Uint8Array(plain);
+    logger.log("proxy", "aes128", "decrypted", out.byteLength, "bytes");
+    return out;
   }
 }

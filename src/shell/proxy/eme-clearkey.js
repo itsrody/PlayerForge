@@ -20,6 +20,7 @@
  * The EME surfaces (navigator, video, license transport) are injectable so the
  * flow is exercised headlessly with stubs; the wire contract mirrors §12.2.
  */
+import { logger } from "../../shared/logger.js";
 import { SegmentError } from "./segment-manager.js";
 
 export const CLEARKEY_SYSTEM = "org.w3.clearkey";
@@ -82,9 +83,11 @@ export class ClearKeyEme {
       const access = await this.#navigator.requestMediaKeySystemAccess(CLEARKEY_SYSTEM, [this.#config]);
       this.#mediaKeys = await access.createMediaKeys();
       await video.setMediaKeys(this.#mediaKeys);
+      logger.log("proxy", "clearkey", "attached", { laurl: this.#laurl || "none" });
     } catch (err) {
       await safeDetach(video);
       this.#video = null;
+      logger.error("proxy", "clearkey", "attach failed", err?.message ?? err);
       throw new SegmentError(`ClearKey media keys attach failed: ${err?.message ?? err}`, { retryable: false });
     }
     return this;
@@ -107,6 +110,7 @@ export class ClearKeyEme {
     const session = this.#mediaKeys.createSession();
     this.#session = session;
     const target = laurl ?? this.#laurl;
+    logger.log("proxy", "clearkey", "session created", { kids: kidList });
 
     this.#ready = new Promise((resolve, reject) => {
       this.#resolveReady = resolve;
@@ -138,13 +142,16 @@ export class ClearKeyEme {
         if (body && Array.isArray(body.keys)) {
           // The CDM handed us the license directly; nothing to POST.
           license = toUint8(event.message);
+          logger.log("proxy", "clearkey", "direct license from CDM");
         } else {
           const requestBody = body && Array.isArray(body.kids)
             ? body
             : { kids: kidList, type: "temporary" };
+          logger.log("proxy", "clearkey", "license POST", target);
           const resp = await this.#postJson(target, requestBody, { signal: null });
           license = toUint8(resp);
         }
+        logger.log("proxy", "clearkey", "session.update", license.byteLength, "bytes");
         await session.update(license);
       };
       run().catch(fail);
@@ -160,9 +167,11 @@ export class ClearKeyEme {
           const resolve = this.#resolveReady;
           this.#resolveReady = null;
           this.#rejectReady = null;
+          logger.log("proxy", "clearkey", "key usable", statuses[0]);
           resolve(session);
         }
       } else if (statuses.some((status) => status === "expired" || status === "internal-error" || status === "output-restricted")) {
+        logger.warn("proxy", "clearkey", "key status failure", statuses[0]);
         fail(new SegmentError(`ClearKey key status ${statuses[0]}`, { retryable: false }));
       }
     });
@@ -175,6 +184,7 @@ export class ClearKeyEme {
 
   /** Close the session and detach the CDM; safe to call repeatedly. */
   detach() {
+    logger.log("proxy", "clearkey", "detach");
     const session = this.#session;
     const reject = this.#rejectReady;
     this.#session = null;
