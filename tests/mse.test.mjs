@@ -99,6 +99,14 @@ function hangar() {
   return { seams, ms, video, revoked, created };
 }
 
+async function settleAppend(sb) {
+  for (let i = 0; i < 16; i++) {
+    await Promise.resolve();
+    if (sb.updating) break;
+  }
+  if (sb.updating) sb.finishAppend();
+}
+
 test("create() opens the MediaSource, attaches the object URL, resolves after sourceopen", async () => {
   const { seams, ms, video, created } = hangar();
   const factory = new MSEFactory(seams);
@@ -310,6 +318,89 @@ test("destroy() is idempotent and fires no second state change", async () => {
   sink.destroy();
   sink.destroy();
   assert.deepEqual(states.map((s) => s.type), ["destroyed"]);
+});
+
+test("setInit appends the init segment before the first media fragment", async () => {
+  const { seams, ms, video } = hangar();
+  const factory = new MSEFactory(seams);
+  ms.readyState = "open";
+  ms.emit("sourceopen");
+  const sink = await factory.create({ video, mimeType: 'video/mp4; codecs="avc1."' });
+
+  const INIT = Uint8Array.from([77, 68, 65, 84]);
+  sink.setInit(INIT, { mimeType: 'video/mp4; codecs="avc1."' });
+  const p = sink.enqueue(1, Uint8Array.from([1]));
+  const sb = ms.sourceBuffers[0];
+  await settleAppend(sb);
+  await settleAppend(sb);
+  await p;
+
+  assert.deepEqual(sb.records, [[...INIT], [1]], "init lands first, then the fragment");
+  assert.equal(sb.windowsAtAppend[0].start, 0, "init append uses the default window");
+});
+
+test("setInit re-arms a lane when the init bytes change (re-init before next fragment)", async () => {
+  const { seams, ms, video } = hangar();
+  const factory = new MSEFactory(seams);
+  ms.readyState = "open";
+  ms.emit("sourceopen");
+  const sink = await factory.create({ video, mimeType: 'video/mp4; codecs="avc1."' });
+
+  const first = sink.setInit(Uint8Array.from([1, 2, 3]));
+  let enq = sink.enqueue(1, Uint8Array.from([10]));
+  const sb = ms.sourceBuffers[0];
+  await settleAppend(sb);
+  await settleAppend(sb);
+  await enq;
+
+  const second = sink.setInit(Uint8Array.from([4, 5, 6]), { mimeType: 'video/mp4; codecs="avc1."' });
+  enq = sink.enqueue(2, Uint8Array.from([20]));
+  await settleAppend(sb);
+  await settleAppend(sb);
+  await enq;
+
+  assert.deepEqual(sb.records, [[1, 2, 3], [10], [4, 5, 6], [20]], "new init bytes re-appear before the next fragment");
+});
+
+test("setInit null clears the lane init expectation", async () => {
+  const { seams, ms, video } = hangar();
+  const factory = new MSEFactory(seams);
+  ms.readyState = "open";
+  ms.emit("sourceopen");
+  const sink = await factory.create({ video, mimeType: 'video/mp4; codecs="avc1."' });
+
+  sink.setInit(Uint8Array.from([9]));
+  sink.setInit(null, { mimeType: 'video/mp4; codecs="avc1."' });
+  const p = sink.enqueue(1, Uint8Array.from([1]));
+  const sb = ms.sourceBuffers[0];
+  await settleAppend(sb);
+  await p;
+  assert.deepEqual(sb.records, [[1]], "no init append after clearing");
+});
+
+test("separate mimeType lanes get their own init and ordering", async () => {
+  const { seams, ms, video } = hangar();
+  const factory = new MSEFactory(seams);
+  ms.readyState = "open";
+  ms.emit("sourceopen");
+  const sink = await factory.create({ video, mimeType: 'video/mp4; codecs="avc1."' });
+
+  sink.setInit(Uint8Array.from([11]), { mimeType: 'video/mp4; codecs="avc1."' });
+  sink.setInit(Uint8Array.from([22]), { mimeType: 'audio/mp4; codecs="mp4a.40.2"' });
+  const v = sink.enqueue(1, Uint8Array.from([1]), { mimeType: 'video/mp4; codecs="avc1."' });
+  const a = sink.enqueue(1, Uint8Array.from([2]), { mimeType: 'audio/mp4; codecs="mp4a.40.2"' });
+
+  const sbv = ms.sourceBuffers[0];
+  const sba = ms.sourceBuffers[1];
+  await settleAppend(sbv);
+  await settleAppend(sbv);
+  await v;
+  await settleAppend(sba);
+  await settleAppend(sba);
+  await a;
+
+  assert.deepEqual(sbv.records, [[11], [1]], "video lane: init then fragment");
+  assert.deepEqual(sba.records, [[22], [2]], "audio lane: its own init then fragment");
 });
 
 test("MSEFactory refuses a missing MediaSource seam", () => {

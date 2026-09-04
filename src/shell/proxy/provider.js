@@ -39,15 +39,22 @@ export class ProxyProvider {
   #nativeFetch = null;
   #gmAbort = null;
 
-  /** Fetch a single segment. Returns the provider chosen and the response. */
-  async fetch(uri, { signal, headers = {}, timeoutMs = 0 } = {}) {
-    logger.log("proxy", "provider", "fetch", uri, { timeoutMs });
+  /** Fetch a single segment. `byteRange` is `{start, end}` (inclusive) or a
+   *  `"start-end"` string; it becomes `Range: bytes=start-end`. Returns the
+   *  provider chosen and the response. */
+  async fetch(uri, { signal, headers = {}, timeoutMs = 0, byteRange = null } = {}) {
+    logger.log("proxy", "provider", "fetch", uri, { timeoutMs, byteRange });
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    const requestHeaders = { ...headers };
+    const rangeText = byteRange ? rangeHeaderValue(byteRange) : null;
+    if (rangeText) {
+      requestHeaders.Range = rangeText;
+    }
     if (this.#gmFetch) {
       try {
         return {
           via: "gm",
-          resp: await this.#gmRequest(uri, headers, signal, timeoutMs)
+          resp: await this.#gmRequest(uri, requestHeaders, signal, timeoutMs)
         };
       } catch (err) {
         // An aborted GM attempt must not spawn a fallback fetch; any other
@@ -56,7 +63,7 @@ export class ProxyProvider {
         logger.warn("proxy", "provider", "GM request failed, falling back to fetch", uri, err?.message ?? err);
       }
     }
-    return { via: "fetch", resp: await this.#fetchRequest(uri, headers, signal) };
+    return { via: "fetch", resp: await this.#fetchRequest(uri, requestHeaders, signal) };
   }
 
   #gmRequest(uri, headers, signal, timeoutMs) {
@@ -148,6 +155,22 @@ function headerObject(headers) {
   const obj = {};
   if (headers?.forEach) headers.forEach((v, k) => { obj[k] = v; });
   return obj;
+}
+
+/** `{start, end}` or `"start-end"` → HTTP `Range` header value, null when no
+ *  exact bytes are understood. */
+function rangeHeaderValue(range) {
+  if (range == null) {
+    return null;
+  }
+  if (typeof range === "string") {
+    const m = /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(range);
+    return m ? `bytes=${m[1]}-${m[2]}` : null;
+  }
+  if (typeof range === "object" && Number.isInteger(range.start) && Number.isInteger(range.end)) {
+    return `bytes=${range.start}-${range.end}`;
+  }
+  return null;
 }
 
 function toUint8(value) {

@@ -72,6 +72,12 @@ export class MediaSink {
   #destroyed = false;
   #ended = false;
   #lanes = new Map();
+  /** A fragment container needs its init segment ('ftyp'+'moov' for fMP4)
+   *  appended before the first media fragment on its SourceBuffer. Keyed by
+   *  mimeType; the value is the init byte payload (an opaque reference).
+   *  `setInit` with new bytes re-arms the lane so the next media append is
+   *  preceded by the fresh init (variant/codec switch re-init). */
+  #inits = new Map();
 
   get readyState() {
     return this.#mediaSource.readyState;
@@ -91,6 +97,25 @@ export class MediaSink {
     this.#mimeType = mimeType;
     this.#seams = seams;
     this.#onStateChange = onStateChange;
+  }
+
+  /**
+   * Declare a lane's init segment. `bytes` are appended immediately before
+   * the first media fragment on that lane (and again whenever the init
+   * changes). Setting null clears the lane's init expectation.
+   * @param {Uint8Array} bytes
+   * @param {object} [opts] { mimeType? } lane to target (default the sink's).
+   */
+  setInit(bytes, { mimeType = this.#mimeType } = {}) {
+    if (this.#destroyed) {
+      return;
+    }
+    if (bytes == null) {
+      this.#inits.delete(mimeType);
+    } else {
+      this.#inits.set(mimeType, bytes);
+    }
+    logger.log("proxy", "mse", "setInit", mimeType, bytes?.byteLength ?? bytes?.length ?? 0, "bytes");
   }
 
   /** Resolve once the MediaSource reports readyState "open" (or errors). */
@@ -114,11 +139,13 @@ export class MediaSink {
    * append lands (its `updateend` fired).
    * @param {number} seq     Segment sequence number (strictly ascending per lane).
    * @param {Uint8Array} bytes Cleartext bytes.
-   * @param {object} [opts]  { startTime?, endTime? } for appendWindow.
+   * @param {object} [opts]  { startTime?, endTime?, mimeType? } - mimeType
+   *                          selects a lane (audio/video SourceBuffers);
+   *                          default the sink's configured mimeType.
    */
-  async enqueue(seq, bytes, { startTime, endTime } = {}) {
+  async enqueue(seq, bytes, { startTime, endTime, mimeType = this.#mimeType } = {}) {
     if (this.#destroyed) throw new SegmentError("sink destroyed", { retryable: false });
-    const lane = this.#lane();
+    const lane = this.#lane(mimeType);
     const tail = lane.pending[lane.pending.length - 1];
     if (tail && seq <= tail.seq) {
       throw new SegmentError(
@@ -126,10 +153,24 @@ export class MediaSink {
         { retryable: false }
       );
     }
-    const task = { seq, bytes, startTime, endTime };
+    // A pending init for this lane goes in ahead of this media segment.
+    const init = this.#inits.get(mimeType);
+    const initTask =
+      init != null && lane.appliedInit !== init
+        ? { seq: -1, bytes: init, init: true, startTime: null, endTime: null }
+        : null;
+    if (initTask) {
+      lane.pending.push(initTask);
+      lane.appliedInit = init;
+    }
+    const task = { seq, bytes, startTime, endTime, init: false };
     lane.pending.push(task);
     logger.log("proxy", "mse", "enqueue", seq, bytes?.byteLength ?? bytes?.length ?? 0, "bytes");
-    const job = (lane.chain ?? Promise.resolve()).then(() => this.#append(lane, task));
+    const appends = initTask ? [initTask, task] : [task];
+    const job = appends.reduce(
+      (chain, t) => chain.then(() => this.#append(lane, t)),
+      lane.chain ?? Promise.resolve()
+    );
     lane.chain = job.catch(() => {}); // swallowed copy: lane errors surface to the enqueue's await
     await job;
   }
@@ -161,21 +202,21 @@ export class MediaSink {
     this.#onStateChange?.({ type: "destroyed" });
   }
 
-  #lane() {
-    let lane = this.#lanes.get(this.#mimeType);
+  #lane(mimeType = this.#mimeType) {
+    let lane = this.#lanes.get(mimeType);
     if (!lane) {
       let sourceBuffer;
       try {
-        sourceBuffer = this.#mediaSource.addSourceBuffer(this.#mimeType);
+        sourceBuffer = this.#mediaSource.addSourceBuffer(mimeType);
       } catch (err) {
-        logger.error("proxy", "mse", "addSourceBuffer failed", this.#mimeType, err?.message ?? err);
+        logger.error("proxy", "mse", "addSourceBuffer failed", mimeType, err?.message ?? err);
         throw new SegmentError(
-          `addSourceBuffer(${this.#mimeType}) failed: ${err?.message ?? err}`,
+          `addSourceBuffer(${mimeType}) failed: ${err?.message ?? err}`,
           { retryable: false }
         );
       }
-      lane = { sourceBuffer, pending: [], chain: null };
-      this.#lanes.set(this.#mimeType, lane);
+      lane = { mimeType, sourceBuffer, pending: [], chain: null, appliedInit: null };
+      this.#lanes.set(mimeType, lane);
     }
     return lane;
   }
@@ -191,7 +232,9 @@ export class MediaSink {
     for (;;) {
       if (this.#destroyed) return;
       try {
-        this.#setWindow(buffer, task);
+        if (!task.init) {
+          this.#setWindow(buffer, task);
+        }
         buffer.appendBuffer(task.bytes);
         break;
       } catch (err) {
@@ -204,9 +247,11 @@ export class MediaSink {
       }
     }
     await this.#waitUntilIdle(buffer);
-    this.#resetWindow(buffer, task);
-    logger.log("proxy", "mse", "appended", lastSeq);
-    this.#onStateChange?.({ type: "appended", seq: lastSeq });
+    if (!task.init) {
+      this.#resetWindow(buffer, task);
+      this.#onStateChange?.({ type: "appended", seq: lastSeq });
+    }
+    logger.log("proxy", "mse", task.init ? "init appended" : "appended", lastSeq);
   }
 
   async #waitUntilIdle(buffer) {

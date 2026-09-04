@@ -150,3 +150,27 @@ test("rewriteManifest+injectQueryParams compose to a tokenized route", () => {
   const out = rewriteManifest(hls, { armed: true, baseUrl: "https://cdn/pl.m3u8", rewriteUri: route });
   assert.equal(out, "#EXTM3U\n#EXTINF:4.0,\nseg-1.ts?md5=live&expires=1710000000\n#EXT-X-ENDLIST");
 });
+
+test("HLS: #EXT-X-MAP init URI rewrites through the segment pipe", () => {
+  const hls = '#EXTM3U\n#EXT-X-MAP:URI="main.mp4",BYTERANGE="720@0"\n#EXTINF:4.0,\n#EXT-X-BYTERANGE:720@720\nmain.mp4';
+  const out = rewriteManifest(hls, { armed: true, baseUrl: "https://cdn/v/pl.m3u8", rewriteUri: ROUTE });
+  assert.ok(out.includes('URI="pf://seg/main.mp4"'), out);
+  assert.ok(out.includes('BYTERANGE="720@0"'), "byte ranges ride along untouched");
+  assert.ok(out.includes("pf://seg/main.mp4"), "the media fragment still rewrites");
+});
+
+test("DASH: SegmentBase initialization and Initialization element rewrite, ranges stay", () => {
+  const mpd = '<MPD><SegmentBase indexRange="0-999" initialization="whole.mp4#0-999"><Initialization sourceURL="whole.mp4" range="0-999"/></SegmentBase></MPD>';
+  const out = rewriteManifest(mpd, { armed: true, baseUrl: "https://cdn/v/manifest.mpd", rewriteUri: ROUTE });
+  assert.ok(out.includes('initialization="pf://seg/whole.mp4#0-999"'), out);
+  assert.ok(out.includes('sourceURL="pf://seg/whole.mp4"'), out);
+  assert.ok(out.includes('range="0-999"'), "byte ranges are not URIs - left untouched");
+  assert.ok(out.includes('indexRange="0-999"'), out);
+});
+
+test("DASH: bare range-only initialization values are never rewritten", () => {
+  const mpd = '<MPD><SegmentBase indexRange="4-999" initialization="0-3"><Initialization sourceURL="init.mp4" range="0-3"/></SegmentBase></MPD>';
+  const out = rewriteManifest(mpd, { armed: true, baseUrl: "https://cdn/v/manifest.mpd", rewriteUri: ROUTE });
+  assert.ok(out.includes('initialization="0-3"'), "a pure byte-range value stays a byte range");
+  assert.ok(out.includes('sourceURL="pf://seg/init.mp4"'), out);
+});

@@ -88,7 +88,7 @@ function rewriteHls(text, scope, rewriteUri) {
   let changed = false;
   for (let i = 0; i < parts.length; i += 2) {
     const line = parts[i];
-    if (line.startsWith("#EXT-X-MEDIA")) {
+    if (line.startsWith("#EXT-X-MEDIA") || line.startsWith("#EXT-X-MAP")) {
       const next = rewriteMediaAttrs(line, scope, rewriteUri);
       if (next !== line) {
         changed = true;
@@ -127,9 +127,33 @@ function rewriteMediaAttrs(line, scope, rewriteUri) {
   });
 }
 
+/** Range-style values ("0-999") are byte offsets, not URIs - never rewrite
+ *  them, even when a template/init surface sits on the same tag. */
+function isByteRangeValue(value) {
+  return /^\s*\d+\s*-\s*\d+\s*$/.test(String(value ?? ""));
+}
+
+/** Rewrite one or more URL-ish attributes on a DASH tag (`sourceURL=`,
+ *  `initialization=`) while leaving range/hash-fragment-only values alone. */
+function rewriteDashUriAttrs(tagText, scope, rewriteUri, names) {
+  const nameList = Array.isArray(names) ? names : [names];
+  const re = new RegExp(`\\b(${nameList.join("|")})\\s*=\\s*"([^"]*)"`, "gi");
+  return tagText.replace(re, (match, name, value) => {
+    if (isByteRangeValue(value) || !isSegmentReference(value) || !scope(value)) {
+      return match;
+    }
+    const next = rewriteUri(value);
+    return next === value ? match : `${name}="${next}"`;
+  });
+}
+
 function rewriteMpd(text, scope, rewriteUri) {
   let out = text;
   out = out.replace(/<SegmentTemplate\b[^>]*>/g, (tag) => rewriteDashTemplateAttrs(tag, scope, rewriteUri));
+  out = out.replace(/<(SegmentBase|SegmentList)\b[^>]*\/?>/gi, (tag) =>
+    rewriteDashUriAttrs(tag, scope, rewriteUri, "initialization"));
+  out = out.replace(/<Initialization\b[^>]*\/?>/gi, (tag) =>
+    rewriteDashUriAttrs(tag, scope, rewriteUri, "sourceURL"));
   out = out.replace(/<BaseURL\s*>([^<]*)<\/BaseURL>/g, (match, inner) => {
     if (!inner) {
       return match;

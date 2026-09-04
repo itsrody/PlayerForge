@@ -71,6 +71,41 @@ test("GM is the primary transport; headers and binary payload survive", async ()
   assert.equal(calls[0].responseType, "arraybuffer");
 });
 
+test("byteRange param becomes a Range header on both GM and native paths", async () => {
+  const { gmFetch, calls } = fakeGMHarness();
+  const gmProvider = new ProxyProvider({ gmFetch, native: { fetch: async () => { throw new Error("unused"); } } });
+  await gmProvider.fetch("https://x/seg/1.m4s", { byteRange: { start: 720, end: 1439 } });
+  assert.equal(calls[0].headers.Range, "bytes=720-1439");
+
+  const nativeCalls = [];
+  const nativeProvider = new ProxyProvider({
+    native: {
+      fetch: async (uri, opts) => {
+        nativeCalls.push(opts);
+        return fakeFetchResponse({ status: 206 });
+      }
+    }
+  });
+  await nativeProvider.fetch("https://x/seg/2.m4s", { byteRange: "1200-1679" });
+  assert.equal(nativeCalls[0].headers.Range, "bytes=1200-1679");
+});
+
+test("operator-supplied Range header wins over no byteRange; byteRange overrides both cleanly", async () => {
+  const nativeCalls = [];
+  const provider = new ProxyProvider({
+    native: {
+      fetch: async (uri, opts) => {
+        nativeCalls.push(opts);
+        return fakeFetchResponse({ status: 206 });
+      }
+    }
+  });
+  await provider.fetch("https://x/seg/3.m4s", { headers: { Range: "bytes=0-9" } });
+  assert.equal(nativeCalls[0].headers.Range, "bytes=0-9", "caller headers still pass through");
+  await provider.fetch("https://x/seg/4.m4s", { byteRange: { start: 1, end: 2 } });
+  assert.equal(nativeCalls[1].headers.Range, "bytes=1-2");
+});
+
 test("GM wire failure falls back to native fetch", async () => {
   const { gmFetch } = fakeGMHarness({ behavior: "fail" });
   const provider = new ProxyProvider({
