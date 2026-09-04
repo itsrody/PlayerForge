@@ -633,7 +633,7 @@ export class SettingsPanel {
     for (const type of ["pointerdown", "pointerup", "click", "touchstart", "touchend"]) {
       this.#root.addEventListener(type, (event) => {
         event.stopPropagation();
-      }, { signal });
+      }, { signal, passive: true });
     }
 
     // Any fullscreen transition dismisses the panel; the shared transition
@@ -654,7 +654,7 @@ export class SettingsPanel {
         return;
       }
       this.close();
-    }, { signal, capture: true });
+    }, { signal, capture: true, passive: true });
 
     this.#tabList.addEventListener("keydown", (event) => {
       if (!TAB_NAV_KEYS.has(event.key)) {
