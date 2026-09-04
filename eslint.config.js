@@ -86,6 +86,7 @@ export default [
         CustomEvent: "readonly",
         Event: "readonly",
         EventTarget: "readonly",
+        DOMException: "readonly",
         MediaStream: "readonly",
         TextTrack: "readonly",
         TextTrackCue: "readonly",
