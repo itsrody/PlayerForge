@@ -109,7 +109,15 @@ if (typeof AbortSignal !== "undefined") {
   };
 }
 if (typeof globalThis.MediaMetadata === "undefined") {
-  globalThis.MediaMetadata = class MediaMetadata {};
+  // Constructor copies the init fields so tests can assert what the bridge put
+  // in OS metadata; the real API materializes them from the init dict too.
+  globalThis.MediaMetadata = class MediaMetadata {
+    constructor(init) {
+      if (init) {
+        Object.assign(this, init);
+      }
+    }
+  };
 }
 // Firefox's Vibration API - absent on Node. Stubbed so gestureHaptic's
 // feature-detect is true and tests can assert the haptic pulse pattern; the

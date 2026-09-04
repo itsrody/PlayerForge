@@ -373,9 +373,9 @@ export const CTX_REQUEST_TIMEOUT_MS = 3000;
  * route changes are reflected. Requests qualify when they originate from our
  * own origin or from one of this document's <iframe> descendants.
  *
- * The payload deliberately omits document.title: any embed in the page can
- * pass the frame-tree vouch, and the title is the one field with nothing to
- * offer resume matching (domain + path + duration drive identity). Domain
+ * The payload carries the (stripNonAscii'd) document.title: it feeds
+ * presentation surfaces - MediaSession OS metadata, resume, history - and
+ * never resume matching (domain + path + duration drive identity). Domain
  * and path stay because cross-origin players cannot function without them.
  */
 export function createTopFrameResponder(resolveContext, ownOrigin = location.origin, post = defaultPostToSource) {

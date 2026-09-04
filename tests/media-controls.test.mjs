@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { createMediaControls, claimMediaSession, MEDIA_SESSION_SYNC_EVENTS } from "../src/shell/media.js";
+import { CTX_RESPONSE_TYPE } from "../src/shared/context.js";
 
 function makeEnv(readyState = 0) {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", {
@@ -100,13 +101,29 @@ test("gating reads live readyState, not a snapshot at creation", async () => {
 
 function makeSession() {
   const positions = [];
-  return {
+  const metadatum = [];
+  const session = {
     positions,
+    metadatum,
     setActionHandler() {},
     setPositionState(state) {
       positions.push({ ...state });
     }
   };
+  // media.js assigns session.metadata (null on teardown); capture non-null
+  // writes so the title fix can be asserted instead of swallowed by a plain
+  // property.
+  Object.defineProperty(session, "metadata", {
+    get() {
+      return null;
+    },
+    set(value) {
+      if (value) {
+        metadatum.push(value);
+      }
+    }
+  });
+  return session;
 }
 
 test("MediaSession position state stays live off the media clock", async () => {
@@ -137,4 +154,61 @@ test("MediaSession position state stays live off the media clock", async () => {
 
   assert.equal(MEDIA_SESSION_SYNC_EVENTS.has("timeupdate"), true);
   scope.abort();
+});
+
+// jsdom's `window.top` is non-configurable, so an unreachable ancestor is
+// simulated with a Proxy whose `top` exposes only an unreadable location
+// (SecurityError), exactly like a cross-origin top from inside a frame.
+const crossOriginFrame = (win) => new Proxy(win, {
+  get(target, prop, receiver) {
+    if (prop === "top") {
+      const opaque = {};
+      Object.defineProperty(opaque, "location", {
+        get() {
+          const err = new Error("cross-origin top");
+          err.name = "SecurityError";
+          throw err;
+        }
+      });
+      return opaque;
+    }
+    return Reflect.get(target, prop, receiver);
+  }
+});
+
+test("MediaSession metadata title resolves to the parent-page title via the frame bridge", async () => {
+  const { dom, video, controls } = makeEnv(4);
+  Object.defineProperty(video, "duration", { value: 120, configurable: true });
+  dom.window.document.title = "embed frame title";
+
+  const session = makeSession();
+  // jsdom rejects AbortSignals from the Node realm; lend the DOM realm's.
+  globalThis.AbortController = dom.window.AbortController;
+  globalThis.window = crossOriginFrame(dom.window);
+  globalThis.location = dom.window.location;
+  globalThis.document = dom.window.document;
+  const scope = new AbortController();
+
+  let nonce = null;
+  const originalPost = dom.window.parent.postMessage.bind(dom.window.parent);
+  dom.window.parent.postMessage = (msg) => { nonce = msg.nonce; };
+  try {
+    claimMediaSession({ controls, video, signal: scope.signal, session });
+
+    // Instant sync placeholder: this window's own title until the bridge settles.
+    assert.equal(session.metadatum.at(-1).title, "embed frame title");
+
+    dom.window.dispatchEvent(new dom.window.MessageEvent("message", {
+      data: { type: CTX_RESPONSE_TYPE, nonce, domain: "hub", path: "/embed/1", title: "Parent Page" },
+      origin: "https://hub.test",
+      source: dom.window.parent
+    }));
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(session.metadatum.length, 2, "placeholder then bridged parent title - never clobbered");
+    assert.equal(session.metadatum.at(-1).title, "Parent Page", "parent-page title wins over the embed's own");
+  } finally {
+    dom.window.parent.postMessage = originalPost;
+    scope.abort();
+  }
 });

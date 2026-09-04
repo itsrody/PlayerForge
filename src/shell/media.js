@@ -1,5 +1,6 @@
 import { logger } from "../shared/logger.js";
 import { clamp } from "../shared/clamp.js";
+import { getPageContext } from "../shared/context.js";
 
 /** Volume delta applied by nudgeVolume, shared with UI feedback layers. */
 export const VOLUME_STEP = 0.1;
@@ -169,21 +170,23 @@ let sessionOwner = null;
 /**
  * Rich metadata for OS media surfaces: page title, host as artist, poster as
  * artwork. Returns null when there is nothing to show or the poster URL is
- * malformed.
+ * malformed. `title` is passed in rather than read from `document` so the
+ * caller can supply the resolved page-context title (parent webpage for
+ * embedded players) instead of this window's own title.
  */
-function buildSessionMetadata(video) {
+function buildSessionMetadata(video, title) {
   let artwork;
   try {
     artwork = video.poster ? [{ src: new URL(video.poster, location.href).href }] : [];
   } catch {
     artwork = [];
   }
-  const title = document.title?.trim();
-  if (!title && !artwork.length) {
+  const clean = title?.trim();
+  if (!clean && !artwork.length) {
     return null;
   }
   return new MediaMetadata({
-    title: title || undefined,
+    title: clean || undefined,
     artist: location.hostname || undefined,
     artwork
   });
@@ -212,6 +215,10 @@ class MediaSessionBridge {
   #controls;
   #video;
   #destroyed = false;
+  /** Resolved page-context title (parent webpage for embeds); wins over the
+   *  window's own document.title once it lands, and is never clobbered by a
+   *  later loadedmetadata refresh. */
+  #contextTitle = null;
 
   constructor(session, controls, video) {
     this.#session = session;
@@ -242,7 +249,16 @@ class MediaSessionBridge {
     this.sync();
     // Posters often arrive with metadata; refresh once it exists.
     this.#video.addEventListener("loadedmetadata", () => this.#refreshMetadata(), { signal });
+    // Instant sync placeholder: our own document.title wins until the page
+    // context (parent webpage title for embedded players) resolves, then the
+    // OS surfaces switch to the parent-page title just after attach.
     this.#refreshMetadata();
+    getPageContext().then((context) => {
+      if (typeof context?.title === "string") {
+        this.#contextTitle = context.title;
+        this.#refreshMetadata(this.#contextTitle);
+      }
+    }).catch(() => {});
     signal.addEventListener("abort", () => this.destroy(), { once: true });
     logger.log("media", "MediaSession claimed - handlers registered");
   }
@@ -289,12 +305,13 @@ class MediaSessionBridge {
     logger.log("media", "MediaSession released");
   }
 
-  #refreshMetadata() {
+  #refreshMetadata(title) {
     if (this.#destroyed) {
       return;
     }
     try {
-      this.#session.metadata = buildSessionMetadata(this.#video);
+      const clean = this.#contextTitle ?? (typeof title === "string" ? title.trim() : document.title.trim());
+      this.#session.metadata = buildSessionMetadata(this.#video, clean);
     } catch {}
   }
 }
