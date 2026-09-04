@@ -32,6 +32,28 @@ function matchPreset(values) {
   return "Custom";
 }
 
+/** Read persisted filter values into a fresh object, defaulting each key. */
+function readValuesFromConfig() {
+  const values = { ...DEFAULTS };
+  for (const key of ALL_KEYS) {
+    const def = DEFAULTS[key];
+    const raw = getConfigValue(`${CONFIG_PREFIX}.${key}`, def);
+    values[key] = typeof def === "number" ? (Number(raw) || def) : (raw ?? def);
+  }
+  return values;
+}
+
+/** Eagerly re-apply a persisted color filter to a video, with no panel/UI
+ *  dependency. Lets the shell boot with the saved look already live instead
+ *  of waiting for the settings panel's first open (the VideoFilter is built
+ *  lazily in the panel section builder). */
+export function applyPersistedVideoFilter(video) {
+  if (!video) {
+    return;
+  }
+  video.style.filter = buildFilterString(readValuesFromConfig());
+}
+
 function buildFilterString(values) {
   const parts = [];
   const tempHue = (Number(values.temperature) || 0) * 0.3;
@@ -166,11 +188,7 @@ export class VideoFilter {
   }
 
   #loadFromConfig() {
-    for (const key of ALL_KEYS) {
-      const def = DEFAULTS[key];
-      const raw = getConfigValue(`${CONFIG_PREFIX}.${key}`, def);
-      this.#values[key] = typeof def === "number" ? (Number(raw) || def) : (raw ?? def);
-    }
+    this.#values = readValuesFromConfig();
     for (const key of ALL_KEYS) {
       this.#steppers[key]?.setValue(this.#values[key]);
     }

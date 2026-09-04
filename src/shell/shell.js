@@ -4,7 +4,7 @@ import { InputForge } from "./inputs/forge.js";
 import { attachInputActions } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
 import { SubtitlesSection } from "./subtitles/section.js";
-import { VideoFilter } from "./filter.js";
+import { VideoFilter, applyPersistedVideoFilter } from "./filter.js";
 import { SettingsPanel } from "./chrome/panel.js";
 import { addSettingsSection, getSetting, onSettingChange } from "./chrome/config.js";
 import { TUNING } from "../shared/tuning.js";
@@ -66,6 +66,11 @@ export class Shell {
     // scheduler.yield() is native in Firefox 142+ (baseline 155), so the
     // prioritized continuation keeps the shell ahead of competing page tasks.
     await scheduler.yield();
+
+    // Re-apply the persisted color filter immediately so a saved look is live
+    // as soon as the shell boots - the VideoFilter panel section is built
+    // lazily on first open and must not gate the video's appearance.
+    applyPersistedVideoFilter(this.video);
 
     this.#panel = new SettingsPanel(this);
     this.#toasts = new ToastManager(this.#shellDom.hudLayer);

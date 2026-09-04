@@ -6,7 +6,7 @@ globalThis.GM_getValue = (key, fallback) => writes[key] ?? fallback;
 globalThis.GM_setValue = (key, value) => { writes[key] = value; };
 globalThis.GM_addValueChangeListener = () => {};
 
-const { VideoFilter } = await import("../src/shell/filter.js");
+const { VideoFilter, applyPersistedVideoFilter } = await import("../src/shell/filter.js");
 const { invalidateConfigCache } = await import("../src/shared/storage.js");
 
 function makeFakeVideo() {
@@ -89,6 +89,22 @@ test("applies default filter as 'none'", () => {
   const panel = makeFakePanel();
   new VideoFilter(makeFakeShell(video), panel);
   assert.equal(video.style.filter, "none");
+});
+
+test("applyPersistedVideoFilter applies a saved filter without any panel", () => {
+  cleanWrites();
+  writes["pf:configs"] = { filter: { brightness: 150, contrast: 130, saturate: 120 } };
+  invalidateConfigCache();
+  const video = makeFakeVideo();
+  applyPersistedVideoFilter(video);
+  assert.ok(video.style.filter.includes("brightness(150%)"), `got "${video.style.filter}"`);
+  assert.ok(video.style.filter.includes("contrast(130%)"), `got "${video.style.filter}"`);
+  assert.ok(video.style.filter.includes("saturate(120%)"), `got "${video.style.filter}"`);
+});
+
+test("applyPersistedVideoFilter is a no-op on a missing video", () => {
+  cleanWrites();
+  assert.doesNotThrow(() => applyPersistedVideoFilter(null));
 });
 
 test("creates Color section with 9 steppers and 1 select", () => {
