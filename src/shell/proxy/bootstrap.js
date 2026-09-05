@@ -41,9 +41,11 @@ export function isManifestUrl(url) {
 }
 
 /**
- * Install the observe-only seams for a debug session. Returns a summary:
- * { enabled, observe, fetch, xhr, mp4 }. When `debugOn` is false nothing is
- * touched and the returned summary says `{ enabled: false }`.
+ * Install the observe-only seams for a debug session. Returns
+ * `{ summary, router }` where `summary` is `{ enabled, observe, fetch, xhr,
+ * mp4 }` and `router` is the shared Mp4Router (used by the element-level src
+ * seam in addition to fetch/XHR routing). When `debugOn` is false nothing is
+ * touched and the returned summary says `{ enabled: false }` with a null router.
  *
  * @param {object}   [env]
  * @param {boolean}  [env.debugOn=false]      caller decides (hash / stored toggle).
@@ -73,7 +75,7 @@ export function installProxyDebug({
   provider = null
 } = {}) {
   if (!debugOn) {
-    return { enabled: false };
+    return { summary: { enabled: false }, router: null };
   }
 
   const gate = new Gate({ enabled: false });
@@ -159,5 +161,5 @@ export function installProxyDebug({
   // proving the new build is loaded and which seams are live - the first thing
   // to look for when no breadcrumbs appear.
   logger.warn("proxy", "bootstrap", "debug seams installed", summary);
-  return summary;
+  return { summary, router };
 }

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ProxyProvider } from "../src/shell/proxy/provider.js";
+import { logger } from "../src/shared/logger.js";
 
 function fakeFetchResponse({ status = 200, headers = new Map([["content-type", "video/mp4"]]), body = Uint8Array.from([1, 2, 3]) } = {}) {
   return {
@@ -171,6 +172,61 @@ test("aborting mid-GM cancels the request and never spawns a fallback fetch", as
   controller.abort();
   await assert.rejects(pending, (err) => err?.name === "AbortError");
   assert.equal(aborted.length, 1, "the GM request was told to abort");
+});
+
+test("GM whole-file progress is logged at the first byte and once per 64MiB", async () => {
+  const lines = [];
+  const realLog = console.log;
+  console.log = (...args) => lines.push(args);
+  logger.enable();
+  try {
+    const mb = 1024 * 1024;
+    const gmFetch = (req, callbacks) => {
+      callbacks.onprogress({ loaded: 1024, total: 256 * mb });
+      callbacks.onprogress({ loaded: 64 * mb + 2048, total: 256 * mb });
+      callbacks.onprogress({ loaded: 64 * mb + 2053, total: 256 * mb });
+      callbacks.onprogress({ loaded: 128 * mb + 2048, total: 256 * mb });
+      setImmediate(() => callbacks.onload?.({ status: 200, responseHeaders: "", response: new Uint8Array(0) }));
+      return { abort() {} };
+    };
+    const provider = new ProxyProvider({ gmFetch, native: { fetch: async () => { throw new Error("unused"); } } });
+    const { via, resp } = await provider.fetch("https://x/big.mp4");
+    assert.equal(via, "gm");
+    assert.equal(resp.status, 200);
+    const progress = [];
+    for (const args of lines) {
+      const gi = args.indexOf("GM progress");
+      if (gi > 0) {
+        progress.push({ uri: String(args[gi + 1]), text: String(args[gi + 2]) });
+      }
+    }
+    assert.equal(progress.length, 3, "first byte, 64MiB and 128MiB steps only - sub-step deltas stay silent");
+    assert.equal(progress[0].uri, "https://x/big.mp4", "first progress reports the uri");
+    assert.match(progress[0].text, /0MiB of 256MiB/);
+    assert.match(progress[1].text, /64MiB of 256MiB/);
+    assert.match(progress[2].text, /128MiB of 256MiB/);
+  } finally {
+    console.log = realLog;
+    logger.disable();
+  }
+});
+
+test("onProgress forwards GM progress to the caller (oversize railway)", async () => {
+  const seen = [];
+  const gmFetch = (req, callbacks) => {
+    setImmediate(() => {
+      callbacks.onprogress?.({ loaded: 1024, total: 4096 });
+      callbacks.onprogress?.({ loaded: 2048, total: 4096 });
+      callbacks.onload?.({ status: 200, responseHeaders: "", response: new Uint8Array(0) });
+    });
+    return { abort() {} };
+  };
+  const provider = new ProxyProvider({ gmFetch, native: { fetch: async () => { throw new Error("unused"); } } });
+  await provider.fetch("https://x/big.mp4", { onProgress: (ev) => seen.push(ev) });
+  assert.deepEqual(seen, [
+    { loaded: 1024, total: 4096 },
+    { loaded: 2048, total: 4096 }
+  ]);
 });
 
 test("constructor refuses a broken native fetch seam", () => {

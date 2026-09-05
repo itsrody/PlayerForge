@@ -10,6 +10,7 @@ import { KEYS, getConfigValue, setConfigValue, deleteConfigField } from "./share
 import { initFullscreenGate } from "./shared/shadow.js";
 import { DEBUG_LOGS_KEY } from "./kernel/contract.js";
 import { installProxyDebug } from "./shell/proxy/bootstrap.js";
+import { routeProgressiveSource, disposeElementSource } from "./shell/proxy/element-route.js";
 import { ProxyProvider } from "./shell/proxy/provider.js";
 import { getSetting } from "./shell/chrome/config.js";
 
@@ -46,7 +47,7 @@ function bootstrap() {
     logger.enable();
   }
   const inTopFrame = window.top === window;
-  installProxyDebug({
+  const { router } = installProxyDebug({
     debugOn: proxyDebugOn,
     role: inTopFrame ? "top" : "frame",
     gmWebRequest: inTopFrame && typeof GM_webRequest === "function" ? GM_webRequest : null,
@@ -91,6 +92,24 @@ function bootstrap() {
     }
     kernel.onShellCreated((shell) => {
       logger.log("entry", `Shell ready: ${shell.sdk.name}`);
+      // Element-level progressive MP4 routing: a player that assigns the media
+      // URL straight to video.src (StreamTape-style) bypasses fetch/XHR, so the
+      // proxy could never be its initiator. The seam routes the src through the
+      // shared Mp4Router and swaps it to an object URL over the proxied bytes;
+      // any refusal keeps the native wire. Re-checked after the shell finishes
+      // booting (players that set src lazily) - routing is idempotent, a
+      // blob: src or an in-flight/past route is skipped. The object URL is
+      // revoked when the shell tears down.
+      const routeSrc = () => {
+        if (router) {
+          routeProgressiveSource({ video: shell.video, router, getSetting });
+        }
+      };
+      routeSrc();
+      shell.ready
+        .then(routeSrc)
+        .catch((err) => logger.warn("entry", "Shell ready rejected", err?.message ?? err));
+      shell.dom?.onCleanup?.(() => disposeElementSource(shell.video));
       // Nested embeds can silently lose fullscreen (browsers require
       // allowfullscreen on every ancestor iframe). A shell in a
       // frame pushes a provisioning request up the chain so our SDK's own

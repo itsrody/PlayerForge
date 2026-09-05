@@ -24,21 +24,22 @@ test("isManifestUrl matches .m3u8/.mpd with query/fragment tails", () => {
 
 test("installProxyDebug touches nothing when debug is off", () => {
   const calls = [];
-  const summary = installProxyDebug({
+  const installed = installProxyDebug({
     debugOn: false,
     gmWebRequest: () => calls.push("gm"),
     fetch: () => calls.push("fetch"),
     installFetch: () => calls.push("install"),
     xhrPrototype: {}
   });
-  assert.deepEqual(summary, { enabled: false });
+  assert.deepEqual(installed.summary, { enabled: false });
+  assert.equal(installed.router, null);
   assert.deepEqual(calls, []);
 });
 
 test("installProxyDebug frame role skips GM_webRequest but keeps interpose layers", () => {
   const registerCalls = [];
   let installedFetch = null;
-  const summary = installProxyDebug({
+  const installed = installProxyDebug({
     debugOn: true,
     role: "frame",
     gmWebRequest: (rules) => registerCalls.push(rules),
@@ -46,7 +47,8 @@ test("installProxyDebug frame role skips GM_webRequest but keeps interpose layer
     installFetch: (wrapped) => { installedFetch = wrapped; },
     xhrPrototype: { send() {} }
   });
-  assert.deepEqual(summary, { enabled: true, role: "frame", observe: false, fetch: true, xhr: true, mp4: { route: true } });
+  assert.deepEqual(installed.summary, { enabled: true, role: "frame", observe: false, fetch: true, xhr: true, mp4: { route: true } });
+  assert.ok(installed.router, "a frame also gets the shared router for element-level src routing");
   assert.deepEqual(registerCalls, [], "frame instance must not register tab-level rules");
   assert.equal(typeof installedFetch, "function", "frame interposes its own fetch/XHR surface");
 });
@@ -58,7 +60,7 @@ test("installProxyDebug wires observe + fetch + xhr with the gate disabled (byte
   let installedFetch = null;
   const proto = { send() {} };
 
-  const summary = installProxyDebug({
+  const installed = installProxyDebug({
     debugOn: true,
     gmWebRequest: (rules, listener) => {
       ruleCalls.push(rules);
@@ -68,7 +70,8 @@ test("installProxyDebug wires observe + fetch + xhr with the gate disabled (byte
     installFetch: (wrapped) => { installedFetch = wrapped; },
     xhrPrototype: proto
   });
-  assert.deepEqual(summary, { enabled: true, role: "top", observe: true, fetch: true, xhr: true, mp4: { route: true } });
+  assert.deepEqual(installed.summary, { enabled: true, role: "top", observe: true, fetch: true, xhr: true, mp4: { route: true } });
+  assert.ok(installed.router, "the shared Mp4Router is exposed for the element-level seam");
   assert.equal(ruleCalls.length, 1, "GM_webRequest registered once");
   assert.ok(ruleCalls[0][0].selector.include.some((p) => p.includes("m3u8")));
   const out = await installedFetch("https://cdn.example/master.m3u8");
@@ -90,27 +93,28 @@ test("installProxyDebug passes manifest responses through byte-identically when 
 
 test("installProxyDebug feature-detects a missing GM_webRequest but keeps interpose layers", () => {
   let installedFetch = null;
-  const summary = installProxyDebug({
+  const installed = installProxyDebug({
     debugOn: true,
     fetch: async () => new Response(M3U8),
     installFetch: (wrapped) => { installedFetch = wrapped; },
     xhrPrototype: { send() {} }
   });
-  assert.equal(summary.observe, false);
-  assert.equal(summary.fetch, true);
-  assert.equal(summary.xhr, true);
+  assert.equal(installed.summary.observe, false);
+  assert.equal(installed.summary.fetch, true);
+  assert.equal(installed.summary.xhr, true);
   assert.equal(typeof installedFetch, "function");
-  assert.equal(summary.role, "top");
+  assert.equal(installed.summary.role, "top");
 });
 
 test("installProxyDebug degrades gracefully with missing fetch/xhr seams", () => {
-  const summary = installProxyDebug({
+  const installed = installProxyDebug({
     debugOn: true,
     gmWebRequest: () => {},
     fetch: null,
     xhrPrototype: null
   });
-  assert.deepEqual(summary, { enabled: true, role: "top", observe: true, fetch: false, xhr: false, mp4: { route: false } });
+  assert.deepEqual(installed.summary, { enabled: true, role: "top", observe: true, fetch: false, xhr: false, mp4: { route: false } });
+  assert.equal(installed.router, null);
 });
 
 test("installProxyDebug rewrites xhr manifest text through the wrapped prototype", () => {

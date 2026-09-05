@@ -118,11 +118,11 @@ export class Mp4Router {
     this.#onRoute = onRoute;
   }
 
-  async routeRequest(url, { byContent = false } = {}) {
+  async routeRequest(url, { byContent = false, signal = null, onProgress = null } = {}) {
     if ((!byContent && !isMp4StreamUrl(url)) || !this.#enabledFor(url)) {
       return null;
     }
-    return this.#route(url);
+    return this.#route(url, 0, signal, onProgress);
   }
 
   /** Content-type-armed route: URL shape is not required, the caller already
@@ -131,11 +131,14 @@ export class Mp4Router {
     return this.routeRequest(url, { byContent: true });
   }
 
-  async #route(url, hops = 0) {
+  async #route(url, hops = 0, signal = null, onProgress = null) {
     let resp;
     try {
-      ({ resp } = await this.#provider.fetch(url));
+      ({ resp } = await this.#provider.fetch(url, { signal, onProgress }));
     } catch (err) {
+      if (err?.name === "AbortError") {
+        return null;
+      }
       logger.warn("proxy", "mp4", "route request failed, keeping native wire", url, err?.message ?? err);
       return null;
     }
@@ -159,7 +162,7 @@ export class Mp4Router {
         return null;
       }
       logger.warn("proxy", "mp4", "route redirect", url, resp.status, "->", next);
-      return this.#route(next, hops + 1);
+      return this.#route(next, hops + 1, signal, onProgress);
     }
     if (!(resp.status >= 200 && resp.status < 300)) {
       logger.warn("proxy", "mp4", "route request not ok, keeping native wire", url, resp?.status);

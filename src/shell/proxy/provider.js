@@ -15,6 +15,11 @@
 import { logger } from "../../shared/logger.js";
 import { SegmentError } from "./segment-manager.js";
 
+/** Cadence for whole-file progress breadcrumbs: log the first byte and then
+ *  once per 64MiB, so a multi-minute movie download stays audible in the
+ *  console without flooding it. */
+const PROGRESS_LOG_STEP = 64 * 1024 * 1024;
+
 export class ProxyProvider {
   /**
    * @param {object} [env] injectable runtime seams (tests replace these):
@@ -41,8 +46,10 @@ export class ProxyProvider {
 
   /** Fetch a single segment. `byteRange` is `{start, end}` (inclusive) or a
    *  `"start-end"` string; it becomes `Range: bytes=start-end`. Returns the
-   *  provider chosen and the response. */
-  async fetch(uri, { signal, headers = {}, timeoutMs = 0, byteRange = null } = {}) {
+   *  provider chosen and the response. `onProgress` (optional) receives
+   *  `{ loaded, total }` as bytes arrive - the caller's abort railway for
+   *  oversized whole-file routes. */
+  async fetch(uri, { signal, headers = {}, timeoutMs = 0, byteRange = null, onProgress = null } = {}) {
     logger.log("proxy", "provider", "fetch", uri, { timeoutMs, byteRange });
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     const requestHeaders = { ...headers };
@@ -54,7 +61,7 @@ export class ProxyProvider {
       try {
         return {
           via: "gm",
-          resp: await this.#gmRequest(uri, requestHeaders, signal, timeoutMs)
+          resp: await this.#gmRequest(uri, requestHeaders, signal, timeoutMs, onProgress)
         };
       } catch (err) {
         // An aborted GM attempt must not spawn a fallback fetch; any other
@@ -66,13 +73,30 @@ export class ProxyProvider {
     return { via: "fetch", resp: await this.#fetchRequest(uri, requestHeaders, signal) };
   }
 
-  #gmRequest(uri, headers, signal, timeoutMs) {
+  #gmRequest(uri, headers, signal, timeoutMs, onProgress) {
     return new Promise((resolve, reject) => {
       let settled = false;
+      // Whole-file progressive MP4 downloads can run for minutes; report
+      // download progress at a bounded cadence so the wait is visible and a
+      // doggedly-slow CDN is distinguishable from a dead pipe.
+      let lastProgressBytes = 0;
       const callbacks = {
         onabort: () => reject(new DOMException("Aborted", "AbortError")),
         onerror: (e) => reject(new SegmentError(`GM request failed: ${e?.error ?? e}`, { status: 0 })),
         ontimeout: () => reject(new SegmentError("GM request timed out", { status: 0 })),
+        onprogress: (ev) => {
+          const loaded = Number(ev?.loaded ?? 0);
+          const total = Number(ev?.total ?? 0);
+          onProgress?.({ loaded, total });
+          const first = lastProgressBytes === 0 && loaded > 0;
+          if (!first && loaded - lastProgressBytes < PROGRESS_LOG_STEP) {
+            return;
+          }
+          lastProgressBytes = loaded;
+          const mb = Math.round(loaded / (1024 * 1024));
+          const size = total > 0 ? ` of ${Math.round(total / (1024 * 1024))}MiB` : "";
+          logger.log("proxy", "provider", "GM progress", uri, `${mb}MiB${size}`);
+        },
         onload: (res) => {
           if (settled) return;
           settle();

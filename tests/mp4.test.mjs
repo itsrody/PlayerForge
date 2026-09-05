@@ -156,6 +156,25 @@ test("Mp4Router.routeRequest stays on the native wire when declined or failed", 
   assert.equal(await nonOk.routeRequest(GET_VIDEO_URL), null, "a non-2xx keeps the wire");
 });
 
+test("routeRequest threads an abort signal and progress railway into the provider", async () => {
+  const seen = [];
+  const router = new Mp4Router({
+    provider: {
+      fetch: async (url, opts) => {
+        seen.push(opts);
+        return { via: "gm", resp: { status: 200, headers: {}, body: new Uint8Array([1, 2]) } };
+      }
+    },
+    enabledFor: () => true
+  });
+  const signal = new AbortController().signal;
+  const onProgress = () => {};
+  const out = await router.routeRequest("https://x/MOVIE.mp4", { signal, onProgress });
+  assert.ok(out, "routed normally");
+  assert.equal(seen[0].signal, signal, "the caller's signal reaches the wire");
+  assert.equal(seen[0].onProgress, onProgress, "the caller's progress railway reaches the wire");
+});
+
 test("interposed fetch routes an MP4 fetch through the wire before the page fetch", async () => {
   const routed = [];
   const wrapper = interposeFetch({
