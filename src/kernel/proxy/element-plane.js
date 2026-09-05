@@ -37,6 +37,10 @@ import { MSEFactory, Aes128Decrypter, ClearKeyEme } from "./decrypt-eme.js";
 
 const FALLBACK_BASE = "https://nowhere.invalid/";
 
+/** True for an http(s)-schemed src. Hoisted - a regex literal in `streamable`
+ *  would re-allocate per whole-file route attempt. */
+const STREAM_SCHEME_RE = /^https?:/i;
+
 /** Ceiling for a whole-file element route. Bigger than this and the download
  *  would hog GBs in a single GM arraybuffer (a 4K movie silently balloons past
  *  every browser's comfort zone); the seam instead aborts the proxied GET and
@@ -189,7 +193,7 @@ function resolveSrcUrl(video, baseUrl) {
 /** Only http(s) srcs are routable; blob:/data: the page already owns bytes
  *  for (a cleared native wire is a frozen wire). */
 function streamable(url) {
-  return /^https?:/i.test(String(url ?? ""));
+  return STREAM_SCHEME_RE.test(String(url ?? ""));
 }
 
 /**

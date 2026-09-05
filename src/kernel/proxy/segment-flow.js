@@ -595,7 +595,7 @@ function resolveManifestRef(baseUrl, uri) {
   if (!ref) {
     return ref;
   }
-  if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(ref)) {
+  if (ABSOLUTE_REF_RE.test(ref)) {
     return ref;
   }
   if (!baseUrl) {
@@ -686,6 +686,11 @@ function parseHlsAttrs(input) {
 const XML_ATTR_RE = /([A-Za-z_:][\w:.-]*)\s*=\s*"([^"]*)"|([A-Za-z_:][\w:.-]*)\s*=\s*'([^']*)'/g;
 const TAG_TAIL_SLASH_RE = /\/\s*$/;
 const XML_WS_RE = /\s/;
+
+/** Absolute-scheme media refs (or a `//` authority) need no base resolution.
+ *  Hoisted - a regex literal in `resolveManifestRef` would re-allocate per
+ *  segment/media reference the parser walks. */
+const ABSOLUTE_REF_RE = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
 
 function parseXmlAttrs(input) {
   const out = new Map();

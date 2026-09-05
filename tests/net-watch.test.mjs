@@ -220,6 +220,57 @@ test("netSight ignores nameless or non-string entries", async () => {
   off();
 });
 
+test("a throwing subscriber cannot starve a sibling of the same batch", async () => {
+  const seen = [];
+  const offBoom = onNetEvents(() => {
+    throw new Error("boom");
+  });
+  const offOk = onNetEvents((entries) => seen.push(entries.map((entry) => entry.name)));
+  const observer = observerInstances.at(-1);
+
+  observer.fire([mediaEntry(MP4_URL), { name: "https://x/track.m3u8", initiatorType: "script" }]);
+  await tick();
+
+  assert.equal(seen.length, 1, "the healthy subscriber still received its batch");
+  assert.deepEqual(seen[0], [MP4_URL, "https://x/track.m3u8"], "the whole batch survived the faulting interest");
+  offBoom();
+  offOk();
+});
+
+test("a throwing filter cannot starve a sibling of the same batch either", async () => {
+  const seen = [];
+  const offBoom = onNetEvents(() => {}, { filter: () => { throw new Error("filter boom"); } });
+  const offOk = onNetEvents((entries) => seen.push(entries.map((entry) => entry.name)));
+  const observer = observerInstances.at(-1);
+
+  observer.fire([mediaEntry(MP4_URL), { name: "https://x/track.m3u8", initiatorType: "script" }]);
+  await tick();
+
+  assert.equal(seen.length, 1, "a filtered subscriber starving on its own filter leaves the batch intact");
+  assert.deepEqual(seen[0], [MP4_URL, "https://x/track.m3u8"], "the sibling interest still received every entry");
+  offBoom();
+  offOk();
+});
+
+test("a throwing subscriber does not abort the feed for later batches", async () => {
+  const seen = [];
+  const offBoom = onNetEvents(() => {
+    throw new Error("boom");
+  });
+  const offOk = onNetEvents((entries) => seen.push(entries.map((entry) => entry.name)));
+  const observer = observerInstances.at(-1);
+
+  observer.fire([mediaEntry(MP4_URL)]);
+  await tick();
+  observer.fire([mediaEntry("https://x/again.mp4")]);
+  await tick();
+
+  assert.equal(seen.length, 2, "the faulting interest only skips its own delivery, not the feed's cadence");
+  assert.deepEqual(seen, [[MP4_URL], ["https://x/again.mp4"]]);
+  offBoom();
+  offOk();
+});
+
 test("a teardown before a queued flush never hands the re-armed feed an empty batch", async () => {
   const off = onNetEvents(() => {});
   const observer = observerInstances.at(-1);

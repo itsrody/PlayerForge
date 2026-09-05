@@ -173,6 +173,21 @@ test("object-URL and MSE glue is invoked unguarded (no cross-browser fallbacks)"
   );
 });
 
+test("proxy media URL/reference regexes are hoisted (no per-call allocation)", () => {
+  assert.match(elementPlaneSrc, /const STREAM_SCHEME_RE = \/\^https\?:\/i/, "element routes test the hoisted scheme regex");
+  assert.doesNotMatch(
+    elementPlaneSrc,
+    /return \/\^https\?:\/i/,
+    "streamable no longer allocates a regex per whole-file route attempt"
+  );
+  assert.match(segmentFlowSrc, /const ABSOLUTE_REF_RE = \/\^/, "parse refs test the hoisted absolute-scheme regex");
+  assert.doesNotMatch(
+    segmentFlowSrc,
+    /if \(\/\^/,
+    "resolveManifestRef no longer allocates a regex per media/segment reference"
+  );
+});
+
 test("unified net-watch feed is a live unguarded PerformanceObserver, not a buffer replay", () => {
   assert.match(netWatchSrc, /new ObserverClass\(/, "the feed constructs the FF-native PerformanceObserver");
   assert.match(netWatchSrc, /type:\s*"resource"/, "the feed observes resource entries");

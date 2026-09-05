@@ -106,20 +106,30 @@ function flush() {
   }
   for (const subscriber of subscribers) {
     const handler = subscriber.handler;
-    if (!subscriber.filter) {
-      handler(entries);
-      continue;
-    }
-    // Lazy batch: the filtered array is only allocated when something matches,
-    // so a high-churn resource feed allocates nothing for non-media entries.
-    let matched = null;
-    for (const entry of entries) {
-      if (subscriber.filter(entry)) {
-        (matched ??= []).push(entry);
+    try {
+      if (!subscriber.filter) {
+        handler(entries);
+        continue;
       }
-    }
-    if (matched) {
-      handler(matched);
+      // Lazy batch: the filtered array is only allocated when something matches,
+      // so a high-churn resource feed allocates nothing for non-media entries.
+      let matched = null;
+      for (const entry of entries) {
+        if (subscriber.filter(entry)) {
+          (matched ??= []).push(entry);
+        }
+      }
+      if (matched) {
+        handler(matched);
+      }
+    } catch (err) {
+      // One throwing interest must not starve its siblings or destroy the
+      // batch: the entries are already captured above, so every other
+      // subscriber still receives the full batch (the same fan-out discipline
+      // as the kernel's shell-created listeners). The error is logged, never
+      // rethrown - an uncaught microtask fault would pollute the page console
+      // and abort the rest of the dispatch.
+      logger.error("net-watch", "subscriber threw", err?.message ?? err);
     }
   }
 }
