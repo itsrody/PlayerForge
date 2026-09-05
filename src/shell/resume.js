@@ -1,5 +1,5 @@
 import { getPageContext, domainsMatch, domainScore, hashEntry } from "../shared/context.js";
-import { onFrame } from "../kernel/proxy/frame-watch.js";
+import { onFrame } from "../kernel/proxy/element-plane.js";
 import { TUNING } from "../shared/tuning.js";
 import { KEYS, gmSetValue, loadJsonObject, gmAddValueChangeListener, gmRemoveValueChangeListener } from "../shared/storage.js";
 import { formatTime } from "../shared/time.js";

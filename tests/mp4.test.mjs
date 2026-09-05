@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isMp4StreamUrl, isMp4ContentType, mediaSafeType, Mp4Router } from "../src/kernel/proxy/mp4.js";
-import { interposeFetch, interposeXhrPrototype } from "../src/kernel/proxy/manifest.js";
+import { isMp4StreamUrl, isMp4ContentType, mediaSafeType, Mp4Router } from "../src/kernel/proxy/stream-transport.js";
+import { interposeFetch, interposeXhrPrototype } from "../src/kernel/proxy/manifest-pipe.js";
 
 const GET_VIDEO_URL =
   "https://streamtape.com/get_video?id=VzGml9j9zMsKvxx&expires=1788640920&ip=F0INKRSUEy9XKxR&token=H6V4Z60CJoCK&stream=1";

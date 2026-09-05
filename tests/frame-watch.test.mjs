@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { onFrame } from "../src/kernel/proxy/frame-watch.js";
+import { onFrame } from "../src/kernel/proxy/element-plane.js";
 
 /**
  * The unified requestVideoFrameCallback seam (§7.8) is a pure funnel over the

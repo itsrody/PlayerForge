@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ClearKeyEme, CLEARKEY_SYSTEM, DEFAULT_KEY_SYSTEM_CONFIG, parseCencInitData } from "../src/kernel/proxy/eme-clearkey.js";
-import { SegmentError } from "../src/kernel/proxy/segment-manager.js";
+import { ClearKeyEme, CLEARKEY_SYSTEM, DEFAULT_KEY_SYSTEM_CONFIG, parseCencInitData } from "../src/kernel/proxy/decrypt-eme.js";
+import { SegmentError } from "../src/kernel/proxy/segment-flow.js";
 
 const CLEARKEY_PSSH_SYSTEM_ID = "edef8ba979d64ace-a3c827dcd51d21ed".replace(/-/g, "");
 

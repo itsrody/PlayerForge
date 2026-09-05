@@ -7,7 +7,7 @@ import {
   rewriteManifest,
   injectQueryParams,
   injectPathTokens
-} from "../src/kernel/proxy/rewrite.js";
+} from "../src/kernel/proxy/manifest-pipe.js";
 
 // Caller-supplied transformer in these tests: route every in-scope reference
 // through the proxy pipe so assertions target the surgery, not the scheme.

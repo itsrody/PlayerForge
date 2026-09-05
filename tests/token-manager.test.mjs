@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { TOKEN_STATE, TokenManager } from "../src/kernel/proxy/token-manager.js";
+import { TOKEN_STATE, TokenManager } from "../src/kernel/proxy/stream-transport.js";
 
 function deferred() {
   let resolve;

@@ -33,19 +33,15 @@ const panelSrc = readFileSync(join(ROOT, "src", "shell", "chrome", "panel.js"), 
 const forgeSrc = readFileSync(join(ROOT, "src", "shell", "inputs", "forge.js"), "utf8");
 const actionsSrc = readFileSync(join(ROOT, "src", "shell", "inputs", "actions.js"), "utf8");
 const animateSrc = readFileSync(join(ROOT, "src", "shell", "chrome", "animate.js"), "utf8");
-const gateSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "gate.js"), "utf8");
-const manifestSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "manifest.js"), "utf8");
-const rewriteSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "rewrite.js"), "utf8");
-const manifestSegmentsSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "manifest-segments.js"), "utf8");
-const mp4Src = readFileSync(join(ROOT, "src", "kernel", "proxy", "mp4.js"), "utf8");
-const elementRouteSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "element-route.js"), "utf8");
-const providerSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "provider.js"), "utf8");
-const mseSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "mse.js"), "utf8");
+const manifestPipeSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "manifest-pipe.js"), "utf8");
+const segmentFlowSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "segment-flow.js"), "utf8");
+const streamTransportSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "stream-transport.js"), "utf8");
+const elementPlaneSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "element-plane.js"), "utf8");
+const decryptEmeSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "decrypt-eme.js"), "utf8");
 const kernelSrc = readFileSync(join(ROOT, "src", "kernel", "kernel.js"), "utf8");
 const entrySrc = readFileSync(join(ROOT, "src", "entry.js"), "utf8");
 const shapesSrc = readFileSync(join(ROOT, "src", "shared", "media-shapes.js"), "utf8");
 const netWatchSrc = readFileSync(join(ROOT, "src", "kernel", "net-watch.js"), "utf8");
-const frameWatchSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "frame-watch.js"), "utf8");
 const mediaTimingSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "media-timing.js"), "utf8");
 
 test("build targets the firefox155 baseline", () => {
@@ -134,7 +130,7 @@ test("proxy URL resolution uses URL.canParse natively, no try/catch constructors
   // URL.canParse() is FF 115+ (baseline 155); each ref resolver must use it so
   // no dead try/catch fallback can return. The constructor still runs where a
   // parse is already known-valid.
-  for (const file of [gateSrc, manifestSrc, manifestSegmentsSrc, mp4Src, elementRouteSrc]) {
+  for (const file of [manifestPipeSrc, segmentFlowSrc, streamTransportSrc, elementPlaneSrc]) {
     assert.match(file, /URL\.canParse\(/, "URL.canParse is used");
     assert.match(file, /new URL\(/, "the parse target is still constructed where valid");
     assert.doesNotMatch(file, /try\s*\{[\s\S]{0,80}?new URL\(/, "no try/catch new URL fallback");
@@ -142,36 +138,36 @@ test("proxy URL resolution uses URL.canParse natively, no try/catch constructors
 });
 
 test("proxy transport composes AbortSignal natively and streams single-chunk bodies uncopied", () => {
-  assert.match(providerSrc, /AbortSignal\.any\(/, "provider composes signals natively");
-  assert.match(providerSrc, /AbortSignal\.timeout\(/, "provider honors native timeouts");
+  assert.match(streamTransportSrc, /AbortSignal\.any\(/, "provider composes signals natively");
+  assert.match(streamTransportSrc, /AbortSignal\.timeout\(/, "provider honors native timeouts");
   assert.doesNotMatch(
-    providerSrc.replace(/\/\*[\s\S]*?\*\//g, ""),
+    streamTransportSrc.replace(/\/\*[\s\S]*?\*\//g, ""),
     /typeof\s+AbortSignal/,
     "no AbortSignal feature-detect in provider"
   );
-  assert.match(providerSrc, /\.buffer\.transfer\(/, "provider merges chunks via zero-copy transfer");
-  assert.match(providerSrc, /stream\s*=\s*false/, "provider opts into streaming per call");
-  assert.match(providerSrc, /body:\s*res\.body,\s*streamed:\s*true/, "the native body passes through un-buffered when streaming");
+  assert.match(streamTransportSrc, /\.buffer\.transfer\(/, "provider merges chunks via zero-copy transfer");
+  assert.match(streamTransportSrc, /stream\s*=\s*false/, "provider opts into streaming per call");
+  assert.match(streamTransportSrc, /body:\s*res\.body,\s*streamed:\s*true/, "the native body passes through un-buffered when streaming");
 });
 
 test("object-URL and MSE glue is invoked unguarded (no cross-browser fallbacks)", () => {
-  assert.match(elementRouteSrc, /return URL\.createObjectURL\(blob\)/, "object URLs are created natively");
-  assert.match(elementRouteSrc, /URL\.revokeObjectURL\(objectUrl\)/, "object URLs are revoked natively");
+  assert.match(elementPlaneSrc, /return URL\.createObjectURL\(blob\)/, "object URLs are created natively");
+  assert.match(elementPlaneSrc, /URL\.revokeObjectURL\(objectUrl\)/, "object URLs are revoked natively");
   assert.doesNotMatch(
-    elementRouteSrc.replace(/\/\*[\s\S]*?\*\//g, ""),
+    elementPlaneSrc.replace(/\/\*[\s\S]*?\*\//g, ""),
     /typeof\s+URL|URL\?\./,
     "no object-URL feature-detect in element-route"
   );
-  assert.match(elementRouteSrc, /onFrame\(video,/, "the frame watchdog subscribes through the unified §7.8 frame feed");
-  assert.match(elementRouteSrc, /new FinalizationRegistry\(/, "routed object URLs are GC-cleaned via FinalizationRegistry (FF 79+)");
+  assert.match(elementPlaneSrc, /onFrame\(video,/, "the frame watchdog subscribes through the unified §7.8 frame feed");
+  assert.match(elementPlaneSrc, /new FinalizationRegistry\(/, "routed object URLs are GC-cleaned via FinalizationRegistry (FF 79+)");
   assert.doesNotMatch(
-    elementRouteSrc.replace(/\/\*[\s\S]*?\*\//g, ""),
+    elementPlaneSrc.replace(/\/\*[\s\S]*?\*\//g, ""),
     /typeof\s+requestVideoFrameCallback|typeof\s+FinalizationRegistry/,
     "no feature-detect on the watchdog/cleanup FF-native surfaces"
   );
-  assert.match(mseSrc, /isTypeSupported\(mimeType\)/, "MSE lanes pre-validate mime natively");
+  assert.match(decryptEmeSrc, /isTypeSupported\(mimeType\)/, "MSE lanes pre-validate mime natively");
   assert.doesNotMatch(
-    frameWatchSrc.replace(/\/\*[\s\S]*?\*\//g, ""),
+    elementPlaneSrc.replace(/\/\*[\s\S]*?\*\//g, ""),
     /typeof\s+requestVideoFrameCallback/,
     "the unified frame feed never feature-detects requestVideoFrameCallback bare"
   );
@@ -194,8 +190,8 @@ test("unified net-watch feed is a live unguarded PerformanceObserver, not a buff
   assert.match(mediaTimingSrc, /export function isMediaElementEntry/, "the media extractor survives the rebase");
   assert.match(mediaTimingSrc, /export const mediaTimeline/, "the kernel-held collector survives the rebase");
   assert.match(entrySrc, /netSight\(\{ name: url, via: "proxy"/, "entry schedules proxy sightings on the feed");
-  assert.match(mp4Src, /reportNativeWire\(url, resp\.status\)/, "mp4 router reports the native-fetch fallback");
-  assert.match(mp4Src, /via\s*===\s*"fetch"/, "only the native wire (never GM) is reported");
+  assert.match(streamTransportSrc, /reportNativeWire\(url, resp\.status\)/, "mp4 router reports the native-fetch fallback");
+  assert.match(streamTransportSrc, /via\s*===\s*"fetch"/, "only the native wire (never GM) is reported");
 });
 
 test("media URL taxonomies live in media-shapes.js and consumers delegate", () => {
@@ -204,15 +200,15 @@ test("media URL taxonomies live in media-shapes.js and consumers delegate", () =
   assert.match(shapesSrc, /export function manifestKindFromUrl/, "the kind resolver lives in shapes");
   assert.match(shapesSrc, /export function isSegmentLikeUrl/, "the segment-fetch shape lives in shapes");
   assert.match(shapesSrc, /export function isMediaUrlName/, "the observation superset lives in shapes");
-  assert.doesNotMatch(mp4Src, /MP4_STREAM_URL_RE/, "mp4.js no longer owns the progressive taxonomy");
-  assert.match(mp4Src, /export function isMp4StreamUrl\(url\)[\s\S]{0,60}isProgressiveStreamUrl\(url\)/, "mp4.js delegates the routing predicate");
-  assert.match(mp4Src, /byShape\s*=\s*false/, "segment routing is opt-in per call (byShape)");
+  assert.doesNotMatch(streamTransportSrc, /MP4_STREAM_URL_RE/, "stream-transport.js no longer owns the progressive taxonomy");
+  assert.match(streamTransportSrc, /export function isMp4StreamUrl\(url\)[\s\S]{0,60}isProgressiveStreamUrl\(url\)/, "stream-transport.js delegates the routing predicate");
+  assert.match(streamTransportSrc, /byShape\s*=\s*false/, "segment routing is opt-in per call (byShape)");
   assert.doesNotMatch(shapesSrc, /isSegmentLikeUrl[\s\S]{0,80}isMediaUrlName/, "segment shape stays OUT of the observation superset (.ts is also TypeScript)");
   assert.doesNotMatch(netWatchSrc, /MANIFEST_URL_RE/, "the manager no longer owns the manifest taxonomy");
   assert.match(netWatchSrc, /export \{ isManifestUrl \}/, "the manager re-exports the manifest predicate");
-  assert.doesNotMatch(rewriteSrc, /MANIFEST_SUFFIX_RE/, "rewrite.js no longer owns the suffix regex");
-  assert.match(rewriteSrc, /return manifestKindFromUrl\(url\)/, "rewrite.js delegates kind detection");
-  assert.match(manifestSegmentsSrc, /detectManifestKind\(baseUrl\)/, "manifest-segments.js delegates kind detection");
+  assert.doesNotMatch(manifestPipeSrc, /MANIFEST_SUFFIX_RE/, "manifest-pipe no longer owns the suffix regex");
+  assert.match(manifestPipeSrc, /return manifestKindFromUrl\(url\)/, "manifest-pipe delegates kind detection");
+  assert.match(segmentFlowSrc, /detectManifestKind\(baseUrl\)/, "segment-flow.js delegates kind detection");
   assert.match(mediaTimingSrc, /return isMediaUrlName\(name\)/, "media-timing.js delegates the name predicate");
 });
 

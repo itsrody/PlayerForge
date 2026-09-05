@@ -2,11 +2,11 @@
  * Media URL taxonomy - the single source for what a media URL looks like.
  *
  * Before this module the shapes were rediscovered six times: the progressive
- * `.mp4`/get_video/stream=1/tokenized-CDN shape lived in mp4.js, the manifest
- * `.m3u8`/`.mpd` shape in bootstrap.js, the manifest suffix in rewrite.js and
- * manifest-segments.js, and the media-name superset in media-timing.js. Each
- * copy drifted independently. Proxy, kernel, and the timing surface all import
- * from here.
+ * `.mp4`/get_video/stream=1/tokenized-CDN shape lived in stream-transport.js,
+ * the manifest `.m3u8`/`.mpd` shape in bootstrap.js, the manifest suffix in
+ * rewrite.js and segment-flow.js, and the media-name superset in
+ * media-timing.js. Each copy drifted independently. Proxy, kernel, and the
+ * timing surface all import from here.
  *
  * Levels:
  *  - isProgressiveStreamUrl - the byte-seam routing shape: `.mp4` paths and

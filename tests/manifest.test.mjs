@@ -11,8 +11,8 @@ import {
   ManifestFlow,
   ENGAGE_MODE,
   isClaimable
-} from "../src/kernel/proxy/manifest.js";
-import { Gate, CLASS } from "../src/kernel/proxy/gate.js";
+} from "../src/kernel/proxy/manifest-pipe.js";
+import { Gate, CLASS } from "../src/kernel/proxy/manifest-pipe.js";
 
 const M3U8 = [
   "#EXTM3U",

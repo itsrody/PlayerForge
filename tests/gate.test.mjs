@@ -7,7 +7,7 @@ import {
   hasTokenMarkers,
   matchWildcard,
   Gate
-} from "../src/kernel/proxy/gate.js";
+} from "../src/kernel/proxy/manifest-pipe.js";
 
 const HLS = "m3u8";
 const MPD = "mpd";

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { Gate } from "../src/kernel/proxy/gate.js";
+import { Gate } from "../src/kernel/proxy/manifest-pipe.js";
 
 // The unified network manager (net-watch.js) imports the settings engine, whose
 // cache evaluates through shared storage at module load (bare GM_getValue). A

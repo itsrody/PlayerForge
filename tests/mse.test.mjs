@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { MSEFactory, MediaSink } from "../src/kernel/proxy/mse.js";
-import { SegmentError } from "../src/kernel/proxy/segment-manager.js";
+import { MSEFactory, MediaSink } from "../src/kernel/proxy/decrypt-eme.js";
+import { SegmentError } from "../src/kernel/proxy/segment-flow.js";
 
 class FakeSourceBuffer {
   constructor(mime) {

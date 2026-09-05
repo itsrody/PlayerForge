@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SegmentManager, SegmentError, STATUS } from "../src/kernel/proxy/segment-manager.js";
+import { SegmentManager, SegmentError, STATUS } from "../src/kernel/proxy/segment-flow.js";
 
 const BYTE = new Uint8Array([1]);
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));

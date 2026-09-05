@@ -65,23 +65,22 @@
 import { logger } from "../shared/logger.js";
 import { isManifestUrl, isSegmentLikeUrl } from "../shared/media-shapes.js";
 import { getSetting } from "./settings.js";
-import { Gate, classifyStream } from "./proxy/gate.js";
+import { Gate, classifyStream } from "./proxy/manifest-pipe.js";
 import {
   observeManifests,
   interposeFetch,
   manifestRewrite,
   interposeXhrPrototype,
   ManifestFlow
-} from "./proxy/manifest.js";
-import { ProxyProvider } from "./proxy/provider.js";
-import { isMp4StreamUrl, Mp4Router } from "./proxy/mp4.js";
+} from "./proxy/manifest-pipe.js";
+import { isMp4StreamUrl, Mp4Router, ProxyProvider } from "./proxy/stream-transport.js";
 import {
   routeProgressiveSource,
   disposeElementSource,
   routeManifestStreams,
   disposeManifestStream
-} from "./proxy/element-route.js";
-import { onFrame } from "./proxy/frame-watch.js";
+} from "./proxy/element-plane.js";
+import { onFrame } from "./proxy/element-plane.js";
 import { mediaTimeline, isMediaElementEntry } from "./proxy/media-timing.js";
 
 // ---------------------------------------------------------------------------
@@ -752,20 +751,12 @@ export const network = Object.freeze({
 // ---------------------------------------------------------------------------
 // THE MANAGER'S UTILITIES & ALGORITHMS - re-exported from the model layer
 // ---------------------------------------------------------------------------
-export * from "./proxy/gate.js";
-export * from "./proxy/rewrite.js";
-export * from "./proxy/manifest.js";
-export * from "./proxy/mp4.js";
-export * from "./proxy/provider.js";
-export * from "./proxy/element-route.js";
-export * from "./proxy/mse.js";
-export * from "./proxy/take-over.js";
-export * from "./proxy/segment-manager.js";
-export * from "./proxy/manifest-segments.js";
-export * from "./proxy/decrypt-aes128.js";
-export * from "./proxy/eme-clearkey.js";
-export * from "./proxy/token-manager.js";
-export * from "./proxy/frame-watch.js";
+export * from "./proxy/manifest-pipe.js";
+export * from "./proxy/stream-transport.js";
+export * from "./proxy/element-plane.js";
+export * from "./proxy/decrypt-eme.js";
+export * from "./proxy/segment-flow.js";
+export * from "./proxy/media-timing.js";
 export * from "./proxy/media-timing.js";
 export { isManifestUrl } from "../shared/media-shapes.js";
 export { isProgressiveStreamUrl, isSegmentLikeUrl, hasMediaExtension, isMediaUrlName, manifestKindFromUrl } from "../shared/media-shapes.js";

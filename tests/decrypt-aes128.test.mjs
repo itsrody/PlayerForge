@@ -4,8 +4,8 @@ import {
   parseHexIv,
   deriveIv,
   Aes128Decrypter
-} from "../src/kernel/proxy/decrypt-aes128.js";
-import { SegmentError } from "../src/kernel/proxy/segment-manager.js";
+} from "../src/kernel/proxy/decrypt-eme.js";
+import { SegmentError } from "../src/kernel/proxy/segment-flow.js";
 
 const subtle = globalThis.crypto?.subtle;
 
