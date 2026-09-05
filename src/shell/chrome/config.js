@@ -89,6 +89,13 @@ const SETTINGS_SCHEMA = [
     group: "Features"
   },
   {
+    key: "features.mse",
+    type: "bool",
+    label: "Stream Takeover (fMP4)",
+    default: false,
+    group: "Features"
+  },
+  {
     key: "ui.compact",
     type: "bool",
     label: "Compact Panel",

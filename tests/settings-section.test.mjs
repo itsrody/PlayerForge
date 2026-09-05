@@ -88,7 +88,7 @@ test("renders one labeled section per unique schema group", () => {
 test("bool settings render toggles with labels and aria", () => {
   const panel = makeFakePanel();
   addSettingsSection(panel);
-  assert.equal(panel.calls.checkboxes.length, 11);
+  assert.equal(panel.calls.checkboxes.length, 12);
   assert.ok(panel.calls.checkboxes.every((box) => typeof box.onChange === "function"));
   const hotkeys = panel.calls.checkboxes[0];
   assert.equal(hotkeys.checked, true);
@@ -107,6 +107,11 @@ test("bool settings render toggles with labels and aria", () => {
   const manifestRoute = panel.calls.checkboxes[9];
   assert.equal(manifestRoute.ariaLabel, "Route HLS/DASH Streams");
   assert.equal(manifestRoute.checked, false);
+  // MSE data-plane takeover is a second opt-in layered on manifest routing,
+  // default off — the network arm never reads it.
+  const mseTakeover = panel.calls.checkboxes[10];
+  assert.equal(mseTakeover.ariaLabel, "Stream Takeover (fMP4)");
+  assert.equal(mseTakeover.checked, false);
 });
 
 test("toggle onChange persists through setSetting", () => {

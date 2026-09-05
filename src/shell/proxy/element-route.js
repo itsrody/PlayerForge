@@ -45,6 +45,7 @@
 import { logger } from "../../shared/logger.js";
 import { onFrame } from "../../kernel/proxy/frame-watch.js";
 import { isMp4StreamUrl } from "./mp4.js";
+import { attachTakeover } from "./take-over.js";
 
 const FALLBACK_BASE = "https://nowhere.invalid/";
 
@@ -66,6 +67,10 @@ const routedUrls = new WeakMap();
 const pendingRoutes = new WeakSet();
 /** Per-element cleanup registries, unregistered when their route is released. */
 const routeCleanupRegistries = new WeakMap();
+/** Active §Phase 6 MSE takeovers, detached on re-route, dispose, or disengage. */
+const activeTakeovers = new WeakMap();
+/** Per-element in-flight takeover guard (attach is async). */
+const pendingTakeovers = new WeakSet();
 
 function defaultMakeObjectUrl(blob) {
   return URL.createObjectURL(blob);
@@ -197,6 +202,92 @@ function resolveSrcUrl(video, baseUrl) {
  *  for (a cleared native wire is a frozen wire). */
 function streamable(url) {
   return /^https?:/i.test(String(url ?? ""));
+}
+
+/**
+ * §Phase 6 MSE stream takeover at the element level. Where progressive MP4
+ * routing hands the element an object URL over proxied bytes, a manifest
+ * takeover builds a full `attachTakeover` plane (MediaSink + per-lane
+ * SegmentManagers + AES-128/ClearKey) off a §7.4 claim from the bootstrap
+ * ring. The claim was decided at the manifest fetch; the element seam is the
+ * rendezvous: it picks the first engaged claim that survives `attachTakeover`'s
+ * own ablation re-check and rides the same decline-to-native policy as
+ * progressive routing — feature toggle off, a busy video, an already-armed
+ * takeover, an unsupported (TS) lane, or an attach failure all leave the
+ * element and the page player untouched. Detach happens on element cleanup
+ * (`disposeManifestStream`), which also disarms a takeover the flow disengaged
+ * out from under it (the claim no longer exists; `attachTakeover`'s
+ * `sourceclose` path already handled a page that grabbed the element).
+ */
+export async function routeManifestStreams({
+  video,
+  claims,
+  attach = attachTakeover,
+  provider,
+  mse = {},
+  decrypter = null,
+  eme = null,
+  checkBusy = null,
+  managerOptions = {},
+  getSetting = () => false,
+  onTakeover = () => {},
+  onDecline = () => {}
+}) {
+  if (!video || !claims) {
+    return null;
+  }
+  if (getSetting("features.mse") !== true) {
+    return null;
+  }
+  if (pendingTakeovers.has(video) || activeTakeovers.has(video)) {
+    return null;
+  }
+  pendingTakeovers.add(video);
+  try {
+    for (const claim of claims.values()) {
+      const result = await attach({
+        video,
+        claim,
+        provider,
+        mse,
+        decrypter,
+        eme,
+        checkBusy: checkBusy ?? undefined,
+        managerOptions
+      });
+      if (result?.taken) {
+        activeTakeovers.set(video, result);
+        pendingTakeovers.delete(video);
+        onTakeover(result);
+        return result;
+      }
+      onDecline(result);
+    }
+    pendingTakeovers.delete(video);
+    return null;
+  } catch (err) {
+    pendingTakeovers.delete(video);
+    logger.warn("proxy", "mp4", "manifest takeover threw, keeping page player", err?.message ?? err);
+    return null;
+  }
+}
+
+/**
+ * Detach a routed takeover from the element (shell teardown). Idempotent:
+ * clearing an element with no active takeover is a no-op that also releases a
+ * stale in-flight guard, so a shell that never saw a claim cannot wedge a
+ * later one.
+ */
+export async function disposeManifestStream(video, { detach = null } = {}) {
+  const takeover = activeTakeovers.get(video);
+  activeTakeovers.delete(video);
+  pendingTakeovers.delete(video);
+  if (!takeover) {
+    return false;
+  }
+  const release = detach ?? takeover.detach;
+  await release();
+  return true;
 }
 
 /**

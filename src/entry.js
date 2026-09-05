@@ -10,7 +10,7 @@ import { KEYS, getConfigValue, setConfigValue, deleteConfigField } from "./share
 import { initFullscreenGate } from "./shared/shadow.js";
 import { DEBUG_LOGS_KEY } from "./kernel/contract.js";
 import { installProxy, installProxyDebug } from "./shell/proxy/bootstrap.js";
-import { routeProgressiveSource, disposeElementSource } from "./shell/proxy/element-route.js";
+import { routeProgressiveSource, disposeElementSource, routeManifestStreams, disposeManifestStream } from "./shell/proxy/element-route.js";
 import { ProxyProvider } from "./shell/proxy/provider.js";
 import { netSight } from "./kernel/net-watch.js";
 import { getSetting } from "./shell/chrome/config.js";
@@ -73,9 +73,14 @@ function bootstrap() {
       netSight({ name: url, via: "proxy", initiatorType: "proxy", responseStatus: status });
     }
   };
-  const { router } = proxyDebugOn
+  const { router, claims } = proxyDebugOn
     ? installProxyDebug({ debugOn: true, ...proxyEnv })
     : installProxy(proxyEnv);
+
+  // §Phase 6 MSE rendezvous env shared by every shell: routed transit for the
+  // take-over plane rides the same ProxyProvider the wire seams use, so the
+  // userscript stays the Network initiator for init + media bytes alike.
+  const takeoverEnv = { claims, provider: proxyEnv.provider };
 
   // The shell stylesheet is warmed lazily at first shell construction
   // (shell.js #injectDom): the embedded sheet is adopted synchronously there,
@@ -126,7 +131,21 @@ function bootstrap() {
       shell.ready
         .then(routeSrc)
         .catch((err) => logger.warn("entry", "Shell ready rejected", err?.message ?? err));
-      shell.dom?.onCleanup?.(() => disposeElementSource(shell.video));
+      // §Phase 6 manifest takeover: a claim the fetch layer engaged waits in
+      // the bootstrap ring; the element seam fires the MSE plane only when
+      // `features.mse` is armed and the video is still uncommitted, and
+      // declines toward the page player otherwise. Re-checked after the shell
+      // finishes booting (claims can land after src routing runs).
+      routeManifestStreams({ video: shell.video, getSetting, ...takeoverEnv });
+      shell.ready
+        .then(() => routeManifestStreams({ video: shell.video, getSetting, ...takeoverEnv }))
+        .catch(() => {});
+      shell.dom?.onCleanup?.(() => {
+        disposeElementSource(shell.video);
+        disposeManifestStream(shell.video).catch((err) =>
+          logger.warn("entry", "Manifest stream dispose failed", err?.message ?? err)
+        );
+      });
       // Nested embeds can silently lose fullscreen (browsers require
       // allowfullscreen on every ancestor iframe). A shell in a
       // frame pushes a provisioning request up the chain so our SDK's own

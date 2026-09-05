@@ -173,7 +173,7 @@ export function installProxyDebug({
   // proving the new build is loaded and which seams are live - the first thing
   // to look for when no breadcrumbs appear.
   logger.warn("proxy", "bootstrap", "debug seams installed", summary);
-  return { summary, router };
+  return { summary, router, claims: new Map() };
 }
 
 /** The hostname a network URL owns; null for any unparseable input. */
@@ -216,10 +216,12 @@ function discoverEngagedHosts(manifestUrl, text) {
  * Install the production proxy arm. Always-on, decoupled from debug mode: the
  * Gate's manifest routing rides `features.manifestProxy` plus the optional
  * `proxy.routing.includes/excludes` site lists, and only an armed manifest
- * engages its segment space. Returns `{ summary, router, flow }` where
+ * engages its segment space. Returns `{ summary, router, flow, claims }` where
  * `summary` is `{ enabled, role, observe, fetch, xhr, manifest, mp4 }`, `router`
- * is the shared Mp4Router (element-level src seam) and `flow` the §7.4
- * ManifestFlow over the rewrite decision (claim/telemetry, downgrade revokes).
+ * is the shared Mp4Router (element-level src seam), `flow` the §7.4
+ * ManifestFlow over the rewrite decision (claim/telemetry, downgrade revokes),
+ * and `claims` the §Phase 6 ring of engaged manifests (URL + text) waiting on
+ * the element seam's MSE rendezvous.
  *
  * @param {object}   [env]
  * @param {"top"|"frame"} [env.role="top"]    tab-level ownership split (top owns
@@ -259,8 +261,16 @@ export function installProxy({
   const flow = new ManifestFlow({
     gate,
     consented: true,
-    onDisengage: ({ player }) => disengageHostsFor(player)
+    onDisengage: ({ player }) => {
+      disengageHostsFor(player);
+      claims.delete(player);
+    }
   });
+
+  // The §Phase 6 ring: engaged claims (manifest URL + text) waiting for an
+  // element-seam rendezvous. Declared before engageHostsFor so the flow's
+  // onDisengage closure can reference it.
+  const claims = new Map();
 
   // A routed manifest's CDN hosts, ref-counted across players. This set - not
   // the URL shape - is what makes a segment fetch routable: `.ts` ALSO names
@@ -307,6 +317,14 @@ export function installProxy({
       const outcome = flow.consider({ player: url, manifestUrl: url, kind: result.decision.kind, text });
       if (outcome.engage) {
         engageHostsFor(url, text);
+        claims.set(url, {
+          manifestUrl: url,
+          kind: result.decision.kind,
+          klass: result.decision.klass,
+          text,
+          engagedAt: Date.now()
+        });
+        logger.log("proxy", "bootstrap", "claim recorded", url);
       }
     }
     return result;
@@ -409,5 +427,5 @@ export function installProxy({
   }
 
   logger.log("proxy", "bootstrap", "proxy seams installed", summary);
-  return { summary, router, flow };
+  return { summary, router, flow, claims };
 }

@@ -115,6 +115,9 @@ export class SegmentManager {
     this.#maxRefreshes = Math.max(0, opts.maxRefreshes ?? 1);
     this.#allowGaps = opts.allowGaps === true;
     this.#gapTimeoutMs = Math.max(0, opts.gapTimeoutMs ?? 2000);
+    if (Number.isInteger(opts.startSeq) && opts.startSeq > 0) {
+      this.#deliverSeq = opts.startSeq;
+    }
 
     if (opts.signal) {
       opts.signal.addEventListener("abort", () => this.abort(), { signal: this.#ownsAc.signal });

@@ -91,6 +91,10 @@ export class MediaSink {
     return this.#objectURL;
   }
 
+  get mediaSource() {
+    return this.#mediaSource;
+  }
+
   get destroyed() {
     return this.#destroyed;
   }
