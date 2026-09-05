@@ -313,6 +313,48 @@ test("a single-chunk streamed body passes through without a copy", async () => {
   assert.equal(resp.body, chunk, "the single read is returned without a copy");
 });
 
+test("stream:true passes the native body through untouched (no buffering)", async () => {
+  const chunk = new Uint8Array([1, 2, 3]);
+  const provider = new ProxyProvider({
+    native: {
+      fetch: async (uri, opts) => {
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(chunk);
+            controller.close();
+          }
+        });
+        return new Response(stream, { status: 200, headers: { "content-type": "video/mp4" } });
+      }
+    }
+  });
+  const { via, resp } = await provider.fetch("https://x/live.mp4", { stream: true });
+  assert.equal(via, "fetch");
+  assert.equal(resp.streamed, true, "the provider flags a passthrough stream");
+  assert.ok(typeof resp.body?.getReader === "function", "the response body IS the native stream");
+  // Playback can start before the whole file arrives: the reader returns the
+  // first chunk immediately rather than after a full drain.
+  const reader = resp.body.getReader();
+  const { value } = await reader.read();
+  assert.deepEqual([...value], [1, 2, 3]);
+});
+
+test("stream:true still buffers when only GM is available (GM is serialized)", async () => {
+  let gmCalled = 0;
+  const provider = new ProxyProvider({
+    gmFetch: (req, cb) => {
+      gmCalled++;
+      queueMicrotask(() => cb.onload?.({ status: 200, responseType: "arraybuffer", response: Uint8Array.from([9, 9]) }));
+      return {};
+    },
+    native: { fetch: async () => { throw new Error("native should not be reached"); } }
+  });
+  const { via, resp } = await provider.fetch("https://x/gm.mp4", { stream: true });
+  assert.equal(via, "gm");
+  assert.equal(resp.streamed, undefined, "a GM body is never a passthrough stream");
+  assert.deepEqual([...resp.body], [9, 9]);
+});
+
 test("a requested timeout aborts the native-wire fetch too", async () => {
   const passedSignals = [];
   const provider = new ProxyProvider({

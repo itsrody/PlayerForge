@@ -49,9 +49,14 @@ export class ProxyProvider {
    *  `"start-end"` string; it becomes `Range: bytes=start-end`. Returns the
    *  provider chosen and the response. `onProgress` (optional) receives
    *  `{ loaded, total }` as bytes arrive - the caller's abort railway for
-   *  oversized whole-file routes. */
-  async fetch(uri, { signal, headers = {}, timeoutMs = 0, byteRange = null, onProgress = null } = {}) {
-    logger.log("proxy", "provider", "fetch", uri, { timeoutMs, byteRange });
+   *  oversized whole-file routes. `stream` (optional, default false) asks for
+   *  the body as a passthrough ReadableStream rather than a fully-drained
+   *  Uint8Array: only the native-fetch route can honor it (GM is serialized,
+   *  so a GM-granular body is always drained); the element whole-file route
+   *  never streams - it needs the whole bytes to build a blob and to enforce
+   *  its size ceiling. */
+  async fetch(uri, { signal, headers = {}, timeoutMs = 0, byteRange = null, onProgress = null, stream = false } = {}) {
+    logger.log("proxy", "provider", "fetch", uri, { timeoutMs, byteRange, stream });
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     const requestHeaders = { ...headers };
     const rangeText = byteRange ? rangeHeaderValue(byteRange) : null;
@@ -71,7 +76,7 @@ export class ProxyProvider {
         logger.warn("proxy", "provider", "GM request failed, falling back to fetch", uri, err?.message ?? err);
       }
     }
-    return { via: "fetch", resp: await this.#fetchRequest(uri, requestHeaders, signal, timeoutMs, onProgress) };
+    return { via: "fetch", resp: await this.#fetchRequest(uri, requestHeaders, signal, timeoutMs, onProgress, stream) };
   }
 
   #gmRequest(uri, headers, signal, timeoutMs, onProgress) {
@@ -150,7 +155,7 @@ export class ProxyProvider {
     });
   }
 
-  async #fetchRequest(uri, headers, signal, timeoutMs = 0, onProgress = null) {
+  async #fetchRequest(uri, headers, signal, timeoutMs = 0, onProgress = null, stream = false) {
     // Honor a caller timeout on the fallback wire too: AbortSignal.timeout
     // aborts the network read, and the loop's own aborted check keeps mocks
     // that ignore the signal from hanging past the deadline.
@@ -163,6 +168,15 @@ export class ProxyProvider {
       signal: wireSignal ?? undefined
     });
     const total = Number(res.headers?.get?.("content-length") ?? 0) || 0;
+    // A real page-facing stream rides straight through the native response
+    // body - the proxy never buffers it, playback starts on the first chunk
+    // and seeking stays native. Progress cannot be measured without draining
+    // (no caller railway), which is exactly why the element whole-file route
+    // opts out of streaming.
+    if (stream && typeof res?.body?.getReader === "function") {
+      logger.log("proxy", "provider", "native fetch stream passthrough", uri, { status: res.status });
+      return { status: res.status, headers: headerObject(res.headers), body: res.body, streamed: true };
+    }
     if (typeof res?.body?.getReader !== "function") {
       const buf = new Uint8Array(await res.arrayBuffer());
       onProgress?.({ loaded: buf.byteLength, total });

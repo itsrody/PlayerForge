@@ -75,6 +75,47 @@ test("Mp4Router.routeRequest issues the proxy GET and fabricates the page Respon
   assert.deepEqual([...out.body], [1, 2, 3], "the page receives the proxied bytes");
 });
 
+test("routeRequest with stream:true passes a native ReadableStream body through", async () => {
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array([3, 2, 1]));
+      controller.close();
+    }
+  });
+  const router = new Mp4Router({
+    provider: {
+      fetch: async (url, opts) => {
+        assert.equal(opts.stream, true, "the router asks the provider for a passthrough stream");
+        return { via: "fetch", resp: { status: 200, headers: { "content-type": "video/mp4" }, body: stream, streamed: true } };
+      }
+    },
+    enabledFor: () => true,
+    makeResponse: (body, init) => ({ status: init.status, body, init })
+  });
+  const out = await router.routeRequest(GET_VIDEO_URL, { stream: true });
+  assert.equal(out.status, 200);
+  assert.ok(typeof out.body?.getReader === "function", "the page-facing response streams the native body");
+  const reader = out.body.getReader();
+  const { value } = await reader.read();
+  assert.deepEqual([...value], [3, 2, 1]);
+});
+
+test("routeRequest without stream keeps the buffered-whole model (bytes, not a stream)", async () => {
+  let requested = null;
+  const router = new Mp4Router({
+    provider: {
+      fetch: async (url, opts) => {
+        requested = opts;
+        return { via: "gm", resp: { status: 200, headers: { "content-type": "video/mp4" }, body: new Uint8Array([5]) } };
+      }
+    },
+    enabledFor: () => true,
+    makeResponse: (body, init) => ({ status: init.status, body, init })
+  });
+  await router.routeRequest(GET_VIDEO_URL);
+  assert.equal(requested.stream, false, "the default route is the whole-file model");
+});
+
 test("Mp4Router coerces an octet-stream label to a playable media type", async () => {
   const router = new Mp4Router({
     provider: {
@@ -211,6 +252,30 @@ test("interposed fetch keeps the native wire when routing declines", async () =>
   const out = await wrapper(GET_VIDEO_URL);
   assert.deepEqual(routed, [`native:${GET_VIDEO_URL}`]);
   assert.equal(out.native, true);
+});
+
+test("routeRequest byShape routes a segment-shaped URL the caller classified", async () => {
+  const fetched = [];
+  const router = new Mp4Router({
+    provider: {
+      fetch: async (url, opts) => {
+        fetched.push({ url, stream: opts?.stream });
+        return { via: "gm", resp: { status: 200, headers: { "content-type": "video/mp2t" }, body: new Uint8Array([9]) } };
+      }
+    },
+    enabledFor: () => true,
+    makeResponse: (body, init) => ({ status: init.status, body, init })
+  });
+  assert.equal(await router.routeRequest("https://cdn.example/seg/1.ts"), null, "the progressive-MP4 shape gate blocks a .ts by default");
+  const out = await router.routeRequest("https://cdn.example/seg/1.ts", { byShape: true, stream: true });
+  assert.deepEqual(fetched, [{ url: "https://cdn.example/seg/1.ts", stream: true }]);
+  assert.equal(out.status, 200);
+  assert.deepEqual([...out.body], [9]);
+});
+
+test("routeRequest byShape still honors the policy gate", async () => {
+  const never = new Mp4Router({ provider: { fetch: async () => { throw new Error("unused"); } }, enabledFor: () => false });
+  assert.equal(await never.routeRequest("https://cdn.example/seg/1.ts", { byShape: true }), null);
 });
 
 test("routeContent bypasses the URL-shape gate for content-type-armed callers", async () => {

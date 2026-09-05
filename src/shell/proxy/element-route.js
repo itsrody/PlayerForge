@@ -43,6 +43,7 @@
  * whole flow runs headless.
  */
 import { logger } from "../../shared/logger.js";
+import { onFrame } from "../../kernel/proxy/frame-watch.js";
 import { isMp4StreamUrl } from "./mp4.js";
 
 const FALLBACK_BASE = "https://nowhere.invalid/";
@@ -155,25 +156,29 @@ function armNativeFallback(video, nativeUrl, revokeObjectUrl) {
  * never presents one inside `watchdogMs` is dead bytes even when no error
  * fires (a 200-body that is not demuxable media, truncation that hangs
  * metadata); revert to the native src, which streams the same resource, so
- * the element is never left frozen. `requestVideoFrameCallback` fires when a
- * frame is actually composited (FF 132+, baseline 2024); a paused element
- * still presents its initial frame, so an unplayed routed video disarms on
- * load. Unarmed for mock videos without the method; a deadline that fires
- * after the error-revert already cleared the route is a no-op.
+ * the element is never left frozen. `onFrame` (§7.8) subscribes to the
+ * unified requestVideoFrameCallback feed - it disarms on the first composited
+ * frame (a paused element still presents its initial frame, so an unplayed
+ * routed video disarms on load), and also on error/emptied/ended which are
+ * already handled by the error fallback. A method-less mock (test host) means
+ * "can't prove the blob is dead" - the deadline still arms, but the frame
+ * signal is a request-worth it cannot give, so the watchdog stays armed and
+ * reverts on expiry. Unarmed for mock videos without the method; a deadline
+ * that fires after the error-revert already cleared the route is a no-op.
  */
 function armFrameWatchdog(video, nativeUrl, revokeObjectUrl, watchdogMs) {
-  if (typeof video.requestVideoFrameCallback !== "function") {
-    return;
-  }
   const deadline = AbortSignal.timeout(watchdogMs);
   const onDeadline = () => {
     revertToNative(video, nativeUrl, revokeObjectUrl);
   };
   deadline.addEventListener("abort", onDeadline, { once: true });
-  const onFirstFrame = () => {
+  // The first composited frame proves the blob is live media - the watchdog's
+  // whole duty. onFrame self-unsubscribes on that frame and on error/emptied/
+  // ended (the error fallback owns those); the deadline is left running for a
+  // no-method mock, where onFrame returns false and cannot disarm us.
+  onFrame(video, () => {
     deadline.removeEventListener("abort", onDeadline);
-  };
-  video.requestVideoFrameCallback(onFirstFrame);
+  }, { signal: null });
 }
 
 /** The element's media URL. `currentSrc` wins once a source is selected;

@@ -5,6 +5,7 @@ import {
   isManifestUrl,
   manifestKindFromUrl,
   hasMediaExtension,
+  isSegmentLikeUrl,
   isMediaUrlName
 } from "../src/shared/media-shapes.js";
 
@@ -61,6 +62,19 @@ test("hasMediaExtension names media container files only", () => {
   assert.equal(hasMediaExtension("https://x/logo.svg"), false);
   assert.equal(hasMediaExtension("https://x/app.js"), false);
   assert.equal(hasMediaExtension(""), false);
+});
+
+test("isSegmentLikeUrl names the segment-fetch shapes only (never the decision)", () => {
+  for (const ext of ["ts", "mts", "m2ts", "m4s", "aac", "eac3", "m4a"]) {
+    assert.equal(isSegmentLikeUrl(`https://cdn.example/seg/1.${ext}`), true, `.${ext}`);
+  }
+  assert.equal(isSegmentLikeUrl("https://cdn.example/seg/1.ts?md5=abc"), true, "query tail keeps the extension");
+  assert.equal(isSegmentLikeUrl("https://cdn.example/v/init.mp4"), false, "MP4 init segments are not segment-shaped");
+  assert.equal(isSegmentLikeUrl("https://cdn.example/master.m3u8"), false, "manifests are their own shape");
+  assert.equal(isSegmentLikeUrl("https://cdn.example/main.ts?x=1"), true, ".ts really is segment-shaped");
+  assert.equal(isSegmentLikeUrl("https://x/icons/play.svg"), false);
+  assert.equal(isSegmentLikeUrl("https://x/app.js"), false);
+  assert.equal(isSegmentLikeUrl(""), false);
 });
 
 test("isMediaUrlName is the observation superset of the routing shapes", () => {

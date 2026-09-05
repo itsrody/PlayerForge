@@ -1,4 +1,5 @@
 import { getPageContext, domainsMatch, domainScore, hashEntry } from "../shared/context.js";
+import { onFrame } from "../kernel/proxy/frame-watch.js";
 import { TUNING } from "../shared/tuning.js";
 import { KEYS, gmSetValue, loadJsonObject, gmAddValueChangeListener, gmRemoveValueChangeListener } from "../shared/storage.js";
 import { formatTime } from "../shared/time.js";
@@ -492,15 +493,15 @@ export class ResumeTracker {
     };
     video.addEventListener("timeupdate", gatedSaveIfDue, { signal, passive: true });
     video.addEventListener("pause", () => {
-      // requestVideoFrameCallback gives the exact mediaTime of the last rendered
-      // frame — the position the user actually saw — whereas currentTime is the
-      // decoder position which may lead or lag the display. Falls back to
-      // currentTime when the API is unavailable (non-Chromium, test harness).
-      if (typeof video.requestVideoFrameCallback === "function") {
-        video.requestVideoFrameCallback((_now, metadata) => {
-          this.#saveProgress(metadata.mediaTime);
-        });
-      } else {
+      // onFrame (§7.8) reads the exact mediaTime of the last rendered frame —
+      // the position the user actually saw — via requestVideoFrameCallback,
+      // whereas currentTime is the decoder position which may lead or lag the
+      // display. Falls back to currentTime when the API is unavailable
+      // (non-Firefox, test harness).
+      const got = onFrame(video, (_now, metadata) => {
+        this.#saveProgress(metadata?.mediaTime ?? shell.currentTime);
+      });
+      if (!got) {
         this.#saveProgress(shell.currentTime);
       }
     }, { signal, passive: true });

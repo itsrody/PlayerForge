@@ -9,7 +9,7 @@ import { shouldSkipUrl } from "./kernel/guard.js";
 import { KEYS, getConfigValue, setConfigValue, deleteConfigField } from "./shared/storage.js";
 import { initFullscreenGate } from "./shared/shadow.js";
 import { DEBUG_LOGS_KEY } from "./kernel/contract.js";
-import { installProxyDebug } from "./shell/proxy/bootstrap.js";
+import { installProxy, installProxyDebug } from "./shell/proxy/bootstrap.js";
 import { routeProgressiveSource, disposeElementSource } from "./shell/proxy/element-route.js";
 import { ProxyProvider } from "./shell/proxy/provider.js";
 import { netSight } from "./kernel/net-watch.js";
@@ -48,8 +48,14 @@ function bootstrap() {
     logger.enable();
   }
   const inTopFrame = window.top === window;
-  const { router } = installProxyDebug({
-    debugOn: proxyDebugOn,
+  // The production proxy arm is always-on, decoupled from debug mode: the Gate
+  // rides the features.manifestProxy toggle + proxy.routing.site lists, and
+  // only armed manifests engage their segment space. The debug installer is a
+  // hard-disabled superset (Gate forced off) so a debug session observes and
+  // interposes byte-identically while the production installer keeps its own
+  // routing state; the last installer to run wins the fetch/XHR wrap. Debug
+  // mode therefore adds logs, never proxy behavior.
+  const proxyEnv = {
     role: inTopFrame ? "top" : "frame",
     gmWebRequest: inTopFrame && typeof GM_webRequest === "function" ? GM_webRequest : null,
     fetch: globalThis.fetch,
@@ -66,7 +72,10 @@ function bootstrap() {
     reportNativeWire: (url, status) => {
       netSight({ name: url, via: "proxy", initiatorType: "proxy", responseStatus: status });
     }
-  });
+  };
+  const { router } = proxyDebugOn
+    ? installProxyDebug({ debugOn: true, ...proxyEnv })
+    : installProxy(proxyEnv);
 
   // The shell stylesheet is warmed lazily at first shell construction
   // (shell.js #injectDom): the embedded sheet is adopted synchronously there,

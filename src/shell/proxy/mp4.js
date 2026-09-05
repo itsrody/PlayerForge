@@ -88,6 +88,10 @@ function resolveLocation(baseUrl, location) {
  * with no MP4 shape can still *be* an MP4 stream (the response says so); the
  * caller that already saw `video/mp4` content-type routes it with
  * `routeContent(appurl)`, which skips the shape gate but keeps every other.
+ * The same caller-classify semantic serves Mode-A segments: a manifest-engaged
+ * segment URL (`.ts`/`.m4s`/...) is not MP4-shaped either, so the interpose
+ * seam passes `byShape: true` once IT has matched the segment shape - the
+ * progressive-MP4 shape gate is skipped, every other gate stays.
  */
 export class Mp4Router {
   #provider;
@@ -113,11 +117,11 @@ export class Mp4Router {
     this.#reportNativeWire = reportNativeWire;
   }
 
-  async routeRequest(url, { byContent = false, signal = null, onProgress = null } = {}) {
-    if ((!byContent && !isMp4StreamUrl(url)) || !this.#enabledFor(url)) {
+  async routeRequest(url, { byContent = false, byShape = false, signal = null, onProgress = null, stream = false } = {}) {
+    if ((!byContent && !byShape && !isMp4StreamUrl(url)) || !this.#enabledFor(url)) {
       return null;
     }
-    return this.#route(url, 0, signal, onProgress);
+    return this.#route(url, 0, signal, onProgress, stream);
   }
 
   /** Content-type-armed route: URL shape is not required, the caller already
@@ -126,11 +130,11 @@ export class Mp4Router {
     return this.routeRequest(url, { byContent: true });
   }
 
-  async #route(url, hops = 0, signal = null, onProgress = null) {
+  async #route(url, hops = 0, signal = null, onProgress = null, stream = false) {
     let resp;
     let via;
     try {
-      ({ via, resp } = await this.#provider.fetch(url, { signal, onProgress }));
+      ({ via, resp } = await this.#provider.fetch(url, { signal, onProgress, stream }));
     } catch (err) {
       if (err?.name === "AbortError") {
         return null;
@@ -158,30 +162,32 @@ export class Mp4Router {
         return null;
       }
       logger.warn("proxy", "mp4", "route redirect", url, resp.status, "->", next);
-      return this.#route(next, hops + 1, signal, onProgress);
+      return this.#route(next, hops + 1, signal, onProgress, stream);
     }
     if (!(resp.status >= 200 && resp.status < 300)) {
       logger.warn("proxy", "mp4", "route request not ok, keeping native wire", url, resp?.status);
       return null;
     }
     const contentType = mediaSafeType(headerValue(resp.headers, "content-type") ?? "video/mp4");
-    const response = this.#makeResponse(resp.body, {
+    const body = resp.body;
+    const response = this.#makeResponse(body, {
       status: resp.status,
       headers: { ...(resp.headers ?? {}), "content-type": contentType }
     });
-    this.#onRoute({ url, status: resp.status, bytes: resp.body?.byteLength ?? 0 });
+    const bytes = resp.streamed ? null : (body?.byteLength ?? 0);
+    this.#onRoute({ url, status: resp.status, bytes });
     // A routed request that went out over the native-fetch fallback rode the
     // same wire the media element's own GETs use; surface it on the kernel's
-    // media timeline so the fallback is not a blind spot.
+    // net-watch feed (via:proxy) so the fallback is not a blind spot.
     if (via === "fetch") {
       this.#reportNativeWire(url, resp.status);
     }
     logger.warn(
       "proxy",
       "mp4",
-      "routed fetch through proxy",
+      resp.streamed ? "routed stream through proxy" : "routed fetch through proxy",
       url,
-      { status: resp.status, bytes: (resp.body?.byteLength ?? 0).toLocaleString() }
+      { status: resp.status, bytes: bytes == null ? "(streaming)" : bytes.toLocaleString() }
     );
     return response;
   }

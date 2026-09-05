@@ -82,6 +82,13 @@ const SETTINGS_SCHEMA = [
     group: "Features"
   },
   {
+    key: "features.manifestProxy",
+    type: "bool",
+    label: "Route HLS/DASH Streams",
+    default: false,
+    group: "Features"
+  },
+  {
     key: "ui.compact",
     type: "bool",
     label: "Compact Panel",

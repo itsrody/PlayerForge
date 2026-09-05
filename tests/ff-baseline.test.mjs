@@ -46,6 +46,7 @@ const entrySrc = readFileSync(join(ROOT, "src", "entry.js"), "utf8");
 const bootstrapSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "bootstrap.js"), "utf8");
 const shapesSrc = readFileSync(join(ROOT, "src", "shared", "media-shapes.js"), "utf8");
 const netWatchSrc = readFileSync(join(ROOT, "src", "kernel", "net-watch.js"), "utf8");
+const frameWatchSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "frame-watch.js"), "utf8");
 const mediaTimingSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "media-timing.js"), "utf8");
 
 test("build targets the firefox155 baseline", () => {
@@ -150,6 +151,8 @@ test("proxy transport composes AbortSignal natively and streams single-chunk bod
     "no AbortSignal feature-detect in provider"
   );
   assert.match(providerSrc, /\.buffer\.transfer\(/, "provider merges chunks via zero-copy transfer");
+  assert.match(providerSrc, /stream\s*=\s*false/, "provider opts into streaming per call");
+  assert.match(providerSrc, /body:\s*res\.body,\s*streamed:\s*true/, "the native body passes through un-buffered when streaming");
 });
 
 test("object-URL and MSE glue is invoked unguarded (no cross-browser fallbacks)", () => {
@@ -160,7 +163,7 @@ test("object-URL and MSE glue is invoked unguarded (no cross-browser fallbacks)"
     /typeof\s+URL|URL\?\./,
     "no object-URL feature-detect in element-route"
   );
-  assert.match(elementRouteSrc, /\.requestVideoFrameCallback\(onFirstFrame\)/, "the frame watchdog arms via requestVideoFrameCallback (FF 132+, baseline 2024)");
+  assert.match(elementRouteSrc, /onFrame\(video,/, "the frame watchdog subscribes through the unified §7.8 frame feed");
   assert.match(elementRouteSrc, /new FinalizationRegistry\(/, "routed object URLs are GC-cleaned via FinalizationRegistry (FF 79+)");
   assert.doesNotMatch(
     elementRouteSrc.replace(/\/\*[\s\S]*?\*\//g, ""),
@@ -168,6 +171,11 @@ test("object-URL and MSE glue is invoked unguarded (no cross-browser fallbacks)"
     "no feature-detect on the watchdog/cleanup FF-native surfaces"
   );
   assert.match(mseSrc, /isTypeSupported\(mimeType\)/, "MSE lanes pre-validate mime natively");
+  assert.doesNotMatch(
+    frameWatchSrc.replace(/\/\*[\s\S]*?\*\//g, ""),
+    /typeof\s+requestVideoFrameCallback/,
+    "the unified frame feed never feature-detects requestVideoFrameCallback bare"
+  );
 });
 
 test("unified net-watch feed is a live unguarded PerformanceObserver, not a buffer replay", () => {
@@ -195,13 +203,28 @@ test("media URL taxonomies live in media-shapes.js and consumers delegate", () =
   assert.match(shapesSrc, /export function isProgressiveStreamUrl/, "the progressive-stream shape lives in shapes");
   assert.match(shapesSrc, /export function isManifestUrl/, "the manifest shape lives in shapes");
   assert.match(shapesSrc, /export function manifestKindFromUrl/, "the kind resolver lives in shapes");
+  assert.match(shapesSrc, /export function isSegmentLikeUrl/, "the segment-fetch shape lives in shapes");
   assert.match(shapesSrc, /export function isMediaUrlName/, "the observation superset lives in shapes");
   assert.doesNotMatch(mp4Src, /MP4_STREAM_URL_RE/, "mp4.js no longer owns the progressive taxonomy");
   assert.match(mp4Src, /export function isMp4StreamUrl\(url\)[\s\S]{0,60}isProgressiveStreamUrl\(url\)/, "mp4.js delegates the routing predicate");
+  assert.match(mp4Src, /byShape\s*=\s*false/, "segment routing is opt-in per call (byShape)");
+  assert.doesNotMatch(shapesSrc, /isSegmentLikeUrl[\s\S]{0,80}isMediaUrlName/, "segment shape stays OUT of the observation superset (.ts is also TypeScript)");
   assert.doesNotMatch(bootstrapSrc, /MANIFEST_URL_RE/, "bootstrap.js no longer owns the manifest taxonomy");
   assert.match(bootstrapSrc, /export \{ isManifestUrl \}/, "bootstrap.js re-exports the manifest predicate");
   assert.doesNotMatch(rewriteSrc, /MANIFEST_SUFFIX_RE/, "rewrite.js no longer owns the suffix regex");
   assert.match(rewriteSrc, /return manifestKindFromUrl\(url\)/, "rewrite.js delegates kind detection");
   assert.match(manifestSegmentsSrc, /detectManifestKind\(baseUrl\)/, "manifest-segments.js delegates kind detection");
   assert.match(mediaTimingSrc, /return isMediaUrlName\(name\)/, "media-timing.js delegates the name predicate");
+});
+
+test("production proxy is config-armed, always-on, and routes only engaged hosts", () => {
+  assert.match(bootstrapSrc, /export function installProxy\(/, "the always-on production installer survives");
+  assert.match(bootstrapSrc, /getSetting\("features\.manifestProxy"\)/, "manifest engagement is feature-gated in the production arm");
+  assert.match(bootstrapSrc, /proxy\.routing\.includes/, "the Gate's site policy is config-driven too");
+  assert.match(bootstrapSrc, /new ManifestFlow\(\{[\s\S]{0,60}consented: true,/, "a routed manifest claims through the §7.4 flow in auto+consented mode");
+  assert.match(bootstrapSrc, /engagedHosts\.has\(/, "segment routing requires an engaged manifest host (never URL shape alone)");
+  assert.match(bootstrapSrc, /byShape:\s*isSegmentLikeUrl\(url\)/, "engaged segments classify through the router's byShape gate");
+  assert.match(bootstrapSrc, /always-on production arm/, "the header documents the always-on arm");
+  assert.match(bootstrapSrc, /decoupled from debug mode/, "the production arm is debug-decoupled");
+  assert.match(entrySrc, /installProxy\(proxyEnv\)/, "entry installs the production arm on every page");
 });

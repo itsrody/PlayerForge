@@ -88,7 +88,7 @@ test("renders one labeled section per unique schema group", () => {
 test("bool settings render toggles with labels and aria", () => {
   const panel = makeFakePanel();
   addSettingsSection(panel);
-  assert.equal(panel.calls.checkboxes.length, 10);
+  assert.equal(panel.calls.checkboxes.length, 11);
   assert.ok(panel.calls.checkboxes.every((box) => typeof box.onChange === "function"));
   const hotkeys = panel.calls.checkboxes[0];
   assert.equal(hotkeys.checked, true);
@@ -102,6 +102,11 @@ test("bool settings render toggles with labels and aria", () => {
   const mp4Recover = panel.calls.checkboxes[8];
   assert.equal(mp4Recover.ariaLabel, "Recover MP4 Streams");
   assert.equal(mp4Recover.checked, true);
+  // Manifest routing is a fresh opt-in, default off (Mode-A never touches a
+  // stream until the user arms the proxy).
+  const manifestRoute = panel.calls.checkboxes[9];
+  assert.equal(manifestRoute.ariaLabel, "Route HLS/DASH Streams");
+  assert.equal(manifestRoute.checked, false);
 });
 
 test("toggle onChange persists through setSetting", () => {

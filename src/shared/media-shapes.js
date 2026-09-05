@@ -14,6 +14,11 @@
  *  - isManifestUrl          - the manifest look the observe/interpose seam
  *    recognizes (the segment-level surface, engaged by its own gate);
  *  - manifestKindFromUrl    - the exact manifest suffix ("m3u8" | "mpd" | null);
+ *  - isSegmentLikeUrl       - the segment-fetch shape (.ts/.m4s/.aac/.m4a...):
+ *    the byte surface Mode-A routing carries. Deliberately NOT folded into
+ *    isMediaUrlName because .ts ALSO names TypeScript modules - the routing
+ *    seam guards every match by the engaged-host set (a routed manifest's
+ *    CDN hosts only), so the predicate is the shape, never the decision;
  *  - hasMediaExtension      - any media container extension, query/hash honored;
  *  - isMediaUrlName         - the observation superset: everything the element
  *    net feed classifies as media. A superset of the routing levels above by
@@ -26,6 +31,7 @@ const PROGRESSIVE_STREAM_URL_RE = /\.mp4(?:[?#]|$)|get_video|[?&]stream=1\b|(?:t
 const MANIFEST_URL_RE = /\.(?:m3u8|mpd)(?:[?#&]|$)/i;
 const MANIFEST_EXTENSION_RE = /\.(m3u8|mpd)$/i;
 const MEDIA_EXTENSION_RE = /\.(?:mp4|webm|ogv|ogg|m4v|mov)(?:[?#]|$)/i;
+const SEGMENT_LIKE_URL_RE = /\.(?:ts|mts|m2ts|m4s|aac|m4a|eac3)(?:[?#]|$)/i;
 
 /** True for a URL that could be a progressive MP4 stream: `.mp4` paths,
  *  `get_video` handlers, `stream=1` markers, or presigned media-CDN paths
@@ -53,6 +59,15 @@ export function manifestKindFromUrl(url) {
  *  `.ogg`/`.m4v`/`.mov`), query/fragment tails included. */
 export function hasMediaExtension(url) {
   return MEDIA_EXTENSION_RE.test(String(url ?? ""));
+}
+
+/** True for a URL whose tail names a media segment (`.ts`/`.mts`/`.m2ts`/
+ *  `.m4s`/`.aac`/`.m4a`/`.eac3`), query/fragment tails included. This is the
+ *  byte shape Mode-A routing carries. Shape alone is never a decision: `.ts`
+ *  also names TypeScript modules, so the routing seam only treats a match as a
+ *  segment when its host is inside a routed manifest's engaged-host set. */
+export function isSegmentLikeUrl(url) {
+  return SEGMENT_LIKE_URL_RE.test(String(url ?? ""));
 }
 
 /** True for any media-shaped resource name: the extension superset, a
