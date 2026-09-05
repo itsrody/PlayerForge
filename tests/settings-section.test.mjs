@@ -82,7 +82,7 @@ test("renders one labeled section per unique schema group", () => {
   const panel = makeFakePanel();
   addSettingsSection(panel);
   assert.deepEqual(panel.calls.sections.map((s) => s.title), ["Settings"]);
-  assert.deepEqual(panel.calls.labels, ["Playback", "Skip Step", "Features", "Interface"]);
+  assert.deepEqual(panel.calls.labels, ["Playback", "Skip Step", "Features", "Proxy", "Interface"]);
 });
 
 test("bool settings render toggles with labels and aria", () => {
@@ -112,6 +112,19 @@ test("bool settings render toggles with labels and aria", () => {
   const mseTakeover = panel.calls.checkboxes[10];
   assert.equal(mseTakeover.ariaLabel, "Stream Takeover (fMP4)");
   assert.equal(mseTakeover.checked, false);
+});
+
+test("the MP4 route ceiling renders as a MiB stepper with the 4GiB default", () => {
+  const panel = makeFakePanel();
+  addSettingsSection(panel);
+  assert.equal(panel.calls.steppers.length, 1, "only the proxy route ceiling is a numeric field");
+  const stepper = panel.calls.steppers[0];
+  assert.equal(stepper.label, "Max MP4 Route Size");
+  assert.equal(stepper.value, 4 * 1024 * 1024 * 1024, "the whole-file ceiling admits full-length films out of the box");
+  assert.equal(stepper.format(2 * 1024 * 1024 * 1024), "2048MiB");
+  stepper.onChange(8 * 1024 * 1024 * 1024);
+  assert.equal(getSetting("proxy.mp4MaxBytes"), 8 * 1024 * 1024 * 1024, "the stepper writes through the settings engine");
+  assert.equal(writes["pf:configs"]?.settings?.proxy?.mp4MaxBytes, 8 * 1024 * 1024 * 1024);
 });
 
 test("toggle onChange persists through setSetting", () => {

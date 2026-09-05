@@ -108,6 +108,20 @@ export const SETTINGS_SCHEMA = [
     group: "Features"
   },
   {
+    key: "proxy.mp4MaxBytes",
+    label: "Max MP4 Route Size",
+    // Stepper field (no "type", so the renderer's number branch drives it).
+    // The ceiling for a whole-file element route (bytes): above it, the proxy
+    // bails and the element keeps the native wire. Decision-time - read per
+    // src route, never snapshotted. Stored as bytes, shown as MiB.
+    min: 256 * 1024 * 1024,
+    max: 16384 * 1024 * 1024,
+    step: 256 * 1024 * 1024,
+    default: 4 * 1024 * 1024 * 1024,
+    fmt: (bytes) => `${Math.round(bytes / (1024 * 1024))}MiB`,
+    group: "Proxy"
+  },
+  {
     key: "ui.compact",
     type: "bool",
     label: "Compact Panel",

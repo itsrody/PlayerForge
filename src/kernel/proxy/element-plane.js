@@ -297,6 +297,9 @@ export async function routeProgressiveSource({
   revokeObjectUrl = defaultRevokeObjectUrl,
   onRoute = () => {},
   maxBytes = ELEMENT_ROUTE_MAX_BYTES,
+  // Compiled-default fallback only: the decision-time ceiling is the settings
+  // engine's proxy.mp4MaxBytes when it holds a finite number, so a panel-tuned
+  // route applies per src without a reinstall. The seam stays test-overridable.
   frameWatchdogMs = FRAME_WATCHDOG_MS,
   makeCleanupRegistry = defaultMakeCleanupRegistry
 }) {
@@ -322,18 +325,26 @@ export async function routeProgressiveSource({
 
   pendingRoutes.add(video);
   // Bail out of a whole-file proxy download the instant it crosses the
-  // ceiling: 10GiB in a Uint8Array is not a route, it is a tab killer. The
-  // element keeps its untouched native src, so no progress is lost.
+  // ceiling: several GiB in a Uint8Array is not a route, it is a tab killer.
+  // The element keeps its untouched native src, so no progress is lost.
+  // Decision-time ceiling: the settings engine's proxy.mp4MaxBytes (bytes)
+  // overrides the compiled default - a user tuning the panel applies at the
+  // next src route, no reinstall, and a poisoned (non-finite) stored value
+  // fails toward the bounded default, the native wire being the safe lane.
+  const ceiling =
+    typeof getSetting === "function" && Number.isFinite(getSetting("proxy.mp4MaxBytes"))
+      ? getSetting("proxy.mp4MaxBytes")
+      : maxBytes;
   const controller = new AbortController();
   let exceeded = false;
   const onProgress = (ev) => {
     const loaded = Number(ev?.loaded ?? 0);
     const total = Number(ev?.total ?? 0);
-    if (loaded > maxBytes || (total > 0 && total > maxBytes)) {
+    if (loaded > ceiling || (total > 0 && total > ceiling)) {
       exceeded = true;
       controller.abort();
       const shown = total > 0 ? `${Math.round(total / (1024 * 1024))}MiB` : `${Math.round(loaded / (1024 * 1024))}MiB`;
-      logger.warn("proxy", "mp4", "element route oversized, keeping native wire", url, `${shown} > ${Math.round(maxBytes / (1024 * 1024))}MiB`);
+      logger.warn("proxy", "mp4", "element route oversized, keeping native wire", url, `${shown} > ${Math.round(ceiling / (1024 * 1024))}MiB`);
     }
   };
   let response;
@@ -360,7 +371,7 @@ export async function routeProgressiveSource({
     pendingRoutes.delete(video);
     return null;
   }
-  if (blob.size > maxBytes) {
+  if (blob.size > ceiling) {
     // An abort race can still deliver the whole oversized file - never swap it.
     pendingRoutes.delete(video);
     logger.warn(
@@ -368,7 +379,7 @@ export async function routeProgressiveSource({
       "mp4",
       "element route oversized, keeping native wire",
       url,
-      `${Math.round(blob.size / (1024 * 1024))}MiB > ${Math.round(maxBytes / (1024 * 1024))}MiB`
+      `${Math.round(blob.size / (1024 * 1024))}MiB > ${Math.round(ceiling / (1024 * 1024))}MiB`
     );
     return null;
   }

@@ -223,6 +223,51 @@ test("keeps the native wire when an oversized whole-file route is reported", asy
   assert.ok(probes[0].signal, "the seam passed its abort signal");
 });
 
+test("the element route ceiling is decision-time: proxy.mp4MaxBytes admits a bigger film", async () => {
+  let aborted = false;
+  const router = makeRouter(async (url, opts) => {
+    // 3GiB whole file, well past the 1GiB compiled default - the seam reports
+    // the total on its progress railway exactly like a real content-length.
+    opts.onProgress?.({ loaded: 2048, total: 3 * 1024 * 1024 * 1024 });
+    if (opts.signal?.aborted) {
+      aborted = true;
+      throw new DOMException("Aborted", "AbortError");
+    }
+    return { via: "gm", resp: { status: 200, headers: { "content-type": "video/mp4" }, body: MP4_BYTES } };
+  });
+  const result = await routeProgressiveSource({
+    video: { currentSrc: "", src: "https://cdn.example/BIG-MOVIE.mp4" },
+    router,
+    getSetting: (key) =>
+      key === "features.mp4Fallback" ? true : key === "proxy.mp4MaxBytes" ? 4 * 1024 * 1024 * 1024 : undefined,
+    makeObjectUrl: () => "blob:pf-big-movie",
+    baseUrl: "https://player.example/watch"
+  });
+  assert.ok(result, "the settings ceiling (4GiB) admits the 3GiB whole-file route without swallowing it twice");
+  assert.equal(aborted, false, "no abort fired inside the raised ceiling");
+});
+
+test("a poisoned proxy.mp4MaxBytes fails toward the bounded compiled ceiling", async () => {
+  let aborted = false;
+  const router = makeRouter(async (url, opts) => {
+    opts.onProgress?.({ loaded: 2048, total: 3 * 1024 * 1024 * 1024 });
+    if (opts.signal?.aborted) {
+      aborted = true;
+      throw new DOMException("Aborted", "AbortError");
+    }
+    return { via: "gm", resp: { status: 200, headers: { "content-type": "video/mp4" }, body: MP4_BYTES } };
+  });
+  const result = await routeProgressiveSource({
+    video: { currentSrc: "", src: "https://cdn.example/BIG-MOVIE.mp4" },
+    router,
+    getSetting: (key) => key === "proxy.mp4MaxBytes" ? "poison" : true,
+    makeObjectUrl: () => "blob:pf-should-not-happen",
+    baseUrl: "https://player.example/watch"
+  });
+  assert.equal(result, null, "a non-finite stored ceiling keeps the native wire - the safe lane");
+  assert.equal(aborted, true, "the compiled default (1GiB) still guards the abort");
+});
+
 test("oversized delivery after an abort race is never swapped", async () => {
   let callWithOptions;
   const router = makeRouter(async (url, opts) => {
