@@ -5,6 +5,7 @@ import { ShellSlot } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, meetsMinSize, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
+import { MediaTimingObserver, mediaTimeline } from "./proxy/media-timing.js";
 
 /**
  * Top-level orchestrator: watches for <video> elements, identifies the player
@@ -34,6 +35,8 @@ export class Kernel {
   #scope = new AbortController();
   /** The shell host provider, registered by the shell plugin (never imported). */
   #shellProvider = null;
+  /** Kernel-armer media-timeline relay; disconnected at pagehide. */
+  #netTimingRelay = null;
 
   #onPageShow = (event) => {
     if (!event.persisted) {
@@ -62,6 +65,8 @@ export class Kernel {
         cancel();
       }
       this.#removalTimers.clear();
+      this.#netTimingRelay?.disconnect();
+      this.#netTimingRelay = null;
       this.#registry.destroyAll();
       this.#scope.abort();
     }
@@ -121,6 +126,14 @@ export class Kernel {
     // Permanent rider on the shared discovery tap: every video the probe
     // would have seen, the kernel now adopts through the same wiring.
     this.#stopDiscoveryTap = watchDocumentVideos((video) => this.#adoptVideo(video));
+    // The framework owns the page's media network timeline: one live, passive
+    // resource-timing observer relays the media element's own native GETs (the
+    // network-process loads this userscript's request seams can never see) into
+    // the kernel-held collector until the page hides. Event-driven by design -
+    // the browser calls us, we never re-read performance buffers.
+    this.#netTimingRelay = new MediaTimingObserver((entry) => {
+      mediaTimeline.add(entry);
+    }).observe();
     logger.log("kernel", "Kernel ready - discovery tap active");
   }
 

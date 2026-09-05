@@ -100,12 +100,14 @@ export class Mp4Router {
   #enabledFor;
   #makeResponse;
   #onRoute;
+  #reportNativeWire;
 
   constructor({
     provider,
     enabledFor = () => true,
     makeResponse = (body, init) => new Response(body, init),
-    onRoute = () => {}
+    onRoute = () => {},
+    reportNativeWire = () => {}
   } = {}) {
     if (!provider) {
       throw new TypeError("Mp4Router requires a provider");
@@ -114,6 +116,7 @@ export class Mp4Router {
     this.#enabledFor = enabledFor;
     this.#makeResponse = makeResponse;
     this.#onRoute = onRoute;
+    this.#reportNativeWire = reportNativeWire;
   }
 
   async routeRequest(url, { byContent = false, signal = null, onProgress = null } = {}) {
@@ -131,8 +134,9 @@ export class Mp4Router {
 
   async #route(url, hops = 0, signal = null, onProgress = null) {
     let resp;
+    let via;
     try {
-      ({ resp } = await this.#provider.fetch(url, { signal, onProgress }));
+      ({ via, resp } = await this.#provider.fetch(url, { signal, onProgress }));
     } catch (err) {
       if (err?.name === "AbortError") {
         return null;
@@ -172,6 +176,12 @@ export class Mp4Router {
       headers: { ...(resp.headers ?? {}), "content-type": contentType }
     });
     this.#onRoute({ url, status: resp.status, bytes: resp.body?.byteLength ?? 0 });
+    // A routed request that went out over the native-fetch fallback rode the
+    // same wire the media element's own GETs use; surface it on the kernel's
+    // media timeline so the fallback is not a blind spot.
+    if (via === "fetch") {
+      this.#reportNativeWire(url, resp.status);
+    }
     logger.warn(
       "proxy",
       "mp4",

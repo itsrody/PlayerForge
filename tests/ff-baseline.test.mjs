@@ -40,6 +40,9 @@ const mp4Src = readFileSync(join(ROOT, "src", "shell", "proxy", "mp4.js"), "utf8
 const elementRouteSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "element-route.js"), "utf8");
 const providerSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "provider.js"), "utf8");
 const mseSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "mse.js"), "utf8");
+const kernelSrc = readFileSync(join(ROOT, "src", "kernel", "kernel.js"), "utf8");
+const entrySrc = readFileSync(join(ROOT, "src", "entry.js"), "utf8");
+const mediaTimingSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "media-timing.js"), "utf8");
 
 test("build targets the firefox155 baseline", () => {
   assert.match(esbuild, /target:\s*\[["']firefox155["']\]/, "esbuild target is firefox155");
@@ -161,4 +164,21 @@ test("object-URL and MSE glue is invoked unguarded (no cross-browser fallbacks)"
     "no feature-detect on the watchdog/cleanup FF-native surfaces"
   );
   assert.match(mseSrc, /isTypeSupported\(mimeType\)/, "MSE lanes pre-validate mime natively");
+});
+
+test("kernel media-timing surface is a live unguarded PerformanceObserver, not a buffer replay", () => {
+  assert.match(mediaTimingSrc, /new PerformanceObserverClass\(/, "the relay's default observer is the FF-native bare global");
+  assert.doesNotMatch(
+    mediaTimingSrc.replace(/\/\*[\s\S]*?\*\//g, ""),
+    /typeof\s+PerformanceObserver\b|\bwindow\.PerformanceObserver/,
+    "no PerformanceObserver feature-detect in the relay"
+  );
+  assert.match(mediaTimingSrc, /buffered:\s*false/, "live push mode - no buffered window replay");
+  assert.match(mediaTimingSrc, /initiatorType/, "media element initiatorType (video/audio) is filtered");
+  assert.match(kernelSrc, /new MediaTimingObserver\(/, "the framework owns the relay");
+  assert.match(kernelSrc, /\.observe\(\)/, "the kernel arms the relay at init");
+  assert.match(kernelSrc, /#netTimingRelay\?\.disconnect\(\)/, "the relay disconnects at pagehide");
+  assert.match(entrySrc, /mediaTimeline\.add\(/, "entry schedules proxy sightings on the kernel timeline");
+  assert.match(mp4Src, /reportNativeWire\(url, resp\.status\)/, "mp4 router reports the native-fetch fallback");
+  assert.match(mp4Src, /via\s*===\s*"fetch"/, "only the native wire (never GM) is reported");
 });

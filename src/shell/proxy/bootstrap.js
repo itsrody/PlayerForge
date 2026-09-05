@@ -61,6 +61,8 @@ export function isManifestUrl(url) {
  * @param {object}   [env.xhrPrototype]       object with a `send` method to wrap.
  * @param {Function} [env.getSetting]         (key) => value, for `features.mp4Fallback`.
  * @param {object}   [env.provider]           ProxyProvider seam for routed re-fetch.
+ * @param {Function} [env.reportNativeWire]   (url, status) => void, fed when a routed
+ *                                            request rode the native-fetch fallback.
  */
 export function installProxyDebug({
   debugOn = false,
@@ -72,7 +74,8 @@ export function installProxyDebug({
   },
   xhrPrototype = null,
   getSetting = () => true,
-  provider = null
+  provider = null,
+  reportNativeWire = () => {}
 } = {}) {
   if (!debugOn) {
     return { summary: { enabled: false }, router: null };
@@ -116,7 +119,8 @@ export function installProxyDebug({
       provider ?? new ProxyProvider({ native: { fetch } });
     router = new Mp4Router({
       provider: fallbackProvider,
-      enabledFor: (url) => getSetting("features.mp4Fallback") === true && gate.inScope(url)
+      enabledFor: (url) => getSetting("features.mp4Fallback") === true && gate.inScope(url),
+      reportNativeWire
     });
   }
 
