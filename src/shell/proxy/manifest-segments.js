@@ -30,13 +30,10 @@
  * Unbounded DASH `SegmentTemplate`s (no timeline, no endNumber) emit the
  * template only — `resolveTemplate(template, n)` expands a numbered URI.
  */
-import { MANIFEST_KIND } from "./rewrite.js";
+import { MANIFEST_KIND, detectManifestKind } from "./rewrite.js";
 
 /** Upper bound for expanding DASH timeline/template loops. */
 const MAX_CONCRETE_SEGMENTS = 1024;
-
-/** pathname suffix detection for kind resolution. */
-const SUFFIX_RE = /\.(m3u8|mpd)$/i;
 
 /**
  * Resolve a manifest-internal reference (possibly relative) against the
@@ -571,17 +568,11 @@ export function parseDash(text, { baseUrl = null } = {}) {
  * first, then sniffed from the text (both via rewrite.js helpers).
  */
 export function parseManifest(text, { kind = null, baseUrl = null } = {}) {
-  const effectiveKind = kind ?? detectKind(baseUrl) ?? sniffKind(text);
+  const effectiveKind = kind ?? detectManifestKind(baseUrl) ?? sniffKind(text);
   if (effectiveKind === MANIFEST_KIND.MPD) {
     return parseDash(text, { baseUrl });
   }
   return parseHls(text, { baseUrl });
-}
-
-function detectKind(url) {
-  const path = String(url ?? "").split(/[?#]/, 1)[0];
-  const m = SUFFIX_RE.exec(path);
-  return m ? m[1].toLowerCase() : null;
 }
 
 function sniffKind(text) {

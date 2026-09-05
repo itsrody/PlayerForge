@@ -12,10 +12,20 @@
  * so a subframe's element GETs surface in ITS realm with no TM privileges and
  * no cross-frame routing - the "top-frame-only" GM_webRequest limitation never
  * applies to this feed and there is nothing to relay. GM_webRequest stays a
- * top-frame tab-wide analyst (the bootstrap role split) and is deliberately
- * NOT a transport of this module. Because the feed is realm-local, page
- * scripts cannot spoof it and no privileged action is reachable through it -
- * observe-only by construction.
+ * top-frame tab-wide analyst and is deliberately NOT a transport of this
+ * module; debug sightings it sees may still be relayed INTO the feed (as
+ * `via: "gm"` entries via netSight) - analysis in, never transport of net
+ * facts out. Because the feed is realm-local, page scripts cannot spoof it
+ * and no privileged action is reachable through it - observe-only by
+ * construction.
+ *
+ * The feed is a bus as well as an observer: netSight() lets the framework's
+ * own seams schedule the sightings PerformanceObserver can never see - the
+ * userscript-initiated routed GETs and the debug capture layer - into the
+ * identical coalesced fan-out with the same `{ name, via, initiatorType,
+ * responseStatus }` shape. A sighting with no subscribers is dropped
+ * immediately (the feed stays idle - no queue, no microtask), and network
+ * events and schedules share one per-microtask flush in insertion order.
  *
  * Firefox-native: PerformanceObserver / PerformanceResourceTiming are FF 57+
  * (baseline 2024). `entry.name` (the URL) survives cross-origin -
@@ -111,4 +121,27 @@ export function onNetEvents(handler, { signal, filter = null } = {}) {
   };
   signal?.addEventListener("abort", off, { once: true });
   return off;
+}
+
+/**
+ * Schedule the framework's OWN network sightings onto the feed. The proxy
+ * seams schedule here what the observer never sees - the routed native-fetch
+ * fallback and the debug observe/interpose captures. Same `{ name, via,
+ * initiatorType, responseStatus }` shape as resource entries, coalesced with
+ * them in insertion order. With no subscribers the feed is idle by design: a
+ * sighting nobody is listening for is dropped immediately (live feed, no
+ * look-backs), never queued.
+ */
+export function netSight(entry) {
+  if (!entry || typeof entry?.name !== "string" || !entry.name) {
+    return;
+  }
+  if (subscribers.size === 0) {
+    return;
+  }
+  pendingEntries.push(entry);
+  if (!queued) {
+    queued = true;
+    queueMicrotask(flush);
+  }
 }

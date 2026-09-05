@@ -12,7 +12,7 @@ import { DEBUG_LOGS_KEY } from "./kernel/contract.js";
 import { installProxyDebug } from "./shell/proxy/bootstrap.js";
 import { routeProgressiveSource, disposeElementSource } from "./shell/proxy/element-route.js";
 import { ProxyProvider } from "./shell/proxy/provider.js";
-import { mediaTimeline } from "./kernel/proxy/media-timing.js";
+import { netSight } from "./kernel/net-watch.js";
 import { getSetting } from "./shell/chrome/config.js";
 
 // The version lives in the banner and is read from the installed script at
@@ -59,11 +59,12 @@ function bootstrap() {
       gmFetch: typeof GM_xmlhttpRequest === "function" ? GM_xmlhttpRequest : null,
       native: { fetch: globalThis.fetch }
     }),
-    // The kernel arms the timeline observer at init; the proxy schedules its
-    // own native-wire fallback sightings on the same collector so the fallback
-    // is not a blind spot. mp4.js only ever sees this seam, never the kernel.
+    // The kernel arms the net-watch feed at init; the proxy schedules its own
+    // native-wire fallback sightings on the same feed so the fallback is not a
+    // blind spot. It lands on the kernel-held collector only through the
+    // kernel's media-filtered subscription - mp4.js only ever sees this seam.
     reportNativeWire: (url, status) => {
-      mediaTimeline.add({ name: url, initiatorType: "proxy-native-fetch", responseStatus: status });
+      netSight({ name: url, via: "proxy", initiatorType: "proxy", responseStatus: status });
     }
   });
 

@@ -35,6 +35,7 @@ const actionsSrc = readFileSync(join(ROOT, "src", "shell", "inputs", "actions.js
 const animateSrc = readFileSync(join(ROOT, "src", "shell", "chrome", "animate.js"), "utf8");
 const gateSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "gate.js"), "utf8");
 const manifestSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "manifest.js"), "utf8");
+const rewriteSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "rewrite.js"), "utf8");
 const manifestSegmentsSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "manifest-segments.js"), "utf8");
 const mp4Src = readFileSync(join(ROOT, "src", "shell", "proxy", "mp4.js"), "utf8");
 const elementRouteSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "element-route.js"), "utf8");
@@ -42,6 +43,8 @@ const providerSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "provider.j
 const mseSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "mse.js"), "utf8");
 const kernelSrc = readFileSync(join(ROOT, "src", "kernel", "kernel.js"), "utf8");
 const entrySrc = readFileSync(join(ROOT, "src", "entry.js"), "utf8");
+const bootstrapSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "bootstrap.js"), "utf8");
+const shapesSrc = readFileSync(join(ROOT, "src", "shared", "media-shapes.js"), "utf8");
 const netWatchSrc = readFileSync(join(ROOT, "src", "kernel", "net-watch.js"), "utf8");
 const mediaTimingSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "media-timing.js"), "utf8");
 
@@ -177,12 +180,28 @@ test("unified net-watch feed is a live unguarded PerformanceObserver, not a buff
     "no timeline re-reading and no window-indirected observer"
   );
   assert.match(netWatchSrc, /globalThis\.PerformanceObserver/, "the bare global is the structural default");
+  assert.match(netWatchSrc, /export function netSight/, "the framework schedules its own sights on the feed");
   assert.match(kernelSrc, /onNetEvents\(/, "the framework subscribes to the unified feed");
   assert.match(kernelSrc, /filter:\s*isMediaElementEntry/, "the kernel consumes only the media-shaped subset");
   assert.match(kernelSrc, /#stopNetWatch\?\.\(\)/, "the feed unsubscribes at pagehide");
   assert.match(mediaTimingSrc, /export function isMediaElementEntry/, "the media extractor survives the rebase");
   assert.match(mediaTimingSrc, /export const mediaTimeline/, "the kernel-held collector survives the rebase");
-  assert.match(entrySrc, /mediaTimeline\.add\(/, "entry schedules proxy sightings on the kernel timeline");
+  assert.match(entrySrc, /netSight\(\{ name: url, via: "proxy"/, "entry schedules proxy sightings on the feed");
   assert.match(mp4Src, /reportNativeWire\(url, resp\.status\)/, "mp4 router reports the native-fetch fallback");
   assert.match(mp4Src, /via\s*===\s*"fetch"/, "only the native wire (never GM) is reported");
+});
+
+test("media URL taxonomies live in media-shapes.js and consumers delegate", () => {
+  assert.match(shapesSrc, /export function isProgressiveStreamUrl/, "the progressive-stream shape lives in shapes");
+  assert.match(shapesSrc, /export function isManifestUrl/, "the manifest shape lives in shapes");
+  assert.match(shapesSrc, /export function manifestKindFromUrl/, "the kind resolver lives in shapes");
+  assert.match(shapesSrc, /export function isMediaUrlName/, "the observation superset lives in shapes");
+  assert.doesNotMatch(mp4Src, /MP4_STREAM_URL_RE/, "mp4.js no longer owns the progressive taxonomy");
+  assert.match(mp4Src, /export function isMp4StreamUrl\(url\)[\s\S]{0,60}isProgressiveStreamUrl\(url\)/, "mp4.js delegates the routing predicate");
+  assert.doesNotMatch(bootstrapSrc, /MANIFEST_URL_RE/, "bootstrap.js no longer owns the manifest taxonomy");
+  assert.match(bootstrapSrc, /export \{ isManifestUrl \}/, "bootstrap.js re-exports the manifest predicate");
+  assert.doesNotMatch(rewriteSrc, /MANIFEST_SUFFIX_RE/, "rewrite.js no longer owns the suffix regex");
+  assert.match(rewriteSrc, /return manifestKindFromUrl\(url\)/, "rewrite.js delegates kind detection");
+  assert.match(manifestSegmentsSrc, /detectManifestKind\(baseUrl\)/, "manifest-segments.js delegates kind detection");
+  assert.match(mediaTimingSrc, /return isMediaUrlName\(name\)/, "media-timing.js delegates the name predicate");
 });

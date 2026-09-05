@@ -9,22 +9,23 @@
  * player frame drift and byte-range indexing are never disturbed.
  */
 
-const MANIFEST_SUFFIX_RE = /\.(m3u8|mpd)$/i;
+import { isManifestUrl, manifestKindFromUrl } from "../../shared/media-shapes.js";
+
 /** Media references routed through OTHER seams stay out of the segment pipe:
- *  variant playlists (the manifest layer), the AES-128 key path (§11.2), and
- *  subtitle lists (the existing GM_webRequest surface). */
-const NON_SEGMENT_URI_RE = /\.(m3u8|mpd|key|vtt)$/i;
+ *  variants (the manifest layer), the AES-128 key path (§11.2), and subtitle
+ *  lists (the existing GM_webRequest surface). Manifest shapes come from
+ *  media-shapes.js; only the key/vtt tails are local to this pipe. */
+const NON_SEGMENT_URI_RE = /\.(?:key|vtt)$/i;
 
 export const MANIFEST_KIND = Object.freeze({
   M3U8: "m3u8",
   MPD: "mpd"
 });
 
-/** Kind by URL pathname suffix ("m3u8" | "mpd" | null) - honors query/hash. */
+/** Kind by URL pathname suffix ("m3u8" | "mpd" | null) - honors query/hash.
+ *  Delegates to the media-shapes taxonomy. */
 export function detectManifestKind(url) {
-  const path = String(url ?? "").split(/[?#]/, 1)[0];
-  const m = MANIFEST_SUFFIX_RE.exec(path);
-  return m ? m[1].toLowerCase() : null;
+  return manifestKindFromUrl(url);
 }
 
 /** Kind by content head, for streams whose manifest URL hides the suffix. */
@@ -52,7 +53,8 @@ export function isSegmentReference(uri) {
   if (ref.startsWith("data:") || ref.startsWith("blob:")) {
     return false;
   }
-  return !NON_SEGMENT_URI_RE.test(ref.split(/[?#]/, 1)[0].toLowerCase());
+  const pure = ref.split(/[?#]/, 1)[0].toLowerCase();
+  return !isManifestUrl(pure) && !NON_SEGMENT_URI_RE.test(pure);
 }
 
 /**

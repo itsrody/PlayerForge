@@ -19,27 +19,21 @@
  * creator are constructor parameters, so the whole chain runs headless.
  */
 import { logger } from "../../shared/logger.js";
+import { isProgressiveStreamUrl } from "../../shared/media-shapes.js";
 
-/** Stream-shaped URLs:
- *  - `.mp4` paths (query/fragment/trailing-segment included) - direct MP4s;
- *  - `get_video` handlers and `stream=1` markers - StreamTape-style endpoints
- *    that answer with a redirect to the real file;
- *  - presigned media CDNs (`radosgw` S3 paths, `tapecontent.net` shards) whose
- *    tokenized URLs carry the `.mp4` deep inside an opaque `/radosgw/{id}/{huge
- *    token}/{file}.mp4` path - the shape the StreamTape get_video redirects
- *    into. Tokens are opaque to us: routing keeps the full URL, token intact.
- *    The presigned branch only matches when a `.mp4` also appears, so plain
- *    shard assets are not misrouted. */
-const MP4_STREAM_URL_RE = /\.mp4(?:[?#]|$)|get_video|[?&]stream=1\b|(?:tapecontent|radosgw)[^#?]*\.mp4/i;
+/**
+ * The stream-shaped URL taxonomy now lives in media-shapes.js; this function
+ * delegates so the seam consumers (bootstrap, element-route), the MPC contract,
+ * and this module's own routing all share one predicate under the historical
+ * name. `get_video`/`stream=1` carry no content-type hint, so the URL shape
+ * marks them routable - the response content-type (when a capture sees one)
+ * confirms.
+ */
+export function isMp4StreamUrl(url) {
+  return isProgressiveStreamUrl(url);
+}
 
 const MP4_CONTENT_TYPE_RE = /^video\/mp4\b/i;
-
-/** True for a URL that could be a progressive MP4 stream. `get_video` and
- *  `stream=1` carry no content-type hint, so URLs alone mark them routable -
- *  the response content-type (when a capture sees one) confirms. */
-export function isMp4StreamUrl(url) {
-  return MP4_STREAM_URL_RE.test(String(url ?? ""));
-}
 
 /** True for a `video/mp4` content-type header value. */
 export function isMp4ContentType(contentType) {

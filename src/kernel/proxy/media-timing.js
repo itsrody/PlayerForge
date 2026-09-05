@@ -18,16 +18,17 @@
  * `entry.name` (the URL) survives cross-origin - Timing-Allow-Origin only
  * zeros granular timestamps, never the name.
  *
- * Deterministic: pure predicates and a plain store - the whole module runs
- * headless with no DOM, network, or observer dependency.
+*  Deterministic: pure predicates and a plain store - the whole module runs
+ *  headless with no DOM, network, or observer dependency.
  */
-const MEDIA_TIMING_NAME_RE = /\.(?:mp4|webm|ogv|ogg|m4v|mov)(?:[?#]|$)|\.(?:m3u8|mpd)(?:[?#&]|$)|get_video|[?&]stream=1\b|(?:tapecontent|radosgw)[^#?]*\.mp4/i;
+import { isMediaUrlName } from "../../shared/media-shapes.js";
 
 const MEDIA_INITIATOR_RE = /^(?:video|audio)$/;
 
-/** True for a resource-timing `name` shaped like a media stream URL. */
+/** True for a resource-timing `name` shaped like a media stream URL (the
+ *  observation superset from media-shapes.js). */
 export function isMediaTimingName(name) {
-  return MEDIA_TIMING_NAME_RE.test(String(name ?? ""));
+  return isMediaUrlName(name);
 }
 
 /** True for a resource entry that came from the media element itself (the

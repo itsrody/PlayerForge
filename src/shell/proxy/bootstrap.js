@@ -32,13 +32,10 @@ import {
 } from "./manifest.js";
 import { ProxyProvider } from "./provider.js";
 import { isMp4StreamUrl, Mp4Router } from "./mp4.js";
+import { isManifestUrl } from "../../shared/media-shapes.js";
+import { netSight } from "../../kernel/net-watch.js";
 
-/** Manifest-looking URLs (`.m3u8`/`.mpd`, including query/fragment tails). */
-const MANIFEST_URL_RE = /\.(?:m3u8|mpd)(?:[?#&]|$)/i;
-
-export function isManifestUrl(url) {
-  return MANIFEST_URL_RE.test(String(url ?? ""));
-}
+export { isManifestUrl };
 
 /**
  * Install the observe-only seams for a debug session. Returns
@@ -95,6 +92,11 @@ export function installProxyDebug({
     observeManifests({
       gmWebRequest,
       onObserve: (hit) => {
+        // The GM rule sees the tab-wide request surface a per-realm observer
+        // never can; relay the sighting into the kernel feed as the top-frame
+        // analyst (via: "gm"). Debug-only: this whole bootstrap is armed for
+        // a debug session and rides the feed's idle rule otherwise.
+        netSight({ name: hit.url, via: "gm", initiatorType: hit.type ?? "other", responseStatus: null });
         logger.log("proxy", "observe", "manifest request seen", hit.url, hit.type);
       }
     });
@@ -108,6 +110,10 @@ export function installProxyDebug({
       logger.log("proxy", "mp4", "capture failed (no response)", url);
       return;
     }
+    // Every in-scope fetch/XHR capture is a sighting the observer never sees
+    // (the userscript is the initiator); feed it so the interpose surface is
+    // not a blind spot. Debug-only like everything here.
+    netSight({ name: url, via: "interpose", initiatorType: "fetch", responseStatus: null });
     logger.log("proxy", "mp4", "capture", url, contentType);
   };
 

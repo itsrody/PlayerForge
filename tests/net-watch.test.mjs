@@ -34,7 +34,7 @@ globalThis.PerformanceObserver = class {
   }
 };
 
-const { onNetEvents } = await import("../src/kernel/net-watch.js");
+const { onNetEvents, netSight } = await import("../src/kernel/net-watch.js");
 
 function tick() {
   return new Promise((resolve) => queueMicrotask(() => setTimeout(resolve, 0)));
@@ -153,4 +153,62 @@ test("a realm without PerformanceObserver stays idle instead of throwing", () =>
     globalThis.PerformanceObserver = previous;
     observerInstances = stashed;
   }
+});
+
+test("netSight pushes framework sightings through the same coalesced feed", async () => {
+  const seen = [];
+  const off = onNetEvents((entries) => seen.push(entries.map((entry) => entry.name)));
+  const observer = observerInstances.at(-1);
+
+  observer.fire([mediaEntry(MP4_URL)]);
+  netSight({ name: "https://x/proxy.m3u8", via: "proxy", initiatorType: "proxy", responseStatus: 200 });
+  await tick();
+
+  assert.equal(seen.length, 1, "observer events and netSight sights share ONE flush");
+  assert.deepEqual(
+    seen[0],
+    [MP4_URL, "https://x/proxy.m3u8"],
+    "resource entries and schedules coalesce in insertion order"
+  );
+  off();
+});
+
+test("netSight entries are filtered by name shape like observer entries", async () => {
+  const seen = [];
+  const off = onNetEvents((entries) => seen.push(entries.map((entry) => entry.name)), { filter: isMedia });
+
+  netSight({ name: "https://x/manifest.m3u8", via: "gm", initiatorType: "other", responseStatus: null });
+  netSight({ name: "https://x/logo.svg", via: "interpose", initiatorType: "fetch", responseStatus: null });
+  await tick();
+
+  assert.deepEqual(seen, [["https://x/manifest.m3u8"]], "only the media-shaped sight survived the filter");
+  off();
+});
+
+test("netSight with no subscribers drops immediately and never queues or arms", async () => {
+  const startCount = observerInstances.length;
+  netSight({ name: MP4_URL, via: "proxy", initiatorType: "proxy", responseStatus: 200 });
+  await tick();
+  assert.equal(observerInstances.length, startCount, "no observer was armed for an idle feed");
+
+  let calls = 0;
+  const off = onNetEvents(() => { calls++; });
+  const observer = observerInstances.at(-1);
+  assert.equal(calls, 0, "pre-subscription sights never replay (live feed, no look-backs)");
+  observer.fire([mediaEntry(MP4_URL)]);
+  await tick();
+  assert.equal(calls, 1, "post-subscription events still flow");
+  off();
+});
+
+test("netSight ignores nameless or non-string entries", async () => {
+  const seen = [];
+  const off = onNetEvents((entries) => seen.push(entries));
+  netSight(null);
+  netSight({});
+  netSight({ name: "" });
+  netSight({ name: 42 });
+  await tick();
+  assert.equal(seen.length, 0, "nothing was scheduled");
+  off();
 });
