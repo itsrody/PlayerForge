@@ -136,7 +136,7 @@ export async function routeProgressiveSource({
       logger.warn("proxy", "mp4", "element route oversized, keeping native wire", url, `${shown} > ${Math.round(maxBytes / (1024 * 1024))}MiB`);
     }
   };
-  let response = null;
+  let response;
   try {
     response = await router.routeRequest(url, { signal: controller.signal, onProgress });
   } catch (err) {

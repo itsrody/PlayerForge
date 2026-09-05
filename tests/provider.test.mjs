@@ -229,6 +229,90 @@ test("onProgress forwards GM progress to the caller (oversize railway)", async (
   ]);
 });
 
+test("native fetch streams the body and forwards chunked progress (oversize railway)", async () => {
+  const seen = [];
+  const provider = new ProxyProvider({
+    native: {
+      fetch: async (uri, opts) => {
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array([1, 2, 3]));
+            controller.enqueue(new Uint8Array([4, 5]));
+            controller.close();
+          }
+        });
+        return new Response(stream, { status: 200, headers: { "content-type": "video/mp4" } });
+      }
+    }
+  });
+  const { via, resp } = await provider.fetch("https://x/big.mp4", {
+    onProgress: (ev) => seen.push(ev)
+  });
+  assert.equal(via, "fetch");
+  assert.deepEqual([...resp.body], [1, 2, 3, 4, 5], "streamed chunks merge to the same bytes as a whole-body read");
+  assert.deepEqual(seen, [
+    { loaded: 3, total: 0 },
+    { loaded: 5, total: 0 }
+  ]);
+});
+
+test("a response without a streamable body keeps the arrayBuffer fallback", async () => {
+  const provider = new ProxyProvider({
+    native: {
+      fetch: async (uri, opts) => fakeFetchResponse({ status: 206, body: Uint8Array.from([4, 5, 6]) })
+    }
+  });
+  const { via, resp } = await provider.fetch("https://x/seg/9.ts", { byteRange: "0-99" });
+  assert.equal(via, "fetch");
+  assert.deepEqual([...resp.body], [4, 5, 6]);
+});
+
+test("aborting a native-streamed fetch mid-body rejects and cancels the reader", async () => {
+  const controller = new AbortController();
+  const cancelled = [];
+  const provider = new ProxyProvider({
+    native: {
+      fetch: async (uri, opts) => {
+        const stream = new ReadableStream({
+          pull(c) {
+            c.enqueue(new Uint8Array(16));
+          },
+          cancel(reason) {
+            cancelled.push(reason?.name ?? "cancel");
+          }
+        });
+        return new Response(stream, { status: 200 });
+      }
+    }
+  });
+  const pending = provider.fetch("https://x/big.mp4", {
+    signal: controller.signal,
+    onProgress: () => controller.abort()
+  });
+  await assert.rejects(pending, (err) => err?.name === "AbortError");
+  assert.equal(cancelled.length, 1, "the native body read was cancelled instead of partial-buffered");
+});
+
+test("a requested timeout aborts the native-wire fetch too", async () => {
+  const passedSignals = [];
+  const provider = new ProxyProvider({
+    native: {
+      fetch: async (uri, opts) => {
+        passedSignals.push(opts.signal);
+        await new Promise((resolve, reject) => {
+          opts.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+        });
+      }
+    }
+  });
+  await assert.rejects(
+    provider.fetch("https://x/big.mp4", { timeoutMs: 25 }),
+    (err) => err?.name === "AbortError",
+    "the fallback wire honors the caller's timeout via a composed signal"
+  );
+  assert.equal(passedSignals.length, 1, "the native wire received the composed timeout signal");
+});
+
 test("constructor refuses a broken native fetch seam", () => {
   assert.throws(() => new ProxyProvider({ native: { fetch: null } }), TypeError);
 });

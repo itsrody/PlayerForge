@@ -6,7 +6,8 @@
  * progress event (§13). It tries transport strategies in priority order:
  *
  *   1. GM_xmlhttpRequest (binary, headers honored) — bypasses CORS/CSP.
- *   2. Native fetch + arrayBuffer — same-origin or permissive-CORS fallback.
+ *   2. Native fetch + streamed whole-body read (progress + timeout honored) —
+ *      same-origin or permissive-CORS fallback.
  *
  * Every fetch honors an AbortSignal and resolves to an opaque binary payload
  * { status, headers, body }. The caller (SegmentManager) owns decode,
@@ -70,7 +71,7 @@ export class ProxyProvider {
         logger.warn("proxy", "provider", "GM request failed, falling back to fetch", uri, err?.message ?? err);
       }
     }
-    return { via: "fetch", resp: await this.#fetchRequest(uri, requestHeaders, signal) };
+    return { via: "fetch", resp: await this.#fetchRequest(uri, requestHeaders, signal, timeoutMs, onProgress) };
   }
 
   #gmRequest(uri, headers, signal, timeoutMs, onProgress) {
@@ -149,15 +150,53 @@ export class ProxyProvider {
     });
   }
 
-  async #fetchRequest(uri, headers, signal) {
+  async #fetchRequest(uri, headers, signal, timeoutMs = 0, onProgress = null) {
+    // Honor a caller timeout on the fallback wire too: AbortSignal.timeout
+    // aborts the network read, and the loop's own aborted check keeps mocks
+    // that ignore the signal from hanging past the deadline.
+    const extra = timeoutMs > 0 ? [AbortSignal.timeout(timeoutMs)] : [];
+    const signals = extra.concat(signal ? [signal] : []);
+    const wireSignal = signals.length > 0 ? AbortSignal.any(signals) : null;
     const res = await this.#nativeFetch(uri, {
       method: "GET",
       headers,
-      signal
+      signal: wireSignal ?? undefined
     });
-    const buf = new Uint8Array(await res.arrayBuffer());
-    logger.log("proxy", "provider", "native fetch response", uri, { status: res.status, bytes: buf.byteLength });
-    return { status: res.status, headers: headerObject(res.headers), body: buf };
+    const total = Number(res.headers?.get?.("content-length") ?? 0) || 0;
+    if (typeof res?.body?.getReader !== "function") {
+      const buf = new Uint8Array(await res.arrayBuffer());
+      onProgress?.({ loaded: buf.byteLength, total });
+      logger.log("proxy", "provider", "native fetch response", uri, { status: res.status, bytes: buf.byteLength });
+      return { status: res.status, headers: headerObject(res.headers), body: buf };
+    }
+    // Stream the body chunk-wise so progress reaches the caller's abort
+    // railway (the oversized-element ceiling) before the whole file is buffered.
+    const reader = res.body.getReader();
+    const chunks = [];
+    let loaded = 0;
+    for (;;) {
+      if (wireSignal?.aborted) {
+        try {
+          await reader.cancel();
+        } catch {}
+        throw new DOMException("Aborted", "AbortError");
+      }
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      loaded += value?.byteLength ?? 0;
+      chunks.push(value);
+      onProgress?.({ loaded, total });
+    }
+    const merged = new Uint8Array(loaded);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    logger.log("proxy", "provider", "native fetch response", uri, { status: res.status, bytes: merged.byteLength });
+    return { status: res.status, headers: headerObject(res.headers), body: merged };
   }
 }
 
