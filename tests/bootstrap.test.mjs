@@ -9,7 +9,7 @@ import { Gate } from "../src/kernel/proxy/manifest-pipe.js";
 globalThis.GM_getValue = (key, fallback) => fallback;
 globalThis.GM_setValue = () => {};
 globalThis.GM_addValueChangeListener = undefined;
-const { installProxy, installProxyDebug, isManifestUrl } = await import("../src/kernel/net-watch.js");
+const { installProxy, installProxyDebug, onNetEvents, isManifestUrl } = await import("../src/kernel/net-watch.js");
 
 const M3U8 = [
   "#EXTM3U",
@@ -430,4 +430,61 @@ test("installProxy isolates a throwing GM_webRequest row - the interpose arm sur
   assert.equal(installed.summary.fetch, true, "fetch interpose still arms");
   assert.equal(installed.summary.xhr, true, "xhr interpose still arms");
   assert.ok(installed.router, "the shared router still arms");
+});
+
+test("installProxy re-arms the observe band when a live flip brings a feature on", () => {
+  const registerCalls = [];
+  const settings = { "features.manifestProxy": false, "features.mp4Fallback": false };
+  const installed = installProxy({
+    gmWebRequest: (rules) => registerCalls.push(rules),
+    fetch: null,
+    xhrPrototype: null,
+    getSetting: (key) => settings[key] ?? undefined
+  });
+  assert.equal(registerCalls.length, 0, "no feature armed: registration waits");
+  assert.equal(installed.summary.observe, false);
+
+  settings["features.manifestProxy"] = true;
+  assert.equal(installed.reflectPolicy(), true, "a live flip ON arms the band through reflectPolicy");
+  assert.equal(registerCalls.length, 1, "rows register exactly once");
+
+  installed.reflectPolicy();
+  assert.equal(registerCalls.length, 1, "re-arming on the same policy is idempotent - no duplicate rows");
+
+  settings["features.manifestProxy"] = false;
+  installed.reflectPolicy();
+  assert.equal(registerCalls.length, 1, "a flip OFF never unregisters (no row-level arm state) - the relay neutralizes instead");
+  assert.equal(installed.summary.observe, true, "the registered band stays registered; sightings are dropped at the relay");
+});
+
+test("installProxy observe relay drops sightings while policy is off (decision-time)", async () => {
+  let listener = null;
+  const registerCalls = [];
+  const settings = { "features.manifestProxy": false, "features.mp4Fallback": false };
+  const installed = installProxy({
+    gmWebRequest: (rules, onHit) => { registerCalls.push(rules); listener = onHit; },
+    fetch: null,
+    xhrPrototype: null,
+    getSetting: (key) => settings[key] ?? undefined
+  });
+  assert.equal(listener, null, "with no feature armed the row is not even mounted - registration waits");
+
+  settings["features.manifestProxy"] = true;
+  installed.reflectPolicy();
+  assert.equal(typeof listener, "function", "the live flip mounts the row through reflectPolicy");
+  assert.equal(registerCalls.length, 1);
+
+  const seen = [];
+  const off = onNetEvents((entries) => seen.push(...entries.map((entry) => entry.name)));
+  const awaitFlush = () => new Promise((resolve) => queueMicrotask(resolve));
+
+  listener({ action: "observe", ruleIndex: 0 }, {}, { url: "https://cdn.example/master.m3u8", type: "media", tab: 1 });
+  await awaitFlush();
+  assert.deepEqual(seen, ["https://cdn.example/master.m3u8"], "an armed policy relays the sighting into the feed");
+
+  settings["features.manifestProxy"] = false;
+  listener({ action: "observe", ruleIndex: 0 }, {}, { url: "https://other.example/still.m3u8", type: "media", tab: 1 });
+  await awaitFlush();
+  assert.deepEqual(seen, ["https://cdn.example/master.m3u8"], "a live flip OFF neutralizes the SAME registered row without teardown");
+  off();
 });

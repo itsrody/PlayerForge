@@ -64,7 +64,7 @@
  */
 import { logger } from "../shared/logger.js";
 import { isManifestUrl, isSegmentLikeUrl } from "../shared/media-shapes.js";
-import { getSetting } from "./settings.js";
+import { getSetting, onSettingChange } from "./settings.js";
 import { Gate, classifyStream } from "./proxy/manifest-pipe.js";
 import {
   observeManifests,
@@ -448,12 +448,12 @@ export function installProxy({
     manifest: getSetting("features.manifestProxy") === true,
     mp4: getSetting("features.mp4Fallback") === true
   };
-  // Policy is DECISION-TIME, not snapshotted: the fast-path + per-lane gates
-  // re-read the settings engine per request (uBO re-evaluates policy per
-  // request), so a user flipping a feature mid-page stops routing at the next
-  // fetch - the settings engine live-reloads by design. The install-time
-  // `features` snapshot below only feeds the install report; the Gate arms
-  // true and `routingArmed` is the real gate.
+  // Policy is DECISION-TIME, not snapshotted: the fast-path per-lane gates and
+  // the observe band re-read the settings engine per request/sighting (uBO
+  // re-evaluates policy per request), so a user flipping a feature mid-page
+  // stops routing at the next fetch - the settings engine live-reloads by
+  // design. The install-time `features` snapshot below only feeds the install
+  // report; the Gate arms true and `routingArmed` is the real gate.
   const routingArmed = () =>
     getSetting("features.manifestProxy") === true || getSetting("features.mp4Fallback") === true;
   const gate = new Gate({
@@ -548,25 +548,48 @@ export function installProxy({
     mp4: { route: features.mp4 }
   };
 
+  // The GM_webRequest observe band obeys the SAME decision-time doctrine as
+  // the fetch/xhr lanes: rows register top-frame once (MV2 re-registration
+  // updates them in place), but the sighting relay re-reads the armed gate per
+  // hit and `reflectPolicy` re-arms registration the moment a live flip brings
+  // a feature on - no reinstall needed. GM has no row-level arm state, so a
+  // flip-off is neutralized at the relay, never through an unregister; a
+  // registered band under a disabled policy silently ignores sightings.
+  const observeRelay = (hit) => {
+    if (!routingArmed()) {
+      return;
+    }
+    netSight({ name: hit.url, via: "gm", initiatorType: hit.type ?? "other", responseStatus: null });
+    logger.log("proxy", "observe", "manifest request seen", hit.url, hit.type);
+  };
+  let observeRegistered = false;
+  const armObserve = () => {
+    if (observeRegistered) {
+      return;
+    }
+    if (routingArmed() && typeof gmWebRequest === "function") {
+      observeManifests({ gmWebRequest, onObserve: observeRelay });
+      observeRegistered = true;
+      summary.observe = true;
+    }
+  };
+  const reflectPolicy = () => {
+    try {
+      armObserve();
+    } catch (err) {
+      // One broken row cannot abort the rest of the arm: registration fails
+      // closed (observe off) but fetch/xhr still engage below.
+      summary.observe = false;
+      logger.error("proxy", "bootstrap", "observe registration failed", err?.message ?? err);
+    }
+    return summary.observe;
+  };
+
   if (role === "frame") {
     // Not a hole: GM_webRequest rules are tab-scoped, so the top frame owns them.
     logger.log("proxy", "bootstrap", "observe owned by top frame - subframe skips GM_webRequest");
-  } else if (routingArmed() && typeof gmWebRequest === "function") {
-    // Rules are tab-wide registered rows; with routing off (nothing armed) they
-    // would register neutral observers for no purpose, so registration waits
-    // until a feature is on. Wrapped so one broken row cannot abort the arm.
-    try {
-      observeManifests({
-        gmWebRequest,
-        onObserve: (hit) => {
-          netSight({ name: hit.url, via: "gm", initiatorType: hit.type ?? "other", responseStatus: null });
-          logger.log("proxy", "observe", "manifest request seen", hit.url, hit.type);
-        }
-      });
-      summary.observe = true;
-    } catch (err) {
-      logger.error("proxy", "bootstrap", "observe registration failed", err?.message ?? err);
-    }
+  } else if (typeof gmWebRequest === "function") {
+    reflectPolicy();
   } else {
     logger.log("proxy", "bootstrap", "GM_webRequest unavailable - observe layer off (top frame)");
   }
@@ -652,7 +675,7 @@ export function installProxy({
   }
 
   logger.log("proxy", "bootstrap", "proxy seams installed", summary);
-  return { summary, router, flow, claims };
+  return { summary, router, flow, claims, reflectPolicy };
 }
 
 /**
@@ -693,6 +716,17 @@ export function armProxy({ kernel, role = "top", gmWebRequest = null, fetch = nu
   const installed = debugOn
     ? installProxyDebug({ debugOn: true, role, gmWebRequest, fetch, xhrPrototype, provider: fallbackProvider, reportNativeWire, getSetting })
     : installProxy({ role, gmWebRequest, fetch, xhrPrototype, provider: fallbackProvider, reportNativeWire, getSetting });
+
+  // The observe band is decision-time: a live feature flip (panel toggle or a
+  // cross-tab reload through refreshSettingsCache's notifySetting) re-arms
+  // GM_webRequest registration the moment a feature comes on, without waiting
+  // for a reinstall. Flip-off needs no teardown - the sighting relay re-reads
+  // the armed gate per hit. armProxy owns this wiring because only the kernel
+  // knows the settings engine (installProxy only got a getSetting seam).
+  if (typeof installed.reflectPolicy === "function") {
+    onSettingChange("features.manifestProxy", () => installed.reflectPolicy());
+    onSettingChange("features.mp4Fallback", () => installed.reflectPolicy());
+  }
 
   if (!installed.router) {
     logger.warn("proxy", "arm", "no fetch seam - element seams stay inactive", installed.summary);
