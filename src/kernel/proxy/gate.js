@@ -198,30 +198,76 @@ function splitAttrs(input) {
   return out;
 }
 
+const REGEXP_SPECIALS = /[|\\{}()[\]^$+?.]/;
+function escapeRegExpChar(ch) {
+  return REGEXP_SPECIALS.test(ch) ? `\\${ch}` : ch;
+}
+
+/** Compile-once pattern pages for the site policy hot path. Site lists are
+ *  handful-sized and stable between arms, but `inScope` consults them per
+ *  request; compiling the wildcard/family regexes once per pattern (capped,
+ *  LRU) removes a `new RegExp` from every scope probe. */
+const COMPILED_CACHE_MAX = 128;
+function compileCached(cache, source, build) {
+  if (cache.has(source)) {
+    const hit = cache.get(source);
+    if (cache.size > 1) {
+      cache.delete(source);
+      cache.set(source, hit);
+    }
+    return hit;
+  }
+  const compiled = build(source);
+  if (cache.size >= COMPILED_CACHE_MAX) {
+    cache.delete(cache.keys().next().value);
+  }
+  cache.set(source, compiled);
+  return compiled;
+}
+
+function buildWildcardRe(pattern) {
+  let regex = "^";
+  for (const ch of pattern) {
+    regex += ch === "*" ? ".*" : escapeRegExpChar(ch);
+  }
+  return new RegExp(regex + "$");
+}
+
+const wildcardReCache = new Map();
+
 /** True when `pattern` (userscript-style glob: `*` wildcards) covers `text`.
  *  Anchored to the whole string so a partial scheme cannot over-match. */
 export function matchWildcard(text, pattern) {
   if (typeof pattern !== "string") {
     return false;
   }
-  let regex = "^";
-  for (const ch of pattern) {
-    regex += ch === "*" ? ".*" : escapeRegExpChar(ch);
-  }
-  regex += "$";
-  return new RegExp(regex).test(String(text ?? ""));
+  const re = compileCached(wildcardReCache, pattern, buildWildcardRe);
+  return re.test(String(text ?? ""));
 }
 
-const REGEXP_SPECIALS = /[|\\{}()[\]^$+?.]/;
-function escapeRegExpChar(ch) {
-  return REGEXP_SPECIALS.test(ch) ? `\\${ch}` : ch;
-}
+/** Capped memo twin of net-watch's hostnameOf: classified/probed URLs repeat,
+ *  so per-request `inScope` probes skip the URL parse after the first sight. */
+const HOSTNAME_MEMO_MAX = 256;
+const gateMemo = new Map();
 
 function hostnameOf(url) {
   if (typeof url !== "string" || !url) {
     return null;
   }
-  return URL.canParse(url) ? new URL(url).hostname : null;
+  if (gateMemo.has(url)) {
+    const host = gateMemo.get(url);
+    if (gateMemo.size > 1) {
+      gateMemo.delete(url);
+      gateMemo.set(url, host);
+    }
+    return host;
+  }
+  const host = URL.canParse(url) ? new URL(url).hostname : null;
+  if (gateMemo.size >= HOSTNAME_MEMO_MAX) {
+    gateMemo.delete(gateMemo.keys().next().value);
+  }
+  gateMemo.set(url, host);
+  return host;
 }
 
 /** The hostname projection of a site pattern: a bare glob stays as-is, a URL
@@ -239,22 +285,9 @@ function hostGlobOf(pattern) {
   return rest;
 }
 
-/** Domain-family match: `host` is covered by `glob`'s hostname when it is
- *  the same family - the glob itself, a subdomain of it, or (for a leading
- *  `*.` label) the apex. Purely label-bound: "not-example.com" is never a
- *  member of the example.com family. */
-function hostCoveredBy(host, pattern) {
-  const value = String(host ?? "");
+const hostFamilyReCache = new Map();
+function buildHostFamilyRe(pattern) {
   const glob = hostGlobOf(pattern);
-  if (!value || !glob) {
-    return false;
-  }
-  if (value === glob) {
-    return true;
-  }
-  if (!glob.includes("*") && value.endsWith("." + glob)) {
-    return true;
-  }
   const labels = glob.split(".");
   let regex = "^";
   for (let i = 0; i < labels.length; i++) {
@@ -271,10 +304,31 @@ function hostCoveredBy(host, pattern) {
     }
   }
   try {
-    return new RegExp(regex + "$").test(value);
+    return new RegExp(regex + "$");
   } catch {
+    return null;
+  }
+}
+
+/** Domain-family match: `host` is covered by `glob`'s hostname when it is
+ *  the same family - the glob itself, a subdomain of it, or (for a leading
+ *  `*.` label) the apex. Purely label-bound: "not-example.com" is never a
+ *  member of the example.com family. The family regex is compiled once per
+ *  pattern (capped) instead of per scope probe. */
+function hostCoveredBy(host, pattern) {
+  const value = String(host ?? "");
+  const glob = hostGlobOf(pattern);
+  if (!value || !glob) {
     return false;
   }
+  if (value === glob) {
+    return true;
+  }
+  if (!glob.includes("*") && value.endsWith("." + glob)) {
+    return true;
+  }
+  const re = compileCached(hostFamilyReCache, pattern, buildHostFamilyRe);
+  return re ? re.test(value) : false;
 }
 
 /** True when `text` is a bare hostname entry (no scheme/authority), so

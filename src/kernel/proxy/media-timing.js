@@ -41,8 +41,12 @@ export function isMediaElementEntry(entry) {
  * The media network-timeline collector: a per-realm store of the routed and
  * native-fallback media URLs the framework has observed or been told about.
  * `add`/`has` are the whole API - wire-layer code never touches performance
- * directly.
+ * directly. Bounded FIFO: a segment-per-second stream would otherwise grow
+ * `byName` without limit; the newest `MAX` sightings are kept and stale ones
+ * evicted in insertion order (live feed - old segment URLs have no look-back
+ * value, matching the observer's out-of-the-box window).
  */
+const MAX_TIMELINE = 500;
 export const mediaTimeline = (() => {
   const byName = new Map();
   return {
@@ -50,6 +54,10 @@ export const mediaTimeline = (() => {
       const name = String(entry?.name ?? "");
       if (!name) {
         return;
+      }
+      byName.delete(name);
+      if (byName.size >= MAX_TIMELINE) {
+        byName.delete(byName.keys().next().value);
       }
       byName.set(name, entry);
     },

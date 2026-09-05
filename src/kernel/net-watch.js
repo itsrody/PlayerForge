@@ -98,19 +98,28 @@ function flush() {
   queued = false;
   const entries = pendingEntries;
   pendingEntries = [];
+  // A teardown/resubscribe may have cleared the queue while this flush was
+  // already queued (stopIfIdle resets pendingEntries but not the flag); the
+  // re-armed feed must not deliver a stale empty batch - an empty flush is a
+  // no-op, never a handler call.
+  if (entries.length === 0) {
+    return;
+  }
   for (const subscriber of subscribers) {
     const handler = subscriber.handler;
     if (!subscriber.filter) {
       handler(entries);
       continue;
     }
-    const matched = [];
+    // Lazy batch: the filtered array is only allocated when something matches,
+    // so a high-churn resource feed allocates nothing for non-media entries.
+    let matched = null;
     for (const entry of entries) {
       if (subscriber.filter(entry)) {
-        matched.push(entry);
+        (matched ??= []).push(entry);
       }
     }
-    if (matched.length) {
+    if (matched) {
       handler(matched);
     }
   }
@@ -193,12 +202,30 @@ export function netSight(entry) {
 // THE RESOURCE PLANE: the wire-seam installer and the kernel coordinator
 // ---------------------------------------------------------------------------
 
-/** The hostname a network URL owns; null for any unparseable input. */
+/** The hostname a network URL owns; null for any unparseable input. Memoized
+ *  against a capped LRU: segment hosts repeat per stream, so the per-request
+ *  `segmentEngaged`/`discoverEngagedHosts` probes hot-path through a Map
+ *  instead of a `new URL` (and its full URL parse) every time. */
+const HOSTNAME_MEMO_MAX = 256;
+const hostnameMemo = new Map();
 function hostnameOf(url) {
   if (typeof url !== "string" || !url) {
     return null;
   }
-  return URL.canParse(url) ? new URL(url).hostname : null;
+  if (hostnameMemo.has(url)) {
+    const host = hostnameMemo.get(url);
+    if (hostnameMemo.size > 1) {
+      hostnameMemo.delete(url);
+      hostnameMemo.set(url, host);
+    }
+    return host;
+  }
+  const host = URL.canParse(url) ? new URL(url).hostname : null;
+  if (hostnameMemo.size >= HOSTNAME_MEMO_MAX) {
+    hostnameMemo.delete(hostnameMemo.keys().next().value);
+  }
+  hostnameMemo.set(url, host);
+  return host;
 }
 
 /** Only string lists may drive the Gate's site policy (a foreign storage

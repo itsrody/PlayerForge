@@ -52,3 +52,13 @@ test("the timeline collector keeps url-keyed media observations", () => {
   const afterBlank = mediaTimeline.all().length;
   assert.equal(afterBlank, afterDedupe, "blank names are ignored");
 });
+
+test("mediaTimeline stays bounded: newest sightings evict the oldest FIFO", () => {
+  for (let i = 0; i < 600; i++) {
+    mediaTimeline.add({ name: `https://cdn.example/seg/${i}.ts`, initiatorType: "video" });
+  }
+  const all = mediaTimeline.all();
+  assert.equal(all.length, 500, "the store is capped at the newest 500 sightings");
+  assert.equal(mediaTimeline.has("https://cdn.example/seg/0.ts"), false, "oldest sightings were evicted");
+  assert.equal(mediaTimeline.has("https://cdn.example/seg/599.ts"), true, "the newest sighting survives");
+});

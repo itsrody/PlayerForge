@@ -219,3 +219,17 @@ test("netSight ignores nameless or non-string entries", async () => {
   assert.equal(seen.length, 0, "nothing was scheduled");
   off();
 });
+
+test("a teardown before a queued flush never hands the re-armed feed an empty batch", async () => {
+  const off = onNetEvents(() => {});
+  const observer = observerInstances.at(-1);
+  observer.fire([mediaEntry(MP4_URL)]); // queues a flush
+  off(); // last subscriber leaves: pendingEntries resets, the flush is already queued
+
+  let calls = 0;
+  const off2 = onNetEvents(() => { calls++; }); // re-arms before the queued microtask runs
+  await tick();
+
+  assert.equal(calls, 0, "the re-armed subscriber is not delivered the emptied queue");
+  off2();
+});
