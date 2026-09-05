@@ -153,5 +153,12 @@ test("object-URL and MSE glue is invoked unguarded (no cross-browser fallbacks)"
     /typeof\s+URL|URL\?\./,
     "no object-URL feature-detect in element-route"
   );
+  assert.match(elementRouteSrc, /\.requestVideoFrameCallback\(onFirstFrame\)/, "the frame watchdog arms via requestVideoFrameCallback (FF 132+, baseline 2024)");
+  assert.match(elementRouteSrc, /new FinalizationRegistry\(/, "routed object URLs are GC-cleaned via FinalizationRegistry (FF 79+)");
+  assert.doesNotMatch(
+    elementRouteSrc.replace(/\/\*[\s\S]*?\*\//g, ""),
+    /typeof\s+requestVideoFrameCallback|typeof\s+FinalizationRegistry/,
+    "no feature-detect on the watchdog/cleanup FF-native surfaces"
+  );
   assert.match(mseSrc, /isTypeSupported\(mimeType\)/, "MSE lanes pre-validate mime natively");
 });

@@ -23,10 +23,24 @@
  * decline, network error, non-2xx, redirect cap, blob:/data:/empty src - leaves
  * the element's src untouched and the native wire in charge. Never patch a
  * prototype: a routed element is tracked in a WeakMap so its object URL is
- * revoked on re-route, on dispose, and never leaks after the element dies.
+ * revoked on re-route, on dispose, and - via a FinalizationRegistry held on
+ * the element - even when the page throws the element away without disposing
+ * it.
  *
- * Deterministic: object-URL creation/revocation and the base URL are
- * injectable, so the whole flow runs headless.
+ * Dead-bytes watchdog: the file is fully buffered before the swap, so the first
+ * frame should be composited almost immediately. A routed blob that never
+ * presents a frame inside `frameWatchdogMs` - a 200-body that is not demuxable
+ * media but fires no error, truncation that hangs metadata - is dead bytes, and
+ * the element is handed back its native src through the same `revertToNative`
+ * path the error fallback uses. `requestVideoFrameCallback` is the "pixels
+ * actually composited" signal (FF 132+, baseline 2024); a paused element still
+ * presents its initial frame, so an unplayed routed blob disarms on load. Every
+ * revert is toward the native wire, which streams the same resource, so the
+ * element is never left frozen.
+ *
+ * Deterministic: object-URL creation/revocation, the base URL, the cleanup
+ * registry factory, and the frame-watchdog deadline are injectable, so the
+ * whole flow runs headless.
  */
 import { logger } from "../../shared/logger.js";
 import { isMp4StreamUrl } from "./mp4.js";
@@ -39,10 +53,18 @@ const FALLBACK_BASE = "https://nowhere.invalid/";
  *  keeps the native media-stack wire - which streams + seeks by design. */
 const ELEMENT_ROUTE_MAX_BYTES = 1024 * 1024 * 1024;
 
+/** Deadline for a routed blob to present its first frame. The whole file is
+ *  buffered before the swap, so a composed frame should arrive almost
+ *  immediately; a blob that never presents one in this window is dead bytes
+ *  even when no error fires. */
+const FRAME_WATCHDOG_MS = 10_000;
+
 /** Per-element routed object URLs, revoked on re-route or dispose. */
 const routedUrls = new WeakMap();
 /** Per-element in-flight guards so two routes never race. */
 const pendingRoutes = new WeakSet();
+/** Per-element cleanup registries, unregistered when their route is released. */
+const routeCleanupRegistries = new WeakMap();
 
 function defaultMakeObjectUrl(blob) {
   return URL.createObjectURL(blob);
@@ -52,16 +74,57 @@ function defaultRevokeObjectUrl(objectUrl) {
   URL.revokeObjectURL(objectUrl);
 }
 
+/** FinalizationRegistry factory: revokes a routed element's object URL if the
+ *  element is garbage-collected without a dispose or revert ever releasing it.
+ *  The held value carries the route's own revoke seam, so an injected
+ *  test double still exercises the release path. */
+function defaultMakeCleanupRegistry(cleanup) {
+  return new FinalizationRegistry(cleanup);
+}
+
 /** MediaError.code for "the resource (object URL) could not be loaded". */
 const MEDIA_ERR_SRC_NOT_SUPPORTED = 4;
 
+/** Release a routed element's object URL: drop the route maps, unregister the
+ *  element from its cleanup registry, revoke the URL. Idempotent - releasing
+ *  an already-reverted route is a no-op. */
+function revokeRouted(video, revokeObjectUrl) {
+  const objectUrl = routedUrls.get(video);
+  if (!objectUrl) {
+    return false;
+  }
+  routedUrls.delete(video);
+  const cleanupRegistry = routeCleanupRegistries.get(video);
+  if (cleanupRegistry) {
+    routeCleanupRegistries.delete(video);
+    cleanupRegistry.unregister(video);
+  }
+  revokeObjectUrl(objectUrl);
+  return true;
+}
+
+/**
+ * Hand the element back its original native src. The revert requires our
+ * object URL to still be the active source, so the page's own src changes are
+ * never clobbered. Idempotent and shared by the error fallback and the frame
+ * watchdog: degrades toward native, never frozen playback.
+ */
+function revertToNative(video, nativeUrl, revokeObjectUrl) {
+  const objectUrl = routedUrls.get(video);
+  if (!objectUrl) {
+    return;
+  }
+  if (video.currentSrc !== objectUrl && video.src !== objectUrl) {
+    return;
+  }
+  revokeRouted(video, revokeObjectUrl);
+  video.src = nativeUrl;
+}
+
 /** Release the object URL the seam handed `video` (idempotent). */
 export function disposeElementSource(video, { revokeObjectUrl = defaultRevokeObjectUrl } = {}) {
-  const objectUrl = routedUrls.get(video);
-  if (objectUrl) {
-    routedUrls.delete(video);
+  if (revokeRouted(video, revokeObjectUrl)) {
     pendingRoutes.delete(video);
-    revokeObjectUrl(objectUrl);
   }
 }
 
@@ -82,17 +145,35 @@ function armNativeFallback(video, nativeUrl, revokeObjectUrl) {
     if (video?.error?.code !== MEDIA_ERR_SRC_NOT_SUPPORTED) {
       return;
     }
-    const objectUrl = routedUrls.get(video);
-    if (!objectUrl) {
-      return;
-    }
-    if (video.currentSrc !== objectUrl && video.src !== objectUrl) {
-      return;
-    }
-    routedUrls.delete(video);
-    revokeObjectUrl(objectUrl);
-    video.src = nativeUrl;
+    revertToNative(video, nativeUrl, revokeObjectUrl);
   }, { once: true });
+}
+
+/**
+ * First-frame watchdog: the routed blob's whole file is buffered before the
+ * swap, so a composited frame should arrive almost immediately. A blob that
+ * never presents one inside `watchdogMs` is dead bytes even when no error
+ * fires (a 200-body that is not demuxable media, truncation that hangs
+ * metadata); revert to the native src, which streams the same resource, so
+ * the element is never left frozen. `requestVideoFrameCallback` fires when a
+ * frame is actually composited (FF 132+, baseline 2024); a paused element
+ * still presents its initial frame, so an unplayed routed video disarms on
+ * load. Unarmed for mock videos without the method; a deadline that fires
+ * after the error-revert already cleared the route is a no-op.
+ */
+function armFrameWatchdog(video, nativeUrl, revokeObjectUrl, watchdogMs) {
+  if (typeof video.requestVideoFrameCallback !== "function") {
+    return;
+  }
+  const deadline = AbortSignal.timeout(watchdogMs);
+  const onDeadline = () => {
+    revertToNative(video, nativeUrl, revokeObjectUrl);
+  };
+  deadline.addEventListener("abort", onDeadline, { once: true });
+  const onFirstFrame = () => {
+    deadline.removeEventListener("abort", onDeadline);
+  };
+  video.requestVideoFrameCallback(onFirstFrame);
 }
 
 /** The element's media URL. `currentSrc` wins once a source is selected;
@@ -127,7 +208,9 @@ export async function routeProgressiveSource({
   makeObjectUrl = defaultMakeObjectUrl,
   revokeObjectUrl = defaultRevokeObjectUrl,
   onRoute = () => {},
-  maxBytes = ELEMENT_ROUTE_MAX_BYTES
+  maxBytes = ELEMENT_ROUTE_MAX_BYTES,
+  frameWatchdogMs = FRAME_WATCHDOG_MS,
+  makeCleanupRegistry = defaultMakeCleanupRegistry
 }) {
   if (!video || !router) {
     return null;
@@ -211,11 +294,15 @@ export async function routeProgressiveSource({
   pendingRoutes.delete(video);
   const previous = routedUrls.get(video);
   if (previous) {
-    revokeObjectUrl(previous);
+    revokeRouted(video, revokeObjectUrl);
   }
+  const cleanupRegistry = makeCleanupRegistry((route) => route.revokeObjectUrl(route.objectUrl));
+  cleanupRegistry.register(video, { objectUrl, revokeObjectUrl }, video);
+  routeCleanupRegistries.set(video, cleanupRegistry);
   video.src = objectUrl;
   routedUrls.set(video, objectUrl);
   armNativeFallback(video, url, revokeObjectUrl);
+  armFrameWatchdog(video, url, revokeObjectUrl, frameWatchdogMs);
   logger.warn("proxy", "mp4", "element routed through proxy", url, { bytes: blob.size.toLocaleString() });
   onRoute({ url, objectUrl, bytes: blob.size });
   return { url, objectUrl, bytes: blob.size };

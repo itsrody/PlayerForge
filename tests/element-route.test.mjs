@@ -319,3 +319,192 @@ test("a decode/network error on the routed blob does not yank the element to nat
   assert.deepEqual(state.revoked, [], "no revoke for an unrelated media error");
   assert.equal(video.src, "blob:pf-1", "the routed wire stays");
 });
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test("reverts to native when a routed blob never presents a first frame", async () => {
+  const state = { revoked: [] };
+  const frameCallbacks = [];
+  const video = {
+    currentSrc: "",
+    src: "https://cdn.example/MOVIE.mp4",
+    requestVideoFrameCallback(cb) {
+      frameCallbacks.push(cb);
+      return 1;
+    }
+  };
+  const result = await routeProgressiveSource({
+    video,
+    router: makeRouter(async () => ({
+      via: "gm",
+      resp: { status: 200, headers: { "content-type": "video/mp4" }, body: MP4_BYTES }
+    })),
+    getSetting: () => true,
+    baseUrl: "https://player.example/watch",
+    makeObjectUrl: () => "blob:pf-1",
+    revokeObjectUrl: (url) => state.revoked.push(url),
+    frameWatchdogMs: 10
+  });
+  assert.ok(result);
+  assert.equal(video.src, "blob:pf-1");
+  assert.equal(frameCallbacks.length, 1, "the watchdog armed a first-frame callback");
+  await sleep(50);
+  assert.deepEqual(state.revoked, ["blob:pf-1"], "the dead routed blob is revoked");
+  assert.equal(video.src, "https://cdn.example/MOVIE.mp4", "the element returns to the native wire");
+});
+
+test("keeps the routed blob when the first frame arrives, even after the deadline passes", async () => {
+  const state = { revoked: [] };
+  const frameCallbacks = [];
+  const video = {
+    currentSrc: "",
+    src: "https://cdn.example/MOVIE.mp4",
+    requestVideoFrameCallback(cb) {
+      frameCallbacks.push(cb);
+      return 2;
+    }
+  };
+  const result = await routeProgressiveSource({
+    video,
+    router: makeRouter(async () => ({
+      via: "gm",
+      resp: { status: 200, headers: { "content-type": "video/mp4" }, body: MP4_BYTES }
+    })),
+    getSetting: () => true,
+    baseUrl: "https://player.example/watch",
+    makeObjectUrl: () => "blob:pf-1",
+    revokeObjectUrl: (url) => state.revoked.push(url),
+    frameWatchdogMs: 10
+  });
+  assert.ok(result);
+  frameCallbacks[0](0, { presentationTime: 0 });
+  await sleep(50);
+  assert.deepEqual(state.revoked, [], "a live routed blob is never revoked");
+  assert.equal(video.src, "blob:pf-1", "the routed wire stays");
+});
+
+test("a watchdog expiry does not clobber the page's own src change", async () => {
+  const state = { revoked: [] };
+  const video = {
+    currentSrc: "",
+    src: "https://cdn.example/MOVIE.mp4",
+    requestVideoFrameCallback() {
+      return 3;
+    }
+  };
+  const result = await routeProgressiveSource({
+    video,
+    router: makeRouter(async () => ({
+      via: "gm",
+      resp: { status: 200, headers: { "content-type": "video/mp4" }, body: MP4_BYTES }
+    })),
+    getSetting: () => true,
+    baseUrl: "https://player.example/watch",
+    makeObjectUrl: () => "blob:pf-1",
+    revokeObjectUrl: (url) => state.revoked.push(url),
+    frameWatchdogMs: 10
+  });
+  assert.ok(result);
+  video.src = "blob:next-video";
+  await sleep(50);
+  assert.deepEqual(state.revoked, [], "the page's new src is not clobbered");
+  assert.equal(video.src, "blob:next-video");
+});
+
+test("a watchdog expiry after the error-revert is a no-op (no double revoke)", async () => {
+  const state = { revoked: [] };
+  const listeners = {};
+  const video = {
+    currentSrc: "",
+    src: "https://cdn.example/MOVIE.mp4",
+    addEventListener(type, fn) {
+      (listeners[type] ??= []).push(fn);
+    },
+    requestVideoFrameCallback() {
+      return 4;
+    },
+    fireError(code) {
+      video.error = { code };
+      for (const fn of listeners.error ?? []) fn();
+    }
+  };
+  const result = await routeProgressiveSource({
+    video,
+    router: makeRouter(async () => ({
+      via: "gm",
+      resp: { status: 200, headers: { "content-type": "video/mp4" }, body: MP4_BYTES }
+    })),
+    getSetting: () => true,
+    baseUrl: "https://player.example/watch",
+    makeObjectUrl: () => "blob:pf-1",
+    revokeObjectUrl: (url) => state.revoked.push(url),
+    frameWatchdogMs: 10
+  });
+  assert.ok(result);
+  video.currentSrc = "blob:pf-1";
+  video.fireError(4);
+  assert.deepEqual(state.revoked, ["blob:pf-1"]);
+  await sleep(50);
+  assert.deepEqual(state.revoked, ["blob:pf-1"], "the late watchdog expiry does not double-revoke");
+  assert.equal(video.src, "https://cdn.example/MOVIE.mp4");
+});
+
+test("the cleanup registry registers the routed element and revokes on GC cleanup", async () => {
+  const state = { revoked: [], registered: [] };
+  let cleanupFn;
+  const fakeRegistry = {
+    register(...args) {
+      state.registered.push(args);
+    },
+    unregister() {}
+  };
+  const video = { currentSrc: "", src: "https://cdn.example/MOVIE.mp4" };
+  const result = await routeProgressiveSource({
+    video,
+    router: makeRouter(async () => ({
+      via: "gm",
+      resp: { status: 200, headers: { "content-type": "video/mp4" }, body: MP4_BYTES }
+    })),
+    getSetting: () => true,
+    baseUrl: "https://player.example/watch",
+    makeObjectUrl: () => "blob:pf-1",
+    revokeObjectUrl: (url) => state.revoked.push(url),
+    makeCleanupRegistry: (cleanup) => {
+      cleanupFn = cleanup;
+      return fakeRegistry;
+    }
+  });
+  assert.ok(result);
+  assert.equal(state.registered.length, 1, "the routed element is registered once");
+  const [target, held, unregisterToken] = state.registered[0];
+  assert.equal(target, video, "the routed element is the registry target");
+  assert.equal(held.objectUrl, "blob:pf-1", "the held value carries the object URL");
+  assert.equal(unregisterToken, video, "the element is its own unregister token");
+  cleanupFn(held);
+  assert.deepEqual(state.revoked, ["blob:pf-1"], "GC cleanup revokes the live object URL");
+});
+
+test("disposeElementSource unregisters the element from its cleanup registry", async () => {
+  const unregistered = [];
+  const fakeRegistry = {
+    register() {},
+    unregister(token) {
+      unregistered.push(token);
+    }
+  };
+  const video = { currentSrc: "", src: "https://cdn.example/MOVIE.mp4" };
+  await routeProgressiveSource({
+    video,
+    router: makeRouter(async () => ({
+      via: "gm",
+      resp: { status: 200, headers: { "content-type": "video/mp4" }, body: MP4_BYTES }
+    })),
+    getSetting: () => true,
+    baseUrl: "https://player.example/watch",
+    makeObjectUrl: () => "blob:pf-1",
+    revokeObjectUrl: () => {},
+    makeCleanupRegistry: () => fakeRegistry
+  });
+  disposeElementSource(video, { revokeObjectUrl: () => {} });
+  assert.deepEqual(unregistered, [video], "release unregisters the element so a late GC is a no-op");
+});
