@@ -88,6 +88,12 @@ export function observeManifests({ gmWebRequest, rules = MANIFEST_OBSERVE_RULES,
  *                                    null keeps whatever the wire returned.
  * @param {Function} [env.onOutcome]  notification for tests/telemetry.
  * @param {Function} [env.makeResponse] (body, init) => Response-like object (default new Response).
+ * @param {Function} [env.enabled]    (uri, opts) => boolean, evaluated per call BEFORE
+ *                                    any capture/routing work. false short-circuits the
+ *                                    wrapper to a pure passthrough - the plain page pays
+ *                                    one callback, not regexes or async yields. Lets the
+ *                                    arm run at decision-time (live feature flips) while
+ *                                    keeping the off-state cost at zero.
  */
 export function interposeFetch({
   fetch: realFetch,
@@ -98,7 +104,8 @@ export function interposeFetch({
   route = null,
   routeContent = null,
   onOutcome = () => {},
-  makeResponse = (body, init) => new Response(body, init)
+  makeResponse = (body, init) => new Response(body, init),
+  enabled = () => true
 }) {
   if (typeof realFetch !== "function") throw new TypeError("interposeFetch requires a fetch seam");
   if (typeof shouldCapture !== "function") throw new TypeError("interposeFetch requires shouldCapture");
@@ -107,9 +114,23 @@ export function interposeFetch({
   const manifestPending = (url) => (isManifest ? isManifest(url) : shouldCapture(url));
 
   return async (uri, opts) => {
+    if (typeof enabled === "function" && !enabled(uri, opts)) {
+      // Unarmed fast path: the wrapper becomes a pure passthrough. The plain
+      // page pays this single check - never a regex, a capture, or an async
+      // routing yield. The check is DECISION-TIME so a live feature flip
+      // re-arms the next request without any reinstall.
+      return realFetch(uri, opts);
+    }
     const url = typeof uri === "string" ? uri : uri?.url;
     if (typeof route === "function" && shouldCapture(url)) {
-      const routed = await route(url);
+      let routed = null;
+      try {
+        routed = await route(url);
+      } catch (err) {
+        // Routing is a service, never a trap: a throwing seam must degrade to
+        // the native wire, per this module's fail-toward-native rule.
+        logger.warn("proxy", "fetch", "route throw, keeping native wire", url, err?.message ?? err);
+      }
       if (routed) {
         onOutcome({ url, decision: "routed" });
         return routed;
@@ -130,7 +151,12 @@ export function interposeFetch({
         : "";
     if (!shouldCapture(url)) {
       if (typeof routeContent === "function" && isMp4ContentType(contentType)) {
-        const rerouted = await routeContent(url);
+        let rerouted = null;
+        try {
+          rerouted = await routeContent(url);
+        } catch (err) {
+          logger.warn("proxy", "fetch", "routeContent throw, keeping native wire", url, err?.message ?? err);
+        }
         if (rerouted) {
           onOutcome({ url, decision: "routed-content" });
           return rerouted;
@@ -263,12 +289,17 @@ export function guardXhrBloom(xhr, { shouldCapture, rewrite, isManifest, onCaptu
  * instance gets one load hook per `send`, and responses still pass byte-identical
  * when unarmed or unchanged.
  */
-export function interposeXhrPrototype(proto, { shouldCapture, rewrite, isManifest, onCapture }) {
+export function interposeXhrPrototype(proto, { shouldCapture, rewrite, isManifest, onCapture, enabled = () => true }) {
   if (!proto || typeof proto.send !== "function") {
     return { registered: false };
   }
   const originalSend = proto.send;
   proto.send = function (...args) {
+    if (typeof enabled === "function" && !enabled()) {
+      // Unarmed fast path: same decision-time contract as the fetch interpose -
+      // the plain page pays one callback per send, no hook wiring at all.
+      return originalSend.apply(this, args);
+    }
     hookXhrLoad(this, { shouldCapture, rewrite, isManifest, onCapture });
     return originalSend.apply(this, args);
   };

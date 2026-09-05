@@ -363,3 +363,71 @@ test("installProxy keeps MP4 request routing behind its own toggle", async () =>
   assert.deepEqual(await bodyBytes(out), [8], "an MP4-shaped fetch is routed even with manifest routing off");
   assert.ok(providerFetches.some((u) => u === GET_VIDEO_URL));
 });
+test("installProxy off-switch routes nothing and never classifies", async () => {
+  const nativeResponse = new Response("native", { status: 200 });
+  const providerCalls = [];
+  let installedFetch = null;
+  const installed = installProxy({
+    fetch: async () => nativeResponse,
+    installFetch: (wrapped) => { installedFetch = wrapped; },
+    xhrPrototype: { send() {} },
+    getSetting: () => undefined,
+    provider: { fetch: async (url) => { providerCalls.push(url); return null; } }
+  });
+  assert.equal(installed.summary.enabled, false);
+  const manifestOut = await installedFetch("https://cdn.example/master.m3u8");
+  const segOut = await installedFetch("https://cdn.example/seg/1.ts");
+  const mp4Out = await installedFetch("https://cdn.example/get_video?id=1");
+  assert.deepEqual([manifestOut, segOut, mp4Out], [nativeResponse, nativeResponse, nativeResponse]);
+  assert.deepEqual(providerCalls, [], "with no armed feature the wrapper is a pure passthrough - nothing routes");
+});
+
+test("installProxy re-evaluates the feature gate per request (live re-arm)", async () => {
+  const providerFetches = [];
+  const settings = { "features.manifestProxy": false, "features.mp4Fallback": false };
+  let installedFetch = null;
+  const installed = installProxy({
+    fetch: async () => new Response(M3U8, { status: 200 }),
+    installFetch: (wrapped) => { installedFetch = wrapped; },
+    xhrPrototype: { send() {} },
+    getSetting: (key) => settings[key] ?? undefined,
+    provider: {
+      fetch: async (url) => {
+        providerFetches.push(url);
+        return { via: "gm", resp: { status: 200, headers: { "content-type": "video/mp2t" }, body: new Uint8Array([5]) } };
+      }
+    }
+  });
+
+  const offManifest = await installedFetch("https://cdn.example/master.m3u8");
+  assert.equal(await offManifest.text(), M3U8, "off: a manifest fetch stays byte-identical");
+  assert.equal(installed.flow.claimedSize, 0, "off: no claim without an armed feature");
+
+  settings["features.manifestProxy"] = true;
+  await installedFetch("https://cdn.example/master.m3u8");
+  assert.equal(installed.flow.claimedSize, 1, "a live flip ON re-arms engagement without any reinstall");
+  const segOut = await installedFetch("https://cdn.example/seg/1.ts");
+  assert.deepEqual(await bodyBytes(segOut), [5], "the re-armed host's segment bytes ride the proxy");
+
+  settings["features.manifestProxy"] = false;
+  await installedFetch("https://other.example/other.m3u8");
+  assert.equal(installed.flow.claimedSize, 1, "a live flip OFF stops new claims (release is the flow's job)");
+  const segNative = await installedFetch("https://cdn.example/seg/1.ts");
+  assert.equal(await segNative.text(), M3U8, "the disabled lane hands even engaged space back to native");
+  assert.equal(providerFetches.length, 1, "exactly one proxy GET ever ran - while armed");
+});
+
+test("installProxy isolates a throwing GM_webRequest row - the interpose arm survives", () => {
+  let installedFetch = null;
+  const installed = installProxy({
+    gmWebRequest: () => { throw new Error("rules table full"); },
+    fetch: async () => new Response(M3U8, { status: 200 }),
+    installFetch: (wrapped) => { installedFetch = wrapped; },
+    xhrPrototype: { send() {} },
+    getSetting: manifestFeatures()
+  });
+  assert.equal(installed.summary.observe, false, "the failed observe row reports off");
+  assert.equal(installed.summary.fetch, true, "fetch interpose still arms");
+  assert.equal(installed.summary.xhr, true, "xhr interpose still arms");
+  assert.ok(installed.router, "the shared router still arms");
+});

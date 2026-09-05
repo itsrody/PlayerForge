@@ -342,3 +342,35 @@ test("interposeXhrPrototype reports registered:false for a non-wrappable seam", 
   assert.deepEqual(interposeXhrPrototype(null, { shouldCapture: () => true, rewrite: () => ({}) }), { registered: false });
   assert.deepEqual(interposeXhrPrototype({}, { shouldCapture: () => true, rewrite: () => ({}) }), { registered: false });
 });
+test("interposeFetch enabled:false is a pure passthrough - no route or classify work", async () => {
+  const nativeResponse = new Response("native", { status: 200 });
+  let routeCalls = 0;
+  let captureCalls = 0;
+  let rewriteCalls = 0;
+  const intercepted = interposeFetch({
+    fetch: async () => nativeResponse,
+    shouldCapture: () => { captureCalls++; return true; },
+    rewrite: () => { rewriteCalls++; return { text: "should-not-run", decision: {} }; },
+    route: async () => { routeCalls++; return new Response("routed"); },
+    enabled: () => false
+  });
+  const out = await intercepted("https://cdn.example/master.m3u8");
+  assert.equal(out, nativeResponse);
+  assert.equal(routeCalls, 0, "the unarmed fast path never routes");
+  assert.equal(captureCalls, 0, "the unarmed fast path never even classifies");
+  assert.equal(rewriteCalls, 0, "the unarmed fast path never rewrites");
+});
+
+test("interposeFetch survives a throwing route seam by keeping the native wire", async () => {
+  const nativeResponse = new Response("native", { status: 200 });
+  const intercepted = interposeFetch({
+    fetch: async () => nativeResponse,
+    shouldCapture: () => true,
+    isManifest: () => false,
+    rewrite: () => ({ text: "x", decision: {} }),
+    route: async () => { throw new Error("seam exploded"); },
+    routeContent: () => { throw new Error("content seam exploded"); }
+  });
+  const out = await intercepted("https://cdn.example/master.m3u8");
+  assert.equal(out, nativeResponse, "a throwing route falls through to the wire it replaced");
+});

@@ -281,18 +281,23 @@ export function installProxyDebug({
     // tab, the top page never matched the script and observe is dark for the tab.
     logger.log("proxy", "bootstrap", "observe owned by top frame - subframe skips GM_webRequest");
   } else if (typeof gmWebRequest === "function") {
-    observeManifests({
-      gmWebRequest,
-      onObserve: (hit) => {
-        // The GM rule sees the tab-wide request surface a per-realm observer
-        // never can; relay the sighting into the kernel feed as the top-frame
-        // analyst (via: "gm"). Debug-only: this whole bootstrap is armed for
-        // a debug session and rides the feed's idle rule otherwise.
-        netSight({ name: hit.url, via: "gm", initiatorType: hit.type ?? "other", responseStatus: null });
-        logger.log("proxy", "observe", "manifest request seen", hit.url, hit.type);
-      }
-    });
-    summary.observe = true;
+    try {
+      observeManifests({
+        gmWebRequest,
+        onObserve: (hit) => {
+          // The GM rule sees the tab-wide request surface a per-realm observer
+          // never can; relay the sighting into the kernel feed as the top-frame
+          // analyst (via: "gm"). Debug-only: this whole bootstrap is armed for
+          // a debug session and rides the feed's idle rule otherwise.
+          netSight({ name: hit.url, via: "gm", initiatorType: hit.type ?? "other", responseStatus: null });
+          logger.log("proxy", "observe", "manifest request seen", hit.url, hit.type);
+        }
+      });
+      summary.observe = true;
+    } catch (err) {
+      // Seams are isolated: a broken observe row must not abort the interpose arm.
+      logger.error("proxy", "bootstrap", "observe registration failed", err?.message ?? err);
+    }
   } else {
     logger.log("proxy", "bootstrap", "GM_webRequest unavailable - observe layer off (top frame)");
   }
@@ -407,8 +412,16 @@ export function installProxy({
     manifest: getSetting("features.manifestProxy") === true,
     mp4: getSetting("features.mp4Fallback") === true
   };
+  // Policy is DECISION-TIME, not snapshotted: the fast-path + per-lane gates
+  // re-read the settings engine per request (uBO re-evaluates policy per
+  // request), so a user flipping a feature mid-page stops routing at the next
+  // fetch - the settings engine live-reloads by design. The install-time
+  // `features` snapshot below only feeds the install report; the Gate arms
+  // true and `routingArmed` is the real gate.
+  const routingArmed = () =>
+    getSetting("features.manifestProxy") === true || getSetting("features.mp4Fallback") === true;
   const gate = new Gate({
-    enabled: features.manifest,
+    enabled: true,
     includes: normalizeList(getSetting("proxy.routing.includes")),
     excludes: normalizeList(getSetting("proxy.routing.excludes"))
   });
@@ -466,6 +479,11 @@ export function installProxy({
   };
 
   const rewrite = (url, text) => {
+    // Live feature gate in front of the classify work: flipping the manifest
+    // feature off must stop rewrites at the next fetch, not at the next load.
+    if (getSetting("features.manifestProxy") !== true) {
+      return { text, decision: { routed: false, klass: null, reason: "disabled" } };
+    }
     const result = manifestRewrite(url, text, { gate });
     if (result.decision.routed) {
       const outcome = flow.consider({ player: url, manifestUrl: url, kind: result.decision.kind, text });
@@ -497,15 +515,22 @@ export function installProxy({
   if (role === "frame") {
     // Not a hole: GM_webRequest rules are tab-scoped, so the top frame owns them.
     logger.log("proxy", "bootstrap", "observe owned by top frame - subframe skips GM_webRequest");
-  } else if (typeof gmWebRequest === "function") {
-    observeManifests({
-      gmWebRequest,
-      onObserve: (hit) => {
-        netSight({ name: hit.url, via: "gm", initiatorType: hit.type ?? "other", responseStatus: null });
-        logger.log("proxy", "observe", "manifest request seen", hit.url, hit.type);
-      }
-    });
-    summary.observe = true;
+  } else if (routingArmed() && typeof gmWebRequest === "function") {
+    // Rules are tab-wide registered rows; with routing off (nothing armed) they
+    // would register neutral observers for no purpose, so registration waits
+    // until a feature is on. Wrapped so one broken row cannot abort the arm.
+    try {
+      observeManifests({
+        gmWebRequest,
+        onObserve: (hit) => {
+          netSight({ name: hit.url, via: "gm", initiatorType: hit.type ?? "other", responseStatus: null });
+          logger.log("proxy", "observe", "manifest request seen", hit.url, hit.type);
+        }
+      });
+      summary.observe = true;
+    } catch (err) {
+      logger.error("proxy", "bootstrap", "observe registration failed", err?.message ?? err);
+    }
   } else {
     logger.log("proxy", "bootstrap", "GM_webRequest unavailable - observe layer off (top frame)");
   }
@@ -534,8 +559,16 @@ export function installProxy({
       provider ?? new ProxyProvider({ native: { fetch } });
     router = new Mp4Router({
       provider: fallbackProvider,
-      enabledFor: (url) =>
-        gate.inScope(url) && (isSegmentLikeUrl(url) ? features.manifest : features.mp4),
+      enabledFor: (url) => {
+        // Decision-time lanes: segments ride the manifest toggle, standalone
+        // MP4s the mp4Fallback toggle - re-read per request so a live flip
+        // stops routing immediately (fail toward native).
+        const shaped = isSegmentLikeUrl(url);
+        const on = shaped
+          ? getSetting("features.manifestProxy") === true
+          : getSetting("features.mp4Fallback") === true;
+        return on && gate.inScope(url);
+      },
       reportNativeWire
     });
   }
@@ -557,7 +590,8 @@ export function installProxy({
         routeContent: (url) => router?.routeContent(url) ?? null,
         onOutcome: ({ url, decision }) => {
           logger.log("proxy", "bootstrap", "fetch interpose", url, decision);
-        }
+        },
+        enabled: routingArmed
       });
       installFetch(wrapped);
       summary.fetch = true;
@@ -572,7 +606,8 @@ export function installProxy({
         shouldCapture,
         rewrite,
         isManifest: isManifestUrl,
-        onCapture
+        onCapture,
+        enabled: routingArmed
       });
       summary.xhr = registered;
     } catch (err) {
