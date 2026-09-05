@@ -69,6 +69,17 @@ test("GM is the primary transport; headers and binary payload survive", async ()
   assert.equal(calls[0].url, "https://x/seg/2.ts");
   assert.equal(calls[0].headers.Referer, "https://player/");
   assert.equal(calls[0].responseType, "arraybuffer");
+  assert.equal(calls[0].timeout, undefined, "default fetch must not send an explicit 0ms timeout");
+});
+
+test("a real requested timeout is forwarded to GM; zero is omitted", async () => {
+  const { gmFetch, calls } = fakeGMHarness();
+  const nativeSpy = { fetch: async () => { throw new Error("should not fall back"); } };
+  const provider = new ProxyProvider({ gmFetch, native: nativeSpy });
+  await provider.fetch("https://x/seg/5.ts", { timeoutMs: 15000 });
+  assert.equal(calls[0].timeout, 15000);
+  await provider.fetch("https://x/seg/6.ts", { timeoutMs: 0 });
+  assert.equal(calls[1].timeout, undefined);
 });
 
 test("byteRange param becomes a Range header on both GM and native paths", async () => {

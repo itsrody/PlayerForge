@@ -46,7 +46,7 @@ test("installProxyDebug frame role skips GM_webRequest but keeps interpose layer
     installFetch: (wrapped) => { installedFetch = wrapped; },
     xhrPrototype: { send() {} }
   });
-  assert.deepEqual(summary, { enabled: true, role: "frame", observe: false, fetch: true, xhr: true });
+  assert.deepEqual(summary, { enabled: true, role: "frame", observe: false, fetch: true, xhr: true, mp4: { route: true } });
   assert.deepEqual(registerCalls, [], "frame instance must not register tab-level rules");
   assert.equal(typeof installedFetch, "function", "frame interposes its own fetch/XHR surface");
 });
@@ -68,7 +68,7 @@ test("installProxyDebug wires observe + fetch + xhr with the gate disabled (byte
     installFetch: (wrapped) => { installedFetch = wrapped; },
     xhrPrototype: proto
   });
-  assert.deepEqual(summary, { enabled: true, role: "top", observe: true, fetch: true, xhr: true });
+  assert.deepEqual(summary, { enabled: true, role: "top", observe: true, fetch: true, xhr: true, mp4: { route: true } });
   assert.equal(ruleCalls.length, 1, "GM_webRequest registered once");
   assert.ok(ruleCalls[0][0].selector.include.some((p) => p.includes("m3u8")));
   const out = await installedFetch("https://cdn.example/master.m3u8");
@@ -110,7 +110,7 @@ test("installProxyDebug degrades gracefully with missing fetch/xhr seams", () =>
     fetch: null,
     xhrPrototype: null
   });
-  assert.deepEqual(summary, { enabled: true, role: "top", observe: true, fetch: false, xhr: false });
+  assert.deepEqual(summary, { enabled: true, role: "top", observe: true, fetch: false, xhr: false, mp4: { route: false } });
 });
 
 test("installProxyDebug rewrites xhr manifest text through the wrapped prototype", () => {

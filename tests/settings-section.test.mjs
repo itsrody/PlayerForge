@@ -88,7 +88,7 @@ test("renders one labeled section per unique schema group", () => {
 test("bool settings render toggles with labels and aria", () => {
   const panel = makeFakePanel();
   addSettingsSection(panel);
-  assert.equal(panel.calls.checkboxes.length, 9);
+  assert.equal(panel.calls.checkboxes.length, 10);
   assert.ok(panel.calls.checkboxes.every((box) => typeof box.onChange === "function"));
   const hotkeys = panel.calls.checkboxes[0];
   assert.equal(hotkeys.checked, true);
@@ -97,6 +97,11 @@ test("bool settings render toggles with labels and aria", () => {
   const wakeLock = panel.calls.checkboxes[7];
   assert.equal(wakeLock.ariaLabel, "Keep Screen Awake");
   assert.equal(wakeLock.checked, true);
+  // MP4 recovery is opt-toggle, default on (fallback-only: never touches a
+  // working native path).
+  const mp4Recover = panel.calls.checkboxes[8];
+  assert.equal(mp4Recover.ariaLabel, "Recover MP4 Streams");
+  assert.equal(mp4Recover.checked, true);
 });
 
 test("toggle onChange persists through setSetting", () => {

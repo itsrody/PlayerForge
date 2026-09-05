@@ -19,6 +19,7 @@
  */
 import { logger } from "../../shared/logger.js";
 import { detectManifestKind, sniffManifestKind, rewriteManifest } from "./rewrite.js";
+import { isMp4ContentType } from "./mp4.js";
 
 /** Rules fed to `GM_webRequest`: observe-only. TM's MV2 `observe` is
  *  emulated by a no-op `cancel` rule whose listener never aborts. */
@@ -62,8 +63,29 @@ export function observeManifests({ gmWebRequest, rules = MANIFEST_OBSERVE_RULES,
  *
  * @param {object} env
  * @param {Function} env.fetch        the real fetch (uri, opts) => Promise<Response>.
- * @param {Function} env.shouldCapture (url) => boolean — manifest-looking URLs.
+ * @param {Function} env.shouldCapture (url) => boolean — manifest/stream-looking URLs.
  * @param {Function} env.rewrite     (url, text) => { text, decision } — armed rewrite.
+ * @param {Function} [env.isManifest] (url) => boolean — which captures take the
+ *                                    text-rewrite path (default: shouldCapture).
+ * @param {Function} [env.onCapture] ({ url, response, contentType, failed, error }) —
+ *                                    capture record hook for non-manifest streams
+ *                                    (progressive MP4s). Never consumes the body.
+ * @param {Function} [env.route]       async (url) => Response|null — checked BEFORE
+ *                                    the wire: when it returns a Response, that
+ *                                    becomes the page's response and `fetch` is
+ *                                    never called (request-level takeover makes the
+ *                                    proxy the Network initiator). null keeps the
+ *                                    native wire.
+ * @param {Function} [env.routeContent] async (url) => Response|null — content-type
+ *                                    armed: a request whose URL gives no MP4 shape
+ *                                    hint but whose response comes back
+ *                                    `video/mp4` is re-routed through the proxy and
+ *                                    the fabricated Response replaces the native
+ *                                    one (the native body is abandoned, so the
+ *                                    browser cancels the stream). This is the MP4
+ *                                    mirror of the manifest path: capture by what
+ *                                    the response *is*, not just its URL shape.
+ *                                    null keeps whatever the wire returned.
  * @param {Function} [env.onOutcome]  notification for tests/telemetry.
  * @param {Function} [env.makeResponse] (body, init) => Response-like object (default new Response).
  */
@@ -71,17 +93,54 @@ export function interposeFetch({
   fetch: realFetch,
   shouldCapture,
   rewrite,
+  isManifest = null,
+  onCapture = () => {},
+  route = null,
+  routeContent = null,
   onOutcome = () => {},
   makeResponse = (body, init) => new Response(body, init)
 }) {
   if (typeof realFetch !== "function") throw new TypeError("interposeFetch requires a fetch seam");
   if (typeof shouldCapture !== "function") throw new TypeError("interposeFetch requires shouldCapture");
   if (typeof rewrite !== "function") throw new TypeError("interposeFetch requires rewrite");
+  if (typeof onCapture !== "function") throw new TypeError("interposeFetch requires onCapture to be a function");
+  const manifestPending = (url) => (isManifest ? isManifest(url) : shouldCapture(url));
 
   return async (uri, opts) => {
-    const response = await realFetch(uri, opts);
     const url = typeof uri === "string" ? uri : uri?.url;
+    if (typeof route === "function" && shouldCapture(url)) {
+      const routed = await route(url);
+      if (routed) {
+        onOutcome({ url, decision: "routed" });
+        return routed;
+      }
+    }
+    let response;
+    try {
+      response = await realFetch(uri, opts);
+    } catch (err) {
+      if (shouldCapture(url)) {
+        onCapture({ url, failed: true, error: err });
+      }
+      throw err;
+    }
+    const contentType =
+      typeof response?.headers?.get === "function"
+        ? response.headers.get("content-type") ?? ""
+        : "";
     if (!shouldCapture(url)) {
+      if (typeof routeContent === "function" && isMp4ContentType(contentType)) {
+        const rerouted = await routeContent(url);
+        if (rerouted) {
+          onOutcome({ url, decision: "routed-content" });
+          return rerouted;
+        }
+        onOutcome({ url, decision: "content-native" });
+      }
+      return response;
+    }
+    onCapture({ url, response, contentType, failed: false });
+    if (!manifestPending(url)) {
       return response;
     }
     logger.log("proxy", "fetch", "capturing manifest response", url);
@@ -145,10 +204,24 @@ export function resolveRef(baseUrl, uri) {
  * when unarmed or unchanged. Operates on the xhr contract (open/send/responseText)
  * so a fake XHR exercises it headlessly.
  */
-function hookXhrLoad(xhr, { shouldCapture, rewrite }) {
+function hookXhrLoad(xhr, { shouldCapture, rewrite, isManifest = null, onCapture = () => {} }) {
   const onLoad = () => {
     const url = xhr.responseURL ?? xhr.url;
-    if (!shouldCapture(url) || xhr.responseType && xhr.responseType !== "") {
+    const contentType =
+      typeof xhr.getResponseHeader === "function"
+        ? xhr.getResponseHeader("content-type") ?? ""
+        : "";
+    if (!shouldCapture(url)) {
+      if (isMp4ContentType(contentType)) {
+        onCapture({ url, response: xhr, contentType, failed: false });
+      }
+      return;
+    }
+    onCapture({ url, response: xhr, contentType, failed: false });
+    if (isManifest && !isManifest(url)) {
+      return;
+    }
+    if (xhr.responseType && xhr.responseType !== "") {
       return;
     }
     const body = typeof xhr.responseText === "string" ? xhr.responseText : "";
@@ -179,10 +252,10 @@ function hookXhrLoad(xhr, { shouldCapture, rewrite }) {
  * Purely explicit in how much it rewrites: an unarmed/no-change response keeps
  * its original `responseText` (byte-identical).
  */
-export function guardXhrBloom(xhr, { shouldCapture, rewrite }) {
+export function guardXhrBloom(xhr, { shouldCapture, rewrite, isManifest, onCapture }) {
   const originalSend = xhr.send;
   xhr.send = (...args) => {
-    hookXhrLoad(xhr, { shouldCapture, rewrite });
+    hookXhrLoad(xhr, { shouldCapture, rewrite, isManifest, onCapture });
     return originalSend.apply(xhr, args);
   };
   return xhr;
@@ -194,13 +267,13 @@ export function guardXhrBloom(xhr, { shouldCapture, rewrite }) {
  * instance gets one load hook per `send`, and responses still pass byte-identical
  * when unarmed or unchanged.
  */
-export function interposeXhrPrototype(proto, { shouldCapture, rewrite }) {
+export function interposeXhrPrototype(proto, { shouldCapture, rewrite, isManifest, onCapture }) {
   if (!proto || typeof proto.send !== "function") {
     return { registered: false };
   }
   const originalSend = proto.send;
   proto.send = function (...args) {
-    hookXhrLoad(this, { shouldCapture, rewrite });
+    hookXhrLoad(this, { shouldCapture, rewrite, isManifest, onCapture });
     return originalSend.apply(this, args);
   };
   return { registered: true };

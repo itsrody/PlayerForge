@@ -75,6 +75,13 @@ const SETTINGS_SCHEMA = [
     group: "Features"
   },
   {
+    key: "features.mp4Fallback",
+    type: "bool",
+    label: "Recover MP4 Streams",
+    default: true,
+    group: "Features"
+  },
+  {
     key: "ui.compact",
     type: "bool",
     label: "Compact Panel",

@@ -88,17 +88,21 @@ export class ProxyProvider {
       const settle = () => { settled = true; };
       let req;
       try {
-        req = this.#gmFetch(
-          {
-            method: "GET",
-            url: uri,
-            headers,
-            responseType: "arraybuffer",
-            timeout: timeoutMs,
-            ...callbacks
-          },
-          callbacks
-        );
+        const options = {
+          method: "GET",
+          url: uri,
+          headers,
+          responseType: "arraybuffer",
+          ...callbacks
+        };
+        if (timeoutMs > 0) {
+          // Never send `timeout: 0`: Tampermonkey (Firefox) interprets an
+          // explicit 0 as "fire ontimeout immediately", which killed the GM
+          // GET before a single byte arrived and forced the CORS-blocked
+          // native-fetch fallback. Omitted entirely means "no timeout".
+          options.timeout = timeoutMs;
+        }
+        req = this.#gmFetch(options, callbacks);
       } catch (err) {
         settle();
         reject(new SegmentError(`GM request setup failed: ${err?.message ?? err}`, { status: 0 }));

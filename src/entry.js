@@ -10,6 +10,8 @@ import { KEYS, getConfigValue, setConfigValue, deleteConfigField } from "./share
 import { initFullscreenGate } from "./shared/shadow.js";
 import { DEBUG_LOGS_KEY } from "./kernel/contract.js";
 import { installProxyDebug } from "./shell/proxy/bootstrap.js";
+import { ProxyProvider } from "./shell/proxy/provider.js";
+import { getSetting } from "./shell/chrome/config.js";
 
 // The version lives in the banner and is read from the installed script at
 // runtime via GM_info, so what the UI reports is always what the manager
@@ -49,7 +51,12 @@ function bootstrap() {
     role: inTopFrame ? "top" : "frame",
     gmWebRequest: inTopFrame && typeof GM_webRequest === "function" ? GM_webRequest : null,
     fetch: globalThis.fetch,
-    xhrPrototype: globalThis.XMLHttpRequest?.prototype
+    xhrPrototype: globalThis.XMLHttpRequest?.prototype,
+    getSetting,
+    provider: new ProxyProvider({
+      gmFetch: typeof GM_xmlhttpRequest === "function" ? GM_xmlhttpRequest : null,
+      native: { fetch: globalThis.fetch }
+    })
   });
 
   // The shell stylesheet is warmed lazily at first shell construction
