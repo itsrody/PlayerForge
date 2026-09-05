@@ -14,8 +14,8 @@ import { ProxyProvider } from "./kernel/proxy/provider.js";
 import { netSight } from "./kernel/net-watch.js";
 
 // The version lives in the banner and is read from the installed script at
-// runtime via GM_info, so the UI reports is always what the manager actually
-// runs - never a stale build-time constant.
+// runtime via GM_info, so what the UI reports is always what the manager
+// actually runs - never a stale build-time constant.
 
 function bootstrap() {
   "use strict";
