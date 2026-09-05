@@ -42,6 +42,7 @@ const providerSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "provider.j
 const mseSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "mse.js"), "utf8");
 const kernelSrc = readFileSync(join(ROOT, "src", "kernel", "kernel.js"), "utf8");
 const entrySrc = readFileSync(join(ROOT, "src", "entry.js"), "utf8");
+const netWatchSrc = readFileSync(join(ROOT, "src", "kernel", "net-watch.js"), "utf8");
 const mediaTimingSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "media-timing.js"), "utf8");
 
 test("build targets the firefox155 baseline", () => {
@@ -166,18 +167,21 @@ test("object-URL and MSE glue is invoked unguarded (no cross-browser fallbacks)"
   assert.match(mseSrc, /isTypeSupported\(mimeType\)/, "MSE lanes pre-validate mime natively");
 });
 
-test("kernel media-timing surface is a live unguarded PerformanceObserver, not a buffer replay", () => {
-  assert.match(mediaTimingSrc, /new PerformanceObserverClass\(/, "the relay's default observer is the FF-native bare global");
+test("unified net-watch feed is a live unguarded PerformanceObserver, not a buffer replay", () => {
+  assert.match(netWatchSrc, /new ObserverClass\(/, "the feed constructs the FF-native PerformanceObserver");
+  assert.match(netWatchSrc, /type:\s*"resource"/, "the feed observes resource entries");
+  assert.match(netWatchSrc, /buffered:\s*false/, "live push mode - no buffered window replay");
   assert.doesNotMatch(
-    mediaTimingSrc.replace(/\/\*[\s\S]*?\*\//g, ""),
-    /typeof\s+PerformanceObserver\b|\bwindow\.PerformanceObserver/,
-    "no PerformanceObserver feature-detect in the relay"
+    netWatchSrc.replace(/\/\*[\s\S]*?\*\//g, ""),
+    /getEntriesByType\s*\(|window\.PerformanceObserver/,
+    "no timeline re-reading and no window-indirected observer"
   );
-  assert.match(mediaTimingSrc, /buffered:\s*false/, "live push mode - no buffered window replay");
-  assert.match(mediaTimingSrc, /initiatorType/, "media element initiatorType (video/audio) is filtered");
-  assert.match(kernelSrc, /new MediaTimingObserver\(/, "the framework owns the relay");
-  assert.match(kernelSrc, /\.observe\(\)/, "the kernel arms the relay at init");
-  assert.match(kernelSrc, /#netTimingRelay\?\.disconnect\(\)/, "the relay disconnects at pagehide");
+  assert.match(netWatchSrc, /globalThis\.PerformanceObserver/, "the bare global is the structural default");
+  assert.match(kernelSrc, /onNetEvents\(/, "the framework subscribes to the unified feed");
+  assert.match(kernelSrc, /filter:\s*isMediaElementEntry/, "the kernel consumes only the media-shaped subset");
+  assert.match(kernelSrc, /#stopNetWatch\?\.\(\)/, "the feed unsubscribes at pagehide");
+  assert.match(mediaTimingSrc, /export function isMediaElementEntry/, "the media extractor survives the rebase");
+  assert.match(mediaTimingSrc, /export const mediaTimeline/, "the kernel-held collector survives the rebase");
   assert.match(entrySrc, /mediaTimeline\.add\(/, "entry schedules proxy sightings on the kernel timeline");
   assert.match(mp4Src, /reportNativeWire\(url, resp\.status\)/, "mp4 router reports the native-fetch fallback");
   assert.match(mp4Src, /via\s*===\s*"fetch"/, "only the native wire (never GM) is reported");

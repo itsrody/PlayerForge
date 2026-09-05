@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import {
   isMediaTimingName,
   isMediaElementEntry,
-  mediaTimeline,
-  MediaTimingObserver
+  mediaTimeline
 } from "../src/kernel/proxy/media-timing.js";
 
 const MP4_URL =
@@ -14,26 +13,6 @@ const HLS_URL = "https://cdn.example/hls/master.m3u8?token=abc";
 
 function mediaEntry(url, initiatorType = "video") {
   return { name: url, initiatorType, startTime: 12, duration: 3.2, transferSize: 2048, responseStatus: 200 };
-}
-
-class FakePerformanceObserver {
-  constructor(callback) {
-    this.callback = callback;
-    this.options = null;
-    this.disconnected = false;
-  }
-
-  observe(options) {
-    this.options = options;
-  }
-
-  disconnect() {
-    this.disconnected = true;
-  }
-
-  fire(entries) {
-    this.callback({ getEntries: () => entries });
-  }
 }
 
 test("media URL names are recognized per the routing shapes", () => {
@@ -72,42 +51,4 @@ test("the timeline collector keeps url-keyed media observations", () => {
   mediaTimeline.add({ name: "", initiatorType: "video" });
   const afterBlank = mediaTimeline.all().length;
   assert.equal(afterBlank, afterDedupe, "blank names are ignored");
-});
-
-test("MediaTimingObserver relays only media-shaped resource entries", () => {
-  const seen = [];
-  let fake;
-  const observer = new MediaTimingObserver((entry) => seen.push(entry), {
-    PerformanceObserverClass: function (callback) {
-      fake = new FakePerformanceObserver(callback);
-      return fake;
-    }
-  });
-  observer.observe();
-  observer.disconnect();
-  assert.deepEqual(fake.options, { type: "resource", buffered: false }, "live push observer, no buffered replay");
-  assert.equal(fake.disconnected, true, "disconnect tears the relay down");
-
-  fake.fire([
-    mediaEntry(MP4_URL),
-    mediaEntry(HLS_URL, "audio"),
-    { name: "https://x/app.js", initiatorType: "script" },
-    { name: "https://x/api", initiatorType: "fetch" }
-  ]);
-  assert.equal(seen.length, 2, "only the two media entries were relayed");
-  assert.equal(seen[0].name, MP4_URL);
-  assert.equal(seen[1].name, HLS_URL);
-});
-
-test("MediaTimingObserver throws on invalid seams", () => {
-  assert.throws(
-    () => new MediaTimingObserver(null, { PerformanceObserverClass: FakePerformanceObserver }),
-    /callback/,
-    "a callback is required"
-  );
-  assert.throws(
-    () => new MediaTimingObserver(() => {}, { PerformanceObserverClass: null }),
-    /PerformanceObserverClass/,
-    "an observer class is required"
-  );
 });

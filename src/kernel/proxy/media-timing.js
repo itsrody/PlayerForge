@@ -1,27 +1,25 @@
 /**
- * Kernel-owned media network-timeline surface (§7.5).
+ * Kernel-owned media network-timeline extractor and collector (§7.5).
  *
- * The framework owns the page's network timeline. One live, passive
- * PerformanceObserver over `resource` entries relays only media-shaped loads
- * - URLs that look like progressive/HLS/DASH streams, or entries whose
- * initiatorType is `video`/`audio`, the shape the media element's OWN native
- * GETs have (the network-process loads the element-level proxy seam can never
- * see) - into a per-realm collector. The kernel arms the relay; the network
- * layer consults or schedules into the collector without ever owning a DOM
- * handle or polling performance. It is event-driven by construction: the
- * browser calls the observer, the observer never actively re-reads the
- * timeline.
+ * The framework owns the page's media network timeline. The observer
+ * substrate ships in net-watch.js (§7.7) - one realm-wide feed this module
+ * consumes as a filtered subscriber: `isMediaElementEntry` keeps only the
+ * media-shaped loads - URLs that look like progressive/HLS/DASH streams, or
+ * entries whose initiatorType is `video`/`audio`, the shape the media
+ * element's OWN native GETs have (the network-process loads the element-level
+ * proxy seam can never see) - and the per-realm collector keeps them,
+ * url-keyed. The wire layer never touches performance directly; it consults
+ * or schedules into the collector (`has` is the "already on the wire" test
+ * the element seam's existence check needs). Event-driven by construction:
+ * the browser calls the observer, nothing here ever re-reads the timeline.
  *
- * Firefox-native: PerformanceObserver / PerformanceResourceTiming are FF 57+
- * (baseline 2024). Media elements surface their loads with initiatorType
- * `video`/`audio`, and `entry.name` (the URL) survives cross-origin -
- * Timing-Allow-Origin only zeros granular timestamps, never the name.
- * `buffered: false` is the efficient mode by design: a buffered replay would
- * O(n) the whole 250-entry default window on first callback and drop the
- * live entry pressure this surface exists to catch.
+ * Firefox-native: PerformanceResourceTiming is FF 57+ (baseline 2024). The
+ * initiatorType `video`/`audio` marks the media element's own requests, and
+ * `entry.name` (the URL) survives cross-origin - Timing-Allow-Origin only
+ * zeros granular timestamps, never the name.
  *
- * Deterministic: the observer class is a constructor-injectable seam, so the
- * whole relay runs headless against a stubbed observer.
+ * Deterministic: pure predicates and a plain store - the whole module runs
+ * headless with no DOM, network, or observer dependency.
  */
 const MEDIA_TIMING_NAME_RE = /\.(?:mp4|webm|ogv|ogg|m4v|mov)(?:[?#]|$)|\.(?:m3u8|mpd)(?:[?#&]|$)|get_video|[?&]stream=1\b|(?:tapecontent|radosgw)[^#?]*\.mp4/i;
 
@@ -65,38 +63,3 @@ export const mediaTimeline = (() => {
     }
   };
 })();
-
-/**
- * Live media-timing observer. Constructs the native PerformanceObserver once
- * and relays only media-shaped resource entries to the callback. The observer
- * class is injectable for headless tests; the default is the FF-native bare
- * global resolved at call time.
- */
-export class MediaTimingObserver {
-  #observer = null;
-
-  constructor(callback, { PerformanceObserverClass = globalThis.PerformanceObserver } = {}) {
-    if (typeof callback !== "function") {
-      throw new TypeError("MediaTimingObserver requires a callback");
-    }
-    if (typeof PerformanceObserverClass !== "function") {
-      throw new TypeError("MediaTimingObserver requires PerformanceObserverClass");
-    }
-    this.#observer = new PerformanceObserverClass((list) => {
-      for (const entry of list.getEntries()) {
-        if (isMediaElementEntry(entry)) {
-          callback(entry);
-        }
-      }
-    });
-  }
-
-  observe(options = {}) {
-    this.#observer?.observe({ type: "resource", buffered: false, ...options });
-    return this;
-  }
-
-  disconnect() {
-    this.#observer?.disconnect();
-  }
-}
