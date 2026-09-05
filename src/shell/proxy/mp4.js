@@ -78,11 +78,9 @@ function resolveLocation(baseUrl, location) {
   if (!loc) {
     return null;
   }
-  try {
-    return new URL(loc, baseUrl).href;
-  } catch {
-    return /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(loc) ? loc : null;
-  }
+  return URL.canParse(loc, baseUrl)
+    ? new URL(loc, baseUrl).href
+    : /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(loc) ? loc : null;
 }
 
 /**

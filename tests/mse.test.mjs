@@ -406,3 +406,35 @@ test("separate mimeType lanes get their own init and ordering", async () => {
 test("MSEFactory refuses a missing MediaSource seam", () => {
   assert.throws(() => new MSEFactory({ mediaSource: undefined }), TypeError);
 });
+
+test("a lane mime the engine cannot demux is rejected before addSourceBuffer", async () => {
+  class PickyMediaSource extends FakeMediaSource {
+    static isTypeSupported(mime) {
+      return mime === "video/mp4";
+    }
+  }
+  const ms = new PickyMediaSource();
+  const factory = new MSEFactory({
+    mediaSource: PickyMediaSource,
+    createObjectURL: () => "blob:pf-picky",
+    revokeObjectURL: () => {},
+    delay: async () => {}
+  });
+  const sink = new MediaSink({
+    mediaSource: ms,
+    objectURL: "blob:pf-picky",
+    mimeType: "video/mp4",
+    seams: factory,
+    onStateChange: () => {}
+  });
+  await assert.rejects(
+    sink.enqueue(0, new Uint8Array([1]), { mimeType: "audio/mp4" }),
+    (err) => err instanceof SegmentError && /unsupported mime type/.test(err.message),
+    "a mime isTypeSupported flags as false throws before addSourceBuffer"
+  );
+  assert.equal(ms.sourceBuffers.length, 0, "no SourceBuffer was created for the unsupported mime");
+  const pending = sink.enqueue(0, new Uint8Array([2]));
+  await settleAppend(ms.sourceBuffers[0]);
+  assert.deepEqual(ms.sourceBuffers[0].records, [[2]], "a supported mime still creates its lane");
+  await pending;
+});

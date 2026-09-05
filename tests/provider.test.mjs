@@ -293,6 +293,26 @@ test("aborting a native-streamed fetch mid-body rejects and cancels the reader",
   assert.equal(cancelled.length, 1, "the native body read was cancelled instead of partial-buffered");
 });
 
+test("a single-chunk streamed body passes through without a copy", async () => {
+  const chunk = new Uint8Array([7, 8, 9]);
+  const provider = new ProxyProvider({
+    native: {
+      fetch: async (uri, opts) => {
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(chunk);
+            controller.close();
+          }
+        });
+        return new Response(stream, { status: 200, headers: { "content-type": "video/mp4" } });
+      }
+    }
+  });
+  const { resp } = await provider.fetch("https://x/single.mp4");
+  assert.deepEqual([...resp.body], [7, 8, 9]);
+  assert.equal(resp.body, chunk, "the single read is returned without a copy");
+});
+
 test("a requested timeout aborts the native-wire fetch too", async () => {
   const passedSignals = [];
   const provider = new ProxyProvider({

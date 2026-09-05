@@ -20,14 +20,18 @@ export class MSEFactory {
    * @param {object} [seams.mediaSource]      MediaSource class/constructor (browser default).
    * @param {Function} [seams.createObjectURL]  (ms) => string (default URL.createObjectURL).
    * @param {Function} [seams.revokeObjectURL]  (url) => void (default URL.revokeObjectURL).
+   * @param {Function} [seams.isTypeSupported] (mime) => boolean - mime the
+   *                                    engine can demux (default the injected
+   *                                    MediaSource's static / native static).
    * @param {Function} [seams.delay]            (ms) => Promise — backpressure wait (default setTimeout).
    */
-  constructor({ mediaSource = globalThis.MediaSource, createObjectURL, revokeObjectURL, delay } = {}) {
+  constructor({ mediaSource = globalThis.MediaSource, createObjectURL, revokeObjectURL, delay, isTypeSupported } = {}) {
     const ctor = typeof mediaSource;
     if (ctor !== "function" && ctor !== "object") {
       throw new TypeError("MSEFactory requires a MediaSource class or instance");
     }
     this.mediaSource = mediaSource;
+    this.isTypeSupported = isTypeSupported ?? mediaSource?.isTypeSupported ?? null;
     this.createObjectURL = (ms) => (createObjectURL ?? URL.createObjectURL.bind(URL))(ms);
     this.revokeObjectURL = (url) => (revokeObjectURL ?? URL.revokeObjectURL.bind(URL))(url);
     this.delay = (ms) => (delay ?? ((d) => new Promise((r) => { setTimeout(r, d); })))(ms);
@@ -205,6 +209,10 @@ export class MediaSink {
   #lane(mimeType = this.#mimeType) {
     let lane = this.#lanes.get(mimeType);
     if (!lane) {
+      if (this.#seams.isTypeSupported && !this.#seams.isTypeSupported(mimeType)) {
+        logger.log("proxy", "mse", "unsupported mime type", mimeType);
+        throw new SegmentError(`unsupported mime type: ${mimeType}`, { retryable: false });
+      }
       let sourceBuffer;
       try {
         sourceBuffer = this.#mediaSource.addSourceBuffer(mimeType);

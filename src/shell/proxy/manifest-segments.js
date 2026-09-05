@@ -54,11 +54,7 @@ function resolveManifestRef(baseUrl, uri) {
   if (!baseUrl) {
     return ref;
   }
-  try {
-    return new URL(ref, baseUrl).href;
-  } catch {
-    return ref;
-  }
+  return URL.canParse(ref, baseUrl) ? new URL(ref, baseUrl).href : ref;
 }
 
 /** True when a reference is a URL-ish thing we should resolve/route (skips

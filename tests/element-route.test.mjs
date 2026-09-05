@@ -254,3 +254,68 @@ test("a scheme-relative src resolves against the frame before routing", async ()
   assert.ok(h.result);
   assert.equal(seen[0], "https://streamtape.com/get_video?id=abc&stream=1", "the provider gets an absolute URL");
 });
+
+test("reverts to the native src when the routed object URL fails to play", async () => {
+  const state = { revoked: [] };
+  const listeners = {};
+  const video = {
+    currentSrc: "",
+    src: "https://cdn.example/MOVIE.mp4",
+    addEventListener(type, fn) {
+      (listeners[type] ??= []).push(fn);
+    },
+    fireError(code) {
+      video.error = { code };
+      for (const fn of listeners.error ?? []) fn();
+    }
+  };
+  const result = await routeProgressiveSource({
+    video,
+    router: makeRouter(async () => ({
+      via: "gm",
+      resp: { status: 200, headers: { "content-type": "video/mp4" }, body: MP4_BYTES }
+    })),
+    getSetting: () => true,
+    baseUrl: "https://player.example/watch",
+    makeObjectUrl: () => "blob:pf-1",
+    revokeObjectUrl: (url) => state.revoked.push(url)
+  });
+  assert.ok(result);
+  assert.equal(video.src, "blob:pf-1");
+  video.currentSrc = "blob:pf-1";
+  video.fireError(4);
+  assert.deepEqual(state.revoked, ["blob:pf-1"], "the routed object URL is revoked");
+  assert.equal(video.src, "https://cdn.example/MOVIE.mp4", "the element returns to the native wire");
+});
+
+test("a decode/network error on the routed blob does not yank the element to native", async () => {
+  const state = { revoked: [] };
+  const listeners = {};
+  const video = {
+    currentSrc: "",
+    src: "https://cdn.example/MOVIE.mp4",
+    addEventListener(type, fn) {
+      (listeners[type] ??= []).push(fn);
+    },
+    fireError(code) {
+      video.error = { code };
+      for (const fn of listeners.error ?? []) fn();
+    }
+  };
+  const result = await routeProgressiveSource({
+    video,
+    router: makeRouter(async () => ({
+      via: "gm",
+      resp: { status: 200, headers: { "content-type": "video/mp4" }, body: MP4_BYTES }
+    })),
+    getSetting: () => true,
+    baseUrl: "https://player.example/watch",
+    makeObjectUrl: () => "blob:pf-1",
+    revokeObjectUrl: (url) => state.revoked.push(url)
+  });
+  assert.ok(result);
+  video.currentSrc = "blob:pf-1";
+  video.fireError(3);
+  assert.deepEqual(state.revoked, [], "no revoke for an unrelated media error");
+  assert.equal(video.src, "blob:pf-1", "the routed wire stays");
+});

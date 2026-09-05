@@ -190,11 +190,7 @@ export function resolveRef(baseUrl, uri) {
   if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(ref)) {
     return ref;
   }
-  try {
-    return new URL(ref, baseUrl).href;
-  } catch {
-    return baseUrl;
-  }
+  return URL.canParse(ref, baseUrl) ? new URL(ref, baseUrl).href : baseUrl;
 }
 
 /**

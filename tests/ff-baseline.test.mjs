@@ -33,6 +33,13 @@ const panelSrc = readFileSync(join(ROOT, "src", "shell", "chrome", "panel.js"), 
 const forgeSrc = readFileSync(join(ROOT, "src", "shell", "inputs", "forge.js"), "utf8");
 const actionsSrc = readFileSync(join(ROOT, "src", "shell", "inputs", "actions.js"), "utf8");
 const animateSrc = readFileSync(join(ROOT, "src", "shell", "chrome", "animate.js"), "utf8");
+const gateSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "gate.js"), "utf8");
+const manifestSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "manifest.js"), "utf8");
+const manifestSegmentsSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "manifest-segments.js"), "utf8");
+const mp4Src = readFileSync(join(ROOT, "src", "shell", "proxy", "mp4.js"), "utf8");
+const elementRouteSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "element-route.js"), "utf8");
+const providerSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "provider.js"), "utf8");
+const mseSrc = readFileSync(join(ROOT, "src", "shell", "proxy", "mse.js"), "utf8");
 
 test("build targets the firefox155 baseline", () => {
   assert.match(esbuild, /target:\s*\[["']firefox155["']\]/, "esbuild target is firefox155");
@@ -114,4 +121,37 @@ test("HUD glass never samples or blurs the video (no backdrop-filter)", () => {
 test("keep-awake wake lock re-acquires on sentinel release and obeys a setting", () => {
   assert.match(shellSrc, /addEventListener\("release"/, "sentinel release listener re-acquires the lock");
   assert.match(shellSrc, /getSetting\("features\.wakeLock"\)/, "wake lock is gated by the features.wakeLock setting");
+});
+
+test("proxy URL resolution uses URL.canParse natively, no try/catch constructors", () => {
+  // URL.canParse() is FF 115+ (baseline 155); each ref resolver must use it so
+  // no dead try/catch fallback can return. The constructor still runs where a
+  // parse is already known-valid.
+  for (const file of [gateSrc, manifestSrc, manifestSegmentsSrc, mp4Src, elementRouteSrc]) {
+    assert.match(file, /URL\.canParse\(/, "URL.canParse is used");
+    assert.match(file, /new URL\(/, "the parse target is still constructed where valid");
+    assert.doesNotMatch(file, /try\s*\{[\s\S]{0,80}?new URL\(/, "no try/catch new URL fallback");
+  }
+});
+
+test("proxy transport composes AbortSignal natively and streams single-chunk bodies uncopied", () => {
+  assert.match(providerSrc, /AbortSignal\.any\(/, "provider composes signals natively");
+  assert.match(providerSrc, /AbortSignal\.timeout\(/, "provider honors native timeouts");
+  assert.doesNotMatch(
+    providerSrc.replace(/\/\*[\s\S]*?\*\//g, ""),
+    /typeof\s+AbortSignal/,
+    "no AbortSignal feature-detect in provider"
+  );
+  assert.match(providerSrc, /\.buffer\.transfer\(/, "provider merges chunks via zero-copy transfer");
+});
+
+test("object-URL and MSE glue is invoked unguarded (no cross-browser fallbacks)", () => {
+  assert.match(elementRouteSrc, /return URL\.createObjectURL\(blob\)/, "object URLs are created natively");
+  assert.match(elementRouteSrc, /URL\.revokeObjectURL\(objectUrl\)/, "object URLs are revoked natively");
+  assert.doesNotMatch(
+    elementRouteSrc.replace(/\/\*[\s\S]*?\*\//g, ""),
+    /typeof\s+URL|URL\?\./,
+    "no object-URL feature-detect in element-route"
+  );
+  assert.match(mseSrc, /isTypeSupported\(mimeType\)/, "MSE lanes pre-validate mime natively");
 });

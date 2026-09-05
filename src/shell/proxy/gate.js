@@ -221,11 +221,7 @@ function hostnameOf(url) {
   if (typeof url !== "string" || !url) {
     return null;
   }
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return null;
-  }
+  return URL.canParse(url) ? new URL(url).hostname : null;
 }
 
 /** The hostname projection of a site pattern: a bare glob stays as-is, a URL

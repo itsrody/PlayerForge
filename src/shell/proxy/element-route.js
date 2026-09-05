@@ -45,12 +45,15 @@ const routedUrls = new WeakMap();
 const pendingRoutes = new WeakSet();
 
 function defaultMakeObjectUrl(blob) {
-  return typeof URL?.createObjectURL === "function" ? URL.createObjectURL(blob) : null;
+  return URL.createObjectURL(blob);
 }
 
 function defaultRevokeObjectUrl(objectUrl) {
-  URL?.revokeObjectURL?.(objectUrl);
+  URL.revokeObjectURL(objectUrl);
 }
+
+/** MediaError.code for "the resource (object URL) could not be loaded". */
+const MEDIA_ERR_SRC_NOT_SUPPORTED = 4;
 
 /** Release the object URL the seam handed `video` (idempotent). */
 export function disposeElementSource(video, { revokeObjectUrl = defaultRevokeObjectUrl } = {}) {
@@ -62,6 +65,36 @@ export function disposeElementSource(video, { revokeObjectUrl = defaultRevokeObj
   }
 }
 
+/**
+ * If the routed object-URL playback fails the moment it should start (the
+ * source it wraps is not supported), hand the element back its original
+ * native src instead of leaving the wire frozen. Armed once per routed
+ * element; unarmed elements (mock videos without an event surface) route
+ * without it, and a later unrelated error cannot clobber the page's own
+ * src changes because the revert requires our object URL to still be the
+ * active source.
+ */
+function armNativeFallback(video, nativeUrl, revokeObjectUrl) {
+  if (typeof video.addEventListener !== "function") {
+    return;
+  }
+  video.addEventListener("error", () => {
+    if (video?.error?.code !== MEDIA_ERR_SRC_NOT_SUPPORTED) {
+      return;
+    }
+    const objectUrl = routedUrls.get(video);
+    if (!objectUrl) {
+      return;
+    }
+    if (video.currentSrc !== objectUrl && video.src !== objectUrl) {
+      return;
+    }
+    routedUrls.delete(video);
+    revokeObjectUrl(objectUrl);
+    video.src = nativeUrl;
+  }, { once: true });
+}
+
 /** The element's media URL. `currentSrc` wins once a source is selected;
  *  otherwise the attribute value. Resolved absolute so a scheme-relative src
  *  (`//streamtape.com/...`) routes with a real URL - the raw string is what a
@@ -71,11 +104,7 @@ function resolveSrcUrl(video, baseUrl) {
   if (!raw) {
     return null;
   }
-  try {
-    return new URL(raw, baseUrl).href;
-  } catch {
-    return null;
-  }
+  return URL.canParse(raw, baseUrl) ? new URL(raw, baseUrl).href : null;
 }
 
 /** Only http(s) srcs are routable; blob:/data: the page already owns bytes
@@ -186,6 +215,7 @@ export async function routeProgressiveSource({
   }
   video.src = objectUrl;
   routedUrls.set(video, objectUrl);
+  armNativeFallback(video, url, revokeObjectUrl);
   logger.warn("proxy", "mp4", "element routed through proxy", url, { bytes: blob.size.toLocaleString() });
   onRoute({ url, objectUrl, bytes: blob.size });
   return { url, objectUrl, bytes: blob.size };

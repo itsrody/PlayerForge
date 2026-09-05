@@ -189,11 +189,28 @@ export class ProxyProvider {
       chunks.push(value);
       onProgress?.({ loaded, total });
     }
-    const merged = new Uint8Array(loaded);
-    let offset = 0;
-    for (const chunk of chunks) {
-      merged.set(chunk, offset);
-      offset += chunk.byteLength;
+    let merged;
+    if (chunks.length === 1) {
+      // Single-read bodies (the common small-segment case) pass through
+      // without a copy.
+      merged = chunks[0];
+    } else {
+      const first = chunks[0];
+      const firstLen = first.byteLength;
+      // ReadableStream chunks never share an underlying buffer, so an
+      // exclusively-owned, byte-aligned first chunk can be grown in place via
+      // ArrayBuffer.transfer (zero-copy resize); otherwise concat fresh. The
+      // length is captured before transfer, which detaches the source view.
+      const realloc =
+        first.byteOffset === 0 &&
+        firstLen === first.buffer.byteLength &&
+        chunks.slice(1).every((chunk) => chunk.buffer !== first.buffer);
+      merged = realloc ? new Uint8Array(first.buffer.transfer(loaded)) : new Uint8Array(loaded);
+      let offset = realloc ? firstLen : 0;
+      for (let i = realloc ? 1 : 0; i < chunks.length; i++) {
+        merged.set(chunks[i], offset);
+        offset += chunks[i].byteLength;
+      }
     }
     logger.log("proxy", "provider", "native fetch response", uri, { status: res.status, bytes: merged.byteLength });
     return { status: res.status, headers: headerObject(res.headers), body: merged };
