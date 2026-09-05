@@ -434,12 +434,18 @@ timing lives:
 - **EME (`MediaKeys` ClearKey)** — native on FF via MSE; used for DASH ClearKey (§11.3) through
   the standard `video.setMediaKeys` path, no grant needed.
 
-## 10. File layout (kernel-owned `src/kernel/proxy/`)
+## 10. File layout (kernel-owned network plane)
+
+The unified network manager is `src/kernel/net-watch.js`: it hosts the live
+feed, the wire-seam installer (`installProxyDebug`/`installProxy`), the kernel
+shell-lifecycle coordinator (`armProxy`), and the frozen `network` hub that
+re-exports every model below. The files under `src/kernel/proxy/` are the
+manager's headless utilities and algorithms — the dependency direction is
+one-way (manager imports models, never the reverse):
 
 ```
+src/kernel/net-watch.js   # §7.7 unified manager: feed + installer + arm + network hub
 src/kernel/proxy/
-  arm.js             # proxy → kernel wiring: wire-seam install + shell hook subscription
-  bootstrap.js       # installProxy / installProxyDebug factories (§7.4)
   gate.js            # arm/disarm, protection-classification, include-exclude policy (§11.4)
   manifest.js        # GM_webRequest rules + register/listener, @webRequest fallback
   rewrite.js         # pure .m3u8 / .mpd text rewriting (URL -> routed URL)
@@ -456,12 +462,14 @@ src/kernel/proxy/
   media-timing.js    # §7.5 media network-timeline extractor/collector (kernel-held)
 ```
 
-The proxy is 100% kernel-owned: the data plane never imports a shell module, the
-element takeover plane rides the kernel's shell-created / shell-destroyed
-lifecycle hooks (teardown is the kernel's disposal signal, not the shell's
-DOMManager), and every tuning key reads the kernel settings engine — the shell
-panel only *renders* that same schema. The kernel's own net-watch and settings
-modules stay the proxy's only cross-package deps.
+The network plane is 100% kernel-owned: the data plane never imports a shell
+module, the element takeover plane rides the kernel's shell-created /
+shell-destroyed lifecycle hooks (teardown is the kernel's disposal signal, not
+the shell's DOMManager), and every tuning key reads the kernel settings engine
+— the shell panel only *renders* that same schema. Entry and the kernel
+consume the whole plane through the single `net-watch.js` import; the manager's
+only cross-package deps are `src/shared/media-shapes.js` and
+`src/kernel/settings.js`.
 
 Pure functions (`rewrite.js`, `segment-manager.js` state transitions, `decrypt-aes128.js`,
 `token-manager.js`) are unit-testable exactly like the existing `tests/` (jsdom where needed,

@@ -9,11 +9,12 @@ globalThis.GM_setValue = () => {};
 globalThis.GM_addValueChangeListener = undefined;
 
 /**
- * The proxy arm is kernel-owned: installProxy/installProxyDebug arm the wire
- * seams, and the element takeover plane rides the kernel's shell-created /
- * shell-destroyed lifecycle hooks instead of entry.js's manual shell wiring or
- * the shell's own DOMManager cleanup. These tests assert the coordinator
- * applies the arm to a fake kernel without ever touching a shell import.
+ * The proxy arm is kernel-owned and lives on the unified network manager:
+ * armProxy/installProxy/installProxyDebug arm the wire seams, and the element
+ * takeover plane rides the kernel's shell-created / shell-destroyed lifecycle
+ * hooks instead of entry.js's manual shell wiring or the shell's own
+ * DOMManager cleanup. These tests assert the coordinator applies the arm to a
+ * fake kernel without ever touching a shell import.
  */
 
 /** A minimal Kernel-shaped lifetime surface (registers providers + hooks). */
@@ -61,13 +62,13 @@ function makeVideo(overrides = {}) {
 }
 
 test("armProxy requires a kernel with shell lifecycle hooks", async () => {
-  const { armProxy } = await import("../src/kernel/proxy/arm.js");
+  const { armProxy } = await import("../src/kernel/net-watch.js");
   assert.equal(armProxy({ kernel: null }), null);
   assert.equal(armProxy({ kernel: {} }), null);
 });
 
 test("armProxy installs the production arm against the injected fetch", async () => {
-  const { armProxy } = await import("../src/kernel/proxy/arm.js");
+  const { armProxy } = await import("../src/kernel/net-watch.js");
   const kernel = fakeKernel();
   const installed = armProxy({
     kernel,
@@ -83,7 +84,7 @@ test("armProxy installs the production arm against the injected fetch", async ()
 });
 
 test("armProxy downgrades to inactive when no fireable fetch seam exists", async () => {
-  const { armProxy } = await import("../src/kernel/proxy/arm.js");
+  const { armProxy } = await import("../src/kernel/net-watch.js");
   const kernel = fakeKernel();
   const installed = armProxy({
     kernel,
@@ -96,7 +97,7 @@ test("armProxy downgrades to inactive when no fireable fetch seam exists", async
 });
 
 test("element seams fire on shell-created and tear down on shell-destroyed", async () => {
-  const { armProxy } = await import("../src/kernel/proxy/arm.js");
+  const { armProxy } = await import("../src/kernel/net-watch.js");
   const kernel = fakeKernel();
 
   armProxy({

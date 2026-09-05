@@ -34,6 +34,13 @@ globalThis.PerformanceObserver = class {
   }
 };
 
+// The unified manager imports the settings engine, whose cache evaluates
+// through shared storage at module load (bare GM_getValue). Stub the trio
+// before the manager import - it is dynamic so these all land first.
+globalThis.GM_getValue = (key, fallback) => fallback;
+globalThis.GM_setValue = () => {};
+globalThis.GM_addValueChangeListener = undefined;
+
 const { onNetEvents, netSight } = await import("../src/kernel/net-watch.js");
 
 function tick() {

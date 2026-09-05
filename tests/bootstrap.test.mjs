@@ -1,7 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { installProxy, installProxyDebug, isManifestUrl } from "../src/kernel/proxy/bootstrap.js";
 import { Gate } from "../src/kernel/proxy/gate.js";
+
+// The unified network manager (net-watch.js) imports the settings engine, whose
+// cache evaluates through shared storage at module load (bare GM_getValue). A
+// static import would run before any body statement, so stub the trio and pull
+// the manager dynamically - the statements above all land first.
+globalThis.GM_getValue = (key, fallback) => fallback;
+globalThis.GM_setValue = () => {};
+globalThis.GM_addValueChangeListener = undefined;
+const { installProxy, installProxyDebug, isManifestUrl } = await import("../src/kernel/net-watch.js");
 
 const M3U8 = [
   "#EXTM3U",

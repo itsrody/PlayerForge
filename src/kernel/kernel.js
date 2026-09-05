@@ -5,8 +5,7 @@ import { ShellSlot } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, meetsMinSize, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
-import { onNetEvents } from "./net-watch.js";
-import { mediaTimeline, isMediaElementEntry } from "./proxy/media-timing.js";
+import { onNetEvents, mediaTimeline, isMediaElementEntry } from "./net-watch.js";
 
 /**
  * Top-level orchestrator: watches for <video> elements, identifies the player

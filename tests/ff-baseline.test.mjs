@@ -43,7 +43,6 @@ const providerSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "provider.
 const mseSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "mse.js"), "utf8");
 const kernelSrc = readFileSync(join(ROOT, "src", "kernel", "kernel.js"), "utf8");
 const entrySrc = readFileSync(join(ROOT, "src", "entry.js"), "utf8");
-const bootstrapSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "bootstrap.js"), "utf8");
 const shapesSrc = readFileSync(join(ROOT, "src", "shared", "media-shapes.js"), "utf8");
 const netWatchSrc = readFileSync(join(ROOT, "src", "kernel", "net-watch.js"), "utf8");
 const frameWatchSrc = readFileSync(join(ROOT, "src", "kernel", "proxy", "frame-watch.js"), "utf8");
@@ -209,8 +208,8 @@ test("media URL taxonomies live in media-shapes.js and consumers delegate", () =
   assert.match(mp4Src, /export function isMp4StreamUrl\(url\)[\s\S]{0,60}isProgressiveStreamUrl\(url\)/, "mp4.js delegates the routing predicate");
   assert.match(mp4Src, /byShape\s*=\s*false/, "segment routing is opt-in per call (byShape)");
   assert.doesNotMatch(shapesSrc, /isSegmentLikeUrl[\s\S]{0,80}isMediaUrlName/, "segment shape stays OUT of the observation superset (.ts is also TypeScript)");
-  assert.doesNotMatch(bootstrapSrc, /MANIFEST_URL_RE/, "bootstrap.js no longer owns the manifest taxonomy");
-  assert.match(bootstrapSrc, /export \{ isManifestUrl \}/, "bootstrap.js re-exports the manifest predicate");
+  assert.doesNotMatch(netWatchSrc, /MANIFEST_URL_RE/, "the manager no longer owns the manifest taxonomy");
+  assert.match(netWatchSrc, /export \{ isManifestUrl \}/, "the manager re-exports the manifest predicate");
   assert.doesNotMatch(rewriteSrc, /MANIFEST_SUFFIX_RE/, "rewrite.js no longer owns the suffix regex");
   assert.match(rewriteSrc, /return manifestKindFromUrl\(url\)/, "rewrite.js delegates kind detection");
   assert.match(manifestSegmentsSrc, /detectManifestKind\(baseUrl\)/, "manifest-segments.js delegates kind detection");
@@ -218,14 +217,14 @@ test("media URL taxonomies live in media-shapes.js and consumers delegate", () =
 });
 
 test("production proxy is config-armed, always-on, and routes only engaged hosts", () => {
-  assert.match(bootstrapSrc, /export function installProxy\(/, "the always-on production installer survives");
-  assert.match(bootstrapSrc, /getSetting\("features\.manifestProxy"\)/, "manifest engagement is feature-gated in the production arm");
-  assert.match(bootstrapSrc, /proxy\.routing\.includes/, "the Gate's site policy is config-driven too");
-  assert.match(bootstrapSrc, /new ManifestFlow\(\{[\s\S]{0,60}consented: true,/, "a routed manifest claims through the §7.4 flow in auto+consented mode");
-  assert.match(bootstrapSrc, /engagedHosts\.has\(/, "segment routing requires an engaged manifest host (never URL shape alone)");
-  assert.match(bootstrapSrc, /byShape:\s*isSegmentLikeUrl\(url\)/, "engaged segments classify through the router's byShape gate");
-  assert.match(bootstrapSrc, /always-on production arm/, "the header documents the always-on arm");
-  assert.match(bootstrapSrc, /decoupled from debug mode/, "the production arm is debug-decoupled");
+  assert.match(netWatchSrc, /export function installProxy\(/, "the always-on production installer survives");
+  assert.match(netWatchSrc, /getSetting\("features\.manifestProxy"\)/, "manifest engagement is feature-gated in the production arm");
+  assert.match(netWatchSrc, /proxy\.routing\.includes/, "the Gate's site policy is config-driven too");
+  assert.match(netWatchSrc, /new ManifestFlow\(\{[\s\S]{0,60}consented: true,/, "a routed manifest claims through the §7.4 flow in auto+consented mode");
+  assert.match(netWatchSrc, /engagedHosts\.has\(/, "segment routing requires an engaged manifest host (never URL shape alone)");
+  assert.match(netWatchSrc, /byShape:\s*isSegmentLikeUrl\(url\)/, "engaged segments classify through the router's byShape gate");
+  assert.match(netWatchSrc, /always-on production arm/, "the header documents the always-on arm");
+  assert.match(netWatchSrc, /decoupled from debug mode/, "the production arm is debug-decoupled");
   assert.match(entrySrc, /armProxy\(\{ kernel, \.\.\.proxyEnv, debugOn: proxyDebugOn \}\)/, "entry arms the kernel-owned proxy on every page");
   assert.doesNotMatch(entrySrc, /routeProgressiveSource|routeManifestStreams|disposeManifestStream/, "the element plane is not wired in entry (it rides the kernel's shell hooks)");
 });

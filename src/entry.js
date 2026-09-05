@@ -9,9 +9,7 @@ import { shouldSkipUrl } from "./kernel/guard.js";
 import { KEYS, getConfigValue, setConfigValue, deleteConfigField } from "./shared/storage.js";
 import { initFullscreenGate } from "./shared/shadow.js";
 import { DEBUG_LOGS_KEY } from "./kernel/contract.js";
-import { armProxy } from "./kernel/proxy/arm.js";
-import { ProxyProvider } from "./kernel/proxy/provider.js";
-import { netSight } from "./kernel/net-watch.js";
+import { armProxy, ProxyProvider, netSight } from "./kernel/net-watch.js";
 
 // The version lives in the banner and is read from the installed script at
 // runtime via GM_info, so what the UI reports is always what the manager
