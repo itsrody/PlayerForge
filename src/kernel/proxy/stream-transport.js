@@ -446,12 +446,14 @@ function headerObject(headers) {
 
 /** `{start, end}` or `"start-end"` → HTTP `Range` header value, null when no
  *  exact bytes are understood. */
+const RANGE_VALUE_RE = /^\s*(\d+)\s*-\s*(\d+)\s*$/;
+
 function rangeHeaderValue(range) {
   if (range == null) {
     return null;
   }
   if (typeof range === "string") {
-    const m = /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(range);
+    const m = RANGE_VALUE_RE.exec(range);
     return m ? `bytes=${m[1]}-${m[2]}` : null;
   }
   if (typeof range === "object" && Number.isInteger(range.start) && Number.isInteger(range.end)) {

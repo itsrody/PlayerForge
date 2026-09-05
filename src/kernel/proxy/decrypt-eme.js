@@ -22,12 +22,16 @@
 import { logger } from "../../shared/logger.js";
 import { SegmentError } from "./segment-flow.js";
 
+/** A 32-hex-digit (128-bit, no `0x`) IV literal. Hoisted - a regex literal
+ *  would re-allocate for every AES-128 segment key. */
+const HEX_IV_RE = /^[0-9a-fA-F]{32}$/;
+
 /** Parse an explicit `IV="0x…"` tag attribute into its 16 bytes. A missing,
  *  malformed, or non-128-bit value is a hard failure (fail-to-skip). */
 export function parseHexIv(hex) {
   const raw = String(hex ?? "").trim();
   const body = raw.startsWith("0x") || raw.startsWith("0X") ? raw.slice(2) : raw;
-  if (!/^[0-9a-fA-F]{32}$/.test(body)) {
+  if (!HEX_IV_RE.test(body)) {
     throw new SegmentError("AES-128 IV must be a 128-bit hex value", { retryable: false });
   }
   const out = new Uint8Array(16);

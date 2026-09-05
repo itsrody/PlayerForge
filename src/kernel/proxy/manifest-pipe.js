@@ -171,11 +171,12 @@ function classifyMpd(text) {
 /** DASH XML tags are whitespace-separated attributes (XML names + double
  *  quotes); unlike HLS they are never comma-delimited, so the HLS attr
  *  splitter cannot be reused. */
+const XML_ATTR_RE = /([A-Za-z_:][\w:.-]*)\s*=\s*"([^"]*)"|([A-Za-z_:][\w:.-]*)\s*=\s*'([^']*)'/g;
+
 function splitXmlAttrs(input) {
   const out = new Map();
-  const re = /([A-Za-z_:][\w:.-]*)\s*=\s*"([^"]*)"|([A-Za-z_:][\w:.-]*)\s*=\s*'([^']*)'/g;
   let m;
-  while ((m = re.exec(String(input ?? "")))) {
+  while ((m = XML_ATTR_RE.exec(String(input ?? "")))) {
     out.set((m[1] ?? m[3]).toLowerCase(), m[2] ?? m[4]);
   }
   return out;
@@ -291,9 +292,11 @@ function hostnameOf(url) {
 
 /** The hostname projection of a site pattern: a bare glob stays as-is, a URL
  *  glob loses its scheme, authority markers, and path. */
+const SCHEME_PREFIX_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
+
 function hostGlobOf(pattern) {
   let rest = String(pattern ?? "");
-  const m = /^[a-z][a-z0-9+.-]*:\/\//i.exec(rest);
+  const m = SCHEME_PREFIX_RE.exec(rest);
   if (m) {
     rest = rest.slice(m[0].length);
   }
@@ -353,7 +356,7 @@ function hostCoveredBy(host, pattern) {
 /** True when `text` is a bare hostname entry (no scheme/authority), so
  *  `v.example.com` and `example.com` compare as host families. */
 function bareHostname(text) {
-  return typeof text === "string" && !!text && !/^[a-z][a-z0-9+.-]*:\/\//i.test(text);
+  return typeof text === "string" && !!text && !SCHEME_PREFIX_RE.test(text);
 }
 
 /**
@@ -570,17 +573,20 @@ function rewriteMediaAttrs(line, scope, rewriteUri) {
 
 /** Range-style values ("0-999") are byte offsets, not URIs - never rewrite
  *  them, even when a template/init surface sits on the same tag. */
+const BYTE_RANGE_VALUE_RE = /^\s*\d+\s*-\s*\d+\s*$/;
+
 function isByteRangeValue(value) {
-  return /^\s*\d+\s*-\s*\d+\s*$/.test(String(value ?? ""));
+  return BYTE_RANGE_VALUE_RE.test(String(value ?? ""));
 }
 
 /** Rewrite one or more URL-ish attributes on a DASH tag (`sourceURL=`,
  *  `initialization=`) while leaving range/hash-fragment-only values alone. */
+const DASH_URI_ATTR_RE = /\b(initialization|sourceURL)\s*=\s*"([^"]*)"/gi;
+
 function rewriteDashUriAttrs(tagText, scope, rewriteUri, names) {
   const nameList = Array.isArray(names) ? names : [names];
-  const re = new RegExp(`\\b(${nameList.join("|")})\\s*=\\s*"([^"]*)"`, "gi");
-  return tagText.replace(re, (match, name, value) => {
-    if (isByteRangeValue(value) || !isSegmentReference(value) || !scope(value)) {
+  return tagText.replace(DASH_URI_ATTR_RE, (match, name, value) => {
+    if (!nameList.includes(name) || isByteRangeValue(value) || !isSegmentReference(value) || !scope(value)) {
       return match;
     }
     const next = rewriteUri(value);
@@ -588,14 +594,19 @@ function rewriteDashUriAttrs(tagText, scope, rewriteUri, names) {
   });
 }
 
+const MPD_SEGMENT_TEMPLATE_TAG_RE = /<SegmentTemplate\b[^>]*>/g;
+const MPD_SEGMENT_LIST_TAG_RE = /<(SegmentBase|SegmentList)\b[^>]*\/?>/gi;
+const MPD_INITIALIZATION_TAG_RE = /<Initialization\b[^>]*\/?>/gi;
+const MPD_BASE_URL_TAG_RE = /<BaseURL\s*>([^<]*)<\/BaseURL>/g;
+
 function rewriteMpd(text, scope, rewriteUri) {
   let out = text;
-  out = out.replace(/<SegmentTemplate\b[^>]*>/g, (tag) => rewriteDashTemplateAttrs(tag, scope, rewriteUri));
-  out = out.replace(/<(SegmentBase|SegmentList)\b[^>]*\/?>/gi, (tag) =>
+  out = out.replace(MPD_SEGMENT_TEMPLATE_TAG_RE, (tag) => rewriteDashTemplateAttrs(tag, scope, rewriteUri));
+  out = out.replace(MPD_SEGMENT_LIST_TAG_RE, (tag) =>
     rewriteDashUriAttrs(tag, scope, rewriteUri, "initialization"));
-  out = out.replace(/<Initialization\b[^>]*\/?>/gi, (tag) =>
+  out = out.replace(MPD_INITIALIZATION_TAG_RE, (tag) =>
     rewriteDashUriAttrs(tag, scope, rewriteUri, "sourceURL"));
-  out = out.replace(/<BaseURL\s*>([^<]*)<\/BaseURL>/g, (match, inner) => {
+  out = out.replace(MPD_BASE_URL_TAG_RE, (match, inner) => {
     if (!inner) {
       return match;
     }
@@ -614,8 +625,10 @@ function rewriteMpd(text, scope, rewriteUri) {
   return out;
 }
 
+const DASH_TEMPLATE_ATTR_RE = /\b(initialization|index|media)\s*=\s*"([^"]*)"/g;
+
 function rewriteDashTemplateAttrs(tag, scope, rewriteUri) {
-  return tag.replace(/\b(initialization|index|media)\s*=\s*"([^"]*)"/g, (match, name, uri) => {
+  return tag.replace(DASH_TEMPLATE_ATTR_RE, (match, name, uri) => {
     if (!uri || !isSegmentReference(uri) || !scope(uri)) {
       return match;
     }

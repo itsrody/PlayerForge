@@ -614,24 +614,28 @@ function resolveManifestRef(baseUrl, uri) {
  * - `"720"`       → length only; needs `startHint` (the running offset on the
  *   same resource) else null (unresolvable, fetch whole resource instead)
  */
+const BYTE_RANGE_RE = /^(\d+)-(\d+)$/;
+const BYTE_OFFSET_RE = /^(\d+)@(\d+)$/;
+const BYTE_LENGTH_RE = /^(\d+)$/;
+
 export function normalizeByteRange(value, { startHint = null } = {}) {
   const text = String(value ?? "").trim();
   if (!text) {
     return null;
   }
-  let m = /^(\d+)-(\d+)$/.exec(text);
+  let m = BYTE_RANGE_RE.exec(text);
   if (m) {
     const start = parseInt(m[1], 10);
     const end = parseInt(m[2], 10);
     return { start, end: Math.max(end, start) };
   }
-  m = /^(\d+)@(\d+)$/.exec(text);
+  m = BYTE_OFFSET_RE.exec(text);
   if (m) {
     const length = parseInt(m[1], 10);
     const start = parseInt(m[2], 10);
     return { start, end: start + length - 1 };
   }
-  m = /^(\d+)$/.exec(text);
+  m = BYTE_LENGTH_RE.exec(text);
   if (m) {
     const length = parseInt(m[1], 10);
     if (startHint == null) {
@@ -679,11 +683,14 @@ function parseHlsAttrs(input) {
 }
 
 /** Whitespace-separated XML tag attributes (double-quoted values). */
+const XML_ATTR_RE = /([A-Za-z_:][\w:.-]*)\s*=\s*"([^"]*)"|([A-Za-z_:][\w:.-]*)\s*=\s*'([^']*)'/g;
+const TAG_TAIL_SLASH_RE = /\/\s*$/;
+const XML_WS_RE = /\s/;
+
 function parseXmlAttrs(input) {
   const out = new Map();
-  const re = /([A-Za-z_:][\w:.-]*)\s*=\s*"([^"]*)"|([A-Za-z_:][\w:.-]*)\s*=\s*'([^']*)'/g;
   let m;
-  while ((m = re.exec(String(input ?? "")))) {
+  while ((m = XML_ATTR_RE.exec(String(input ?? "")))) {
     out.set(m[1] ?? m[3], m[2] ?? m[4]);
   }
   return out;
@@ -859,9 +866,9 @@ function tokenizeXml(text) {
       tokens.push({ type: "close", name: raw.slice(1).trim().toLowerCase() });
       continue;
     }
-    const self = /\/\s*$/.test(raw);
-    const body = raw.replace(/\/\s*$/, "");
-    const sp = body.search(/[\s]/);
+    const self = TAG_TAIL_SLASH_RE.test(raw);
+    const body = raw.replace(TAG_TAIL_SLASH_RE, "");
+    const sp = body.search(XML_WS_RE);
     const name = (sp < 0 ? body : body.slice(0, sp)).toLowerCase();
     const attrs = sp < 0 ? {} : Object.fromEntries(parseXmlAttrs(body.slice(sp + 1)));
     tokens.push({ type: "open", name, attrs, self });
