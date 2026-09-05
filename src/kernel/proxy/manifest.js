@@ -208,12 +208,17 @@ export function manifestRewrite(url, text, { gate, rewriteUri = null } = {}) {
   return { text: rewritten, decision: { ...decision, kind } };
 }
 
+/** A ref that names its own absolute scheme (or starts `//`): no base needed.
+ *  Hoisted - a regex literal in `resolveRef` would re-allocate per manifest
+ *  URI the scope callback judges. */
+const ABSOLUTE_REF_RE = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
+
 /** Resolve a manifest-internal ref (possibly relative / `$`-templated) to its
  *  absolute URL so site policy can judge it. Non-URL refs fail open to the
  *  manifest URL's own host judgement. */
 export function resolveRef(baseUrl, uri) {
   const ref = String(uri ?? "").trim();
-  if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(ref)) {
+  if (ABSOLUTE_REF_RE.test(ref)) {
     return ref;
   }
   return URL.canParse(ref, baseUrl) ? new URL(ref, baseUrl).href : baseUrl;

@@ -34,6 +34,7 @@ export function isMp4StreamUrl(url) {
 }
 
 const MP4_CONTENT_TYPE_RE = /^video\/mp4\b/i;
+const MEDIA_FAMILY_RE = /^(?:video|audio)\//i;
 
 /** True for a `video/mp4` content-type header value. */
 export function isMp4ContentType(contentType) {
@@ -45,7 +46,8 @@ export function isMp4ContentType(contentType) {
  *  the page would make `Response#blob()` return a blob the player refuses to
  *  load. Map anything that is not a video/audio media type to `video/mp4`. */
 export function mediaSafeType(contentType) {
-  return /^(?:video|audio)\//i.test(String(contentType ?? "")) ? String(contentType) : "video/mp4";
+  const value = String(contentType ?? "");
+  return MEDIA_FAMILY_RE.test(value) ? value : "video/mp4";
 }
 
 /** Redirect hops a routed stream may follow before we give up and keep the

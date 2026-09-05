@@ -34,7 +34,7 @@ export function isMediaTimingName(name) {
 /** True for a resource entry that came from the media element itself (the
  *  native GETs at the network-process boundary) or names a media URL. */
 export function isMediaElementEntry(entry) {
-  return MEDIA_INITIATOR_RE.test(String(entry?.initiatorType ?? "")) || isMediaTimingName(entry?.name);
+  return MEDIA_INITIATOR_RE.test(entry?.initiatorType ?? "") || isMediaTimingName(entry?.name);
 }
 
 /**
