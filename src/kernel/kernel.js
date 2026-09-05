@@ -25,6 +25,8 @@ export class Kernel {
   #lifecycle;
   /** Shell-ready listeners (direct callbacks, no bus). */
   #createdListeners = new Set();
+  /** Shell-destroyed listeners - the teardown twin of #createdListeners. */
+  #destroyedListeners = new Set();
   #initialized = false;
   #seenVideos = new Set();
   #removalObservers = new Set();
@@ -48,6 +50,7 @@ export class Kernel {
       if (!shell.video.isConnected) {
         this.#seenVideos.delete(shell.video);
         shell.destroy();
+        this.#notifyShellDestroyed(shell);
         logger.log("kernel", `Reconciled orphaned shell: ${shell.sdk.name}`);
       }
     }
@@ -68,14 +71,22 @@ export class Kernel {
       this.#removalTimers.clear();
       this.#stopNetWatch?.();
       this.#stopNetWatch = null;
+      const dying = this.#registry.getAll();
       this.#registry.destroyAll();
+      for (const dyingShell of dying) {
+        this.#notifyShellDestroyed(dyingShell);
+      }
       this.#scope.abort();
     }
   };
 
   constructor() {
     this.#registry = new ShellSlot();
-    this.#lifecycle = new LifecycleManager(this.#registry, (shell) => this.#notifyShellCreated(shell));
+    this.#lifecycle = new LifecycleManager(
+      this.#registry,
+      (shell) => this.#notifyShellCreated(shell),
+      (shell) => this.#notifyShellDestroyed(shell)
+    );
     this.#lifecycle.setShellFactory((discovery) => this.#createShell(discovery));
   }
 
@@ -94,6 +105,14 @@ export class Kernel {
     return () => this.#createdListeners.delete(cb);
   }
 
+  /** Register a shell-destroyed listener (teardown twin); returns an
+   *  unsubscribe. Fired from every kernel destroy path: video removal,
+   *  bfcache reconcile, and pagehide teardown. */
+  onShellDestroyed(cb) {
+    this.#destroyedListeners.add(cb);
+    return () => this.#destroyedListeners.delete(cb);
+  }
+
   /** Register the shell then fan out to every shell-ready listener. */
   #notifyShellCreated(shell) {
     this.#registry.register(shell);
@@ -102,6 +121,17 @@ export class Kernel {
         cb(shell);
       } catch (err) {
         logger.error("kernel", "Shell-created listener threw:", err);
+      }
+    }
+  }
+
+  /** Fan out to every shell-destroyed listener. */
+  #notifyShellDestroyed(shell) {
+    for (const cb of this.#destroyedListeners) {
+      try {
+        cb(shell);
+      } catch (err) {
+        logger.error("kernel", "Shell-destroyed listener threw:", err);
       }
     }
   }

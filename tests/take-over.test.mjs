@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { attachTakeover, laneMime } from "../src/shell/proxy/take-over.js";
+import { attachTakeover, laneMime } from "../src/kernel/proxy/take-over.js";
 
 const SEG0 = new Uint8Array([0, 0, 0, 28, 0x6d, 0x6f, 0x6f, 0x76]);
 const SEG1 = new Uint8Array([0, 0, 0, 24, 0x6d, 0x6f, 0x6f, 0x6e]);

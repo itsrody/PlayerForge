@@ -45,13 +45,15 @@ function whenDomSettled(container, { quietFrames = 2, capMs = 150 } = {}) {
 export class LifecycleManager {
   #registry;
   #onShellCreated;
+  #onShellDestroyed;
   #shellFactory = null;
   /** Videos with a settle wait in flight - dedups repeated discovery. */
   #pending = new Set();
 
-  constructor(registry, onShellCreated) {
+  constructor(registry, onShellCreated, onShellDestroyed = () => {}) {
     this.#registry = registry;
     this.#onShellCreated = onShellCreated;
+    this.#onShellDestroyed = onShellDestroyed;
   }
 
   setShellFactory(factory) {
@@ -95,6 +97,7 @@ export class LifecycleManager {
     const shell = this.#registry.getByVideo(video);
     if (shell) {
       shell.destroy();
+      this.#onShellDestroyed(shell);
       logger.log("lifecycle", `Shell destroyed: ${shell.sdk.name}`);
     }
   }

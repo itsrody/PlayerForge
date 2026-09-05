@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { installProxy, installProxyDebug, isManifestUrl } from "../src/shell/proxy/bootstrap.js";
-import { Gate } from "../src/shell/proxy/gate.js";
+import { installProxy, installProxyDebug, isManifestUrl } from "../src/kernel/proxy/bootstrap.js";
+import { Gate } from "../src/kernel/proxy/gate.js";
 
 const M3U8 = [
   "#EXTM3U",

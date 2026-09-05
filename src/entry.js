@@ -9,15 +9,13 @@ import { shouldSkipUrl } from "./kernel/guard.js";
 import { KEYS, getConfigValue, setConfigValue, deleteConfigField } from "./shared/storage.js";
 import { initFullscreenGate } from "./shared/shadow.js";
 import { DEBUG_LOGS_KEY } from "./kernel/contract.js";
-import { installProxy, installProxyDebug } from "./shell/proxy/bootstrap.js";
-import { routeProgressiveSource, disposeElementSource, routeManifestStreams, disposeManifestStream } from "./shell/proxy/element-route.js";
-import { ProxyProvider } from "./shell/proxy/provider.js";
+import { armProxy } from "./kernel/proxy/arm.js";
+import { ProxyProvider } from "./kernel/proxy/provider.js";
 import { netSight } from "./kernel/net-watch.js";
-import { getSetting } from "./shell/chrome/config.js";
 
 // The version lives in the banner and is read from the installed script at
-// runtime via GM_info, so what the UI reports is always what the manager
-// actually runs - never a stale build-time constant.
+// runtime via GM_info, so the UI reports is always what the manager actually
+// runs - never a stale build-time constant.
 
 function bootstrap() {
   "use strict";
@@ -47,20 +45,18 @@ function bootstrap() {
     // Enabling here is idempotent with the kernel and the menu toggle.
     logger.enable();
   }
-  const inTopFrame = window.top === window;
+
   // The production proxy arm is always-on, decoupled from debug mode: the Gate
   // rides the features.manifestProxy toggle + proxy.routing.site lists, and
-  // only armed manifests engage their segment space. The debug installer is a
-  // hard-disabled superset (Gate forced off) so a debug session observes and
-  // interposes byte-identically while the production installer keeps its own
-  // routing state; the last installer to run wins the fetch/XHR wrap. Debug
-  // mode therefore adds logs, never proxy behavior.
+  // only armed manifests engage their segment space. The kernel owns the arm:
+  // installProxy arms the wire seams when a kernel exists, and the element
+  // takeover plane rides the kernel's shell lifecycle hooks. entry.js only
+  // decides role/debug and hands the arm its realm.
   const proxyEnv = {
-    role: inTopFrame ? "top" : "frame",
-    gmWebRequest: inTopFrame && typeof GM_webRequest === "function" ? GM_webRequest : null,
+    role: (window.top === window) ? "top" : "frame",
+    gmWebRequest: (window.top === window && typeof GM_webRequest === "function") ? GM_webRequest : null,
     fetch: globalThis.fetch,
     xhrPrototype: globalThis.XMLHttpRequest?.prototype,
-    getSetting,
     provider: new ProxyProvider({
       gmFetch: typeof GM_xmlhttpRequest === "function" ? GM_xmlhttpRequest : null,
       native: { fetch: globalThis.fetch }
@@ -73,14 +69,6 @@ function bootstrap() {
       netSight({ name: url, via: "proxy", initiatorType: "proxy", responseStatus: status });
     }
   };
-  const { router, claims } = proxyDebugOn
-    ? installProxyDebug({ debugOn: true, ...proxyEnv })
-    : installProxy(proxyEnv);
-
-  // §Phase 6 MSE rendezvous env shared by every shell: routed transit for the
-  // take-over plane rides the same ProxyProvider the wire seams use, so the
-  // userscript stays the Network initiator for init + media bytes alike.
-  const takeoverEnv = { claims, provider: proxyEnv.provider };
 
   // The shell stylesheet is warmed lazily at first shell construction
   // (shell.js #injectDom): the embedded sheet is adopted synchronously there,
@@ -103,6 +91,11 @@ function bootstrap() {
     registerShell(kernel);
     kernel.init();
 
+    // The proxy arm is kernel-owned: wire seams install with the kernel, and
+    // the element takeover surface rides its shell-created / shell-destroyed
+    // lifecycle hooks.
+    armProxy({ kernel, ...proxyEnv, debugOn: proxyDebugOn });
+
     // One subscription serves both duties: readiness log always, first-run
     // welcome toast only until the flag flips. Installs from before the key
     // rename carry a bare "firstRun" field inside the configs doc - absorb
@@ -114,38 +107,6 @@ function bootstrap() {
     }
     kernel.onShellCreated((shell) => {
       logger.log("entry", `Shell ready: ${shell.sdk.name}`);
-      // Element-level progressive MP4 routing: a player that assigns the media
-      // URL straight to video.src (StreamTape-style) bypasses fetch/XHR, so the
-      // proxy could never be its initiator. The seam routes the src through the
-      // shared Mp4Router and swaps it to an object URL over the proxied bytes;
-      // any refusal keeps the native wire. Re-checked after the shell finishes
-      // booting (players that set src lazily) - routing is idempotent, a
-      // blob: src or an in-flight/past route is skipped. The object URL is
-      // revoked when the shell tears down.
-      const routeSrc = () => {
-        if (router) {
-          routeProgressiveSource({ video: shell.video, router, getSetting });
-        }
-      };
-      routeSrc();
-      shell.ready
-        .then(routeSrc)
-        .catch((err) => logger.warn("entry", "Shell ready rejected", err?.message ?? err));
-      // §Phase 6 manifest takeover: a claim the fetch layer engaged waits in
-      // the bootstrap ring; the element seam fires the MSE plane only when
-      // `features.mse` is armed and the video is still uncommitted, and
-      // declines toward the page player otherwise. Re-checked after the shell
-      // finishes booting (claims can land after src routing runs).
-      routeManifestStreams({ video: shell.video, getSetting, ...takeoverEnv });
-      shell.ready
-        .then(() => routeManifestStreams({ video: shell.video, getSetting, ...takeoverEnv }))
-        .catch(() => {});
-      shell.dom?.onCleanup?.(() => {
-        disposeElementSource(shell.video);
-        disposeManifestStream(shell.video).catch((err) =>
-          logger.warn("entry", "Manifest stream dispose failed", err?.message ?? err)
-        );
-      });
       // Nested embeds can silently lose fullscreen (browsers require
       // allowfullscreen on every ancestor iframe). A shell in a
       // frame pushes a provisioning request up the chain so our SDK's own

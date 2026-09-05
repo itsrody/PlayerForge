@@ -6,7 +6,7 @@ import {
   parseDash,
   resolveTemplate,
   normalizeByteRange
-} from "../src/shell/proxy/manifest-segments.js";
+} from "../src/kernel/proxy/manifest-segments.js";
 
 test("normalizeByteRange handles start-end, length@offset, and length-with-hint", () => {
   assert.deepEqual(normalizeByteRange("720-1439"), { start: 720, end: 1439 });

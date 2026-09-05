@@ -43,7 +43,7 @@
  * whole flow runs headless.
  */
 import { logger } from "../../shared/logger.js";
-import { onFrame } from "../../kernel/proxy/frame-watch.js";
+import { onFrame } from "./frame-watch.js";
 import { isMp4StreamUrl } from "./mp4.js";
 import { attachTakeover } from "./take-over.js";
 

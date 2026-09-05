@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ProxyProvider } from "../src/shell/proxy/provider.js";
+import { ProxyProvider } from "../src/kernel/proxy/provider.js";
 import { logger } from "../src/shared/logger.js";
 
 function fakeFetchResponse({ status = 200, headers = new Map([["content-type", "video/mp4"]]), body = Uint8Array.from([1, 2, 3]) } = {}) {

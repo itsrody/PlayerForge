@@ -35,7 +35,7 @@ import {
 import { ProxyProvider } from "./provider.js";
 import { isMp4StreamUrl, Mp4Router } from "./mp4.js";
 import { isManifestUrl, isSegmentLikeUrl } from "../../shared/media-shapes.js";
-import { netSight } from "../../kernel/net-watch.js";
+import { netSight } from "../net-watch.js";
 
 export { isManifestUrl };
 

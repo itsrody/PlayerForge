@@ -425,27 +425,43 @@ timing lives:
   the SegmentManager's per-video scope.
 - **`src/kernel/sdk.js` / probe** — gate on the same `meetsMinSize`/probe used for video
   discovery; MSE attaches to the *same* video the shell already owns.
-- **Config/menus** — a new `pf:proxy` config section + a TM menu toggle, wired exactly like
-  existing menu commands in `kernel/menus.js`.
+- **Config/menus** — the settings engine (schema, defaults, coercion, cache,
+  change notifications) is kernel-owned (`src/kernel/settings.js`); the shell
+  panel renders that same schema and re-exports the accessors. A GM menu
+  toggle lives in `kernel/menus.js`, wired exactly like the debug command.
 - **WebCrypto (`crypto.subtle`)** — native on FF, no grant; used for all AES-128 clear-key
   decryption (§11.2).
 - **EME (`MediaKeys` ClearKey)** — native on FF via MSE; used for DASH ClearKey (§11.3) through
   the standard `video.setMediaKeys` path, no grant needed.
 
-## 10. File layout (proposed `src/shell/proxy/`)
+## 10. File layout (kernel-owned `src/kernel/proxy/`)
 
 ```
-src/shell/proxy/
-  manifest.js          # GM_webRequest rules + register/listener, @webRequest fallback
-  rewrite.js           # pure .m3u8 / .mpd text rewriting (URL -> routed URL)
-  provider.js          # ProxyProvider: GM_xmlhttpRequest / fetch / blob strategies
-  mse.js               # MediaSource + SourceBuffer lifecycle, append gate
-  segment-manager.js   # the flow state machine (§7.3), reorder buffer, backpressure
-  gate.js              # arm/disarm, protection-classification, include-exclude policy (§11.4)
-  decrypt-aes128.js    # pure AES-128-CBC segment decryption via WebCrypto (§11.2)
-  eme-clearkey.js      # DASH ClearKey EME wiring: MediaKeys/encrypted/update (§11.3)
-  token-manager.js     # refresh tokenized-stream state machine: TTL, refresh, URL rewrite (§12)
+src/kernel/proxy/
+  arm.js             # proxy → kernel wiring: wire-seam install + shell hook subscription
+  bootstrap.js       # installProxy / installProxyDebug factories (§7.4)
+  gate.js            # arm/disarm, protection-classification, include-exclude policy (§11.4)
+  manifest.js        # GM_webRequest rules + register/listener, @webRequest fallback
+  rewrite.js         # pure .m3u8 / .mpd text rewriting (URL -> routed URL)
+  provider.js        # ProxyProvider: GM_xmlhttpRequest / fetch / blob strategies
+  mp4.js             # progressive-stream routing + the shared Mp4Router
+  element-route.js   # element-level src routing + the MSE/manifest takeover seam
+  take-over.js       # §Phase 6: engage a claim -> MSE data plane for one <video>
+  mse.js             # MediaSource + SourceBuffer lifecycle, append gate
+  segment-manager.js # the flow state machine (§7.3), reorder buffer, backpressure
+  decrypt-aes128.js  # pure AES-128-CBC segment decryption via WebCrypto (§11.2)
+  eme-clearkey.js    # DASH ClearKey EME wiring: MediaKeys/encrypted/update (§11.3)
+  token-manager.js   # refresh tokenized-stream state machine: TTL, refresh, URL rewrite (§12)
+  frame-watch.js     # §7.8 unified rVFC frame feed (also consumed by shell resume)
+  media-timing.js    # §7.5 media network-timeline extractor/collector (kernel-held)
 ```
+
+The proxy is 100% kernel-owned: the data plane never imports a shell module, the
+element takeover plane rides the kernel's shell-created / shell-destroyed
+lifecycle hooks (teardown is the kernel's disposal signal, not the shell's
+DOMManager), and every tuning key reads the kernel settings engine — the shell
+panel only *renders* that same schema. The kernel's own net-watch and settings
+modules stay the proxy's only cross-package deps.
 
 Pure functions (`rewrite.js`, `segment-manager.js` state transitions, `decrypt-aes128.js`,
 `token-manager.js`) are unit-testable exactly like the existing `tests/` (jsdom where needed,
