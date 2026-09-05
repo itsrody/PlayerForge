@@ -81,7 +81,7 @@ import {
   disposeManifestStream
 } from "./proxy/element-plane.js";
 import { onFrame } from "./proxy/element-plane.js";
-import { mediaTimeline, isMediaElementEntry } from "./proxy/media-timing.js";
+import { mediaTimeline, isMediaElementEntry, NetworkThroughput } from "./proxy/media-timing.js";
 
 // ---------------------------------------------------------------------------
 // THE FEED
@@ -788,6 +788,7 @@ export const network = Object.freeze({
   disposeManifestStream,
   // the timeline + frame algorithms
   mediaTimeline,
+  NetworkThroughput,
   onFrame,
   isMediaElementEntry
 });

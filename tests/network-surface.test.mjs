@@ -30,6 +30,7 @@ test("network is a frozen hub exposing the feed, the resource plane, and the mod
       "disposeElementSource",
       "disposeManifestStream",
       "mediaTimeline",
+      "NetworkThroughput",
       "onFrame",
       "isMediaElementEntry"
     ],
@@ -56,6 +57,7 @@ test("the model utilities survive the re-export band", () => {
     "disposeElementSource",
     "disposeManifestStream",
     "mediaTimeline",
+    "NetworkThroughput",
     "onFrame",
     "isMediaElementEntry",
     "isManifestUrl",

@@ -46,6 +46,85 @@ export function isMediaElementEntry(entry) {
  * evicted in insertion order (live feed - old segment URLs have no look-back
  * value, matching the observer's out-of-the-box window).
  */
+/**
+ * The pure measurement half of the bandwidth-acceleration layer: a headless
+ * EWMA + sliding-window network-throughput estimator. Every successful media
+ * fetch samples `bytes` over `elapsedMs` and the smoothed estimate feeds the
+ * segment flow's look-ahead window (segment-flow.js). No browser API touches
+ * this model - an injectable clock keeps it deterministic, and a poisoned
+ * (zero/negative) sample is ignored so a degenerate transport can never NaN
+ * the estimate or the scheduler that reads it.
+ */
+export class NetworkThroughput {
+  #windowMs;
+  #ewma;
+  #clock;
+  #onEstimate;
+  #bps = 0;
+  #hasEstimate = false;
+  #samples = [];
+
+  constructor({ windowMs = 30_000, ewma = 0.25, clock = () => Date.now(), onEstimate = () => {} } = {}) {
+    this.#windowMs = Math.max(1, Number(windowMs) || 30_000);
+    this.#ewma = Math.min(1, Math.max(0, Number(ewma) || 0.25));
+    this.#clock = typeof clock === "function" ? clock : () => Date.now();
+    this.#onEstimate = typeof onEstimate === "function" ? onEstimate : () => {};
+  }
+
+  /** Record one transfer sample: `bytes` moved over `elapsedMs`. Returns the
+   *  updated EWMA estimate. Samples with no elapsed time or no bytes are
+   *  ignored (they carry no rate signal). */
+  sample(bytes, elapsedMs) {
+    const size = Number(bytes) || 0;
+    const elapsed = Number(elapsedMs) || 0;
+    if (elapsed <= 0 || size <= 0) {
+      return this.#bps;
+    }
+    const instant = (size * 1000) / elapsed;
+    this.#samples.push({ bps: instant, at: this.#clock() });
+    const cutoff = this.#clock() - this.#windowMs;
+    while (this.#samples.length > 0 && this.#samples[0].at < cutoff) {
+      this.#samples.shift();
+    }
+    const previous = this.#bps;
+    if (!this.#hasEstimate) {
+      this.#bps = instant;
+      this.#hasEstimate = true;
+    } else {
+      this.#bps = this.#bps + this.#ewma * (instant - this.#bps);
+    }
+    if (this.#bps !== previous) {
+      this.#onEstimate(this.#bps);
+    }
+    return this.#bps;
+  }
+
+  /** The smoothed EWMA estimate (bps) - the scheduler's fast signal. */
+  estimateBps() {
+    return this.#bps;
+  }
+
+  /** The mean of the in-window sample rates (bps) - the stable signal. */
+  windowAverageBps() {
+    if (this.#samples.length === 0) {
+      return 0;
+    }
+    let sum = 0;
+    for (const sample of this.#samples) {
+      sum += sample.bps;
+    }
+    return sum / this.#samples.length;
+  }
+
+  /** Forget every sample and the estimate (new arm / stream reset). */
+  reset() {
+    this.#bps = 0;
+    this.#hasEstimate = false;
+    this.#samples.length = 0;
+    this.#onEstimate(0);
+  }
+}
+
 const MAX_TIMELINE = 500;
 export const mediaTimeline = (() => {
   const byName = new Map();

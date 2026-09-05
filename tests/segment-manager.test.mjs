@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { SegmentManager, SegmentError, STATUS } from "../src/kernel/proxy/segment-flow.js";
+import { NetworkThroughput } from "../src/kernel/proxy/media-timing.js";
 
 const BYTE = new Uint8Array([1]);
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -240,6 +241,82 @@ test("destroy is idempotent and tolerates an external abort signal", () => {
   manager.destroy();
   assert.equal(manager.aborted, true);
   ac.abort();
+});
+
+test("look-ahead watermark caps started media at the window and repays on delivery", async () => {
+  const gates = new Map();
+  const resolved = new Set();
+  const { manager, log, drain } = makeManager({
+    fetch: (seg) => {
+      log.fetched.push(seg.id);
+      const g = deferred();
+      gates.set(seg.id, g);
+      return g.promise;
+    },
+    options: { concurrency: 4, lookaheadMs: 25000 }
+  });
+  for (let id = 0; id < 5; id++) {
+    manager.enqueue({ id, uri: String(id), durationMs: 10000 });
+  }
+  await flush();
+  assert.deepEqual(log.fetched, [0, 1], "two 10s segments start inside the 25s window");
+  assert.equal(manager.bufferedAheadMs, 20000, "the watermark tracks started media");
+  assert.equal(manager.statusOf(2), STATUS.IDLE, "the third would cross 30s > 25s, so it waits");
+
+  gates.get(0).resolve(BYTE);
+  await flush();
+  assert.deepEqual(log.fetched, [0, 1, 2], "the delivered head repays 10s of credit, opening one slot");
+  assert.equal(manager.bufferedAheadMs, 20000, "the window holds steady at 2 segments of started media");
+  assert.equal(manager.statusOf(3), STATUS.IDLE, "the fourth still waits");
+
+  for (;;) {
+    const fresh = [...gates.entries()].filter(([id]) => !resolved.has(id));
+    if (fresh.length === 0) {
+      break;
+    }
+    for (const [id, g] of fresh) {
+      resolved.add(id);
+      g.resolve(BYTE);
+    }
+    await flush();
+  }
+  await drain;
+  assert.deepEqual(log.appended, [0, 1, 2, 3, 4], "every segment eventually drains through the window");
+  assert.equal(manager.bufferedAheadMs, 0, "delivered media releases all look-ahead credit");
+});
+
+test("the watermark and byte budget are dormant without their options", async () => {
+  const { manager, log, sources, drain } = makeManager();
+  for (let id = 0; id < 2; id++) {
+    sources.set(String(id), BYTE);
+    manager.enqueue({ id, uri: String(id), durationMs: 5000 });
+  }
+  await drain;
+  assert.equal(manager.bufferedAheadMs, 0, "durationMs alone never arms the watermark");
+});
+
+test("the throughput seam samples each successful fetch", async () => {
+  const gates = new Map();
+  const now = { t: 0 };
+  const meter = new NetworkThroughput({ clock: () => now.t });
+  const { manager, log, drain } = makeManager({
+    fetch: (seg) => {
+      log.fetched.push(seg.id);
+      const g = deferred();
+      gates.set(seg.id, g);
+      return g.promise;
+    },
+    options: { throughput: meter, clock: () => now.t }
+  });
+  manager.enqueue({ id: 0, uri: "a" });
+  await flush();
+  assert.equal(manager.throughputBps(), 0, "no estimate while the fetch is open");
+  now.t = 100;
+  gates.get(0).resolve(BYTE);
+  await flush();
+  assert.equal(meter.estimateBps(), 10, "1 byte over 100ms samples at 10 bps");
+  assert.equal(manager.throughputBps(), 10, "the manager surfaces the shared estimator");
+  await drain;
 });
 
 test("byte-cap backpressure blocks new fetches until buffered bytes clear", async () => {

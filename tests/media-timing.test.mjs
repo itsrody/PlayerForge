@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import {
   isMediaTimingName,
   isMediaElementEntry,
-  mediaTimeline
+  mediaTimeline,
+  NetworkThroughput
 } from "../src/kernel/proxy/media-timing.js";
 
 const MP4_URL =
@@ -61,4 +62,43 @@ test("mediaTimeline stays bounded: newest sightings evict the oldest FIFO", () =
   assert.equal(all.length, 500, "the store is capped at the newest 500 sightings");
   assert.equal(mediaTimeline.has("https://cdn.example/seg/0.ts"), false, "oldest sightings were evicted");
   assert.equal(mediaTimeline.has("https://cdn.example/seg/599.ts"), true, "the newest sighting survives");
+});
+
+test("NetworkThroughput smooths samples into an EWMA while the window holds the stable mean", () => {
+  let now = 0;
+  let estimate = 0;
+  const meter = new NetworkThroughput({ windowMs: 1000, ewma: 0.5, clock: () => now, onEstimate: (v) => (estimate = v) });
+  assert.equal(meter.estimateBps(), 0, "no estimate before any sample");
+  now = 200;
+  meter.sample(10_000, 200);
+  assert.equal(meter.estimateBps(), 50_000, "the first sample seeds the EWMA");
+  assert.equal(meter.windowAverageBps(), 50_000, "the window holds the only sample");
+  now = 400;
+  meter.sample(10_000, 200);
+  assert.equal(meter.estimateBps(), 50_000, "a same-rate sample leaves the EWMA unchanged");
+  assert.equal(estimate, 50_000, "onEstimate fires on the changed estimate");
+  now = 600;
+  meter.sample(20_000, 200);
+  assert.equal(meter.estimateBps(), 75_000, "the EWMA half-steps toward the faster instant");
+  now = 1500;
+  meter.sample(5_000, 100);
+  const afterExpiry = meter.windowAverageBps();
+  assert.ok(afterExpiry > 50_000, "the expired slow samples fell out of the window mean");
+});
+
+test("NetworkThroughput ignores degenerate samples and reset clears the state", () => {
+  let now = 0;
+  let fired = 0;
+  const meter = new NetworkThroughput({ clock: () => now, onEstimate: () => fired++ });
+  meter.sample(0, 100);
+  meter.sample(1000, 0);
+  meter.sample(-5, 100);
+  assert.equal(meter.estimateBps(), 0, "poisoned samples are ignored, never NaN the estimate");
+  meter.sample(1000, 100);
+  const estimate = meter.estimateBps();
+  assert.equal(estimate, 10_000, "the first valid sample seeds the meter");
+  meter.reset();
+  assert.equal(meter.estimateBps(), 0, "reset forgets the estimate");
+  assert.equal(meter.windowAverageBps(), 0, "reset empties the window");
+  assert.ok(fired >= 2, "reset notifies subscribers of the zero estimate");
 });

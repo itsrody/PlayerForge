@@ -69,6 +69,8 @@ export class SegmentError extends Error {
  *   clock() -> ms          deterministic test injection; default Date.now
  *   concurrency, maxQueued, maxPendingBytes, retryBaseMs, maxRetryMs,
  *   maxRetries, maxRefreshes, allowGaps, gapTimeoutMs
+ *   lookaheadMs         media-milliseconds to keep prefetched (0 = off)
+ *   throughput          NetworkThroughput seam sampled per fetch
  */
 export class SegmentManager {
   #fetch;
@@ -87,6 +89,10 @@ export class SegmentManager {
   #maxRefreshes;
   #allowGaps;
   #gapTimeoutMs;
+  #lookaheadMs;
+  #throughput;
+
+  #aheadMs = 0;
 
   #internalAc = new AbortController();
   #ownsAc = new AbortController();
@@ -127,6 +133,8 @@ export class SegmentManager {
     this.#maxRefreshes = Math.max(0, opts.maxRefreshes ?? 1);
     this.#allowGaps = opts.allowGaps === true;
     this.#gapTimeoutMs = Math.max(0, opts.gapTimeoutMs ?? 2000);
+    this.#lookaheadMs = Math.max(0, opts.lookaheadMs ?? 0);
+    this.#throughput = opts.throughput ?? null;
     if (Number.isInteger(opts.startSeq) && opts.startSeq > 0) {
       this.#deliverSeq = opts.startSeq;
     }
@@ -161,18 +169,24 @@ export class SegmentManager {
     }
     seg.status = to;
     // A segment leaves the "owed" set exactly once - on its first final
-    // status - so the active count (reorder-buffer cap + drain) stays exact
-    // no matter how late delivery runs relative to the fetch step.
+    // status - so the active count (reorder-buffer cap + drain) and the
+    // look-ahead credit (bufferedAheadMs) stay exact no matter how late
+    // delivery runs relative to the fetch step.
     if (ACTIVE.has(from) && !ACTIVE.has(to)) {
       this.#active = Math.max(0, this.#active - 1);
+      if (seg.durationMs > 0) {
+        this.#aheadMs = Math.max(0, this.#aheadMs - seg.durationMs);
+      }
     }
     this.#emit({ type: "status", id: seg.id, from, to });
   }
 
   /**
    * Register a segment for the stream. `info` = {id, uri, byteRange?,
-   * encrypted?, key?, auth?, byteHint?}. Idempotent per id (duplicates and
-   * already-finalized ids are ignored); returns false once the stream aborts.
+   * encrypted?, key?, auth?, byteHint?, durationMs?}. `durationMs` (media
+   * milliseconds) feeds the look-ahead watermark; `byteHint` the byte budget.
+   * Idempotent per id (duplicates and already-finalized ids are ignored);
+   * returns false once the stream aborts.
    */
   enqueue(info) {
     if (this.#aborted) {
@@ -193,16 +207,18 @@ export class SegmentManager {
       key: info.key ?? null,
       auth: info.auth ?? null,
       byteHint: Math.max(0, info.byteHint ?? 0),
+      durationMs: Math.max(0, Number(info.durationMs) || 0),
       attempts: 0,
       refreshes: 0,
       bytes: null,
       retryAt: null,
+      startedAt: null,
       status: STATUS.IDLE
     };
     this.#pending.set(id, seg);
     this.#active++;
     this.#emit({ type: "status", id, from: null, to: STATUS.IDLE });
-    logger.log("proxy", "segment", "enqueue", { id, uri: seg.uri, encrypted: seg.encrypted, byteHint: seg.byteHint });
+    logger.log("proxy", "segment", "enqueue", { id, uri: seg.uri, encrypted: seg.encrypted, byteHint: seg.byteHint, durationMs: seg.durationMs });
     this.#pump();
     return true;
   }
@@ -271,6 +287,17 @@ export class SegmentManager {
     return this.#pendingBytes;
   }
 
+  /** Media-milliseconds of started (fetched/fetching/buffering) segments - the
+   *  look-ahead watermark's live reading. Zero with the window off. */
+  get bufferedAheadMs() {
+    return this.#aheadMs;
+  }
+
+  /** The sampled network estimate (bps) from the throughput seam. */
+  throughputBps() {
+    return this.#throughput?.estimateBps() ?? 0;
+  }
+
   /** Resolves once the stream drains: no in-flight fetches and no active
    *  (queued/buffering) segments. Retry backoff keeps it pending, by design. */
   waitDrain() {
@@ -328,8 +355,17 @@ export class SegmentManager {
     return best;
   }
 
-  #canStartFetch() {
+  #canStartFetch(seg) {
     if (this.#inFlight >= this.#concurrency) {
+      return false;
+    }
+    if (this.#lookaheadMs > 0 && seg.durationMs > 0 && this.#aheadMs + seg.durationMs > this.#lookaheadMs) {
+      // The look-ahead watermark: never pull more media ahead than the
+      // window. Once buffered media crosses the ceiling the pipeline holds
+      // idle slots until delivery repays the credit - the bandwidth-
+      // acceleration bound that keeps an ample pipe racing ahead to a bounded
+      // horizon instead of unbounded.
+      logger.log("proxy", "segment", "look-ahead full", seg.id, "bufferedMs", this.#aheadMs, "windowMs", this.#lookaheadMs);
       return false;
     }
     if (this.#maxPendingBytes > 0 && this.#pendingBytes >= this.#maxPendingBytes) {
@@ -358,9 +394,12 @@ export class SegmentManager {
   }
 
   #pump() {
-    while (!this.#aborted && this.#canStartFetch()) {
+    while (!this.#aborted) {
       const seg = this.#nextEligible();
       if (!seg) {
+        break;
+      }
+      if (!this.#canStartFetch(seg)) {
         break;
       }
       this.#startFetch(seg);
@@ -372,7 +411,11 @@ export class SegmentManager {
   #startFetch(seg) {
     this.#inFlight++;
     this.#pendingBytes += seg.byteHint;
+    if (seg.durationMs > 0) {
+      this.#aheadMs += seg.durationMs;
+    }
     seg.retryAt = null;
+    seg.startedAt = this.#clock();
     this.#setStatus(seg, STATUS.FETCHING);
     logger.log("proxy", "segment", "fetching", seg.id, seg.uri);
     this.#run(seg).catch(() => {}).finally(() => {
@@ -385,6 +428,11 @@ export class SegmentManager {
   async #run(seg) {
     try {
       let bytes = await this.#fetch(seg, this.#fetchSignal);
+      if (this.#throughput) {
+        const elapsed = this.#clock() - (seg.startedAt ?? this.#clock());
+        const size = bytes?.byteLength ?? bytes?.length ?? 0;
+        this.#throughput.sample(size, elapsed);
+      }
       if (seg.encrypted) {
         if (typeof this.#decrypt !== "function") {
           throw new SegmentError("no decrypt seam for encrypted segment", { retryable: false });
@@ -523,6 +571,10 @@ export class SegmentManager {
     } finally {
       this.#delivering = false;
       this.#tryDeliver();
+      // Delivery frees the look-ahead credit (bufferedAheadMs drops as a head
+      // reaches DONE); only a pump can spend that freed credit, and the fetch
+      // step's own finally already ran before the async append resolved.
+      this.#pump();
     }
   }
 

@@ -34,6 +34,7 @@ import { logger } from "../../shared/logger.js";
 import { isMp4StreamUrl } from "./stream-transport.js";
 import { SegmentError, SegmentManager, parseManifest } from "./segment-flow.js";
 import { MSEFactory, Aes128Decrypter, ClearKeyEme } from "./decrypt-eme.js";
+import { NetworkThroughput } from "./media-timing.js";
 
 const FALLBACK_BASE = "https://nowhere.invalid/";
 
@@ -446,6 +447,12 @@ export async function routeProgressiveSource({
 /** Per-lane fetch concurrency for the take-over's SegmentManagers. */
 const LANE_CONCURRENCY = 2;
 
+// The look-ahead watermark for MSE take-over lanes: prefetch up to a minute
+// of media ahead (acceleration) but never more than a bounded byte budget
+// (128MiB of estimated lane bytes) so a high-bitrate lane cannot tab-kill.
+const LANE_LOOKAHEAD_MS = 60_000;
+const LANE_PREFETCH_BYTES = 128 * 1024 * 1024;
+
 /** A lane counts as fragmented MP4 when it carries an init segment (HLS
  *  `#EXT-X-MAP` → lane.maps, DASH `<Initialization>`/`initialization=` →
  *  lane.init). Raw TS lanes have neither and are left to the page player. */
@@ -607,6 +614,7 @@ export async function attachTakeover({
   }
 
   const signal = managerOptions.signal ?? null;
+  const throughput = new NetworkThroughput();
   const managers = [];
   let encryptedListener = null;
   let clearKey = null;
@@ -655,17 +663,30 @@ export async function attachTakeover({
         concurrency: LANE_CONCURRENCY,
         allowGaps: false,
         maxRefreshes: 0,
+        lookaheadMs: LANE_LOOKAHEAD_MS,
+        maxPendingBytes: LANE_PREFETCH_BYTES,
+        throughput,
         startSeq: segments.length > 0 ? segments.reduce((lo, s) => Math.min(lo, s.id), segments[0].id) : 0,
         ...managerOptions
       });
       managers.push(manager);
       for (const seg of segments) {
+        const durationSec = Number(seg.duration) || 0;
+        // Estimated lane bytes: DASH $Bandwidth$ (bps) over the segment's own
+        // duration - the byte-budget watermark's fuel; HLS lanes carry no
+        // bandwidth, so they ride the time window only.
+        const byteHint =
+          typeof lane.bandwidth === "number" && lane.bandwidth > 0 && durationSec > 0
+            ? Math.round((lane.bandwidth * durationSec) / 8)
+            : 0;
         manager.enqueue({
           id: seg.id,
           uri: seg.uri,
           byteRange: seg.byteRange ?? null,
           encrypted: isAes && seg.encrypted === true,
-          key: seg.key ?? null
+          key: seg.key ?? null,
+          durationMs: Math.round(durationSec * 1000),
+          byteHint
         });
       }
     }
