@@ -7,6 +7,7 @@ import {
   timecodeToSeconds,
   parseSubtitles,
   parseSubtitlesAsync,
+  offsetCues,
   sortCues
 } from "../src/shell/subtitles/forgevtt.js";
 
@@ -183,6 +184,60 @@ test("empty and headerless documents yield no cues without throwing", () => {
   assert.deepEqual(parseSubtitles(""), []);
   assert.deepEqual(parseSubtitles("just some words"), []);
   assert.deepEqual(parseSubtitles("WEBVTT"), []);
+});
+
+const VTT_WITH_OFFSETS = [
+  "WEBVTT",
+  "",
+  "00:00:01.000 --> 00:00:03.000",
+  "early",
+  "",
+  "00:00:05.000 --> 00:00:06.000",
+  "middle",
+  "",
+  "00:00:09.000 --> 00:00:10.000",
+  "late"
+].join("\n");
+
+test("offsetCues matches parseSubtitles at the same offset (drop/clamp/order)", () => {
+  const base = parseSubtitles(VTT_WITH_OFFSETS);
+  for (const offset of [0, 1, -2, -4.5, -9, 20]) {
+    assert.deepEqual(offsetCues(base, offset), parseSubtitles(VTT_WITH_OFFSETS, offset),
+      `offset ${offset}`);
+  }
+});
+
+test("offsetCues returns the array unchanged at offset zero", () => {
+  const base = parseSubtitles(VTT_WITH_OFFSETS);
+  assert.equal(offsetCues(base, 0), base);
+});
+
+test("offsetCues shares text/settings fields and keeps the parsed order", () => {
+  const base = parseSubtitles(VTT_WITH_OFFSETS);
+  const shifted = offsetCues(base, 2);
+  assert.notEqual(shifted, base);
+  assert.equal(shifted.length, base.length);
+  shifted.forEach((cue, i) => {
+    assert.equal(cue.text, base[i].text);
+    assert.equal(cue.line, base[i].line);
+    assert.equal(cue.position, base[i].position);
+    assert.ok(cue.start > base[i].start);
+    assert.ok(cue.end > base[i].end);
+  });
+});
+
+test("offsetCues drops nothing at offset zero and clamps a straddling cue", () => {
+  const vtt = [
+    "WEBVTT",
+    "",
+    "00:00:02.000 --> 00:00:04.000",
+    "straddles zero"
+  ].join("\n");
+  const base = parseSubtitles(vtt);
+  const shifted = offsetCues(base, -3);
+  assert.equal(shifted.length, 1);
+  assert.equal(shifted[0].start, 0);
+  assert.equal(shifted[0].end, 1);
 });
 
 test("srtToVtt strips indices, converts separators, pads ms, escapes stray arrows", () => {

@@ -291,3 +291,38 @@ export function sortCues(cues) {
   cues.sort((a, b) => a.start - b.start);
   return cues;
 }
+
+/**
+ * Re-offset already-parsed cues by a constant number of seconds without
+ * touching the source text. A uniform shift never reorders cues, so this
+ * stays sorted without a sort pass; semantics are identical to parseSubtitles
+ * at the same offset: cues pushed entirely before zero drop, straddling ones
+ * clamp their start to 0, the end keeps its raw shift, and the (start, end,
+ * text, ...) shape is preserved for ForgeTrack.load. Only the numeric start/
+ * end change - text, line, position and align are field-shared with the base
+ * array, so a sync-offset drag costs one small object alloc per cue instead
+ * of a full normalize/split/regex/entity-decode re-parse.
+ */
+export function offsetCues(cues, offset = 0) {
+  if (offset === 0) {
+    return cues;
+  }
+  const shifted = [];
+  for (let i = 0; i < cues.length; i++) {
+    const cue = cues[i];
+    const end = cue.end + offset;
+    if (end <= 0) {
+      continue;
+    }
+    const start = cue.start + offset;
+    shifted.push({
+      start: start < 0 ? 0 : start,
+      end,
+      text: cue.text,
+      line: cue.line,
+      position: cue.position,
+      align: cue.align
+    });
+  }
+  return shifted;
+}

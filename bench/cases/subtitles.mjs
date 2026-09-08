@@ -1,6 +1,6 @@
 import { measure } from "../lib.mjs";
 import { formatTime } from "../../src/shared/time.js";
-import { timecodeToSeconds, parseSubtitles } from "../../src/shell/subtitles/forgevtt.js";
+import { timecodeToSeconds, parseSubtitles, offsetCues } from "../../src/shell/subtitles/forgevtt.js";
 
 /** Build a realistic ~500-cue VTT document once per process. */
 function buildVtt(cueCount) {
@@ -44,5 +44,10 @@ export default [
 
   measure("parseSubtitles 500-cue VTT", () => {
     return () => parseSubtitles(VTT_500);
+  }),
+
+  measure("offsetCues 500-cue sync re-offset", () => {
+    const base = parseSubtitles(VTT_500);
+    return () => offsetCues(base, -2.5);
   })
 ];

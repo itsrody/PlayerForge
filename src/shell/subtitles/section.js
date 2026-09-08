@@ -1,7 +1,7 @@
 import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/storage.js";
 import { TUNING } from "../../shared/tuning.js";
 import { fmtPercent, fmtEm } from "../../shared/formatters.js";
-import { srtToVtt, ensureVttHeader, parseSubtitles, parseSubtitlesAsync } from "./forgevtt.js";
+import { srtToVtt, ensureVttHeader, parseSubtitlesAsync, offsetCues } from "./forgevtt.js";
 import { ForgeTrack } from "./forge-track.js";
 import { debounce } from "../../shared/time.js";
 import { flashElement } from "../chrome/animate.js";
@@ -29,6 +29,8 @@ export class SubtitlesSection {
   #shell;
   #forgeTrack = null;
   #trackMeta = null;
+  /** Cues parsed at zero offset; the sync stepper re-offsets this base. */
+  #baseCues = null;
   #cueLayer = null;
   #syncOffset = 0;
   #fileInput = null;
@@ -214,8 +216,9 @@ export class SubtitlesSection {
 
     const applySyncOffset = debounce((offset) => {
       if (this.#trackMeta) {
-        const cues = parseSubtitles(this.#trackMeta.text, offset);
-        this.#forgeTrack?.load(cues);
+        // Re-offset the parsed base: one O(n) numeric pass per step instead
+        // of a full text re-parse (normalize/split/regex/entity decode).
+        this.#forgeTrack?.load(offsetCues(this.#baseCues, offset));
       }
       setConfigValue(SETTING_KEYS.syncOffset, offset);
     }, TUNING.subtitles.syncDebounceMs);
@@ -378,8 +381,10 @@ export class SubtitlesSection {
     }
     const normalizedText = /\.srt$/i.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
     // Cooperative parse: yields to the browser on large tracks so ingesting a
-    // big VTT never blocks playback (see forgevtt.parseSubtitlesAsync).
-    const cues = await parseSubtitlesAsync(normalizedText, this.#syncOffset);
+    // big VTT never blocks playback (see forgevtt.parseSubtitlesAsync). The
+    // base is parsed at zero offset and the current sync offset is applied
+    // as a numeric pass so later sync drags never re-touch the text.
+    const cues = await parseSubtitlesAsync(normalizedText, 0);
     if (!cues.length) {
       this.#toastInfo("captions", "No cues found", "subtitles");
       return;
@@ -387,8 +392,9 @@ export class SubtitlesSection {
     if (!this.#forgeTrack) {
       this.#forgeTrack = new ForgeTrack(this.#shell.video, this.#cueLayer);
     }
-    this.#trackMeta = { name, text: normalizedText };
-    this.#forgeTrack.load(cues);
+    this.#trackMeta = { name };
+    this.#baseCues = cues;
+    this.#forgeTrack.load(offsetCues(cues, this.#syncOffset));
     this.#refreshHint();
     this.#toastInfo("captions", name, "subtitles");
     logger.log("subtitles", `Loaded ${name}`);
@@ -428,6 +434,7 @@ export class SubtitlesSection {
     this.#forgeTrack?.destroy();
     this.#forgeTrack = null;
     this.#trackMeta = null;
+    this.#baseCues = null;
     this.#refreshHint();
   }
 }
