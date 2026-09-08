@@ -476,6 +476,35 @@ test("installContextBridge registers a top-frame message listener", () => {
   stop();
 });
 
+test("installContextBridge survives a document whose root element is not parsed yet", () => {
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+  globalThis.MutationObserver = win.MutationObserver;
+
+  // Fresh nested frames at document-start can expose a document with no root
+  // element yet. The cache observer must not throw out of the bridge install -
+  // entry.js installs the bridge BEFORE the video probe, so a throw here would
+  // silently kill capture in that frame.
+  Object.defineProperty(win.document, "documentElement", { value: null, configurable: true });
+
+  let stop = null;
+  assert.doesNotThrow(() => { stop = installContextBridge(); });
+
+  // With the bridge torn down (cache inactive), the provisioner's fallback
+  // scan still vouches an iframe - proving the install never poisoned the
+  // message vouch on its way out.
+  stop();
+  const child = win.document.createElement("iframe");
+  win.document.body.append(child);
+  const provision = createTopFrameProvisioner();
+  provision({ data: { type: FS_REQUEST_TYPE }, source: child.contentWindow, origin: "https://kid.test" });
+  assert.equal(child.hasAttribute("allowfullscreen"), true);
+
+  stopContextPipe();
+});
+
 test("top-frame responder answers on a transferred MessageChannel port", () => {
   // jsdom's window.postMessage drops transferred ports, so the port path is
   // injected directly into the handler via a real MessageChannel. The

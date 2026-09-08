@@ -805,7 +805,14 @@ function diffIframeCache() {
  *  AbortSignal teardown. Degrades gracefully when MutationObserver is absent
  *  (jsdom without an explicit binding): the cache stays inactive and
  *  iframeElementForWindow falls back to a scan, so the bridge's message
- *  handling never depends on it. */
+ *  handling never depends on it.
+ *
+ *  The observe target falls back to `document` when the root element has not
+ *  been parsed yet (fresh nested frames at document-start): observing the
+ *  document node covers the same subtree and never throws on a missing
+ *  documentElement - a throw here would abort entry.js's boot BEFORE the
+ *  video probe, silently killing capture in that frame.
+ */
 function startIframeCache(ac) {
   if (typeof MutationObserver !== "function") {
     return;
@@ -814,7 +821,14 @@ function startIframeCache(ac) {
   iframeCacheDoc = document;
   iframeCacheActive = true;
   iframeCacheObserver = new MutationObserver(diffIframeCache);
-  iframeCacheObserver.observe(document.documentElement, { childList: true, subtree: true });
+  try {
+    iframeCacheObserver.observe(document.documentElement || document, { childList: true, subtree: true });
+  } catch {
+    // Root not available yet (or observer rejected): drop the cache instead of
+    // throwing out of the bridge install - scans remain the fallback vouch.
+    stopIframeCache();
+    return;
+  }
   ac.signal.addEventListener("abort", () => {
     stopIframeCache();
   }, { once: true });

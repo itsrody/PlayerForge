@@ -103,7 +103,16 @@ function bootstrap() {
     );
   };
 
-  installContextBridge();
+  // The frame bridge is best-effort plumbing: if it ever fails to install
+  // (e.g. its iframe-registry observer cannot bind to the document yet), the
+  // video probe must still run - a nested frame whose bridge died would
+  // otherwise lose capture entirely, since probe install is order-gated on
+  // the bridge returning.
+  try {
+    installContextBridge();
+  } catch (error) {
+    logger.error("entry", "Frame bridge install failed", error);
+  }
   installVideoProbe({
     minWidth: MIN_VIDEO_WIDTH,
     minHeight: MIN_VIDEO_HEIGHT,
