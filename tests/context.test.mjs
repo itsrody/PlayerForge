@@ -475,6 +475,93 @@ test("installContextBridge registers a top-frame message listener", () => {
   stop();
 });
 
+test("top-frame responder answers on a transferred MessageChannel port", () => {
+  // jsdom's window.postMessage drops transferred ports, so the port path is
+  // injected directly into the handler via a real MessageChannel. The
+  // responder must answer on the pipe (unforgeable) instead of a broadcast.
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  const mc = new globalThis.MessageChannel();
+  const iframe = win.document.createElement("iframe");
+  win.document.body.append(iframe);
+
+  let calls = 0;
+  const respond = createTopFrameResponder(() => {
+    calls++;
+    return { domain: "port", path: "/p/2", title: "P" };
+  }, "https://site.test");
+
+  const got = new Promise((resolve) => {
+    mc.port1.addEventListener("message", (e) => resolve(e.data));
+    mc.port1.start();
+  });
+  respond({ data: { type: CTX_REQUEST_TYPE, nonce: "pn" }, origin: "https://embed.net", source: iframe.contentWindow, ports: [mc.port2] });
+  assert.equal(calls, 1);
+  return got.then((data) => {
+    mc.port1.close();
+    mc.port2.close();
+    assert.equal(data.type, CTX_RESPONSE_TYPE);
+    assert.deepEqual(data, { type: CTX_RESPONSE_TYPE, domain: "port", path: "/p/2", title: "P" });
+  });
+});
+
+test("frame relay re-forwards a port request upward", () => {
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.parent = win.parent;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  const childFrame = win.document.createElement("iframe");
+  win.document.body.append(childFrame);
+  const child = childFrame.contentWindow;
+  const mc = new globalThis.MessageChannel();
+
+  let relayedUp = null;
+  const originalPost = win.parent.postMessage.bind(win.parent);
+  win.parent.postMessage = (msg, target, ports) => { relayedUp = { msg, target, ports }; };
+
+  try {
+    const relay = createFrameRelay();
+    relay({ data: { type: CTX_REQUEST_TYPE, nonce: "rp" }, origin: "https://kid.test", source: child, ports: [mc.port2] });
+    assert.equal(relayedUp.msg.type, CTX_REQUEST_TYPE);
+    assert.deepEqual(relayedUp.ports, [mc.port2], "the received port is chained upward");
+  } finally {
+    win.parent.postMessage = originalPost;
+    mc.port1.close();
+    mc.port2.close();
+  }
+});
+
+test("getPageContext resolves via its private port without a broadcast echo", async () => {
+  const { window: win } = dom();
+  globalThis.window = crossOriginFrame(win);
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  let captured = null;
+  const originalPost = win.parent.postMessage.bind(win.parent);
+  win.parent.postMessage = (msg, target, ports) => {
+    captured = { msg, ports };
+    // jsdom drops the transfer, so the port stays live; answer on the
+    // transferred end to simulate the remote ancestor replying on the pipe.
+    if (ports && ports[0]) {
+      ports[0].postMessage({ type: CTX_RESPONSE_TYPE, domain: "hub", path: "/legal", title: "Legal Co" });
+    }
+  };
+  try {
+    const context = await getPageContext();
+    assert.ok(captured, "request posted to the parent");
+    assert.ok(Array.isArray(captured.ports) && captured.ports.length === 1, "first hop transfers a reply port");
+    assert.deepEqual(context, { domain: "hub", path: "/legal", title: "Legal Co" });
+  } finally {
+    win.parent.postMessage = originalPost;
+  }
+});
+
 test("presence probe fires once on the first qualifying insertion", async () => {
   const { window: win } = dom();
   globalThis.window = win;

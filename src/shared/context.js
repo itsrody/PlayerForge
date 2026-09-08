@@ -319,13 +319,28 @@ export async function getPageContext() {
 const CTX_RETRY_BACKOFF = [60, 150, 320, 640];
 const CTX_RETRY_JITTER_MS = 250;
 
-/** Ask the parent chain for page context via postMessage (cross-origin iframes). */
+/** Ask the parent chain for page context via postMessage (cross-origin iframes).
+ *
+ * Answers arrive through one of two pipes, both vouch-checks by identity rather
+ * than guessable state:
+ *   - A dedicated MessageChannel port transferred upward on the first request
+ *     (Chromium 152). The pipe is unforgeable: only the ancestor that received
+ *     the transferred end can speak on it, so no random nonce can be spoofed.
+ *   - The legacy nonce broadcast, kept as a fallback for parents (or test
+ *     hosts such as jsdom) that drop transferred ports. It answers the same
+ *     nonce echoed back on the window message channel.
+ * The first attempt attaches the port; later retries resend only the nonce as
+ * a broadcast, since a transferred port is neutered after delivery.
+ */
 function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   const { promise, resolve } = Promise.withResolvers();
   const ac = new AbortController();
   let nonce = null;
   let retryTimer = null;
   let attemptCount = 0;
+  let replyPort = null;
+  let transferPort = null;
+  let closed = false;
 
   // AbortSignal.any() + AbortSignal.timeout() is the ideal path (Chromium 103+),
   // but Node's brand-check can reject timeout signals in older runtimes.
@@ -340,6 +355,49 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   }
   const deadline = useSignalAny ? 0 : Date.now() + timeoutMs;
 
+  const settle = (context) => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    clearTimeout(retryTimer);
+    ac.abort();
+    if (replyPort) {
+      try {
+        replyPort.removeEventListener("message", onReplyPort);
+        replyPort.close();
+      } catch {
+        // Port may already be neutered or closed; settle regardless.
+      }
+    }
+    resolve(context);
+  };
+
+  // Private pipe: an ancestor that honored the transfer answers here directly.
+  const onReplyPort = (event) => {
+    const data = event.data;
+    if (data && typeof data === "object" && data.type === CTX_RESPONSE_TYPE
+        && typeof data.domain === "string") {
+      settle({
+        domain: data.domain,
+        path: data.path,
+        title: stripNonAscii(typeof data.title === "string" ? data.title : "")
+      });
+    }
+  };
+  if (typeof MessageChannel === "function") {
+    try {
+      const mc = new MessageChannel();
+      replyPort = mc.port1;
+      transferPort = mc.port2;
+      replyPort.addEventListener("message", onReplyPort);
+      replyPort.start();
+    } catch {
+      replyPort = null;
+      transferPort = null;
+    }
+  }
+
   const onMessage = (event) => {
     const data = event.data;
     if (
@@ -348,9 +406,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
       && data.type === CTX_RESPONSE_TYPE && data.nonce === nonce
       && typeof data.domain === "string"
     ) {
-      clearTimeout(retryTimer);
-      ac.abort();
-      resolve({
+      settle({
         domain: data.domain,
         path: data.path,
         title: stripNonAscii(typeof data.title === "string" ? data.title : "")
@@ -360,22 +416,33 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
 
   if (useSignalAny) {
     signal.addEventListener("abort", () => {
-      clearTimeout(retryTimer);
-      resolve(null);
+      settle(null);
     }, { once: true });
   }
 
   window.addEventListener("message", onMessage, { signal });
 
+  let portAttached = false;
   const sendRequest = () => {
     nonce = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    window.parent.postMessage({ type: CTX_REQUEST_TYPE, nonce }, "*");
+    const msg = { type: CTX_REQUEST_TYPE, nonce };
+    if (transferPort && !portAttached) {
+      try {
+        window.parent.postMessage(msg, "*", [transferPort]);
+        portAttached = true;
+        return;
+      } catch {
+        // Parent rejected the transfer (e.g. neutered port); fall through to
+        // the plain nonce broadcast for this and every later attempt.
+        transferPort = null;
+      }
+    }
+    window.parent.postMessage(msg, "*");
   };
   const attempt = () => {
     if (useSignalAny ? signal.aborted : Date.now() >= deadline) {
-      clearTimeout(retryTimer);
       if (!useSignalAny) ac.abort();
-      resolve(null);
+      settle(null);
       return;
     }
     sendRequest();
@@ -417,6 +484,18 @@ export function createTopFrameResponder(resolveContext, ownOrigin = location.ori
       return;
     }
     const { domain, path, title } = resolveContext();
+    const ports = event.ports || [];
+    if (ports.length) {
+      // A transferred MessageChannel pipe rides the request up the relay
+      // chain; answer directly on it - unforgeable, no broadcast echo. Fall
+      // back to the broadcast path if the port is already gone.
+      try {
+        ports[0].postMessage({ type: CTX_RESPONSE_TYPE, domain, path, title });
+        return;
+      } catch {
+        // Port neutered/closed: answer the requester by broadcast instead.
+      }
+    }
     post(event.source, {
       type: CTX_RESPONSE_TYPE,
       nonce: data.nonce,
@@ -450,10 +529,22 @@ export function createFrameRelay() {
       }
       // Remember who asked AND from which origin: the answer must travel back
       // down addressed to the requester's origin - this hop's upstream origin
-      // would get the delivery dropped whenever the two differ.
+      // would get the delivery dropped whenever the two differ. Kept for the
+      // legacy broadcast answer; a port request is also answered directly on
+      // the pipe, but a mixed chain may still deliver down as a broadcast.
       pending.set(data.nonce, { source: event.source, origin: event.origin });
       setTimeout(() => pending.delete(data.nonce), NONCE_TTL_MS);
-      window.parent.postMessage(data, "*");
+      // Requests carrying a transferred MessageChannel port are chained upward
+      // by re-transferring the SAME port, so the top frame's answer travels
+      // back down the private, unforgeable pipe straight to the requester.
+      // Our copy is neutered by the transfer; the nonce entry above still
+      // guards a legacy broadcast answer arriving instead.
+      const ports = event.ports || [];
+      try {
+        window.parent.postMessage(data, "*", ports.length ? ports : undefined);
+      } catch {
+        window.parent.postMessage(data, "*");
+      }
     } else if (data.type === CTX_RESPONSE_TYPE && pending.has(data.nonce)) {
       // Answers may only come from the parent we relayed to - a sibling or
       // nested frame that guesses a live nonce must not inject context.

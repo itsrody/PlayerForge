@@ -123,6 +123,8 @@ export default [
         NavigationHistoryEntry: "readonly",
         navigator: "readonly",
         PerformanceObserver: "readonly",
+        MessageChannel: "readonly",
+        MessagePort: "readonly",
         GM_getResourceText: "readonly"
       }
     },
