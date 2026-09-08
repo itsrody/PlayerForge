@@ -306,12 +306,26 @@ export async function getPageContext() {
   }
 }
 
+/**
+ * Backoff table (ms) for bridge request retries. The fixed 1200ms poll the
+ * bridge previously used intentionally avoided hammering the parent chain, but
+ * cost up to a full second of latency whenever the child raced the ancestors'
+ * document-start message handlers (the common embed case). An exponential
+ * backoff with jitter is just as sparing in the worst case yet answers a ready
+ * parent within one short retry. Initial low latency for the typical
+ * already-listening parent; jitter (<=250ms) prevents a thundering herd when
+ * several nested frames boot simultaneously.
+ */
+const CTX_RETRY_BACKOFF = [60, 150, 320, 640];
+const CTX_RETRY_JITTER_MS = 250;
+
 /** Ask the parent chain for page context via postMessage (cross-origin iframes). */
 function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   const { promise, resolve } = Promise.withResolvers();
   const ac = new AbortController();
   let nonce = null;
   let retryTimer = null;
+  let attemptCount = 0;
 
   // AbortSignal.any() + AbortSignal.timeout() is the ideal path (Chromium 103+),
   // but Node's brand-check can reject timeout signals in older runtimes.
@@ -365,7 +379,9 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
       return;
     }
     sendRequest();
-    retryTimer = setTimeout(attempt, 1200);
+    const base = CTX_RETRY_BACKOFF[Math.min(attemptCount, CTX_RETRY_BACKOFF.length - 1)];
+    attemptCount++;
+    retryTimer = setTimeout(attempt, base + Math.floor(Math.random() * (CTX_RETRY_JITTER_MS + 1)));
   };
   attempt();
   return promise;
@@ -480,7 +496,122 @@ function isOwnFrame(source) {
   return scan(document, 0);
 }
 
-/* - 4b. Fullscreen provisioning - */
+/* - 4a. Live iframe registry - */
+
+/**
+ * Live map from <iframe> contentWindow -> element, refreshed by an observer
+ * that lives for the whole frame bridge. Without it, every relayed message
+ * rewound the full frame tree via querySelectorAll - O(frametree) per message
+ * on iframe-heavy pages.
+ *
+ * This is self-contained to the shared layer (no dependency on the kernel's
+ * dom-watch dispatcher, which is installed lazily and may not exist when the
+ * bridge boots at document-start) and torn down by the bridge teardown, so a
+ * top frame that never relays pays no ongoing cost. Cross-origin iframe
+ * elements are still readable (contentWindow stays accessible across origins),
+ * so a cross-origin child's element is resolvable here - which is exactly what
+ * the fullscreen provisioner and frame relay need to vouch event.source.
+ */
+const iframeCache = new Map();
+/** Document the cache currently describes. Tracked so a document swap (fresh
+ *  page / test harness) reseeds instead of serving a stale map. */
+let iframeCacheDoc = null;
+/** True once the bridge wired the cache observer (installContextBridge). Before
+ *  that - e.g. handlers used directly - iframeElementForWindow scans inline so
+ *  the vouch stays correct even unseeded. */
+let iframeCacheActive = false;
+/** Observer driving the cache; lifecycled by startIframeCache/stopIframeCache. */
+let iframeCacheObserver = null;
+
+/** (Re)build the cache from the live <iframe> set. ContentWindow never throws,
+ *  so this is safe across same- and cross-origin subtrees. */
+function seedIframeCache() {
+  iframeCache.clear();
+  for (const ifr of document.querySelectorAll("iframe")) {
+    const win = ifr.contentWindow;
+    if (win) {
+      iframeCache.set(win, ifr);
+    }
+  }
+}
+
+/** Diff the cache against childList mutations: removed frames drop out, added
+ *  frames (new/kept entries) seed in. One pass, no per-message tree scan. */
+function diffIframeCache() {
+  seedIframeCache();
+  for (const [win, ifr] of iframeCache) {
+    if (!ifr.isConnected) {
+      iframeCache.delete(win);
+    }
+  }
+}
+
+/** Install the cache observer bound to the current document. Returns an
+ *  AbortSignal teardown. Degrades gracefully when MutationObserver is absent
+ *  (jsdom without an explicit binding): the cache stays inactive and
+ *  iframeElementForWindow falls back to a scan, so the bridge's message
+ *  handling never depends on it. */
+function startIframeCache(ac) {
+  if (typeof MutationObserver !== "function") {
+    return;
+  }
+  seedIframeCache();
+  iframeCacheDoc = document;
+  iframeCacheActive = true;
+  iframeCacheObserver = new MutationObserver(diffIframeCache);
+  iframeCacheObserver.observe(document.documentElement, { childList: true, subtree: true });
+  ac.signal.addEventListener("abort", () => {
+    stopIframeCache();
+  }, { once: true });
+}
+
+function stopIframeCache() {
+  iframeCacheObserver?.disconnect();
+  iframeCacheObserver = null;
+  iframeCacheActive = false;
+  iframeCacheDoc = null;
+}
+
+/** Ensure the cache describes the CURRENT document, reseeding and rebinding the
+ *  observer if the document swapped underneath us (fresh jsdom/page). */
+function ensureIframeCacheCurrent() {
+  if (!iframeCacheActive || iframeCacheDoc === document) {
+    return;
+  }
+  if (typeof MutationObserver !== "function") {
+    stopIframeCache();
+    return;
+  }
+  // Cache belongs to a previous document - rebind to the live one.
+  iframeCacheObserver?.disconnect();
+  seedIframeCache();
+  iframeCacheDoc = document;
+  try {
+    iframeCacheObserver = new MutationObserver(diffIframeCache);
+    iframeCacheObserver.observe(document.documentElement, { childList: true, subtree: true });
+  } catch {
+    stopIframeCache();
+  }
+}
+
+/** The direct <iframe> child of THIS document whose contentWindow is `win`, or null. */
+function iframeElementForWindow(win) {
+  if (!win) {
+    return null;
+  }
+  if (iframeCacheActive) {
+    ensureIframeCacheCurrent();
+    return iframeCache.get(win) || null;
+  }
+  // Fallback before the bridge seeds the cache (or when handlers are used
+  // directly): scan inline so the vouch never silently drops.
+  for (const iframe of document.querySelectorAll("iframe")) {
+    if (iframe.contentWindow === win) {
+      return iframe;
+    }
+  }
+  return null;
+}
 
 /**
  * Browsers require `allowfullscreen`/`allow="fullscreen"` on EVERY ancestor
@@ -494,19 +625,6 @@ function isOwnFrame(source) {
  * one child, so a hostile foreign window cannot punch allowfullscreen for
  * frames it does not own: every grant is vouched by an own-<iframe> match.
  */
-
-/** The direct <iframe> child of THIS document whose contentWindow is `win`, or null. */
-function iframeElementForWindow(win) {
-  if (!win) {
-    return null;
-  }
-  for (const iframe of document.querySelectorAll("iframe")) {
-    if (iframe.contentWindow === win) {
-      return iframe;
-    }
-  }
-  return null;
-}
 
 /** Grant allowfullscreen on an iframe element when it lacks it (idempotent). */
 function grantFullscreen(frameElement) {
@@ -595,5 +713,9 @@ export function installContextBridge() {
   for (const handler of handlers) {
     window.addEventListener("message", handler, { signal: ac.signal });
   }
+  // Every handler above vouch-checks event.source against the live iframe
+  // registry; seed it once (with an observer keeping it current) so relayed
+  // messages never pay a per-message tree scan. Torn down with the bridge.
+  startIframeCache(ac);
   return () => ac.abort();
 }

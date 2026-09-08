@@ -1,6 +1,7 @@
 import { logger } from "../shared/logger.js";
 import { getConfigValue } from "../shared/storage.js";
 import { delay } from "../shared/time.js";
+import { setPerfDiag } from "../shared/perf-diag.js";
 import { ShellSlot } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, meetsMinSize, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
@@ -269,5 +270,6 @@ export class Kernel {
     } else {
       logger.disable();
     }
+    setPerfDiag(on);
   }
 }

@@ -98,6 +98,22 @@
   }
 }
 
+/* -- Low CPU-tier fidelity gate (CPU Performance API, Chromium 152+) --
+   Set on the host element by injectShell. On a "low" device the most
+   expensive visual effects - backdrop blur/saturate and promiscuous
+   compositor hints - cost more than they delight, so they are turned down
+   at the token and hint level rather than per-component. "medium" leaves
+   everything at the default. High-tier is untouched (the default already
+   favors the rich look). */
+.pf-shell[data-pf-cpu-tier="low"] {
+  /* Flat, opaque surfaces: no transparent layers to composite, no blur. */
+  --pf-hud-glass: var(--pf-surface);
+  --pf-blur-sm: none;
+  --pf-blur-lg: none;
+  --pf-panel-bg: var(--pf-surface);
+  --pf-toast-bg: var(--pf-surface);
+}
+
 /* Neutralize the inline 'position: relative' we set on the container
    while it is the native fullscreen element. The UA's ':fullscreen'
    rule uses 'position: fixed' (non-important), which an inline style

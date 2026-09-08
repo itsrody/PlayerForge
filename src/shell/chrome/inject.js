@@ -74,6 +74,20 @@ export function ensureStyles() {
   return styleLoad;
 }
 
+function mapCpuTier(tier) {
+  return tier === "high" ? "high" : tier === "low" ? "low" : "medium";
+}
+
+/** Resolve the device CPU tier once (CPU Performance API, Chromium 152+).
+ *  "medium" when absent, so feature-detect degrades to the current default. */
+function detectCpuTier() {
+  try {
+    return mapCpuTier(navigator.cpuPerformanceTier);
+  } catch {
+    return "medium";
+  }
+}
+
 /**
  * Build the shell DOM inside the player container as a parasite:
  * host > #shadow-root > hud layer > cue layer, appended LAST so no SDK
@@ -87,6 +101,13 @@ export function injectShell(container) {
     return null;
   }
   const host = el("div", { class: "pf-shell", tabindex: "-1" }, container);
+  // CPU tier gating: low-tier devices skip backdrop blur / heavy compositor
+  // hints (see `.pf-shell[data-pf-cpu-tier] > ...` in styles.css). Attached at
+  // host creation so the stylesheet can branch without a JS-driven class flip.
+  const tier = detectCpuTier();
+  if (tier !== "medium") {
+    host.setAttribute("data-pf-cpu-tier", tier);
+  }
 
   const shadow = host.attachShadow({ mode: "open" });
   if (sharedSheet) {

@@ -122,6 +122,7 @@ export default [
         ServiceWorkerRegistration: "readonly",
         NavigationHistoryEntry: "readonly",
         navigator: "readonly",
+        PerformanceObserver: "readonly",
         GM_getResourceText: "readonly"
       }
     },
