@@ -17,7 +17,8 @@ import {
   FS_REQUEST_TYPE,
   CTX_REQUEST_TYPE,
   CTX_RESPONSE_TYPE,
-  CTX_REQUEST_TIMEOUT_MS
+  CTX_REQUEST_TIMEOUT_MS,
+  stopContextPipe
 } from "../src/shared/context.js";
 import { installVideoProbe } from "../src/kernel/probe.js";
 
@@ -537,6 +538,7 @@ test("frame relay re-forwards a port request upward", () => {
 });
 
 test("getPageContext resolves via its private port without a broadcast echo", async () => {
+  stopContextPipe(); // order-independent: clear any pipe/legacy memo from prior tests
   const { window: win } = dom();
   globalThis.window = crossOriginFrame(win);
   globalThis.location = win.location;
@@ -559,6 +561,134 @@ test("getPageContext resolves via its private port without a broadcast echo", as
     assert.deepEqual(context, { domain: "hub", path: "/legal", title: "Legal Co" });
   } finally {
     win.parent.postMessage = originalPost;
+    stopContextPipe();
+  }
+});
+
+test("getPageContext reuses the established pipe instead of a second broadcast", async () => {
+  stopContextPipe();
+  const { window: win } = dom();
+  globalThis.window = crossOriginFrame(win);
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  // The FIRST resolve captures the transferred port end; the pipe is retained
+  // by the child, so the SECOND resolve must travel over the port with no new
+  // window.postMessage at all. Answer it on the retained paired end.
+  let farEnd = null;
+  let postCalls = 0;
+  const originalPost = win.parent.postMessage.bind(win.parent);
+  win.parent.postMessage = (msg, target, ports) => {
+    postCalls++;
+    if (ports && ports[0]) {
+      farEnd = ports[0];
+      farEnd.postMessage({ type: CTX_RESPONSE_TYPE, domain: "hub", path: "/legal", title: "Legal Co" });
+    }
+  };
+  try {
+    const first = await getPageContext();
+    assert.ok(farEnd, "first resolve established a pipe");
+    assert.deepEqual(first, { domain: "hub", path: "/legal", title: "Legal Co" });
+
+    // Second resolve: no broadcast, no transfer - the request rides the pipe.
+    const before = postCalls;
+    // Answer the piped request on the retained far end.
+    let secondResolve = getPageContext();
+    farEnd.postMessage({ type: CTX_RESPONSE_TYPE, domain: "hub", path: "/legal", title: "Legal Co" });
+    const second = await secondResolve;
+    assert.equal(postCalls, before, "repeat resolve never touches window.postMessage");
+    assert.deepEqual(second, { domain: "hub", path: "/legal", title: "Legal Co" });
+  } finally {
+    win.parent.postMessage = originalPost;
+    stopContextPipe();
+  }
+});
+
+test("top-frame responder answers repeat requests over an established pipe", async () => {
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  const iframe = win.document.createElement("iframe");
+  win.document.body.append(iframe);
+  const mc = new globalThis.MessageChannel();
+
+  let calls = 0;
+  const respond = createTopFrameResponder(() => {
+    calls++;
+    return { domain: "pipe", path: "/p", title: "P" };
+  }, "https://site.test");
+
+  const nextOnPort1 = () => new Promise((resolve) => {
+    mc.port1.addEventListener("message", (e) => resolve(e.data), { once: true });
+  });
+  mc.port1.start();
+
+  try {
+    // First contact transfers a port; the responder answers it AND registers
+    // a persistent handler for the pipe.
+    const first = nextOnPort1();
+    respond({ data: { type: CTX_REQUEST_TYPE, nonce: "p1" }, origin: "https://embed.net", source: iframe.contentWindow, ports: [mc.port2] });
+    assert.deepEqual(await first, { type: CTX_RESPONSE_TYPE, domain: "pipe", path: "/p", title: "P" });
+    assert.equal(calls, 1);
+
+    // Later resolves arrive on the port (no window source/origin/ports) and
+    // must still be answered by the registered pipe handler. The responder
+    // holds port2, so requests ride port1 in.
+    const second = nextOnPort1();
+    mc.port1.postMessage({ type: CTX_REQUEST_TYPE, nonce: "p2" });
+    assert.deepEqual(await second, { type: CTX_RESPONSE_TYPE, domain: "pipe", path: "/p", title: "P" });
+    assert.equal(calls, 2, "pipe handler resolved a second request");
+  } finally {
+    mc.port1.close();
+    mc.port2.close();
+  }
+});
+
+test("a broadcast-settled chain stops allocating channels on later resolves", async () => {
+  stopContextPipe();
+  const { window: win } = dom();
+  globalThis.window = crossOriginFrame(win);
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  let nonce = null;
+  let transferCount = 0;
+  let postCount = 0;
+  const originalPost = win.parent.postMessage.bind(win.parent);
+  win.parent.postMessage = (msg, target, ports) => {
+    postCount++;
+    nonce = msg.nonce;
+    if (ports && ports.length) transferCount++;
+  };
+  try {
+    // First resolve answered only by broadcast -> chain is remembered legacy.
+    const p1 = getPageContext();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    win.dispatchEvent(new win.MessageEvent("message", {
+      data: { type: CTX_RESPONSE_TYPE, nonce, domain: "hub", path: "/", title: "Hub" },
+      origin: "https://hub.test",
+      source: win.parent
+    }));
+    const c1 = await p1;
+    assert.deepEqual(c1, { domain: "hub", path: "/", title: "Hub" });
+    assert.equal(transferCount, 1, "first resolve attempted the port");
+
+    // Second resolve: still answered by broadcast, but no channel allocated.
+    const p2 = getPageContext();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    win.dispatchEvent(new win.MessageEvent("message", {
+      data: { type: CTX_RESPONSE_TYPE, nonce, domain: "hub", path: "/", title: "Hub" },
+      origin: "https://hub.test",
+      source: win.parent
+    }));
+    assert.deepEqual(await p2, { domain: "hub", path: "/", title: "Hub" });
+    assert.equal(transferCount, 1, "legacy chain never allocates another channel");
+    assert.ok(postCount >= 2);
+  } finally {
+    win.parent.postMessage = originalPost;
+    stopContextPipe();
   }
 });
 

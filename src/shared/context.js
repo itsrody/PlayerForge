@@ -319,20 +319,124 @@ export async function getPageContext() {
 const CTX_RETRY_BACKOFF = [60, 150, 320, 640];
 const CTX_RETRY_JITTER_MS = 250;
 
+/**
+ * Established private context pipe to an ancestor responder. Set the FIRST time
+ * a resolve is answered on a transferred port, then reused by every later
+ * resolve so repeat requests never recreate/transfer a channel or touch the
+ * broadcast channel again. Null when no ancestor honored a port (legacy chain)
+ * or after the pipe dies (teardown/timeout) so a fresh one can be established.
+ */
+let contextPipe = null;
+/**
+ * Remember a chain that only ever answers the broadcast (no port ever came
+ * back). Later resolves skip creating + transferring a channel that the legacy
+ * chain just drops, avoiding a wasted MessageChannel per resolve. Reset when a
+ * port pipe is established (the chain may have been upgraded mid-session).
+ */
+let legacyChain = false;
+
+/** Private one-shot context request over an established pipe: no broadcast,
+ *  no transfer, no retry - the pipe is live and dedicated. Times out (and
+ *  drops the dead pipe) instead of queueing, so the caller can fall back. */
+function requestPageContextOverPipe(timeoutMs, deadline) {
+  const { promise, resolve } = Promise.withResolvers();
+  const ac = new AbortController();
+  const pipe = contextPipe;
+  let settled = false;
+  let answered = false;
+
+  const settle = (context) => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    ac.abort();
+    resolve(context);
+  };
+
+  const onData = (event) => {
+    const data = event.data;
+    if (answered) {
+      return;
+    }
+    if (data && typeof data === "object" && data.type === CTX_RESPONSE_TYPE
+        && typeof data.domain === "string") {
+      answered = true;
+      settle({
+        domain: data.domain,
+        path: data.path,
+        title: stripNonAscii(typeof data.title === "string" ? data.title : "")
+      });
+    }
+  };
+
+  let signal;
+  try {
+    signal = AbortSignal.any([ac.signal, AbortSignal.timeout(timeoutMs)]);
+  } catch {
+    signal = null;
+  }
+
+  const dropDeadPipe = () => {
+    if (contextPipe === pipe) {
+      contextPipe = null;
+      try {
+        pipe.port.close();
+      } catch {}
+    }
+  };
+
+  if (signal) {
+    signal.addEventListener("abort", () => {
+      // The abort fires both on the timeout AND on settle()'s own ac.abort()
+      // after a response. Only a timeout (no answer) means the pipe is dead.
+      if (answered) {
+        return;
+      }
+      dropDeadPipe();
+      settle(null);
+    }, { once: true });
+  } else {
+    const timer = setTimeout(() => {
+      if (answered) {
+        return;
+      }
+      dropDeadPipe();
+      ac.abort();
+      settle(null);
+    }, Math.max(0, deadline - Date.now()));
+    ac.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
+  }
+
+  pipe.port.addEventListener("message", onData, { signal: ac.signal });
+  try {
+    pipe.port.postMessage({ type: CTX_REQUEST_TYPE, nonce: `${Date.now()}-${Math.random().toString(36).slice(2)}` });
+  } catch {
+    // Port already closed under us: re-establish from scratch on the next call.
+    dropDeadPipe();
+    settle(null);
+  }
+  return promise;
+}
+
 /** Ask the parent chain for page context via postMessage (cross-origin iframes).
  *
- * Answers arrive through one of two pipes, both vouch-checks by identity rather
- * than guessable state:
- *   - A dedicated MessageChannel port transferred upward on the first request
- *     (Chromium 152). The pipe is unforgeable: only the ancestor that received
- *     the transferred end can speak on it, so no random nonce can be spoofed.
- *   - The legacy nonce broadcast, kept as a fallback for parents (or test
- *     hosts such as jsdom) that drop transferred ports. It answers the same
- *     nonce echoed back on the window message channel.
- * The first attempt attaches the port; later retries resend only the nonce as
- * a broadcast, since a transferred port is neutered after delivery.
+ * Reuses an established private MessageChannel pipe when one exists: repeat
+ * resolves ride the dedicated, unforgeable link straight to the ancestor
+ * responder - no broadcast, no transfer, no retry. Otherwise a first contact
+ * creates a channel and transfers a port upward; the answer identifies whether
+ * the chain supports the pipe (port answer: establishment) or only the legacy
+ * broadcast (fallback, and the chain is remembered as legacy so later resolves
+ * stop wasting channels on it).
+ *
+ * The legacy nonce broadcast remains the fallback for parents (or test hosts
+ * such as jsdom) that drop transferred ports.
  */
 function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
+  if (contextPipe) {
+    return requestPageContextOverPipe(timeoutMs, Date.now() + timeoutMs);
+  }
+
   const { promise, resolve } = Promise.withResolvers();
   const ac = new AbortController();
   let nonce = null;
@@ -340,7 +444,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   let attemptCount = 0;
   let replyPort = null;
   let transferPort = null;
-  let closed = false;
+  let settled = false;
 
   // AbortSignal.any() + AbortSignal.timeout() is the ideal path (Chromium 103+),
   // but Node's brand-check can reject timeout signals in older runtimes.
@@ -355,19 +459,24 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   }
   const deadline = useSignalAny ? 0 : Date.now() + timeoutMs;
 
-  const settle = (context) => {
-    if (closed) {
+  const settle = (context, viaPort) => {
+    if (settled) {
       return;
     }
-    closed = true;
+    settled = true;
     clearTimeout(retryTimer);
     ac.abort();
     if (replyPort) {
-      try {
-        replyPort.removeEventListener("message", onReplyPort);
-        replyPort.close();
-      } catch {
-        // Port may already be neutered or closed; settle regardless.
+      if (viaPort) {
+        // A port answered: the chain supports a private pipe. Retain the pipe
+        // for repeat resolves instead of closing it with this one.
+        importMarshalPipe(replyPort);
+        legacyChain = false;
+      } else {
+        try {
+          replyPort.removeEventListener("message", onReplyPort);
+          replyPort.close();
+        } catch {}
       }
     }
     resolve(context);
@@ -382,10 +491,10 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
         domain: data.domain,
         path: data.path,
         title: stripNonAscii(typeof data.title === "string" ? data.title : "")
-      });
+      }, true);
     }
   };
-  if (typeof MessageChannel === "function") {
+  if (!legacyChain && typeof MessageChannel === "function") {
     try {
       const mc = new MessageChannel();
       replyPort = mc.port1;
@@ -406,17 +515,20 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
       && data.type === CTX_RESPONSE_TYPE && data.nonce === nonce
       && typeof data.domain === "string"
     ) {
+      // Broadcast answer: this chain does not honor ports - remember it so
+      // later resolves stop allocating channels it will only drop.
+      legacyChain = true;
       settle({
         domain: data.domain,
         path: data.path,
         title: stripNonAscii(typeof data.title === "string" ? data.title : "")
-      });
+      }, false);
     }
   };
 
   if (useSignalAny) {
     signal.addEventListener("abort", () => {
-      settle(null);
+      settle(null, false);
     }, { once: true });
   }
 
@@ -442,7 +554,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   const attempt = () => {
     if (useSignalAny ? signal.aborted : Date.now() >= deadline) {
       if (!useSignalAny) ac.abort();
-      settle(null);
+      settle(null, false);
       return;
     }
     sendRequest();
@@ -452,6 +564,29 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   };
   attempt();
   return promise;
+}
+
+/** Retain a responding port as the frame's persistent context pipe. Per-request
+ *  listeners attach transiently (see requestPageContextOverPipe); nothing hangs
+ *  off the pipe between resolves. Reset with the bridge teardown. */
+function importMarshalPipe(port) {
+  if (contextPipe) {
+    try {
+      contextPipe.port.close();
+    } catch {}
+  }
+  contextPipe = { port };
+}
+
+/** Drop the persistent pipe + legacy memo when the frame bridge is torn down. */
+export function stopContextPipe() {
+  if (contextPipe) {
+    try {
+      contextPipe.port.close();
+    } catch {}
+  }
+  contextPipe = null;
+  legacyChain = false;
 }
 
 /* - 4. Frame bridge - */
@@ -471,6 +606,26 @@ export const CTX_REQUEST_TIMEOUT_MS = 3000;
  * and path stay because cross-origin players cannot function without them.
  */
 export function createTopFrameResponder(resolveContext, ownOrigin = location.origin, post = defaultPostToSource) {
+  // Ports that established a private pipe get a persistent handler: after the
+  // first contact, the requesting frame sends every later resolve straight
+  // over the pipe, and those messages arrive as MessagePort events (no window
+  // source/origin/ports), so the window responder alone would never see them.
+  const pipePorts = new Set();
+
+  const onPipeRequest = (port) => (event) => {
+    const data = event.data;
+    if (!data || typeof data !== "object" || data.type !== CTX_REQUEST_TYPE
+        || typeof data.nonce !== "string") {
+      return;
+    }
+    const { domain, path, title } = resolveContext();
+    try {
+      port.postMessage({ type: CTX_RESPONSE_TYPE, domain, path, title });
+    } catch {
+      // Port closed under us; the next request on it won't arrive either.
+    }
+  };
+
   return (event) => {
     const data = event && event.data;
     if (
@@ -486,11 +641,20 @@ export function createTopFrameResponder(resolveContext, ownOrigin = location.ori
     const { domain, path, title } = resolveContext();
     const ports = event.ports || [];
     if (ports.length) {
+      const port = ports[0];
+      if (!pipePorts.has(port)) {
+        // First contact on a fresh pipe: register the persistent handler so
+        // repeat resolves over this port are answered without ever touching
+        // the window message channel again.
+        pipePorts.add(port);
+        port.addEventListener("message", onPipeRequest(port));
+        port.start();
+      }
       // A transferred MessageChannel pipe rides the request up the relay
       // chain; answer directly on it - unforgeable, no broadcast echo. Fall
       // back to the broadcast path if the port is already gone.
       try {
-        ports[0].postMessage({ type: CTX_RESPONSE_TYPE, domain, path, title });
+        port.postMessage({ type: CTX_RESPONSE_TYPE, domain, path, title });
         return;
       } catch {
         // Port neutered/closed: answer the requester by broadcast instead.
@@ -808,5 +972,8 @@ export function installContextBridge() {
   // registry; seed it once (with an observer keeping it current) so relayed
   // messages never pay a per-message tree scan. Torn down with the bridge.
   startIframeCache(ac);
-  return () => ac.abort();
+  return () => {
+    ac.abort();
+    stopContextPipe();
+  };
 }
