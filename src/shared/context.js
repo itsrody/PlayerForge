@@ -779,7 +779,9 @@ let iframeCacheActive = false;
 let iframeCacheObserver = null;
 
 /** (Re)build the cache from the live <iframe> set. ContentWindow never throws,
- *  so this is safe across same- and cross-origin subtrees. */
+ *  so this is safe across same- and cross-origin subtrees. Only used for the
+ *  initial install and a document swap reseed - ongoing updates are
+ *  differential (diffIframeCache). */
 function seedIframeCache() {
   iframeCache.clear();
   for (const ifr of document.querySelectorAll("iframe")) {
@@ -790,10 +792,46 @@ function seedIframeCache() {
   }
 }
 
-/** Diff the cache against childList mutations: removed frames drop out, added
- *  frames (new/kept entries) seed in. One pass, no per-message tree scan. */
-function diffIframeCache() {
-  seedIframeCache();
+/** Register one <iframe> element under its contentWindow. Idempotent: moved or
+ *  re-inserted frames just update the entry in place (Map keyed by window). */
+function registerIframe(ifr) {
+  const win = ifr.contentWindow;
+  if (win) {
+    iframeCache.set(win, ifr);
+  }
+}
+
+/** Register every <iframe> inside one added node (an `<iframe>` itself, or a
+ *  container subtree). Scoped to the added node only - the old full reseed
+ *  walked the whole document every batch even when nothing changed. */
+function collectIframes(node) {
+  if (!node || node.nodeType !== 1) {
+    return;
+  }
+  if (node.localName === "iframe") {
+    registerIframe(node);
+    return;
+  }
+  const set = node.querySelectorAll("iframe");
+  for (let i = 0; i < set.length; i++) {
+    registerIframe(set[i]);
+  }
+}
+
+/** Keep the cache diffed against one observer batch: added nodes register any
+ *  iframes they carry, then an isConnected sweep drops frames removed anywhere
+ *  - including inside a dropped ancestor subtree (the SPA replacer case, which
+ *  no added-node scan covers). One O(added subtree) traversal per batch plus a
+ *  constant sweep over the map (bounded by iframe count) instead of the old
+ *  shape, which re-ran a full querySelectorAll("iframe") over the document for
+ *  EVERY batch, even one touching nothing iframe-related. */
+function diffIframeCache(records) {
+  for (const record of records) {
+    const added = record.addedNodes;
+    for (let i = 0; i < added.length; i++) {
+      collectIframes(added[i]);
+    }
+  }
   for (const [win, ifr] of iframeCache) {
     if (!ifr.isConnected) {
       iframeCache.delete(win);

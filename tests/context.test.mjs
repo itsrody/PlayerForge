@@ -505,6 +505,64 @@ test("installContextBridge survives a document whose root element is not parsed 
   stopContextPipe();
 });
 
+test("live iframe registry stays current under non-iframe churn", async () => {
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+  globalThis.MutationObserver = win.MutationObserver;
+
+  const stop = installContextBridge();
+  // Drive the real provisioner through the installed bridge: a grant only
+  // lands when iframeElementForWindow() vouches the source, so the cache's
+  // contents are observable through the allowfullscreen attribute.
+  const provision = (source) => {
+    win.dispatchEvent(new win.MessageEvent("message", {
+      data: { type: FS_REQUEST_TYPE },
+      source,
+      origin: "https://kid.test"
+    }));
+  };
+
+  const child = win.document.createElement("iframe");
+  win.document.body.append(child);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  provision(child.contentWindow);
+  assert.equal(child.hasAttribute("allowfullscreen"), true, "observed iframe is vouched");
+
+  // SPA-style churn of entirely unrelated nodes must not disturb the entry.
+  for (let i = 0; i < 5; i++) {
+    const host = win.document.createElement("div");
+    host.appendChild(win.document.createElement("span"));
+    win.document.body.append(host);
+    host.remove();
+  }
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  provision(child.contentWindow);
+  assert.equal(child.hasAttribute("allowfullscreen"), true, "iframe survives unrelated churn");
+
+  // Iframes nested in an added container register through the subtree scan.
+  const suite = win.document.createElement("div");
+  const inner = win.document.createElement("iframe");
+  suite.appendChild(inner);
+  win.document.body.append(suite);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  provision(inner.contentWindow);
+  assert.equal(inner.hasAttribute("allowfullscreen"), true, "added-subtree scan registers nested iframes");
+
+  // Removing the whole container drops the inner frame from the cache - the
+  // isConnected sweep covers removals the added-node scan cannot see. Clear
+  // the attribute first: an earlier grant would leave it set on the detached
+  // iframe, so a fresh provision must NOT re-add it when the vouch fails.
+  suite.remove();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  inner.removeAttribute("allowfullscreen");
+  provision(inner.contentWindow);
+  assert.equal(inner.hasAttribute("allowfullscreen"), false, "removed iframe is no longer vouched");
+
+  stop();
+});
+
 test("top-frame responder answers on a transferred MessageChannel port", () => {
   // jsdom's window.postMessage drops transferred ports, so the port path is
   // injected directly into the handler via a real MessageChannel. The
