@@ -15,7 +15,14 @@
  * Resource rule borrowed from uBO: the underlying observer exists only
  * while at least one subscriber is attached, and teardown is automatic
  * when the last one leaves (or via AbortSignal).
+ *
+ * Dispatch rule also borrowed from uBO's safeObserverHandler: listeners are
+ * visited from a snapshot (listener-set can't mutate under a live iterator),
+ * and each listener is isolated so a throwing consumer cannot abort delivery
+ * to the peers that share this batch.
  */
+import { logger } from "../shared/logger.js";
+
 const subscribers = new Set();
 
 let observer = null;
@@ -28,8 +35,18 @@ function flush() {
   queued = false;
   const records = pendingRecords;
   pendingRecords = [];
-  for (const subscriber of subscribers) {
-    subscriber(records);
+  // Dispatch from a snapshot: a subscriber that unsubscribes during delivery
+  // (or another that subscribes) must not skew the current batch's audience.
+  const snapshot = [...subscribers];
+  for (const subscriber of snapshot) {
+    // uBO safeObserverHandler rule: one throwing consumer must never abort
+    // the fan-out to its peers in the same batch, nor escape into the page's
+    // unhandled-rejection path.
+    try {
+      subscriber(records);
+    } catch (err) {
+      logger.error("dom-watch", "A dom-watch subscriber threw during dispatch", err);
+    }
   }
 }
 

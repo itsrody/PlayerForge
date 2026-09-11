@@ -65,3 +65,21 @@ test("unsubscribe tears the observer down when the last subscriber leaves", asyn
   assert.equal(calls2, 1);
   off2();
 });
+
+test("a throwing subscriber never aborts delivery to its peers [uBO safeObserverHandler rule]", async () => {
+  const delivered = [];
+  const offBad = onDomMutations(() => {
+    throw new Error("consumer bug");
+  });
+  const offGood = onDomMutations((records) => {
+    delivered.push(records.length);
+  });
+
+  document.body.appendChild(document.createElement("span"));
+  await tick();
+
+  assert.ok(delivered.length >= 1, "the healthy peer still received the batch");
+
+  offBad();
+  offGood();
+});
