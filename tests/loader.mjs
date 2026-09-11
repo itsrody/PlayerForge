@@ -45,6 +45,21 @@ if (typeof globalThis.scheduler === "undefined") {
 if (typeof globalThis.MediaMetadata === "undefined") {
   globalThis.MediaMetadata = class MediaMetadata {};
 }
+if (typeof globalThis.matchMedia !== "function") {
+  // jsdom has no viewport/media-query engine. A static no-op keeps the
+  // shell's compact-mode auto-detect and its matchMedia change listener
+  // constructible in tests; matches stays false so the narrow-touch
+  // breakpoint never toggles into compact mode under the harness, and
+  // addEventListener/removeEventListener are no-ops since no test drives a
+  // viewport crossing.
+  globalThis.matchMedia = () => ({
+    get matches() {
+      return false;
+    },
+    addEventListener() {},
+    removeEventListener() {}
+  });
+}
 // Chromium's Vibration API - absent on Node. Stubbed so gestureHaptic's
 // feature-detect is true and tests can assert the haptic pulse pattern; the
 // stub records the last pattern for inspection.

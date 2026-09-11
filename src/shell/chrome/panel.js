@@ -9,6 +9,8 @@ import { getSetting } from "./config.js";
 const HOLD_DELAY_MS = 400;
 const HOLD_REPEAT_MS = 75;
 const TAB_NAV_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End"]);
+/** Auto-detect compact: narrow touch viewport. matchMedia change re-applies live. */
+const COMPACT_MEDIA_QUERY = "(max-width: 480px) and (pointer: coarse)";
 
 function decimalsOf(step) {
   const str = String(step);
@@ -242,14 +244,15 @@ export class SettingsPanel {
 
   /**
    * Compact mode: explicit setting wins; otherwise auto-detect touch + narrow
-   * viewport (< 480px). The auto-detect is a one-shot at construction — the
-   * user can always override via the Settings toggle.
+   * viewport (< 480px). A matchMedia change listener in #wireEvents re-applies
+   * the class live when the viewport crosses the breakpoint; the setting
+   * override still wins for the explicit (undirected) path.
    */
   #isCompactMode() {
     const explicit = getSetting("ui.compact");
     if (explicit === true || explicit === false) return explicit;
     // Auto-detect: narrow touch viewport.
-    return matchMedia("(max-width: 480px) and (pointer: coarse)").matches;
+    return matchMedia(COMPACT_MEDIA_QUERY).matches;
   }
 
   get element() {
@@ -615,6 +618,16 @@ export class SettingsPanel {
 
   #wireEvents() {
     const { signal } = this.#scope;
+    // Live compact mode: Chromium re-fires matchMedia change on viewport
+    // crossings, so the panel tracks the breakpoint instead of a one-shot
+    // read at construction. The explicit ui.compact setting still wins - it
+    // is consulted first inside #isCompactMode and only the auto-detect path
+    // consults the query. Listener dies with the panel's scope signal.
+    matchMedia(COMPACT_MEDIA_QUERY).addEventListener("change", () => {
+      if (this.isOpen) {
+        this.#root.classList.toggle("pf-compact", this.#isCompactMode());
+      }
+    }, { signal });
     this.#shellHost.addEventListener(GESTURE_EVENTS.panel, (event) => {
       event.stopPropagation();
       this.toggle();
