@@ -58,6 +58,10 @@ export const INPUT_BINDINGS = [
     setting: "gestures.hotkeys", fs: false
   },
   {
+    id: "key-pip", gesture: "key", code: "KeyP", emit: GESTURE_EVENTS.pip,
+    setting: "gestures.hotkeys", fs: false
+  },
+  {
     id: "key-panel", gesture: "key", code: "KeyS", emit: GESTURE_EVENTS.panel,
     setting: "gestures.hotkeys", fs: false, allowControlFocus: true
   }
@@ -552,6 +556,24 @@ export function attachInputActions(shell, host, signal) {
     }
     shell.media.toggleMute();
     shell.toastFlash(volumeIcon(shell.volume, shell.muted), shell.muted ? "Muted" : volumePercent(shell.volume), "volume");
+  }, { signal });
+
+  // Picture-in-Picture: native always-on-top surface. The browser owns the
+  // window lifecycle; we only flip the toggle. Unsupported hosts get a hint
+  // instead of a silent no-op, mirroring the fs-block pattern.
+  host.addEventListener(GESTURE_EVENTS.pip, () => {
+    if (!shell.video) {
+      return;
+    }
+    if (!shell.media.pictureInPictureSupported()) {
+      shell.toastInfo("pip", "Picture-in-Picture not supported", "pip");
+      return;
+    }
+    shell.media.togglePictureInPicture().then((active) => {
+      shell.toastFlash("pip", active ? "Picture-in-Picture" : "Exited Picture-in-Picture", "pip");
+    }).catch(() => {
+      shell.toastInfo("pip", "Picture-in-Picture unavailable", "pip");
+    });
   }, { signal });
 
   host.addEventListener(GESTURE_EVENTS.pinch, ({ detail }) => {

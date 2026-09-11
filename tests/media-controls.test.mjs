@@ -138,3 +138,134 @@ test("MediaSession position state stays live off the media clock", async () => {
   assert.equal(MEDIA_SESSION_SYNC_EVENTS.has("timeupdate"), true);
   scope.abort();
 });
+
+function makePiP() {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>");
+  const video = dom.window.document.createElement("video");
+  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
+  const doc = dom.window.document;
+  // jsdom has no Picture-in-Picture surface; fake the native contract on the
+  // bare global the command plane reads (media.js resolves document bare).
+  globalThis.document = doc;
+  let active = false;
+  Object.defineProperty(doc, "pictureInPictureEnabled", { value: true, configurable: true });
+  Object.defineProperty(doc, "pictureInPictureElement", {
+    get: () => (active ? video : null),
+    configurable: true
+  });
+  const calls = { request: 0, exit: 0 };
+  video.requestPictureInPicture = () => {
+    calls.request++;
+    active = true;
+    return Promise.resolve();
+  };
+  doc.exitPictureInPicture = () => {
+    calls.exit++;
+    active = false;
+    return Promise.resolve();
+  };
+  const controls = createMediaControls({ video });
+  return {
+    dom,
+    video,
+    doc,
+    controls,
+    calls,
+    cleanup: () => {
+      delete globalThis.document;
+    }
+  };
+}
+
+test("Picture-in-Picture toggle rides the native surface", async () => {
+  const { controls, calls, cleanup } = makePiP();
+  try {
+    assert.equal(controls.pictureInPictureSupported(), true);
+    assert.equal(await controls.togglePictureInPicture(), true, "enter PiP");
+    assert.equal(calls.request, 1);
+    assert.equal(await controls.togglePictureInPicture(), false, "sibling call exits");
+    assert.equal(calls.exit, 1);
+  } finally {
+    cleanup();
+  }
+});
+
+test("Picture-in-Picture is inert before metadata (readyState 0)", async () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>");
+  const video = dom.window.document.createElement("video");
+  const doc = dom.window.document;
+  globalThis.document = doc;
+  let called = 0;
+  video.requestPictureInPicture = () => {
+    called++;
+    return Promise.resolve();
+  };
+  const controls = createMediaControls({ video });
+  try {
+    assert.equal(await controls.togglePictureInPicture(), false);
+    assert.equal(called, 0, "no PiP request before load");
+  } finally {
+    delete globalThis.document;
+  }
+});
+
+test("Picture-in-Picture hands back false when the browser disables it", async () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>");
+  const video = dom.window.document.createElement("video");
+  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
+  const doc = dom.window.document;
+  globalThis.document = doc;
+  Object.defineProperty(doc, "pictureInPictureEnabled", { value: false, configurable: true });
+  let called = 0;
+  video.requestPictureInPicture = () => {
+    called++;
+    return Promise.resolve();
+  };
+  const controls = createMediaControls({ video });
+  try {
+    assert.equal(controls.pictureInPictureSupported(), false);
+    assert.equal(await controls.togglePictureInPicture(), false);
+    assert.equal(called, 0, "feature-detect gates the call");
+  } finally {
+    delete globalThis.document;
+  }
+});
+
+test("URL.canParse gates MediaSession poster artwork", () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+    url: "https://example.com/watch?v=1"
+  });
+  Object.defineProperty(dom.window.document, "title", { value: "Demo", configurable: true });
+  const video = dom.window.document.createElement("video");
+  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
+  const previousMetadata = globalThis.MediaMetadata;
+  globalThis.MediaMetadata = class MediaMetadata {
+    constructor(options) {
+      this._captured = options;
+    }
+  };
+  globalThis.document = dom.window.document;
+  globalThis.location = dom.window.location;
+
+  const session = {
+    playbackState: "none",
+    metadata: null,
+    setActionHandler() {},
+    setPositionState() {}
+  };
+  const scope = new dom.window.AbortController();
+  const controls = createMediaControls({ video });
+  try {
+    video.poster = "// not a url wording ^^";
+    claimMediaSession({ controls, video, signal: scope.signal, session });
+    assert.deepEqual(session.metadata._captured.artwork, [], "malformed poster drops artwork");
+
+    video.poster = "/posters/front.jpg";
+    video.dispatchEvent(new dom.window.Event("loadedmetadata"));
+    assert.equal(session.metadata._captured.artwork[0].src, "https://example.com/posters/front.jpg");
+  } finally {
+    globalThis.MediaMetadata = previousMetadata;
+    delete globalThis.document;
+    delete globalThis.location;
+  }
+});

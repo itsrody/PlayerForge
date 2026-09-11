@@ -34,6 +34,7 @@ export const GESTURE_EVENTS = {
   skip: "pf:gesture-skip",
   volume: "pf:gesture-volume",
   mute: "pf:gesture-mute",
+  pip: "pf:gesture-pip",
   panel: "pf:gesture-panel",
   pinch: "pf:gesture-pinch"
 };

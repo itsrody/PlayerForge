@@ -364,15 +364,14 @@ export class SubtitlesSection {
 
   /** Last path segment as a display name, defaulted to .vtt when unknown. */
   #nameFromUrl(url) {
-    try {
-      const last = decodeURIComponent(new URL(url).pathname.split("/").pop() || "");
-      if (!last) {
-        return "subtitles.vtt";
-      }
-      return SUBTITLE_EXT_RE.test(last) ? last : `${last}.vtt`;
-    } catch {
+    if (!URL.canParse(url)) {
       return "subtitles.vtt";
     }
+    const last = decodeURIComponent(new URL(url).pathname.split("/").pop() || "");
+    if (!last) {
+      return "subtitles.vtt";
+    }
+    return SUBTITLE_EXT_RE.test(last) ? last : `${last}.vtt`;
   }
 
   async #ingest(name, rawText) {
