@@ -17,14 +17,22 @@ export function flashElement(el, { duration = FLASH_MS } = {}) {
   if (!el || typeof el.animate !== "function") {
     return;
   }
-  const prior = (el.getAnimations?.() ?? []).filter((anim) => {
-    const animatesBackground = anim.effect &&
-      typeof anim.effect.getKeyframes === "function" &&
-      anim.effect.getKeyframes().some((kf) => "backgroundColor" in kf);
-    return animatesBackground && anim.playState !== "finished";
-  });
-  for (const anim of prior) {
-    anim.cancel();
+  // Single pass over the element's active animations: finished entries are
+  // always accumulated prior flashes (backgroundColor - this module is the
+  // only background animator on flash targets), so they cancel without a
+  // keyframe scan; running/pending animations are scanned so unrelated CSS /
+  // WAAPI animations (transforms, view-transitions) survive the restart.
+  for (const anim of el.getAnimations?.() ?? []) {
+    if (anim.playState === "finished") {
+      anim.cancel();
+      continue;
+    }
+    const keyframes = anim.effect && typeof anim.effect.getKeyframes === "function"
+      ? anim.effect.getKeyframes()
+      : [];
+    if (keyframes.some((kf) => "backgroundColor" in kf)) {
+      anim.cancel();
+    }
   }
   el.animate(
     [

@@ -25,7 +25,9 @@ export class Kernel {
   /** Shell-ready listeners (direct callbacks, no bus). */
   #createdListeners = new Set();
   #initialized = false;
-  #seenVideos = new Set();
+  // Weak: an adopted video orphaned by an untracked removal path must not
+  // pin the element (and its whole subtree) for the page's lifetime.
+  #seenVideos = new WeakSet();
   #removalObservers = new Set();
   #removalTimers = new Map();
   /** Unsubscribe for the shared discovery tap; dropped at pagehide. */
@@ -179,42 +181,14 @@ export class Kernel {
   }
 
   #watchVideoRemoval(video, container, hops) {
-    const observers = [];
-
     /** Adaptive watch depth: the matched anchor + a margin, never unbounded. */
     const watchDepth = Number.isInteger(hops) && hops > 0
       ? Math.min(hops + REMOVAL_DEPTH_MARGIN, MAX_REMOVAL_DEPTH)
       : MAX_REMOVAL_DEPTH;
 
-    const stopWatching = () => {
-      for (const observer of observers) {
-        observer.disconnect();
-        this.#removalObservers.delete(observer);
-      }
-      this.#removalTimers.get(video)?.();
-      this.#removalTimers.delete(video);
-      this.#seenVideos.delete(video);
-    };
-
-    const reanchorObservers = () => {
-      for (const observer of observers) {
-        observer.disconnect();
-        this.#removalObservers.delete(observer);
-      }
-      observers.length = 0;
-      anchors.length = 0;
-      let anchor = video.parentElement || container;
-      for (let depth = 0; anchor && depth < watchDepth; depth++, anchor = anchor.parentElement) {
-        const observer = new MutationObserver(checkAnchors);
-        observer.observe(anchor, { childList: true });
-        observers.push(observer);
-        anchors.push(anchor);
-        this.#removalObservers.add(observer);
-      }
-    };
-
     const anchors = [];
 
+    // Arrow fn keeps the enclosing class-level `this` for timer/lifecycle access.
     const checkAnchors = () => {
       if (this.#removalTimers.has(video)) {
         return;
@@ -234,6 +208,34 @@ export class Kernel {
       if (video.parentElement !== anchors[0]) {
         reanchorObservers();
       }
+    };
+
+    /** Chromium-native single-target consolidation: `MutationObserver.observe()`
+     *  supports multiple root targets natively (childList filtered in C++), so
+     *  up to `watchDepth` per-video C++ wrappers collapse to one instance. */
+    const observer = new MutationObserver(checkAnchors);
+    this.#removalObservers.add(observer);
+
+    const reanchorObservers = () => {
+      // Unobserve stale anchors without a full disconnect (pending records
+      // from targets that still matter are preserved).
+      for (const target of anchors) {
+        observer.unobserve(target);
+      }
+      anchors.length = 0;
+      let anchor = video.parentElement || container;
+      for (let depth = 0; anchor && depth < watchDepth; depth++, anchor = anchor.parentElement) {
+        observer.observe(anchor, { childList: true });
+        anchors.push(anchor);
+      }
+    };
+
+    const stopWatching = () => {
+      observer.disconnect();
+      this.#removalObservers.delete(observer);
+      this.#removalTimers.get(video)?.();
+      this.#removalTimers.delete(video);
+      this.#seenVideos.delete(video);
     };
 
     reanchorObservers();
