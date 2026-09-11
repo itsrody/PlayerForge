@@ -27,14 +27,18 @@ export function el(tag, attrs = {}, parent = null) {
 
 /**
  * Icon-button building block: a type=button element with a class, title and
- * optional icon child. Returns the button for event wiring.
+ * optional icon child. Returns the button for event wiring. Any extra
+ * attributes (`data-action`, off, disabled, ...) in the option map are
+ * forwarded verbatim - the icon buttons only destructure the presentation
+ * keys so the contract (data-action selectors) never silently drops.
  */
-export function button({ class: cls = "", title = "", "aria-label": ariaLabel = "", icon = null }, parent = null) {
+export function button({ class: cls = "", title = "", "aria-label": ariaLabel = "", icon = null, ...rest }, parent = null) {
   const node = el("button", {
     type: "button",
     ...(cls ? { class: cls } : {}),
     ...(title ? { title } : {}),
-    ...(ariaLabel ? { "aria-label": ariaLabel } : {})
+    ...(ariaLabel ? { "aria-label": ariaLabel } : {}),
+    ...rest
   }, parent);
   if (icon) {
     node.appendChild(icon);

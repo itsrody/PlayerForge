@@ -313,7 +313,17 @@ export class Shell {
         return;
       }
       try {
-        this.#wakeLock = await navigator.wakeLock.request("screen");
+        const lock = await navigator.wakeLock.request("screen");
+        // Re-check after the await: pause/ended/destroy may have run while
+        // the request was in flight. A lock resolved past those must drop
+        // itself, or the screen stays lit through a paused video.
+        if (this.#destroyed || video.paused || video.ended) {
+          lock.release?.();
+          return;
+        }
+        // A newer acquire may have superseded an in-flight one: last wins.
+        this.#wakeLock?.release?.();
+        this.#wakeLock = lock;
       } catch {}
     };
     const release = () => {

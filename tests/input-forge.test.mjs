@@ -249,6 +249,50 @@ test("pointer gestures never cancel defaults (passivity contract)", () => {
   controller.destroy();
 });
 
+test("pointercancel cancels a swipe without committing it or arming a dbltap", () => {
+  const { dom, video, zone, host } = makeEnv();
+  stubFullscreen(dom, true);
+  const controller = new InputForge(video, zone, host);
+  const seen = collect(host, dom.window);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 405, y: 260 }));
+  assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.swipeStart).length, 1);
+  zone.dispatchEvent(pointerEvent(dom.window, "pointercancel", { x: 405, y: 260 }));
+
+  assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.swipe).length, 0,
+    "a cancelled pointer never commits a swipe");
+  assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.release).length, 0);
+
+  // A cancelled pointer must not have seeded the double-tap window: the first
+  // real tap arms it, the second fires exactly one dbltap.
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 400, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 402, y: 202 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 402, y: 202 }));
+
+  const dbltaps = seen.filter((entry) => entry.type === GESTURE_EVENTS.dbltap);
+  assert.equal(dbltaps.length, 1, "cancel does not consume the first genuine tap");
+  controller.destroy();
+});
+
+test("pointercancel mid-hold still releases playback rate", async () => {
+  const { dom, video, zone, host } = makeEnv();
+  stubFullscreen(dom, true);
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  const controller = new InputForge(video, zone, host);
+  const seen = collect(host, dom.window);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  await sleep(350);
+  assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.hold).length, 1);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointercancel", { x: 400, y: 200 }));
+  assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.release).length, 1,
+    "a cancelled hold still restores the boosted rate");
+  controller.destroy();
+});
+
 test("swipe down starts from any zone in fullscreen, not just the center", () => {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true);

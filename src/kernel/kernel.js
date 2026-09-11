@@ -122,6 +122,13 @@ export class Kernel {
     // Permanent rider on the shared discovery tap: every video the probe
     // would have seen, the kernel now adopts through the same wiring.
     this.#stopDiscoveryTap = watchDocumentVideos((video) => this.#adoptVideo(video));
+    // The probe boots us precisely so a video already in the parsed DOM gets
+    // its shell without waiting for the next media event. Replay once: the
+    // media-event tap (and the downgrade path) still catches script-lazy SDK
+    // players that surface after boot.
+    for (const video of document.querySelectorAll("video")) {
+      this.#adoptVideo(video);
+    }
     logger.log("kernel", "Kernel ready - discovery tap active");
   }
 

@@ -2,6 +2,8 @@ import { DOMManager } from "../../shared/dom-manager.js";
 
 const STACK_OVERLAP_EM = 1.6;
 const MAX_SLOTS = 8;
+/** The native TextTrack label this renderer owns; reuse, never append. */
+const TRACK_LABEL = "PlayerForge Subtitles";
 
 /**
  * Subtitle track backed by the browser's native TextTrack for timing and a
@@ -23,6 +25,8 @@ export class ForgeTrack {
    *  pooled scrub payload: mutate in place, read immediately. */
   #lastRender = [];
   #lastActive = [];
+  /** Records the bound cuechange so destroy can unregister it. */
+  #onCueChange = null;
   #destroyed = false;
 
   constructor(video, cueLayer) {
@@ -42,17 +46,23 @@ export class ForgeTrack {
         this.#slots[i] = this.#dom.createElement("div", { class: "pf-cue", role: "caption" }, cueLayer);
       }
     }
-    // addTextTrack is undefined on non-media elements; fail the constructor
-    // with a clear error so the section's own catch surfaces a "Failed to
-    // load subtitles" toast instead of a bare TypeError on mode.
-    this.#track = video?.addTextTrack?.("subtitles", "Subtitles", "en");
+    // Reuse a PlayerForge-owned native track instead of calling addTextTrack
+    // on every toggle cycle: textTracks is append-only (no spec API removes a
+    // track), so a fresh track per load would accumulate leaks across cycles.
+    // A page track with this exact label is collision-safe - the renderer owns
+    // it exclusively once created.
+    const owned = Array.from(video?.textTracks ?? []).find(
+      (track) => track.kind === "subtitles" && track.label === TRACK_LABEL
+    );
+    this.#track = owned ?? video?.addTextTrack?.("subtitles", TRACK_LABEL, "en");
     if (!this.#track) {
       throw new Error("This element cannot host a subtitle track");
     }
     this.#track.mode = "hidden";
-    this.#track.addEventListener("cuechange", () => {
+    this.#onCueChange = () => {
       this.#render();
-    });
+    };
+    this.#track.addEventListener("cuechange", this.#onCueChange);
   }
 
   /** Replace all cues on the track. Accepts plain cue objects from forgevtt. */
@@ -156,6 +166,10 @@ export class ForgeTrack {
       return;
     }
     this.#destroyed = true;
+    // Unregister our native cuechange listener: the track survives (the spec
+    // has no removal API) and would otherwise keep firing this renderer's
+    // slot-node logic against a torn-down pool forever.
+    this.#track.removeEventListener?.("cuechange", this.#onCueChange);
     this.#track.mode = "disabled";
     while (this.#track.cues.length > 0) {
       this.#track.removeCue(this.#track.cues[0]);

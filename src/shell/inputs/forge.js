@@ -201,11 +201,11 @@ export class InputForge {
     zone.addEventListener("pointerdown", (event) => this.#handlePointerDown(event), options);
     zone.addEventListener("pointermove", (event) => this.#handlePointerMove(event), options);
     zone.addEventListener("pointerup", (event) => this.#handlePointerUp(event), options);
-    zone.addEventListener("pointercancel", (event) => this.#handlePointerUp(event), options);
+    zone.addEventListener("pointercancel", (event) => this.#handlePointerCancel(event), options);
     zone.addEventListener("click", (event) => this.#handleClickCapture(event), { capture: true, signal });
     zone.addEventListener("dblclick", (event) => this.#handleDblClickCapture(event), { capture: true, signal });
     window.addEventListener("pointerup", (event) => this.#handlePointerUp(event), options);
-    window.addEventListener("pointercancel", (event) => this.#handlePointerUp(event), options);
+    window.addEventListener("pointercancel", (event) => this.#handlePointerCancel(event), options);
     document.addEventListener("keydown", (event) => this.#handleKeydown(event), { capture: true, signal });
     document.addEventListener("keyup", (event) => this.#handleKeyup(event), { capture: true, signal });
     // A window blur can swallow the matching Space keyup; finish the hold
@@ -801,6 +801,25 @@ export class InputForge {
         this.#lastTapTime = now;
       }
     }
+    this.#primaryPointerId = null;
+    this.#gestureZone = null;
+  }
+
+  #handlePointerCancel(event) {
+    this.#pointers.delete(event.pointerId);
+    if (this.#pinchStartDistance > 0 && this.#pointers.size < 2) {
+      this.#pinchStartDistance = 0;
+      this.#pinchFired = false;
+      this.#pinchZone = null;
+    }
+    // A pointercancel means the browser reclaimed the pointer (system
+    // gesture, hit-test fighting, lost capture) - the interaction was never a
+    // completed user gesture. Never commit a swipe, and never arm/seed the
+    // double-tap window from a cancelled touch.
+    if (this.#primaryPointerId === null || event.pointerId !== this.#primaryPointerId) {
+      return;
+    }
+    this.#endPointerSession();
     this.#primaryPointerId = null;
     this.#gestureZone = null;
   }

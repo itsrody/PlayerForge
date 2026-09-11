@@ -593,6 +593,8 @@ export function stopContextPipe() {
 
 const NONCE_TTL_MS = 5000;
 export const CTX_REQUEST_TIMEOUT_MS = 3000;
+/** How long a context pipe stays registered without a request before it is dropped. */
+const CTX_PIPE_IDLE_MS = 60_000;
 
 /**
  * Handler for the top frame: answers validated context requests. Context is
@@ -610,9 +612,39 @@ export function createTopFrameResponder(resolveContext, ownOrigin = location.ori
   // first contact, the requesting frame sends every later resolve straight
   // over the pipe, and those messages arrive as MessagePort events (no window
   // source/origin/ports), so the window responder alone would never see them.
+  //
+  // textTracks-style append-only leak guard: there is no close/removal
+  // notification for a MessagePort, so an iframe that dies with its pipe open
+  // would otherwise pin the port (and its closures) here forever. Each port is
+  // tracked with an activity stamp: repeat resolves keep it warm while an idle
+  // port is dropped, unregistered, and closed. A transferred port also fires
+  // messageerror when its channel is torn down - that path drops it eagerly.
   const pipePorts = new Set();
+  const pipeEntryByPort = new Map();
 
-  const onPipeRequest = (port) => (event) => {
+  const dropPipe = (entry) => {
+    if (!pipePorts.delete(entry)) {
+      return;
+    }
+    pipeEntryByPort.delete(entry.port);
+    entry.port.removeEventListener("message", entry.handler);
+    entry.port.removeEventListener("messageerror", entry.onError);
+    entry.port.close();
+  };
+
+  /** Live-pipe keepalive: refresh stamps on activity, evict idle ports. */
+  const touchPipe = (entry) => {
+    entry.lastUsed = performance.now();
+    const cutoff = entry.lastUsed - CTX_PIPE_IDLE_MS;
+    for (const candidate of pipePorts) {
+      if (candidate.lastUsed < cutoff) {
+        dropPipe(candidate);
+      }
+    }
+  };
+
+  const onPipeRequest = (entry) => (event) => {
+    touchPipe(entry);
     const data = event.data;
     if (!data || typeof data !== "object" || data.type !== CTX_REQUEST_TYPE
         || typeof data.nonce !== "string") {
@@ -620,9 +652,11 @@ export function createTopFrameResponder(resolveContext, ownOrigin = location.ori
     }
     const { domain, path, title } = resolveContext();
     try {
-      port.postMessage({ type: CTX_RESPONSE_TYPE, domain, path, title });
+      entry.port.postMessage({ type: CTX_RESPONSE_TYPE, domain, path, title });
     } catch {
-      // Port closed under us; the next request on it won't arrive either.
+      // Port closed under us; the next request on it won't arrive either. Drop
+      // now instead of waiting for the idle sweep.
+      dropPipe(entry);
     }
   };
 
@@ -642,13 +676,19 @@ export function createTopFrameResponder(resolveContext, ownOrigin = location.ori
     const ports = event.ports || [];
     if (ports.length) {
       const port = ports[0];
-      if (!pipePorts.has(port)) {
+      let entry = pipeEntryByPort.get(port);
+      if (!entry) {
         // First contact on a fresh pipe: register the persistent handler so
         // repeat resolves over this port are answered without ever touching
         // the window message channel again.
-        pipePorts.add(port);
-        port.addEventListener("message", onPipeRequest(port));
+        entry = { port, lastUsed: performance.now(), handler: null, onError: null };
+        entry.handler = onPipeRequest(entry);
+        entry.onError = () => dropPipe(entry);
+        port.addEventListener("message", entry.handler);
+        port.addEventListener("messageerror", entry.onError);
         port.start();
+        pipeEntryByPort.set(port, entry);
+        pipePorts.add(entry);
       }
       // A transferred MessageChannel pipe rides the request up the relay
       // chain; answer directly on it - unforgeable, no broadcast echo. Fall
@@ -658,6 +698,7 @@ export function createTopFrameResponder(resolveContext, ownOrigin = location.ori
         return;
       } catch {
         // Port neutered/closed: answer the requester by broadcast instead.
+        dropPipe(entry);
       }
     }
     post(event.source, {

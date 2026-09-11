@@ -385,6 +385,11 @@ export class SubtitlesSection {
     // base is parsed at zero offset and the current sync offset is applied
     // as a numeric pass so later sync drags never re-touch the text.
     const cues = await parseSubtitlesAsync(normalizedText, 0);
+    // Cooperative parse yields to the browser; the section may have been torn
+    // down mid-await, so re-check before touching the track/slots.
+    if (this.#destroyed) {
+      return;
+    }
     if (!cues.length) {
       this.#toastInfo("captions", "No cues found", "subtitles");
       return;

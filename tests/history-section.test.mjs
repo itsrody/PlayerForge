@@ -46,7 +46,13 @@ function makeFakeShell() {
         return () => { listener = null; };
       },
       resetEntry: () => {},
-      removeEntry: () => {}
+      removeEntry: (id) => {
+        const i = entries.findIndex((entry) => entry.id === id);
+        if (i !== -1) {
+          entries.splice(i, 1);
+          listener?.(true);
+        }
+      }
     },
     toast: () => {},
     toastInfo: () => {}
@@ -103,4 +109,37 @@ test("History restores the hint when the list empties", () => {
   shell.notify(true);
   assert.equal(list.querySelectorAll(".pf-history-card").length, 0);
   assert.equal(hint.hidden, false, "removing the last entry shows the hint again");
+});
+
+test("History removing a middle entry keeps the remaining cards in order", () => {
+  const panel = makeFakePanel();
+  const shell = makeFakeShell();
+  addHistorySection(panel, shell);
+  const list = sectionRoot.querySelector(".pf-history-list");
+
+  const titles = ["Alpha", "Bravo", "Charlie"];
+  shell.entries.push(...titles.map((title, i) => ({
+    id: `e${i + 1}`,
+    domain: "youtube",
+    path: `/watch/${i}`,
+    title,
+    duration: 300,
+    resume: 0
+  })));
+  shell.notify(true);
+  assert.equal(list.querySelectorAll(".pf-history-card").length, 3);
+
+  const cards = () => [...list.querySelectorAll(".pf-history-card")];
+  const middle = cards().find((card) => card.querySelector(".pf-history-title").textContent === "Bravo");
+  assert.ok(middle, "middle card present");
+  const remove = middle.querySelector('[data-action="remove"]');
+  remove.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+
+  assert.deepEqual(shell.entries.map((entry) => entry.title), ["Alpha", "Charlie"], "store drops exactly the removed entry");
+  assert.equal(list.querySelectorAll(".pf-history-card").length, 2, "no stale/duplicate card survives the click");
+  assert.deepEqual(
+    cards().map((card) => card.querySelector(".pf-history-title").textContent),
+    ["Alpha", "Charlie"],
+    "the survivor card is re-labeled, not the oldest one dropped"
+  );
 });

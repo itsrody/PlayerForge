@@ -56,14 +56,11 @@ export function addHistorySection(panel, shell) {
           flashElement(btn);
           shell.toastInfo("reload", "Resume Entry Reset", "history");
         } else if (action === "remove") {
+          // The store's #persist(true) fires onChange synchronously, so the
+          // structural render() below reconciles the list (pop the stale card,
+          // re-label the rest). Manual mutation here would double-release the
+          // clicked card into the pool — render() is the single mutator.
           shell.resume?.removeEntry(id);
-          card.remove();
-          cardPool.release(card);
-          const idx = activeCards.indexOf(card);
-          if (idx !== -1) activeCards.splice(idx, 1);
-          if (!list.children.length) {
-            hint.hidden = false;
-          }
           shell.toastInfo("trash", "Resume Entry Removed", "history");
         }
       });
