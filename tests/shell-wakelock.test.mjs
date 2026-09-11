@@ -24,21 +24,41 @@ async function makeWakeLockShell() {
     configurable: true,
   });
 
-  const released = [];
+  // Native wake-lock contract: request("screen", { signal }) - the browser
+  // owns release. Aborting a held lock releases it; aborting an in-flight
+  // request rejects it with AbortError and no lock is ever formed.
   let seq = 0;
+  const released = [];
   const pending = [];
   let requests = 0;
   const wakeLock = {
     released,
     get requests() { return requests; },
-    async request() {
+    request(_type, { signal }) {
       requests += 1;
-      return new Promise((resolve) => pending.push((id) => resolve({ release: () => released.push(id) })));
+      const session = { signal, id: ++seq, lock: null };
+      signal.addEventListener("abort", () => {
+        if (session.lock) {
+          released.push(session.id);
+        }
+        session.lock = null;
+      });
+      return new Promise((resolve, reject) => {
+        pending.push(() => {
+          if (signal.aborted) {
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          } else {
+            const lock = { release: () => released.push(session.id) };
+            session.lock = lock;
+            resolve(lock);
+          }
+        });
+      });
     },
     resolveNext() {
       const settle = pending.shift();
       assert.ok(settle, "a wake-lock request is in flight");
-      settle(++seq);
+      settle();
     }
   };
   Object.defineProperty(globalThis.navigator, "wakeLock", {
@@ -66,47 +86,57 @@ async function makeWakeLockShell() {
   return { dom, shell, video, wakeLock, play, pause, tick };
 }
 
-test("wake lock resolved after pause releases itself (no stranded lock)", async () => {
+test("pause aborts an in-flight request; no lock is ever created", async () => {
   const { shell, video, wakeLock, play, pause, tick } = await makeWakeLockShell();
   video.paused = false;
   play(); // acquire in flight
-  assert.equal(wakeLock.released.length, 0);
+  assert.equal(wakeLock.requests, 1);
 
   video.paused = true;
-  pause(); // release runs while the request is unresolved
-  assert.equal(wakeLock.released.length, 0, "nothing to release yet");
-
+  pause(); // abort races the unresolved request
   wakeLock.resolveNext(); // the stale request settles after the pause
   await tick();
-  assert.equal(wakeLock.released.length, 1, "the late lock drops itself instead of lighting the screen");
+  assert.equal(wakeLock.released.length, 0, "the aborted request never forms a lock");
   shell.destroy();
 });
 
-test("wake lock resolved after destroy releases itself", async () => {
+test("destroy releases a held lock", async () => {
   const { shell, video, wakeLock, play, tick } = await makeWakeLockShell();
   video.paused = false;
   play();
-  shell.destroy();
-  wakeLock.resolveNext();
+  wakeLock.resolveNext(); // lock held
   await tick();
-  assert.equal(wakeLock.released.length, 1, "a lock that lands after teardown is discarded");
+  assert.equal(wakeLock.released.length, 0, "lock still held");
+
+  shell.destroy(); // abort tears the held lock down
+  await tick();
+  assert.equal(wakeLock.released.length, 1, "destroy releases the held lock");
 });
 
-test("overlapping acquires: the newer lock wins, the older one is dropped", async () => {
+test("overlapping acquires: the newer signal wins, pause releases the winner", async () => {
   const { shell, video, wakeLock, play, pause, tick } = await makeWakeLockShell();
   video.paused = false;
   play();
   play(); // second acquire supersedes the first while both are in flight
 
-  wakeLock.resolveNext(); // first settles and becomes the active lock
+  wakeLock.resolveNext(); // first settles after being superseded -> AbortError
   await tick();
-  assert.equal(wakeLock.released.length, 0, "the first lock holds until the winner lands");
-  wakeLock.resolveNext(); // second settles and supersedes the first
+  assert.equal(wakeLock.released.length, 0, "the superseded request forms no lock");
+  wakeLock.resolveNext(); // second settles -> becomes the active lock
   await tick();
-  assert.equal(wakeLock.released.length, 1, "the superseded first lock is released on arrival");
+  assert.equal(wakeLock.released.length, 0, "winner held, nothing released");
 
   video.paused = true;
   pause();
-  assert.equal(wakeLock.released.length, 2, "pausing releases the held (winner) lock");
+  assert.equal(wakeLock.released.length, 1, "pausing releases the held (winner) lock");
+  shell.destroy();
+});
+
+test("pause when no lock is held is a no-op", async () => {
+  const { shell, video, wakeLock, pause } = await makeWakeLockShell();
+  video.paused = true;
+  pause();
+  assert.equal(wakeLock.requests, 0, "no acquire ever happened");
+  assert.equal(wakeLock.released.length, 0);
   shell.destroy();
 });

@@ -34,7 +34,8 @@ export class Shell {
   #filter = null;
   #panel;
   #toasts = null;
-  #wakeLock = null;
+  /** Active wake-lock session's abort controller; the browser owns release. */
+  #wakeLockAbort = null;
   #onDestroy;
   #destroyed = false;
   /** DOM lifecycle manager: listeners, observers, elements, rollbacks. */
@@ -308,27 +309,28 @@ export class Shell {
   /** Keep screen awake while video is playing; release on pause/ended/hidden. */
   #watchWakeLock() {
     const video = this.video;
-    const acquire = async () => {
+    const release = () => {
+      this.#wakeLockAbort?.abort();
+      this.#wakeLockAbort = null;
+    };
+    // The signal option hands lock lifecycle to the browser: aborting the
+    // controller drops an in-flight request (rejects with AbortError) or tears
+    // down a held lock - so there is no manual lock.release() and no post-await
+    // re-check for pause/ended/destroy racing the request.
+    const acquire = () => {
       if (this.#destroyed || video.paused || video.ended) {
         return;
       }
-      try {
-        const lock = await navigator.wakeLock.request("screen");
-        // Re-check after the await: pause/ended/destroy may have run while
-        // the request was in flight. A lock resolved past those must drop
-        // itself, or the screen stays lit through a paused video.
-        if (this.#destroyed || video.paused || video.ended) {
-          lock.release?.();
-          return;
+      // A newer acquire supersedes an in-flight one: last signal wins.
+      this.#wakeLockAbort?.abort();
+      const ac = new AbortController();
+      this.#wakeLockAbort = ac;
+      navigator.wakeLock.request("screen", { signal: ac.signal }).catch(() => {
+        // Aborted (superseded/paused/hidden) or policy-denied: no lock formed.
+        if (this.#wakeLockAbort === ac) {
+          this.#wakeLockAbort = null;
         }
-        // A newer acquire may have superseded an in-flight one: last wins.
-        this.#wakeLock?.release?.();
-        this.#wakeLock = lock;
-      } catch {}
-    };
-    const release = () => {
-      this.#wakeLock?.release();
-      this.#wakeLock = null;
+      });
     };
     this.#dom.listen(video, "play", acquire, { passive: true });
     this.#dom.listen(video, "pause", release, { passive: true });
@@ -379,8 +381,8 @@ export class Shell {
       this.#subtitles = null;
       this.#filter?.destroy();
       this.#filter = null;
-      this.#wakeLock?.release();
-      this.#wakeLock = null;
+      this.#wakeLockAbort?.abort();
+      this.#wakeLockAbort = null;
       this.#inputs?.destroy();
       this.#inputs = null;
       this.#panel?.destroy();
