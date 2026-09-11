@@ -410,7 +410,7 @@ function requestPageContextOverPipe(timeoutMs, deadline) {
 
   pipe.port.addEventListener("message", onData, { signal: ac.signal });
   try {
-    pipe.port.postMessage({ type: CTX_REQUEST_TYPE, nonce: `${Date.now()}-${Math.random().toString(36).slice(2)}` });
+    pipe.port.postMessage({ type: CTX_REQUEST_TYPE, nonce: crypto.randomUUID() });
   } catch {
     // Port already closed under us: re-establish from scratch on the next call.
     dropDeadPipe();
@@ -536,7 +536,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
 
   let portAttached = false;
   const sendRequest = () => {
-    nonce = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    nonce = crypto.randomUUID();
     const msg = { type: CTX_REQUEST_TYPE, nonce };
     if (transferPort && !portAttached) {
       try {
