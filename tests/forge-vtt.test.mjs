@@ -62,7 +62,7 @@ test("parseSubtitles skips STYLE and REGION blocks", () => {
   assert.equal(cues[0].text, "hello");
 });
 
-test("parseSubtitlesAsync matches parseSubtitles (fallback path, no scheduler)", async () => {
+test("parseSubtitlesAsync matches parseSubtitles", async () => {
   const vtt = [
     "WEBVTT",
     "",

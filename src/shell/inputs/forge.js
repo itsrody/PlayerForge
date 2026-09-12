@@ -661,8 +661,8 @@ export class InputForge {
   }
 
   /**
-   * Consume every coalesced sample of the move so high-rate Chromium pointer
-   * streams scrub at full fidelity; one semantic event is emitted per move.
+   * Consume every coalesced sample of the move so high-rate pointer streams
+   * scrub at full fidelity; one semantic event is emitted per move.
    *
    * Real-time velocity is measured at move granularity from true event
    * timestamps (the live event's own DOMHighResTimeStamp, same epoch as
@@ -673,8 +673,8 @@ export class InputForge {
    * signal responsive enough to track speed changes mid-stroke, so the seek
    * amount stays proportional to the hand in real time.
    *
-   * Chromium's PointerEvent.getPredictedEvents() returns extrapolated FUTURE
-   * positions. We speculatively "draw ahead" with them, matching the drawing
+   * PointerEvent.getPredictedEvents() returns extrapolated FUTURE positions.
+   * We speculatively "draw ahead" with them, matching the drawing
    * idiom in the Pointer Events spec (predict, then discard once real points
    * arrive): predicted travel feeds the VELOCITY estimate only, never the
    * confirmed seek delta (#scrubLastX stays pinned to real samples). Because
@@ -685,38 +685,31 @@ export class InputForge {
    * bounded: only the first predicted sample, capped to the confirmed travel.
    */
   #advanceScrub(event) {
+    // Firefox 155+ guarantees getCoalescedEvents and getPredictedEvents on
+    // PointerEvent; call directly without runtime feature-detection.
+    const samples = event.getCoalescedEvents();
     let totalStep = 0;
-    const hasCoalesced = typeof event.getCoalescedEvents === "function";
-    const samples = hasCoalesced ? event.getCoalescedEvents() : null;
     // Coalesced samples then the live event, without materializing a combined
-    // array: high-rate Chromium pointer streams land here every move, so a
+    // array: high-rate pointer streams land here every move, so a
     // [[...samples, event]] spread per frame would allocate needlessly.
-    if (samples) {
-      const count = samples.length + 1;
-      let lastX = this.#scrubLastX;
-      for (let i = 0; i < count; i++) {
-        const sample = i < samples.length ? samples[i] : event;
-        totalStep += sample.clientX - lastX;
-        lastX = sample.clientX;
-      }
-      this.#scrubLastX = lastX;
-    } else {
-      totalStep = event.clientX - this.#scrubLastX;
-      this.#scrubLastX = event.clientX;
+    const count = samples.length + 1;
+    let lastX = this.#scrubLastX;
+    for (let i = 0; i < count; i++) {
+      const sample = i < samples.length ? samples[i] : event;
+      totalStep += sample.clientX - lastX;
+      lastX = sample.clientX;
     }
+    this.#scrubLastX = lastX;
 
     // Speculative velocity wash: the first predicted pointer beats the live
     // event just enough to pull the velocity estimate forward, but is clamped
     // to a fraction of the confirmed step so it can never dominate or reverse
     // against a correcting hand. Purely a velocity-shaping signal.
-    const hasPredicted = hasCoalesced && typeof event.getPredictedEvents === "function";
     let velocityStep = totalStep;
-    if (hasPredicted) {
-      const predicted = event.getPredictedEvents();
-      if (predicted && predicted.length) {
-        velocityStep += Math.sign(totalStep) *
-          Math.min(Math.abs(predicted[0].clientX - event.clientX), Math.abs(totalStep));
-      }
+    const predicted = event.getPredictedEvents();
+    if (predicted && predicted.length) {
+      velocityStep += Math.sign(totalStep) *
+        Math.min(Math.abs(predicted[0].clientX - event.clientX), Math.abs(totalStep));
     }
 
     const now = event.timeStamp;

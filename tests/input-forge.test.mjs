@@ -48,6 +48,9 @@ function pointerEvent(win, type, { id = 1, x = 0, y = 0 } = {}) {
     bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0
   });
   Object.defineProperty(event, "pointerId", { value: id });
+  // Firefox 155+ guarantees both methods on PointerEvent; stub for jsdom.
+  Object.defineProperty(event, "getCoalescedEvents", { configurable: true, value: () => [] });
+  Object.defineProperty(event, "getPredictedEvents", { configurable: true, value: () => [] });
   return event;
 }
 
@@ -417,7 +420,7 @@ test("computeCoverScale covers a reference box from aspect ratios alone", () => 
   dom.window.close();
 });
 
-/** A scrub pointermove whose (fake) Chromium sample streams we control. */
+/** A scrub pointermove whose (fake) sample streams we control. */
 function scrubMoveEvent(win, { x, y, coalesced, predicted, ts }) {
   const event = pointerEvent(win, "pointermove", { x, y });
   Object.defineProperty(event, "timeStamp", { value: ts });

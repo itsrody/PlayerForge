@@ -35,9 +35,9 @@ if (typeof globalThis.IntersectionObserver === "undefined") {
   };
 }
 if (typeof globalThis.scheduler === "undefined") {
-  // Minimal cooperative scheduler shim so parseSubtitlesAsync's yield branch
-  // is reachable under Node. yield() resolves on a microtask, matching the
-  // real Chromium hand-back without needing a real task-dispatch scheduler.
+  // Minimal cooperative scheduler shim so scheduler.yield() callers are
+  // testable under Node. yield() resolves on a microtask, matching the
+  // real browser task-dispatch scheduler.
   globalThis.scheduler = {
     yield: () => Promise.resolve()
   };

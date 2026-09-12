@@ -261,17 +261,15 @@ export function parseSubtitles(text, offset = 0) {
 /**
  * Cooperative variant of parseSubtitles for large track loads. Checks a
  * ~50ms time budget between blocks and, when spent, yields to the browser
- * via scheduler.yield() (Chromium 129+) so a huge VTT/SRT parse never blocks
- * video playback or paint. Falls back to synchronous parsing when
- * scheduler.yield is unavailable (jsdom/test hosts). Intentionally separate
- * from parseSubtitles so the hot, on-the-fly sync reparse (sync-offset
- * stepper) keeps its zero-await fast path.
+ * via scheduler.yield() so a huge VTT/SRT parse never blocks video playback
+ * or paint. Intentionally separate from parseSubtitles so the hot,
+ * on-the-fly sync reparse (sync-offset stepper) keeps its zero-await fast
+ * path.
  */
 const YIELD_BUDGET_MS = 50;
 export async function parseSubtitlesAsync(text, offset = 0) {
   const cueText = normalizeText(text);
   const blocks = cueText.split(/\n[ \t]*\n/);
-  const canYield = typeof globalThis.scheduler?.yield === "function";
   const cues = [];
   let last = performance.now();
   for (let i = 0; i < blocks.length; i++) {
@@ -279,8 +277,8 @@ export async function parseSubtitlesAsync(text, offset = 0) {
     if (cue) {
       cues.push(cue);
     }
-    if (canYield && (i & 127) === 0 && performance.now() - last > YIELD_BUDGET_MS) {
-      await globalThis.scheduler.yield();
+    if ((i & 127) === 0 && performance.now() - last > YIELD_BUDGET_MS) {
+      await scheduler.yield();
       last = performance.now();
     }
   }
