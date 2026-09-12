@@ -32,6 +32,11 @@ export class ToastManager {
   #dom = new DOMManager();
   /** Cancel handle for the pending auto-hide, null when none is scheduled. */
   #cancelAutoHide = null;
+  /** Stable auto-hide callback, cached so show() never re-creates a closure. */
+  #autoHide = () => {
+    this.#cancelAutoHide = null;
+    this.#toast.classList.remove("pf-visible");
+  };
   #activeGroup = null;
 
   constructor(hudLayer) {
@@ -109,12 +114,7 @@ export class ToastManager {
     this.#toast.style.color = color || "";
     this.#toast.classList.add("pf-visible");
     this.#cancelAutoHide?.();
-    this.#cancelAutoHide = duration > 0
-      ? delay(() => {
-          this.#cancelAutoHide = null;
-          this.#toast.classList.remove("pf-visible");
-        }, duration)
-      : null;
+    this.#cancelAutoHide = duration > 0 ? delay(this.#autoHide, duration) : null;
   }
 
   hide(group) {

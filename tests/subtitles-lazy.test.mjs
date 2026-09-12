@@ -47,7 +47,7 @@ test("track load via file input, then destroy — no leak", async () => {
   // Panel sections (subtitles, filter, history, settings) build lazily on the
   // panel's first open (shell.setSectionBuilder → panel.open). Open the panel
   // once so the subtitles section exists before we assert its file input.
-  shell.panel.open();
+  await shell.panel.open();
 
   const vtt = "WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nHello";
   const file = new File([vtt], "sub.vtt", { type: "text/vtt" });

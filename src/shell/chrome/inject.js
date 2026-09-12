@@ -74,15 +74,20 @@ export function ensureStyles() {
   return styleLoad;
 }
 
+/**
+ * Map the CPU Performance API's device tier (navigator.cpuPerformance,
+ * Chromium 152+; unsigned short: 0=unknown, 1=low, 2=mid, 3=high, 4=ultra)
+ * to the shell's fidelity tier. "medium" for unknown/absent, so the gate
+ * degrades to the current default on hosts without the API.
+ */
 function mapCpuTier(tier) {
-  return tier === "high" ? "high" : tier === "low" ? "low" : "medium";
+  return tier === 1 ? "low" : tier === 3 || tier === 4 ? "high" : "medium";
 }
 
-/** Resolve the device CPU tier once (CPU Performance API, Chromium 152+).
- *  "medium" when absent, so feature-detect degrades to the current default. */
+/** Resolve the device CPU tier once (CPU Performance API, Chromium 152+). */
 function detectCpuTier() {
   try {
-    return mapCpuTier(navigator.cpuPerformanceTier);
+    return mapCpuTier(navigator.cpuPerformance);
   } catch {
     return "medium";
   }

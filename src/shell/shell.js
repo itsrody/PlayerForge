@@ -74,11 +74,16 @@ export class Shell {
     this.#resume = new ResumeTracker(this);
 
     // Lazy section builder: panel sections (subtitles, filter, history,
-    // settings) are constructed on first open to keep boot fast.
-    this.#panel.setSectionBuilder(() => {
+    // settings) are constructed on first open to keep boot fast. Construction
+    // yields to the event loop between sections so the first-open burst never
+    // wedges input handling.
+    this.#panel.setSectionBuilder(async () => {
       this.#subtitles = new SubtitlesSection(this);
+      await scheduler?.yield?.();
       this.#filter = new VideoFilter(this, this.#panel);
+      await scheduler?.yield?.();
       addHistorySection(this.#panel, this);
+      await scheduler?.yield?.();
       addSettingsSection(this.#panel);
     });
 
@@ -274,7 +279,7 @@ export class Shell {
     }
     // Expose media state as CSS custom properties on the host so the shadow
     // DOM can style based on playing/paused/muted without crossing the realm
-    // boundary. Chromium 152+ :playing/:paused/:muted pseudo-classes exist but
+    // boundary. Chromium 153+ :playing/:paused/:muted pseudo-classes exist but
     // cannot reach into shadow roots; custom properties bridge the gap.
     if (host) {
       const sync = () => {

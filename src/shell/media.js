@@ -241,11 +241,18 @@ class MediaSessionBridge {
   #controls;
   #video;
   #destroyed = false;
+  /**
+   * Pre-detected once at construction: setPositionState is absent on some
+   * host surfaces, and sync() rides the ~4 Hz media clock - a hoisted boolean
+   * keeps the hot path free of per-tick try/catch.
+   */
+  #canSetPositionState = false;
 
   constructor(session, controls, video) {
     this.#session = session;
     this.#controls = controls;
     this.#video = video;
+    this.#canSetPositionState = typeof session?.setPositionState === "function";
   }
 
   /** Wire handlers, metadata refresh, and signal teardown. Called once by claim. */
@@ -289,14 +296,12 @@ class MediaSessionBridge {
     const session = this.#session;
     session.playbackState = this.#video.paused ? "paused" : "playing";
     const { duration, playbackRate, currentTime } = this.#video;
-    if (Number.isFinite(duration) && duration > 0) {
-      try {
-        const state = this.#positionState;
-        state.duration = duration;
-        state.playbackRate = playbackRate;
-        state.position = currentTime < duration ? currentTime : duration;
-        session.setPositionState(state);
-      } catch {}
+    if (this.#canSetPositionState && Number.isFinite(duration) && duration > 0) {
+      const state = this.#positionState;
+      state.duration = duration;
+      state.playbackRate = playbackRate;
+      state.position = currentTime < duration ? currentTime : duration;
+      session.setPositionState(state);
     }
   }
 

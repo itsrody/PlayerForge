@@ -2,34 +2,33 @@ import { logger } from "../shared/logger.js";
 
 /**
  * Resolve once the container's child list has been quiet for a run of
- * consecutive animation frames, or when the cap expires - whichever comes
- * first. SDKs build their player over several microtasks/frames after the
+ * consecutive quiet time, or when the cap expires - whichever comes first.
+ * SDKs build their player over several microtasks/frames after the
  * <video> appears; injecting mid-build invites wholesale innerHTML wipes.
+ *
+ * Settle detection is a MutationObserver trailing quiet-period timer rather
+ * than an rAF quiet-frame counter, so the window is frame-rate independent
+ * (an 144 Hz display settles 2.4x faster than 60 Hz, and a missed frame or
+ * a throttled background tab still resolves on the quiet clock).
  */
-function whenDomSettled(container, { quietFrames = 2, capMs = 150 } = {}) {
+function whenDomSettled(container, { quietMs = 50, capMs = 150 } = {}) {
   const { promise, resolve } = Promise.withResolvers();
-  let quiet = 0;
-  let rafId = 0;
+  let settleTimer = 0;
+  let capTimer = 0;
   const observer = new MutationObserver(() => {
-    quiet = 0;
+    // Any mutation re-arms the trailing quiet window from scratch.
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(done, quietMs);
   });
   const done = () => {
+    clearTimeout(settleTimer);
     clearTimeout(capTimer);
-    cancelAnimationFrame(rafId);
     observer.disconnect();
     resolve();
   };
-  const tick = () => {
-    quiet += 1;
-    if (quiet >= quietFrames) {
-      done();
-      return;
-    }
-    rafId = requestAnimationFrame(tick);
-  };
-  const capTimer = setTimeout(done, capMs);
+  capTimer = setTimeout(done, capMs);
   observer.observe(container, { childList: true });
-  rafId = requestAnimationFrame(tick);
+  settleTimer = setTimeout(done, quietMs);
   return promise;
 }
 

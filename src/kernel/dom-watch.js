@@ -16,14 +16,22 @@
  * while at least one subscriber is attached, and teardown is automatic
  * when the last one leaves (or via AbortSignal).
  *
- * Dispatch rule also borrowed from uBO's safeObserverHandler: listeners are
- * visited from a snapshot (listener-set can't mutate under a live iterator),
- * and each listener is isolated so a throwing consumer cannot abort delivery
- * to the peers that share this batch.
+ * Dispatch rule also borrowed from uBO's safeObserverHandler: each listener
+ * is isolated so a throwing consumer cannot abort delivery to the peers in
+ * this batch, and fan-out holds the slot length at dispatch start - a
+ * subscription that lands mid-batch never mutates the live iterator.
  */
 import { logger } from "../shared/logger.js";
 
-const subscribers = new Set();
+/**
+ * Append-only subscriber slots with tombstones. A live subscription is a
+ * [handler] slot; unsubscribe writes a null tombstone without reindexing.
+ * `live` counts active slots so teardown stays automatic. This replaces a
+ * Set-snapshot fan-out: the per-batch `[...subscribers]` allocation is gone
+ * from the mutation hot path.
+ */
+const slots = [];
+let live = 0;
 
 let observer = null;
 /** Document the observer is currently bound to - see ensureObserver(). */
@@ -35,15 +43,20 @@ function flush() {
   queued = false;
   const records = pendingRecords;
   pendingRecords = [];
-  // Dispatch from a snapshot: a subscriber that unsubscribes during delivery
-  // (or another that subscribes) must not skew the current batch's audience.
-  const snapshot = [...subscribers];
-  for (const subscriber of snapshot) {
+  // Dispatch from a length-hold: tombstones are skipped, and slots appended
+  // mid-batch (subscriptions landing during delivery) belong to the next
+  // batch - subscribe/unsubscribe can't skew the current audience.
+  const length = slots.length;
+  for (let i = 0; i < length; i++) {
+    const slot = slots[i];
+    if (!slot) {
+      continue;
+    }
     // uBO safeObserverHandler rule: one throwing consumer must never abort
     // the fan-out to its peers in the same batch, nor escape into the page's
     // unhandled-rejection path.
     try {
-      subscriber(records);
+      slot[0](records);
     } catch (err) {
       logger.error("dom-watch", "A dom-watch subscriber threw during dispatch", err);
     }
@@ -92,19 +105,25 @@ function ensureObserver() {
 
 /** Idempotent no-op when already detached (observer torn down). */
 function stopIfIdle() {
-  if (subscribers.size === 0 && observer) {
+  if (live === 0 && observer) {
     observer.disconnect();
     observer = null;
     observedDoc = null;
     pendingRecords = [];
+    slots.length = 0;
   }
 }
 
 export function onDomMutations(handler, { signal } = {}) {
   ensureObserver();
-  subscribers.add(handler);
+  slots.push([handler]);
+  live += 1;
+  const index = slots.length - 1;
   const off = () => {
-    subscribers.delete(handler);
+    if (slots[index]) {
+      slots[index] = null;
+      live -= 1;
+    }
     stopIfIdle();
   };
   signal?.addEventListener("abort", off, { once: true });

@@ -79,7 +79,7 @@ test("compact class tracks a live viewport crossing while open", async () => {
   const media = installMatchMedia();
   const { shell, teardown } = await makeShell(true);
   assert.ok(media.listener, "panel wired the change listener at construction");
-  shell.panel.open();
+  await shell.panel.open();
   assert.ok(shell.panel.element.classList.contains("pf-compact") === media.matches,
     "build mirrors auto-detect at open");
   media.dispatch(true);
@@ -95,7 +95,7 @@ test("explicit ui.compact setting wins and the listener never flips it", async (
   const media = installMatchMedia();
   const { shell, teardown } = await makeShell(true);
   setSetting("ui.compact", true);
-  shell.panel.open();
+  await shell.panel.open();
   assert.ok(shell.panel.element.classList.contains("pf-compact"),
     "explicit compact applies at open");
   media.dispatch(false);
