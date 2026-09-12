@@ -737,8 +737,13 @@ export function createFrameRelay() {
       // would get the delivery dropped whenever the two differ. Kept for the
       // legacy broadcast answer; a port request is also answered directly on
       // the pipe, but a mixed chain may still deliver down as a broadcast.
-      pending.set(data.nonce, { source: event.source, origin: event.origin });
-      setTimeout(() => pending.delete(data.nonce), NONCE_TTL_MS);
+      const now = Date.now();
+      for (const [nonce, entry] of pending) {
+        if (entry.deadline < now) {
+          pending.delete(nonce);
+        }
+      }
+      pending.set(data.nonce, { source: event.source, origin: event.origin, deadline: now + NONCE_TTL_MS });
       // Requests carrying a transferred MessageChannel port are chained upward
       // by re-transferring the SAME port, so the top frame's answer travels
       // back down the private, unforgeable pipe straight to the requester.
