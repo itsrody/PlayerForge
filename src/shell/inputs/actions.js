@@ -3,7 +3,6 @@ import { TUNING } from "../../shared/tuning.js";
 import { formatTime } from "../../shared/time.js";
 import { fs, subscribeFullscreen } from "../../shared/shadow.js";
 import { GESTURE_EVENTS } from "../../kernel/contract.js";
-import { gestureHaptic } from "../chrome/haptics.js";
 import { EASE_SNAPPY_CURVE, EASE_SNAPPY_MS } from "../../shared/timing.js";
 
 export { GESTURE_EVENTS };
@@ -55,10 +54,6 @@ export const INPUT_BINDINGS = [
   },
   {
     id: "key-mute", gesture: "key", code: "KeyM", emit: GESTURE_EVENTS.mute,
-    setting: "gestures.hotkeys", fs: false
-  },
-  {
-    id: "key-pip", gesture: "key", code: "KeyP", emit: GESTURE_EVENTS.pip,
     setting: "gestures.hotkeys", fs: false
   },
   {
@@ -398,7 +393,6 @@ export function attachInputActions(shell, host, signal) {
     const speed = TUNING.controller.holdSpeed;
     state.savedRate = shell.playbackRate;
     shell.media.beginBoost(speed);
-    gestureHaptic("hold");
     shell.toast({ icon: "right-arrows", text: `${speed}x`, group: "hold" });
   }, { signal });
 
@@ -440,7 +434,6 @@ export function attachInputActions(shell, host, signal) {
       state.scrubFastGain = fastCeiling / width;
       state.scrubSensitivity = SCRUB_SENSITIVITY;
       state.scrubDirectionMomentum = 0;
-      gestureHaptic("scrub");
     }
 
     if (Math.abs(detail.dx) < SCRUB_DEAD_ZONE_PX) {
@@ -516,7 +509,6 @@ export function attachInputActions(shell, host, signal) {
       return;
     }
     if (detail.distance > TUNING.gestures.swipeExitMinPx) {
-      gestureHaptic("swipe");
       clearFillMode(shell, state, false);
       shell.toastFlash("fs-exit", "Fullscreen Exited", "fs");
       shell.exitFullscreen();
@@ -530,7 +522,6 @@ export function attachInputActions(shell, host, signal) {
    * playback. Inline double-taps belong to the browser/player natively.
    */
   host.addEventListener(GESTURE_EVENTS.dbltap, ({ detail }) => {
-    gestureHaptic("dbltap");
     if (detail.zone === "left-edge" || detail.zone === "right-edge") {
       performSkip(shell, stateFor(shell), detail.zone === "left-edge" ? "left" : "right");
     } else if (detail.zone === "screen") {
@@ -558,24 +549,6 @@ export function attachInputActions(shell, host, signal) {
     shell.toastFlash(volumeIcon(shell.volume, shell.muted), shell.muted ? "Muted" : volumePercent(shell.volume), "volume");
   }, { signal });
 
-  // Picture-in-Picture: native always-on-top surface. The browser owns the
-  // window lifecycle; we only flip the toggle. Unsupported hosts get a hint
-  // instead of a silent no-op, mirroring the fs-block pattern.
-  host.addEventListener(GESTURE_EVENTS.pip, () => {
-    if (!shell.video) {
-      return;
-    }
-    if (!shell.media.pictureInPictureSupported()) {
-      shell.toastInfo("pip", "Picture-in-Picture not supported", "pip");
-      return;
-    }
-    shell.media.togglePictureInPicture().then((active) => {
-      shell.toastFlash("pip", active ? "Picture-in-Picture" : "Exited Picture-in-Picture", "pip");
-    }).catch(() => {
-      shell.toastInfo("pip", "Picture-in-Picture unavailable", "pip");
-    });
-  }, { signal });
-
   host.addEventListener(GESTURE_EVENTS.pinch, ({ detail }) => {
     if (!shell.video) {
       return;
@@ -587,7 +560,6 @@ export function attachInputActions(shell, host, signal) {
       if (scale <= 1) {
         return;
       }
-      gestureHaptic("pinch");
       // Own object-fit: computeCoverScale models the element content letterboxed
       // by its own ratio (contain). The embed may use the UA default 'fill', so
       // normalize to 'contain' here; clearFillMode restores the prior value.

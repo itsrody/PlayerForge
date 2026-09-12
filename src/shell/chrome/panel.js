@@ -284,7 +284,7 @@ export class SettingsPanel {
     if (!this.#body.childElementCount) {
       return;
     }
-    this.#runWithViewTransition("pf-panel-open", () => {
+    this.#runWithViewTransition(() => {
       this.#root.classList.toggle("pf-compact", this.#isCompactMode());
       this.#root.classList.add("pf-open");
       const activeTab = this.#root.querySelector(".pf-panel-tab-active") || this.#closeButton;
@@ -296,7 +296,7 @@ export class SettingsPanel {
 
   close() {
     if (this.#root && !this.#destroyed && this.isOpen) {
-      this.#runWithViewTransition("pf-panel-close", () => {
+      this.#runWithViewTransition(() => {
         this.#root.classList.remove("pf-open");
         if (this.#shellHost && this.#root.contains(deepestActiveElement(this.#shellHost))) {
           this.#shellHost.focus();
@@ -725,9 +725,9 @@ export class SettingsPanel {
     this.#activeSection = targetSection;
   }
 
-  #runWithViewTransition(type, update) {
+  #runWithViewTransition(update) {
     if (typeof document.startViewTransition === "function") {
-      document.startViewTransition({ types: [type], update });
+      document.startViewTransition(update);
     } else {
       update();
     }

@@ -23,6 +23,16 @@ function makeEnv(duration) {
   globalThis.location = dom.window.location;
   globalThis.document = dom.window.document;
   const video = dom.window.document.createElement("video");
+  // jsdom lacks the frame-callback union; stub it so the tracker's pause flush
+  // (which consults requestVideoFrameCallback directly on Firefox 132+) runs
+  // synchronously. mediaTime mirrors the element's currentTime, matching the
+  // real API's just-rendered-frame position.
+  if (typeof video.requestVideoFrameCallback !== "function") {
+    video.requestVideoFrameCallback = function requestVideoFrameCallback(cb) {
+      cb(0, { mediaTime: Number(this.currentTime) || 0 });
+      return 0;
+    };
+  }
   dom.window.document.body.appendChild(video);
   if (duration != null) {
     Object.defineProperty(video, "duration", { value: duration, configurable: true });
@@ -197,6 +207,9 @@ test("wall floor gates incremental timeupdate saves but never the pause flush", 
   assert.equal(stored(), 0, "incremental save blocked by the wall floor");
 
   shell.paused = true;
+  // The rVFC pause flush reads the video playhead (mediaTime), which the
+  // harness mirrors onto the element itself.
+  video.currentTime = 10;
   video.dispatchEvent(new dom.window.Event("pause"));
   assert.equal(stored(), 10, "pause flush bypasses the wall floor");
   tracker.destroy();
@@ -268,6 +281,7 @@ test("off-screen IntersectionObserver observation gates incremental resume saves
     callback([{ isIntersecting: false }]);
     shell.paused = true;
     shell.currentTime = 15; // >3s past 9 => clears the epsilon gate
+    video.currentTime = 15; // rVFC mediaTime mirrors the video playhead
     video.dispatchEvent(new dom.window.Event("pause"));
     assert.equal(stored(), 15, "pause flush bypasses the visibility gate");
 

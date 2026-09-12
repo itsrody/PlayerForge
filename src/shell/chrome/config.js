@@ -60,13 +60,6 @@ const SETTINGS_SCHEMA = [
     default: true,
     group: "Features"
   },
-  {
-    key: "gestures.haptics",
-    type: "bool",
-    label: "Haptic Feedback",
-    default: true,
-    group: "Features"
-  },
 
   {
     key: "ui.compact",

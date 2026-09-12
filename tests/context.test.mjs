@@ -459,6 +459,7 @@ test("installContextBridge registers a top-frame message listener", () => {
   globalThis.window = win;
   globalThis.location = win.location;
   globalThis.document = win.document;
+  globalThis.MutationObserver = win.MutationObserver;
 
   let captured = null;
   win.addEventListener("message", (event) => { captured = event; });

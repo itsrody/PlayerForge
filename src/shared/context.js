@@ -881,10 +881,7 @@ function diffIframeCache(records) {
 }
 
 /** Install the cache observer bound to the current document. Returns an
- *  AbortSignal teardown. Degrades gracefully when MutationObserver is absent
- *  (jsdom without an explicit binding): the cache stays inactive and
- *  iframeElementForWindow falls back to a scan, so the bridge's message
- *  handling never depends on it.
+ *  AbortSignal teardown.
  *
  *  The observe target falls back to `document` when the root element has not
  *  been parsed yet (fresh nested frames at document-start): observing the
@@ -893,9 +890,6 @@ function diffIframeCache(records) {
  *  video probe, silently killing capture in that frame.
  */
 function startIframeCache(ac) {
-  if (typeof MutationObserver !== "function") {
-    return;
-  }
   seedIframeCache();
   iframeCacheDoc = document;
   iframeCacheActive = true;
@@ -924,10 +918,6 @@ function stopIframeCache() {
  *  observer if the document swapped underneath us (fresh jsdom/page). */
 function ensureIframeCacheCurrent() {
   if (!iframeCacheActive || iframeCacheDoc === document) {
-    return;
-  }
-  if (typeof MutationObserver !== "function") {
-    stopIframeCache();
     return;
   }
   // Cache belongs to a previous document - rebind to the live one.

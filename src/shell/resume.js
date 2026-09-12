@@ -473,9 +473,9 @@ export class ResumeTracker {
     // layout-free "is this player on screen" boolean, so the media-clock saves
     // stop churning GM storage writes for a video the user cannot see. The
     // pause flush above still runs whenever playback actually pauses, so the
-    // final position is never lost by this gate. Chromium supports `signal` in
-    // IntersectionObserver options for automatic teardown; feature-detect for
-    // hosts (jsdom) without it.
+    // final position is never lost by this gate. The teardown is explicit
+    // (AbortSignal `signal` in IntersectionObserver options is not guaranteed
+    // across engines); feature-detect for hosts (jsdom) without the observer.
     let onScreen = true;
     if (typeof IntersectionObserver === "function") {
       try {
@@ -483,6 +483,7 @@ export class ResumeTracker {
           onScreen = entry.isIntersecting;
         }, { signal });
         io.observe(video);
+        signal.addEventListener("abort", () => io.disconnect(), { once: true });
       } catch {}
     }
     const gatedSaveIfDue = () => {
@@ -492,17 +493,13 @@ export class ResumeTracker {
     };
     video.addEventListener("timeupdate", gatedSaveIfDue, { signal, passive: true });
     video.addEventListener("pause", () => {
-      // requestVideoFrameCallback gives the exact mediaTime of the last rendered
-      // frame — the position the user actually saw — whereas currentTime is the
-      // decoder position which may lead or lag the display. Falls back to
-      // currentTime when the API is unavailable (non-Chromium, test harness).
-      if (typeof video.requestVideoFrameCallback === "function") {
-        video.requestVideoFrameCallback((_now, metadata) => {
-          this.#saveProgress(metadata.mediaTime);
-        });
-      } else {
-        this.#saveProgress(shell.currentTime);
-      }
+      // requestVideoFrameCallback (Firefox 132+) gives the exact mediaTime of
+      // the last rendered frame — the position the user actually saw —
+      // whereas currentTime is the decoder position, which may lead or lag the
+      // display.
+      video.requestVideoFrameCallback((_now, metadata) => {
+        this.#saveProgress(metadata.mediaTime);
+      });
     }, { signal, passive: true });
   }
 

@@ -131,38 +131,6 @@ export function createMediaControls({ video }) {
       video.muted = !video.muted;
     },
 
-    /** Native PiP availability: the browser's own always-on-top surface. */
-    pictureInPictureSupported() {
-      return typeof video.requestPictureInPicture === "function" &&
-        typeof document.pictureInPictureEnabled === "boolean" &&
-        document.pictureInPictureEnabled;
-    },
-
-    /**
-     * Toggle the native picture-in-picture window. Entering needs a user
-     * gesture (hotkeys/panel qualify); the PiP window owns its own controls.
-     * Returns whether PiP is active afterwards. Rejects that are ordinary
-     * browser policy (AbortError/NotAllowedError) surface as `false`; real
-     * failures throw for the caller to present.
-     */
-    async togglePictureInPicture() {
-      if (!isReady() || !this.pictureInPictureSupported()) {
-        return false;
-      }
-      try {
-        if (document.pictureInPictureElement === video) {
-          await document.exitPictureInPicture();
-        } else {
-          await video.requestPictureInPicture();
-        }
-      } catch (err) {
-        if (err.name !== "AbortError" && err.name !== "NotAllowedError") {
-          throw err;
-        }
-      }
-      return document.pictureInPictureElement === video;
-    },
-
     /** Hold-to-fast-forward pair; `speed` is restored verbatim on release. */
     beginBoost(speed) {
       if (!isReady()) {

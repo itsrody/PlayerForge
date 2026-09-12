@@ -313,7 +313,7 @@ export class Shell {
       this.#wakeLockAbort?.abort();
       const ac = new AbortController();
       this.#wakeLockAbort = ac;
-      navigator.wakeLock?.request("screen", { signal: ac.signal }).catch(() => {
+      navigator.wakeLock.request("screen", { signal: ac.signal }).catch(() => {
         // Aborted (superseded/paused/hidden) or policy-denied: no lock formed.
         if (this.#wakeLockAbort === ac) {
           this.#wakeLockAbort = null;
@@ -330,16 +330,16 @@ export class Shell {
     });
   }
 
-  /** Lock to landscape on fullscreen entry (Android); unlock on exit. */
+  /** Lock to landscape on fullscreen entry; unlock on exit. */
   #watchOrientation() {
     const unsub = subscribeFullscreen(async (active) => {
       if (this.#destroyed) {
         return;
       }
       try {
-        if (active && screen.orientation?.lock) {
+        if (active) {
           await screen.orientation.lock("landscape");
-        } else if (!active && screen.orientation?.unlock) {
+        } else {
           screen.orientation.unlock();
         }
       } catch {}
@@ -349,7 +349,7 @@ export class Shell {
 
   exitFullscreen() {
     if (fs) {
-      document.exitFullscreen()?.catch(() => {});
+      document.exitFullscreen().catch(() => {});
     }
   }
 
