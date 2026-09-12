@@ -142,7 +142,7 @@ const stateFor = (() => {
         scrubToastSecCurrent: NaN,
         streakCount: 0,
         lastSkipDirection: null,
-        streakResetTimer: null,
+        streakResetAt: null,
         fillActive: false
       };
       states.set(shell, state);
@@ -153,17 +153,20 @@ const stateFor = (() => {
 
 function performSkip(shell, state, direction) {
   const streakMax = TUNING.controller.streakMax;
+  // Lazy streak reset: the window is a deadline checked on the next skip
+  // event instead of a timer firing in the gap. Streak state is only ever
+  // read in this call, so no clearTimeout/setTimeout per skip.
+  if (state.streakResetAt !== null && performance.now() >= state.streakResetAt) {
+    state.streakCount = 0;
+    state.lastSkipDirection = null;
+  }
   if (direction === state.lastSkipDirection) {
     state.streakCount = Math.min(state.streakCount + 1, streakMax);
   } else {
     state.streakCount = 1;
     state.lastSkipDirection = direction;
   }
-  clearTimeout(state.streakResetTimer);
-  state.streakResetTimer = setTimeout(() => {
-    state.streakCount = 0;
-    state.lastSkipDirection = null;
-  }, TUNING.gestures.streakResetMs);
+  state.streakResetAt = performance.now() + TUNING.gestures.streakResetMs;
 
   const step = getSetting("controller.stepSeek") * state.streakCount;
   shell.media.skip(direction === "right" ? step : -step);

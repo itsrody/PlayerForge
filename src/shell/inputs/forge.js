@@ -132,10 +132,10 @@ export class InputForge {
   #lastTapTime = -Infinity;
   #gestureZone = null;
 
-  // Click/dblclick suppression after gestures.
-  #suppressClickPending = false;
-  #suppressDblclickPending = false;
-  #clickSuppressTimer = null;
+  // Click/dblclick suppression after gestures: a deadline, consumed by the
+  // capture handlers when the next click actually arrives (no per-gesture
+  // timer).
+  #suppressClickUntil = 0;
 
   // Scrub state.
   #scrubbing = false;
@@ -172,7 +172,7 @@ export class InputForge {
   #keyboardHoldStart = 0;
 
   // Trackpad ctrl+wheel pinch cooldown.
-  #trackpadPinchCooldown = false;
+#trackpadPinchCooldownUntil = 0;
   /** Whether the (non-passive) wheel pinch listener is currently attached. */
   #trackpadPinchSubscribed = false;
   /** Stable reference so the scoped wheel listener can be removed again. */
@@ -277,8 +277,6 @@ export class InputForge {
       this.#keyboardHoldTimer = null;
       clearTimeout(this.#pinchInitTimer);
       this.#pinchInitTimer = null;
-      clearTimeout(this.#clickSuppressTimer);
-      this.#clickSuppressTimer = null;
       this.#videoRect = null;
       this.#pointers.clear();
       cancelEase(this.#video);
@@ -295,14 +293,7 @@ export class InputForge {
 
   /** Suppress the click/dblclick that follows an interactive gesture. */
   #suppressNextActivations() {
-    this.#suppressClickPending = true;
-    this.#suppressDblclickPending = true;
-    clearTimeout(this.#clickSuppressTimer);
-    this.#clickSuppressTimer = setTimeout(() => {
-      this.#clickSuppressTimer = null;
-      this.#suppressClickPending = false;
-      this.#suppressDblclickPending = false;
-    }, SUPPRESS_WINDOW_MS);
+    this.#suppressClickUntil = performance.now() + SUPPRESS_WINDOW_MS;
   }
 
   #resetKeyboardHold() {
@@ -545,9 +536,7 @@ export class InputForge {
       this.#startY = event.clientY;
       this.#startTime = performance.now();
       this.#holding = false;
-      this.#suppressClickPending = false;
-      clearTimeout(this.#clickSuppressTimer);
-      this.#clickSuppressTimer = null;
+      this.#suppressClickUntil = 0;
       this.#gestureZone = this.#zoneForPoint(event);
       this.#scrubbing = false;
       this.#scrubLastX = event.clientX;
@@ -816,24 +805,18 @@ export class InputForge {
   }
 
   #handleClickCapture(event) {
-    if (this.#suppressClickPending) {
+    if (performance.now() < this.#suppressClickUntil) {
+      this.#suppressClickUntil = 0;
       event.stopImmediatePropagation();
       event.preventDefault();
-      this.#suppressClickPending = false;
-      clearTimeout(this.#clickSuppressTimer);
-      this.#clickSuppressTimer = null;
-      this.#suppressDblclickPending = false;
     }
   }
 
   #handleDblClickCapture(event) {
-    if (this.#suppressDblclickPending) {
+    if (performance.now() < this.#suppressClickUntil) {
+      this.#suppressClickUntil = 0;
       event.stopImmediatePropagation();
       event.preventDefault();
-      this.#suppressDblclickPending = false;
-      clearTimeout(this.#clickSuppressTimer);
-      this.#clickSuppressTimer = null;
-      this.#suppressClickPending = false;
     }
   }
 
@@ -841,11 +824,9 @@ export class InputForge {
     if (fs && event.ctrlKey && !event.momentum && allowsIntent("pinch")) {
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (!this.#trackpadPinchCooldown) {
-        this.#trackpadPinchCooldown = true;
-        setTimeout(() => {
-          this.#trackpadPinchCooldown = false;
-        }, TRACKPAD_COOLDOWN_MS);
+      const now = performance.now();
+      if (now >= this.#trackpadPinchCooldownUntil) {
+        this.#trackpadPinchCooldownUntil = now + TRACKPAD_COOLDOWN_MS;
         this.#suppressNextActivations();
         this.#dispatch(GESTURE_EVENTS.pinch, {
           zone: "screen",
