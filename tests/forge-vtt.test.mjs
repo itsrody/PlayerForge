@@ -180,6 +180,13 @@ test("cue settings line/position/align are parsed", () => {
   assert.equal(cues[0].align, "start");
 });
 
+test("cues without settings carry the shape-stable defaults", () => {
+  const cues = parseSubtitles("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nplain cue");
+  assert.equal(cues[0].line, 85);
+  assert.equal(cues[0].position, 50);
+  assert.equal(cues[0].align, undefined);
+});
+
 test("empty and headerless documents yield no cues without throwing", () => {
   assert.deepEqual(parseSubtitles(""), []);
   assert.deepEqual(parseSubtitles("just some words"), []);

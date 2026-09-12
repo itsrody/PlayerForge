@@ -173,9 +173,22 @@ function decodeCueText(text) {
     .replace(NUMERIC_ENTITY_RE, decodeNumericEntity);
 }
 
+/**
+ * Shape-stable settings default, fast-returned for cues with no settings tail
+ * (the common case on track load). One shared frozen object with the same
+ * 3-key hidden class as populated settings: parseCueBlock's settings reads stay
+ * monomorphic and the no-settings path allocates nothing. Consumers only read
+ * the fields into cue objects, so sharing is safe.
+ */
+const DEFAULT_CUE_SETTINGS = Object.freeze({ line: 85, position: 50, align: undefined });
+
 function parseCueSettings(settings) {
-  const parsed = { line: 85, position: 50 };
-  for (const token of settings.trim().split(/\s+/)) {
+  const rest = settings.trim();
+  if (!rest) {
+    return DEFAULT_CUE_SETTINGS;
+  }
+  const parsed = { line: 85, position: 50, align: undefined };
+  for (const token of rest.split(/\s+/)) {
     if (!token) {
       continue;
     }
