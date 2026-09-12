@@ -1,6 +1,6 @@
 /**
- * Clamp a value into [lo, hi]. A single monomorphic shape that V8 inlines
- * cleanly across the codebase; replaces the repeated
+ * Clamp a value into [lo, hi]. A single monomorphic pure function that inlines
+ * cleanly (constant operands fold) across the codebase; replaces the repeated
  * Math.max(lo, Math.min(hi, v)) idiom at 7+ call sites (volume, seek targets,
  * filter saturation, panel steppers).
  */

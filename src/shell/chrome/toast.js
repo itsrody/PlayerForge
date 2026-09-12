@@ -1,5 +1,4 @@
 import { DomPool } from "../../shared/dom-pool.js";
-import { delay } from "../../shared/time.js";
 import { flashElement } from "./animate.js";
 import { button } from "./elements.js";
 import { createIconElement } from "./icons.js";
@@ -30,8 +29,15 @@ export class ToastManager {
   #actions;
   /** DOM lifecycle manager: pool and timer cleanup on destroy. */
   #dom = new DOMManager();
-  /** Cancel handle for the pending auto-hide, null when none is scheduled. */
-  #cancelAutoHide = null;
+  /** Timeout id for the pending auto-hide, null when none is scheduled. */
+  #autoHideHandle = null;
+  /** Reusable hide callback: `setTimeout(this.#autoHide, ms)` schedules with a
+   *  single instance callback (both were fresh closures per show before),
+   *  on the ~10 Hz scrub-hint cadence. */
+  #autoHide = () => {
+    this.#autoHideHandle = null;
+    this.#toast.classList.remove("pf-visible");
+  };
   #activeGroup = null;
 
   constructor(hudLayer) {
@@ -108,27 +114,29 @@ export class ToastManager {
     }
     this.#toast.style.color = color || "";
     this.#toast.classList.add("pf-visible");
-    this.#cancelAutoHide?.();
-    this.#cancelAutoHide = duration > 0
-      ? delay(() => {
-          this.#cancelAutoHide = null;
-          this.#toast.classList.remove("pf-visible");
-        }, duration)
-      : null;
+    this.#clearAutoHide();
+    if (duration > 0) {
+      this.#autoHideHandle = setTimeout(this.#autoHide, duration);
+    }
+  }
+
+  #clearAutoHide() {
+    if (this.#autoHideHandle !== null) {
+      clearTimeout(this.#autoHideHandle);
+      this.#autoHideHandle = null;
+    }
   }
 
   hide(group) {
     if (group === undefined || group === this.#activeGroup) {
-      this.#cancelAutoHide?.();
-      this.#cancelAutoHide = null;
+      this.#clearAutoHide();
       this.#toast.classList.remove("pf-visible");
     }
   }
 
   destroy() {
     this.#dom.destroy();
-    this.#cancelAutoHide?.();
-    this.#cancelAutoHide = null;
+    this.#clearAutoHide();
     this.#pool.destroy();
   }
 }

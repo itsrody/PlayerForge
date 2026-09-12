@@ -14,10 +14,9 @@ import { logger } from "../../shared/logger.js";
 const WHEEL_CAPTURE = { capture: true, passive: false };
 
 // Gesture calibration hoisted to module consts. TUNING is static (read-only
-// after load), so binding these at module scope lets V8 treat them as
-// invariant values and fold them - Maglev/TurboFan raise constants to load,
-// instead of re-running shape-guarded property loads on every high-frequency
-// pointer/keyboard event.
+// after load), so binding these at module scope gives every high-frequency
+// pointer/keyboard event constant single-shape loads - Warp folds them as
+// stabilized constants instead of re-resolving the deep TUNING property chain.
 const EDGE_ZONE_RATIO = TUNING.gestures.edgeZoneRatio;
 const EDGE_ZONE_START = 1 - TUNING.gestures.edgeZoneRatio;
 const HOLD_TIMEOUT_MS = TUNING.gestures.holdTimeoutMs;
@@ -40,8 +39,7 @@ let lastActiveForge = null;
  * Reusable scratch for the first two live pointers. The pinch path runs on
  * every two-finger move, so reading the pair into this single object (instead
  * of [...values()].slice(0,2) - two array allocations per move) keeps the hot
- * loop allocation-free for the JIT. Mutated in place; callers must read it
- * immediately.
+ * loop allocation-free. Mutated in place; callers must read it immediately.
  */
 const firstTwoPointers = { x0: 0, y0: 0, x1: 0, y1: 0 };
 
@@ -190,7 +188,7 @@ export class InputForge {
 
     // NOTE: the native video element is deliberately NEVER patched (no
     // own-property rewrite of play/pause). Assigning JS functions as own
-    // properties onto HTMLMediaElement mutates the instance's V8 map/expando
+    // properties onto HTMLMediaElement gives the instance a dictionary/expando
     // shape and would swallow play()/pause() calls from the media command
     // plane, page autoplay code, and other plugins during a Space hold. The
     // UA's own Space-activates-video default is cancelled by preventDefault on

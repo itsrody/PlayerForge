@@ -13,8 +13,8 @@ function sortByUpdatedAt(entries, descending = false) {
   });
 }
 
-// Hoisted TUNING.resume.* scalars: mutation-free calibration, so V8 folds
-// them as invariants on the media-clock path rather than re-resolving the
+// Hoisted TUNING.resume.* scalars: mutation-free calibration, folded as
+// invariant constants on the media-clock path rather than re-resolving the
 // deep TUNING chain on every timeupdate/save decision.
 const RESUME_STALE_DAYS = TUNING.resume.staleDays;
 const RESUME_MAX_ENTRIES = TUNING.resume.maxEntries;

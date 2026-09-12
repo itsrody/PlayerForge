@@ -214,6 +214,7 @@ class MediaSessionBridge {
     this.#session = session;
     this.#controls = controls;
     this.#video = video;
+    this.#canSetPositionState = typeof session.setPositionState === "function";
   }
 
   /** Wire handlers, metadata refresh, and signal teardown. Called once by claim. */
@@ -249,22 +250,29 @@ class MediaSessionBridge {
    *  on the ~4 Hz media clock (same rationale as the forge's pooled event). */
   #positionState = { duration: 0, playbackRate: 0, position: 0 };
 
-  /** playbackState plus guarded position state; safe to call per event batch. */
+  /** Whether the session accepts position pushes. Pre-detected once in the
+   *  constructor so the ~4 Hz media clock rides a boolean branch instead of
+   *  per-event try/catch exception machinery (Firefox supports
+   *  setPositionState unconditionally on a real MediaSession). */
+  #canSetPositionState = false;
+
+  /** playbackState plus position state; safe to call per event batch. */
   sync() {
     if (this.#destroyed) {
       return;
     }
     const session = this.#session;
     session.playbackState = this.#video.paused ? "paused" : "playing";
+    if (!this.#canSetPositionState) {
+      return;
+    }
     const { duration, playbackRate, currentTime } = this.#video;
     if (Number.isFinite(duration) && duration > 0) {
-      try {
-        const state = this.#positionState;
-        state.duration = duration;
-        state.playbackRate = playbackRate;
-        state.position = currentTime < duration ? currentTime : duration;
-        session.setPositionState(state);
-      } catch {}
+      const state = this.#positionState;
+      state.duration = duration;
+      state.playbackRate = playbackRate;
+      state.position = currentTime < duration ? currentTime : duration;
+      session.setPositionState(state);
     }
   }
 
