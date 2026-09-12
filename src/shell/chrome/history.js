@@ -45,25 +45,6 @@ export function addHistorySection(panel, shell) {
         "data-action": "remove",
         icon: createIconElement("trash")
       }, actions);
-      // Event delegation: one listener per card, not per button.
-      card.addEventListener("click", (event) => {
-        const btn = event.target.closest("[data-action]");
-        if (!btn) return;
-        const id = card.dataset.entryId;
-        const action = btn.dataset.action;
-        if (action === "reset") {
-          shell.resume?.resetEntry(id);
-          flashElement(btn);
-          shell.toastInfo("reload", "Resume Entry Reset", "history");
-        } else if (action === "remove") {
-          // The store's #persist(true) fires onChange synchronously, so the
-          // structural render() below reconciles the list (pop the stale card,
-          // re-label the rest). Manual mutation here would double-release the
-          // clicked card into the pool — render() is the single mutator.
-          shell.resume?.removeEntry(id);
-          shell.toastInfo("trash", "Resume Entry Removed", "history");
-        }
-      });
       return card;
     },
     reset: (card) => {
@@ -72,6 +53,31 @@ export function addHistorySection(panel, shell) {
       info.querySelector(".pf-history-title").textContent = "";
       info.querySelector(".pf-history-meta").textContent = "";
       return card;
+    }
+  });
+
+  // Event delegation for the whole list: one static listener instead of one
+  // per pooled card. Card count is runtime-dynamic (watched entries, removals,
+  // cross-tab adds) and the pool shrinks, so listener lifetime must not ride
+  // the card/pool cycle - render() and shrink() never attach or detach a
+  // listener. Button clicks bubble up through the card to the list.
+  list.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-action]");
+    const card = event.target.closest(".pf-history-card");
+    if (!btn || !card) {
+      return;
+    }
+    if (btn.dataset.action === "reset") {
+      shell.resume?.resetEntry(card.dataset.entryId);
+      flashElement(btn);
+      shell.toastInfo("reload", "Resume Entry Reset", "history");
+    } else if (btn.dataset.action === "remove") {
+      // The store's #persist(true) fires onChange synchronously, so the
+      // structural render() below reconciles the list (pop the stale card,
+      // re-label the rest). Manual mutation here would double-release the
+      // clicked card into the pool — render() is the single mutator.
+      shell.resume?.removeEntry(card.dataset.entryId);
+      shell.toastInfo("trash", "Resume Entry Removed", "history");
     }
   });
 
