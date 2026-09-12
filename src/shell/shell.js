@@ -65,7 +65,15 @@ export class Shell {
 
     // Yield between DOM injection and component construction so the browser
     // can process pending layout/paint work before the panel builds its tree.
-    await scheduler.yield();
+    // Firefox has no scheduler.yield(); fall back to a task boundary so boot
+    // still yields to the event loop instead of building the tree in one block.
+    if (typeof scheduler?.yield === "function") {
+      await scheduler.yield();
+    } else {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    }
 
     this.#panel = new SettingsPanel(this);
     this.#toasts = new ToastManager(this.#shellDom.hudLayer);
@@ -325,7 +333,7 @@ export class Shell {
       this.#wakeLockAbort?.abort();
       const ac = new AbortController();
       this.#wakeLockAbort = ac;
-      navigator.wakeLock.request("screen", { signal: ac.signal }).catch(() => {
+      navigator.wakeLock?.request("screen", { signal: ac.signal }).catch(() => {
         // Aborted (superseded/paused/hidden) or policy-denied: no lock formed.
         if (this.#wakeLockAbort === ac) {
           this.#wakeLockAbort = null;
