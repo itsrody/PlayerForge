@@ -272,14 +272,14 @@ export class SettingsPanel {
     this.#sectionBuilder = fn;
   }
 
-  open() {
+  async open() {
     if (!this.#root || this.#destroyed || this.isOpen) {
       return;
     }
     if (this.#sectionBuilder) {
       const build = this.#sectionBuilder;
       this.#sectionBuilder = null;
-      build();
+      await build();
     }
     if (!this.#body.childElementCount) {
       return;
@@ -313,14 +313,14 @@ export class SettingsPanel {
     }
   }
 
-  openSection(title) {
+  async openSection(title) {
     if (!this.#root || this.#destroyed) {
       return false;
     }
     if (this.#sectionBuilder) {
       const build = this.#sectionBuilder;
       this.#sectionBuilder = null;
-      build();
+      await build();
     }
     for (const [section, tab] of this.#sections) {
       if (section.dataset.title === title) {

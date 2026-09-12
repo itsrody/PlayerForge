@@ -73,11 +73,17 @@ export class Shell {
     this.#resume = new ResumeTracker(this);
 
     // Lazy section builder: panel sections (subtitles, filter, history,
-    // settings) are constructed on first open to keep boot fast.
-    this.#panel.setSectionBuilder(() => {
+    // settings) are constructed on first open to keep boot fast. The build
+    // yields between sections so the browser can paint the panel chrome and
+    // earlier sections before the heavier ones (history can render up to
+    // TUNING.resume.maxEntries cards) assemble.
+    this.#panel.setSectionBuilder(async () => {
       this.#subtitles = new SubtitlesSection(this);
+      await scheduler.yield();
       this.#filter = new VideoFilter(this, this.#panel);
+      await scheduler.yield();
       addHistorySection(this.#panel, this);
+      await scheduler.yield();
       addSettingsSection(this.#panel);
     });
 

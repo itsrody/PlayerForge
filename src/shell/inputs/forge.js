@@ -117,8 +117,8 @@ export class InputForge {
   #scope = new AbortController();
   #destroyed = false;
 
-  // Cached <video> box for hit-testing, invalidated on resize/fullscreen so
-  // pointerdown never forces a synchronous layout flush with getBoundingClientRect.
+  // Cached <video> box for hit-testing, invalidated on resize/fullscreen/scroll
+  // so pointerdown never forces a synchronous layout flush with getBoundingClientRect.
   #videoRect = null;
 
   // Pointer session state.
@@ -219,6 +219,13 @@ export class InputForge {
       this.#dom.observeResize(video, () => {
         this.#videoRect = null;
       });
+      // Position shifts from page/container scroll (or ancestor transforms)
+      // don't resize the video box, so ResizeObserver and fullscreen alone can
+      // leave the cached viewport rect stale. Scroll events don't bubble, so
+      // capture phase catches any scroller; invalidation is a null-assign.
+      document.addEventListener("scroll", () => {
+        this.#videoRect = null;
+      }, { capture: true, passive: true, signal });
     }
 
     activeForges.add(this);
@@ -305,7 +312,7 @@ export class InputForge {
   #hitTestVideo(pointerEvent) {
     // Cache the box so a pointerdown outside the HUD doesn't force a sync
     // layout flush (getBoundingClientRect) on Chromium; the cache is dropped on
-    // resize and fullscreen change so it never goes stale.
+    // resize, fullscreen change, and scroll so it never goes stale.
     if (!this.#videoRect) {
       this.#videoRect = this.#video.getBoundingClientRect();
     }
