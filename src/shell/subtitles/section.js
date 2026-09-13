@@ -1,7 +1,8 @@
 import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/storage.js";
 import { TUNING } from "../../shared/tuning.js";
 import { fmtPercent, fmtEm } from "../../shared/formatters.js";
-import { srtToVtt, ensureVttHeader, parseSubtitlesAsync, offsetCues } from "./forgevtt.js";
+import { srtToVtt, ensureVttHeader, offsetCues } from "./forgevtt.js";
+import { parseSubtitlesAsync } from "./vtt-worker-loader.js";
 import { ForgeTrack } from "./forge-track.js";
 import { debounce } from "../../shared/time.js";
 import { flashElement } from "../chrome/animate.js";
@@ -380,7 +381,8 @@ export class SubtitlesSection {
     }
     const normalizedText = /\.srt$/i.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
     // Cooperative parse: yields to the browser on large tracks so ingesting a
-    // big VTT never blocks playback (see forgevtt.parseSubtitlesAsync). The
+    // big VTT never blocks playback (see forgevtt.parseSubtitlesAsync), and
+    // offloads multi-megabyte tracks to a Chromium 153+ dedicated Worker. The
     // base is parsed at zero offset and the current sync offset is applied
     // as a numeric pass so later sync drags never re-touch the text.
     const cues = await parseSubtitlesAsync(normalizedText, 0);

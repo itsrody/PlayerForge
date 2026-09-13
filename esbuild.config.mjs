@@ -136,6 +136,26 @@ function minifyCssPlugin() {
   };
 }
 
+// Bundle the subtitle parse worker on its own BEFORE defining the main build:
+// its output is embedded into the main bundle via the __VTT_WORKER_SOURCE__
+// define, so the single-file userscript can spawn it from a Blob URL. The
+// worker input is a real module importing forgevtt.js, which keeps the parse
+// engine single-source between main thread and worker. (Watch mode rebuilds
+// the main bundle but not this embedded chunk; verify the worker side
+// separately with a cold `npm run dev`/`npm run build` after worker edits.)
+const workerBuildResult = await build({
+  entryPoints: ["src/shell/subtitles/vtt-worker.js"],
+  bundle: true,
+  format: "iife",
+  target: ["chrome153"],
+  minify: true,
+  charset: "utf8",
+  legalComments: "none",
+  write: false,
+  logLevel: "silent"
+});
+const vttWorkerSource = workerBuildResult.outputFiles[0].text;
+
 const shared = {
   entryPoints: ["src/entry.js"],
   bundle: true,
@@ -145,6 +165,11 @@ const shared = {
   banner: { js: banner },
   loader: { ".css": "text" },
   plugins: [minifyCssPlugin()],
+  // The subtitle parse worker is a real entry bundled separately, embedded as
+  // a string const so the single-file userscript can spawn it from a Blob URL.
+  // forgevtt.js stays a plain, Node-importable module (the test harness reads
+  // it straight) because the substitution happens here, not in source.
+  define: { __VTT_WORKER_SOURCE__: JSON.stringify(vttWorkerSource) },
   // Emit real UTF-8 instead of \uXXXX escapes: the three intentional UI
   // glyphs (close X, settings gear, toast separator) stay readable and the
   // bundle stops paying six bytes per code point.

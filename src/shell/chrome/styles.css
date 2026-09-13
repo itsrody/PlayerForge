@@ -998,6 +998,11 @@
       gap: 4px;
       max-height: 168px;
       overflow-y: auto;
+      /* One-axis scroll container: horizontal overflow is clipped, never
+         turned into a second scroller (Chromium 125+ supports clip per axis;
+         the scroll+clip two-value form stays out because it is flagged behind
+         a Chrome 153 beta flag). */
+      overflow-x: clip;
       scrollbar-width: thin;
       scrollbar-color: var(--pf-text-mid) transparent;
       content-visibility: auto;

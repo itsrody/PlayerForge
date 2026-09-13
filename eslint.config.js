@@ -125,6 +125,9 @@ export default [
         PerformanceObserver: "readonly",
         MessageChannel: "readonly",
         MessagePort: "readonly",
+        Worker: "readonly",
+        self: "readonly",
+        __VTT_WORKER_SOURCE__: "readonly",
         GM_getResourceText: "readonly"
       }
     },
