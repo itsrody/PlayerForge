@@ -213,25 +213,7 @@ export class InputForge {
 
     subscribeFullscreen(() => {
       this.setTrackpadPinchEnabled(fs);
-      this.#videoRect = null;
     }, this.#scope.signal);
-
-    if (video) {
-      this.#dom.observeResize(video, () => {
-        this.#videoRect = null;
-      });
-      // Position shifts from page/container scroll (or ancestor transforms)
-      // don't resize the video box, so ResizeObserver and fullscreen change
-      // can leave the cached viewport rect stale. Scroll doesn't bubble, so
-      // capture phase catches any scroller; invalidation is a null-assign.
-      document.addEventListener(
-        "scroll",
-        () => {
-          this.#videoRect = null;
-        },
-        { capture: true, passive: true, signal }
-      );
-    }
 
     activeForges.add(this);
   }
@@ -315,9 +297,10 @@ export class InputForge {
   }
 
   #hitTestVideo(pointerEvent) {
-    // Cache the box so a pointerdown outside the HUD doesn't force a sync
-    // layout flush (getBoundingClientRect) on Chromium; the cache is dropped on
-    // resize and fullscreen change so it never goes stale.
+    // Cache the box within one interaction so taps outside the HUD don't
+    // force a sync layout flush (getBoundingClientRect) on Chromium. The cache
+    // is dropped at every pointerdown (see #handlePointerDown), so it can never
+    // be served stale by a scroll or ancestor-transform move.
     if (!this.#videoRect) {
       this.#videoRect = this.#video.getBoundingClientRect();
     }
@@ -520,6 +503,12 @@ export class InputForge {
   }
 
   #handlePointerDown(event) {
+    // Fresh box per interaction: scroll/ancestor-transform shifts that
+    // ResizeObserver and fullscreenchange never see are covered by dropping
+    // the cached hit-test box at every tap (the old document-scroll capture
+    // listener nulled it, but only ever mattered at this read and ran on
+    // every page scroll for the whole shell lifetime).
+    this.#videoRect = null;
     if (
       event.button !== 0 ||
       this.#eventTarget && isInsideShell(this.#eventTarget, event.target) ||

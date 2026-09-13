@@ -91,6 +91,25 @@ test("double tap in the left-edge zone dispatches once in fullscreen", () => {
   controller.destroy();
 });
 
+test("hit-test rect is not kept fresh by an always-on document scroll listener", () => {
+  const { dom, video, zone, host } = makeEnv();
+  const { document: doc } = dom.window;
+  // The rect cache was historically invalidated by a capture-phase document
+  // scroll listener that ran on every page scroll for the whole shell life.
+  // It must not be registered anymore: freshness is per-tap instead.
+  const realAdd = doc.addEventListener.bind(doc);
+  let scrollAdds = 0;
+  doc.addEventListener = (type, fn, opts) => {
+    if (type === "scroll") {
+      scrollAdds++;
+    }
+    return realAdd(type, fn, opts);
+  };
+  const controller = new InputForge(video, zone, host);
+  assert.equal(scrollAdds, 0, "no always-on document scroll listener is armed with the forge");
+  controller.destroy();
+});
+
 test("inline double taps never dispatch outside fullscreen", () => {
   const { dom, video, zone, host } = makeEnv();
   const controller = new InputForge(video, zone, host);

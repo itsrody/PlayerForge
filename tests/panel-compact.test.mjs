@@ -140,3 +140,41 @@ test("stepper hold-to-repeat releases all timers when the panel dies mid-hold", 
   assert.equal(nudges, frozen, "destroy stopped the repeat - no nudges on a dead panel");
   teardown();
 });
+
+test("dismissal listeners arm per open and die with the panel", async () => {
+  installMatchMedia();
+  const { shell, teardown } = await makeShell(false);
+  // Let any async construction-time document listeners settle before counting.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const realAdd = document.addEventListener.bind(document);
+  let keydownAdds = 0;
+  let pointerdownAdds = 0;
+  document.addEventListener = (type, fn, opts) => {
+    if (type === "keydown") keydownAdds++;
+    else if (type === "pointerdown") pointerdownAdds++;
+    return realAdd(type, fn, opts);
+  };
+
+  assert.equal(keydownAdds + pointerdownAdds, 0, "no dismissal listeners before the first open");
+
+  await shell.panel.open();
+  assert.equal(keydownAdds, 1, "Esc dismissal armed on open");
+  assert.equal(pointerdownAdds, 1, "outside-dismissal armed on open");
+
+  document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.equal(shell.panel.isOpen, false, "Esc closes the open panel");
+  assert.equal(pointerdownAdds, 1, "close never re-arms the dismissal scope");
+
+  await shell.panel.open();
+  assert.equal(keydownAdds, 2, "dismissal re-arms for the next open");
+  assert.equal(pointerdownAdds, 2, "dismissal re-arms for the next open");
+
+  document.body.dispatchEvent(new window.MouseEvent("pointerdown", {
+    bubbles: true,
+    cancelable: true
+  }));
+  assert.equal(shell.panel.isOpen, false, "a press outside the shell closes the open panel");
+
+  teardown();
+});

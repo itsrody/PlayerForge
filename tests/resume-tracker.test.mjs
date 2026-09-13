@@ -62,6 +62,37 @@ test("finite duration creates the pf:resume entry without waiting", async () => 
   assert.equal(writes["pf:resume"].entries[0].duration, 600);
 });
 
+test("off-screen save gate observer is disconnected on destroy", async () => {
+  delete writes["pf:resume"];
+  let observeCalls = 0;
+  let disconnectCalls = 0;
+  class FakeIO {
+    constructor(cb) {
+      this.cb = cb;
+    }
+    observe() {
+      observeCalls++;
+    }
+    disconnect() {
+      disconnectCalls++;
+    }
+  }
+  const realIO = globalThis.IntersectionObserver;
+  globalThis.IntersectionObserver = FakeIO;
+  try {
+    const { shell } = makeEnv(600);
+    const tracker = new ResumeTracker(shell);
+    await flush();
+    await flush();
+    assert.equal(observeCalls, 1, "the on-screen gate armed an observer for the video");
+
+    tracker.destroy();
+    assert.equal(disconnectCalls, 1, "destroy disconnects the observer");
+  } finally {
+    globalThis.IntersectionObserver = realIO;
+  }
+});
+
 test("missing duration waits for loadedmetadata before creating the entry", async () => {
   delete writes["pf:resume"];
   const { dom, video, shell } = makeEnv(null);

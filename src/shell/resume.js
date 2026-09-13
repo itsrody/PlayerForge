@@ -339,6 +339,8 @@ export class ResumeTracker {
   #lastSavedPosition = 0;
   /** Wall-clock floor for persists - keeps the write cadence bounded. */
   #lastSavedWall = 0;
+  /** Off-screen save gate observer; disconnected in destroy(). */
+  #intersectionObserver = null;
   #destroyed = false;
 
   constructor(shell) {
@@ -379,6 +381,9 @@ export class ResumeTracker {
       const onLoaded = () => finishWaiting();
       const onError = () => finishWaiting();
       const timeoutHandle = setTimeout(finishWaiting, RESUME_METADATA_WAIT_MS);
+      // A shell destroyed mid-wait must not leave the suspended #init
+      // continuation (and its closure) alive for the full metadata timeout.
+      signal.addEventListener("abort", () => clearTimeout(timeoutHandle), { once: true });
       video.addEventListener("loadedmetadata", onLoaded, { signal });
       video.addEventListener("durationchange", onDurationChange, { signal });
       video.addEventListener("error", onError, { signal });
@@ -473,17 +478,18 @@ export class ResumeTracker {
     // layout-free "is this player on screen" boolean, so the media-clock saves
     // stop churning GM storage writes for a video the user cannot see. The
     // pause flush above still runs whenever playback actually pauses, so the
-    // final position is never lost by this gate. Chromium supports `signal` in
-    // IntersectionObserver options for automatic teardown; feature-detect for
-    // hosts (jsdom) without it.
+    // final position is never lost by this gate. IntersectionObserverInit has
+    // no `signal` member (unlike AbortSignal-friendly APIs), so the observer
+    // is held on a field and disconnected in destroy() - otherwise a shell
+    // torn down while the element stays in the page (SPA video swaps) would
+    // leak the observer + target for the rest of the page lifetime.
     let onScreen = true;
     if (typeof IntersectionObserver === "function") {
-      try {
-        const io = new IntersectionObserver(([entry]) => {
-          onScreen = entry.isIntersecting;
-        }, { signal });
-        io.observe(video);
-      } catch {}
+      const io = new IntersectionObserver(([entry]) => {
+        onScreen = entry.isIntersecting;
+      });
+      io.observe(video);
+      this.#intersectionObserver = io;
     }
     const gatedSaveIfDue = () => {
       if (onScreen) {
@@ -534,6 +540,8 @@ export class ResumeTracker {
 
   destroy() {
     this.#scope.abort();
+    this.#intersectionObserver?.disconnect();
+    this.#intersectionObserver = null;
     if (this.#entry && !this.#destroyed) {
       this.#saveProgress(this.#shell?.currentTime || NaN);
     }

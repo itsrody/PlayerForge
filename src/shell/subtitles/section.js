@@ -42,6 +42,8 @@ export class SubtitlesSection {
   #styleControls = null;
   #positionControls = null;
   #resetBtn = null;
+  /** Debounced sync-offset apply; cancelled on destroy so no trailing write lands. */
+  #scheduleSyncOffset = null;
   #scope = new AbortController();
   #destroyed = false;
 
@@ -60,6 +62,8 @@ export class SubtitlesSection {
       return;
     }
     this.#destroyed = true;
+    this.#scheduleSyncOffset?.cancel();
+    this.#scheduleSyncOffset = null;
     this.#scope.abort();
     this.#forgeTrack?.destroy();
     this.#forgeTrack = null;
@@ -215,7 +219,7 @@ export class SubtitlesSection {
     });
     applyCueShadow(shadowStepper.getValue());
 
-    const applySyncOffset = debounce((offset) => {
+    this.#scheduleSyncOffset = debounce((offset) => {
       if (this.#trackMeta) {
         // Re-offset the parsed base: one O(n) numeric pass per step instead
         // of a full text re-parse (normalize/split/regex/entity decode).
@@ -233,7 +237,7 @@ export class SubtitlesSection {
       format: (v) => v === 0 ? "0s" : `${v > 0 ? "+" : ""}${v}s`,
       onChange: (offset) => {
         this.#syncOffset = offset;
-        applySyncOffset(offset);
+        this.#scheduleSyncOffset(offset);
       }
     });
 

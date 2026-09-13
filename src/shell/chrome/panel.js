@@ -233,6 +233,8 @@ export class SettingsPanel {
   #sectionCounter = 0;
   /** All panel subscriptions die with this signal. */
   #scope = new AbortController();
+  /** Live only while the panel is open: Esc + outside-click dismissal. */
+  #dismissScope = null;
   #backdrop = null;
   #destroyed = false;
   #sectionBuilder = null;
@@ -291,6 +293,7 @@ export class SettingsPanel {
     if (!this.#body.childElementCount) {
       return;
     }
+    this.#armDismissal();
     this.#runWithViewTransition("pf-panel-open", () => {
       this.#root.classList.toggle("pf-compact", this.#isCompactMode());
       this.#root.classList.add("pf-open");
@@ -309,6 +312,7 @@ export class SettingsPanel {
           this.#shellHost.focus();
         }
       });
+      this.#teardownDismissal();
     }
   }
 
@@ -318,6 +322,38 @@ export class SettingsPanel {
     } else {
       this.open();
     }
+  }
+
+  /**
+   * Esc + outside-click dismissal exists only while the panel is open. Arming
+   * it per open() keeps two document listeners out of the page's hot path for
+   * shells whose panel is never (or rarely) opened; close()/destroy() abort
+   * the per-open scope, so they die with the open state.
+   */
+  #armDismissal() {
+    if (this.#dismissScope || this.#destroyed) {
+      return;
+    }
+    this.#dismissScope = new AbortController();
+    const { signal } = this.#dismissScope;
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        this.close();
+      }
+    }, { signal });
+    document.addEventListener("pointerdown", (event) => {
+      // The whole host counts as "inside", so a press on the panel or its
+      // HUD siblings toggles without a close/reopen flicker.
+      if (event.composedPath().includes(this.#shellHost)) {
+        return;
+      }
+      this.close();
+    }, { signal, capture: true });
+  }
+
+  #teardownDismissal() {
+    this.#dismissScope?.abort();
+    this.#dismissScope = null;
   }
 
   async openSection(title) {
@@ -551,6 +587,7 @@ export class SettingsPanel {
   destroy() {
     if (!this.#destroyed) {
       this.#destroyed = true;
+      this.#teardownDismissal();
       this.#scope.abort();
       this.#root?.remove();
       this.#root = null;
@@ -663,20 +700,9 @@ export class SettingsPanel {
 
     // Dismissal is ours since the popover left: Esc closes, and a press
     // outside the shell closes. The whole host counts as "inside" so our
-    // own controls toggle themselves without a close/reopen flicker.
-    // Static guarded listeners: two no-op calls when closed, zero churn.
-    document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && this.isOpen) {
-        this.close();
-      }
-    }, { signal });
-    document.addEventListener("pointerdown", (event) => {
-      if (!this.isOpen || event.composedPath().includes(this.#shellHost)) {
-        return;
-      }
-      this.close();
-    }, { signal, capture: true });
-
+    // own controls toggle themselves without a close/reopen flicker. Armed
+    // per open() and torn down on close()/destroy() so a never-opened panel
+    // pays zero document listeners for its whole shell lifetime.
     this.#tabList.addEventListener("keydown", (event) => {
       if (!TAB_NAV_KEYS.has(event.key)) {
         return;
