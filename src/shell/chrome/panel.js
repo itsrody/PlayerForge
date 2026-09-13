@@ -35,7 +35,8 @@ function createStepper({
   value,
   label,
   onChange,
-  deferTextInput = false
+  deferTextInput = false,
+  signal
 } = {}) {
   const lo = Number(min);
   const hi = Number(max);
@@ -76,6 +77,11 @@ function createStepper({
       delayTimer = null;
       repeatTimer = null;
     };
+    // A hold can be pending or repeating when the panel is destroyed (video
+    // swap / fullscreen change). Scope the release listeners to the panel
+    // signal AND stop the timers on abort, so destroy never leaves the
+    // interval nudging a detached panel until the pointer lifts.
+    signal?.addEventListener("abort", stopRepeat, { once: true });
     button.addEventListener("pointerdown", (event) => {
       event.preventDefault();
       if (input.disabled) {
@@ -87,12 +93,13 @@ function createStepper({
       }, HOLD_DELAY_MS);
       const release = () => {
         stopRepeat();
+        // No-ops once the signal already released them on destroy.
         window.removeEventListener("pointerup", release, { passive: true });
         window.removeEventListener("pointercancel", release, { passive: true });
       };
       // Passive: the release handler only stops timers - it never cancels defaults.
-      window.addEventListener("pointerup", release, { passive: true });
-      window.addEventListener("pointercancel", release, { passive: true });
+      window.addEventListener("pointerup", release, { passive: true, signal });
+      window.addEventListener("pointercancel", release, { passive: true, signal });
     });
     return button;
   };
@@ -477,7 +484,8 @@ export class SettingsPanel {
       value,
       label,
       deferTextInput,
-      onChange
+      onChange,
+      signal: this.#scope.signal
     });
     if (head) {
       const cellHead = this.el("div", { class: "pf-panel-cell-head" }, cell);

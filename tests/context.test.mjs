@@ -563,6 +563,52 @@ test("live iframe registry stays current under non-iframe churn", async () => {
   stop();
 });
 
+test("iframe registry arms lazily on the first bridged message", async () => {
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  // Count observer constructions: pages with no child frames must never arm
+  // the whole-document observer until the first bridged message proves one.
+  const RealMO = win.MutationObserver;
+  let constructions = 0;
+  class CountingMO extends RealMO {
+    constructor(cb) {
+      super(cb);
+      constructions++;
+    }
+  }
+  globalThis.MutationObserver = CountingMO;
+  win.MutationObserver = CountingMO;
+
+  const stop = installContextBridge();
+  assert.equal(constructions, 0, "no observer armed before any bridged message");
+
+  const child = win.document.createElement("iframe");
+  win.document.body.append(child);
+  const provision = (source) => {
+    win.dispatchEvent(new win.MessageEvent("message", {
+      data: { type: FS_REQUEST_TYPE },
+      source,
+      origin: "https://kid.test"
+    }));
+  };
+
+  provision(child.contentWindow);
+  assert.equal(constructions, 1, "first message armed the registry exactly once");
+  assert.equal(child.hasAttribute("allowfullscreen"), true, "synchronous seed registered the live iframe before the handler vouched");
+
+  // The guard is idempotent: further messages never re-arm.
+  provision(child.contentWindow);
+  assert.equal(constructions, 1, "later messages do not construct another observer");
+
+  stop();
+  globalThis.MutationObserver = RealMO;
+  win.MutationObserver = RealMO;
+  stopContextPipe();
+});
+
 test("top-frame responder answers on a transferred MessageChannel port", () => {
   // jsdom's window.postMessage drops transferred ports, so the port path is
   // injected directly into the handler via a real MessageChannel. The

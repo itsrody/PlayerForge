@@ -103,3 +103,40 @@ test("explicit ui.compact setting wins and the listener never flips it", async (
     "viewport exit cannot override the explicit setting");
   teardown();
 });
+
+test("stepper hold-to-repeat releases all timers when the panel dies mid-hold", async () => {
+  // Mirrors HOLD_DELAY_MS / HOLD_REPEAT_MS in panel.js.
+  const HOLD_DELAY_MS = 400;
+  installMatchMedia();
+  const { shell, teardown } = await makeShell(false);
+  await shell.panel.open();
+
+  const parent = document.createElement("div");
+  let nudges = 0;
+  shell.panel.addStepper(parent, {
+    label: "Test",
+    min: 0,
+    max: 100,
+    step: 1,
+    value: 0,
+    onChange: () => nudges++
+  });
+  document.body.appendChild(parent);
+
+  const upButton = parent.querySelector(".pf-stepper-btn");
+  upButton.dispatchEvent(new window.MouseEvent("pointerdown", {
+    bubbles: true,
+    cancelable: true,
+    view: window
+  }));
+
+  // Past the delay so the 75ms repeat interval is live and nudging.
+  await new Promise((resolve) => setTimeout(resolve, HOLD_DELAY_MS + 150));
+  assert.ok(nudges >= 2, "hold started repeating before destroy");
+
+  shell.destroy();
+  const frozen = nudges;
+  await new Promise((resolve) => setTimeout(resolve, 260));
+  assert.equal(nudges, frozen, "destroy stopped the repeat - no nudges on a dead panel");
+  teardown();
+});

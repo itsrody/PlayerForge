@@ -801,9 +801,12 @@ function isOwnFrame(source) {
 
 /**
  * Live map from <iframe> contentWindow -> element, refreshed by an observer
- * that lives for the whole frame bridge. Without it, every relayed message
- * rewound the full frame tree via querySelectorAll - O(frametree) per message
- * on iframe-heavy pages.
+ * that lives only while the bridge is installed AND messages have been seen.
+ * Without it, every relayed message rewound the full frame tree via
+ * querySelectorAll - O(frametree) per message on iframe-heavy pages. Armed
+ * lazily on the first bridged message (see installContextBridge), so the vast
+ * majority of pages - which have no child frames to vouch - never pay for the
+ * whole-document observer at all.
  *
  * This is self-contained to the shared layer (no dependency on the kernel's
  * dom-watch dispatcher, which is installed lazily and may not exist when the
@@ -817,9 +820,11 @@ const iframeCache = new Map();
 /** Document the cache currently describes. Tracked so a document swap (fresh
  *  page / test harness) reseeds instead of serving a stale map. */
 let iframeCacheDoc = null;
-/** True once the bridge wired the cache observer (installContextBridge). Before
- *  that - e.g. handlers used directly - iframeElementForWindow scans inline so
- *  the vouch stays correct even unseeded. */
+/** True once the iframe registry observer is live. Armed lazily by
+ *  installContextBridge on the first bridged message - pages with no child
+ *  frames never arm it. Before that - e.g. handlers used directly -
+ *  iframeElementForWindow scans inline so the vouch stays correct even
+ *  unseeded. */
 let iframeCacheActive = false;
 /** Observer driving the cache; lifecycled by startIframeCache/stopIframeCache. */
 let iframeCacheObserver = null;
@@ -891,6 +896,10 @@ function diffIframeCache(records) {
  *  iframeElementForWindow falls back to a scan, so the bridge's message
  *  handling never depends on it.
  *
+ *  Idempotent: re-arming for the same document is a no-op, and a previous
+ *  document's cache is discarded before rebind (browser/tab navigations hand
+ *  the script a fresh document object).
+ *
  *  The observe target falls back to `document` when the root element has not
  *  been parsed yet (fresh nested frames at document-start): observing the
  *  document node covers the same subtree and never throws on a missing
@@ -900,6 +909,12 @@ function diffIframeCache(records) {
 function startIframeCache(ac) {
   if (typeof MutationObserver !== "function") {
     return;
+  }
+  if (iframeCacheActive && iframeCacheDoc === document) {
+    return;
+  }
+  if (iframeCacheActive) {
+    stopIframeCache();
   }
   seedIframeCache();
   iframeCacheDoc = document;
@@ -1052,6 +1067,22 @@ export function createFrameProvisioner() {
  */
 export function installContextBridge() {
   const ac = new AbortController();
+  // The live iframe registry exists only to vouch incoming bridged messages
+  // against this document's own <iframe> children - never for anything
+  // message-free. On the vast majority of pages (no child frames) the
+  // whole-document MutationObserver therefore never needs to exist, so arm it
+  // lazily instead of at install: the first bridged message proves an iframe
+  // is present, its synchronously-seeded scan registers live frames before any
+  // handler vouches, and the inline-scan fallback covers the pre-observer gap.
+  // This listener must be registered BEFORE the handlers below so the seed
+  // lands before the first vouch-check runs.
+  const maybeStartIframeCache = () => {
+    if (!iframeCacheActive || iframeCacheDoc !== document) {
+      startIframeCache(ac);
+    }
+  };
+  window.addEventListener("message", maybeStartIframeCache, { signal: ac.signal });
+
   const handlers = window === window.top ? [
     createTopFrameResponder(() => ({
       domain: getDomainKey(location.hostname),
@@ -1066,10 +1097,7 @@ export function installContextBridge() {
   for (const handler of handlers) {
     window.addEventListener("message", handler, { signal: ac.signal });
   }
-  // Every handler above vouch-checks event.source against the live iframe
-  // registry; seed it once (with an observer keeping it current) so relayed
-  // messages never pay a per-message tree scan. Torn down with the bridge.
-  startIframeCache(ac);
+  // Torn down with the bridge.
   return () => {
     ac.abort();
     stopContextPipe();
