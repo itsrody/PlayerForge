@@ -1,5 +1,5 @@
 /**
- * Dedicated Worker that owns large subtitle parses (Chromium 153+).
+ * Dedicated Worker that owns large subtitle parses.
  *
  * The parse engine is this package's source of truth - forgevtt.js is bundled
  * straight in, so the worker can never drift from the main-thread parser. The

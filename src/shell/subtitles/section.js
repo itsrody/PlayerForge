@@ -386,7 +386,7 @@ export class SubtitlesSection {
     const normalizedText = /\.srt$/i.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
     // Cooperative parse: yields to the browser on large tracks so ingesting a
     // big VTT never blocks playback (see forgevtt.parseSubtitlesAsync), and
-    // offloads multi-megabyte tracks to a Chromium 153+ dedicated Worker. The
+    // offloads multi-megabyte tracks to a dedicated Worker. The
     // base is parsed at zero offset and the current sync offset is applied
     // as a numeric pass so later sync drags never re-touch the text.
     const cues = await parseSubtitlesAsync(normalizedText, 0);

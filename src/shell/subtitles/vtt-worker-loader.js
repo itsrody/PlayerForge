@@ -5,7 +5,7 @@
  * structured-cloning a megabyte of text out, and cloning the cue array back
  * costs more than the parse itself. Only large loads earn the round trip - the
  * renderer thread never eats a multi-megabyte normalize/split/regex storm
- * mid-playback (Chromium 153+ dedicated workers, where the parse just runs).
+*  mid-playback (dedicated workers, where the parse just runs).
  *
  * Every failure mode - no Worker, page CSP blocking blob workers, the parse
  * throwing in the worker, a hung worker, teardown mid-await - degrades to the

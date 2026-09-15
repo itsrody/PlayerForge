@@ -103,7 +103,7 @@ function pooledScrubEvent() {
  * decision (settings gates, fullscreen requirement) is delegated to the
  * declarative INPUT_BINDINGS list, sampled live at each decision point.
  *
- * Chromium 153+ native by design: one AbortSignal owns the entire listener
+ * Chromium 150+ native by design: one AbortSignal owns the entire listener
  * lifetime (destroy() === scope.abort()), all pointer listeners are passive,
  * scrub sampling consumes getCoalescedEvents(), and fullscreen truth is the
  * single shared `fs` gate (shadow.js), built on the native fullscreen event.
