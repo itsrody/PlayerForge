@@ -248,6 +248,58 @@ test("wheel pinch listener is inert until enabled and detaches on disable", () =
   controller.destroy();
 });
 
+test("two-finger pinch tracks the pair and fires past the scale threshold", async () => {
+  const { dom, video, zone, host } = makeEnv();
+  stubFullscreen(dom, true);
+  const controller = new InputForge(video, zone, host);
+  const seen = collect(host, dom.window);
+
+  // A single finger can never pinch.
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { id: 1, x: 400, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { id: 1, x: 402, y: 200 }));
+  assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.pinch).length, 0);
+
+  // Second finger lands at 100px separation; the 2ms baseline must elapse
+  // before the spread can be measured against it.
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { id: 2, x: 500, y: 200 }));
+  await sleep(10);
+  zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { id: 2, x: 700, y: 200 }));
+
+  const pinches = seen.filter((entry) => entry.type === GESTURE_EVENTS.pinch);
+  assert.equal(pinches.length, 1);
+  assert.equal(pinches[0].detail.direction, "out");
+  assert.equal(pinches[0].detail.method, "pointer");
+  assert.equal(pinches[0].detail.zone, "screen");
+
+  // Passivity still holds on the two-finger stream.
+  const move = pointerEvent(dom.window, "pointermove", { id: 2, x: 720, y: 200 });
+  zone.dispatchEvent(move);
+  assert.equal(move.defaultPrevented, false, "two-finger moves never cancel defaults");
+
+  controller.destroy();
+});
+
+test("3-pointer collapse re-points the pinch pair before the next move", async () => {
+  const { dom, video, zone, host } = makeEnv();
+  stubFullscreen(dom, true);
+  const controller = new InputForge(video, zone, host);
+  const seen = collect(host, dom.window);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { id: 1, x: 400, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { id: 2, x: 500, y: 200 }));
+  await sleep(10);
+  // Third finger lands, then the FIRST finger (a tracked pair member) lifts,
+  // leaving [2, 3] live - the pair must re-point to them, not hold id 1.
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { id: 3, x: 560, y: 210 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { id: 1, x: 400, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { id: 3, x: 700, y: 210 }));
+
+  const pinches = seen.filter((entry) => entry.type === GESTURE_EVENTS.pinch);
+  assert.equal(pinches.length, 1);
+  assert.equal(pinches[0].detail.direction, "out");
+  controller.destroy();
+});
+
 test("pointer gestures never cancel defaults (passivity contract)", () => {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true);

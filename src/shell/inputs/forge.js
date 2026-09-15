@@ -39,31 +39,6 @@ const activeForges = new Set();
 let lastActiveForge = null;
 
 /**
- * Reusable scratch for the first two live pointers. The pinch path runs on
- * every two-finger move, so reading the pair into this single object (instead
- * of [...values()].slice(0,2) - two array allocations per move) keeps the hot
- * loop allocation-free for the JIT. Mutated in place; callers must read it
- * immediately.
- */
-const firstTwoPointers = { x0: 0, y0: 0, x1: 0, y1: 0 };
-
-function captureFirstTwo(pointers, out) {
-  let n = 0;
-  for (const point of pointers.values()) {
-    if (n === 0) {
-      out.x0 = point.x;
-      out.y0 = point.y;
-    } else {
-      out.x1 = point.x;
-      out.y1 = point.y;
-      return true;
-    }
-    n = 1;
-  }
-  return false;
-}
-
-/**
  * Pooled scrub event + detail payload. Scrub fires once per coalesced pointer
  * move (up to display rate), so allocating a fresh CustomEvent plus a fresh
  * detail object per move - the old #dispatch shape - churns the young
@@ -191,6 +166,13 @@ export class InputForge {
 
   // Pinch state.
   #pointers = new Map();
+  /** The two live pinch records (refs into #pointers), oldest finger first.
+   *  Kept in sync only when the pinch SET's shape changes (second finger
+   *  down, a 3+->2 collapse), never per move: the two-finger move stream
+   *  reads these refs directly, so it allocates no MapIterator per move (the
+   *  old captureFirstTwo(...) scan did). */
+  #pinchA = null;
+  #pinchB = null;
   #pinchStartDistance = 0;
   #pinchFired = false;
   #pinchZone = null;
@@ -302,6 +284,8 @@ export class InputForge {
       this.#pinchInitTimer = null;
       this.#videoRect = null;
       this.#pointers.clear();
+      this.#pinchA = null;
+      this.#pinchB = null;
       cancelEase(this.#video);
       // DOM lifecycle: disconnect observers, restore styles, remove elements.
       this.#dom.destroy();
@@ -400,29 +384,53 @@ export class InputForge {
     this.#pinchStartDistance = 0;
     this.#pinchFired = false;
     this.#pinchZone = this.#gestureZone || "screen";
+    this.#capturePair();
     clearTimeout(this.#pinchInitTimer);
     this.#pinchInitTimer = setTimeout(() => {
       this.#pinchInitTimer = null;
-      if (this.#destroyed || this.#pointers.size < 2) {
+      const a = this.#pinchA;
+      const b = this.#pinchB;
+      if (this.#destroyed || this.#pointers.size < 2 || !a || !b) {
         return;
       }
-      captureFirstTwo(this.#pointers, firstTwoPointers);
       this.#pinchStartDistance =
-        Math.hypot(firstTwoPointers.x1 - firstTwoPointers.x0, firstTwoPointers.y1 - firstTwoPointers.y0);
+        Math.hypot(b.x - a.x, b.y - a.y);
     }, PINCH_BASELINE_DELAY_MS);
+  }
+
+  /**
+   * Re-point #pinchA/#pinchB at the two live pointer records (oldest finger
+   * first). Runs only when the pinch set reshapes - the second finger leaving
+   * the ground, or a 3+->2 collapse mid-pinch - never on the per-move stream.
+   * Refs share the Map records, so coordinate updates in #handlePointerMove
+   * are visible to #checkPinch with no copy.
+   */
+  #capturePair() {
+    let a = null;
+    for (const point of this.#pointers.values()) {
+      if (a === null) {
+        a = point;
+      } else {
+        this.#pinchA = a;
+        this.#pinchB = point;
+        return;
+      }
+    }
+    this.#pinchA = null;
+    this.#pinchB = null;
   }
 
   #checkPinch() {
     if (!fs || this.#pinchFired || this.#pinchStartDistance < PINCH_MIN_DISTANCE_PX) {
       return;
     }
-    if (!captureFirstTwo(this.#pointers, firstTwoPointers)) {
+    const a = this.#pinchA;
+    const b = this.#pinchB;
+    if (!a || !b) {
       return;
     }
     const scaleDelta =
-      (Math.hypot(firstTwoPointers.x1 - firstTwoPointers.x0, firstTwoPointers.y1 - firstTwoPointers.y0) -
-        this.#pinchStartDistance) /
-      this.#pinchStartDistance;
+      (Math.hypot(b.x - a.x, b.y - a.y) - this.#pinchStartDistance) / this.#pinchStartDistance;
     if (scaleDelta > PINCH_SCALE_THRESHOLD || scaleDelta < -PINCH_SCALE_THRESHOLD) {
       this.#pinchFired = true;
       this.#suppressNextActivations();
@@ -599,6 +607,12 @@ export class InputForge {
       pointer.y = y;
     }
     if (this.#pointers.size === 2 && this.#pinchStartDistance > 0) {
+      // The moved pointer can fall outside the tracked pair only after a
+      // 3+->2 collapse mid-pinch; re-sync the pair once there instead of
+      // paying a Map iteration on the hot two-finger move path.
+      if (pointer !== this.#pinchA && pointer !== this.#pinchB) {
+        this.#capturePair();
+      }
       this.#checkPinch();
       return;
     }
@@ -754,10 +768,16 @@ export class InputForge {
 
   #handlePointerUp(event) {
     this.#pointers.delete(event.pointerId);
-    if (this.#pinchStartDistance > 0 && this.#pointers.size < 2) {
+    if (this.#pointers.size === 2) {
+      // A 3+->2 collapse mid-pinch: the pair refs may now point at a lifted
+      // finger, so re-point them at the surviving two before the next move.
+      this.#capturePair();
+    } else if (this.#pinchStartDistance > 0 && this.#pointers.size < 2) {
       this.#pinchStartDistance = 0;
       this.#pinchFired = false;
       this.#pinchZone = null;
+      this.#pinchA = null;
+      this.#pinchB = null;
     }
     if (this.#primaryPointerId === null || event.pointerId !== this.#primaryPointerId) {
       return;
@@ -821,10 +841,16 @@ export class InputForge {
 
   #handlePointerCancel(event) {
     this.#pointers.delete(event.pointerId);
-    if (this.#pinchStartDistance > 0 && this.#pointers.size < 2) {
+    if (this.#pointers.size === 2) {
+      // A 3+->2 collapse mid-pinch: the pair refs may now point at a lifted
+      // finger, so re-point them at the surviving two before the next move.
+      this.#capturePair();
+    } else if (this.#pinchStartDistance > 0 && this.#pointers.size < 2) {
       this.#pinchStartDistance = 0;
       this.#pinchFired = false;
       this.#pinchZone = null;
+      this.#pinchA = null;
+      this.#pinchB = null;
     }
     // A pointercancel means the browser reclaimed the pointer (system
     // gesture, hit-test fighting, lost capture) - the interaction was never a

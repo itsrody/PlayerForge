@@ -243,16 +243,27 @@ export function easeTransformTo(video, transform) {
     video.style.willChange = "transform";
   }
 
-  // WAAPI path: one compositor animation from the current
-  // computed transform to the target. On finish the final value is committed
-  // to an inline style and the animation is cancelled so its fill gives way;
-  // on cancel (via stop() or supersession) the layer is dropped immediately.
+  // WAAPI path: one compositor animation. The common case (no ease already
+  // running on the video) uses an implicit origin - the engine reads the
+  // element's live transform as the from-frame, so no synchronous
+  // getComputedStyle style read runs on the gesture path (swipe restore, fill
+  // entry/exit). Superseding a still-running ease is the one case that needs
+  // an explicit from: its cancel would otherwise release the prior fill and
+  // the "current" value would read stale. On finish the final value is
+  // committed to an inline style and the animation is cancelled so its fill
+  // gives way; on cancel (via stop() or supersession) the layer is dropped.
   if (typeof video.animate === "function") {
+    const prior = pendingEase.get(video);
+    // Snapshot the live, fill-inflated transform BEFORE the prior cancel
+    // releases its fill, so a mid-flight supersession keeps a smooth handoff.
+    const liveTransform = prior ? getComputedStyle(video).transform || "none" : null;
+    if (prior) {
+      prior();
+    }
     const animation = video.animate(
-      [
-        { transform: getComputedStyle(video).transform || "none" },
-        { transform: transform || "none" }
-      ],
+      liveTransform
+        ? [{ transform: liveTransform }, { transform: transform || "none" }]
+        : [{ transform: transform || "none" }],
       { duration: EASE_MS, easing: EASE_STYLE, fill: "both" }
     );
     const stop = () => {

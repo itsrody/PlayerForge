@@ -43,6 +43,11 @@ export class SubtitlesSection {
   #resetBtn = null;
   /** Debounced sync-offset apply; cancelled on destroy so no trailing write lands. */
   #scheduleSyncOffset = null;
+  /** Per-key trailing persist for the style steppers: preview is instant,
+   *  storage lands ~150ms after the drag settles (mirrors filter's debounced
+   *  persist), so a size/color/shadow drag fires one config write instead of
+   *  one per tick. */
+  #stylePersist = new Map();
   #scope = new AbortController();
   #destroyed = false;
 
@@ -63,6 +68,12 @@ export class SubtitlesSection {
     this.#destroyed = true;
     this.#scheduleSyncOffset?.cancel();
     this.#scheduleSyncOffset = null;
+    // Land any trailing style writes before the section dies so the last
+    // stepper tick is never lost (mirrors filter's flush-on-destroy).
+    for (const writer of this.#stylePersist.values()) {
+      writer.flush();
+    }
+    this.#stylePersist.clear();
     this.#scope.abort();
     this.#forgeTrack?.destroy();
     this.#forgeTrack = null;
@@ -183,8 +194,8 @@ export class SubtitlesSection {
       value: getConfigValue(SETTING_KEYS.size, 1.2),
       format: fmtEm,
       onChange: (v) => {
-        setConfigValue(SETTING_KEYS.size, v);
         applyCueSize(v);
+        this.#persistStyle(SETTING_KEYS.size, v);
       }
     });
     applyCueSize(sizeStepper.getValue());
@@ -194,8 +205,8 @@ export class SubtitlesSection {
       label: "Color",
       value: getConfigValue(SETTING_KEYS.color, "#ffffff"),
       onChange: (hex) => {
-        setConfigValue(SETTING_KEYS.color, hex);
         this.#setCueVar("--pf-cue-color", hex);
+        this.#persistStyle(SETTING_KEYS.color, hex);
       }
     });
     this.#setCueVar("--pf-cue-color", colorField.getValue());
@@ -212,8 +223,8 @@ export class SubtitlesSection {
       value: getConfigValue(SETTING_KEYS.shadow, 40),
       format: (v) => v ? `${v}%` : "Off",
       onChange: (v) => {
-        setConfigValue(SETTING_KEYS.shadow, v);
         applyCueShadow(v);
+        this.#persistStyle(SETTING_KEYS.shadow, v);
       }
     });
     applyCueShadow(shadowStepper.getValue());
@@ -291,6 +302,16 @@ export class SubtitlesSection {
 
   #setCueVar(prop, value) {
     this.#forgeTrack?.setVar(prop, value);
+  }
+
+  /** Debounced per-key config write for the style steppers. */
+  #persistStyle(key, value) {
+    let writer = this.#stylePersist.get(key);
+    if (!writer) {
+      writer = debounce((v) => setConfigValue(key, v), TUNING.subtitles.syncDebounceMs);
+      this.#stylePersist.set(key, writer);
+    }
+    writer(value);
   }
 
   #toastFlash(icon, text, group) {
