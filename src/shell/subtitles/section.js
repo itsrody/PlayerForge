@@ -1,8 +1,7 @@
 import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/storage.js";
 import { TUNING } from "../../shared/tuning.js";
 import { fmtPercent, fmtEm } from "../../shared/formatters.js";
-import { srtToVtt, ensureVttHeader, offsetCues } from "./forgevtt.js";
-import { parseSubtitlesAsync } from "./vtt-worker-loader.js";
+import { srtToVtt, ensureVttHeader, offsetCues, parseSubtitlesAsync } from "./forgevtt.js";
 import { ForgeTrack } from "./forge-track.js";
 import { debounce } from "../../shared/time.js";
 import { flashElement } from "../chrome/animate.js";
@@ -384,11 +383,14 @@ export class SubtitlesSection {
       return;
     }
     const normalizedText = /\.srt$/i.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
-    // Cooperative parse: yields to the browser on large tracks so ingesting a
-    // big VTT never blocks playback (see forgevtt.parseSubtitlesAsync), and
-    // offloads multi-megabyte tracks to a dedicated Worker. The
-    // base is parsed at zero offset and the current sync offset is applied
-    // as a numeric pass so later sync drags never re-touch the text.
+    // Cooperative in-band parse (forgevtt.parseSubtitlesAsync): the ~50ms
+    // budget between blocks hands back to the browser through scheduler.yield()
+    // (Firefox 157 native), so even a multi-megabyte VTT ingest never blocks
+    // playback - no worker hop needed on Gecko. Everything downstream is
+    // Firefox's native subtitle flow: cues land on a TextTrack as VTTCues and
+    // the browser owns cue scheduling. The base is parsed at zero offset and
+    // the current sync offset is applied as a numeric pass so later sync
+    // drags never re-touch the text.
     const cues = await parseSubtitlesAsync(normalizedText, 0);
     // Cooperative parse yields to the browser; the section may have been torn
     // down mid-await, so re-check before touching the track/slots.
