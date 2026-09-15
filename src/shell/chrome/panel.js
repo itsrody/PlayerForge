@@ -772,10 +772,23 @@ export class SettingsPanel {
   }
 
   #runWithViewTransition(type, update) {
-    if (typeof document.startViewTransition === "function") {
-      document.startViewTransition({ types: [type], update });
-    } else {
+    const svt = document.startViewTransition;
+    if (typeof svt !== "function") {
       update();
+      return;
+    }
+    // The typed-transitions ({ types, update }) signature is Chromium-specific.
+    // Firefox 144+ supports base same-document transitions (callback-only).
+    // A TypeError in Firefox is caught and the base path is tried first;
+    // the final fallback runs the update directly without a transition.
+    try {
+      svt({ types: [type], update });
+    } catch {
+      try {
+        svt(update);
+      } catch {
+        update();
+      }
     }
   }
 }

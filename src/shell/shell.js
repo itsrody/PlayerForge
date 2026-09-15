@@ -65,7 +65,7 @@ export class Shell {
 
     // Yield between DOM injection and component construction so the browser
     // can process pending layout/paint work before the panel builds its tree.
-    await scheduler.yield();
+    await scheduler?.yield?.();
 
     this.#panel = new SettingsPanel(this);
     this.#toasts = new ToastManager(this.#shellDom.hudLayer);
@@ -286,8 +286,9 @@ export class Shell {
     }
     // Expose media state as CSS custom properties on the host so the shadow
     // DOM can style based on playing/paused/muted without crossing the realm
-    // boundary. The :playing/:paused/:muted pseudo-classes (Chromium 153+)
-    // cannot reach into shadow roots; custom properties bridge the gap.
+    // boundary. The :playing/:paused/:muted pseudo-classes (Chromium 153+,
+    // absent on Firefox) cannot reach into shadow roots; custom properties
+    // bridge the gap.
     if (host) {
       const sync = () => {
         host.style.setProperty("--pf-media-paused", video.paused ? "1" : "0");

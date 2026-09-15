@@ -64,7 +64,7 @@ function flush() {
 }
 
 /**
- * Chromium-native scheduling advantage: `scheduler.yield()` lets the browser
+ * Chromium-specific scheduling advantage: `scheduler.yield()` (absent on Firefox)
  * interleave input / paint between the mutation batch and the subscriber
  * dispatch. Falls back to flush() directly when the API is absent (jsdom
  * tests, non-Chromium hosts) so the test tick() helper stays compatible.

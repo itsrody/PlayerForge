@@ -7,7 +7,7 @@
  * when it answers, so the page's renderer thread never pays for the
  * normalize/split/regex storm of a multi-megabyte .srt/.vtt.
  *
- * Chromium 153 extends Long Animation Frames to workers: a parse that would
+ * Chromium 153 (Firefox 138+) extends Long Animation Frames to workers: a parse that would
  * have blocked the worker's own event loop is reported per-script, which the
  * loader surfaces through the existing debug perf-diag channel instead of a
  * silent stall. No GM_* grants exist in a Worker - this file stays pure.
