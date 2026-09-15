@@ -1,6 +1,6 @@
 /* ------------------------------------------------------------------
    PlayerForge HUD styles - Firefox 157+ native: CSS nesting, @container,
-   @starting-style, @property, :has, color-mix. Design tokens live on the shell
+   @starting-style, @property, :has. Design tokens live on the shell
    root; every surface derives from them, so theming/contrast tuning is
    one edit. Components are grouped per tree with native nesting (&).
 
@@ -26,10 +26,8 @@
   --pf-bg: #000;                    /* base ink                */
   --pf-accent: #4a9eff;             /* interaction accent      */
 
-  --pf-hud-glass: color-mix(in srgb, var(--pf-bg) 82%, transparent);
-  /* Dark tinted glass: backdrop-blur + saturate applied at element level. */
+  --pf-surface: rgba(0, 0, 0, 0.65);              /* solid toast sheet          */
 
-  --pf-surface: rgba(0, 0, 0, 0.8);              /* toast + panel sheets        */
   --pf-surface-soft: rgba(255, 255, 255, 0.04);  /* cells, stepper, toggle bg   */
   --pf-surface-mid: rgba(255, 255, 255, 0.09);   /* ghost btn, hover cells      */
   --pf-surface-strong: rgba(255, 255, 255, 0.16);/* toast actions, ghost hover  */
@@ -58,18 +56,15 @@
   --pf-ease-bounce: 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
   --pf-ease-out: 0.2s cubic-bezier(0.4, 0, 1, 1);
 
-  --pf-blur-sm: blur(12px) saturate(1.3);
-  --pf-blur-lg: blur(16px) saturate(1.4);
-
   --pf-space-xs: 4px;
   --pf-space-sm: 6px;
   --pf-space-md: 8px;
   --pf-space-lg: 10px;
 
-  /* Flat dark surfaces - simple, predictable, GPU-free. No backdrop blur or
-     gradients, so a video color filter never interferes with the HUD. */
-  --pf-panel-bg: var(--pf-hud-glass);   /* panel glass (inherits --pf-hud-glass) */
-  --pf-toast-bg: var(--pf-hud-glass);   /* toast glass (inherits --pf-hud-glass) */
+  /* Solid flat surfaces - predictable, GPU-free. No backdrop blur, so the
+     video beneath is never dimmed or tinted by the HUD. */
+  --pf-panel-bg: rgba(0, 0, 0, 0.85);
+  --pf-toast-bg: var(--pf-surface);
 
   --pf-z-hud: 2;
   --pf-z-toast: 3;
@@ -255,9 +250,8 @@
          the transform property, so transform-based animations on the toast
          never clobber it. */
       translate: -50%;
-      /* Dark tinted glass - color-mix backdrop + blur. */
+      /* Solid black pill - no backdrop blur, so it never dims the video. */
       background: var(--pf-toast-bg);
-      backdrop-filter: var(--pf-blur-sm);
       color: var(--pf-toast-color);
       padding: 6px 16px;
       border-radius: var(--pf-toast-radius);
@@ -378,9 +372,8 @@
       scrollbar-width: thin;
       scrollbar-color: var(--pf-text-mid) transparent;
 
-      /* Flat dark glass - color-mix backdrop + blur for depth. */
+      /* Solid black sheet - 0.85 alpha, no backdrop blur. */
       background: var(--pf-panel-bg);
-      backdrop-filter: var(--pf-blur-lg);
       color: var(--pf-fg);
       border-radius: var(--pf-radius-lg);
       font-size: var(--pf-font-md);
