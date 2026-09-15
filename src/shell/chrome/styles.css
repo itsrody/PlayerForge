@@ -475,6 +475,11 @@
 
       .pf-panel-body {
         padding: var(--pf-space-sm) var(--pf-space-md) var(--pf-space-lg);
+        /* Containment: layout/style changes inside the panel body (stepper
+           updates, checkbox toggles, section show/hide) never ripple into the
+           host page or HUD siblings. Paint containment would clip the panel's
+           own overflow, so only layout+style are applied. Firefox 110+. */
+        contain: layout style;
       }
 
       .pf-panel-section {

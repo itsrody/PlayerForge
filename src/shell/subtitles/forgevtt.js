@@ -342,3 +342,70 @@ export function offsetCues(cues, offset = 0) {
   }
   return shifted;
 }
+
+/**
+ * Streaming subtitle parser for large files delivered via ReadableStream.
+ * Processes a byte stream through TextDecoder, accumulating VTT/SRT blocks
+ * as they arrive and yielding parsed cue arrays per block boundary. This
+ * enables progressive rendering: the track can start showing cues before
+ * the entire file has been downloaded, which matters for multi-MB subtitle
+ * files on slow connections.
+ *
+ * Falls back to the synchronous parseSubtitles when ReadableStream is
+ * unavailable (jsdom/test hosts). Returns an async iterable of { cues, done }
+ * where `cues` is a sorted array of cue objects parsed so far, and `done`
+ * signals the final batch (all cues, fully sorted).
+ *
+ * Usage:
+ *   for await (const batch of parseSubtitlesStream(response.body, offset)) {
+ *     if (batch.done) loadCues(batch.cues);
+ *   }
+ */
+export async function* parseSubtitlesStream(readable, offset = 0) {
+  if (!readable || typeof readable.getReader !== "function") {
+    // Degenerate: no stream, return the whole thing as one batch.
+    const text = typeof readable === "string" ? readable : "";
+    yield { cues: parseSubtitles(text, offset), done: true };
+    return;
+  }
+  const decoder = new TextDecoder("utf-8", { fatal: false });
+  const reader = readable.getReader();
+  let remainder = "";
+  let last = performance.now();
+  const canYield = typeof globalThis.scheduler?.yield === "function";
+  const accumulated = [];
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      remainder += decoder.decode(value, { stream: true });
+      // Process complete blocks (delimited by blank lines).
+      const parts = remainder.split(/\n[ \t]*\n/);
+      // Keep the last part as remainder — it may be incomplete.
+      remainder = parts.pop();
+      for (const block of parts) {
+        const cue = parseCueBlock(block, offset);
+        if (cue) {
+          accumulated.push(cue);
+        }
+      }
+      // Yield periodically so the browser can paint between chunks.
+      if (canYield && (accumulated.length & 31) === 0 && performance.now() - last > YIELD_BUDGET_MS) {
+        yield { cues: sortCues([...accumulated]), done: false };
+        last = performance.now();
+      }
+    }
+    // Flush remaining text.
+    if (remainder.trim()) {
+      const cue = parseCueBlock(remainder, offset);
+      if (cue) {
+        accumulated.push(cue);
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  yield { cues: sortCues(accumulated), done: true };
+}

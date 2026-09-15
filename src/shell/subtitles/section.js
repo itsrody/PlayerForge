@@ -11,6 +11,24 @@ import { logger } from "../../shared/logger.js";
 const SUBTITLE_FILE_ACCEPT = ".srt,.vtt";
 const SUBTITLE_EXT_RE = /\.(srt|vtt)$/i;
 
+/**
+ * Race a promise against an AbortSignal. When the signal aborts, the returned
+ * promise rejects with an AbortError. The original promise's result is still
+ * returned if it settles first. Used to compose GM_xmlhttpRequest (which lacks
+ * native AbortController support) with timeout/section-scope signals.
+ */
+function raceWithAbort(promise, signal) {
+  if (!signal || signal.aborted) {
+    return promise;
+  }
+  const { promise: abortPromise, reject } = Promise.withResolvers();
+  const onAbort = () => reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+  signal.addEventListener("abort", onAbort, { once: true });
+  return Promise.race([promise, abortPromise]).finally(() => {
+    signal.removeEventListener("abort", onAbort);
+  });
+}
+
 const SETTING_KEYS = {
   size: "subtitles.style.size",
   color: "subtitles.style.color",
@@ -350,7 +368,13 @@ export class SubtitlesSection {
     }
   }
 
-  /** Fetch a subtitle file from the web through the manager's xhr. */
+  /** Fetch a subtitle file from the web through the manager's xhr.
+   *  Uses AbortSignal.timeout() (Firefox 100+) composed with the section scope
+   *  via AbortSignal.any() (Firefox 109+) so a slow/dead fetch is bounded at
+   *  15s and a destroyed section cancels in-flight requests immediately. The
+   *  composed signal is raced against the GM_xmlhttpRequest promise; abort
+   *  rejects with AbortError, which #handleLoadError surfaces as a normal
+   *  fetch failure. */
   async loadFromUrl(rawUrl) {
     if (this.#destroyed) {
       return;
@@ -361,9 +385,24 @@ export class SubtitlesSection {
     }
     let response;
     try {
-      response = await gmRequestText(url);
+      const { signal } = this.#scope;
+      const timeoutSignal = AbortSignal.timeout(15000);
+      let fetchSignal;
+      try {
+        fetchSignal = AbortSignal.any([signal, timeoutSignal]);
+      } catch {
+        // jsdom brand-checks AbortSignal against its own realm; fall back to
+        // the section scope alone (no timeout) in test hosts.
+        fetchSignal = signal;
+      }
+      response = await raceWithAbort(gmRequestText(url), fetchSignal);
     } catch (err) {
-      this.#handleLoadError("fetch", url, err);
+      if (err.name === "AbortError") {
+        // Destroyed section or timeout — surface as a generic fetch failure.
+        this.#handleLoadError("fetch", url, new Error("Request timed out or was cancelled"));
+      } else {
+        this.#handleLoadError("fetch", url, err);
+      }
       return;
     }
     try {

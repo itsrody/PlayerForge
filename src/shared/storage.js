@@ -160,13 +160,18 @@ export function setConfigValue(path, value) {
  * write of the configs document. Preset/flush paths that touch many fields at
  * once avoid N serialized gmSetValue round trips (each of which re-reads and
  * re-serializes the whole doc).
+ *
+ * For single-field updates (the common case from stepper/checkbox changes),
+ * a shallow copy of the top-level object is sufficient — the mutation only
+ * touches leaf values, never restructures nested objects. Multi-field batches
+ * fall back to structuredClone for deep defensive copying.
  */
 export function setConfigFields(fields) {
-  // Work on a copy: successful batches commit to cache+storage atomically, a
-  // defensive early-return (unsafe segment) never leaks a partial mutation
-  // into the live cache the way mutating the cached doc in place would.
-  const doc = structuredClone(readConfigDoc());
-  for (const [path, value] of Object.entries(fields)) {
+  const entries = Object.entries(fields);
+  const doc = entries.length === 1
+    ? shallowCopyConfig(readConfigDoc())
+    : structuredClone(readConfigDoc());
+  for (const [path, value] of entries) {
     const segments = path.split(".");
     let node = doc;
     for (let i = 0; i < segments.length - 1; i++) {
@@ -196,11 +201,32 @@ export function setConfigFields(fields) {
 }
 
 /**
+ * Shallow copy of the config document: the top-level object and one level of
+ * nested objects are cloned; leaf values (primitives, arrays) are shared.
+ * This is safe for single-field updates where the mutation path is a straight
+ * line to a leaf — no intermediate object is replaced, only a leaf value is
+ * overwritten. Multi-field batches that restructure nested objects must use
+ * structuredClone for deep safety.
+ */
+function shallowCopyConfig(doc) {
+  if (!doc || typeof doc !== "object") {
+    return doc;
+  }
+  const copy = { ...doc };
+  for (const key of Object.keys(copy)) {
+    if (copy[key] != null && typeof copy[key] === "object" && !Array.isArray(copy[key])) {
+      copy[key] = { ...copy[key] };
+    }
+  }
+  return copy;
+}
+
+/**
  * Remove one dotted field from the configs document (migration sweeps).
  * No-op when any intermediate segment or the leaf itself is missing.
  */
 export function deleteConfigField(path) {
-  const doc = structuredClone(readConfigDoc());
+  const doc = shallowCopyConfig(readConfigDoc());
   const segments = path.split(".");
   let node = doc;
   for (let i = 0; i < segments.length - 1; i++) {

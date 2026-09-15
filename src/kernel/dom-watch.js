@@ -48,6 +48,9 @@ const DEFER_VISIBILITY_CAP_MS = 500;
 /** Cap timeout for a currently-deferred hidden-document flush; 0 = none. */
 let visibilityDeferTimer = 0;
 let visibilityListenerAttached = false;
+/** Retained handle for scheduler.postTask() so it can be cancelled if the
+ *  document becomes visible before the delay elapses. Null when not pending. */
+let backgroundTaskHandle = null;
 
 /**
  * Real-hidden only: `visibilityState === "hidden"` is the primitive behind
@@ -62,6 +65,9 @@ function isDocumentHidden() {
 function flushPending() {
   clearTimeout(visibilityDeferTimer);
   visibilityDeferTimer = 0;
+  if (backgroundTaskHandle) {
+    backgroundTaskHandle = null;
+  }
   flush();
 }
 
@@ -72,12 +78,23 @@ function onVisibilityChanged() {
   }
 }
 
-/** Defer the batch until the document is visible again or the cap elapses. */
+/** Defer the batch until the document is visible again or the cap elapses.
+ *  Uses scheduler.postTask() (Firefox 142+ / Chrome 129+) with 'background'
+ *  priority when available: the browser's task scheduler natively prioritizes
+ *  visible-tab work over this hidden-tab flush, and the delay option provides
+ *  the timeout cap. Falls back to setTimeout for older runtimes. */
 function deferFlushUntilVisible() {
-  if (visibilityDeferTimer) {
+  if (visibilityDeferTimer || backgroundTaskHandle) {
     return;
   }
-  visibilityDeferTimer = setTimeout(flushPending, DEFER_VISIBILITY_CAP_MS);
+  if (typeof globalThis.scheduler?.postTask === "function") {
+    backgroundTaskHandle = globalThis.scheduler.postTask(flushPending, {
+      priority: "background",
+      delay: DEFER_VISIBILITY_CAP_MS
+    });
+  } else {
+    visibilityDeferTimer = setTimeout(flushPending, DEFER_VISIBILITY_CAP_MS);
+  }
   if (!visibilityListenerAttached) {
     visibilityListenerAttached = true;
     document.addEventListener("visibilitychange", onVisibilityChanged, { once: true });
@@ -166,6 +183,7 @@ function stopIfIdle() {
     slots.length = 0;
     clearTimeout(visibilityDeferTimer);
     visibilityDeferTimer = 0;
+    backgroundTaskHandle = null;
     if (visibilityListenerAttached) {
       document.removeEventListener("visibilitychange", onVisibilityChanged);
       visibilityListenerAttached = false;

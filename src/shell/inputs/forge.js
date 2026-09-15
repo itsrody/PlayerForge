@@ -310,6 +310,15 @@ export class InputForge {
   }
 
   #hitTestVideo(pointerEvent) {
+    // Layout-free visibility pre-gate: checkVisibility() (Firefox 106+)
+    // evaluates display/visibility/opacity/contain-intrinsic in C++ without
+    // forcing a layout flush. When the video is hidden (e.g. during a panel
+    // transition or a script-injected overlay), we can bail immediately
+    // instead of paying getBoundingClientRect()'s synchronous layout.
+    if (typeof this.#video.checkVisibility === "function" &&
+        !this.#video.checkVisibility({ checkOpacity: true, checkClip: true })) {
+      return false;
+    }
     // Cache the box within one interaction so taps outside the HUD don't
     // force a sync layout flush (getBoundingClientRect). The cache is dropped
     // at every pointerdown (see #handlePointerDown), so it can never be served

@@ -850,7 +850,17 @@ function isOwnFrame(source, doc = document, depth = 0) {
  * so a cross-origin child's element is resolvable here - which is exactly what
  * the fullscreen provisioner and frame relay need to vouch event.source.
  */
+/** WeakRef-backed iframe cache: Window -> WeakRef<HTMLIFrameElement>.
+ *  Weak references let GC reclaim dead iframe elements without an explicit
+ *  sweep; FinalizationRegistry auto-evicts the Map entry when the element
+ *  is collected, preventing unbounded Map growth on iframe-heavy SPAs. */
 const iframeCache = new Map();
+/** Auto-evict Map entries when the iframe element is GC'd. The held value
+ *  is the Window key; on finalization the entry is dropped from the cache.
+ *  Firefox 129+ / Chrome 84+; on the Firefox 157 floor. */
+const iframeRegistry = new FinalizationRegistry((win) => {
+  iframeCache.delete(win);
+});
 /** Document the cache currently describes. Tracked so a document swap (fresh
  *  page / test harness) reseeds instead of serving a stale map. */
 let iframeCacheDoc = null;
@@ -871,9 +881,12 @@ function seedIframeCache() {
   iframeCache.clear();
   const frames = document.getElementsByTagName("iframe");
   for (let i = 0; i < frames.length; i++) {
-    const win = frames[i].contentWindow;
+    const ifr = frames[i];
+    const win = ifr.contentWindow;
     if (win) {
-      iframeCache.set(win, frames[i]);
+      const ref = new WeakRef(ifr);
+      iframeCache.set(win, ref);
+      iframeRegistry.register(ifr, win);
     }
   }
 }
@@ -883,7 +896,9 @@ function seedIframeCache() {
 function registerIframe(ifr) {
   const win = ifr.contentWindow;
   if (win) {
-    iframeCache.set(win, ifr);
+    const ref = new WeakRef(ifr);
+    iframeCache.set(win, ref);
+    iframeRegistry.register(ifr, win);
   }
 }
 
@@ -918,8 +933,13 @@ function diffIframeCache(records) {
       collectIframes(added[i]);
     }
   }
-  for (const [win, ifr] of iframeCache) {
-    if (!ifr.isConnected) {
+  // Sweep: drop entries whose iframe is no longer connected or whose WeakRef
+  // was reclaimed by GC (deref returns undefined). The FinalizationRegistry
+  // handles the GC case asynchronously; this sweep catches the deterministic
+  // isConnected=false path (SPA node removal) immediately.
+  for (const [win, ref] of iframeCache) {
+    const ifr = ref.deref();
+    if (!ifr || !ifr.isConnected) {
       iframeCache.delete(win);
     }
   }
@@ -1004,7 +1024,8 @@ function iframeElementForWindow(win) {
   }
   if (iframeCacheActive) {
     ensureIframeCacheCurrent();
-    return iframeCache.get(win) || null;
+    const ref = iframeCache.get(win);
+    return ref ? ref.deref() ?? null : null;
   }
   // Fallback before the bridge seeds the cache (or when handlers are used
   // directly): scan inline so the vouch never silently drops.
