@@ -754,40 +754,60 @@ export class SettingsPanel {
     if (prev === targetSection) {
       return;
     }
-    if (prev) {
-      const prevTab = this.#sections.get(prev);
-      if (prevTab) {
-        prev.hidden = true;
-        prevTab.classList.remove("pf-panel-tab-active");
-        prevTab.setAttribute("aria-selected", "false");
+    // Arm the transient vt name BEFORE the snapshot: the outgoing section is
+    // visible with .pf-panel-vt-active when the OLD tree is captured, and the
+    // incoming section keeps it for the NEW tree. The swap runs under a view
+    // transition; cleanup releases both names once it settles. When no VT is
+    // supported (jsdom/no API) the update runs directly and cleanup is
+    // synchronous - behavior is unchanged.
+    prev?.classList.add("pf-panel-vt-active");
+    targetSection.classList.add("pf-panel-vt-active");
+    const vt = this.#runWithViewTransition("pf-tab", () => {
+      if (prev) {
+        const prevTab = this.#sections.get(prev);
+        if (prevTab) {
+          prev.hidden = true;
+          prevTab.classList.remove("pf-panel-tab-active");
+          prevTab.setAttribute("aria-selected", "false");
+        }
       }
-    }
-    targetSection.hidden = false;
-    const targetTab = this.#sections.get(targetSection);
-    if (targetTab) {
-      targetTab.classList.add("pf-panel-tab-active");
-      targetTab.setAttribute("aria-selected", "true");
-    }
-    this.#activeSection = targetSection;
+      targetSection.hidden = false;
+      const targetTab = this.#sections.get(targetSection);
+      if (targetTab) {
+        targetTab.classList.add("pf-panel-tab-active");
+        targetTab.setAttribute("aria-selected", "true");
+      }
+      this.#activeSection = targetSection;
+    });
+    const releaseNames = () => {
+      prev?.classList.remove("pf-panel-vt-active");
+      targetSection.classList.remove("pf-panel-vt-active");
+    };
+    // finished resolves on completion and rejects when a newer view
+    // transition supersedes this one - both stop the names from lingering.
+    (vt?.finished
+      ? vt.finished.then(releaseNames, releaseNames)
+      : Promise.resolve().then(releaseNames));
   }
 
   #runWithViewTransition(type, update) {
     const svt = document.startViewTransition;
     if (typeof svt !== "function") {
       update();
-      return;
+      return null;
     }
     // The typed-transitions ({ types, update }) signature is Chromium-specific.
     // Firefox 144+ supports base same-document transitions (callback-only).
     // A TypeError in Firefox is caught and the base path is tried first;
     // the final fallback runs the update directly without a transition.
     try {
-      svt({ types: [type], update });
+      return svt({ types: [type], update });
     } catch {
       try {
-        svt(update);
+        return svt(update);
       } catch {
         update();
+        return null;
       }
     }
   }
