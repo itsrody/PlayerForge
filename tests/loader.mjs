@@ -2,7 +2,7 @@ import { register } from "node:module";
 register("./css-hook.mjs", import.meta.url);
 
 /**
- * jsdom 29 lacks several platform APIs the Chromium-only production code uses
+ * jsdom 29 lacks several platform APIs the production code uses
  * unconditionally. Rather than scatter feature-detects through src/ to appease
  * a headless test host, the absence is shimmed here - in the ONE place the
  * harness bootstraps - so production code stays pure Firefox 157. These shims
@@ -37,7 +37,7 @@ if (typeof globalThis.IntersectionObserver === "undefined") {
 if (typeof globalThis.scheduler === "undefined") {
   // Minimal cooperative scheduler shim so parseSubtitlesAsync's yield branch
   // is reachable under Node. yield() resolves on a microtask, matching the
-  // real Chromium hand-back without needing a real task-dispatch scheduler.
+  // real browser hand-back without needing a real task-dispatch scheduler.
   globalThis.scheduler = {
     yield: () => Promise.resolve()
   };
@@ -59,13 +59,4 @@ if (typeof globalThis.matchMedia !== "function") {
     addEventListener() {},
     removeEventListener() {}
   });
-}
-// Chromium's Vibration API - absent on Node. Stubbed so gestureHaptic's
-// feature-detect is true and tests can assert the haptic pulse pattern; the
-// stub records the last pattern for inspection.
-if (typeof globalThis.navigator?.vibrate !== "function") {
-  globalThis.navigator.vibrate = (pattern) => {
-    globalThis.__lastHapticPattern = pattern;
-    return true;
-  };
 }

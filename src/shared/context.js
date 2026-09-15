@@ -453,18 +453,19 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   let transferPort = null;
   let settled = false;
 
-  // AbortSignal.any() + AbortSignal.timeout() is the ideal path (Chromium 103+),
-  // but Node's brand-check can reject timeout signals in older runtimes.
-  // Feature-detect and fall back to manual deadline tracking.
+  // AbortSignal.timeout() (Firefox 100+ / Chrome 103+) and AbortSignal.any()
+  // (Firefox 109+ / Chrome 103+) are both on the Firefox 157 floor, so the
+  // browser always takes the composed-signal path. Node/jsdom brand-checks an
+  // AbortSignal against its own realm and rejects a jsdom-constructed signal
+  // inside any(), so test hosts drop to the controller + manual deadline.
   let signal;
-  let useSignalAny = false;
+  let deadline = 0;
   try {
     signal = AbortSignal.any([ac.signal, AbortSignal.timeout(timeoutMs)]);
-    useSignalAny = true;
   } catch {
     signal = ac.signal;
+    deadline = Date.now() + timeoutMs;
   }
-  const deadline = useSignalAny ? 0 : Date.now() + timeoutMs;
 
   const settle = (context, viaPort) => {
     if (settled) {
@@ -501,7 +502,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
       }, true);
     }
   };
-  if (!legacyChain && typeof MessageChannel === "function") {
+  if (!legacyChain) {
     try {
       const mc = new MessageChannel();
       replyPort = mc.port1;
@@ -533,11 +534,9 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
     }
   };
 
-  if (useSignalAny) {
-    signal.addEventListener("abort", () => {
-      settle(null, false);
-    }, { once: true });
-  }
+  signal.addEventListener("abort", () => {
+    settle(null, false);
+  }, { once: true });
 
   window.addEventListener("message", onMessage, { signal });
 
@@ -559,8 +558,8 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
     window.parent.postMessage(msg, "*");
   };
   const attempt = () => {
-    if (useSignalAny ? signal.aborted : Date.now() >= deadline) {
-      if (!useSignalAny) ac.abort();
+    if (signal.aborted || (deadline !== 0 && Date.now() >= deadline)) {
+      if (deadline !== 0) ac.abort();
       settle(null, false);
       return;
     }

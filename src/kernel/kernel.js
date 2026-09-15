@@ -210,9 +210,9 @@ export class Kernel {
       }
     };
 
-    /** Chromium-native single-target consolidation: `MutationObserver.observe()`
-     *  supports multiple root targets natively (childList filtered in C++), so
-     *  up to `watchDepth` per-video C++ wrappers collapse to one instance. */
+    /** Native multi-target consolidation: `MutationObserver.observe()` supports
+     *  multiple root targets natively (childList filtered in native code), so
+     *  up to `watchDepth` per-video wrappers collapse to one instance. */
     const observer = new MutationObserver(checkAnchors);
     this.#removalObservers.add(observer);
 

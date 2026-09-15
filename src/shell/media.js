@@ -102,15 +102,14 @@ export function createMediaControls({ video }) {
     },
 
     /**
-     * Latched scrub seek for an in-progress drag session. Readiness was
-     * already verified and `duration` captured when the stroke latched, so
-     * this skips the per-move isReady() gate and re-reading video.duration
-     * (native getter) - the single most frequent user-facing path.
+     * Latched scrub seek for an in-progress drag session. The caller
+     * guarantees `duration` is finite and positive (captured + validated at
+     * stroke latch) so the per-move path skips the per-move isReady() gate,
+     * duration re-read, and finite-check fallback — the single most frequent
+     * user-facing path.
      */
     scrubToLatched(time, duration) {
-      video.currentTime = Number.isFinite(duration) && duration > 0
-        ? clamp(time, 0, duration)
-        : Math.max(0, time);
+      video.currentTime = clamp(time, 0, duration);
     },
 
     skip(delta) {

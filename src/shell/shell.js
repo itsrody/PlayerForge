@@ -6,13 +6,12 @@ import { ResumeTracker } from "./resume.js";
 import { SubtitlesSection } from "./subtitles/section.js";
 import { VideoFilter } from "./filter.js";
 import { SettingsPanel } from "./chrome/panel.js";
-import { addSettingsSection, getSetting } from "./chrome/config.js";
+import { addSettingsSection } from "./chrome/config.js";
 import { TUNING } from "../shared/tuning.js";
 import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
 import { SHELL_MARKER, warmStyles, injectShell, watchShellHost } from "./chrome/inject.js";
-import { ensureViewportFitCover } from "./chrome/viewport.js";
 import { requestFullscreenProvision } from "../shared/context.js";
 import { DOMManager } from "../shared/dom-manager.js";
 
@@ -141,12 +140,10 @@ export class Shell {
    * Unified contextual reference box, per the PlayerForge geometry rule: in
    * inline mode the reference is the shell's own container (the SDK container).
    * Fullscreen reference box used for fill-mode cover scaling and scrub
-   * normalization. With the edge-to-edge bypass (see viewport.js) the
-   * fullscreen iframe draws behind the cutout edge-to-edge, so the SDK's
-   * rendered box IS the physical screen - `screen.width/height`. No env-based
-   * safe-rect narrowing is needed (or possible: env(safe-area-inset-*) does
-   * not resolve inside iframes, Chromium #467970444) - the bypass already puts
-   * the frame at the screen. Returns { width, height }.
+   * normalization. Firefox's fullscreen iframe covers the whole display on its
+   * own (the top document's viewport-fit=cover drives the cutout edge-to-edge
+   * behavior; no per-frame workaround is needed), so the SDK's rendered box IS
+   * the physical screen - `screen.width/height`. Returns { width, height }.
    */
   get referenceBox() {
     if (fs) {
@@ -249,14 +246,6 @@ export class Shell {
     // so shell construction never blocks on the @resource fetch. A warm
     // background upgrade later propagates through the same shared sheet.
     warmStyles();
-    // Document-level (idempotent): make the SDK's own viewport report
-    // viewport-fit=cover so the fullscreen frame can draw behind the Android
-    // cutout edge-to-edge (see viewport.js). Gated by fullscreen.edgeToEdge:
-    // when disabled we leave the iframe at the default (Chrome letterboxes to
-    // the safe area itself) and fill simply covers the letterboxed frame.
-    if (getSetting("fullscreen.edgeToEdge") !== false) {
-      ensureViewportFitCover();
-    }
     this.#shellDom = injectShell(this.container);
     if (!this.#shellDom) {
       logger.error("shell", "Failed to inject shell DOM");
@@ -286,9 +275,8 @@ export class Shell {
     }
     // Expose media state as CSS custom properties on the host so the shadow
     // DOM can style based on playing/paused/muted without crossing the realm
-    // boundary. The :playing/:paused/:muted pseudo-classes (Chromium 153+,
-    // absent on Firefox) cannot reach into shadow roots; custom properties
-    // bridge the gap.
+    // boundary. The :playing/:paused/:muted pseudo-classes cannot reach into
+    // shadow roots in any engine; custom properties bridge the gap.
     if (host) {
       const sync = () => {
         host.style.setProperty("--pf-media-paused", video.paused ? "1" : "0");
@@ -304,10 +292,10 @@ export class Shell {
   /** Surface a hint + re-provision when a fullscreen entry is rejected. */
   #watchFullscreen() {
     // An attempt to enter fullscreen was rejected (typically because an
-    // ancestor embed lacks allowfullscreen - Chromium requires it on every
-    // frame edge). Surface a hint and re-provision the chain
-    // (idempotent) so a retry succeeds if the attributes were just granted,
-    // e.g. an SDK iframe created after our boot-time provisioning.
+    // ancestor embed lacks allowfullscreen - every engine gates fullscreen on
+    // that attribute at each frame edge). Surface a hint and re-provision the
+    // chain (idempotent) so a retry succeeds if the attributes were just
+    // granted, e.g. an SDK iframe created after our boot-time provisioning.
     this.#dom.listen(document, "fullscreenerror", () => {
       if (this.#destroyed || fs) {
         return;

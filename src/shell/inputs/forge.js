@@ -14,8 +14,8 @@ import { logger } from "../../shared/logger.js";
 const WHEEL_CAPTURE = { capture: true, passive: false };
 
 // Gesture calibration hoisted to module consts. TUNING is static (read-only
-// after load), so binding these at module scope lets V8 treat them as
-// invariant values and fold them - Maglev/TurboFan raise constants to load,
+// after load), so binding these at module scope lets SpiderMonkey treat them
+// as invariant values and fold them - WarpJIT raises constants to load,
 // instead of re-running shape-guarded property loads on every high-frequency
 // pointer/keyboard event.
 const EDGE_ZONE_RATIO = TUNING.gestures.edgeZoneRatio;
@@ -30,7 +30,9 @@ const PINCH_BASELINE_DELAY_MS = TUNING.gestures.pinchBaselineDelayMs;
 const TRACKPAD_COOLDOWN_MS = TUNING.gestures.trackpadCooldownMs;
 const SUPPRESS_WINDOW_MS = TUNING.gestures.suppressWindowMs;
 const DOUBLE_TAP_WINDOW_MS = TUNING.gestures.doubleTapWindowMs;
-const SCRUB_VELOCITY_TAU_S = TUNING.scrub.velocityFilterMs / 1000;
+/** Inverse time constant of the scrub velocity low-pass filter (1/tau), so
+ *  each move's alpha does a multiply instead of a divide. */
+const SCRUB_VELOCITY_INV = 1000 / TUNING.scrub.velocityFilterMs;
 
 /** All live input engines, used for keyboard focus arbitration. */
 const activeForges = new Set();
@@ -325,9 +327,9 @@ export class InputForge {
 
   #hitTestVideo(pointerEvent) {
     // Cache the box within one interaction so taps outside the HUD don't
-    // force a sync layout flush (getBoundingClientRect) on Chromium. The cache
-    // is dropped at every pointerdown (see #handlePointerDown), so it can never
-    // be served stale by a scroll or ancestor-transform move.
+    // force a sync layout flush (getBoundingClientRect). The cache is dropped
+    // at every pointerdown (see #handlePointerDown), so it can never be served
+    // stale by a scroll or ancestor-transform move.
     if (!this.#videoRect) {
       this.#videoRect = this.#video.getBoundingClientRect();
     }
@@ -339,8 +341,9 @@ export class InputForge {
   #zoneForPoint(pointerEvent) {
     // Edge zones only steer fullscreen gestures (dbltap edge-skip, swipe-down
     // exit - both fs-gated), so the reference is the physical display. screen
-    // also sidesteps innerWidth's scrollbar-inclusive quirk on Chromium. Guard
-    // to the window when the screen reports no size (headless/test environs).
+    // also sidesteps innerWidth's scrollbar-inclusive quirk (the display has
+    // no scrollbar). Guard to the window when the screen reports no size
+    // (headless/test environs).
     const screenWidth =
       typeof screen !== "undefined" && screen.width > 0
         ? screen.width
@@ -672,8 +675,8 @@ export class InputForge {
   }
 
   /**
-   * Consume every coalesced sample of the move so high-rate Chromium pointer
-   * streams scrub at full fidelity; one semantic event is emitted per move.
+   * Consume every coalesced sample of the move so high-rate pointer streams
+   * scrub at full fidelity; one semantic event is emitted per move.
    *
    * Real-time velocity is measured at move granularity from true event
    * timestamps (the live event's own DOMHighResTimeStamp, same epoch as
@@ -684,7 +687,7 @@ export class InputForge {
    * signal responsive enough to track speed changes mid-stroke, so the seek
    * amount stays proportional to the hand in real time.
    *
-   * Chromium's PointerEvent.getPredictedEvents() returns extrapolated FUTURE
+   * PointerEvent.getPredictedEvents() returns extrapolated FUTURE
    * positions. We speculatively "draw ahead" with them, matching the drawing
    * idiom in the Pointer Events spec (predict, then discard once real points
    * arrive): predicted travel feeds the VELOCITY estimate only, never the
@@ -700,7 +703,7 @@ export class InputForge {
     const hasCoalesced = typeof event.getCoalescedEvents === "function";
     const samples = hasCoalesced ? event.getCoalescedEvents() : null;
     // Coalesced samples then the live event, without materializing a combined
-    // array: high-rate Chromium pointer streams land here every move, so a
+    // array: high-rate pointer streams land here every move, so a
     // [[...samples, event]] spread per frame would allocate needlessly.
     if (samples) {
       const count = samples.length + 1;
@@ -734,7 +737,7 @@ export class InputForge {
     const dt = (now - this.#scrubLastTime) / 1000;
     this.#scrubLastTime = now;
     const instantVelocity = dt > 0.001 ? velocityStep / dt : 0;
-    const alpha = dt > 0 ? 1 - Math.exp(-dt / SCRUB_VELOCITY_TAU_S) : 0;
+    const alpha = dt > 0 ? 1 - Math.exp(-dt * SCRUB_VELOCITY_INV) : 0;
     this.#scrubVelocity += alpha * (instantVelocity - this.#scrubVelocity);
     // Emit via the pooled event: the payload and the Event both ride reused
     // objects, so no per-move allocation (dispatchEvent runs synchronously and
@@ -906,7 +909,7 @@ export class InputForge {
       if (!isKeyArmed(binding)) {
         continue;
       }
-      if (!this.#shouldHandleKeys(!!binding.allowControlFocus)) {
+      if (!this.#shouldHandleKeys(binding.allowControlFocus)) {
         continue;
       }
       lastActiveForge = this;

@@ -98,22 +98,6 @@
   }
 }
 
-/* -- Low CPU-tier fidelity gate (CPU Performance API, Chromium 152+) --
-   Set on the host element by injectShell. On a "low" device the most
-   expensive visual effects - backdrop blur/saturate and promiscuous
-   compositor hints - cost more than they delight, so they are turned down
-   at the token and hint level rather than per-component. "medium" leaves
-   everything at the default. High-tier is untouched (the default already
-   favors the rich look). */
-.pf-shell[data-pf-cpu-tier="low"] {
-  /* Flat, opaque surfaces: no transparent layers to composite, no blur. */
-  --pf-hud-glass: var(--pf-surface);
-  --pf-blur-sm: none;
-  --pf-blur-lg: none;
-  --pf-panel-bg: var(--pf-surface);
-  --pf-toast-bg: var(--pf-surface);
-}
-
 /* Neutralize the inline 'position: relative' we set on the container
    while it is the native fullscreen element. The UA's ':fullscreen'
    rule uses 'position: fixed' (non-important), which an inline style
@@ -126,7 +110,7 @@
   height: 100% !important;
 }
 
-/* Register the cue-position custom properties as syntax-typed so Blink can
+/* Register the cue-position custom properties as syntax-typed so the engine can
    reason about them as layout/percentage values instead of opaque strings.
    The cue pool sets these per cuechange (our hottest DOM churn); typed
    registration lets the style engine invalidate only the affected
@@ -267,7 +251,7 @@
       left: 50%;
       z-index: var(--pf-z-toast);
       will-change: opacity, translate;
-      /* Dedicated translate property (Chrome 104+) - keeps centering out of
+      /* Dedicated translate property (Firefox 72+ / Chrome 104+) - keeps centering out of
          the transform property, so transform-based animations on the toast
          never clobber it. */
       translate: -50%;
@@ -989,7 +973,7 @@
 
     /* - History tab - card rows */
     /* History can hold up to ~1000 cards (cap in resume.js). content-visibility
-       lets Blink skip layout/style/paint for rows scrolled out of the list's
+       lets the engine skip layout/style/paint for rows scrolled out of the list's
        own overflow box; contain-intrinsic-size keeps the scroll geometry stable
        so the viewport never jumps while skipping. */
     .pf-history-list {
@@ -999,9 +983,9 @@
       max-height: 168px;
       overflow-y: auto;
       /* One-axis scroll container: horizontal overflow is clipped, never
-         turned into a second scroller (Chromium 125+ supports clip per axis;
-         the scroll+clip two-value form stays out because it is flagged behind
-         a browser flag, beyond the Firefox 157 floor). */
+         turned into a second scroller (Firefox 81+ / Chrome 125+ support clip
+         per axis; the scroll+clip two-value shorthand is Chrome-flagged and
+         adds nothing over plain clip on Firefox). */
       overflow-x: clip;
       scrollbar-width: thin;
       scrollbar-color: var(--pf-text-mid) transparent;
@@ -1117,7 +1101,8 @@
 
     /* Portrait phones (touch): anchor the panel as a bottom sheet - it sits
        within thumb reach and never covers the whole video. safe-area-max-inset-
-       bottom (Chrome 135+) lifts the sheet above the Android gesture bar when
+       bottom (Chrome 135+; Chromium-only - Firefox always evaluates it to the
+       fallback) lifts the sheet above the Android gesture bar when
        viewport-fit=cover is active; the env() falls back to 0 when unset. */
     @media (max-width: 520px) and (pointer: coarse) {
       .pf-panel {
@@ -1287,7 +1272,7 @@
     }
   }
 
-  /* View Transition for the settings panel (Chrome 140+). Scoped via
+  /* View Transition for the settings panel (Firefox 144+ / Chrome 140+). Scoped via
      view-transition-name on .pf-panel.pf-open; the pseudo-element layers
      cross-fade with a subtle scale on entry and a reverse on exit. */
   ::view-transition-old(pf-panel) {

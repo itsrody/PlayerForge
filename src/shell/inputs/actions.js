@@ -3,7 +3,6 @@ import { TUNING } from "../../shared/tuning.js";
 import { formatTime } from "../../shared/time.js";
 import { fs, subscribeFullscreen } from "../../shared/shadow.js";
 import { GESTURE_EVENTS } from "../../kernel/contract.js";
-import { gestureHaptic } from "../chrome/haptics.js";
 import { EASE_SNAPPY_CURVE, EASE_SNAPPY_MS } from "../../shared/timing.js";
 
 export { GESTURE_EVENTS };
@@ -37,33 +36,44 @@ export const INPUT_BINDINGS = [
   { id: "pinch-fill", gesture: "pinch", setting: "gestures.pinch", fs: true },
 
   // - Keyboard -
+  // All key records share the exact same shape (key order) so SpiderMonkey
+  // keeps them in one hidden class and the forge's per-keystroke loop reads
+  // monomorphic: direction and allowControlFocus are always present (null /
+  // false where unused) so no polymorphic bailout on field presence checks.
   {
-    id: "key-skip-right", gesture: "key", code: "ArrowRight", emit: GESTURE_EVENTS.skip,
-    direction: "right", setting: "gestures.hotkeys", fs: false
+    id: "key-skip-right", gesture: "key", code: "ArrowRight",
+    setting: "gestures.hotkeys", emit: GESTURE_EVENTS.skip,
+    direction: "right", allowControlFocus: false, fs: false
   },
   {
-    id: "key-skip-left", gesture: "key", code: "ArrowLeft", emit: GESTURE_EVENTS.skip,
-    direction: "left", setting: "gestures.hotkeys", fs: false
+    id: "key-skip-left", gesture: "key", code: "ArrowLeft",
+    setting: "gestures.hotkeys", emit: GESTURE_EVENTS.skip,
+    direction: "left", allowControlFocus: false, fs: false
   },
   {
-    id: "key-volume-up", gesture: "key", code: "ArrowUp", emit: GESTURE_EVENTS.volume,
-    direction: "up", setting: "gestures.hotkeys", fs: false
+    id: "key-volume-up", gesture: "key", code: "ArrowUp",
+    setting: "gestures.hotkeys", emit: GESTURE_EVENTS.volume,
+    direction: "up", allowControlFocus: false, fs: false
   },
   {
-    id: "key-volume-down", gesture: "key", code: "ArrowDown", emit: GESTURE_EVENTS.volume,
-    direction: "down", setting: "gestures.hotkeys", fs: false
+    id: "key-volume-down", gesture: "key", code: "ArrowDown",
+    setting: "gestures.hotkeys", emit: GESTURE_EVENTS.volume,
+    direction: "down", allowControlFocus: false, fs: false
   },
   {
-    id: "key-mute", gesture: "key", code: "KeyM", emit: GESTURE_EVENTS.mute,
-    setting: "gestures.hotkeys", fs: false
+    id: "key-mute", gesture: "key", code: "KeyM",
+    setting: "gestures.hotkeys", emit: GESTURE_EVENTS.mute,
+    direction: null, allowControlFocus: false, fs: false
   },
   {
-    id: "key-pip", gesture: "key", code: "KeyP", emit: GESTURE_EVENTS.pip,
-    setting: "gestures.hotkeys", fs: false
+    id: "key-pip", gesture: "key", code: "KeyP",
+    setting: "gestures.hotkeys", emit: GESTURE_EVENTS.pip,
+    direction: null, allowControlFocus: false, fs: false
   },
   {
-    id: "key-panel", gesture: "key", code: "KeyS", emit: GESTURE_EVENTS.panel,
-    setting: "gestures.hotkeys", fs: false, allowControlFocus: true
+    id: "key-panel", gesture: "key", code: "KeyS",
+    setting: "gestures.hotkeys", emit: GESTURE_EVENTS.panel,
+    direction: null, allowControlFocus: true, fs: false
   }
 ];
 
@@ -119,7 +129,8 @@ export function isKeyArmed(binding) {
  * adaptive-refresh treatment of the gesture table.
  */
 const SCRUB_KNEE_PX_PER_S = TUNING.scrub.velocity.kneeVelocityPxS;
-const SCRUB_EXPONENT = TUNING.scrub.velocity.exponent;
+/** 1/knee hoisted: the per-move curve is a multiply, never a divide. */
+const SCRUB_KNEE_INV = 1 / SCRUB_KNEE_PX_PER_S;
 const SCRUB_DEAD_ZONE_PX = TUNING.scrub.deadZonePx;
 const SCRUB_SLOW_FULL_WIDTH_SECONDS = TUNING.scrub.velocity.slowFullWidthSeconds;
 const SCRUB_FAST_FULL_WIDTH_FRACTION = TUNING.scrub.velocity.fastFullWidthFraction;
@@ -143,6 +154,7 @@ const stateFor = (() => {
         scrubDirectionMomentum: 0,
         lastScrubToastAt: 0,
         scrubToastText: null,
+        scrubToastHead: "",
         scrubToastSecDuration: NaN,
         scrubToastSecCurrent: NaN,
         streakCount: 0,
@@ -186,15 +198,14 @@ function performSkip(shell, state, direction) {
  * exit, pinch fill, and swipe/pinch restore. A newer snap cancels the previous
  * in-flight animation so no cleanup can land mid-gesture.
  *
- * Where Element.animate (Web Animations API) is available -
- * Chromium 69+, i.e. this fork's baseline - the snap runs a WAAPI animation
- * on the compositor: one deterministic compositor animation with a real
- * finish/cancel, replacing the will-change + CSS-transition + transitionend
- * listener puzzle that could race when the transition shorthand was flipped
- * off. The video is promoted to its own compositor layer while a transform is
- * live (fill-mode, swipe/pinch restore) so Chromium composites the
- * scale/translate instead of re-rasterizing the media surface every frame;
- * the layer is released once the snap settles (or is cancelled).
+ * The snap runs a Web Animations API animation on the compositor: one
+ * deterministic compositor animation with a real finish/cancel, replacing the
+ * will-change + CSS-transition + transitionend listener puzzle that could race
+ * when the transition shorthand was flipped off. The video is promoted to its
+ * own compositor layer while a transform is live (fill-mode, swipe/pinch
+ * restore) so the engine composites the scale/translate instead of
+ * re-rasterizing the media surface every frame; the layer is released once the
+ * snap settles (or is cancelled).
  */
 const EASE_STYLE = EASE_SNAPPY_CURVE;
 const EASE_MS = EASE_SNAPPY_MS;
@@ -232,7 +243,7 @@ export function easeTransformTo(video, transform) {
     video.style.willChange = "transform";
   }
 
-  // WAAPI path (Chromium baseline): one compositor animation from the current
+  // WAAPI path: one compositor animation from the current
   // computed transform to the target. On finish the final value is committed
   // to an inline style and the animation is cancelled so its fill gives way;
   // on cancel (via stop() or supersession) the layer is dropped immediately.
@@ -400,7 +411,6 @@ export function attachInputActions(shell, host, signal) {
     const speed = TUNING.controller.holdSpeed;
     state.savedRate = shell.playbackRate;
     shell.media.beginBoost(speed);
-    gestureHaptic("hold");
     shell.toast({ icon: "right-arrows", text: `${speed}x`, group: "hold" });
   }, { signal });
 
@@ -438,24 +448,28 @@ export function attachInputActions(shell, host, signal) {
       const fastCeiling = duration * SCRUB_FAST_FULL_WIDTH_FRACTION;
       state.scrubbing = true;
       state.scrubDuration = duration;
+      state.scrubToastHead = formatTime(duration);
       state.scrubSlowGain = SCRUB_SLOW_FULL_WIDTH_SECONDS / width;
       state.scrubFastGain = fastCeiling / width;
       state.scrubSensitivity = SCRUB_SENSITIVITY;
       state.scrubDirectionMomentum = 0;
-      gestureHaptic("scrub");
     }
 
     if (Math.abs(detail.dx) < SCRUB_DEAD_ZONE_PX) {
       return;
     }
 
-    // Proportional velocity curve: t in [0,1] as |velocity| rises past the
+    // Velocity-proportional curve: t in [0,1] as |velocity| rises past the
     // knee, so slow scrubbing stays near the 1s floor while fast scrubbing
     // eases toward the duration-scaled ceiling (a fraction of the runtime).
     // Sampled live each move, the seek amount tracks the hand's current
     // velocity in real time and scales with content length.
     const v = Math.abs(detail.velocity);
-    const t = Math.min(1, (v / SCRUB_KNEE_PX_PER_S) ** SCRUB_EXPONENT);
+    // t = (v/knee)^1.5; rewritten as x*sqrt(x) so WarpJIT lowers it to one SSE
+    // sqrt instead of an fdlibm pow call on every scrub move. x >= 0 here, so
+    // the sqrt x-by-x form needs no separate range guard.
+    const x = v * SCRUB_KNEE_INV;
+    const t = x < 1 ? x * Math.sqrt(x) : 1;
     const gain = state.scrubSlowGain + (state.scrubFastGain - state.scrubSlowGain) * t;
     const deltaSeconds = detail.dx * gain * state.scrubSensitivity;
     // The stroke latched above, so duration is stable - use the latched-seek
@@ -468,13 +482,17 @@ export function attachInputActions(shell, host, signal) {
       return;
     }
     state.lastScrubToastAt = now;
-    // Cache the formatted time string: rebuild only when the visible second
-    // changes, not every 100ms tick — avoids 3 string allocations per display
-    // tick during scrub.
+    // Cache the formatted time string: the duration half was formatted once at
+    // latch (state.scrubToastHead) and is constant for the stroke, so each tick
+    // rebuilds only the current-time half - ~1 string allocation per display
+    // tick during scrub instead of 3.
     const secDuration = Math.floor(state.scrubDuration);
     const secCurrent = Math.floor(shell.video.currentTime);
     if (secDuration !== state.scrubToastSecDuration || secCurrent !== state.scrubToastSecCurrent) {
-      state.scrubToastText = `${formatTime(state.scrubDuration)} / ${formatTime(shell.video.currentTime)}`;
+      if (secDuration !== state.scrubToastSecDuration) {
+        state.scrubToastHead = formatTime(state.scrubDuration);
+      }
+      state.scrubToastText = `${state.scrubToastHead} / ${formatTime(shell.video.currentTime)}`;
       state.scrubToastSecDuration = secDuration;
       state.scrubToastSecCurrent = secCurrent;
     }
@@ -497,6 +515,7 @@ export function attachInputActions(shell, host, signal) {
     state.scrubFastGain = 0;
     state.scrubSensitivity = 0;
     state.scrubToastText = null;
+    state.scrubToastHead = "";
     state.scrubToastSecDuration = NaN;
     state.scrubToastSecCurrent = NaN;
     shell.hideToast("scrub");
@@ -518,7 +537,6 @@ export function attachInputActions(shell, host, signal) {
       return;
     }
     if (detail.distance > TUNING.gestures.swipeExitMinPx) {
-      gestureHaptic("swipe");
       clearFillMode(shell, state, false);
       shell.toastFlash("fs-exit", "Fullscreen Exited", "fs");
       shell.exitFullscreen();
@@ -532,7 +550,6 @@ export function attachInputActions(shell, host, signal) {
    * playback. Inline double-taps belong to the browser/player natively.
    */
   host.addEventListener(GESTURE_EVENTS.dbltap, ({ detail }) => {
-    gestureHaptic("dbltap");
     if (detail.zone === "left-edge" || detail.zone === "right-edge") {
       performSkip(shell, stateFor(shell), detail.zone === "left-edge" ? "left" : "right");
     } else if (detail.zone === "screen") {
@@ -589,7 +606,6 @@ export function attachInputActions(shell, host, signal) {
       if (scale <= 1) {
         return;
       }
-      gestureHaptic("pinch");
       // Own object-fit: computeCoverScale models the element content letterboxed
       // by its own ratio (contain). The embed may use the UA default 'fill', so
       // normalize to 'contain' here; clearFillMode restores the prior value.

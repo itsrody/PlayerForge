@@ -60,7 +60,7 @@ function workerCapable() {
 }
 
 function reportWorkerJank(data) {
-  // LoAF attribution in workers is Chromium 153+; only debug runs warrant the
+  // LoAF attribution in workers is Firefox 138+ / Chromium 153+; only debug runs warrant the
   // noise - the one-per-load perf message is the whole debug-story.
   if (logger.enabled) {
     logger.warn(

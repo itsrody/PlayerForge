@@ -64,14 +64,14 @@ function flush() {
 }
 
 /**
- * Chromium-specific scheduling advantage: `scheduler.yield()` (absent on Firefox)
- * interleave input / paint between the mutation batch and the subscriber
- * dispatch. Falls back to flush() directly when the API is absent (jsdom
- * tests, non-Chromium hosts) so the test tick() helper stays compatible.
+ * Cooperative scheduling between the mutation batch and the subscriber
+ * dispatch: `scheduler.yield()` (Firefox 142+ / Chrome 129+; on the Firefox
+ * 157 floor) interleaves input / paint. Falls back to flush() directly when
+ * the API is absent (jsdom tests) so the test tick() helper stays compatible.
  */
 async function scheduleFlush() {
-  if (typeof scheduler?.yield === "function") {
-    await scheduler.yield();
+  if (typeof globalThis.scheduler?.yield === "function") {
+    await globalThis.scheduler.yield();
   }
   flush();
 }

@@ -663,8 +663,8 @@ export class SettingsPanel {
 
   #wireEvents() {
     const { signal } = this.#scope;
-    // Live compact mode: Chromium re-fires matchMedia change on viewport
-    // crossings, so the panel tracks the breakpoint instead of a one-shot
+    // Live compact mode: the matchMedia change event drives viewport crossings
+    // live, so the panel tracks the breakpoint instead of a one-shot
     // read at construction. The explicit ui.compact setting still wins - it
     // is consulted first inside #isCompactMode and only the auto-detect path
     // consults the query. Listener dies with the panel's scope signal.

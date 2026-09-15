@@ -502,7 +502,7 @@ export class ResumeTracker {
       // requestVideoFrameCallback gives the exact mediaTime of the last rendered
       // frame — the position the user actually saw — whereas currentTime is the
       // decoder position which may lead or lag the display. Falls back to
-      // currentTime when the API is unavailable (non-Chromium, test harness).
+      // currentTime when the API is unavailable (test harness).
       if (typeof video.requestVideoFrameCallback === "function") {
         video.requestVideoFrameCallback((_now, metadata) => {
           this.#saveProgress(metadata.mediaTime);
