@@ -86,6 +86,7 @@ export class ResumeStore {
   destroy() {
     gmRemoveValueChangeListener(this.#listenerId);
     this.#listenerId = null;
+    this.#listeners.clear();
   }
 
   #adoptExternal() {

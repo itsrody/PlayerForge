@@ -14,11 +14,13 @@ const ENTITY_MAP = {
 };
 const ENTITY_RE = /&(?:amp|lt|gt|nbsp|lrm|rlm);/g;
 const NUMERIC_ENTITY_RE = /&#(x[0-9a-fA-F]+|\d+);/g;
+const BOM_RE = /^\uFEFF/;
+const CRLF_RE = /\r\n?/g;
 
 export function normalizeText(raw) {
   // NFC at the boundary: composed accents keep matching/timing stable no
   // matter how the source encoded them.
-  return raw.normalize("NFC").replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+  return raw.normalize("NFC").replace(BOM_RE, "").replace(CRLF_RE, "\n");
 }
 
 /** Convert an SRT document into VTT (fixes timecode format, escapes stray "-->"). */

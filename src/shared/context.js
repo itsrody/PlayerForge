@@ -225,6 +225,13 @@ export function hashEntry(domainKey, path, duration) {
 /* - 3. Page context - */
 
 const TITLE_TAGS = /(?:^|[- ])(?:uncensored|uncut|leaked|censored|raw|bd|hdrip|dvdrip|webrip|bluray|remux|cam|reduc(?:ing)?\s*mosaic|english\s*subtitle)/gi;
+const RECORDING_CODE_RE = /^\[([A-Z]+-\d+)(?:-[^\]]*)?\]/;
+const BRACKET_STRIP_RE = /\[[^\]]*\]/g;
+const EN_DASH_RE = /[\u2013\u2014]/g;
+const NON_LATIN_RE = /[^\p{Script=Latin}\p{Script=Common}]+/gu;
+const WS_COLLAPSE_RE = /\s{2,}/g;
+const LEAD_PUNCT_RE = /^[\s\-–—|·:,/]+/;
+const TRAIL_PUNCT_RE = /[\s\-–—|·:,/]+$/;
 
 /**
  * Strip non-Latin script characters and common video-title tags from a page
@@ -241,17 +248,17 @@ function stripNonAscii(raw) {
   // "[ABC-123]" is kept too; non-code brackets still go through the blanket
   // strip below. The preserved [CODE] is reattached after that pass.
   let code = "";
-  const codeMatch = raw.match(/^\[([A-Z]+-\d+)(?:-[^\]]*)?\]/);
+  const codeMatch = raw.match(RECORDING_CODE_RE);
   if (codeMatch) {
     code = `[${codeMatch[1]}]`;
     raw = raw.slice(codeMatch[0].length);
   }
   let s = raw;
-  s = s.replace(/\[[^\]]*\]/g, " ");
+  s = s.replace(BRACKET_STRIP_RE, " ");
   s = s.replace(TITLE_TAGS, " ");
-  s = s.replace(/[\u2013\u2014]/g, " ");
-  s = s.replace(/[^\p{Script=Latin}\p{Script=Common}]+/gu, " ");
-  s = s.replace(/\s{2,}/g, " ").replace(/^[\s\-–—|·:,/]+/, "").replace(/[\s\-–—|·:,/]+$/, "").trim();
+  s = s.replace(EN_DASH_RE, " ");
+  s = s.replace(NON_LATIN_RE, " ");
+  s = s.replace(WS_COLLAPSE_RE, " ").replace(LEAD_PUNCT_RE, "").replace(TRAIL_PUNCT_RE, "").trim();
   if (code) {
     return `${code} ${s}`.trim();
   }

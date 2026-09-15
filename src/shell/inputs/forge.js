@@ -98,6 +98,33 @@ function pooledScrubEvent() {
 }
 
 /**
+ * Pooled per-name CustomEvents so the gesture boundary never allocates. Each
+ * instance gets a fresh own `detail` assigned before every dispatch (own
+ * properties shadow the prototype getter), and the consumers read it
+ * synchronously without retaining it - same contract as the scrub pool above.
+ * Lazy `globalThis.CustomEvent` resolution keeps the pool realm-safe.
+ */
+const dispatchPool = new Map();
+function pooledDispatchEvent(name, detail) {
+  const Ctor = globalThis.CustomEvent;
+  const stale = dispatchPool.get(name);
+  if (stale && stale.Ctor === Ctor) {
+    stale.event.detail = detail;
+    return stale.event;
+  }
+  const event = new Ctor(name, { detail, bubbles: false, composed: false });
+  dispatchPool.set(name, { Ctor, event });
+  return event;
+}
+
+/** Click-event time on the performance.now() timebase. Synthetic events
+ *  (jsdom/host tests) carry a zero timeStamp; falling back keeps the
+ *  suppression window readable there. */
+function clickTime(event) {
+  return event.timeStamp > 0 ? event.timeStamp : performance.now();
+}
+
+/**
  * InputForge engine: pure recognition transport. Turns pointer/keyboard/
  * wheel physics into semantic GESTURE_EVENTS on the shell host; every policy
  * decision (settings gates, fullscreen requirement) is delegated to the
@@ -486,11 +513,7 @@ export class InputForge {
 
   #dispatch(eventName, detail) {
     if (!this.#destroyed && this.#eventTarget) {
-      this.#eventTarget.dispatchEvent(new CustomEvent(eventName, {
-        detail,
-        bubbles: false,
-        composed: false
-      }));
+      this.#eventTarget.dispatchEvent(pooledDispatchEvent(eventName, detail));
     }
   }
 
@@ -813,7 +836,7 @@ export class InputForge {
   }
 
   #handleClickCapture(event) {
-    if (performance.now() < this.#suppressClickUntil) {
+    if (clickTime(event) < this.#suppressClickUntil) {
       this.#suppressClickUntil = 0;
       event.stopImmediatePropagation();
       event.preventDefault();
@@ -821,7 +844,7 @@ export class InputForge {
   }
 
   #handleDblClickCapture(event) {
-    if (performance.now() < this.#suppressClickUntil) {
+    if (clickTime(event) < this.#suppressClickUntil) {
       this.#suppressClickUntil = 0;
       event.stopImmediatePropagation();
       event.preventDefault();

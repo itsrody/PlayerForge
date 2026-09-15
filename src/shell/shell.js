@@ -191,7 +191,14 @@ export class Shell {
     }
     host.focus();
     this.#dom.listen(this.container, "pointerdown", (event) => {
-      if (!this.#destroyed && !isInsideShell(host, event.composedPath()[0])) {
+      if (this.#destroyed) {
+        return;
+      }
+      // Common case: focus already lives on the host - no traversal needed.
+      if (document.activeElement === host) {
+        return;
+      }
+      if (!isInsideShell(host, event.composedPath()[0])) {
         queueMicrotask(() => this.#restoreFocusIfNeeded(host));
       }
     }, { capture: true, passive: true });

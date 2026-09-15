@@ -750,11 +750,23 @@ export class SettingsPanel {
   }
 
   #activateSection(targetSection, _targetTab) {
-    for (const [section, tab] of this.#sections) {
-      const isActive = section === targetSection;
-      section.hidden = !isActive;
-      tab.classList.toggle("pf-panel-tab-active", isActive);
-      tab.setAttribute("aria-selected", String(isActive));
+    const prev = this.#activeSection;
+    if (prev === targetSection) {
+      return;
+    }
+    if (prev) {
+      const prevTab = this.#sections.get(prev);
+      if (prevTab) {
+        prev.hidden = true;
+        prevTab.classList.remove("pf-panel-tab-active");
+        prevTab.setAttribute("aria-selected", "false");
+      }
+    }
+    targetSection.hidden = false;
+    const targetTab = this.#sections.get(targetSection);
+    if (targetTab) {
+      targetTab.classList.add("pf-panel-tab-active");
+      targetTab.setAttribute("aria-selected", "true");
     }
     this.#activeSection = targetSection;
   }
