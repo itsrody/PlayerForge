@@ -56,7 +56,7 @@ export function gmGetResourceText(name) {
  * TM-API policy: a manager API is used only where it uniquely supplies a
  * capability the page cannot - multi-tab manager storage + change
  * notification (configs/resume), CORS-bypassing XHR (@connect * subtitle
- * fetch), manager-cached resource warm-load, TM menu, GM_info. Everything
+ * fetch), manager-cached resource warm-load, VM menu, GM_info. Everything
  * DOM/media/styling-side (MutationObserver, TextTrack/VTTCue,
  * adoptedStyleSheets, fullscreen) stays native; the efficient,
  * reliable implementation wins, and for those domains the native one always

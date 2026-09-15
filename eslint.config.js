@@ -7,7 +7,7 @@ export default [
       ecmaVersion: 2025,
       sourceType: "module",
       globals: {
-        // Tampermonkey API
+        // Violentmonkey API
         GM_getValue: "readonly",
         GM_setValue: "readonly",
         GM_addValueChangeListener: "readonly",

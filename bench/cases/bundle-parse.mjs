@@ -29,7 +29,7 @@ const cases = [];
 if (readableBundle) {
   cases.push(
     measure("bundle parse+compile (readable)", () => {
-      // Strip UserScript header — Tampermonkey parses it separately.
+      // Strip UserScript header — Violentmonkey parses it separately.
       const body = readableBundle.slice(readableBundle.indexOf("==/UserScript==") + 16);
       return () => {
         // new Function triggers V8 parse + compile without executing the IIFE.

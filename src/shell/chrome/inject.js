@@ -23,7 +23,7 @@ function adopt() {
 
 /**
  * Apply the shell stylesheet as early as possible - ideally from document-start
- * under Tampermonkey instant injection - so first-video dimming never waits on
+ * under Violentmonkey 2.49+ instant injection - so first-video dimming never waits on
  * a network round trip. The embedded string is applied synchronously first
  * (it is always available), then the @resource text is fetched in the
  * background and the SAME sheet is upgraded in place via replaceSync, which
