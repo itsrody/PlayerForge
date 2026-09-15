@@ -75,7 +75,6 @@ const banner = `// ==UserScript==
 // @grant        GM_getResourceText
 // @grant        GM_xmlhttpRequest
 // @connect      *
-// @connect      https://www.subtitlecat.com
 // @resource     pfStyle https://raw.githubusercontent.com/itsrody/PlayerForge/firefox/dist/playerforge.css
 // @run-at       document-start
 // @license      MIT

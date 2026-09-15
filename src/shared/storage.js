@@ -100,10 +100,13 @@ let configCache = null;
 
 /**
  * The whole configs document, parsed at most once and served from a module
- * cache afterwards. GM storage is a sync localStorage parse per call - the
- * hot read paths (repeated getConfigValue, the cross-tab refresh loop) were
- * re-parsing the entire doc every time. Writers refresh the cache in place;
- * external (cross-tab) writes invalidate it via invalidateConfigCache().
+ * cache afterwards. GM reads/writes cross the page<->manager boundary - VM
+ * serves sync GM_getValue from the in-memory value store opened for the
+ * script in the page world, but every read still re-parses the whole doc
+ * into that bridge. The hot read paths (repeated getConfigValue, the
+ * cross-tab refresh loop) would pay a bridge crossing per call; the memo
+ * pays it once. Writers refresh the cache in place; external (cross-tab)
+ * writes invalidate it via invalidateConfigCache().
  */
 function readConfigDoc() {
   if (configCache == null) {
