@@ -652,6 +652,47 @@ test("iframe registry arms lazily on the first bridged message", async () => {
   stopContextPipe();
 });
 
+test("one bridge listener serves both context and provisioning requests", async () => {
+  const { window: win } = dom("<p>hi</p>", "https://site.test");
+  globalThis.window = win;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+  globalThis.MutationObserver = win.MutationObserver;
+
+  const stop = installContextBridge();
+  const child = win.document.createElement("iframe");
+  win.document.body.append(child);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  try {
+    // Context resolution rides the single listener: the responder answers on
+    // the source window for a same-origin request (vouch short-circuited).
+    let answered = null;
+    const originalPost = child.contentWindow.postMessage.bind(child.contentWindow);
+    child.contentWindow.postMessage = (msg) => { answered = msg; };
+    win.dispatchEvent(new win.MessageEvent("message", {
+      data: { type: CTX_REQUEST_TYPE, nonce: "b1" },
+      origin: "https://site.test",
+      source: child.contentWindow
+    }));
+    assert.equal(answered?.type, CTX_RESPONSE_TYPE, "context answered by the same listener");
+    assert.equal(answered?.nonce, "b1");
+
+    // Provisioning rides the same listener: the source is vouched against the
+    // cache the first message just seeded, then allowfullscreen is granted.
+    child.contentWindow.postMessage = originalPost;
+    win.dispatchEvent(new win.MessageEvent("message", {
+      data: { type: FS_REQUEST_TYPE },
+      origin: "https://site.test",
+      source: child.contentWindow
+    }));
+    assert.equal(child.hasAttribute("allowfullscreen"), true, "provisioning granted by the same listener");
+  } finally {
+    stop();
+    stopContextPipe();
+  }
+});
+
 test("top-frame responder answers on a transferred MessageChannel port", () => {
   // jsdom's window.postMessage drops transferred ports, so the port path is
   // injected directly into the handler via a real MessageChannel. The

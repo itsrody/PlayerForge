@@ -1110,8 +1110,8 @@ export function installContextBridge() {
   // lazily instead of at install: the first bridged message proves an iframe
   // is present, its synchronously-seeded scan registers live frames before the
   // same message is vouched, and the inline-scan fallback covers the pre-
-  // observer gap. The seed is folded INTO each handler (not a separate
-  // listener): a page's own postMessage chatter costs no extra Gecko event
+  // observer gap. The seed is folded INTO the single listener (not a separate
+  // one): a page's own postMessage chatter costs no extra Gecko event
   // dispatch, and the cheap native window.length pre-filter keeps the
   // frame-tracking observer unarmed on frame-less documents entirely.
   const seeded = (handler) => (event) => {
@@ -1121,20 +1121,34 @@ export function installContextBridge() {
     handler(event);
   };
 
-  const handlers = window === window.top ? [
-    createTopFrameResponder(() => ({
-      domain: getDomainKey(location.hostname),
-      path: location.pathname,
-      title: stripNonAscii(document.title)
-    })),
-    createTopFrameProvisioner()
-  ] : [
-    createFrameRelay(),
-    createFrameProvisioner()
-  ];
-  for (const handler of handlers) {
-    window.addEventListener("message", seeded(handler), { signal: ac.signal });
-  }
+  // ONE message listener per frame. The standard bridge protocol is a set of
+  // typed messages (context request/response, provisioning request); keeping
+  // separate listeners meant every posted message paid one Gecko event
+  // dispatch per handler, re-validating the same shape. A single type-routed
+  // dispatcher validates once and forwards to the granular role handlers
+  // (still unit-tested directly): provisioning serves the provisioner,
+  // anything else serves the context responder (top) or relay (nested).
+  const top = window === window.top;
+  const responder = top
+    ? createTopFrameResponder(() => ({
+        domain: getDomainKey(location.hostname),
+        path: location.pathname,
+        title: stripNonAscii(document.title)
+      }))
+    : createFrameRelay();
+  const provisioner = top ? createTopFrameProvisioner() : createFrameProvisioner();
+  const dispatch = (event) => {
+    const data = event && event.data;
+    if (!data || typeof data !== "object") {
+      return;
+    }
+    if (data.type === FS_REQUEST_TYPE) {
+      provisioner(event);
+      return;
+    }
+    responder(event);
+  };
+  window.addEventListener("message", seeded(dispatch), { signal: ac.signal });
   // Torn down with the bridge.
   return () => {
     ac.abort();
