@@ -174,10 +174,12 @@ export class Shell {
   }
 
   #suppressContextMenu() {
+    // Explicit passivity opt-out: this must cancel the browser's menu, so it
+    // declares `passive: false` against the composer's passive-by-default.
     this.#dom.listen(this.container, "contextmenu", (event) => {
       event.preventDefault();
       event.stopPropagation();
-    }, { capture: true });
+    }, { capture: true, passive: false });
   }
 
   /** Keep focus on the shell host when pointer interactions happen inside it. */

@@ -31,11 +31,25 @@ export class DOMManager {
    * Add an event listener that is automatically removed on destroy.
    * Returns the handler for call-site reference (e.g. passing to removeEventListener
    * before destroy is called).
+   *
+   * Passive by default: unless the caller passes explicit `{ passive: false }`
+   * intent, the registration is spawned passive - the Firefox 157+ guarantee
+   * that a lifecycle-bound listener never forces an uncancellable default
+   * behavior to wait for script. Only handlers that genuinely must cancel a
+   * default (context-menu suppression, keystroke shortcuts, gesture captures)
+   * opt into cancellation; everything else rides the passive lane for free.
+   * A bare AbortSignal passed as `opts` (addEventListener overload) is
+   * forwarded untouched.
    */
   listen(target, event, handler, opts) {
     if (this.#destroyed) return handler;
-    target.addEventListener(event, handler, opts);
-    this.#listeners.push([target, event, handler, opts]);
+    const options = opts == null
+      ? { passive: true }
+      : typeof opts.aborted === "boolean" || opts.passive != null
+        ? opts
+        : { ...opts, passive: true };
+    target.addEventListener(event, handler, options);
+    this.#listeners.push([target, event, handler, options]);
     return handler;
   }
 
