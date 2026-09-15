@@ -696,7 +696,13 @@ export function createTopFrameResponder(resolveContext, ownOrigin = location.ori
     ) {
       return;
     }
-    if (event.origin !== ownOrigin && !isOwnFrame(event.source)) {
+    // Cross-origin sources are accepted only when they belong to THIS frame
+    // tree - a direct <iframe> child (O(1) registry hit, every real embed)
+    // or a deeper same-origin descendant behind a readable layer (the rare
+    // tree-walk fallback). Same-origin messages short-circuit on the origin
+    // check above never reaching either vouch.
+    if (event.origin !== ownOrigin
+        && !(iframeElementForWindow(event.source) || isOwnFrame(event.source))) {
       return;
     }
     const { domain, path, title } = resolveContext();
@@ -795,36 +801,37 @@ export function createFrameRelay() {
   };
 }
 
-/**
- * True when window is an <iframe> descendant reachable through this document.
- * Walks nested frame trees while they stay same-origin readable; a cross-origin
- * layer's subtree is invisible, so descendants behind it are not vouched for -
- * the strict security posture is unchanged, only deeper visible trees count.
- */
-function isOwnFrame(source) {
-  const scan = (doc, depth) => {
-    if (depth > 4) {
-      return false;
-    }
-    for (const iframe of doc.querySelectorAll("iframe")) {
-      if (iframe.contentWindow === source) {
-        return true;
-      }
-      try {
-        const nested = iframe.contentDocument;
-        if (nested && scan(nested, depth + 1)) {
-          return true;
-        }
-      } catch {
-        // Cross-origin contentDocument throws: subtree ends here.
-      }
-    }
-    return false;
-  };
-  return scan(document, 0);
-}
-
 /* - 4a. Live iframe registry - */
+
+/**
+ * True when window is an <iframe> descendant reachable through readable
+ * frame trees (own direct children, then same-origin contentDocuments down to
+ * depth 4; a cross-origin layer's subtree stays invisible). Only consulted
+ * when the direct-child registry misses - cross-origin embed traffic always
+ * originates from a direct child, which the registry answers in one map hit.
+ */
+function isOwnFrame(source, doc = document, depth = 0) {
+  if (depth > 4) {
+    return false;
+  }
+  const frames = doc.getElementsByTagName("iframe");
+  for (let i = 0; i < frames.length; i++) {
+    const iframe = frames[i];
+    if (iframe.contentWindow === source) {
+      return true;
+    }
+    let nested = null;
+    try {
+      nested = iframe.contentDocument;
+    } catch {
+      // Cross-origin contentDocument throws: subtree ends here.
+    }
+    if (nested && isOwnFrame(source, nested, depth + 1)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * Live map from <iframe> contentWindow -> element, refreshed by an observer
@@ -862,10 +869,11 @@ let iframeCacheObserver = null;
  *  differential (diffIframeCache). */
 function seedIframeCache() {
   iframeCache.clear();
-  for (const ifr of document.querySelectorAll("iframe")) {
-    const win = ifr.contentWindow;
+  const frames = document.getElementsByTagName("iframe");
+  for (let i = 0; i < frames.length; i++) {
+    const win = frames[i].contentWindow;
     if (win) {
-      iframeCache.set(win, ifr);
+      iframeCache.set(win, frames[i]);
     }
   }
 }
@@ -890,7 +898,7 @@ function collectIframes(node) {
     registerIframe(node);
     return;
   }
-  const set = node.querySelectorAll("iframe");
+  const set = node.getElementsByTagName("iframe");
   for (let i = 0; i < set.length; i++) {
     registerIframe(set[i]);
   }
@@ -1000,9 +1008,10 @@ function iframeElementForWindow(win) {
   }
   // Fallback before the bridge seeds the cache (or when handlers are used
   // directly): scan inline so the vouch never silently drops.
-  for (const iframe of document.querySelectorAll("iframe")) {
-    if (iframe.contentWindow === win) {
-      return iframe;
+  const frames = document.getElementsByTagName("iframe");
+  for (let i = 0; i < frames.length; i++) {
+    if (frames[i].contentWindow === win) {
+      return frames[i];
     }
   }
   return null;
@@ -1099,16 +1108,18 @@ export function installContextBridge() {
   // message-free. On the vast majority of pages (no child frames) the
   // whole-document MutationObserver therefore never needs to exist, so arm it
   // lazily instead of at install: the first bridged message proves an iframe
-  // is present, its synchronously-seeded scan registers live frames before any
-  // handler vouches, and the inline-scan fallback covers the pre-observer gap.
-  // This listener must be registered BEFORE the handlers below so the seed
-  // lands before the first vouch-check runs.
-  const maybeStartIframeCache = () => {
-    if (!iframeCacheActive || iframeCacheDoc !== document) {
+  // is present, its synchronously-seeded scan registers live frames before the
+  // same message is vouched, and the inline-scan fallback covers the pre-
+  // observer gap. The seed is folded INTO each handler (not a separate
+  // listener): a page's own postMessage chatter costs no extra Gecko event
+  // dispatch, and the cheap native window.length pre-filter keeps the
+  // frame-tracking observer unarmed on frame-less documents entirely.
+  const seeded = (handler) => (event) => {
+    if (window.length !== 0) {
       startIframeCache(ac);
     }
+    handler(event);
   };
-  window.addEventListener("message", maybeStartIframeCache, { signal: ac.signal });
 
   const handlers = window === window.top ? [
     createTopFrameResponder(() => ({
@@ -1122,7 +1133,7 @@ export function installContextBridge() {
     createFrameProvisioner()
   ];
   for (const handler of handlers) {
-    window.addEventListener("message", handler, { signal: ac.signal });
+    window.addEventListener("message", seeded(handler), { signal: ac.signal });
   }
   // Torn down with the bridge.
   return () => {
