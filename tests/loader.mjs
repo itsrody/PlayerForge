@@ -42,6 +42,15 @@ if (typeof globalThis.scheduler === "undefined") {
     yield: () => Promise.resolve()
   };
 }
+if (typeof globalThis.requestAnimationFrame !== "function") {
+  // jsdom has no rendering clock. rAF is driven by a ~16ms setTimeout so a
+  // 60Hz-style frame stream reaches the panel stepper hold-loop under the
+  // harness; cancelAnimationFrame maps to clearTimeout. Per-time consumers
+  // (the hold loop's accumulation timestamp) stay independent of the tick
+  // size. kernel tests override this with a 0ms tick where they need turns.
+  globalThis.requestAnimationFrame = (cb) => setTimeout(() => cb(performance.now()), 16);
+  globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
+}
 if (typeof globalThis.MediaMetadata === "undefined") {
   globalThis.MediaMetadata = class MediaMetadata {};
 }

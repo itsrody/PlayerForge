@@ -70,17 +70,19 @@ function createStepper({
     button.appendChild(createIconElement(name));
     button.title = title;
     let delayTimer = null;
-    let repeatTimer = null;
+    let repeatFrame = null;
     const stopRepeat = () => {
       clearTimeout(delayTimer);
-      clearInterval(repeatTimer);
+      if (repeatFrame !== null) {
+        cancelAnimationFrame(repeatFrame);
+      }
       delayTimer = null;
-      repeatTimer = null;
+      repeatFrame = null;
     };
     // A hold can be pending or repeating when the panel is destroyed (video
     // swap / fullscreen change). Scope the release listeners to the panel
-    // signal AND stop the timers on abort, so destroy never leaves the
-    // interval nudging a detached panel until the pointer lifts.
+    // signal AND stop the hold on abort, so destroy never leaves a loop
+    // nudging a detached panel until the pointer lifts.
     signal?.addEventListener("abort", stopRepeat, { once: true });
     button.addEventListener("pointerdown", (event) => {
       event.preventDefault();
@@ -89,7 +91,22 @@ function createStepper({
       }
       nudge(dir);
       delayTimer = setTimeout(() => {
-        repeatTimer = setInterval(() => nudge(dir), HOLD_REPEAT_MS);
+        delayTimer = null;
+        // Repeat phase rides the animation clock instead of setInterval:
+        // nudge cadence is measured in elapsed time via an accumulation
+        // timestamp, so the repeat rate is display-independent (a 144Hz
+        // panel nudges no faster than 60Hz), and the per-frame hop stops
+        // the instant the pointer lifts or the panel dies - a hidden or
+        // torn-down panel never keeps nudging.
+        let lastNudgeAt = performance.now();
+        const tick = (now) => {
+          if (now - lastNudgeAt >= HOLD_REPEAT_MS) {
+            nudge(dir);
+            lastNudgeAt = now;
+          }
+          repeatFrame = requestAnimationFrame(tick);
+        };
+        repeatFrame = requestAnimationFrame(tick);
       }, HOLD_DELAY_MS);
       const release = () => {
         stopRepeat();
