@@ -22,8 +22,9 @@ export const SHELL_MARKER = "data-pf-shell";
 
 export const DEBUG_LOGS_KEY = "debug.logs";
 
-/** Semantic CustomEvents the shell honors on its host (inputs + panel). */
-export const GESTURE_EVENTS = {
+/** Semantic CustomEvents the shell honors on its host (inputs + panel).
+ *  Frozen at module load to prevent accidental mutation by consumers. */
+export const GESTURE_EVENTS = Object.freeze({
   hold: "pf:gesture-hold",
   release: "pf:gesture-release",
   scrub: "pf:gesture-scrub",
@@ -37,9 +38,10 @@ export const GESTURE_EVENTS = {
   pip: "pf:gesture-pip",
   panel: "pf:gesture-panel",
   pinch: "pf:gesture-pinch"
-};
+});
 
-/** Framework-owned calibration (the removal-watch grace delay). */
-export const FRAMEWORK_TUNING = {
+/** Framework-owned calibration (the removal-watch grace delay).
+ *  Frozen at module load to prevent accidental mutation. */
+export const FRAMEWORK_TUNING = Object.freeze({
   removalGraceMs: 500
-};
+});

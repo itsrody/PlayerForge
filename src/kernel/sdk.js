@@ -131,14 +131,27 @@ function matchSdk(video) {
  */
 const descriptorCache = new WeakMap();
 
-/** Identify the SDK owning a video, or null when unregistered. */
+/** Identify the SDK owning a video, or null when unregistered.
+ *  Caches both positive (descriptor) and negative (null) results to avoid
+ *  redundant full-scan passes on SPA pages with many non-SDK videos. The
+ *  WeakMap key dies with the video element, so cache entries are session-only
+ *  and never persisted. Negative caching is safe because: (1) SDK detection
+ *  is deterministic for a given DOM state, (2) a video that changes its
+ *  composed ancestry enough to switch SDKs would be a different adoption
+ *  cycle, and (3) the probe/kernel already handles video removal + re-add
+ *  via WeakSet tracking. */
 export function findSdkForVideo(video) {
   const cached = descriptorCache.get(video);
+  // WeakMap.get returns undefined for absent keys; null means "confirmed no
+  // match" — both are cached, so a second query never re-scans.
   if (cached !== undefined) {
     return cached;
   }
   const match = matchSdk(video);
-  if (!match) return null;
+  if (!match) {
+    descriptorCache.set(video, null);
+    return null;
+  }
   const descriptor = {
     name: match.record.name,
     host: match.record.host ?? null,
@@ -239,16 +252,24 @@ export function meetsMinSize(video, minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_
  * used by the two-phase boot probe before it commits to a full-document
  * observer. Media events travel the composed path to document, so even
  * shadow-hosted SDK videos surface here without any subtree observer.
+ *
+ * Accepts an optional AbortSignal for automatic teardown: when the signal
+ * fires (e.g. kernel pagehide), both listeners are removed without needing
+ * to call the returned unsubscribe function. The returned function is still
+ * provided for manual cleanup and for environments without signal support.
  */
-export function watchMediaEvents(onVideo) {
+export function watchMediaEvents(onVideo, { signal } = {}) {
   const onMediaEvent = (event) => {
     const video = videoFromEvent(event);
     if (video) {
       onVideo(video);
     }
   };
-  document.addEventListener("loadeddata", onMediaEvent, true);
-  document.addEventListener("play", onMediaEvent, true);
+  document.addEventListener("loadeddata", onMediaEvent, { capture: true, signal });
+  document.addEventListener("play", onMediaEvent, { capture: true, signal });
+  // When a signal is provided, the browser auto-removes listeners on abort;
+  // the returned unsubscribe becomes a no-op in that case but is still safe
+  // to call (removeEventListener for a listener that's already gone is a no-op).
   return () => {
     document.removeEventListener("loadeddata", onMediaEvent, true);
     document.removeEventListener("play", onMediaEvent, true);

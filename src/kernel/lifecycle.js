@@ -10,25 +10,79 @@ import { logger } from "../shared/logger.js";
  * than an rAF quiet-frame counter, so the window is frame-rate independent
  * (an 144 Hz display settles 2.4x faster than 60 Hz, and a missed frame or
  * a throttled background tab still resolves on the quiet clock).
+ *
+ * Accepts an optional AbortSignal: when the signal fires (e.g. pagehide or
+ * video removal during the settle window), the observer is disconnected
+ * immediately and the promise resolves. This avoids running the observer for
+ * up to capMs after the container is no longer relevant.
+ *
+ * Uses scheduler.postTask() (Firefox 142+ / Chrome 129+) with 'user-visible'
+ * priority for the settle and cap timers when available: the browser's task
+ * scheduler natively integrates these delays, yielding better prioritization
+ * than setTimeout for short-lived UI-critical timers. Falls back to setTimeout
+ * for environments without scheduler.
  */
-function whenDomSettled(container, { quietMs = 50, capMs = 150 } = {}) {
+function whenDomSettled(container, { quietMs = 50, capMs = 150, signal } = {}) {
   const { promise, resolve } = Promise.withResolvers();
-  let settleTimer = 0;
-  let capTimer = 0;
-  const observer = new MutationObserver(() => {
-    // Any mutation re-arms the trailing quiet window from scratch.
-    clearTimeout(settleTimer);
-    settleTimer = setTimeout(done, quietMs);
-  });
+  let settled = false;
+  const canPostTask = typeof globalThis.scheduler?.postTask === "function";
+  // Timer handles: either TaskController abort handles (scheduler.postTask)
+  // or numeric setTimeout ids (fallback).
+  let settleHandle = null;
+  let capHandle = null;
+
   const done = () => {
-    clearTimeout(settleTimer);
-    clearTimeout(capTimer);
+    if (settled) {
+      return;
+    }
+    settled = true;
     observer.disconnect();
+    // Clear both timers: whichever is still armed gets cancelled.
+    if (canPostTask) {
+      settleHandle?.abort?.();
+      capHandle?.abort?.();
+    } else {
+      clearTimeout(settleHandle);
+      clearTimeout(capHandle);
+    }
     resolve();
   };
-  capTimer = setTimeout(done, capMs);
+
+  const observer = new MutationObserver(() => {
+    // Any mutation re-arms the trailing quiet window from scratch.
+    if (canPostTask) {
+      settleHandle?.abort?.();
+      settleHandle = globalThis.scheduler.postTask(done, {
+        priority: "user-visible",
+        delay: quietMs
+      });
+    } else {
+      clearTimeout(settleHandle);
+      settleHandle = setTimeout(done, quietMs);
+    }
+  });
+
+  // Arm the initial timers.
+  if (canPostTask) {
+    settleHandle = globalThis.scheduler.postTask(done, {
+      priority: "user-visible",
+      delay: quietMs
+    });
+    capHandle = globalThis.scheduler.postTask(done, {
+      priority: "user-visible",
+      delay: capMs
+    });
+  } else {
+    settleHandle = setTimeout(done, quietMs);
+    capHandle = setTimeout(done, capMs);
+  }
+
   observer.observe(container, { childList: true });
-  settleTimer = setTimeout(done, quietMs);
+
+  // AbortSignal integration: early teardown when the caller's scope ends
+  // (e.g. pagehide, video removal, kernel abort).
+  signal?.addEventListener("abort", done, { once: true });
+
   return promise;
 }
 
@@ -47,6 +101,10 @@ export class LifecycleManager {
   #shellFactory = null;
   /** Videos with a settle wait in flight - dedups repeated discovery. */
   #pending = new Set();
+  /** Scope for settle-wait abort: when the kernel aborts on pagehide,
+   *  in-flight settle waits resolve immediately instead of running their
+   *  full quiet/cap window. */
+  #scope = new AbortController();
 
   constructor(registry, onShellCreated) {
     this.#registry = registry;
@@ -71,7 +129,7 @@ export class LifecycleManager {
       return;
     }
     this.#pending.add(video);
-    await whenDomSettled(container);
+    await whenDomSettled(container, { signal: this.#scope.signal });
     this.#pending.delete(video);
     if (!video.isConnected || !container.isConnected) {
       logger.log("lifecycle", `${sdk.name} video left the document before settle - skipping`);
@@ -96,5 +154,10 @@ export class LifecycleManager {
       shell.destroy();
       logger.log("lifecycle", `Shell destroyed: ${shell.sdk.name}`);
     }
+  }
+
+  /** Tear down in-flight settle waits on pagehide / kernel abort. */
+  destroy() {
+    this.#scope.abort();
   }
 }

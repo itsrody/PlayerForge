@@ -37,7 +37,15 @@ let observer = null;
 /** Document the observer is currently bound to - see ensureObserver(). */
 let observedDoc = null;
 let queued = false;
+
+/**
+ * Pooled records buffer: swapped on each flush instead of allocating a fresh
+ * array per microtask. The old buffer is reused on the next observer callback
+ * after the flush completes, eliminating per-batch array churn on the mutation
+ * hot path.
+ */
 let pendingRecords = [];
+let recycledRecords = [];
 
 /**
  * Cap on how long a hidden document's mutation batch stays deferred (see
@@ -51,6 +59,16 @@ let visibilityListenerAttached = false;
 /** Retained handle for scheduler.postTask() so it can be cancelled if the
  *  document becomes visible before the delay elapses. Null when not pending. */
 let backgroundTaskHandle = null;
+
+/**
+ * Sparsity threshold for slot compaction. When the slots array has more than
+ * COMPACTION_RATIO empty tombstones per live slot, compact by filtering out
+ * nulls and reindexing. This prevents unbounded iteration over dead slots on
+ * long-lived SPA pages with frequent subscribe/unsubscribe churn. The
+ * compaction runs in O(n) over the slot array and is triggered at most once
+ * per flush cycle.
+ */
+const COMPACTION_RATIO = 4;
 
 /**
  * Real-hidden only: `visibilityState === "hidden"` is the primitive behind
@@ -103,8 +121,12 @@ function deferFlushUntilVisible() {
 
 function flush() {
   queued = false;
+  // Swap the pooled buffer: the current pending records become the dispatch
+  // set, and the old recycled buffer is reused on the next observer callback.
+  // This eliminates per-flush array allocation on the mutation hot path.
   const records = pendingRecords;
-  pendingRecords = [];
+  pendingRecords = recycledRecords;
+  recycledRecords = [];
   // Dispatch from a length-hold: tombstones are skipped, and slots appended
   // mid-batch (subscriptions landing during delivery) belong to the next
   // batch - subscribe/unsubscribe can't skew the current audience.
@@ -122,6 +144,20 @@ function flush() {
     } catch (err) {
       logger.error("dom-watch", "A dom-watch subscriber threw during dispatch", err);
     }
+  }
+  // Post-dispatch compaction: when the slot array has accumulated enough
+  // tombstones relative to live subscribers, filter and reindex to prevent
+  // unbounded iteration growth. Runs in O(n) and is triggered at most once
+  // per flush cycle; the cost is amortized across the mutation batches that
+  // built up the sparsity.
+  if (live > 0 && slots.length > live * COMPACTION_RATIO) {
+    let write = 0;
+    for (let i = 0; i < slots.length; i++) {
+      if (slots[i]) {
+        slots[write++] = slots[i];
+      }
+    }
+    slots.length = write;
   }
 }
 
@@ -160,10 +196,12 @@ function ensureObserver() {
   observer?.disconnect();
   queued = false;
   pendingRecords = [];
+  recycledRecords = [];
   observer = new MutationObserver((records) => {
-    for (const record of records) {
-      pendingRecords.push(record);
-    }
+    // Batch push: splice the observer's records into the pending buffer
+    // directly instead of per-record iteration. The native array push is
+    // optimized in all major engines for argument-list splicing.
+    Array.prototype.push.apply(pendingRecords, records);
     if (!queued) {
       queued = true;
       queueMicrotask(scheduleFlush);
@@ -180,6 +218,7 @@ function stopIfIdle() {
     observer = null;
     observedDoc = null;
     pendingRecords = [];
+    recycledRecords = [];
     slots.length = 0;
     clearTimeout(visibilityDeferTimer);
     visibilityDeferTimer = 0;

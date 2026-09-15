@@ -18,6 +18,8 @@ import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "
 const MAX_REMOVAL_DEPTH = 8;
 /** Extra ancestors (beyond the matched anchor) the removal watch observes. */
 const REMOVAL_DEPTH_MARGIN = 1;
+/** Whether scheduler.postTask() is available for priority-aware timers. */
+const CAN_POST_TASK = typeof globalThis.scheduler?.postTask === "function";
 
 export class Kernel {
   #registry;
@@ -65,6 +67,9 @@ export class Kernel {
         cancel();
       }
       this.#removalTimers.clear();
+      // Tear down in-flight settle waits so the lifecycle's observer and
+      // timers die immediately instead of running their full quiet/cap window.
+      this.#lifecycle.destroy();
       this.#registry.destroyAll();
       this.#scope.abort();
     }
@@ -188,13 +193,31 @@ export class Kernel {
 
     const anchors = [];
 
+    /** Schedule the removal grace timer. Uses scheduler.postTask() (Firefox
+     *  142+ / Chrome 129+) with 'user-visible' priority when available: the
+     *  browser's task scheduler natively integrates this delay, yielding
+     *  better prioritization than setTimeout for a UI-critical grace window.
+     *  The signal option (Firefox 157+) auto-cancels on kernel pagehide.
+     *  Falls back to the delay() helper for environments without scheduler. */
+    const scheduleGraceTimer = (callback) => {
+      if (CAN_POST_TASK) {
+        const handle = globalThis.scheduler.postTask(callback, {
+          priority: "user-visible",
+          delay: FRAMEWORK_TUNING.removalGraceMs,
+          signal: this.#scope.signal
+        });
+        return () => handle.abort?.();
+      }
+      return delay(callback, FRAMEWORK_TUNING.removalGraceMs);
+    };
+
     // Arrow fn keeps the enclosing class-level `this` for timer/lifecycle access.
     const checkAnchors = () => {
       if (this.#removalTimers.has(video)) {
         return;
       }
       if (!video.isConnected) {
-        this.#removalTimers.set(video, delay(() => {
+        this.#removalTimers.set(video, scheduleGraceTimer(() => {
           this.#removalTimers.delete(video);
           if (!video.isConnected) {
             stopWatching();
@@ -202,7 +225,7 @@ export class Kernel {
           } else {
             reanchorObservers();
           }
-        }, FRAMEWORK_TUNING.removalGraceMs));
+        }));
         return;
       }
       if (video.parentElement !== anchors[0]) {
