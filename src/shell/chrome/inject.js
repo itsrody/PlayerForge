@@ -49,19 +49,48 @@ export function warmStyles() {
     // Parity guard: only ever swap in STRICTLY better CSS. An empty or
     // malformed resource must not clobber the working embedded sheet - the
     // upgrade is strictly-monotonic, so the shell can never go blank from a
-    // pathological fetch. replaceSync throws on invalid CSS; catch it and
-    // keep the last-good sheet rather than risk a blank UI.
+    // pathological fetch.
     if (css && css.trim().length > 0) {
-      try {
-        // Replace in place: adopted sheets everywhere see the upgrade.
-        sharedSheet.replaceSync(css);
-      } catch (err) {
-        logger.error("inject", "Rejected malformed @resource stylesheet:", err);
-      }
+      await upgradeInIdle(css);
     }
     return sharedSheet;
   })();
   return sharedSheet;
+}
+
+/** Hard cap on the deferred @resource upgrade racing a busy main thread. */
+const STYLE_IDLE_TIMEOUT_MS = 1500;
+
+/**
+ * Apply a fetched @resource stylesheet in place, deferred until browser idle.
+ * The replaceSync reparse is a whole-sheet parse that lands right after the
+ * network response resolves - exactly when boot frames, text wrap, and the
+ * first scroll are contending. Parking it in requestIdleCallback (Firefox
+ * 55+) with a didTimeout cap keeps it from stealing a frame while never
+ * delaying the upgrade past the cap. Without an idle scheduler (test
+ * harness) it runs on the immediate next turn instead, so the
+ * authoritative-sheet promise still resolves with the upgrade applied.
+ * Rejects a swap that throws on invalid CSS, matching the embedded path:
+ * adopted refs everywhere keep the last-good sheet.
+ */
+function upgradeInIdle(css) {
+  const swap = () => {
+    try {
+      // Replace in place: adopted sheets everywhere see the upgrade.
+      sharedSheet.replaceSync(css);
+    } catch (err) {
+      logger.error("inject", "Rejected malformed @resource stylesheet:", err);
+    }
+  };
+  if (typeof requestIdleCallback === "function") {
+    return new Promise((resolve) => {
+      requestIdleCallback(() => {
+        swap();
+        resolve();
+      }, { timeout: STYLE_IDLE_TIMEOUT_MS });
+    });
+  }
+  return Promise.resolve().then(swap);
 }
 
 /**

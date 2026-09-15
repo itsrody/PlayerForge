@@ -63,6 +63,58 @@ test("resource text upgrades the embedded sheet in place", async () => {
   assert.equal(live.css, ".pf-shell{}", "replaceSync upgraded in place, adopted refs update");
 });
 
+test("resource upgrade is deferred until browser idle, not applied on fetch", async () => {
+  setupDom(".pf-shell{}");
+  // Controllable idle scheduler: park callbacks until the test pumps them,
+  // mirroring the real `{ timeout }` contract where a served-free frame fires
+  // the callback and the browser force-fires it by didTimeout past the cap.
+  const idle = [];
+  globalThis.requestIdleCallback = (cb, opts) => {
+    idle.push({ cb, opts });
+    return idle.length;
+  };
+  try {
+    const { warmStyles, ensureStyles } = await loadInject();
+    const live = warmStyles();
+    const pending = ensureStyles();
+    // Let the fetch resolve; the swap must NOT run while main thread stays busy.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(live.css, "", "upgrade kept in idle, not applied on fetch resolve");
+    assert.equal(idle.length, 1, "idle callback registered exactly once");
+    assert.equal(idle[0].opts.timeout, 1500, "didTimeout cap parked the swap");
+    idle[0].cb({ didTimeout: false, timeRemaining: () => 50 });
+    const sheet = await pending;
+    assert.equal(sheet, live, "same sheet instance upgraded at idle");
+    assert.equal(live.css, ".pf-shell{}", "replaceSync ran only once idle arrived");
+  } finally {
+    delete globalThis.requestIdleCallback;
+  }
+});
+
+test("the timeout cap force-fires the upgrade when idle never arrives", async () => {
+  setupDom(".pf-shell{}");
+  const idle = [];
+  globalThis.requestIdleCallback = (cb, opts) => {
+    idle.push({ cb, opts });
+    return idle.length;
+  };
+  try {
+    const { warmStyles, ensureStyles } = await loadInject();
+    const live = warmStyles();
+    const pending = ensureStyles();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // No turn ever frees up; the browser's timeout obligation fires with
+    // didTimeout=true (the `{ timeout: 1500 }` contract) so the parcel is
+    // never stranded waiting for idle that won't come.
+    idle[0].cb({ didTimeout: true, timeRemaining: () => 0 });
+    const sheet = await pending;
+    assert.equal(sheet, live, "timeout-forced fire completed the upgrade");
+    assert.equal(live.css, ".pf-shell{}", "swap applied via the didTimeout fire");
+  } finally {
+    delete globalThis.requestIdleCallback;
+  }
+});
+
 test("ensureStyles falls back to embedded css when the resource fetch fails", async () => {
   setupDom(null);
   globalThis.GM_getResourceText = async () => {

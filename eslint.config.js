@@ -110,6 +110,7 @@ export default [
         getComputedStyle: "readonly",
         cancelAnimationFrame: "readonly",
         requestAnimationFrame: "readonly",
+        requestIdleCallback: "readonly",
         ResizeObserver: "readonly",
         CSSStyleSheet: "readonly",
         MediaMetadata: "readonly",
