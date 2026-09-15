@@ -39,6 +39,51 @@ let observedDoc = null;
 let queued = false;
 let pendingRecords = [];
 
+/**
+ * Cap on how long a hidden document's mutation batch stays deferred (see
+ * scheduleFlush). Records accumulate meanwhile, so a backgrounded SPA build
+ * never stalls discovery past this window.
+ */
+const DEFER_VISIBILITY_CAP_MS = 500;
+/** Cap timeout for a currently-deferred hidden-document flush; 0 = none. */
+let visibilityDeferTimer = 0;
+let visibilityListenerAttached = false;
+
+/**
+ * Real-hidden only: `visibilityState === "hidden"` is the primitive behind
+ * `document.hidden` in every browser, but jsdom documents default to
+ * `visibilityState: "prerender"` with `hidden: true` - gating on `hidden`
+ * alone would silently drop every mutation in a test host.
+ */
+function isDocumentHidden() {
+  return document.visibilityState === "hidden";
+}
+
+function flushPending() {
+  clearTimeout(visibilityDeferTimer);
+  visibilityDeferTimer = 0;
+  flush();
+}
+
+function onVisibilityChanged() {
+  visibilityListenerAttached = false;
+  if (!isDocumentHidden()) {
+    flushPending();
+  }
+}
+
+/** Defer the batch until the document is visible again or the cap elapses. */
+function deferFlushUntilVisible() {
+  if (visibilityDeferTimer) {
+    return;
+  }
+  visibilityDeferTimer = setTimeout(flushPending, DEFER_VISIBILITY_CAP_MS);
+  if (!visibilityListenerAttached) {
+    visibilityListenerAttached = true;
+    document.addEventListener("visibilitychange", onVisibilityChanged, { once: true });
+  }
+}
+
 function flush() {
   queued = false;
   const records = pendingRecords;
@@ -72,6 +117,14 @@ function flush() {
 async function scheduleFlush() {
   if (typeof globalThis.scheduler?.yield === "function") {
     await globalThis.scheduler.yield();
+  }
+  // Hidden-document deferral: a background tab keeps a live-but-idle observer
+  // instead of paying per-mutation JS dispatch for a page nobody is looking
+  // at. Records keep accumulating; the batch flushes on visibility resume or
+  // when the cap elapses (whichever first).
+  if (isDocumentHidden()) {
+    deferFlushUntilVisible();
+    return;
   }
   flush();
 }
@@ -111,6 +164,12 @@ function stopIfIdle() {
     observedDoc = null;
     pendingRecords = [];
     slots.length = 0;
+    clearTimeout(visibilityDeferTimer);
+    visibilityDeferTimer = 0;
+    if (visibilityListenerAttached) {
+      document.removeEventListener("visibilitychange", onVisibilityChanged);
+      visibilityListenerAttached = false;
+    }
   }
 }
 

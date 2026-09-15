@@ -557,6 +557,16 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
     }
     window.parent.postMessage(msg, "*");
   };
+  let hiddenRetryPending = false;
+  const onHiddenResume = () => {
+    hiddenRetryPending = false;
+    attempt();
+  };
+  const scheduleRetry = () => {
+    const base = CTX_RETRY_BACKOFF[Math.min(attemptCount, CTX_RETRY_BACKOFF.length - 1)];
+    attemptCount++;
+    retryTimer = setTimeout(attempt, base + Math.floor(Math.random() * (CTX_RETRY_JITTER_MS + 1)));
+  };
   const attempt = () => {
     if (signal.aborted || (deadline !== 0 && Date.now() >= deadline)) {
       if (deadline !== 0) ac.abort();
@@ -564,9 +574,20 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
       return;
     }
     sendRequest();
-    const base = CTX_RETRY_BACKOFF[Math.min(attemptCount, CTX_RETRY_BACKOFF.length - 1)];
-    attemptCount++;
-    retryTimer = setTimeout(attempt, base + Math.floor(Math.random() * (CTX_RETRY_JITTER_MS + 1)));
+    // A hidden document (background tab / offscreen frame) must not keep
+    // pumping the broadcast backoff for a context nobody can render yet.
+    // Visibility resume re-attempts; AbortSignal.timeout still bounds the
+    // whole wait, so an unanswered chain settles exactly as before. Gated on
+    // visibilityState === "hidden" (not document.hidden): jsdom documents
+    // default to "prerender" with hidden=true and would spuriously pause.
+    if (window.document.visibilityState === "hidden") {
+      if (!hiddenRetryPending) {
+        hiddenRetryPending = true;
+        window.document.addEventListener("visibilitychange", onHiddenResume, { once: true });
+      }
+      return;
+    }
+    scheduleRetry();
   };
   attempt();
   return promise;

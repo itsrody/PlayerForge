@@ -268,6 +268,49 @@ test("getPageContext falls back to the frame's own context when no frame answers
   }
 });
 
+test("retry pump pauses while the document is hidden and resumes on visibility", async () => {
+  stopContextPipe();
+  const { window: win } = dom("<p>hi</p>", "https://embed.test/player");
+  globalThis.window = crossOriginFrame(win);
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  let broadcasts = 0;
+  let requestNonce = null;
+  const originalPost = win.parent.postMessage.bind(win.parent);
+  win.parent.postMessage = (msg) => {
+    broadcasts++;
+    requestNonce = msg?.nonce ?? null;
+  };
+
+  Object.defineProperty(win.document, "hidden", { configurable: true, value: true });
+  Object.defineProperty(win.document, "visibilityState", { configurable: true, value: "hidden" });
+  try {
+    const pending = getPageContext();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.equal(broadcasts, 1, "hidden frame never pumped the backoff");
+
+    Object.defineProperty(win.document, "hidden", { configurable: true, value: false });
+    Object.defineProperty(win.document, "visibilityState", { configurable: true, value: "visible" });
+    win.document.dispatchEvent(new win.Event("visibilitychange"));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.ok(broadcasts >= 2, "visibility resume re-armed the retry pump");
+
+    win.dispatchEvent(new win.MessageEvent("message", {
+      data: { type: CTX_RESPONSE_TYPE, nonce: requestNonce, domain: "hub", path: "/legal", title: "Legal Co" },
+      origin: "https://hub.test",
+      source: win.parent
+    }));
+
+    assert.deepEqual(await pending, { domain: "hub", path: "/legal", title: "Legal Co" });
+  } finally {
+    win.parent.postMessage = originalPost;
+    Object.defineProperty(win.document, "hidden", { configurable: true, value: false });
+    Object.defineProperty(win.document, "visibilityState", { configurable: true, value: "visible" });
+    stopContextPipe();
+  }
+});
+
 test("top-frame responder validates shape and answers with fresh context", () => {
   const { window: win } = dom();
   globalThis.window = win;
