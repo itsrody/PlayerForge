@@ -10,6 +10,7 @@ globalThis.GM_setValue = (key, value) => {
 
 const { ResumeTracker } = await import("../src/shell/resume.js");
 const { TUNING } = await import("../src/shared/tuning.js");
+const { createMediaControls } = await import("../src/shell/media.js");
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -153,6 +154,50 @@ test("a saved position past the threshold seeks and toasts immediately", async (
   await flush();
   assert.deepEqual(shell.seeks, [42], "seek fires immediately without waiting for canplay");
   assert.equal(shell.toasts.length, 1);
+  tracker.destroy();
+});
+
+test("resume seeks land through the real command plane even when metadata lags (MSE window)", async () => {
+  writes["pf:resume"] = {
+    version: 1,
+    entries: [{
+      id: "mse1",
+      domain: "youtube",
+      path: "/watch",
+      title: "",
+      duration: 600,
+      resume: 42,
+      createdAt: 0,
+      updatedAt: Date.now()
+    }]
+  };
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+    url: "https://www.youtube.com/watch?v=1"
+  });
+  globalThis.AbortController = dom.window.AbortController;
+  globalThis.window = dom.window;
+  globalThis.location = dom.window.location;
+  globalThis.document = dom.window.document;
+  const video = dom.window.document.createElement("video");
+  dom.window.document.body.appendChild(video);
+  // MSE preamble: the player sets duration (durationchange) while readyState
+  // is still HAVE_NOTHING (0) - the resume seek must not be dropped by the
+  // command plane's metadata gate.
+  Object.defineProperty(video, "readyState", { value: 0, configurable: true });
+  Object.defineProperty(video, "duration", { value: 600, configurable: true });
+  Object.defineProperty(video, "currentTime", { value: 0, configurable: true, writable: true });
+  const shell = {
+    video,
+    currentTime: 0,
+    paused: true,
+    media: createMediaControls({ video }),
+    toast() {},
+    toastAction() {}
+  };
+  const tracker = new ResumeTracker(shell);
+  await flush();
+  await flush();
+  assert.equal(video.currentTime, 42, "the resume position applies despite readyState 0");
   tracker.destroy();
 });
 

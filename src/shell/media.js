@@ -26,6 +26,17 @@ export function createMediaControls({ video }) {
    */
   const isReady = () => video.readyState >= 1;
 
+  /**
+   * A seekable timeline exists when metadata loaded (readyState >= HAVE_METADATA)
+   * OR a finite positive duration is already established. MSE/streaming players
+   * set duration (firing `durationchange`) while readyState is still
+   * HAVE_NOTHING; seeking in that window is legal - per spec, setting
+   * currentTime before metadata with a known duration parks the default
+   * playback start position, which the browser honors when playback begins. So
+   * a restore (resume) issued in the MSE window is never lost.
+   */
+  const canSeek = () => isReady() || (Number.isFinite(video.duration) && video.duration > 0);
+
   /** Canonical absolute-position clamp: inside duration when we know it. */
   const clampTarget = (time) => {
     if (!Number.isFinite(time)) {
@@ -79,7 +90,7 @@ export function createMediaControls({ video }) {
 
     /** Seek to an absolute position, clamped to the playable range. */
     seekTo(time) {
-      if (!isReady()) {
+      if (!canSeek()) {
         return;
       }
       video.currentTime = clampTarget(time);

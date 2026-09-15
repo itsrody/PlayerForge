@@ -82,6 +82,25 @@ test("controls engage once metadata is loaded (readyState 4)", async () => {
   assert.equal(video.paused, true);
 });
 
+test("seek applies in the MSE window: duration known while readyState is still 0", () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+    url: "https://example.com/watch"
+  });
+  const video = dom.window.document.createElement("video");
+  Object.defineProperty(video, "readyState", { value: 0, configurable: true });
+  Object.defineProperty(video, "duration", { value: 600, configurable: true });
+  Object.defineProperty(video, "currentTime", { value: 0, configurable: true, writable: true });
+  const controls = createMediaControls({ video });
+
+  // MSE/streaming players set duration (durationchange) before metadata; a
+  // known duration IS a timeline, so the seek must not be silently dropped.
+  controls.seekTo(42);
+  assert.equal(video.currentTime, 42, "a finite duration is a timeline even at readyState 0");
+
+  controls.seekTo(700);
+  assert.equal(video.currentTime, 600, "still clamped to the known duration");
+});
+
 test("gating reads live readyState, not a snapshot at creation", async () => {
   const { video, controls } = makeEnv(0);
   let played = 0;
