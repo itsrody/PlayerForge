@@ -25,211 +25,172 @@ import { logger } from "../shared/logger.js";
 import { VisibilityWatcher } from "../shared/visibility-watcher.js";
 import { postTask } from "../shared/scheduler.js";
 
-/**
- * Append-only subscriber slots with tombstones. A live subscription is a
- * [handler] slot; unsubscribe writes a null tombstone without reindexing.
- * `live` counts active slots so teardown stays automatic. This replaces a
- * Set-snapshot fan-out: the per-batch `[...subscribers]` allocation is gone
- * from the mutation hot path.
- */
-const slots = [];
-let live = 0;
-
-let observer = null;
-/** Document the observer is currently bound to - see ensureObserver(). */
-let observedDoc = null;
-let queued = false;
-
-/**
- * Pooled records buffer: swapped on each flush instead of allocating a fresh
- * array per microtask. The old buffer is reused on the next observer callback
- * after the flush completes, eliminating per-batch array churn on the mutation
- * hot path.
- */
-let pendingRecords = [];
-let recycledRecords = [];
-
-/**
- * Cap on how long a hidden document's mutation batch stays deferred (see
- * scheduleFlush). Records accumulate meanwhile, so a backgrounded SPA build
- * never stalls discovery past this window.
- */
+/** Cap on how long a hidden document's mutation batch stays deferred. */
 const DEFER_VISIBILITY_CAP_MS = 500;
-/** Retained handle for the deferred flush timer so it can be cancelled. */
-let deferHandle = null;
-
-/** Module-level VisibilityWatcher replaces manual visibilitychange handling.
- *  Lazily initialized on first use to avoid accessing `document` at import
- *  time — test harnesses may import dom-watch without a DOM. */
-let visWatcher = null;
-let visScope = null;
-
-/**
- * Sparsity threshold for slot compaction. When the slots array has more than
- * COMPACTION_RATIO empty tombstones per live slot, compact by filtering out
- * nulls and reindexing. This prevents unbounded iteration over dead slots on
- * long-lived SPA pages with frequent subscribe/unsubscribe churn. The
- * compaction runs in O(n) over the slot array and is triggered at most once
- * per flush cycle.
- */
+/** Sparsity threshold for slot compaction. */
 const COMPACTION_RATIO = 4;
 
 /**
- * Real-hidden only: `visibilityState === "hidden"` is the primitive behind
- * `document.hidden` in every browser, but jsdom documents default to
- * `visibilityState: "prerender"` with `hidden: true` - gating on `hidden`
- * alone would silently drop every mutation in a test host.
+ * Document-level mutation dispatcher. Encapsulates the subscriber slot
+ * pool, MutationObserver lifecycle, record pooling, and visibility
+ * deferral into a single class. A module-level singleton instance is
+ * exported; the public API surface remains function-based for consumers.
  */
-function isDocumentHidden() {
-  return document.visibilityState === "hidden";
-}
+class DomWatchDispatcher {
+  /** Append-only subscriber slots with tombstones. */
+  #slots = [];
+  #live = 0;
 
-function flushPending() {
-  deferHandle?.abort();
-  deferHandle = null;
-  flush();
-}
+  #observer = null;
+  /** Document the observer is currently bound to. */
+  #observedDoc = null;
+  #queued = false;
 
-/** Defer the batch until the document is visible again or the cap elapses.
- *  Uses the unified postTask() wrapper which picks scheduler.postTask
- *  (Firefox 101+) with 'background' priority, falling back to setTimeout
- *  automatically in test environments. */
-function deferFlushUntilVisible() {
-  if (deferHandle) {
-    return;
-  }
-  deferHandle = postTask(flushPending, {
-    priority: "background",
-    delay: DEFER_VISIBILITY_CAP_MS
-  });
-  // Lazily create and subscribe to the module-level VisibilityWatcher on
-  // first use. This avoids accessing `document` at import time so test
-  // harnesses that import dom-watch without a DOM don't break.
-  if (!visWatcher) {
-    visScope = new AbortController();
-    visWatcher = new VisibilityWatcher(visScope.signal);
-  }
-  visWatcher.onVisible(flushPending);
-}
+  /**
+   * Pooled records buffer: swapped on each flush instead of allocating a
+   * fresh array per microtask.
+   */
+  #pendingRecords = [];
+  #recycledRecords = [];
 
-function flush() {
-  queued = false;
-  // Swap the pooled buffer: the current pending records become the dispatch
-  // set, and the old recycled buffer is reused on the next observer callback.
-  // This eliminates per-flush array allocation on the mutation hot path.
-  const records = pendingRecords;
-  pendingRecords = recycledRecords;
-  recycledRecords = [];
-  // Dispatch from a length-hold: tombstones are skipped, and slots appended
-  // mid-batch (subscriptions landing during delivery) belong to the next
-  // batch - subscribe/unsubscribe can't skew the current audience.
-  const length = slots.length;
-  for (let i = 0; i < length; i++) {
-    const slot = slots[i];
-    if (!slot) {
-      continue;
-    }
-    // uBO safeObserverHandler rule: one throwing consumer must never abort
-    // the fan-out to its peers in the same batch, nor escape into the page's
-    // unhandled-rejection path.
-    try {
-      slot[0](records);
-    } catch (err) {
-      logger.error("dom-watch", "A dom-watch subscriber threw during dispatch", err);
-    }
-  }
-  // Post-dispatch compaction: when the slot array has accumulated enough
-  // tombstones relative to live subscribers, filter and reindex to prevent
-  // unbounded iteration growth. Runs in O(n) and is triggered at most once
-  // per flush cycle; the cost is amortized across the mutation batches that
-  // built up the sparsity.
-  if (live > 0 && slots.length > live * COMPACTION_RATIO) {
-    let write = 0;
-    for (let i = 0; i < slots.length; i++) {
-      if (slots[i]) {
-        slots[write++] = slots[i];
+  /** Retained handle for the deferred flush timer. */
+  #deferHandle = null;
+
+  /** Lazily initialized VisibilityWatcher. */
+  #visWatcher = null;
+  #visScope = null;
+
+  /**
+   * Dispatch the current batch to all live subscribers, then compact
+   * tombstones when sparsity exceeds the threshold.
+   */
+  #flush() {
+    this.#queued = false;
+    const records = this.#pendingRecords;
+    this.#pendingRecords = this.#recycledRecords;
+    this.#recycledRecords = [];
+
+    const length = this.#slots.length;
+    for (let i = 0; i < length; i++) {
+      const slot = this.#slots[i];
+      if (!slot) {
+        continue;
+      }
+      try {
+        slot[0](records);
+      } catch (err) {
+        logger.error("dom-watch", "A dom-watch subscriber threw during dispatch", err);
       }
     }
-    slots.length = write;
-  }
-}
 
-/**
- * Cooperative scheduling between the mutation batch and the subscriber
- * dispatch: `scheduler.yield()` (Firefox 142+ / Chrome 129+; on the Firefox
- * 157 floor) interleaves input / paint. Falls back to flush() directly when
- * the API is absent (jsdom tests) so the test tick() helper stays compatible.
- */
-async function scheduleFlush() {
-  if (typeof globalThis.scheduler?.yield === "function") {
-    await globalThis.scheduler.yield();
-  }
-  // Hidden-document deferral: a background tab keeps a live-but-idle observer
-  // instead of paying per-mutation JS dispatch for a page nobody is looking
-  // at. Records keep accumulating; the batch flushes on visibility resume or
-  // when the cap elapses (whichever first).
-  if (isDocumentHidden()) {
-    deferFlushUntilVisible();
-    return;
-  }
-  flush();
-}
-
-function ensureObserver() {
-  const doc = globalThis.document;
-  if (!doc?.documentElement) {
-    return;
-  }
-  if (observer && observedDoc === doc) {
-    return;
-  }
-  // Re-bind when the active document changed underneath us. Never happens
-  // in a real page; happens constantly under jsdom test harnesses that
-  // install a fresh document per case.
-  observer?.disconnect();
-  queued = false;
-  pendingRecords = [];
-  recycledRecords = [];
-  observer = new MutationObserver((records) => {
-    // Batch push: splice the observer's records into the pending buffer
-    // directly instead of per-record iteration. The native array push is
-    // optimized in all major engines for argument-list splicing.
-    Array.prototype.push.apply(pendingRecords, records);
-    if (!queued) {
-      queued = true;
-      queueMicrotask(scheduleFlush);
+    if (this.#live > 0 && this.#slots.length > this.#live * COMPACTION_RATIO) {
+      let write = 0;
+      for (let i = 0; i < this.#slots.length; i++) {
+        if (this.#slots[i]) {
+          this.#slots[write++] = this.#slots[i];
+        }
+      }
+      this.#slots.length = write;
     }
-  });
-  observer.observe(doc.documentElement, { childList: true, subtree: true });
-  observedDoc = doc;
-}
+  }
 
-/** Idempotent no-op when already detached (observer torn down). */
-function stopIfIdle() {
-  if (live === 0 && observer) {
-    observer.disconnect();
-    observer = null;
-    observedDoc = null;
-    pendingRecords = [];
-    recycledRecords = [];
-    slots.length = 0;
-    deferHandle?.abort();
-    deferHandle = null;
+  #flushPending() {
+    this.#deferHandle?.abort();
+    this.#deferHandle = null;
+    this.#flush();
+  }
+
+  /** Defer the batch until the document is visible again or the cap elapses. */
+  #deferFlushUntilVisible() {
+    if (this.#deferHandle) {
+      return;
+    }
+    this.#deferHandle = postTask(() => this.#flushPending(), {
+      priority: "background",
+      delay: DEFER_VISIBILITY_CAP_MS
+    });
+    if (!this.#visWatcher) {
+      this.#visScope = new AbortController();
+      this.#visWatcher = new VisibilityWatcher(this.#visScope.signal);
+    }
+    this.#visWatcher.onVisible(() => this.#flushPending());
+  }
+
+  async #scheduleFlush() {
+    if (typeof globalThis.scheduler?.yield === "function") {
+      await globalThis.scheduler.yield();
+    }
+    if (document.visibilityState === "hidden") {
+      this.#deferFlushUntilVisible();
+      return;
+    }
+    this.#flush();
+  }
+
+  #ensureObserver() {
+    const doc = globalThis.document;
+    if (!doc?.documentElement) {
+      return;
+    }
+    if (this.#observer && this.#observedDoc === doc) {
+      return;
+    }
+    this.#observer?.disconnect();
+    this.#queued = false;
+    this.#pendingRecords = [];
+    this.#recycledRecords = [];
+    this.#observer = new MutationObserver((records) => {
+      Array.prototype.push.apply(this.#pendingRecords, records);
+      if (!this.#queued) {
+        this.#queued = true;
+        queueMicrotask(() => this.#scheduleFlush());
+      }
+    });
+    this.#observer.observe(doc.documentElement, { childList: true, subtree: true });
+    this.#observedDoc = doc;
+  }
+
+  /** Tear down the observer when no subscribers remain. */
+  #stopIfIdle() {
+    if (this.#live === 0 && this.#observer) {
+      this.#observer.disconnect();
+      this.#observer = null;
+      this.#observedDoc = null;
+      this.#pendingRecords = [];
+      this.#recycledRecords = [];
+      this.#slots.length = 0;
+      this.#deferHandle?.abort();
+      this.#deferHandle = null;
+    }
+  }
+
+  /**
+   * Subscribe to document-level mutations.
+   * @param {Function} handler - Receives the MutationRecord array.
+   * @param {{ signal?: AbortSignal }} opts
+   * @returns {Function} Unsubscribe function.
+   */
+  onDomMutations(handler, { signal } = {}) {
+    this.#ensureObserver();
+    this.#slots.push([handler]);
+    this.#live += 1;
+    const index = this.#slots.length - 1;
+    const off = () => {
+      if (this.#slots[index]) {
+        this.#slots[index] = null;
+        this.#live -= 1;
+      }
+      this.#stopIfIdle();
+    };
+    signal?.addEventListener("abort", off, { once: true });
+    return off;
   }
 }
 
-export function onDomMutations(handler, { signal } = {}) {
-  ensureObserver();
-  slots.push([handler]);
-  live += 1;
-  const index = slots.length - 1;
-  const off = () => {
-    if (slots[index]) {
-      slots[index] = null;
-      live -= 1;
-    }
-    stopIfIdle();
-  };
-  signal?.addEventListener("abort", off, { once: true });
-  return off;
+/** Module-level singleton. */
+const dispatcher = new DomWatchDispatcher();
+
+/** Subscribe to document-level mutations. */
+export function onDomMutations(handler, opts) {
+  return dispatcher.onDomMutations(handler, opts);
 }
