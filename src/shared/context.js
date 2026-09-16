@@ -17,6 +17,7 @@
  * unless the relay chain is already listening.
  */
 import { composeTimeout, composeSignals } from "./signal.js";
+import { ScopedTimer } from "./scoped-timer.js";
 
 /* - Window message types - */
 
@@ -435,7 +436,6 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   const { promise, resolve } = Promise.withResolvers();
   const ac = new AbortController();
   let nonce = null;
-  let retryTimer = null;
   let attemptCount = 0;
   let replyPort = null;
   let transferPort = null;
@@ -452,13 +452,14 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
     deadline = Date.now() + timeoutMs;
   }
   const signal = composedSignal;
+  const retryTimer = new ScopedTimer(signal);
 
   const settle = (context, viaPort) => {
     if (settled) {
       return;
     }
     settled = true;
-    clearTimeout(retryTimer);
+    retryTimer.cancel();
     ac.abort();
     if (replyPort) {
       if (viaPort) {
@@ -551,7 +552,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   const scheduleRetry = () => {
     const base = CTX_RETRY_BACKOFF[Math.min(attemptCount, CTX_RETRY_BACKOFF.length - 1)];
     attemptCount++;
-    retryTimer = setTimeout(attempt, base + Math.floor(Math.random() * (CTX_RETRY_JITTER_MS + 1)));
+    retryTimer.schedule(attempt, base + Math.floor(Math.random() * (CTX_RETRY_JITTER_MS + 1)));
   };
   const attempt = () => {
     if (signal.aborted || (deadline !== 0 && Date.now() >= deadline)) {

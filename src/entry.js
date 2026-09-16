@@ -8,6 +8,7 @@ import { logger } from "./shared/logger.js";
 import { shouldSkipUrl } from "./kernel/guard.js";
 import { KEYS, getConfigValue, setConfigValue, deleteConfigField } from "./shared/storage.js";
 import { initFullscreenGate } from "./shared/shadow.js";
+import { ScopedTimer } from "./shared/scoped-timer.js";
 
 // The version lives in the banner and is read from the installed script at
 // runtime via GM_info, so what the UI reports is always what the manager
@@ -71,7 +72,8 @@ function bootstrap() {
       setConfigValue(KEYS.firstRun, false);
       const coarsePointer = matchMedia("(pointer: coarse)").matches;
       const hintAc = new AbortController();
-      const hintTimer = setTimeout(() => {
+      const hintTimer = new ScopedTimer(hintAc.signal);
+      hintTimer.schedule(() => {
         hintAc.abort();
         if (shell && shell.container?.isConnected && !shell.panel?.isOpen) {
           shell.toastHint(
@@ -82,7 +84,6 @@ function bootstrap() {
           );
         }
       }, 1200);
-      hintAc.signal.addEventListener("abort", () => clearTimeout(hintTimer), { once: true });
       document.addEventListener("pointerdown", () => hintAc.abort(), { capture: true, once: true });
       document.addEventListener("keydown", () => hintAc.abort(), { capture: true, once: true });
       document.addEventListener("wheel", () => hintAc.abort(), { capture: true, passive: true, once: true });
