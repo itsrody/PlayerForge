@@ -2,7 +2,6 @@ import { getPageContext, domainsMatch, domainScore, hashEntry } from "../shared/
 import { TUNING } from "../shared/tuning.js";
 import { KEYS, gmSetValue, loadJsonObject, gmAddValueChangeListener, gmRemoveValueChangeListener } from "../shared/storage.js";
 import { formatTime } from "../shared/time.js";
-import { DebouncedWriter } from "../shared/debounced-writer.js";
 import { Multiplexer } from "../shared/multiplexer.js";
 import { HAS_RVFC } from "../shared/capabilities.js";
 import { composeTimeout } from "../shared/signal.js";
