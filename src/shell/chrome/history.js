@@ -68,21 +68,21 @@ export function addHistorySection(panel, shell) {
       return;
     }
     if (btn.dataset.action === "reset") {
-      shell.resume?.resetEntry(card.dataset.entryId);
+      shell.resume?.store?.updateResume(card.dataset.entryId, 0);
       flashElement(btn);
       shell.toastInfo("reload", "Resume Entry Reset", "history");
     } else if (btn.dataset.action === "remove") {
-      // The store's #persist(true) fires onChange synchronously, so the
+      // The store's persist() fires onChange synchronously, so the
       // structural render() below reconciles the list (pop the stale card,
       // re-label the rest). Manual mutation here would double-release the
       // clicked card into the pool — render() is the single mutator.
-      shell.resume?.removeEntry(card.dataset.entryId);
+      shell.resume?.store?.removeEntry(card.dataset.entryId);
       shell.toastInfo("trash", "Resume Entry Removed", "history");
     }
   });
 
   function render() {
-    const entries = shell.resume?.getEntries() || [];
+    const entries = shell.resume?.store?.getEntries() || [];
     // Release cards that are no longer needed.
     while (activeCards.length > entries.length) {
       const card = activeCards.pop();

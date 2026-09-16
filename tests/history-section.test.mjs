@@ -40,18 +40,23 @@ function makeFakeShell() {
     entries,
     notify: (structural) => listener?.(structural),
     resume: {
-      getEntries: () => entries,
+      store: {
+        getEntries: () => entries,
+        removeEntry: (id) => {
+          const i = entries.findIndex((entry) => entry.id === id);
+          if (i !== -1) {
+            entries.splice(i, 1);
+            listener?.(true);
+          }
+        },
+        updateResume: (id) => {
+          const entry = entries.find((e) => e.id === id);
+          if (entry) entry.resume = 0;
+        }
+      },
       onChange: (cb) => {
         listener = cb;
         return () => { listener = null; };
-      },
-      resetEntry: () => {},
-      removeEntry: (id) => {
-        const i = entries.findIndex((entry) => entry.id === id);
-        if (i !== -1) {
-          entries.splice(i, 1);
-          listener?.(true);
-        }
       }
     },
     toast: () => {},

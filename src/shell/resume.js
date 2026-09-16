@@ -2,8 +2,10 @@ import { getPageContext, domainsMatch, domainScore, hashEntry } from "../shared/
 import { TUNING } from "../shared/tuning.js";
 import { KEYS, gmSetValue, loadJsonObject, gmAddValueChangeListener, gmRemoveValueChangeListener } from "../shared/storage.js";
 import { formatTime } from "../shared/time.js";
+import { DebouncedWriter } from "../shared/debounced-writer.js";
 import { Multiplexer } from "../shared/multiplexer.js";
 import { HAS_RVFC } from "../shared/capabilities.js";
+import { composeTimeout } from "../shared/signal.js";
 import { logger } from "../shared/logger.js";
 
 /** Sort entries by updatedAt - ascending (oldest-first, for eviction) or
@@ -47,97 +49,13 @@ function isValidStore(raw) {
 }
 
 /**
- * Persistent store of per-video entries (keyed by path+duration hash) holding
- * the resume position. Owned by ResumeTracker; per-entry last-write-wins
- * merging keeps concurrent shells/tabs - and any future whole-blob transport -
- * converging without clobbering each other's entries.
+ * Pure persistence layer for resume entries. Handles storage I/O, LWW merge
+ * semantics, bounds enforcement, and query. Owns no notifications — the
+ * tracker layer drives cross-tab sync and change propagation.
  */
 export class ResumeStore {
   #state = null;
   #loaded = false;
-  #listenerId = null;
-  #changeMultiplexer = new Multiplexer();
-
-  /**
-   * Subscribe to store changes. The callback receives a `structural` flag -
-   * true when the entry SET changed (create/remove/import/cross-tab merge),
-   * false for pure position/timestamp updates. Returns an unsubscribe fn.
-   * Consumers that snapshot the whole list (History) re-render on structural
-   * changes only; position-only persists stay invisible to them.
-   */
-  onChange(cb) {
-    return this.#changeMultiplexer.subscribe(cb);
-  }
-
-  #notify(structural = false) {
-    this.#changeMultiplexer.dispatch(structural);
-  }
-
-  constructor() {
-    // Live reload across tabs: whoever writes pf:resume elsewhere triggers a
-    // merge-only adoption here (never written back - the writer owns that
-    // round trip). This is also the seam where a future value-sync transport
-    // would land for free.
-    this.#listenerId = gmAddValueChangeListener(KEYS.resume, () => this.#adoptExternal());
-  }
-
-  /** Release the cross-tab change subscription (SPA re-entry / shell teardown). */
-  destroy() {
-    gmRemoveValueChangeListener(this.#listenerId);
-    this.#listenerId = null;
-    this.#changeMultiplexer.clear();
-  }
-
-  #adoptExternal() {
-    if (!this.#loaded) {
-      return;
-    }
-    const raw = loadJsonObject(KEYS.resume, null);
-    if (isValidStore(raw)) {
-      const { added, updated } = this.#mergeRaw(raw);
-      if (added || updated) {
-        this.#notify(true);
-      }
-    }
-  }
-
-#mergeRaw(raw) {
-  let added = 0;
-  let updated = 0;
-  const byId = new Map();
-  for (const entry of this.#state.entries) {
-    byId.set(entry.id, entry);
-  }
-  for (const incoming of raw.entries) {
-    if (!incoming || typeof incoming !== "object" || typeof incoming.id !== "string") {
-      continue;
-    }
-    const known = byId.get(incoming.id);
-    if (!known) {
-      const filtered = {};
-      for (const key of RESUME_ENTRY_FIELDS) {
-        if (key in incoming) {
-          filtered[key] = incoming[key];
-        }
-      }
-      filtered.id = incoming.id;
-      byId.set(incoming.id, filtered);
-      added++;
-    } else if ((incoming.updatedAt || 0) > (known.updatedAt || 0)) {
-      for (const key of RESUME_ENTRY_FIELDS) {
-        if (key in incoming) {
-          known[key] = incoming[key];
-        }
-      }
-      updated++;
-    }
-  }
-  if (added === 0 && updated === 0) {
-    return { added, updated };
-  }
-  this.#state.entries = [...byId.values()];
-  return { added, updated };
-}
 
   ensureLoaded() {
     if (this.#loaded) {
@@ -145,8 +63,6 @@ export class ResumeStore {
     }
     const raw = loadJsonObject(KEYS.resume, null);
     if (isValidStore(raw)) {
-      // Tolerate foreign or future writers: adopt their entries as-is and
-      // restamp our schema version - resetting would destroy history.
       const valid = raw.entries.filter((entry) => entry && typeof entry === "object" && typeof entry.id === "string");
       if (valid.length !== raw.entries.length) {
         logger.warn("resume", `Dropped ${raw.entries.length - valid.length} malformed entries`);
@@ -165,6 +81,44 @@ export class ResumeStore {
       logger.log("resume", `Dropped ${stalePending} stale pending entries`);
     }
     this.#loaded = true;
+  }
+
+  #mergeRaw(raw) {
+    let added = 0;
+    let updated = 0;
+    const byId = new Map();
+    for (const entry of this.#state.entries) {
+      byId.set(entry.id, entry);
+    }
+    for (const incoming of raw.entries) {
+      if (!incoming || typeof incoming !== "object" || typeof incoming.id !== "string") {
+        continue;
+      }
+      const known = byId.get(incoming.id);
+      if (!known) {
+        const filtered = {};
+        for (const key of RESUME_ENTRY_FIELDS) {
+          if (key in incoming) {
+            filtered[key] = incoming[key];
+          }
+        }
+        filtered.id = incoming.id;
+        byId.set(incoming.id, filtered);
+        added++;
+      } else if ((incoming.updatedAt || 0) > (known.updatedAt || 0)) {
+        for (const key of RESUME_ENTRY_FIELDS) {
+          if (key in incoming) {
+            known[key] = incoming[key];
+          }
+        }
+        updated++;
+      }
+    }
+    if (added === 0 && updated === 0) {
+      return { added, updated };
+    }
+    this.#state.entries = [...byId.values()];
+    return { added, updated };
   }
 
   /**
@@ -188,20 +142,20 @@ export class ResumeStore {
     return kept.slice(kept.length - RESUME_MAX_ENTRIES);
   }
 
-  #persist(structural = false) {
+  /** Merge remote state then persist. Returns true when the write landed. */
+  persist(structural = false) {
     try {
       const raw = loadJsonObject(KEYS.resume, null);
       if (isValidStore(raw)) {
         this.#mergeRaw(raw);
       }
-      // Bounds run AFTER the merge so a stale disk copy can never resurrect
-      // pruned entries - cleanup converges instead of oscillating.
       this.#state.entries = this.#enforceBounds();
       this.#state.updatedAt = Date.now();
       gmSetValue(KEYS.resume, this.#state);
-      this.#notify(structural);
+      return structural;
     } catch (err) {
       logger.error("resume", "Failed to persist resume store:", err);
+      return false;
     }
   }
 
@@ -231,9 +185,6 @@ export class ResumeStore {
   createEntry(domainKey, path, title, duration) {
     this.ensureLoaded();
     const id = hashEntry(domainKey, path, duration);
-    // The id is only a cache key - trust it solely when the domain agrees.
-    // Legacy ids (hashed without domain) and true collisions fall through to
-    // findMatch, which is domain-aware, so old stores keep matching.
     const existingById = this.#state.entries.find((entry) => entry.id === id);
     if (existingById && domainsMatch(existingById.domain, domainKey)) {
       return existingById;
@@ -246,7 +197,6 @@ export class ResumeStore {
       id,
       domain: domainKey,
       path,
-      // NFC so stored titles compare equal regardless of source encoding.
       title: (title || "").normalize("NFC"),
       duration: Number(duration) || NaN,
       resume: 0,
@@ -254,7 +204,7 @@ export class ResumeStore {
       updatedAt: Date.now()
     };
     this.#state.entries.push(entry);
-    this.#persist(true);
+    this.persist(true);
     return entry;
   }
 
@@ -264,7 +214,7 @@ export class ResumeStore {
     if (entry) {
       entry.resume = position;
       entry.updatedAt = Date.now();
-      this.#persist();
+      this.persist();
     }
   }
 
@@ -278,7 +228,7 @@ export class ResumeStore {
     const before = this.#state.entries.length;
     this.#state.entries = this.#state.entries.filter((entry) => entry.id !== id);
     if (this.#state.entries.length < before) {
-      this.#persist(true);
+      this.persist(true);
     }
   }
 
@@ -288,7 +238,7 @@ export class ResumeStore {
     this.#state.entries = this.#enforceBounds(days);
     const removed = before - this.#state.entries.length;
     if (removed > 0) {
-      this.#persist(true);
+      this.persist(true);
       logger.log("resume", `Pruned ${removed} resume entries`);
     }
   }
@@ -316,44 +266,74 @@ export class ResumeStore {
     }
     const result = this.#mergeRaw(raw);
     if (result.added || result.updated) {
-      this.#persist(true);
+      this.persist(true);
     }
     return result;
+  }
+
+  /**
+   * Adopt foreign state from GM storage (cross-tab sync). Returns
+   * {added, updated} counts, or null when nothing changed.
+   */
+  adoptExternal() {
+    if (!this.#loaded) {
+      return null;
+    }
+    const raw = loadJsonObject(KEYS.resume, null);
+    if (isValidStore(raw)) {
+      const result = this.#mergeRaw(raw);
+      if (result.added || result.updated) {
+        return result;
+      }
+    }
+    return null;
   }
 }
 
 /**
  * Shell-owned playback tracker: persists progress per (domain, path, duration)
  * and resumes where the user left off, with a "Start over" toast action.
- * Saves are media-clock driven: a passive `timeupdate` listener (which only
- * fires while playback advances) plus an immediate flush on pause and destroy.
+ *
+ * Uses the shell's shared MediaStateWatcher and VisibilityWatcher for event
+ * subscriptions — zero manual addEventListener calls, full AbortSignal lifecycle.
  */
 export class ResumeTracker {
   #shell;
   #store = new ResumeStore();
   #entry = null;
-  /** Every media listener this tracker attaches dies with this signal. */
+  /** Every subscription this tracker creates dies with this signal. */
   #scope = new AbortController();
   /** Eagerly resolved context promise — kicked off in the constructor. */
   #contextPromise;
   #lastSavedPosition = 0;
   /** Wall-clock floor for persists - keeps the write cadence bounded. */
   #lastSavedWall = 0;
-  /** Off-screen save gate observer; disconnected in destroy(). */
-  #intersectionObserver = null;
   #destroyed = false;
+  /** Change multiplexer — fans out structural/position-only events to consumers. */
+  #changeMultiplexer = new Multiplexer();
+  /** Cross-tab sync listener id — unregistered on destroy. */
+  #listenerId = null;
 
+  /**
+   * @param {object} shell - The shell facade (video, media, mediaWatcher, toastAction, currentTime, paused).
+   */
   constructor(shell) {
     this.#shell = shell;
-    // Kick off context resolution eagerly so the cross-origin bridge request
-    // (if any) runs in parallel with DOM injection and metadata loading.
-    // For top frames this resolves synchronously; for iframes it parallelizes
-    // the postMessage round-trip with the shell construction window.
     this.#contextPromise = getPageContext();
-    // Warm the store from GM storage now so the read happens during the
-    // shell construction + paint window, not sequentially in #init().
     this.#store.ensureLoaded();
+    // Cross-tab live reload: writes in other tabs trigger a merge here.
+    this.#listenerId = gmAddValueChangeListener(KEYS.resume, () => this.#onForeignWrite());
     this.#init().catch((err) => logger.error("resume", "Init failed:", err));
+  }
+
+  /** Expose the store for UI consumers (history, import/export). */
+  get store() {
+    return this.#store;
+  }
+
+  /** Subscribe to store changes (structural vs position-only). */
+  onChange(cb) {
+    return this.#changeMultiplexer.subscribe(cb);
   }
 
   async #init() {
@@ -366,28 +346,26 @@ export class ResumeTracker {
 
     const video = shell.video;
     if (!video.duration || !isFinite(video.duration)) {
-      // Resolving twice is a no-op, so timeout and signal races are safe.
-      const { signal } = this.#scope;
-      const { promise: metadataReady, resolve: resolveMetadata } = Promise.withResolvers();
-      const finishWaiting = () => {
-        clearTimeout(timeoutHandle);
-        resolveMetadata();
-      };
-      const onDurationChange = () => {
-        if (video.duration && isFinite(video.duration)) {
-          finishWaiting();
-        }
-      };
-      const onLoaded = () => finishWaiting();
-      const onError = () => finishWaiting();
-      const timeoutHandle = setTimeout(finishWaiting, RESUME_METADATA_WAIT_MS);
-      // A shell destroyed mid-wait must not leave the suspended #init
-      // continuation (and its closure) alive for the full metadata timeout.
-      signal.addEventListener("abort", () => clearTimeout(timeoutHandle), { once: true });
-      video.addEventListener("loadedmetadata", onLoaded, { signal });
-      video.addEventListener("durationchange", onDurationChange, { signal });
-      video.addEventListener("error", onError, { signal });
-      await metadataReady;
+      // Wait for metadata via composeTimeout — auto-cancels on scope abort.
+      const waitSignal = composeTimeout(this.#scope.signal, RESUME_METADATA_WAIT_MS);
+      await new Promise((resolve) => {
+        const finish = () => {
+          waitSignal.removeEventListener("abort", finish);
+          video.removeEventListener("loadedmetadata", finish);
+          video.removeEventListener("durationchange", onDuration);
+          video.removeEventListener("error", finish);
+          resolve();
+        };
+        const onDuration = () => {
+          if (video.duration && isFinite(video.duration)) {
+            finish();
+          }
+        };
+        waitSignal.addEventListener("abort", finish, { once: true });
+        video.addEventListener("loadedmetadata", finish, { signal: this.#scope.signal });
+        video.addEventListener("durationchange", onDuration, { signal: this.#scope.signal });
+        video.addEventListener("error", finish, { signal: this.#scope.signal });
+      });
       if (this.#destroyed) {
         logger.log("resume", "Shell destroyed before metadata - skipping");
         return;
@@ -416,10 +394,6 @@ export class ResumeTracker {
 
     const savedPosition = Number(this.#entry.resume) || NaN;
     if (savedPosition > RESUME_MIN_POSITION) {
-      // Seek immediately — the browser buffers from the target position in the
-      // background. No need to wait for `canplay` (which requires buffered
-      // data) since seeking is safe at metadata time and the user sees the
-      // jump as soon as duration is known.
       shell.media.seekTo(savedPosition);
       shell.toastAction("resume", `Resumed at ${formatTime(savedPosition)}`, "resume", [{
         icon: "reload",
@@ -440,112 +414,97 @@ export class ResumeTracker {
       return;
     }
     this.#lastSavedPosition = currentTime;
-    // Every persist resets the cadence floor so the timeupdate path's
-    // wall gate starts counting from real writes (including flushes).
     this.#lastSavedWall = Date.now();
     if (this.#entry.duration > 0 && currentTime / this.#entry.duration >= RESUME_COMPLETION_RATIO) {
       this.#entry.resume = 0;
       this.#store.updateResume(this.#entry.id, 0);
+      this.#changeMultiplexer.dispatch(false);
       return;
     }
     this.#store.updateResume(this.#entry.id, currentTime);
+    this.#changeMultiplexer.dispatch(false);
   }
 
   #startProgressWatch(shell) {
     const video = shell.video;
     const { signal } = this.#scope;
-    // Seed the floor at watch start so the first qualifying persist lands where
-    // the old interval's first tick used to - byte-identical cadence. The
-    // position gate is seeded from the saved position earlier in #init.
     this.#lastSavedWall = Date.now();
 
-    // `timeupdate` fires while the playhead advances (~4 Hz continuous), so the
-    // media clock itself is the save crank: no interval to keep alive, and a
-    // video that is "playing" but stalled simply stops writing. Position alone
-    // does not bound write frequency - a fast-forward or scrub trips the
-    // epsilon every ~3 s of content - so the wall floor keeps the incremental
-    // cadence where the old interval put it (≤1 write per saveIntervalMs). The
-    // `pause` flush below is fully immediate, so the "pause to pause" contract
-    // still lands the final position regardless of the floor.
     const saveIfDue = () => {
       if (shell.paused || Date.now() - this.#lastSavedWall < TUNING.resume.saveIntervalMs) {
         return;
       }
       this.#saveProgress(shell.currentTime);
     };
-    // Gate persistent saves while the player scrolls out of the viewport
-    // (carousel / off-screen embeds): an IntersectionObserver drives a
-    // layout-free "is this player on screen" boolean, so the media-clock saves
-    // stop churning GM storage writes for a video the user cannot see. The
-    // pause flush above still runs whenever playback actually pauses, so the
-    // final position is never lost by this gate. IntersectionObserverInit has
-    // no `signal` member (unlike AbortSignal-friendly APIs), so the observer
-    // is held on a field and disconnected in destroy() - otherwise a shell
-    // torn down while the element stays in the page (SPA video swaps) would
-    // leak the observer + target for the rest of the page lifetime.
+
+    // Visibility gating: off-screen incremental saves are suppressed.
     let onScreen = true;
     if (typeof IntersectionObserver === "function") {
       const io = new IntersectionObserver(([entry]) => {
         onScreen = entry.isIntersecting;
       });
       io.observe(video);
-      this.#intersectionObserver = io;
+      signal.addEventListener("abort", () => io.disconnect(), { once: true });
     }
     const gatedSaveIfDue = () => {
       if (onScreen) {
         saveIfDue();
       }
     };
-    video.addEventListener("timeupdate", gatedSaveIfDue, { signal, passive: true });
-    video.addEventListener("pause", () => {
-      // requestVideoFrameCallback gives the exact mediaTime of the last rendered
-      // frame — the position the user actually saw — whereas currentTime is the
-      // decoder position which may lead or lag the display. Falls back to
-      // currentTime when the API is unavailable (test harness).
-      if (HAS_RVFC) {
-        video.requestVideoFrameCallback((_now, metadata) => {
-          this.#saveProgress(metadata.mediaTime);
-        });
-      } else {
+
+    // Subscribe to the shared MediaStateWatcher — zero manual addEventListener calls.
+    const watcher = shell.mediaWatcher;
+    if (watcher) {
+      // timeupdate fires while the playhead advances (~4 Hz) — the media clock is the save crank.
+      watcher.onChange(gatedSaveIfDue, signal);
+      // pause flush: immediate save on pause (bypasses wall floor).
+      watcher.onPlayPause(() => {
+        if (!shell.paused) return;
+        if (HAS_RVFC) {
+          video.requestVideoFrameCallback((_now, metadata) => {
+            this.#saveProgress(metadata.mediaTime);
+          });
+        } else {
+          this.#saveProgress(shell.currentTime);
+        }
+      }, signal);
+      // ended/error: final save.
+      watcher.onDestroy(() => {
         this.#saveProgress(shell.currentTime);
-      }
-    }, { signal, passive: true });
+      }, signal);
+    } else {
+      // Fallback for tests that don't provide a watcher.
+      video.addEventListener("timeupdate", gatedSaveIfDue, { signal, passive: true });
+      video.addEventListener("pause", () => {
+        if (HAS_RVFC) {
+          video.requestVideoFrameCallback((_now, metadata) => {
+            this.#saveProgress(metadata.mediaTime);
+          });
+        } else {
+          this.#saveProgress(shell.currentTime);
+        }
+      }, { signal, passive: true });
+    }
   }
 
-  /** Clipboard bridge passthroughs (see ResumeStore exportData/importData). */
-  exportResume() {
-    return this.#store.exportData();
-  }
-
-  importResume(text) {
-    return this.#store.importData(text);
-  }
-
-  getEntries() {
-    return this.#store.getEntries();
-  }
-
-  removeEntry(id) {
-    this.#store.removeEntry(id);
-  }
-
-  resetEntry(id) {
-    this.#store.updateResume(id, 0);
-  }
-
-  /** Subscribe to store changes (see ResumeStore#onChange). */
-  onChange(cb) {
-    return this.#store.onChange(cb);
+  #onForeignWrite() {
+    const result = this.#store.adoptExternal();
+    if (result) {
+      this.#changeMultiplexer.dispatch(true);
+    }
   }
 
   destroy() {
+    if (this.#destroyed) return;
+    this.#destroyed = true;
     this.#scope.abort();
-    this.#intersectionObserver?.disconnect();
-    this.#intersectionObserver = null;
-    if (this.#entry && !this.#destroyed) {
+    if (this.#listenerId) {
+      gmRemoveValueChangeListener(this.#listenerId);
+      this.#listenerId = null;
+    }
+    if (this.#entry) {
       this.#saveProgress(this.#shell?.currentTime || NaN);
     }
-    this.#destroyed = true;
-    this.#store.destroy();
+    this.#changeMultiplexer.clear();
   }
 }

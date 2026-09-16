@@ -15,8 +15,6 @@ function installGm(initial) {
     if (key !== STORE_KEY) {
       return fallback;
     }
-    // The manager hands back a fresh deserialization per read - mimic it
-    // so shared-reference bugs between "disk" and memory cannot hide.
     return data == null ? fallback : JSON.parse(JSON.stringify(data));
   };
   globalThis.GM_setValue = (key, value) => {
@@ -28,7 +26,6 @@ function installGm(initial) {
   return {
     writes,
     latest: () => data,
-    /** Simulate an external writer (another tab / cloud sync) landing data. */
     writeExternal: (doc) => {
       data = JSON.parse(JSON.stringify(doc));
     }
@@ -127,7 +124,6 @@ test("identical paths on different domains never share an entry", () => {
 });
 
 test("legacy foreign-domain entry with a colliding legacy id is ignored", () => {
-  // Pre-fix store: /watch@600 hashed WITHOUT domain - both sites got "x1".
   installGm({
     version: 1,
     entries: [{ ...entry(), id: "x1", domain: "vimeo", resume: 300 }]
@@ -177,7 +173,6 @@ test("persist adopts newer remote revisions of known ids", () => {
   const e = entry({ id: "mine" });
   const gm = installGm({ version: 1, entries: [e] });
   const store = new ResumeStore();
-  // Remote write landed after our load, stamped in the future.
   gm.writeExternal({ version: 1, entries: [{ ...e, resume: 777, updatedAt: Date.now() + 10000 }] });
   store.updateResume("mine", 42);
   assert.equal(gm.latest().entries.find((x) => x.id === "mine").resume, 777);
@@ -187,40 +182,9 @@ test("persist keeps local revisions when they are newest", () => {
   const e = entry({ id: "mine" });
   const gm = installGm({ version: 1, entries: [e] });
   const store = new ResumeStore();
-  // A stale cloud copy must not clobber our fresh position.
   gm.writeExternal({ version: 1, entries: [{ ...e, resume: 777, updatedAt: Date.now() - 60000 }] });
   store.updateResume("mine", 42);
   assert.equal(gm.latest().entries.find((x) => x.id === "mine").resume, 42);
-});
-
-test("value change listener hot-reloads foreign writes", () => {
-  let fire;
-  globalThis.GM_addValueChangeListener = (key, cb) => {
-    fire = () => cb(key, null, null, true);
-  };
-  try {
-    const gm = installGm({ version: 1, entries: [] });
-    const store = new ResumeStore();
-    gm.writeExternal({ version: 1, entries: [entry({ id: "remote-tab" })] });
-    fire();
-    assert.ok(store.findMatch("youtube", "/watch", 600));
-  } finally {
-    delete globalThis.GM_addValueChangeListener;
-  }
-});
-
-test("destroy unregisters the change listener", () => {
-  let removed;
-  globalThis.GM_addValueChangeListener = () => "listener-1";
-  globalThis.GM_removeValueChangeListener = (id) => { removed = id; };
-  try {
-    const store = new ResumeStore();
-    store.destroy();
-    assert.equal(removed, "listener-1", "destroy frees the cross-tab subscription");
-  } finally {
-    delete globalThis.GM_addValueChangeListener;
-    delete globalThis.GM_removeValueChangeListener;
-  }
 });
 
 test("foreign versions and malformed entries are adopted instead of reset", () => {
@@ -262,31 +226,26 @@ test("importData merges, dedupes, and rejects invalid documents", () => {
   assert.equal(store.importData("{}"), null);
 });
 
-test("onChange flags structural vs position-only updates", () => {
-  installGm({ version: 1, entries: [] });
+test("adoptExternal returns null when not loaded", () => {
   const store = new ResumeStore();
-  const seen = [];
-  const unsub = store.onChange((structural) => seen.push(structural));
+  assert.equal(store.adoptExternal(), null);
+});
 
-  const created = store.createEntry("youtube", "/watch", "T", 600);
-  assert.deepEqual(seen, [true], "a new entry is structural");
+test("adoptExternal merges foreign writes and returns counts", () => {
+  const gm = installGm({ version: 1, entries: [entry({ id: "mine" })] });
+  const store = new ResumeStore();
+  store.ensureLoaded();
+  gm.writeExternal({ version: 1, entries: [entry({ id: "theirs" })] });
+  const result = store.adoptExternal();
+  assert.deepEqual(result, { added: 1, updated: 0 });
+  assert.ok(store.findMatch("youtube", "/watch", 600));
+});
 
-  seen.length = 0;
-  store.updateResume(created.id, 25);
-  assert.deepEqual(seen, [false], "a position save is not structural");
-
-  seen.length = 0;
-  store.removeEntry(created.id);
-  assert.deepEqual(seen, [true], "a removal is structural");
-
-  seen.length = 0;
-  store.importData(JSON.stringify({ version: 1, entries: [{ ...entry(), id: "imp" }] }));
-  assert.deepEqual(seen, [true], "an import that changes the set is structural");
-
-  unsub();
-  seen.length = 0;
-  store.updateResume("imp", 1);
-  assert.deepEqual(seen, [], "unsubscribed listeners are ignored");
-
-  store.destroy();
+test("adoptExternal returns null when nothing changed", () => {
+  const e = entry({ id: "only" });
+  const gm = installGm({ version: 1, entries: [e] });
+  const store = new ResumeStore();
+  store.ensureLoaded();
+  const result = store.adoptExternal();
+  assert.equal(result, null);
 });
