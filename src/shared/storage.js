@@ -1,4 +1,5 @@
 import { logger } from "./logger.js";
+import { guardedGM, guardedGMWithHandle } from "./gm-guard.js";
 
 /** The whole GM storage namespace: every root key lives here. */
 export const KEYS = {
@@ -17,39 +18,24 @@ export function gmSetValue(key, value) {
 
 /** Returns a handle for gmUnregisterMenu, or null when unavailable. */
 export function gmRegisterMenu(title, onClick, options) {
-  if (typeof GM_registerMenuCommand !== "function") {
-    return null;
-  }
-  return GM_registerMenuCommand(title, onClick, options);
+  return guardedGM("GM_registerMenuCommand", title, onClick, options);
 }
 
 /** Takes the handle returned by gmRegisterMenu. */
 export function gmUnregisterMenu(handle) {
-  if (handle == null || typeof GM_unregisterMenuCommand !== "function") {
-    return;
-  }
-  GM_unregisterMenuCommand(handle);
+  guardedGMWithHandle("GM_unregisterMenuCommand", handle);
 }
 
 export function gmAddValueChangeListener(key, callback) {
-  if (typeof GM_addValueChangeListener !== "function") {
-    return null;
-  }
-  return GM_addValueChangeListener(key, callback);
+  return guardedGM("GM_addValueChangeListener", key, callback);
 }
 
 export function gmRemoveValueChangeListener(handle) {
-  if (handle == null || typeof GM_removeValueChangeListener !== "function") {
-    return;
-  }
-  GM_removeValueChangeListener(handle);
+  guardedGMWithHandle("GM_removeValueChangeListener", handle);
 }
 
 export function gmGetResourceText(name) {
-  if (typeof GM_getResourceText !== "function") {
-    return null;
-  }
-  return GM_getResourceText(name);
+  return guardedGM("GM_getResourceText", name);
 }
 
 /**

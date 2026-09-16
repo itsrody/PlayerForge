@@ -1,5 +1,6 @@
 import { logger } from "../shared/logger.js";
 import { clamp } from "../shared/clamp.js";
+import { HAS_REQUEST_PIP } from "../shared/capabilities.js";
 
 /** Volume delta applied by nudgeVolume, shared with UI feedback layers. */
 export const VOLUME_STEP = 0.1;
@@ -143,7 +144,10 @@ export function createMediaControls({ video }) {
 
     /** Native PiP availability: the browser's own always-on-top surface. */
     pictureInPictureSupported() {
-      return typeof video.requestPictureInPicture === "function" &&
+      // HAS_REQUEST_PIP gates the browser's own API on the prototype chain;
+      // the per-instance check covers test harnesses that stub the method
+      // on a single video element (jsdom).
+      return (HAS_REQUEST_PIP || typeof video.requestPictureInPicture === "function") &&
         typeof document.pictureInPictureEnabled === "boolean" &&
         document.pictureInPictureEnabled;
     },

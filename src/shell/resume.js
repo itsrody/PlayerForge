@@ -2,6 +2,8 @@ import { getPageContext, domainsMatch, domainScore, hashEntry } from "../shared/
 import { TUNING } from "../shared/tuning.js";
 import { KEYS, gmSetValue, loadJsonObject, gmAddValueChangeListener, gmRemoveValueChangeListener } from "../shared/storage.js";
 import { formatTime } from "../shared/time.js";
+import { Multiplexer } from "../shared/multiplexer.js";
+import { HAS_RVFC } from "../shared/capabilities.js";
 import { logger } from "../shared/logger.js";
 
 /** Sort entries by updatedAt - ascending (oldest-first, for eviction) or
@@ -54,7 +56,7 @@ export class ResumeStore {
   #state = null;
   #loaded = false;
   #listenerId = null;
-  #listeners = new Set();
+  #changeMultiplexer = new Multiplexer();
 
   /**
    * Subscribe to store changes. The callback receives a `structural` flag -
@@ -64,14 +66,11 @@ export class ResumeStore {
    * changes only; position-only persists stay invisible to them.
    */
   onChange(cb) {
-    this.#listeners.add(cb);
-    return () => this.#listeners.delete(cb);
+    return this.#changeMultiplexer.subscribe(cb);
   }
 
   #notify(structural = false) {
-    for (const cb of this.#listeners) {
-      cb(structural);
-    }
+    this.#changeMultiplexer.dispatch(structural);
   }
 
   constructor() {
@@ -86,7 +85,7 @@ export class ResumeStore {
   destroy() {
     gmRemoveValueChangeListener(this.#listenerId);
     this.#listenerId = null;
-    this.#listeners.clear();
+    this.#changeMultiplexer.clear();
   }
 
   #adoptExternal() {
@@ -503,7 +502,7 @@ export class ResumeTracker {
       // frame — the position the user actually saw — whereas currentTime is the
       // decoder position which may lead or lag the display. Falls back to
       // currentTime when the API is unavailable (test harness).
-      if (typeof video.requestVideoFrameCallback === "function") {
+      if (HAS_RVFC) {
         video.requestVideoFrameCallback((_now, metadata) => {
           this.#saveProgress(metadata.mediaTime);
         });

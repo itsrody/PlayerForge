@@ -2,6 +2,8 @@ import { allowsIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo
 import { TUNING } from "../../shared/tuning.js";
 import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../../shared/shadow.js";
 import { DOMManager } from "../../shared/dom-manager.js";
+import { PooledEventBus } from "../../shared/event-pool.js";
+import { HAS_CHECK_VISIBILITY } from "../../shared/capabilities.js";
 import { logger } from "../../shared/logger.js";
 
 /**
@@ -39,60 +41,11 @@ const activeForges = new Set();
 let lastActiveForge = null;
 
 /**
- * Pooled scrub event + detail payload. Scrub fires once per coalesced pointer
- * move (up to display rate), so allocating a fresh CustomEvent plus a fresh
- * detail object per move - the old #dispatch shape - churns the young
- * generation for the whole drag. Same philosophy as firstTwoPointers: mutate
- * one fixed-shape detail in place and re-dispatch one reused Event.
- * dispatchEvent runs listeners synchronously and every consumer (actions.js
- * reads detail.dx/velocity within the scrub handler) observes the payload
- * before the next move re-mutates it, so a re-dispatched instance is safe -
- * nothing retains the object past the caller that last read it.
- *
- * The pooled Event is built lazily (not at module load) so it is constructed
- * in the same realm as the surface it is dispatched onto: the bare
- * `globalThis.CustomEvent` is resolved at first use, which keeps it valid
- * across jsdom's realm bridging in tests and identical to the page realm in
- * the browser. One pool services the whole engine; only a single scrub can be
- * in flight at a time, so sharing is safe.
+ * Pooled event bus for gesture dispatches. Single instance shared across
+ * all InputForge engines — gesture names are unique and dispatch runs
+ * synchronously, so concurrent engines never collide on the same event.
  */
-const scrubDetail = { zone: "", method: "pointer", dx: 0, velocity: 0, timestamp: 0 };
-let scrubPool = null;
-function pooledScrubEvent() {
-  const Ctor = globalThis.CustomEvent;
-  if (scrubPool && scrubPool.Ctor === Ctor) {
-    return scrubPool.event;
-  }
-  scrubPool = {
-    Ctor,
-    event: new Ctor(GESTURE_EVENTS.scrub, {
-      detail: scrubDetail,
-      bubbles: false,
-      composed: false
-    })
-  };
-  return scrubPool.event;
-}
-
-/**
- * Pooled per-name CustomEvents so the gesture boundary never allocates. Each
- * instance gets a fresh own `detail` assigned before every dispatch (own
- * properties shadow the prototype getter), and the consumers read it
- * synchronously without retaining it - same contract as the scrub pool above.
- * Lazy `globalThis.CustomEvent` resolution keeps the pool realm-safe.
- */
-const dispatchPool = new Map();
-function pooledDispatchEvent(name, detail) {
-  const Ctor = globalThis.CustomEvent;
-  const stale = dispatchPool.get(name);
-  if (stale && stale.Ctor === Ctor) {
-    stale.event.detail = detail;
-    return stale.event;
-  }
-  const event = new Ctor(name, { detail, bubbles: false, composed: false });
-  dispatchPool.set(name, { Ctor, event });
-  return event;
-}
+const eventBus = new PooledEventBus();
 
 /** Click-event time on the performance.now() timebase. Synthetic events
  *  (jsdom/host tests) carry a zero timeStamp; falling back keeps the
@@ -315,7 +268,7 @@ export class InputForge {
     // forcing a layout flush. When the video is hidden (e.g. during a panel
     // transition or a script-injected overlay), we can bail immediately
     // instead of paying getBoundingClientRect()'s synchronous layout.
-    if (typeof this.#video.checkVisibility === "function" &&
+    if (HAS_CHECK_VISIBILITY &&
         !this.#video.checkVisibility({ checkOpacity: true, checkClip: true })) {
       return false;
     }
@@ -533,7 +486,7 @@ export class InputForge {
 
   #dispatch(eventName, detail) {
     if (!this.#destroyed && this.#eventTarget) {
-      this.#eventTarget.dispatchEvent(pooledDispatchEvent(eventName, detail));
+      eventBus.dispatch(this.#eventTarget, eventName, detail);
     }
   }
 
@@ -762,16 +715,17 @@ export class InputForge {
     const instantVelocity = dt > 0.001 ? velocityStep / dt : 0;
     const alpha = dt > 0 ? 1 - Math.exp(-dt * SCRUB_VELOCITY_INV) : 0;
     this.#scrubVelocity += alpha * (instantVelocity - this.#scrubVelocity);
-    // Emit via the pooled event: the payload and the Event both ride reused
+    // Emit via the pooled event bus: the payload and the Event both ride reused
     // objects, so no per-move allocation (dispatchEvent runs synchronously and
     // consumers read before the next move re-mutates them).
-    scrubDetail.zone = this.#gestureZone || "screen";
-    scrubDetail.method = "pointer";
-    scrubDetail.dx = totalStep;
-    scrubDetail.velocity = this.#scrubVelocity;
-    scrubDetail.timestamp = now;
     if (!this.#destroyed && this.#eventTarget) {
-      this.#eventTarget.dispatchEvent(pooledScrubEvent());
+      eventBus.dispatch(this.#eventTarget, GESTURE_EVENTS.scrub, {
+        zone: this.#gestureZone || "screen",
+        method: "pointer",
+        dx: totalStep,
+        velocity: this.#scrubVelocity,
+        timestamp: now
+      });
     }
   }
 

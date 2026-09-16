@@ -16,6 +16,8 @@
  * lazily, so a video-bearing iframe cannot assume its ancestors run anything
  * unless the relay chain is already listening.
  */
+import { composeTimeout, composeSignals } from "./signal.js";
+
 /* - Window message types - */
 
 /**
@@ -377,33 +379,9 @@ function requestPageContextOverPipe(timeoutMs, deadline) {
     }
   };
 
-  let signal;
-  try {
-    signal = AbortSignal.any([ac.signal, AbortSignal.timeout(timeoutMs)]);
-  } catch {
-    signal = null;
-  }
-
-  const dropDeadPipe = () => {
-    if (contextPipe === pipe) {
-      contextPipe = null;
-      try {
-        pipe.port.close();
-      } catch {}
-    }
-  };
-
-  if (signal) {
-    signal.addEventListener("abort", () => {
-      // The abort fires both on the timeout AND on settle()'s own ac.abort()
-      // after a response. Only a timeout (no answer) means the pipe is dead.
-      if (answered) {
-        return;
-      }
-      dropDeadPipe();
-      settle(null);
-    }, { once: true });
-  } else {
+  const signal = composeTimeout(ac.signal, timeoutMs);
+  if (signal === ac.signal) {
+    // jsdom brand-check: no composed signal available; manual deadline.
     const timer = setTimeout(() => {
       if (answered) {
         return;
@@ -413,6 +391,16 @@ function requestPageContextOverPipe(timeoutMs, deadline) {
       settle(null);
     }, Math.max(0, deadline - Date.now()));
     ac.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
+  } else {
+    signal.addEventListener("abort", () => {
+      // The abort fires both on the timeout AND on settle()'s own ac.abort()
+      // after a response. Only a timeout (no answer) means the pipe is dead.
+      if (answered) {
+        return;
+      }
+      dropDeadPipe();
+      settle(null);
+    }, { once: true });
   }
 
   pipe.port.addEventListener("message", onData, { signal: ac.signal });
@@ -458,14 +446,12 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   // browser always takes the composed-signal path. Node/jsdom brand-checks an
   // AbortSignal against its own realm and rejects a jsdom-constructed signal
   // inside any(), so test hosts drop to the controller + manual deadline.
-  let signal;
+  const composedSignal = composeTimeout(ac.signal, timeoutMs);
   let deadline = 0;
-  try {
-    signal = AbortSignal.any([ac.signal, AbortSignal.timeout(timeoutMs)]);
-  } catch {
-    signal = ac.signal;
+  if (composedSignal === ac.signal) {
     deadline = Date.now() + timeoutMs;
   }
+  const signal = composedSignal;
 
   const settle = (context, viaPort) => {
     if (settled) {

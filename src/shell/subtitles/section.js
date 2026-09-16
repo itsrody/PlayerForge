@@ -4,6 +4,7 @@ import { fmtPercent, fmtEm } from "../../shared/formatters.js";
 import { srtToVtt, ensureVttHeader, offsetCues, parseSubtitlesAsync } from "./forgevtt.js";
 import { ForgeTrack } from "./forge-track.js";
 import { debounce } from "../../shared/time.js";
+import { composeTimeout } from "../../shared/signal.js";
 import { flashElement } from "../chrome/animate.js";
 import { el } from "../chrome/elements.js";
 import { logger } from "../../shared/logger.js";
@@ -386,15 +387,7 @@ export class SubtitlesSection {
     let response;
     try {
       const { signal } = this.#scope;
-      const timeoutSignal = AbortSignal.timeout(15000);
-      let fetchSignal;
-      try {
-        fetchSignal = AbortSignal.any([signal, timeoutSignal]);
-      } catch {
-        // jsdom brand-checks AbortSignal against its own realm; fall back to
-        // the section scope alone (no timeout) in test hosts.
-        fetchSignal = signal;
-      }
+      const fetchSignal = composeTimeout(signal, 15000);
       response = await raceWithAbort(gmRequestText(url), fetchSignal);
     } catch (err) {
       if (err.name === "AbortError") {

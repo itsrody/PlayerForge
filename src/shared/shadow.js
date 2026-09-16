@@ -4,6 +4,7 @@
  * (`document.activeElement`, `contains()`, `closest()`) stop at shadow
  * boundaries. These two primitives bridge every gap.
  */
+import { Multiplexer } from "./multiplexer.js";
 
 /**
  * The deepest active element, piercing open shadow boundaries.
@@ -45,7 +46,7 @@ export let fs = false;
 
 /** Subscribers notified on a fullscreen state transition (subscribed from a
  *  single underlying native listener; see initFullscreenGate). */
-const fsSubscribers = new Set();
+const fsMultiplexer = new Multiplexer();
 
 /**
  * Build the `fs` gate off the native fullscreen event and fan out transitions.
@@ -65,9 +66,7 @@ export function initFullscreenGate(doc = document) {
       return;
     }
     fs = next;
-    for (const cb of fsSubscribers) {
-      cb(next);
-    }
+    fsMultiplexer.dispatch(next);
   };
   doc.addEventListener("fullscreenchange", update);
 }
@@ -78,9 +77,5 @@ export function initFullscreenGate(doc = document) {
  * function; pass `signal` to have it torn down automatically.
  */
 export function subscribeFullscreen(cb, signal) {
-  fsSubscribers.add(cb);
-  if (signal) {
-    signal.addEventListener("abort", () => fsSubscribers.delete(cb), { once: true });
-  }
-  return () => fsSubscribers.delete(cb);
+  return fsMultiplexer.subscribe(cb, signal);
 }
