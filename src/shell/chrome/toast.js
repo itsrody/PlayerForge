@@ -4,6 +4,7 @@ import { flashElement } from "./animate.js";
 import { button } from "./elements.js";
 import { createIconElement } from "./icons.js";
 import { DOMManager } from "../../shared/dom-manager.js";
+import { Destroyable } from "../../shared/destroyable.js";
 
 /**
  * Single toast surface hosted in the shell HUD layer: icon + text +
@@ -22,7 +23,7 @@ import { DOMManager } from "../../shared/dom-manager.js";
  * hidden by their gesture's end. Every producer tags its family via
  * `group` (skip, hold, scrub, fs, volume, pinch, resume, data).
  */
-export class ToastManager {
+export class ToastManager extends Destroyable {
   #pool;
   #toast;
   #icon;
@@ -40,6 +41,7 @@ export class ToastManager {
   #activeGroup = null;
 
   constructor(hudLayer) {
+    super();
     const doc = hudLayer.ownerDocument;
     this.#pool = new DomPool({
       initial: 1,
@@ -137,5 +139,6 @@ export class ToastManager {
     this.#autoHideTimer?.cancel();
     this.#autoHideTimer = null;
     this.#pool.destroy();
+    super.destroy();
   }
 }

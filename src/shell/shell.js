@@ -9,6 +9,7 @@ import { SettingsPanel } from "./chrome/panel.js";
 import { addSettingsSection } from "./chrome/config.js";
 import { TUNING } from "../shared/tuning.js";
 import { yield_ as yieldToBrowser } from "../shared/scheduler.js";
+import { Destroyable } from "../shared/destroyable.js";
 import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls } from "./media.js";
@@ -23,7 +24,7 @@ import { VisibilityWatcher } from "../shared/visibility-watcher.js";
  * HUD, hosts the input layer, playback tracking, subtitles, and settings
  * panel, tracks fullscreen state, and wires MediaSession.
  */
-export class Shell {
+export class Shell extends Destroyable {
   id;
   video;
   container;
@@ -39,11 +40,8 @@ export class Shell {
   /** Active wake-lock session's abort controller; the browser owns release. */
   #wakeLockAbort = null;
   #onDestroy;
-  #destroyed = false;
   /** DOM lifecycle manager: listeners, observers, elements, rollbacks. */
   #dom = new DOMManager();
-  /** Sub-component scope: signal passed to InputForge, MediaSession, etc. */
-  #scope = new AbortController();
   /** Command plane: all playback control routes through these primitives. */
   #media;
   /** OS media-key facet, null without MediaSession support. */
@@ -54,6 +52,7 @@ export class Shell {
   #visWatcher = null;
 
   constructor({ video, container, sdk, onDestroy }) {
+    super();
     this.video = video;
     this.container = container;
     this.sdk = sdk;
@@ -88,7 +87,7 @@ export class Shell {
       await yieldToBrowser();
       this.#filter = new VideoFilter(this, this.#panel);
       await yieldToBrowser();
-      addHistorySection(this.#panel, this, this.#scope.signal);
+      addHistorySection(this.#panel, this, this.signal);
       await yieldToBrowser();
       addSettingsSection(this.#panel);
     });
@@ -99,7 +98,7 @@ export class Shell {
     this.#mediaSession = claimMediaSession({
       controls: this.#media,
       video: this.video,
-      signal: this.#scope.signal
+      signal: this.signal
     });
     this.#watchFullscreen();
     this.#watchWakeLock();
@@ -202,7 +201,7 @@ export class Shell {
     }
     host.focus();
     this.#dom.listen(this.container, "pointerdown", (event) => {
-      if (this.#destroyed) {
+      if (this.isDestroyed) {
         return;
       }
       // Common case: focus already lives on the host - no traversal needed.
@@ -217,7 +216,7 @@ export class Shell {
 
   /** Re-focus the host after a pointerdown unless focus already moved inside. */
   #restoreFocusIfNeeded(host) {
-    if (!this.#destroyed && deepestActiveElement(host) !== host) {
+    if (!this.isDestroyed && deepestActiveElement(host) !== host) {
       host.focus();
     }
   }
@@ -284,7 +283,7 @@ export class Shell {
     // Single MediaStateWatcher replaces 13+ individual addEventListener calls.
     // The watcher owns the lifecycle via #scope.signal — all listeners are
     // removed in one pass on destroy.
-    this.#mediaWatcher = new MediaStateWatcher(video, this.#scope.signal);
+    this.#mediaWatcher = new MediaStateWatcher(video, this.signal);
     // MediaSession sync: fires on any state change.
     this.#mediaWatcher.onChange(() => {
       this.#mediaSession?.sync();
@@ -308,7 +307,7 @@ export class Shell {
     // chain (idempotent) so a retry succeeds if the attributes were just
     // granted, e.g. an SDK iframe created after our boot-time provisioning.
     this.#dom.listen(document, "fullscreenerror", () => {
-      if (this.#destroyed || fs) {
+      if (this.isDestroyed || fs) {
         return;
       }
       this.toastInfo("fs-block", "Fullscreen blocked by embed", "fs-block");
@@ -330,7 +329,7 @@ export class Shell {
     // down a held lock - so there is no manual lock.release() and no post-await
     // re-check for pause/ended/destroy racing the request.
     const acquire = () => {
-      if (this.#destroyed || video.paused || video.ended) {
+      if (this.isDestroyed || video.paused || video.ended) {
         return;
       }
       // A newer acquire supersedes an in-flight one: last signal wins.
@@ -357,7 +356,7 @@ export class Shell {
     this.#mediaWatcher?.onDestroy(release);
     // Re-acquire on visibility resume: a background tab loses the wake lock
     // but the video may still be playing when the user returns.
-    this.#visWatcher = new VisibilityWatcher(this.#scope.signal);
+    this.#visWatcher = new VisibilityWatcher(this.signal);
     this.#visWatcher.onVisible(() => {
       if (!video.paused && !video.ended) {
         acquire();
@@ -368,7 +367,7 @@ export class Shell {
   /** Lock to landscape on fullscreen entry (Android); unlock on exit. */
   #watchOrientation() {
     const unsub = subscribeFullscreen(async (active) => {
-      if (this.#destroyed) {
+      if (this.isDestroyed) {
         return;
       }
       try {
@@ -378,7 +377,7 @@ export class Shell {
           screen.orientation.unlock();
         }
       } catch {}
-    }, this.#scope.signal);
+    }, this.signal);
     this.#dom.onCleanup(unsub);
   }
 
@@ -394,31 +393,30 @@ export class Shell {
   }
 
   destroy() {
-    if (!this.#destroyed) {
-      this.#destroyed = true;
-      logger.log("shell", `Destroying shell "${this.sdk.name}"`);
-      // Destroy sub-components (each manages its own internal state).
-      this.#resume?.destroy();
-      this.#resume = null;
-      this.#subtitles?.destroy();
-      this.#subtitles = null;
-      this.#filter?.destroy();
-      this.#filter = null;
-      this.#wakeLockAbort?.abort();
-      this.#wakeLockAbort = null;
-      this.#inputs?.destroy();
-      this.#inputs = null;
-      this.#panel?.destroy();
-      this.#panel = null;
-      this.#toasts?.destroy();
-      this.#toasts = null;
-      // Sub-component scope (InputForge, MediaSession shared signal).
-      this.#scope.abort();
-      // DOM lifecycle: remove elements, disconnect observers, remove
-      // listeners, restore attributes/styles — all in one call.
-      this.#dom.destroy();
-      this.#shellDom = null;
-      this.#onDestroy?.(this);
+    if (this.isDestroyed) {
+      return;
     }
+    logger.log("shell", `Destroying shell "${this.sdk.name}"`);
+    // Destroy sub-components (each manages its own internal state).
+    this.#resume?.destroy();
+    this.#resume = null;
+    this.#subtitles?.destroy();
+    this.#subtitles = null;
+    this.#filter?.destroy();
+    this.#filter = null;
+    this.#wakeLockAbort?.abort();
+    this.#wakeLockAbort = null;
+    this.#inputs?.destroy();
+    this.#inputs = null;
+    this.#panel?.destroy();
+    this.#panel = null;
+    this.#toasts?.destroy();
+    this.#toasts = null;
+    // DOM lifecycle: remove elements, disconnect observers, remove
+    // listeners, restore attributes/styles — all in one call.
+    this.#dom.destroy();
+    this.#shellDom = null;
+    this.#onDestroy?.(this);
+    super.destroy();
   }
 }

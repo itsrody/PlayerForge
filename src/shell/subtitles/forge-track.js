@@ -1,4 +1,5 @@
 import { DOMManager } from "../../shared/dom-manager.js";
+import { Destroyable } from "../../shared/destroyable.js";
 
 const STACK_OVERLAP_EM = 1.6;
 const MAX_SLOTS = 8;
@@ -12,7 +13,7 @@ const TRACK_LABEL = "PlayerForge Subtitles";
  * output: pooled caption slots, CSS custom-property-based styling, and
  * per-cue stacking for simultaneous lines.
  */
-export class ForgeTrack {
+export class ForgeTrack extends Destroyable {
   #cueLayer;
   #cueLayerStyle;
   #track;
@@ -27,9 +28,9 @@ export class ForgeTrack {
   #lastActive = [];
   /** Records the bound cuechange so destroy can unregister it. */
   #onCueChange = null;
-  #destroyed = false;
 
   constructor(video, cueLayer) {
+    super();
     this.#cueLayer = cueLayer;
     this.#cueLayerStyle = cueLayer?.style;
     // Preallocate the pooled per-slot scratch now so cuechange renders (the
@@ -67,7 +68,7 @@ export class ForgeTrack {
 
   /** Replace all cues on the track. Accepts plain cue objects from forgevtt. */
   load(cues) {
-    if (this.#destroyed) {
+    if (this.isDestroyed) {
       return;
     }
     const track = this.#track;
@@ -86,7 +87,7 @@ export class ForgeTrack {
   }
 
   #render() {
-    if (this.#destroyed || !this.#cueLayer) {
+    if (this.isDestroyed || !this.#cueLayer) {
       return;
     }
     const active = this.#track.activeCues;
@@ -147,7 +148,7 @@ export class ForgeTrack {
   }
 
   clear() {
-    if (this.#destroyed || !this.#lastActive.some(Boolean)) {
+    if (this.isDestroyed || !this.#lastActive.some(Boolean)) {
       return;
     }
     for (let i = 0; i < this.#slots.length; i++) {
@@ -164,10 +165,9 @@ export class ForgeTrack {
   }
 
   destroy() {
-    if (this.#destroyed) {
+    if (this.isDestroyed) {
       return;
     }
-    this.#destroyed = true;
     // Unregister our native cuechange listener: the track survives (the spec
     // has no removal API) and would otherwise keep firing this renderer's
     // slot-node logic against a torn-down pool forever.
@@ -180,5 +180,6 @@ export class ForgeTrack {
     this.#dom.destroy();
     this.#slots = [];
     this.#lastActive = [];
+    super.destroy();
   }
 }

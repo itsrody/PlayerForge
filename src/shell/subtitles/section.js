@@ -8,6 +8,7 @@ import { composeTimeout } from "../../shared/signal.js";
 import { flashElement } from "../chrome/animate.js";
 import { el } from "../chrome/elements.js";
 import { logger } from "../../shared/logger.js";
+import { Destroyable } from "../../shared/destroyable.js";
 
 const SUBTITLE_FILE_ACCEPT = ".srt,.vtt";
 const SUBTITLE_EXT_RE = /\.(srt|vtt)$/i;
@@ -44,7 +45,7 @@ const SETTING_KEYS = {
  * cues through the shell's cue layer, with caption styling, manual positioning,
  * and sync offset.
  */
-export class SubtitlesSection {
+export class SubtitlesSection extends Destroyable {
   #shell;
   #forgeTrack = null;
   #trackMeta = null;
@@ -64,28 +65,25 @@ export class SubtitlesSection {
   #scheduleSyncOffset = null;
   /** Per-key trailing persist for the style steppers: auto-flushed on destroy. */
   #styleWriters;
-  #scope = new AbortController();
-  #destroyed = false;
 
   constructor(shell) {
+    super();
     this.#shell = shell;
     this.#syncOffset = Number(getConfigValue(SETTING_KEYS.syncOffset, 0)) || 0;
     this.#cueLayer = shell.shellDom?.cueLayer || null;
     this.#fileInput = this.#createFileInput(shell);
     // DestroyableWriter auto-flushes all per-key writers on scope abort.
-    this.#styleWriters = new DestroyableWriter(this.#scope.signal);
+    this.#styleWriters = new DestroyableWriter(this.signal);
     this.#buildPanelUi(shell);
     this.#startListening();
     logger.log("subtitles", `Ready (${shell.sdk.name})`);
   }
 
   destroy() {
-    if (this.#destroyed) {
+    if (this.isDestroyed) {
       return;
     }
-    this.#destroyed = true;
     // Abort the scope — DebouncedWriter and DestroyableWriter flush automatically.
-    this.#scope.abort();
     this.#forgeTrack?.destroy();
     this.#forgeTrack = null;
     this.#fileInput?.remove();
@@ -99,10 +97,11 @@ export class SubtitlesSection {
     this.#resetBtn = null;
     this.#trackMeta = null;
     this.#cueLayer = null;
+    super.destroy();
   }
 
   #startListening() {
-    const { signal } = this.#scope;
+    const { signal } = this;
     // Use the shared MediaStateWatcher instead of manual addEventListener("ended").
     this.#shell.mediaWatcher?.onDestroy(() => this.#forgeTrack?.clear(), signal);
   }
@@ -120,7 +119,7 @@ export class SubtitlesSection {
     const dragCounter = { count: 0 };
     const hasFiles = (event) => event.dataTransfer?.types?.includes("Files") ?? false;
     const isSubtitleFile = (file) => SUBTITLE_EXT_RE.test(file?.name || "");
-    const { signal } = this.#scope;
+    const { signal } = this;
 
     sectionRoot.addEventListener("dragenter", (event) => {
       if (hasFiles(event)) {
@@ -247,7 +246,7 @@ export class SubtitlesSection {
         this.#forgeTrack?.load(offsetCues(this.#baseCues, offset));
       }
       setConfigValue(SETTING_KEYS.syncOffset, offset);
-    }, TUNING.subtitles.syncDebounceMs, this.#scope.signal);
+    }, TUNING.subtitles.syncDebounceMs, this.signal);
     const syncStepper = panel.addControl(styleGrid, {
       type: "stepper",
       label: "Sync",
@@ -344,12 +343,12 @@ export class SubtitlesSection {
         this.load(file);
       }
       input.value = "";
-    }, { signal: this.#scope.signal });
+    }, { signal: this.signal });
     return input;
   }
 
   async load(file) {
-    if (this.#destroyed) {
+    if (this.isDestroyed) {
       return;
     }
     try {
@@ -368,7 +367,7 @@ export class SubtitlesSection {
    *  rejects with AbortError, which #handleLoadError surfaces as a normal
    *  fetch failure. */
   async loadFromUrl(rawUrl) {
-    if (this.#destroyed) {
+    if (this.isDestroyed) {
       return;
     }
     const url = String(rawUrl || "").trim();
@@ -377,7 +376,7 @@ export class SubtitlesSection {
     }
     let response;
     try {
-      const { signal } = this.#scope;
+      const { signal } = this;
       const fetchSignal = composeTimeout(signal, 15000);
       response = await raceWithAbort(gmRequestText(url), fetchSignal);
     } catch (err) {
@@ -423,7 +422,7 @@ export class SubtitlesSection {
   }
 
   async #ingest(name, rawText) {
-    if (this.#destroyed) {
+    if (this.isDestroyed) {
       return;
     }
     const normalizedText = /\.srt$/i.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
@@ -438,7 +437,7 @@ export class SubtitlesSection {
     const cues = await parseSubtitlesAsync(normalizedText, 0);
     // Cooperative parse yields to the browser; the section may have been torn
     // down mid-await, so re-check before touching the track/slots.
-    if (this.#destroyed) {
+    if (this.isDestroyed) {
       return;
     }
     if (!cues.length) {

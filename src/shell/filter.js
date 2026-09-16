@@ -4,6 +4,7 @@ import { DebouncedWriter } from "../shared/debounced-writer.js";
 import { clamp } from "../shared/clamp.js";
 import { TUNING } from "../shared/tuning.js";
 import { fmtPercent } from "../shared/formatters.js";
+import { Destroyable } from "../shared/destroyable.js";
 
 const CONFIG_PREFIX = "filter";
 
@@ -64,29 +65,26 @@ function buildFilterString(values) {
   return parts.join(" ") || "none";
 }
 
-export class VideoFilter {
+export class VideoFilter extends Destroyable {
   #video;
   #shell;
   #values = { ...DEFAULTS };
   #presetSelect = null;
   #resetBtn = null;
   #steppers = {};
-  #destroyed = false;
-  #scope;
   /** Trailing persist: preview applies instantly, storage lands once the drag
    *  settles (a slider drag otherwise fires a full config write + cross-tab
    *  live-reload echo per step). Auto-flushed on destroy via AbortSignal. */
   #schedulePersist;
 
   constructor(shell, panel) {
+    super();
     this.#video = shell.video;
     this.#shell = shell;
-    // Create a scope for the debounced writer — flushed automatically on abort.
-    this.#scope = new AbortController();
     this.#schedulePersist = new DebouncedWriter(
       () => this.#writePersist(),
       TUNING.filter.persistDebounceMs,
-      this.#scope.signal
+      this.signal
     );
     this.#buildSection(panel);
     this.#loadFromConfig();
@@ -186,7 +184,7 @@ export class VideoFilter {
   }
 
   #apply() {
-    if (this.#destroyed || !this.#video) {
+    if (this.isDestroyed || !this.#video) {
       return;
     }
     this.#video.style.filter = buildFilterString(this.#values);
@@ -246,14 +244,13 @@ export class VideoFilter {
   }
 
   destroy() {
-    if (this.#destroyed) {
+    if (this.isDestroyed) {
       return;
     }
-    this.#destroyed = true;
     // Abort the scope — the DebouncedWriter flushes automatically.
-    this.#scope.abort();
     if (this.#video) {
       this.#video.style.filter = "";
     }
+    super.destroy();
   }
 }

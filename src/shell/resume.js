@@ -6,6 +6,7 @@ import { Multiplexer } from "../shared/multiplexer.js";
 import { HAS_RVFC } from "../shared/capabilities.js";
 import { composeTimeout } from "../shared/signal.js";
 import { logger } from "../shared/logger.js";
+import { Destroyable } from "../shared/destroyable.js";
 
 /** Sort entries by updatedAt - ascending (oldest-first, for eviction) or
  *  descending (newest-first, for history display). */
@@ -296,18 +297,15 @@ export class ResumeStore {
  * Uses the shell's shared MediaStateWatcher and VisibilityWatcher for event
  * subscriptions — zero manual addEventListener calls, full AbortSignal lifecycle.
  */
-export class ResumeTracker {
+export class ResumeTracker extends Destroyable {
   #shell;
   #store = new ResumeStore();
   #entry = null;
-  /** Every subscription this tracker creates dies with this signal. */
-  #scope = new AbortController();
   /** Eagerly resolved context promise — kicked off in the constructor. */
   #contextPromise;
   #lastSavedPosition = 0;
   /** Wall-clock floor for persists - keeps the write cadence bounded. */
   #lastSavedWall = 0;
-  #destroyed = false;
   /** Change multiplexer — fans out structural/position-only events to consumers. */
   #changeMultiplexer = new Multiplexer();
   /** Cross-tab sync listener id — unregistered on destroy. */
@@ -317,6 +315,7 @@ export class ResumeTracker {
    * @param {object} shell - The shell facade (video, media, mediaWatcher, toastAction, currentTime, paused).
    */
   constructor(shell) {
+    super();
     this.#shell = shell;
     this.#contextPromise = getPageContext();
     this.#store.ensureLoaded();
@@ -346,7 +345,7 @@ export class ResumeTracker {
     const video = shell.video;
     if (!video.duration || !isFinite(video.duration)) {
       // Wait for metadata via composeTimeout — auto-cancels on scope abort.
-      const waitSignal = composeTimeout(this.#scope.signal, RESUME_METADATA_WAIT_MS);
+      const waitSignal = composeTimeout(this.signal, RESUME_METADATA_WAIT_MS);
       await new Promise((resolve) => {
         const finish = () => {
           waitSignal.removeEventListener("abort", finish);
@@ -361,11 +360,11 @@ export class ResumeTracker {
           }
         };
         waitSignal.addEventListener("abort", finish, { once: true });
-        video.addEventListener("loadedmetadata", finish, { signal: this.#scope.signal });
-        video.addEventListener("durationchange", onDuration, { signal: this.#scope.signal });
-        video.addEventListener("error", finish, { signal: this.#scope.signal });
+        video.addEventListener("loadedmetadata", finish, { signal: this.signal });
+        video.addEventListener("durationchange", onDuration, { signal: this.signal });
+        video.addEventListener("error", finish, { signal: this.signal });
       });
-      if (this.#destroyed) {
+      if (this.isDestroyed) {
         logger.log("resume", "Shell destroyed before metadata - skipping");
         return;
       }
@@ -426,7 +425,7 @@ export class ResumeTracker {
 
   #startProgressWatch(shell) {
     const video = shell.video;
-    const { signal } = this.#scope;
+    const { signal } = this;
     this.#lastSavedWall = Date.now();
 
     const saveIfDue = () => {
@@ -494,9 +493,7 @@ export class ResumeTracker {
   }
 
   destroy() {
-    if (this.#destroyed) return;
-    this.#destroyed = true;
-    this.#scope.abort();
+    if (this.isDestroyed) return;
     if (this.#listenerId) {
       gmRemoveValueChangeListener(this.#listenerId);
       this.#listenerId = null;
@@ -505,5 +502,6 @@ export class ResumeTracker {
       this.#saveProgress(this.#shell?.currentTime || NaN);
     }
     this.#changeMultiplexer.clear();
+    super.destroy();
   }
 }

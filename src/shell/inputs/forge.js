@@ -6,6 +6,7 @@ import { PooledEventBus } from "../../shared/event-pool.js";
 import { ScopedTimerSet } from "../../shared/scoped-timer.js";
 import { HAS_CHECK_VISIBILITY } from "../../shared/capabilities.js";
 import { logger } from "../../shared/logger.js";
+import { Destroyable } from "../../shared/destroyable.js";
 
 /**
  * Pointer handlers never preventDefault - native pan/scroll over the zone is
@@ -66,16 +67,13 @@ function clickTime(event) {
  * scrub sampling consumes getCoalescedEvents(), and fullscreen truth is the
  * single shared `fs` gate (shadow.js), built on the native fullscreen event.
  */
-export class InputForge {
+export class InputForge extends Destroyable {
   #video;
   #zone;
   #eventTarget;
 
   /** DOM lifecycle manager: listeners, observers, style rollbacks. */
   #dom = new DOMManager();
-  /** Sub-component scope: signal exposed via getter for action wiring. */
-  #scope = new AbortController();
-  #destroyed = false;
 
   // Cached <video> box for hit-testing, invalidated on resize/fullscreen so
   // pointerdown never forces a synchronous layout flush with getBoundingClientRect.
@@ -145,10 +143,11 @@ export class InputForge {
   #timers;
 
   constructor(video, zone, eventTarget) {
+    super();
     this.#video = video;
     this.#zone = zone;
     this.#eventTarget = eventTarget;
-    const { signal } = this.#scope;
+    const { signal } = this;
     // Scoped timers: auto-cancel all pending timers on scope abort.
     this.#timers = new ScopedTimerSet(signal);
     // Track touch-action for automatic rollback on destroy.
@@ -180,15 +179,12 @@ export class InputForge {
 
     subscribeFullscreen(() => {
       this.setTrackpadPinchEnabled(fs);
-    }, this.#scope.signal);
+    }, this.signal);
 
     activeForges.add(this);
   }
 
   /** Engine lifetime signal - action wiring shares it and dies with it. */
-  get signal() {
-    return this.#scope.signal;
-  }
 
   /**
    * Subscribe/unsubscribe the trackpad pinch wheel listener. It is the only
@@ -197,7 +193,7 @@ export class InputForge {
    * fullscreenchange; exposed for explicit scoping in tests.
    */
   setTrackpadPinchEnabled(enabled) {
-    if (this.#destroyed || enabled === this.#trackpadPinchSubscribed) {
+    if (this.isDestroyed || enabled === this.#trackpadPinchSubscribed) {
       return;
     }
     if (enabled) {
@@ -228,25 +224,24 @@ export class InputForge {
   }
 
   destroy() {
-    if (!this.#destroyed) {
-      this.#detachTrackpadPinch();
-      this.#endPointerSession();
-      this.#destroyed = true;
-      this.#videoRect = null;
-      this.#pointers.clear();
-      this.#pinchA = null;
-      this.#pinchB = null;
-      cancelEase(this.#video);
-      // DOM lifecycle: disconnect observers, restore styles, remove elements.
-      this.#dom.destroy();
-      activeForges.delete(this);
-      if (lastActiveForge === this) {
-        lastActiveForge = null;
-      }
-      this.#resetKeyboardHold();
-      // Sub-component scope: abort signal cancels all timers and listeners.
-      this.#scope.abort();
+    if (this.isDestroyed) {
+      return;
     }
+    this.#detachTrackpadPinch();
+    this.#endPointerSession();
+    this.#videoRect = null;
+    this.#pointers.clear();
+    this.#pinchA = null;
+    this.#pinchB = null;
+    cancelEase(this.#video);
+    // DOM lifecycle: disconnect observers, restore styles, remove elements.
+    this.#dom.destroy();
+    activeForges.delete(this);
+    if (lastActiveForge === this) {
+      lastActiveForge = null;
+    }
+    this.#resetKeyboardHold();
+    super.destroy();
   }
 
   /** Suppress the click/dblclick that follows an interactive gesture. */
@@ -346,7 +341,7 @@ export class InputForge {
     this.#timers.get("pinch").schedule(() => {
       const a = this.#pinchA;
       const b = this.#pinchB;
-      if (this.#destroyed || this.#pointers.size < 2 || !a || !b) {
+      if (this.isDestroyed || this.#pointers.size < 2 || !a || !b) {
         return;
       }
       this.#pinchStartDistance =
@@ -475,11 +470,11 @@ export class InputForge {
 
   /** An engine can own playback when its video is loaded and not finished. */
   #isActive(forge) {
-    return !forge.#destroyed && forge.#video.readyState > 0 && !forge.#video.ended;
+    return !forge.isDestroyed && forge.#video.readyState > 0 && !forge.#video.ended;
   }
 
   #dispatch(eventName, detail) {
-    if (!this.#destroyed && this.#eventTarget) {
+    if (!this.isDestroyed && this.#eventTarget) {
       eventBus.dispatch(this.#eventTarget, eventName, detail);
     }
   }
@@ -711,7 +706,7 @@ export class InputForge {
     // Emit via the pooled event bus: the payload and the Event both ride reused
     // objects, so no per-move allocation (dispatchEvent runs synchronously and
     // consumers read before the next move re-mutates them).
-    if (!this.#destroyed && this.#eventTarget) {
+    if (!this.isDestroyed && this.#eventTarget) {
       eventBus.dispatch(this.#eventTarget, GESTURE_EVENTS.scrub, {
         zone: this.#gestureZone || "screen",
         method: "pointer",

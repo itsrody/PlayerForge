@@ -5,6 +5,7 @@ import { deepestActiveElement, subscribeFullscreen } from "../../shared/shadow.j
 import { clamp } from "../../shared/clamp.js";
 import { el } from "./elements.js";
 import { getSetting } from "./config.js";
+import { Destroyable } from "../../shared/destroyable.js";
 
 const HOLD_DELAY_MS = 400;
 const HOLD_REPEAT_MS = 75;
@@ -238,7 +239,7 @@ function createStepper({
  * outside-click dismissal are ours (guarded document listeners).
  * Arrow-key tab navigation likewise stays ours.
  */
-export class SettingsPanel {
+export class SettingsPanel extends Destroyable {
   #hudLayer;
   #shellHost;
   #root = null;
@@ -248,15 +249,13 @@ export class SettingsPanel {
   #sections = new Map();
   #activeSection = null;
   #sectionCounter = 0;
-  /** All panel subscriptions die with this signal. */
-  #scope = new AbortController();
   /** Live only while the panel is open: Esc + outside-click dismissal. */
   #dismissScope = null;
   #backdrop = null;
-  #destroyed = false;
   #sectionBuilder = null;
 
   constructor(shell) {
+    super();
     this.#hudLayer = shell.shellDom?.hudLayer;
     this.#shellHost = shell.shellHost;
     if (!this.#hudLayer || !this.#shellHost) {
@@ -299,7 +298,7 @@ export class SettingsPanel {
   }
 
   async open() {
-    if (!this.#root || this.#destroyed || this.isOpen) {
+    if (!this.#root || this.isDestroyed || this.isOpen) {
       return;
     }
     if (this.#sectionBuilder) {
@@ -322,7 +321,7 @@ export class SettingsPanel {
   }
 
   close() {
-    if (this.#root && !this.#destroyed && this.isOpen) {
+    if (this.#root && !this.isDestroyed && this.isOpen) {
       this.#runWithViewTransition("pf-panel-close", () => {
         this.#root.classList.remove("pf-open");
         if (this.#shellHost && this.#root.contains(deepestActiveElement(this.#shellHost))) {
@@ -348,7 +347,7 @@ export class SettingsPanel {
    * the per-open scope, so they die with the open state.
    */
   #armDismissal() {
-    if (this.#dismissScope || this.#destroyed) {
+    if (this.#dismissScope || this.isDestroyed) {
       return;
     }
     this.#dismissScope = new AbortController();
@@ -374,7 +373,7 @@ export class SettingsPanel {
   }
 
   async openSection(title) {
-    if (!this.#root || this.#destroyed) {
+    if (!this.#root || this.isDestroyed) {
       return false;
     }
     if (this.#sectionBuilder) {
@@ -394,7 +393,7 @@ export class SettingsPanel {
 
   /** Add a section; returns the section root (or null when unusable). */
   addSection(title, icon) {
-    if (!this.#root || this.#destroyed) {
+    if (!this.#root || this.isDestroyed) {
       return null;
     }
     const sectionId = `pf-panel-section-${++this.#sectionCounter}`;
@@ -425,7 +424,7 @@ export class SettingsPanel {
     label.textContent = title;
     tab.appendChild(label);
 
-    tab.addEventListener("click", () => this.#activateSection(section, tab), { signal: this.#scope.signal });
+    tab.addEventListener("click", () => this.#activateSection(section, tab), { signal: this.signal });
     this.#tabList.appendChild(tab);
     this.#sections.set(section, tab);
     if (!this.#activeSection) {
@@ -538,7 +537,7 @@ export class SettingsPanel {
       label,
       deferTextInput,
       onChange,
-      signal: this.#scope.signal
+      signal: this.signal
     });
     if (head) {
       const cellHead = this.el("div", { class: "pf-panel-cell-head" }, cell);
@@ -602,19 +601,19 @@ export class SettingsPanel {
   }
 
   destroy() {
-    if (!this.#destroyed) {
-      this.#destroyed = true;
-      this.#teardownDismissal();
-      this.#scope.abort();
-      this.#root?.remove();
-      this.#root = null;
-      this.#backdrop?.remove();
-      this.#backdrop = null;
-      this.#body = null;
-      this.#tabList = null;
-      this.#sections.clear();
-      this.#activeSection = null;
+    if (this.isDestroyed) {
+      return;
     }
+    this.#teardownDismissal();
+    this.#root?.remove();
+    this.#root = null;
+    this.#backdrop?.remove();
+    this.#backdrop = null;
+    this.#body = null;
+    this.#tabList = null;
+    this.#sections.clear();
+    this.#activeSection = null;
+    super.destroy();
   }
 
   #buildDom() {
@@ -632,7 +631,7 @@ export class SettingsPanel {
     backdrop.addEventListener("pointerdown", (event) => {
       event.stopPropagation();
       this.close();
-    }, { signal: this.#scope.signal });
+    }, { signal: this.signal });
     this.#hudLayer.appendChild(backdrop);
     this.#backdrop = backdrop;
 
@@ -675,11 +674,11 @@ export class SettingsPanel {
     this.#body = body;
     this.#closeButton = closeButton;
 
-    closeButton.addEventListener("click", () => this.close(), { signal: this.#scope.signal });
+    closeButton.addEventListener("click", () => this.close(), { signal: this.signal });
   }
 
   #wireEvents() {
-    const { signal } = this.#scope;
+    const { signal } = this;
     // Live compact mode: the matchMedia change event drives viewport crossings
     // live, so the panel tracks the breakpoint instead of a one-shot
     // read at construction. The explicit ui.compact setting still wins - it
@@ -713,7 +712,7 @@ export class SettingsPanel {
 
     // Any fullscreen transition dismisses the panel; the shared transition
     // source (shadow.js) drives it - no bus event needed.
-    subscribeFullscreen(() => this.close(), this.#scope.signal);
+    subscribeFullscreen(() => this.close(), this.signal);
 
     // Dismissal is ours since the popover left: Esc closes, and a press
     // outside the shell closes. The whole host counts as "inside" so our
