@@ -3,6 +3,7 @@ import { TUNING } from "../../shared/tuning.js";
 import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../../shared/shadow.js";
 import { DOMManager } from "../../shared/dom-manager.js";
 import { PooledEventBus } from "../../shared/event-pool.js";
+import { ScopedTimerSet } from "../../shared/scoped-timer.js";
 import { HAS_CHECK_VISIBILITY } from "../../shared/capabilities.js";
 import { logger } from "../../shared/logger.js";
 
@@ -85,7 +86,6 @@ export class InputForge {
   #startX = 0;
   #startY = 0;
   #startTime = 0;
-  #holdTimer = null;
   #holding = false;
   /** -Infinity so the very first tap can never match against boot time. */
   #lastTapTime = -Infinity;
@@ -129,10 +129,8 @@ export class InputForge {
   #pinchStartDistance = 0;
   #pinchFired = false;
   #pinchZone = null;
-  #pinchInitTimer = null;
 
   // Keyboard hold state.
-  #keyboardHoldTimer = null;
   #keyboardHolding = false;
   #keyboardHoldStart = 0;
 
@@ -143,11 +141,16 @@ export class InputForge {
   /** Stable reference so the scoped wheel listener can be removed again. */
   #wheelHandler = null;
 
+  /** Scoped timers: hold, keyboard, pinch — auto-cancelled on scope abort. */
+  #timers;
+
   constructor(video, zone, eventTarget) {
     this.#video = video;
     this.#zone = zone;
     this.#eventTarget = eventTarget;
     const { signal } = this.#scope;
+    // Scoped timers: auto-cancel all pending timers on scope abort.
+    this.#timers = new ScopedTimerSet(signal);
     // Track touch-action for automatic rollback on destroy.
     this.#dom.markStyle(zone, "touch-action", "none");
 
@@ -229,12 +232,6 @@ export class InputForge {
       this.#detachTrackpadPinch();
       this.#endPointerSession();
       this.#destroyed = true;
-      clearTimeout(this.#holdTimer);
-      this.#holdTimer = null;
-      clearTimeout(this.#keyboardHoldTimer);
-      this.#keyboardHoldTimer = null;
-      clearTimeout(this.#pinchInitTimer);
-      this.#pinchInitTimer = null;
       this.#videoRect = null;
       this.#pointers.clear();
       this.#pinchA = null;
@@ -247,6 +244,7 @@ export class InputForge {
         lastActiveForge = null;
       }
       this.#resetKeyboardHold();
+      // Sub-component scope: abort signal cancels all timers and listeners.
       this.#scope.abort();
     }
   }
@@ -258,8 +256,7 @@ export class InputForge {
 
   #resetKeyboardHold() {
     this.#keyboardHolding = false;
-    clearTimeout(this.#keyboardHoldTimer);
-    this.#keyboardHoldTimer = null;
+    this.#timers.get("keyboard").cancel();
   }
 
   #hitTestVideo(pointerEvent) {
@@ -333,8 +330,7 @@ export class InputForge {
   }
 
   #clearHoldTimer() {
-    clearTimeout(this.#holdTimer);
-    this.#holdTimer = null;
+    this.#timers.get("hold").cancel();
   }
 
   #beginPinchTracking() {
@@ -347,9 +343,7 @@ export class InputForge {
     this.#pinchFired = false;
     this.#pinchZone = this.#gestureZone || "screen";
     this.#capturePair();
-    clearTimeout(this.#pinchInitTimer);
-    this.#pinchInitTimer = setTimeout(() => {
-      this.#pinchInitTimer = null;
+    this.#timers.get("pinch").schedule(() => {
       const a = this.#pinchA;
       const b = this.#pinchB;
       if (this.#destroyed || this.#pointers.size < 2 || !a || !b) {
@@ -545,8 +539,7 @@ export class InputForge {
       this.#lastSwipeTransform = "";
       this.#clearHoldTimer();
 
-      this.#holdTimer = setTimeout(() => {
-        this.#holdTimer = null;
+      this.#timers.get("hold").schedule(() => {
         if (this.#primaryPointerId !== null && !this.#video.paused && allowsIntent("hold")) {
           this.#holding = true;
           this.#pointerOp("setPointerCapture", this.#primaryPointerId);
@@ -876,9 +869,7 @@ export class InputForge {
         event.preventDefault();
         this.#keyboardHoldStart = performance.now();
         this.#keyboardHolding = false;
-        clearTimeout(this.#keyboardHoldTimer);
-        this.#keyboardHoldTimer = setTimeout(() => {
-          this.#keyboardHoldTimer = null;
+        this.#timers.get("keyboard").schedule(() => {
           if (!this.#video.paused && allowsIntent("hold")) {
             this.#keyboardHolding = true;
             this.#dispatch(GESTURE_EVENTS.hold, {
@@ -928,10 +919,9 @@ export class InputForge {
   #finishKeyboardHold(allowToggle) {
     const wasHolding = this.#keyboardHolding;
     const shouldToggle = allowToggle && !wasHolding && this.#shouldHandleKeys();
-    clearTimeout(this.#keyboardHoldTimer);
-    this.#keyboardHoldTimer = null;
-      this.#keyboardHolding = false;
-      if (wasHolding) {
+    this.#timers.get("keyboard").cancel();
+    this.#keyboardHolding = false;
+    if (wasHolding) {
       this.#dispatch(GESTURE_EVENTS.release, {
         zone: "screen",
         method: "keyboard",

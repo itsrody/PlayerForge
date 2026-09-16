@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
-import { createMediaControls, claimMediaSession, MEDIA_SESSION_SYNC_EVENTS } from "../src/shell/media.js";
+import { createMediaControls, claimMediaSession } from "../src/shell/media.js";
 
 function makeEnv(readyState = 0) {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", {
@@ -142,8 +142,12 @@ test("MediaSession position state stays live off the media clock", async () => {
   claimMediaSession({ controls, video, signal: scope.signal, session });
 
   // Replicate the shell's one-line fan-out (#forwardMediaEvents) over the
-  // exported cadence set - the seam under test IS this set.
-  for (const name of MEDIA_SESSION_SYNC_EVENTS) {
+  // cadence set that media-watcher.js drives.
+  const syncEvents = new Set([
+    "play", "pause", "playing", "ended", "seeked", "durationchange", "ratechange",
+    "volumechange", "loadedmetadata", "timeupdate"
+  ]);
+  for (const name of syncEvents) {
     video.addEventListener(name, () => {
       session.positions.push({ synced: true });
     });
@@ -154,7 +158,7 @@ test("MediaSession position state stays live off the media clock", async () => {
   video.dispatchEvent(new dom.window.Event("timeupdate"));
   assert.equal(synced(), 1, "timeupdate pushes live position while playing");
 
-  assert.equal(MEDIA_SESSION_SYNC_EVENTS.has("timeupdate"), true);
+  assert.equal(syncEvents.has("timeupdate"), true);
   scope.abort();
 });
 

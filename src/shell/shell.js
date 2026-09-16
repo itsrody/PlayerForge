@@ -132,6 +132,11 @@ export class Shell {
     return this.video.paused;
   }
 
+  /** Expose the media watcher so sub-components can subscribe directly. */
+  get mediaWatcher() {
+    return this.#mediaWatcher;
+  }
+
   /**
    * Sole fullscreen condition, read straight off the shared `fs` gate
    * (shadow.js) - built on the native fullscreen event by initFullscreenGate().

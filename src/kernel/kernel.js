@@ -6,6 +6,7 @@ import { ShellSlot } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, meetsMinSize, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
+import { Multiplexer } from "../shared/multiplexer.js";
 
 /**
  * Top-level orchestrator: watches for <video> elements, identifies the player
@@ -24,8 +25,8 @@ const CAN_POST_TASK = typeof globalThis.scheduler?.postTask === "function";
 export class Kernel {
   #registry;
   #lifecycle;
-  /** Shell-ready listeners (direct callbacks, no bus). */
-  #createdListeners = new Set();
+  /** Shell-ready listeners — Multiplexer provides subscribe/dispatch/error isolation. */
+  #createdMux = new Multiplexer();
   #initialized = false;
   // Weak: an adopted video orphaned by an untracked removal path must not
   // pin the element (and its whole subtree) for the page's lifetime.
@@ -92,20 +93,13 @@ export class Kernel {
 
   /** Register a shell-ready listener directly; returns an unsubscribe. */
   onShellCreated(cb) {
-    this.#createdListeners.add(cb);
-    return () => this.#createdListeners.delete(cb);
+    return this.#createdMux.subscribe(cb);
   }
 
   /** Register the shell then fan out to every shell-ready listener. */
   #notifyShellCreated(shell) {
     this.#registry.register(shell);
-    for (const cb of this.#createdListeners) {
-      try {
-        cb(shell);
-      } catch (err) {
-        logger.error("kernel", "Shell-created listener threw:", err);
-      }
-    }
+    this.#createdMux.dispatch(shell);
   }
 
   init() {
