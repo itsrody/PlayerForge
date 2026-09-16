@@ -1,6 +1,6 @@
 import { getConfigValue, setConfigFields } from "../shared/storage.js";
 import { flashElement } from "./chrome/animate.js";
-import { debounce } from "../shared/time.js";
+import { DebouncedWriter } from "../shared/debounced-writer.js";
 import { clamp } from "../shared/clamp.js";
 import { TUNING } from "../shared/tuning.js";
 import { fmtPercent } from "../shared/formatters.js";
@@ -72,14 +72,22 @@ export class VideoFilter {
   #resetBtn = null;
   #steppers = {};
   #destroyed = false;
+  #scope;
   /** Trailing persist: preview applies instantly, storage lands once the drag
    *  settles (a slider drag otherwise fires a full config write + cross-tab
-   *  live-reload echo per step). Flushed on destroy. */
-  #schedulePersist = debounce(() => this.#writePersist(), TUNING.filter.persistDebounceMs);
+   *  live-reload echo per step). Auto-flushed on destroy via AbortSignal. */
+  #schedulePersist;
 
   constructor(shell, panel) {
     this.#video = shell.video;
     this.#shell = shell;
+    // Create a scope for the debounced writer — flushed automatically on abort.
+    this.#scope = new AbortController();
+    this.#schedulePersist = new DebouncedWriter(
+      () => this.#writePersist(),
+      TUNING.filter.persistDebounceMs,
+      this.#scope.signal
+    );
     this.#buildSection(panel);
     this.#loadFromConfig();
     this.#apply();
@@ -212,7 +220,7 @@ export class VideoFilter {
   }
 
   #persist() {
-    this.#schedulePersist();
+    this.#schedulePersist.call();
   }
 
   #writePersist() {
@@ -242,9 +250,8 @@ export class VideoFilter {
       return;
     }
     this.#destroyed = true;
-    // Land any trailing persist before the section dies - the last slider
-    // value must not be the one that never got written.
-    this.#schedulePersist.flush();
+    // Abort the scope — the DebouncedWriter flushes automatically.
+    this.#scope.abort();
     if (this.#video) {
       this.#video.style.filter = "";
     }

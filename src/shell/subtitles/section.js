@@ -3,7 +3,7 @@ import { TUNING } from "../../shared/tuning.js";
 import { fmtPercent, fmtEm } from "../../shared/formatters.js";
 import { srtToVtt, ensureVttHeader, offsetCues, parseSubtitlesAsync } from "./forgevtt.js";
 import { ForgeTrack } from "./forge-track.js";
-import { debounce } from "../../shared/time.js";
+import { DebouncedWriter, DestroyableWriter } from "../../shared/debounced-writer.js";
 import { composeTimeout } from "../../shared/signal.js";
 import { flashElement } from "../chrome/animate.js";
 import { el } from "../chrome/elements.js";
@@ -60,13 +60,10 @@ export class SubtitlesSection {
   #styleControls = null;
   #positionControls = null;
   #resetBtn = null;
-  /** Debounced sync-offset apply; cancelled on destroy so no trailing write lands. */
+  /** Debounced sync-offset apply; auto-flushed on destroy via AbortSignal. */
   #scheduleSyncOffset = null;
-  /** Per-key trailing persist for the style steppers: preview is instant,
-   *  storage lands ~150ms after the drag settles (mirrors filter's debounced
-   *  persist), so a size/color/shadow drag fires one config write instead of
-   *  one per tick. */
-  #stylePersist = new Map();
+  /** Per-key trailing persist for the style steppers: auto-flushed on destroy. */
+  #styleWriters;
   #scope = new AbortController();
   #destroyed = false;
 
@@ -75,6 +72,8 @@ export class SubtitlesSection {
     this.#syncOffset = Number(getConfigValue(SETTING_KEYS.syncOffset, 0)) || 0;
     this.#cueLayer = shell.shellDom?.cueLayer || null;
     this.#fileInput = this.#createFileInput(shell);
+    // DestroyableWriter auto-flushes all per-key writers on scope abort.
+    this.#styleWriters = new DestroyableWriter(this.#scope.signal);
     this.#buildPanelUi(shell);
     this.#startListening();
     logger.log("subtitles", `Ready (${shell.sdk.name})`);
@@ -85,14 +84,7 @@ export class SubtitlesSection {
       return;
     }
     this.#destroyed = true;
-    this.#scheduleSyncOffset?.cancel();
-    this.#scheduleSyncOffset = null;
-    // Land any trailing style writes before the section dies so the last
-    // stepper tick is never lost (mirrors filter's flush-on-destroy).
-    for (const writer of this.#stylePersist.values()) {
-      writer.flush();
-    }
-    this.#stylePersist.clear();
+    // Abort the scope — DebouncedWriter and DestroyableWriter flush automatically.
     this.#scope.abort();
     this.#forgeTrack?.destroy();
     this.#forgeTrack = null;
@@ -248,14 +240,14 @@ export class SubtitlesSection {
     });
     applyCueShadow(shadowStepper.getValue());
 
-    this.#scheduleSyncOffset = debounce((offset) => {
+    this.#scheduleSyncOffset = new DebouncedWriter((offset) => {
       if (this.#trackMeta) {
         // Re-offset the parsed base: one O(n) numeric pass per step instead
         // of a full text re-parse (normalize/split/regex/entity decode).
         this.#forgeTrack?.load(offsetCues(this.#baseCues, offset));
       }
       setConfigValue(SETTING_KEYS.syncOffset, offset);
-    }, TUNING.subtitles.syncDebounceMs);
+    }, TUNING.subtitles.syncDebounceMs, this.#scope.signal);
     const syncStepper = panel.addControl(styleGrid, {
       type: "stepper",
       label: "Sync",
@@ -266,7 +258,7 @@ export class SubtitlesSection {
       format: (v) => v === 0 ? "0s" : `${v > 0 ? "+" : ""}${v}s`,
       onChange: (offset) => {
         this.#syncOffset = offset;
-        this.#scheduleSyncOffset(offset);
+        this.#scheduleSyncOffset.call(offset);
       }
     });
 
@@ -325,12 +317,11 @@ export class SubtitlesSection {
 
   /** Debounced per-key config write for the style steppers. */
   #persistStyle(key, value) {
-    let writer = this.#stylePersist.get(key);
+    let writer = this.#styleWriters.get(key);
     if (!writer) {
-      writer = debounce((v) => setConfigValue(key, v), TUNING.subtitles.syncDebounceMs);
-      this.#stylePersist.set(key, writer);
+      writer = this.#styleWriters.add(key, (v) => setConfigValue(key, v), TUNING.subtitles.syncDebounceMs);
     }
-    writer(value);
+    writer.call(value);
   }
 
   #toastFlash(icon, text, group) {

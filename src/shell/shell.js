@@ -10,10 +10,12 @@ import { addSettingsSection } from "./chrome/config.js";
 import { TUNING } from "../shared/tuning.js";
 import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
-import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
+import { claimMediaSession, createMediaControls } from "./media.js";
 import { SHELL_MARKER, warmStyles, injectShell, watchShellHost } from "./chrome/inject.js";
 import { requestFullscreenProvision } from "../shared/context.js";
 import { DOMManager } from "../shared/dom-manager.js";
+import { MediaStateWatcher } from "../shared/media-watcher.js";
+import { VisibilityWatcher } from "../shared/visibility-watcher.js";
 
 /**
  * Per-video facade: wraps the media element with a stable API, injects the
@@ -45,6 +47,10 @@ export class Shell {
   #media;
   /** OS media-key facet, null without MediaSession support. */
   #mediaSession = null;
+  /** Standardized media event watcher — replaces 13+ manual addEventListener calls. */
+  #mediaWatcher = null;
+  /** Standardized visibility watcher — replaces manual visibilitychange handling. */
+  #visWatcher = null;
 
   constructor({ video, container, sdk, onDestroy }) {
     this.video = video;
@@ -269,25 +275,22 @@ export class Shell {
   #forwardMediaEvents() {
     const video = this.video;
     const host = this.#shellDom?.host;
-    const handler = () => {
+    // Single MediaStateWatcher replaces 13+ individual addEventListener calls.
+    // The watcher owns the lifecycle via #scope.signal — all listeners are
+    // removed in one pass on destroy.
+    this.#mediaWatcher = new MediaStateWatcher(video, this.#scope.signal);
+    // MediaSession sync: fires on any state change.
+    this.#mediaWatcher.onChange(() => {
       this.#mediaSession?.sync();
-    };
-    for (const name of MEDIA_SESSION_SYNC_EVENTS) {
-      this.#dom.listen(video, name, handler, { passive: true });
-    }
-    // Expose media state as CSS custom properties on the host so the shadow
-    // DOM can style based on playing/paused/muted without crossing the realm
-    // boundary. The :playing/:paused/:muted pseudo-classes cannot reach into
-    // shadow roots in any engine; custom properties bridge the gap.
+    });
+    // CSS custom property sync: fires on play/pause/volume boundaries.
     if (host) {
-      const sync = () => {
+      const syncCssProps = () => {
         host.style.setProperty("--pf-media-paused", video.paused ? "1" : "0");
         host.style.setProperty("--pf-media-muted", video.muted ? "1" : "0");
       };
-      sync();
-      for (const evt of ["play", "pause", "volumechange"]) {
-        this.#dom.listen(video, evt, sync, { passive: true });
-      }
+      syncCssProps();
+      this.#mediaWatcher.onPlayPause(syncCssProps);
     }
   }
 
@@ -335,11 +338,22 @@ export class Shell {
         }
       });
     };
-    this.#dom.listen(video, "play", acquire, { passive: true });
-    this.#dom.listen(video, "pause", release, { passive: true });
-    this.#dom.listen(video, "ended", release, { passive: true });
-    this.#dom.listen(document, "visibilitychange", () => {
-      if (document.visibilityState === "visible" && !video.paused && !video.ended) {
+    // Use the MediaStateWatcher for play/pause/ended events instead of
+    // manual addEventListener calls. The watcher's lifecycle is tied to
+    // #scope.signal, so all listeners are removed on destroy.
+    this.#mediaWatcher?.onPlayPause(() => {
+      if (video.paused || video.ended) {
+        release();
+      } else {
+        acquire();
+      }
+    });
+    this.#mediaWatcher?.onDestroy(release);
+    // Re-acquire on visibility resume: a background tab loses the wake lock
+    // but the video may still be playing when the user returns.
+    this.#visWatcher = new VisibilityWatcher(this.#scope.signal);
+    this.#visWatcher.onVisible(() => {
+      if (!video.paused && !video.ended) {
         acquire();
       }
     });
