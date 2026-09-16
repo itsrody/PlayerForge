@@ -22,6 +22,7 @@
  * subscription that lands mid-batch never mutates the live iterator.
  */
 import { logger } from "../shared/logger.js";
+import { VisibilityWatcher } from "../shared/visibility-watcher.js";
 
 /**
  * Append-only subscriber slots with tombstones. A live subscription is a
@@ -55,10 +56,15 @@ let recycledRecords = [];
 const DEFER_VISIBILITY_CAP_MS = 500;
 /** Cap timeout for a currently-deferred hidden-document flush; 0 = none. */
 let visibilityDeferTimer = 0;
-let visibilityListenerAttached = false;
 /** Retained handle for scheduler.postTask() so it can be cancelled if the
  *  document becomes visible before the delay elapses. Null when not pending. */
 let backgroundTaskHandle = null;
+
+/** Module-level VisibilityWatcher replaces manual visibilitychange handling.
+ *  Lazily initialized on first use to avoid accessing `document` at import
+ *  time — test harnesses may import dom-watch without a DOM. */
+let visWatcher = null;
+let visScope = null;
 
 /**
  * Sparsity threshold for slot compaction. When the slots array has more than
@@ -89,13 +95,6 @@ function flushPending() {
   flush();
 }
 
-function onVisibilityChanged() {
-  visibilityListenerAttached = false;
-  if (!isDocumentHidden()) {
-    flushPending();
-  }
-}
-
 /** Defer the batch until the document is visible again or the cap elapses.
  *  Uses scheduler.postTask() (Firefox 142+ / Chrome 129+) with 'background'
  *  priority when available: the browser's task scheduler natively prioritizes
@@ -113,10 +112,14 @@ function deferFlushUntilVisible() {
   } else {
     visibilityDeferTimer = setTimeout(flushPending, DEFER_VISIBILITY_CAP_MS);
   }
-  if (!visibilityListenerAttached) {
-    visibilityListenerAttached = true;
-    document.addEventListener("visibilitychange", onVisibilityChanged, { once: true });
+  // Lazily create and subscribe to the module-level VisibilityWatcher on
+  // first use. This avoids accessing `document` at import time so test
+  // harnesses that import dom-watch without a DOM don't break.
+  if (!visWatcher) {
+    visScope = new AbortController();
+    visWatcher = new VisibilityWatcher(visScope.signal);
   }
+  visWatcher.onVisible(flushPending);
 }
 
 function flush() {
@@ -223,10 +226,6 @@ function stopIfIdle() {
     clearTimeout(visibilityDeferTimer);
     visibilityDeferTimer = 0;
     backgroundTaskHandle = null;
-    if (visibilityListenerAttached) {
-      document.removeEventListener("visibilitychange", onVisibilityChanged);
-      visibilityListenerAttached = false;
-    }
   }
 }
 

@@ -1,12 +1,12 @@
 import { logger } from "../shared/logger.js";
 import { getConfigValue } from "../shared/storage.js";
-import { delay } from "../shared/time.js";
 import { setPerfDiag } from "../shared/perf-diag.js";
 import { ShellSlot } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, meetsMinSize, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
 import { Multiplexer } from "../shared/multiplexer.js";
+import { ScopedTimer } from "../shared/scoped-timer.js";
 
 /**
  * Top-level orchestrator: watches for <video> elements, identifies the player
@@ -202,7 +202,9 @@ export class Kernel {
         });
         return () => handle.abort?.();
       }
-      return delay(callback, FRAMEWORK_TUNING.removalGraceMs);
+      const timer = new ScopedTimer(this.#scope.signal);
+      timer.schedule(callback, FRAMEWORK_TUNING.removalGraceMs);
+      return () => timer.cancel();
     };
 
     // Arrow fn keeps the enclosing class-level `this` for timer/lifecycle access.

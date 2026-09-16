@@ -34,9 +34,10 @@ export class VisibilityWatcher {
         this.#fire(this.#hiddenListeners);
       }
     };
-    document.addEventListener("visibilitychange", onChange, { signal });
+    document.addEventListener("visibilitychange", onChange);
     signal.addEventListener("abort", () => {
       this.#destroyed = true;
+      document.removeEventListener("visibilitychange", onChange);
       this.#visibleListeners.clear();
       this.#hiddenListeners.clear();
     }, { once: true });

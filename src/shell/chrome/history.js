@@ -9,7 +9,7 @@ function formatDomain(domain) {
   return domain.charAt(0).toUpperCase() + domain.slice(1);
 }
 
-export function addHistorySection(panel, shell) {
+export function addHistorySection(panel, shell, signal) {
   const sectionRoot = panel.addSection("History", "resume");
   if (!sectionRoot) {
     return;
@@ -125,10 +125,13 @@ export function addHistorySection(panel, shell) {
   // on cross-tab imports; re-render when the entry SET changes so the open
   // History tab never shows a boot-time snapshot. Position-only persists are
   // not structural and stay invisible - the cards don't display position.
-  shell.resume?.onChange?.((structural) => {
+  const unsub = shell.resume?.onChange?.((structural) => {
     if (structural) {
       render();
     }
   });
+  if (unsub && signal) {
+    signal.addEventListener("abort", unsub, { once: true });
+  }
   return { render };
 }

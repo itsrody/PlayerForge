@@ -70,14 +70,9 @@ function bootstrap() {
       welcomePending = false;
       setConfigValue(KEYS.firstRun, false);
       const coarsePointer = matchMedia("(pointer: coarse)").matches;
-      const cancelHint = () => {
-        clearTimeout(hintTimer);
-        document.removeEventListener("pointerdown", cancelHint, true);
-        document.removeEventListener("keydown", cancelHint, true);
-        document.removeEventListener("wheel", cancelHint, true);
-      };
+      const hintAc = new AbortController();
       const hintTimer = setTimeout(() => {
-        cancelHint();
+        hintAc.abort();
         if (shell && shell.container?.isConnected && !shell.panel?.isOpen) {
           shell.toastHint(
             "captions",
@@ -87,9 +82,10 @@ function bootstrap() {
           );
         }
       }, 1200);
-      document.addEventListener("pointerdown", cancelHint, { capture: true, once: true });
-      document.addEventListener("keydown", cancelHint, { capture: true, once: true });
-      document.addEventListener("wheel", cancelHint, { capture: true, passive: true, once: true });
+      hintAc.signal.addEventListener("abort", () => clearTimeout(hintTimer), { once: true });
+      document.addEventListener("pointerdown", () => hintAc.abort(), { capture: true, once: true });
+      document.addEventListener("keydown", () => hintAc.abort(), { capture: true, once: true });
+      document.addEventListener("wheel", () => hintAc.abort(), { capture: true, passive: true, once: true });
     });
 
     // Minimal public surface: pages get the version string only. The kernel

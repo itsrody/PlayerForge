@@ -87,7 +87,7 @@ export class Shell {
       await scheduler?.yield?.();
       this.#filter = new VideoFilter(this, this.#panel);
       await scheduler?.yield?.();
-      addHistorySection(this.#panel, this);
+      addHistorySection(this.#panel, this, this.#scope.signal);
       await scheduler?.yield?.();
       addSettingsSection(this.#panel);
     });

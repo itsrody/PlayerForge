@@ -103,8 +103,8 @@ export class SubtitlesSection {
 
   #startListening() {
     const { signal } = this.#scope;
-    const video = this.#shell.video;
-    video?.addEventListener("ended", () => this.#forgeTrack?.clear(), { signal, passive: true });
+    // Use the shared MediaStateWatcher instead of manual addEventListener("ended").
+    this.#shell.mediaWatcher?.onDestroy(() => this.#forgeTrack?.clear(), signal);
   }
 
   #buildPanelUi(shell) {
