@@ -43,14 +43,6 @@ export const HAS_INTERSECTION_OBSERVER =
 export const HAS_MUTATION_OBSERVER =
   typeof MutationObserver === "function";
 
-/** scheduler.postTask — priority-aware scheduling (Firefox 101+). */
-export const HAS_POST_TASK =
-  typeof globalThis.scheduler?.postTask === "function";
-
-/** requestIdleCallback — idle-time work scheduling. */
-export const HAS_REQUEST_IDLE_CALLBACK =
-  typeof requestIdleCallback === "function";
-
 /** Object.freeze the entire registry so consumers cannot accidentally mutate. */
 Object.freeze({
   HAS_CHECK_VISIBILITY,
@@ -59,7 +51,5 @@ Object.freeze({
   HAS_REQUEST_PIP,
   HAS_RVFC,
   HAS_INTERSECTION_OBSERVER,
-  HAS_MUTATION_OBSERVER,
-  HAS_POST_TASK,
-  HAS_REQUEST_IDLE_CALLBACK
+  HAS_MUTATION_OBSERVER
 });

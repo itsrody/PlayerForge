@@ -8,6 +8,7 @@ import { VideoFilter } from "./filter.js";
 import { SettingsPanel } from "./chrome/panel.js";
 import { addSettingsSection } from "./chrome/config.js";
 import { TUNING } from "../shared/tuning.js";
+import { yield_ as yieldToBrowser } from "../shared/scheduler.js";
 import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls } from "./media.js";
@@ -70,7 +71,7 @@ export class Shell {
 
     // Yield between DOM injection and component construction so the browser
     // can process pending layout/paint work before the panel builds its tree.
-    await scheduler?.yield?.();
+    await yieldToBrowser();
 
     this.#panel = new SettingsPanel(this);
     this.#toasts = new ToastManager(this.#shellDom.hudLayer);
@@ -84,11 +85,11 @@ export class Shell {
     // wedges input handling.
     this.#panel.setSectionBuilder(async () => {
       this.#subtitles = new SubtitlesSection(this);
-      await scheduler?.yield?.();
+      await yieldToBrowser();
       this.#filter = new VideoFilter(this, this.#panel);
-      await scheduler?.yield?.();
+      await yieldToBrowser();
       addHistorySection(this.#panel, this, this.#scope.signal);
-      await scheduler?.yield?.();
+      await yieldToBrowser();
       addSettingsSection(this.#panel);
     });
 

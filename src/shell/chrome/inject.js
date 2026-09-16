@@ -3,6 +3,7 @@ import { logger } from "../../shared/logger.js";
 import { onDomMutations } from "../../kernel/dom-watch.js";
 import { SHELL_MARKER } from "../../kernel/contract.js";
 import { el } from "./elements.js";
+import { scheduleIdle } from "../../shared/scheduler.js";
 import { gmGetResourceText } from "../../shared/storage.js";
 
 // Re-export the single contract-sourced marker so shell/forge keep importing
@@ -82,15 +83,7 @@ function upgradeInIdle(css) {
       logger.error("inject", "Rejected malformed @resource stylesheet:", err);
     }
   };
-  if (typeof requestIdleCallback === "function") {
-    return new Promise((resolve) => {
-      requestIdleCallback(() => {
-        swap();
-        resolve();
-      }, { timeout: STYLE_IDLE_TIMEOUT_MS });
-    });
-  }
-  return Promise.resolve().then(swap);
+  return scheduleIdle(swap, { timeout: STYLE_IDLE_TIMEOUT_MS });
 }
 
 /**

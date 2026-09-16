@@ -6,7 +6,7 @@ import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, meetsMinSize, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
 import { Multiplexer } from "../shared/multiplexer.js";
-import { ScopedTimer } from "../shared/scoped-timer.js";
+import { postTask } from "../shared/scheduler.js";
 
 /**
  * Top-level orchestrator: watches for <video> elements, identifies the player
@@ -19,8 +19,6 @@ import { ScopedTimer } from "../shared/scoped-timer.js";
 const MAX_REMOVAL_DEPTH = 8;
 /** Extra ancestors (beyond the matched anchor) the removal watch observes. */
 const REMOVAL_DEPTH_MARGIN = 1;
-/** Whether scheduler.postTask() is available for priority-aware timers. */
-const CAN_POST_TASK = typeof globalThis.scheduler?.postTask === "function";
 
 export class Kernel {
   #registry;
@@ -187,24 +185,17 @@ export class Kernel {
 
     const anchors = [];
 
-    /** Schedule the removal grace timer. Uses scheduler.postTask() (Firefox
-     *  142+ / Chrome 129+) with 'user-visible' priority when available: the
-     *  browser's task scheduler natively integrates this delay, yielding
-     *  better prioritization than setTimeout for a UI-critical grace window.
-     *  The signal option (Firefox 157+) auto-cancels on kernel pagehide.
-     *  Falls back to the delay() helper for environments without scheduler. */
+    /** Schedule the removal grace timer. Uses the unified postTask()
+     *  wrapper which picks scheduler.postTask (Firefox 101+) with
+     *  'user-visible' priority and AbortSignal, falling back to setTimeout
+     *  automatically in test environments. */
     const scheduleGraceTimer = (callback) => {
-      if (CAN_POST_TASK) {
-        const handle = globalThis.scheduler.postTask(callback, {
-          priority: "user-visible",
-          delay: FRAMEWORK_TUNING.removalGraceMs,
-          signal: this.#scope.signal
-        });
-        return () => handle.abort?.();
-      }
-      const timer = new ScopedTimer(this.#scope.signal);
-      timer.schedule(callback, FRAMEWORK_TUNING.removalGraceMs);
-      return () => timer.cancel();
+      const handle = postTask(callback, {
+        priority: "user-visible",
+        delay: FRAMEWORK_TUNING.removalGraceMs,
+        signal: this.#scope.signal
+      });
+      return () => handle.abort();
     };
 
     // Arrow fn keeps the enclosing class-level `this` for timer/lifecycle access.

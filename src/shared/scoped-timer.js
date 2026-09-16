@@ -5,10 +5,13 @@
  * (#holdTimer, #keyboardHoldTimer, #pinchInitTimer) and the ad-hoc timer
  * management in kernel.js (grace timers) and lifecycle.js (settle timers).
  *
- * Each ScopedTimer owns a single setTimeout and exposes:
+ * Each ScopedTimer owns a single delayed callback and exposes:
  * - `schedule(fn, ms)` — arm a new timer (cancels any pending one)
  * - `cancel()` — drop the pending timer
  * - `isActive` — synchronous check if a timer is pending
+ *
+ * Uses Gecko-native `scheduler.postTask()` (Firefox 101+) for prioritized
+ * scheduling when available; falls back to `setTimeout` in test harnesses.
  *
  * On AbortSignal abort, the pending timer is cancelled automatically.
  *
@@ -21,6 +24,8 @@
  * // later: hold.cancel();
  * // or: signal fires -> auto-cancelled
  */
+import { postTask } from "./scheduler.js";
+
 export class ScopedTimer {
   #cancel = null;
   #destroyed = false;
@@ -50,11 +55,8 @@ export class ScopedTimer {
   schedule(fn, ms) {
     if (this.#destroyed) return;
     this.cancel();
-    const id = setTimeout(() => {
-      this.#cancel = null;
-      fn();
-    }, ms);
-    this.#cancel = () => clearTimeout(id);
+    const handle = postTask(fn, { delay: ms });
+    this.#cancel = () => handle.abort();
   }
 
   /** Cancel the pending timer. No-op when nothing is pending. */

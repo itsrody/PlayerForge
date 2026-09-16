@@ -1,4 +1,5 @@
 import { logger } from "../shared/logger.js";
+import { postTask } from "../shared/scheduler.js";
 
 /**
  * Resolve once the container's child list has been quiet for a run of
@@ -16,18 +17,13 @@ import { logger } from "../shared/logger.js";
  * immediately and the promise resolves. This avoids running the observer for
  * up to capMs after the container is no longer relevant.
  *
- * Uses scheduler.postTask() (Firefox 142+ / Chrome 129+) with 'user-visible'
- * priority for the settle and cap timers when available: the browser's task
- * scheduler natively integrates these delays, yielding better prioritization
- * than setTimeout for short-lived UI-critical timers. Falls back to setTimeout
- * for environments without scheduler.
+ * Uses scheduler.postTask() (Firefox 101+) via the unified postTask()
+ * wrapper for prioritized settle and cap timers. Falls back to setTimeout
+ * automatically in environments without scheduler.
  */
 function whenDomSettled(container, { quietMs = 50, capMs = 150, signal } = {}) {
   const { promise, resolve } = Promise.withResolvers();
   let settled = false;
-  const canPostTask = typeof globalThis.scheduler?.postTask === "function";
-  // Timer handles: either TaskController abort handles (scheduler.postTask)
-  // or numeric setTimeout ids (fallback).
   let settleHandle = null;
   let capHandle = null;
 
@@ -37,50 +33,21 @@ function whenDomSettled(container, { quietMs = 50, capMs = 150, signal } = {}) {
     }
     settled = true;
     observer.disconnect();
-    // Clear both timers: whichever is still armed gets cancelled.
-    if (canPostTask) {
-      settleHandle?.abort?.();
-      capHandle?.abort?.();
-    } else {
-      clearTimeout(settleHandle);
-      clearTimeout(capHandle);
-    }
+    settleHandle?.abort();
+    capHandle?.abort();
     resolve();
   };
 
   const observer = new MutationObserver(() => {
-    // Any mutation re-arms the trailing quiet window from scratch.
-    if (canPostTask) {
-      settleHandle?.abort?.();
-      settleHandle = globalThis.scheduler.postTask(done, {
-        priority: "user-visible",
-        delay: quietMs
-      });
-    } else {
-      clearTimeout(settleHandle);
-      settleHandle = setTimeout(done, quietMs);
-    }
+    settleHandle?.abort();
+    settleHandle = postTask(done, { priority: "user-visible", delay: quietMs });
   });
 
-  // Arm the initial timers.
-  if (canPostTask) {
-    settleHandle = globalThis.scheduler.postTask(done, {
-      priority: "user-visible",
-      delay: quietMs
-    });
-    capHandle = globalThis.scheduler.postTask(done, {
-      priority: "user-visible",
-      delay: capMs
-    });
-  } else {
-    settleHandle = setTimeout(done, quietMs);
-    capHandle = setTimeout(done, capMs);
-  }
+  settleHandle = postTask(done, { priority: "user-visible", delay: quietMs });
+  capHandle = postTask(done, { priority: "user-visible", delay: capMs });
 
   observer.observe(container, { childList: true });
 
-  // AbortSignal integration: early teardown when the caller's scope ends
-  // (e.g. pagehide, video removal, kernel abort).
   signal?.addEventListener("abort", done, { once: true });
 
   return promise;

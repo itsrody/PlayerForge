@@ -23,6 +23,7 @@
  */
 import { logger } from "../shared/logger.js";
 import { VisibilityWatcher } from "../shared/visibility-watcher.js";
+import { postTask } from "../shared/scheduler.js";
 
 /**
  * Append-only subscriber slots with tombstones. A live subscription is a
@@ -54,11 +55,8 @@ let recycledRecords = [];
  * never stalls discovery past this window.
  */
 const DEFER_VISIBILITY_CAP_MS = 500;
-/** Cap timeout for a currently-deferred hidden-document flush; 0 = none. */
-let visibilityDeferTimer = 0;
-/** Retained handle for scheduler.postTask() so it can be cancelled if the
- *  document becomes visible before the delay elapses. Null when not pending. */
-let backgroundTaskHandle = null;
+/** Retained handle for the deferred flush timer so it can be cancelled. */
+let deferHandle = null;
 
 /** Module-level VisibilityWatcher replaces manual visibilitychange handling.
  *  Lazily initialized on first use to avoid accessing `document` at import
@@ -87,31 +85,23 @@ function isDocumentHidden() {
 }
 
 function flushPending() {
-  clearTimeout(visibilityDeferTimer);
-  visibilityDeferTimer = 0;
-  if (backgroundTaskHandle) {
-    backgroundTaskHandle = null;
-  }
+  deferHandle?.abort();
+  deferHandle = null;
   flush();
 }
 
 /** Defer the batch until the document is visible again or the cap elapses.
- *  Uses scheduler.postTask() (Firefox 142+ / Chrome 129+) with 'background'
- *  priority when available: the browser's task scheduler natively prioritizes
- *  visible-tab work over this hidden-tab flush, and the delay option provides
- *  the timeout cap. Falls back to setTimeout for older runtimes. */
+ *  Uses the unified postTask() wrapper which picks scheduler.postTask
+ *  (Firefox 101+) with 'background' priority, falling back to setTimeout
+ *  automatically in test environments. */
 function deferFlushUntilVisible() {
-  if (visibilityDeferTimer || backgroundTaskHandle) {
+  if (deferHandle) {
     return;
   }
-  if (typeof globalThis.scheduler?.postTask === "function") {
-    backgroundTaskHandle = globalThis.scheduler.postTask(flushPending, {
-      priority: "background",
-      delay: DEFER_VISIBILITY_CAP_MS
-    });
-  } else {
-    visibilityDeferTimer = setTimeout(flushPending, DEFER_VISIBILITY_CAP_MS);
-  }
+  deferHandle = postTask(flushPending, {
+    priority: "background",
+    delay: DEFER_VISIBILITY_CAP_MS
+  });
   // Lazily create and subscribe to the module-level VisibilityWatcher on
   // first use. This avoids accessing `document` at import time so test
   // harnesses that import dom-watch without a DOM don't break.
@@ -223,9 +213,8 @@ function stopIfIdle() {
     pendingRecords = [];
     recycledRecords = [];
     slots.length = 0;
-    clearTimeout(visibilityDeferTimer);
-    visibilityDeferTimer = 0;
-    backgroundTaskHandle = null;
+    deferHandle?.abort();
+    deferHandle = null;
   }
 }
 

@@ -1,3 +1,5 @@
+import { yield_ as yieldToBrowser } from "../../shared/scheduler.js";
+
 /** SRT timecode capture; global so srtToVtt rewrites every match in a line. */
 const SRT_TIMECODE_RE = /(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})/g;
 const SRT_BLOCK_RE = /(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})\s*-->/;
@@ -287,7 +289,6 @@ const YIELD_BUDGET_MS = 50;
 export async function parseSubtitlesAsync(text, offset = 0) {
   const cueText = normalizeText(text);
   const blocks = cueText.split(/\n[ \t]*\n/);
-  const canYield = typeof globalThis.scheduler?.yield === "function";
   const cues = [];
   let last = performance.now();
   for (let i = 0; i < blocks.length; i++) {
@@ -295,8 +296,8 @@ export async function parseSubtitlesAsync(text, offset = 0) {
     if (cue) {
       cues.push(cue);
     }
-    if (canYield && (i & 127) === 0 && performance.now() - last > YIELD_BUDGET_MS) {
-      await globalThis.scheduler.yield();
+    if ((i & 127) === 0 && performance.now() - last > YIELD_BUDGET_MS) {
+      await yieldToBrowser();
       last = performance.now();
     }
   }
@@ -372,7 +373,6 @@ export async function* parseSubtitlesStream(readable, offset = 0) {
   const reader = readable.getReader();
   let remainder = "";
   let last = performance.now();
-  const canYield = typeof globalThis.scheduler?.yield === "function";
   const accumulated = [];
   try {
     while (true) {
@@ -392,7 +392,7 @@ export async function* parseSubtitlesStream(readable, offset = 0) {
         }
       }
       // Yield periodically so the browser can paint between chunks.
-      if (canYield && (accumulated.length & 31) === 0 && performance.now() - last > YIELD_BUDGET_MS) {
+      if ((accumulated.length & 31) === 0 && performance.now() - last > YIELD_BUDGET_MS) {
         yield { cues: sortCues([...accumulated]), done: false };
         last = performance.now();
       }
