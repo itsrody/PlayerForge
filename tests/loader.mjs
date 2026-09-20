@@ -5,7 +5,7 @@ register("./css-hook.mjs", import.meta.url);
  * jsdom 29 lacks several platform APIs the Chromium-only production code uses
  * unconditionally. Rather than scatter feature-detects through src/ to appease
  * a headless test host, the absence is shimmed here - in the ONE place the
- * harness bootstraps - so production code stays pure Chromium 150. These shims
+ * harness bootstraps - so production code stays pure Chromium 152. These shims
  * are no-ops; they exist only so constructor/import paths don't throw.
  *
  * Only BARE-GLOBAL identifiers are shimmed (src/ resolves them via globalThis
