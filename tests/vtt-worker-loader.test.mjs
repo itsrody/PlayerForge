@@ -30,7 +30,7 @@ async function workerChunk() {
       entryPoints: ["src/shell/subtitles/vtt-worker.js"],
       bundle: true,
       format: "iife",
-      target: ["chrome152"],
+      target: ["chrome153"],
       minify: true,
       write: false,
       logLevel: "silent"
