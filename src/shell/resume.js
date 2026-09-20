@@ -370,10 +370,7 @@ export class ResumeTracker {
       // Resolving twice is a no-op, so timeout and signal races are safe.
       const { signal } = this.#scope;
       const { promise: metadataReady, resolve: resolveMetadata } = Promise.withResolvers();
-      const finishWaiting = () => {
-        clearTimeout(timeoutHandle);
-        resolveMetadata();
-      };
+      const finishWaiting = () => resolveMetadata();
       const onDurationChange = () => {
         if (video.duration && isFinite(video.duration)) {
           finishWaiting();
@@ -381,13 +378,24 @@ export class ResumeTracker {
       };
       const onLoaded = () => finishWaiting();
       const onError = () => finishWaiting();
-      const timeoutHandle = setTimeout(finishWaiting, RESUME_METADATA_WAIT_MS);
-      // A shell destroyed mid-wait must not leave the suspended #init
-      // continuation (and its closure) alive for the full metadata timeout.
-      signal.addEventListener("abort", () => clearTimeout(timeoutHandle), { once: true });
-      video.addEventListener("loadedmetadata", onLoaded, { signal });
-      video.addEventListener("durationchange", onDurationChange, { signal });
-      video.addEventListener("error", onError, { signal });
+      // The metadata watchdog is the native AbortSignal.timeout shape: the
+      // combined wait signal removes the media listeners AND resolves the
+      // wait the moment the cap elapses or the shell dies, so a destroyed
+      // shell never leaves the suspended continuation alive for the full 10s.
+      // (try/catch mirrors shared/context.js - some host realms brand-check
+      // composed signals; the fallback is the old manual timer.)
+      let waitSignal;
+      try {
+        waitSignal = AbortSignal.any([signal, AbortSignal.timeout(RESUME_METADATA_WAIT_MS)]);
+      } catch {
+        waitSignal = signal;
+        const timeoutHandle = setTimeout(finishWaiting, RESUME_METADATA_WAIT_MS);
+        signal.addEventListener("abort", () => clearTimeout(timeoutHandle), { once: true });
+      }
+      waitSignal.addEventListener("abort", finishWaiting, { once: true });
+      video.addEventListener("loadedmetadata", onLoaded, { signal: waitSignal });
+      video.addEventListener("durationchange", onDurationChange, { signal: waitSignal });
+      video.addEventListener("error", onError, { signal: waitSignal });
       await metadataReady;
       if (this.#destroyed) {
         logger.log("resume", "Shell destroyed before metadata - skipping");

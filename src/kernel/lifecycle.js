@@ -1,4 +1,5 @@
 import { logger } from "../shared/logger.js";
+import { postTask } from "../shared/scheduler.js";
 
 /**
  * Resolve once the container's child list has been quiet for a run of
@@ -10,25 +11,43 @@ import { logger } from "../shared/logger.js";
  * than an rAF quiet-frame counter, so the window is frame-rate independent
  * (an 144 Hz display settles 2.4x faster than 60 Hz, and a missed frame or
  * a throttled background tab still resolves on the quiet clock).
+ *
+ * Both timers are scheduler.postTask handles (background-tab throttling and
+ * pagehide abort are native), re-armed per mutation. An optional AbortSignal
+ * additionally resolves the wait immediately - so a video removed / page
+ * hidden mid-window never leaves the observer + its two timers running for
+ * the full cap.
  */
-function whenDomSettled(container, { quietMs = 50, capMs = 150 } = {}) {
+function whenDomSettled(container, { quietMs = 50, capMs = 150, signal } = {}) {
   const { promise, resolve } = Promise.withResolvers();
-  let settleTimer = 0;
-  let capTimer = 0;
-  const observer = new MutationObserver(() => {
-    // Any mutation re-arms the trailing quiet window from scratch.
-    clearTimeout(settleTimer);
-    settleTimer = setTimeout(done, quietMs);
-  });
+  let settled = false;
+  let settleHandle = null;
+  let capHandle = null;
+
   const done = () => {
-    clearTimeout(settleTimer);
-    clearTimeout(capTimer);
+    if (settled) {
+      return;
+    }
+    settled = true;
     observer.disconnect();
+    settleHandle?.abort();
+    capHandle?.abort();
     resolve();
   };
-  capTimer = setTimeout(done, capMs);
+
+  const observer = new MutationObserver(() => {
+    // Any mutation re-arms the trailing quiet window from scratch.
+    settleHandle?.abort();
+    settleHandle = postTask(done, { priority: "user-visible", delay: quietMs });
+  });
+
+  settleHandle = postTask(done, { priority: "user-visible", delay: quietMs });
+  capHandle = postTask(done, { priority: "user-visible", delay: capMs });
+
   observer.observe(container, { childList: true });
-  settleTimer = setTimeout(done, quietMs);
+
+  signal?.addEventListener("abort", done, { once: true });
+
   return promise;
 }
 
@@ -47,6 +66,8 @@ export class LifecycleManager {
   #shellFactory = null;
   /** Videos with a settle wait in flight - dedups repeated discovery. */
   #pending = new Set();
+  /** Abort source for in-flight settle waits; aborted by destroy() (pagehide). */
+  #scope = new AbortController();
 
   constructor(registry, onShellCreated) {
     this.#registry = registry;
@@ -71,7 +92,7 @@ export class LifecycleManager {
       return;
     }
     this.#pending.add(video);
-    await whenDomSettled(container);
+    await whenDomSettled(container, { signal: this.#scope.signal });
     this.#pending.delete(video);
     if (!video.isConnected || !container.isConnected) {
       logger.log("lifecycle", `${sdk.name} video left the document before settle - skipping`);
@@ -96,5 +117,15 @@ export class LifecycleManager {
       shell.destroy();
       logger.log("lifecycle", `Shell destroyed: ${shell.sdk.name}`);
     }
+  }
+
+  /**
+   * Tear down every in-flight settle wait: the observer + its two timers die
+   * immediately instead of running their full quiet/cap window after pagehide.
+   * Continuations resume and hit the still-connected guards, so nothing is
+   * half-created on a dying page.
+   */
+  destroy() {
+    this.#scope.abort();
   }
 }

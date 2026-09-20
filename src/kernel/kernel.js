@@ -1,7 +1,7 @@
 import { logger } from "../shared/logger.js";
 import { getConfigValue } from "../shared/storage.js";
-import { delay } from "../shared/time.js";
 import { setPerfDiag } from "../shared/perf-diag.js";
+import { postTask } from "../shared/scheduler.js";
 import { ShellSlot } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, meetsMinSize, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
@@ -65,6 +65,10 @@ export class Kernel {
         cancel();
       }
       this.#removalTimers.clear();
+      // Tear down in-flight settle waits so their observers + timers die
+      // immediately instead of running the full quiet/cap window on a page
+      // that is already leaving.
+      this.#lifecycle.destroy();
       this.#registry.destroyAll();
       this.#scope.abort();
     }
@@ -188,13 +192,28 @@ export class Kernel {
 
     const anchors = [];
 
+    /**
+     * Removal-grace tick: a scheduler.postTask handle on the kernel scope. It
+     * is pure deferral - nothing about it needs timer priority - and being
+     * signal-bound means pagehide (or any kernel abort) cancels every pending
+     * grace without the manual sweep loop racing the page.
+     */
+    const scheduleGraceTimer = (done) => {
+      const handle = postTask(done, {
+        priority: "user-visible",
+        delay: FRAMEWORK_TUNING.removalGraceMs,
+        signal: this.#scope.signal
+      });
+      return () => handle.abort();
+    };
+
     // Arrow fn keeps the enclosing class-level `this` for timer/lifecycle access.
     const checkAnchors = () => {
       if (this.#removalTimers.has(video)) {
         return;
       }
       if (!video.isConnected) {
-        this.#removalTimers.set(video, delay(() => {
+        this.#removalTimers.set(video, scheduleGraceTimer(() => {
           this.#removalTimers.delete(video);
           if (!video.isConnected) {
             stopWatching();
@@ -202,7 +221,7 @@ export class Kernel {
           } else {
             reanchorObservers();
           }
-        }, FRAMEWORK_TUNING.removalGraceMs));
+        }));
         return;
       }
       if (video.parentElement !== anchors[0]) {

@@ -131,14 +131,27 @@ function matchSdk(video) {
  */
 const descriptorCache = new WeakMap();
 
-/** Identify the SDK owning a video, or null when unregistered. */
+/**
+ * Identify the SDK owning a video, or null when unregistered.
+ *
+ * Caches BOTH the positive descriptor and the negative null, so a page of
+ * many non-SDK videos (ad grids, untracked embeds) never re-runs the full
+ * ancestry scan per discovery pass. The WeakMap key dies with the video, so
+ * entries are session-only. Negative caching is safe here because detection
+ * is deterministic for a given composed ancestry, and a video that changes
+ * its ancestry enough to gain an SDK is a different adoption cycle - the
+ * media-event tap re-adopts it then.
+ */
 export function findSdkForVideo(video) {
   const cached = descriptorCache.get(video);
   if (cached !== undefined) {
     return cached;
   }
   const match = matchSdk(video);
-  if (!match) return null;
+  if (!match) {
+    descriptorCache.set(video, null);
+    return null;
+  }
   const descriptor = {
     name: match.record.name,
     host: match.record.host ?? null,
@@ -239,16 +252,20 @@ export function meetsMinSize(video, minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_
  * used by the two-phase boot probe before it commits to a full-document
  * observer. Media events travel the composed path to document, so even
  * shadow-hosted SDK videos surface here without any subtree observer.
+ *
+ * Accepts an optional AbortSignal: on abort the browser drops both capture
+ * listeners itself - no manual unsubscribe needed for pagehide teardown. The
+ * returned function stays available for early / signal-free teardown.
  */
-export function watchMediaEvents(onVideo) {
+export function watchMediaEvents(onVideo, { signal } = {}) {
   const onMediaEvent = (event) => {
     const video = videoFromEvent(event);
     if (video) {
       onVideo(video);
     }
   };
-  document.addEventListener("loadeddata", onMediaEvent, true);
-  document.addEventListener("play", onMediaEvent, true);
+  document.addEventListener("loadeddata", onMediaEvent, { capture: true, signal });
+  document.addEventListener("play", onMediaEvent, { capture: true, signal });
   return () => {
     document.removeEventListener("loadeddata", onMediaEvent, true);
     document.removeEventListener("play", onMediaEvent, true);
