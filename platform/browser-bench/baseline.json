@@ -1,0 +1,13 @@
+{
+  "panel toggle open/close (2 rAF cycles)": 63.5,
+  "forced style recalculation (classList toggle + offsetHeight)": 0,
+  "adopted stylesheet add/remove cycle": 0,
+  "mutation burst, no PF (120 nodes/burst, 8 iframes)": 0,
+  "mutation burst, PF iframe cache live (120 nodes/burst, 8 iframes)": 0,
+  "keyboard → gesture dispatch (ArrowRight → skip)": 0,
+  "pointer events → dbltap gesture recognition": 0,
+  "cue slot create → mutate → remove (DOM)": 0,
+  "batch cue update (8 slots, show + text + hide)": 0.09999999403953552,
+  "shell boot (navigate → inject → HUD)": 71.29320800000096,
+  "script injection (injectScript only)": 6.991665999999896
+}

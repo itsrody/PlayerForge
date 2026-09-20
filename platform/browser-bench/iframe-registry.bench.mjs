@@ -30,7 +30,7 @@ const CHURN_NODES = 120;
  *  observer. The double continuation guarantees the MutationObserver callback
  *  queued by this burst has run before the clock stops (the second chain runs
  *  after the observer's microtask). */
-const burstTiming = (churn) => driver.eval(
+const burstTiming = (driver, churn) => driver.eval(
   (n) => new Promise((resolve) => {
     const t0 = performance.now();
     const host = document.createElement("div");
@@ -49,12 +49,12 @@ const burstTiming = (churn) => driver.eval(
 
 /** Batch/iteration loop mirroring the other browser benches: per-batch median
  *  burst time, then median + spread across batches. */
-async function measureBurst(churn) {
+async function measureBurst(driver, churn) {
   const samples = [];
   for (let b = 0; b < BATCHES; b++) {
     const timings = [];
     for (let i = 0; i < ITERATIONS; i++) {
-      timings.push(await burstTiming(churn));
+      timings.push(await burstTiming(driver, churn));
     }
     timings.sort((a, b) => a - b);
     samples.push(timings[Math.floor(timings.length / 2)]);
@@ -78,17 +78,17 @@ export default async function runIframeRegistryBench(bundle = DEFAULT_BUNDLE) {
     // Control: identical protocol, no userscript - isolates pure DOM churn.
     await driver.navigate(createTestPage(server));
     await driver.injectGMStubs();
-    await driver.eval(() => {
-      for (let i = 0; i < FRAME_COUNT; i++) {
+    await driver.eval((frameCount) => {
+      for (let i = 0; i < frameCount; i++) {
         const f = document.createElement("iframe");
         f.setAttribute("data-pf-bench-frame", "");
         f.style.display = "none";
         document.body.appendChild(f);
       }
-    });
+    }, FRAME_COUNT);
     results.push({
       name: `mutation burst, no PF (${suffix}, ${FRAME_COUNT} iframes)`,
-      ...(await measureBurst(CHURN_NODES)),
+      ...(await measureBurst(driver, CHURN_NODES)),
     });
 
     // Active: the bundle's bridge installs the iframe-cache observer; the
@@ -98,7 +98,7 @@ export default async function runIframeRegistryBench(bundle = DEFAULT_BUNDLE) {
     await driver.injectScript(bundle);
     results.push({
       name: `mutation burst, PF iframe cache live (${suffix}, ${FRAME_COUNT} iframes)`,
-      ...(await measureBurst(CHURN_NODES)),
+      ...(await measureBurst(driver, CHURN_NODES)),
     });
   } finally {
     await driver.destroy();
