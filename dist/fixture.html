@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PlayerForge dev fixture</title>
+<style>
+  body { background: #111; color: #eee; font: 14px/1.4 system-ui, sans-serif; margin: 0; padding: 16px; }
+  #player { max-width: 900px; margin: 0 auto; }
+  video { width: 100%; max-height: 70vh; background: #000; }
+  .chrome { display: flex; gap: 8px; margin-top: 10px; }
+  .chrome button { padding: 6px 12px; }
+  #status { margin-top: 12px; color: #8f8; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div id="player">
+  <video id="pv" width="800" height="450" controls muted playsinline poster=""></video>
+  <div class="chrome">
+    <button id="btn-native">native button</button>
+    <button id="btn-spa" data-pf-shell>pf-owned button</button>
+  </div>
+</div>
+<pre id="status"></pre>
+
+<script>
+  // Dev-only GM_* shims so the userscript boots without Tampermonkey.
+  // localStorage is the config backing store.
+  (function () {
+    const store = (k, v) => localStorage.setItem("pf:" + k, JSON.stringify(v));
+    const load = (k) => {
+      const raw = localStorage.getItem("pf:" + k);
+      return raw === null ? undefined : JSON.parse(raw);
+    };
+    window.GM_getValue = (k, def) => (load(k) === undefined ? def : load(k));
+    window.GM_setValue = store;
+    window.GM_deleteValue = (k) => localStorage.removeItem("pf:" + k);
+    window.GM_info = {
+      script: { version: "dev-fixture", name: "PlayerForge", namespace: "dev", description: "dev fixture" },
+      scriptHandler: "fixture", version: "0.0.0"
+    };
+    window.GM_addValueChangeListener = () => 0;
+    window.GM_removeValueChangeListener = () => {};
+    window.GM_registerMenuCommand = () => 0;
+    window.GM_unregisterMenuCommand = () => {};
+    window.GM_getResourceText = () => "";
+    window.GM_setClipboard = () => {};
+    window.GM_xmlhttpRequest = () => ({ abort: () => {} });
+    window.PF_FIXTURE = true;
+  })();
+</script>
+<script src="./playerforge.user.js"></script>
+</body>
+</html>
