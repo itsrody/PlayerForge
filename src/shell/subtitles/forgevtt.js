@@ -1,9 +1,7 @@
 /** SRT timecode capture; global so srtToVtt rewrites every match in a line. */
 const SRT_TIMECODE_RE = /(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})/g;
 const SRT_BLOCK_RE = /(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})\s*-->/;
-const CUE_LINE_RE = /^((?:\d+:\d{1,2}:\d{2}|\d{1,2}:\d{2})[.,]\d{1,3})\s+-->\s+((?:\d+:\d{1,2}:\d{2}|\d{1,2}:\d{2})[.,]\d{1,3})(.*)$/;
 const METADATA_BLOCK_RE = /^(NOTE|STYLE|REGION)(?:[ \t]|$)/;
-const TAG_RE = /<\/?[a-zA-Z][^>]*>/g;
 const ENTITY_MAP = {
   "&amp;": "&",
   "&lt;": "<",
@@ -12,8 +10,9 @@ const ENTITY_MAP = {
   "&lrm;": "\u200E",
   "&rlm;": "\u200F"
 };
-const ENTITY_RE = /&(?:amp|lt|gt|nbsp|lrm|rlm);/g;
-const NUMERIC_ENTITY_RE = /&#(x[0-9a-fA-F]+|\d+);/g;
+/** Single-pass tag-strip + entity-decode alternation: one regex scan over the
+ *  payload instead of the previous three replace() sweeps on track load. */
+const CUE_TEXT_RE = /<\/?[a-zA-Z][^>]*>|&(?:amp|lt|gt|nbsp|lrm|rlm);|&#(?:x[0-9a-fA-F]+|\d+);/g;
 const BOM_RE = /^\uFEFF/;
 const CRLF_RE = /\r\n?/g;
 
@@ -73,6 +72,7 @@ export function ensureVttHeader(raw) {
  * - the same inputs parse, the same garbage returns null.
  */
 const ZERO = 48, NINE = 57, COLON = 58, DOT = 46, COMMA = 44;
+const SPACES_RE = /^\s+$/;
 
 function isDigitCode(c) {
   return c >= ZERO && c <= NINE;
@@ -169,10 +169,12 @@ function decodeNumericEntity(entity) {
 }
 
 function decodeCueText(text) {
-  return text
-    .replace(TAG_RE, "")
-    .replace(ENTITY_RE, (entity) => ENTITY_MAP[entity])
-    .replace(NUMERIC_ENTITY_RE, decodeNumericEntity);
+  return text.replace(CUE_TEXT_RE, (match) => {
+    if (match.charCodeAt(0) === 38) {
+      return match.charCodeAt(1) === 35 ? decodeNumericEntity(match) : ENTITY_MAP[match];
+    }
+    return "";
+  });
 }
 
 /**
@@ -213,62 +215,190 @@ function parseCueSettings(settings) {
   return parsed;
 }
 
+/**
+ * Recognition of a cue timing line without a capture-heavy regex
+ * (CUE_LINE_RE was removed: it ran a regex state machine with 3 capture groups
+ * over every line of every block). A line is a timing line iff it contains an
+ * arrow with the shape `(timecode) \s+ --> \s+ (end-timecode) (rest)` where
+ * timecodeToSeconds mirrors the old pattern's shape constraints exactly
+ * (`MM:SS` with `[.,]` + 1-3 fractional digits, `SS` exactly two digits, and
+ * the end timecode's `\d{1,3}` is capped at three digits with any overflow
+ * becoming settings text - matching the regex engine's backtracking).
+ */
+function parseTimingLine(line) {
+  const arrow = line.indexOf("-->");
+  if (arrow < 0) {
+    return null;
+  }
+  const before = line.slice(0, arrow);
+  const left = before.trimEnd();
+  // The pattern requires `\s+` between the start timecode and the arrow; a
+  // tight `000-->` is not a timing line.
+  if (left === before || !SPACES_RE.test(before.slice(left.length))) {
+    return null;
+  }
+  const start = timecodeToSeconds(left);
+  if (start == null) {
+    return null;
+  }
+  // After the arrow, `\s+` then the end timecode token up to whitespace.
+  const after = line.slice(arrow + 3);
+  let k = 0;
+  while (k < after.length && (after.charCodeAt(k) === 32 || after.charCodeAt(k) === 9)) {
+    k++;
+  }
+  if (k === 0) {
+    return null;
+  }
+  let m = k;
+  while (m < after.length && after.charCodeAt(m) !== 32 && after.charCodeAt(m) !== 9) {
+    m++;
+  }
+  const run = after.slice(k, m);
+  let sep = -1;
+  for (let q = 0; q < run.length; q++) {
+    const c = run.charCodeAt(q);
+    if (c === DOT || c === COMMA) {
+      sep = q;
+      break;
+    }
+  }
+  if (sep < 0) {
+    return null;
+  }
+  // `\d{1,3}` caps the fraction at three digits; any overflow is settings text
+  // (the regex engine's backtrack into `(.*)`).
+  let digits = 0;
+  while (digits < 3 && sep + 1 + digits < run.length && isDigitCode(run.charCodeAt(sep + 1 + digits))) {
+    digits++;
+  }
+  if (digits === 0) {
+    return null;
+  }
+  const end = timecodeToSeconds(run.slice(0, sep + 1 + digits));
+  if (end == null) {
+    return null;
+  }
+  return {
+    start,
+    end,
+    settings: parseCueSettings(run.slice(sep + 1 + digits) + after.slice(m))
+  };
+}
+
 function parseCueBlock(block, offset) {
   const lines = block.split("\n");
   if (METADATA_BLOCK_RE.test(lines[0])) {
     return null;
   }
-  let timingMatch = null;
-  let timingIndex = -1;
   for (let i = 0; i < lines.length; i++) {
-    timingMatch = CUE_LINE_RE.exec(lines[i]);
-    if (timingMatch) {
-      timingIndex = i;
-      break;
+    const t = parseTimingLine(lines[i]);
+    if (t) {
+      const shiftedEnd = t.end + offset;
+      if (!(t.end > t.start) || shiftedEnd <= 0) {
+        return null;
+      }
+      const content = decodeCueText(lines.slice(i + 1).join("\n").trim());
+      if (!content) {
+        return null;
+      }
+      return {
+        start: Math.max(t.start + offset, 0),
+        end: shiftedEnd,
+        text: content,
+        line: t.settings.line,
+        position: t.settings.position,
+        align: t.settings.align
+      };
     }
   }
-  if (!timingMatch) {
-    return null;
-  }
-  const rawStart = timecodeToSeconds(timingMatch[1]);
-  const rawEnd = timecodeToSeconds(timingMatch[2]);
-  const settings = parseCueSettings(timingMatch[3]);
-  if (rawStart == null || rawEnd == null || !(rawEnd > rawStart)) {
-    return null;
-  }
-  const shiftedEnd = rawEnd + offset;
-  if (shiftedEnd <= 0) {
-    return null;
-  }
-  const content = decodeCueText(lines.slice(timingIndex + 1).join("\n").trim());
-  if (!content) {
-    return null;
-  }
-  return {
-    start: Math.max(rawStart + offset, 0),
-    end: shiftedEnd,
-    text: content,
-    line: settings.line,
-    position: settings.position,
-    align: settings.align
-  };
+  return null;
 }
 
 /**
  * Parse a VTT (or SRT already normalized to VTT) document into cue objects
- * using blank-line-delimited blocks per the WebVTT grammar: NOTE/STYLE/REGION
- * metadata blocks are skipped, a cue is its timing line plus payload, and any
- * later timing-looking line inside a payload stays cue text.
- * `offset` shifts every cue by a constant number of seconds; cues pushed
- * fully before zero are dropped, partially shifted ones are clamped.
+ * using a single forward line scan. Blank/whitespace-only lines end a block
+ * (the `\n[ \t]*\n` separator the old split produced), a block whose first
+ * line is NOTE/STYLE/REGION is skipped wholesale, a cue is its timing line
+ * plus the payload after it, and any later timing-looking line inside a
+ * payload stays cue text. `offset` shifts every cue by a constant number of
+ * seconds; cues pushed fully before zero are dropped, partially shifted ones
+ * are clamped.
  */
 export function parseSubtitles(text, offset = 0) {
+  const src = normalizeText(text);
+  const n = src.length;
   const cues = [];
-  for (const block of normalizeText(text).split(/\n[ \t]*\n/)) {
-    const cue = parseCueBlock(block, offset);
-    if (cue) {
-      cues.push(cue);
+  let timing = null;
+  let blockStarted = false;
+  let metadataBlock = false;
+  let payload = null;
+
+  const finishBlock = () => {
+    if (timing && timing.end > timing.start) {
+      const shiftedEnd = timing.end + offset;
+      if (shiftedEnd > 0) {
+        const content = decodeCueText(payload.join("\n").trim());
+        if (content) {
+          cues.push({
+            start: Math.max(timing.start + offset, 0),
+            end: shiftedEnd,
+            text: content,
+            line: timing.settings.line,
+            position: timing.settings.position,
+            align: timing.settings.align
+          });
+        }
+      }
     }
+    timing = null;
+    blockStarted = false;
+    metadataBlock = false;
+    payload = null;
+  };
+
+  for (let cur = 0; cur <= n; ) {
+    const nl = src.indexOf("\n", cur);
+    const lineEnd = nl === -1 ? n : nl;
+    const line = src.slice(cur, lineEnd);
+    cur = nl === -1 ? n + 1 : nl + 1;
+
+    let blank = true;
+    for (let k = 0; k < line.length; k++) {
+      const c = line.charCodeAt(k);
+      if (c !== 32 && c !== 9) {
+        blank = false;
+        break;
+      }
+    }
+    if (blank) {
+      if (blockStarted) {
+        finishBlock();
+      }
+      continue;
+    }
+    if (!blockStarted) {
+      blockStarted = true;
+      if (METADATA_BLOCK_RE.test(line)) {
+        metadataBlock = true;
+        continue;
+      }
+    }
+    if (metadataBlock) {
+      continue;
+    }
+    if (timing) {
+      payload.push(line);
+    } else {
+      const parsed = parseTimingLine(line);
+      if (parsed) {
+        timing = parsed;
+        payload = [];
+      }
+    }
+  }
+  if (blockStarted) {
+    finishBlock();
   }
   return sortCues(cues);
 }
