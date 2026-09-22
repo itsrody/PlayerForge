@@ -35,9 +35,20 @@ export class ToastManager {
   /** Stable auto-hide callback, cached so show() never re-creates a closure. */
   #autoHide = () => {
     this.#cancelAutoHide = null;
+    this.#isVisible = false;
     this.#toast.classList.remove("pf-visible");
   };
   #activeGroup = null;
+  /**
+   * Whether the toast is currently showing - the "already visible" half of
+   * the repeated-show skip below. #autoHide and hide() reset it.
+   */
+  #isVisible = false;
+  /** Render fingerprint of the last show(), for the alloc-free skip. */
+  #lastIcon = undefined;
+  #lastText = "";
+  #lastColor = "";
+  #lastHadActions = false;
 
   constructor(hudLayer) {
     const doc = hudLayer.ownerDocument;
@@ -75,7 +86,34 @@ export class ToastManager {
   }
 
   show({ icon, text, duration = 0, color, group, actions } = {}) {
+    const prevGroup = this.#activeGroup;
     this.#activeGroup = group ?? null;
+    const hadActions = !!(actions?.length);
+    // Repeated-show skip: the scrub hint re-calls show() every ~100ms tick with
+    // an unchanged icon/text. Resolving a cloned SVG icon, rewriting text, and
+    // re-rendering buttons each tick is pure churn when the toast is already
+    // showing that exact payload for the same group - so skip the DOM work and
+    // just re-assert visibility + reset the auto-hide timer. Button-bearing
+    // toasts and cross-group replays always re-render (their payloads are
+    // cheap and genuinely vary).
+    if (
+      this.#isVisible &&
+      this.#activeGroup === prevGroup &&
+      !hadActions && !this.#lastHadActions &&
+      icon === this.#lastIcon &&
+      (text || "") === this.#lastText &&
+      (color || "") === this.#lastColor
+    ) {
+      this.#toast.classList.add("pf-visible");
+      this.#cancelAutoHide?.();
+      this.#cancelAutoHide = duration > 0 ? delay(this.#autoHide, duration) : null;
+      return;
+    }
+    this.#isVisible = true;
+    this.#lastIcon = icon;
+    this.#lastText = text || "";
+    this.#lastColor = color || "";
+    this.#lastHadActions = hadActions;
     // Clone from the cached icon template: a repeated icon is a cheap
     // cloneNode, not an HTML re-parse. aria-hidden lives on the template.
     this.#icon.textContent = "";
@@ -121,6 +159,7 @@ export class ToastManager {
     if (group === undefined || group === this.#activeGroup) {
       this.#cancelAutoHide?.();
       this.#cancelAutoHide = null;
+      this.#isVisible = false;
       this.#toast.classList.remove("pf-visible");
     }
   }

@@ -45,6 +45,23 @@ let lastActiveForge = null;
  */
 const firstTwoPointers = { x0: 0, y0: 0, x1: 0, y1: 0 };
 
+/**
+ * Pooled per-family event payloads mirroring scrubDetail: every #dispatch site
+ * mutates one fixed-shape object in place and re-dispatches one pooled Event,
+ * so the gesture boundary allocates nothing per event. Same synchronous-read
+ * contract - consumers read detail.* inside dispatchEvent and never retain the
+ * object, so each dispatch site must rewrite EVERY field it owns (no stale
+ * carries between events).
+ */
+const releaseDetail = { zone: "", method: "pointer", duration: 0 };
+const holdDetail = { zone: "", method: "pointer", duration: 0 };
+const scrubEndDetail = { zone: "", method: "pointer" };
+const pinchDetail = { zone: "", method: "pointer", direction: "" };
+const swipeStartDetail = { zone: "", method: "pointer", direction: "" };
+const swipeDetail = { zone: "", method: "pointer", direction: "", distance: 0 };
+const dbltapDetail = { zone: "", method: "pointer" };
+const keyDetail = { method: "keyboard", direction: undefined };
+
 function captureFirstTwo(pointers, out) {
   let n = 0;
   for (const point of pointers.values()) {
@@ -359,18 +376,16 @@ export class InputForge {
     this.#clearHoldTimer();
     if (this.#holding) {
       this.#holding = false;
-      this.#dispatch(GESTURE_EVENTS.release, {
-        zone: this.#gestureZone,
-        method: "pointer",
-        duration: performance.now() - this.#startTime
-      });
+      releaseDetail.zone = this.#gestureZone;
+      releaseDetail.method = "pointer";
+      releaseDetail.duration = performance.now() - this.#startTime;
+      this.#dispatch(GESTURE_EVENTS.release, releaseDetail);
     }
     if (this.#scrubbing) {
       this.#scrubbing = false;
-      this.#dispatch(GESTURE_EVENTS.scrubEnd, {
-        zone: this.#gestureZone || "screen",
-        method: "pointer"
-      });
+      scrubEndDetail.zone = this.#gestureZone || "screen";
+      scrubEndDetail.method = "pointer";
+      this.#dispatch(GESTURE_EVENTS.scrubEnd, scrubEndDetail);
     }
     if (this.#swiping) {
       this.#swiping = false;
@@ -423,11 +438,10 @@ export class InputForge {
     if (scaleDelta > PINCH_SCALE_THRESHOLD || scaleDelta < -PINCH_SCALE_THRESHOLD) {
       this.#pinchFired = true;
       this.#suppressNextActivations();
-      this.#dispatch(GESTURE_EVENTS.pinch, {
-        zone: this.#pinchZone,
-        method: "pointer",
-        direction: scaleDelta > 0 ? "out" : "in"
-      });
+      pinchDetail.zone = this.#pinchZone;
+      pinchDetail.method = "pointer";
+      pinchDetail.direction = scaleDelta > 0 ? "out" : "in";
+      this.#dispatch(GESTURE_EVENTS.pinch, pinchDetail);
     }
   }
 
@@ -577,11 +591,10 @@ export class InputForge {
         if (this.#primaryPointerId !== null && !this.#video.paused && allowsIntent("hold")) {
           this.#holding = true;
           this.#pointerOp("setPointerCapture", this.#primaryPointerId);
-          this.#dispatch(GESTURE_EVENTS.hold, {
-            zone: this.#gestureZone,
-            method: "pointer",
-            duration: performance.now() - this.#startTime
-          });
+          holdDetail.zone = this.#gestureZone;
+          holdDetail.method = "pointer";
+          holdDetail.duration = performance.now() - this.#startTime;
+          this.#dispatch(GESTURE_EVENTS.hold, holdDetail);
         }
       }, HOLD_TIMEOUT_MS);
     }
@@ -643,11 +656,10 @@ export class InputForge {
           this.#pointerOp("setPointerCapture", this.#primaryPointerId);
           this.#suppressNextActivations();
           event.stopImmediatePropagation();
-          this.#dispatch(GESTURE_EVENTS.swipeStart, {
-            zone: this.#gestureZone || "screen",
-            method: "pointer",
-            direction: this.#swipeDirection
-          });
+          swipeStartDetail.zone = this.#gestureZone || "screen";
+          swipeStartDetail.method = "pointer";
+          swipeStartDetail.direction = this.#swipeDirection;
+          this.#dispatch(GESTURE_EVENTS.swipeStart, swipeStartDetail);
         }
       }
       if (this.#scrubbing) {
@@ -769,32 +781,29 @@ export class InputForge {
       this.#holding = false;
       this.#suppressNextActivations();
       event.stopImmediatePropagation();
-      this.#dispatch(GESTURE_EVENTS.release, {
-        zone: this.#gestureZone,
-        method: "pointer",
-        duration: elapsed
-      });
+      releaseDetail.zone = this.#gestureZone;
+      releaseDetail.method = "pointer";
+      releaseDetail.duration = elapsed;
+      this.#dispatch(GESTURE_EVENTS.release, releaseDetail);
     } else if (this.#scrubbing) {
       this.#scrubbing = false;
       this.#gestureFsActive = false;
       this.#suppressNextActivations();
       event.stopImmediatePropagation();
-      this.#dispatch(GESTURE_EVENTS.scrubEnd, {
-        zone: this.#gestureZone || "screen",
-        method: "pointer"
-      });
+      scrubEndDetail.zone = this.#gestureZone || "screen";
+      scrubEndDetail.method = "pointer";
+      this.#dispatch(GESTURE_EVENTS.scrubEnd, scrubEndDetail);
     } else if (this.#swiping) {
       this.#swiping = false;
       this.#gestureFsActive = false;
       this.#suppressNextActivations();
       event.stopImmediatePropagation();
       this.#restoreTransform();
-      this.#dispatch(GESTURE_EVENTS.swipe, {
-        zone: this.#gestureZone || "screen",
-        method: "pointer",
-        direction: this.#swipeDirection,
-        distance
-      });
+      swipeDetail.zone = this.#gestureZone || "screen";
+      swipeDetail.method = "pointer";
+      swipeDetail.direction = this.#swipeDirection;
+      swipeDetail.distance = distance;
+      this.#dispatch(GESTURE_EVENTS.swipe, swipeDetail);
       this.#swipeDirection = null;
       this.#lastSwipeDrag = NaN;
       this.#lastSwipeTransform = "";
@@ -807,7 +816,9 @@ export class InputForge {
       if (now - this.#lastTapTime < DOUBLE_TAP_WINDOW_MS) {
         this.#lastTapTime = -Infinity;
         this.#suppressNextActivations();
-        this.#dispatch(GESTURE_EVENTS.dbltap, { zone: this.#gestureZone, method: "pointer" });
+        dbltapDetail.zone = this.#gestureZone;
+        dbltapDetail.method = "pointer";
+        this.#dispatch(GESTURE_EVENTS.dbltap, dbltapDetail);
       } else {
         this.#lastTapTime = now;
       }
@@ -858,11 +869,10 @@ export class InputForge {
       if (performance.now() >= this.#trackpadPinchCooldownUntil) {
         this.#trackpadPinchCooldownUntil = performance.now() + TRACKPAD_COOLDOWN_MS;
         this.#suppressNextActivations();
-        this.#dispatch(GESTURE_EVENTS.pinch, {
-          zone: "screen",
-          method: "trackpad",
-          direction: event.deltaY < 0 ? "out" : "in"
-        });
+        pinchDetail.zone = "screen";
+        pinchDetail.method = "trackpad";
+        pinchDetail.direction = event.deltaY < 0 ? "out" : "in";
+        this.#dispatch(GESTURE_EVENTS.pinch, pinchDetail);
       }
     }
   }
@@ -889,11 +899,10 @@ export class InputForge {
           this.#keyboardHoldTimer = null;
           if (!this.#video.paused && allowsIntent("hold")) {
             this.#keyboardHolding = true;
-            this.#dispatch(GESTURE_EVENTS.hold, {
-              zone: "screen",
-              method: "keyboard",
-              duration: performance.now() - this.#keyboardHoldStart
-            });
+            holdDetail.zone = "screen";
+            holdDetail.method = "keyboard";
+            holdDetail.duration = performance.now() - this.#keyboardHoldStart;
+            this.#dispatch(GESTURE_EVENTS.hold, holdDetail);
           }
         }, HOLD_TIMEOUT_MS);
       }
@@ -912,11 +921,9 @@ export class InputForge {
       lastActiveForge = this;
       event.preventDefault();
       event.stopImmediatePropagation();
-      const detail = { method: "keyboard" };
-      if (binding.direction) {
-        detail.direction = binding.direction;
-      }
-      this.#dispatch(binding.emit, detail);
+      keyDetail.method = "keyboard";
+      keyDetail.direction = binding.direction;
+      this.#dispatch(binding.emit, keyDetail);
       return;
     }
   }
@@ -940,11 +947,10 @@ export class InputForge {
     this.#keyboardHoldTimer = null;
       this.#keyboardHolding = false;
       if (wasHolding) {
-      this.#dispatch(GESTURE_EVENTS.release, {
-        zone: "screen",
-        method: "keyboard",
-        duration: performance.now() - this.#keyboardHoldStart
-      });
+      releaseDetail.zone = "screen";
+      releaseDetail.method = "keyboard";
+      releaseDetail.duration = performance.now() - this.#keyboardHoldStart;
+      this.#dispatch(GESTURE_EVENTS.release, releaseDetail);
     } else if (shouldToggle) {
       if (this.#video.paused) {
         this.#video.play().catch((err) => {

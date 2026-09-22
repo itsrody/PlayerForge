@@ -263,6 +263,13 @@ export class ResumeStore {
     this.ensureLoaded();
     const entry = this.#state.entries.find((candidate) => candidate.id === id);
     if (entry) {
+      // No-op guard: an identical write (paused at the same position, a
+      // completion-reset 0 again, resetEntry on an already-zero entry) skips
+      // the disk read + merge + serialize entirely instead of churning GM
+      // storage every tick.
+      if (entry.resume === position) {
+        return;
+      }
       entry.resume = position;
       entry.updatedAt = Date.now();
       this.#persist();
@@ -512,8 +519,14 @@ export class ResumeTracker {
       // decoder position which may lead or lag the display. Falls back to
       // currentTime when the API is unavailable (non-Chromium, test harness).
       if (typeof video.requestVideoFrameCallback === "function") {
+        // The rVFC callback is not signal-cancellable: the pause listener dies
+        // with the scope, but a callback already queued can still fire after
+        // destroy() - guard it so a dead shell never writes a final stale save
+        // into a re-used store.
         video.requestVideoFrameCallback((_now, metadata) => {
-          this.#saveProgress(metadata.mediaTime);
+          if (!this.#destroyed) {
+            this.#saveProgress(metadata.mediaTime);
+          }
         });
       } else {
         this.#saveProgress(shell.currentTime);

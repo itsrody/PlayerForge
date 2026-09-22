@@ -34,6 +34,10 @@ export class Shell {
   #filter = null;
   #panel;
   #toasts = null;
+  /** Pooled reference-box result + validity flag (see the referenceBox getter). */
+  #refBox = { width: 0, height: 0 };
+  #refBoxValid = false;
+  #refBoxObserver = null;
   /** Active wake-lock session's abort controller; the browser owns release. */
   #wakeLockAbort = null;
   #onDestroy;
@@ -98,6 +102,7 @@ export class Shell {
     this.#watchFullscreen();
     this.#watchWakeLock();
     this.#watchOrientation();
+    this.#watchReferenceBoxSize();
     this.#markManaged();
     logger.log("shell", `Shell "${this.sdk.name}" constructed`);
   }
@@ -149,10 +154,18 @@ export class Shell {
    * the frame at the screen. Returns { width, height }.
    */
   get referenceBox() {
-    if (fs) {
-      return { width: screen.width, height: screen.height };
+    if (!this.#refBoxValid) {
+      const box = this.#refBox;
+      if (fs) {
+        box.width = screen.width;
+        box.height = screen.height;
+      } else {
+        box.width = this.container.clientWidth;
+        box.height = this.container.clientHeight;
+      }
+      this.#refBoxValid = true;
     }
-    return { width: this.container.clientWidth, height: this.container.clientHeight };
+    return this.#refBox;
   }
 
   get shellDom() {
@@ -377,6 +390,25 @@ export class Shell {
     }
   }
 
+  /**
+   * Keep the pooled referenceBox honest: invalidate it on fullscreen flips
+   * (fs -> screen.* dims), window resizes, and container resizes. The getter
+   * stays allocation + layout-read free in the scrub/pinch hot path; only a
+   * change event forces the next read through the layout query.
+   */
+  #watchReferenceBoxSize() {
+    const invalidate = () => {
+      this.#refBoxValid = false;
+    };
+    subscribeFullscreen(invalidate, this.#scope.signal);
+    this.#dom.listen(window, "resize", invalidate, { passive: true });
+    if (typeof ResizeObserver === "function") {
+      const ro = new ResizeObserver(invalidate);
+      ro.observe(this.container);
+      this.#refBoxObserver = ro;
+    }
+  }
+
   #markManaged() {
     this.#dom.markAttribute(this.video, SHELL_MARKER, "");
     this.#dom.markAttribute(this.container, SHELL_MARKER, "");
@@ -403,6 +435,8 @@ export class Shell {
       this.#toasts = null;
       // Sub-component scope (InputForge, MediaSession shared signal).
       this.#scope.abort();
+      this.#refBoxObserver?.disconnect();
+      this.#refBoxObserver = null;
       // DOM lifecycle: remove elements, disconnect observers, remove
       // listeners, restore attributes/styles — all in one call.
       this.#dom.destroy();

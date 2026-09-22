@@ -402,6 +402,9 @@
       observer3.disconnect();
       settleHandle?.abort();
       capHandle?.abort();
+      if (onAbort) {
+        signal?.removeEventListener("abort", onAbort);
+      }
       resolve();
     };
     const observer3 = new MutationObserver(() => {
@@ -411,7 +414,8 @@
     settleHandle = postTask(done, { priority: "user-visible", delay: quietMs });
     capHandle = postTask(done, { priority: "user-visible", delay: capMs });
     observer3.observe(container, { childList: true });
-    signal?.addEventListener("abort", done, { once: true });
+    const onAbort = () => done();
+    signal?.addEventListener("abort", onAbort, { once: true });
     return promise;
   }
   var LifecycleManager = class {
@@ -494,7 +498,7 @@
     queued = false;
     const records = pendingRecords;
     pendingRecords = recycledRecords;
-    recycledRecords = [];
+    recycledRecords = records;
     const length = slots.length;
     for (let i = 0; i < length; i++) {
       const slot = slots[i];
@@ -2073,6 +2077,14 @@
   var activeForges = /* @__PURE__ */ new Set();
   var lastActiveForge = null;
   var firstTwoPointers = { x0: 0, y0: 0, x1: 0, y1: 0 };
+  var releaseDetail = { zone: "", method: "pointer", duration: 0 };
+  var holdDetail = { zone: "", method: "pointer", duration: 0 };
+  var scrubEndDetail = { zone: "", method: "pointer" };
+  var pinchDetail = { zone: "", method: "pointer", direction: "" };
+  var swipeStartDetail = { zone: "", method: "pointer", direction: "" };
+  var swipeDetail = { zone: "", method: "pointer", direction: "", distance: 0 };
+  var dbltapDetail = { zone: "", method: "pointer" };
+  var keyDetail = { method: "keyboard", direction: void 0 };
   function captureFirstTwo(pointers, out) {
     let n = 0;
     for (const point of pointers.values()) {
@@ -2293,18 +2305,16 @@
       this.#clearHoldTimer();
       if (this.#holding) {
         this.#holding = false;
-        this.#dispatch(GESTURE_EVENTS.release, {
-          zone: this.#gestureZone,
-          method: "pointer",
-          duration: performance.now() - this.#startTime
-        });
+        releaseDetail.zone = this.#gestureZone;
+        releaseDetail.method = "pointer";
+        releaseDetail.duration = performance.now() - this.#startTime;
+        this.#dispatch(GESTURE_EVENTS.release, releaseDetail);
       }
       if (this.#scrubbing) {
         this.#scrubbing = false;
-        this.#dispatch(GESTURE_EVENTS.scrubEnd, {
-          zone: this.#gestureZone || "screen",
-          method: "pointer"
-        });
+        scrubEndDetail.zone = this.#gestureZone || "screen";
+        scrubEndDetail.method = "pointer";
+        this.#dispatch(GESTURE_EVENTS.scrubEnd, scrubEndDetail);
       }
       if (this.#swiping) {
         this.#swiping = false;
@@ -2350,11 +2360,10 @@
       if (scaleDelta > PINCH_SCALE_THRESHOLD || scaleDelta < -PINCH_SCALE_THRESHOLD) {
         this.#pinchFired = true;
         this.#suppressNextActivations();
-        this.#dispatch(GESTURE_EVENTS.pinch, {
-          zone: this.#pinchZone,
-          method: "pointer",
-          direction: scaleDelta > 0 ? "out" : "in"
-        });
+        pinchDetail.zone = this.#pinchZone;
+        pinchDetail.method = "pointer";
+        pinchDetail.direction = scaleDelta > 0 ? "out" : "in";
+        this.#dispatch(GESTURE_EVENTS.pinch, pinchDetail);
       }
     }
     /**
@@ -2486,11 +2495,10 @@
           if (this.#primaryPointerId !== null && !this.#video.paused && allowsIntent("hold")) {
             this.#holding = true;
             this.#pointerOp("setPointerCapture", this.#primaryPointerId);
-            this.#dispatch(GESTURE_EVENTS.hold, {
-              zone: this.#gestureZone,
-              method: "pointer",
-              duration: performance.now() - this.#startTime
-            });
+            holdDetail.zone = this.#gestureZone;
+            holdDetail.method = "pointer";
+            holdDetail.duration = performance.now() - this.#startTime;
+            this.#dispatch(GESTURE_EVENTS.hold, holdDetail);
           }
         }, HOLD_TIMEOUT_MS);
       }
@@ -2536,11 +2544,10 @@
             this.#pointerOp("setPointerCapture", this.#primaryPointerId);
             this.#suppressNextActivations();
             event.stopImmediatePropagation();
-            this.#dispatch(GESTURE_EVENTS.swipeStart, {
-              zone: this.#gestureZone || "screen",
-              method: "pointer",
-              direction: this.#swipeDirection
-            });
+            swipeStartDetail.zone = this.#gestureZone || "screen";
+            swipeStartDetail.method = "pointer";
+            swipeStartDetail.direction = this.#swipeDirection;
+            this.#dispatch(GESTURE_EVENTS.swipeStart, swipeStartDetail);
           }
         }
         if (this.#scrubbing) {
@@ -2644,32 +2651,29 @@
         this.#holding = false;
         this.#suppressNextActivations();
         event.stopImmediatePropagation();
-        this.#dispatch(GESTURE_EVENTS.release, {
-          zone: this.#gestureZone,
-          method: "pointer",
-          duration: elapsed
-        });
+        releaseDetail.zone = this.#gestureZone;
+        releaseDetail.method = "pointer";
+        releaseDetail.duration = elapsed;
+        this.#dispatch(GESTURE_EVENTS.release, releaseDetail);
       } else if (this.#scrubbing) {
         this.#scrubbing = false;
         this.#gestureFsActive = false;
         this.#suppressNextActivations();
         event.stopImmediatePropagation();
-        this.#dispatch(GESTURE_EVENTS.scrubEnd, {
-          zone: this.#gestureZone || "screen",
-          method: "pointer"
-        });
+        scrubEndDetail.zone = this.#gestureZone || "screen";
+        scrubEndDetail.method = "pointer";
+        this.#dispatch(GESTURE_EVENTS.scrubEnd, scrubEndDetail);
       } else if (this.#swiping) {
         this.#swiping = false;
         this.#gestureFsActive = false;
         this.#suppressNextActivations();
         event.stopImmediatePropagation();
         this.#restoreTransform();
-        this.#dispatch(GESTURE_EVENTS.swipe, {
-          zone: this.#gestureZone || "screen",
-          method: "pointer",
-          direction: this.#swipeDirection,
-          distance
-        });
+        swipeDetail.zone = this.#gestureZone || "screen";
+        swipeDetail.method = "pointer";
+        swipeDetail.direction = this.#swipeDirection;
+        swipeDetail.distance = distance;
+        this.#dispatch(GESTURE_EVENTS.swipe, swipeDetail);
         this.#swipeDirection = null;
         this.#lastSwipeDrag = NaN;
         this.#lastSwipeTransform = "";
@@ -2678,7 +2682,9 @@
         if (now - this.#lastTapTime < DOUBLE_TAP_WINDOW_MS) {
           this.#lastTapTime = -Infinity;
           this.#suppressNextActivations();
-          this.#dispatch(GESTURE_EVENTS.dbltap, { zone: this.#gestureZone, method: "pointer" });
+          dbltapDetail.zone = this.#gestureZone;
+          dbltapDetail.method = "pointer";
+          this.#dispatch(GESTURE_EVENTS.dbltap, dbltapDetail);
         } else {
           this.#lastTapTime = now;
         }
@@ -2721,11 +2727,10 @@
         if (performance.now() >= this.#trackpadPinchCooldownUntil) {
           this.#trackpadPinchCooldownUntil = performance.now() + TRACKPAD_COOLDOWN_MS;
           this.#suppressNextActivations();
-          this.#dispatch(GESTURE_EVENTS.pinch, {
-            zone: "screen",
-            method: "trackpad",
-            direction: event.deltaY < 0 ? "out" : "in"
-          });
+          pinchDetail.zone = "screen";
+          pinchDetail.method = "trackpad";
+          pinchDetail.direction = event.deltaY < 0 ? "out" : "in";
+          this.#dispatch(GESTURE_EVENTS.pinch, pinchDetail);
         }
       }
     }
@@ -2751,11 +2756,10 @@
             this.#keyboardHoldTimer = null;
             if (!this.#video.paused && allowsIntent("hold")) {
               this.#keyboardHolding = true;
-              this.#dispatch(GESTURE_EVENTS.hold, {
-                zone: "screen",
-                method: "keyboard",
-                duration: performance.now() - this.#keyboardHoldStart
-              });
+              holdDetail.zone = "screen";
+              holdDetail.method = "keyboard";
+              holdDetail.duration = performance.now() - this.#keyboardHoldStart;
+              this.#dispatch(GESTURE_EVENTS.hold, holdDetail);
             }
           }, HOLD_TIMEOUT_MS);
         }
@@ -2774,11 +2778,9 @@
         lastActiveForge = this;
         event.preventDefault();
         event.stopImmediatePropagation();
-        const detail = { method: "keyboard" };
-        if (binding.direction) {
-          detail.direction = binding.direction;
-        }
-        this.#dispatch(binding.emit, detail);
+        keyDetail.method = "keyboard";
+        keyDetail.direction = binding.direction;
+        this.#dispatch(binding.emit, keyDetail);
         return;
       }
     }
@@ -2800,11 +2802,10 @@
       this.#keyboardHoldTimer = null;
       this.#keyboardHolding = false;
       if (wasHolding) {
-        this.#dispatch(GESTURE_EVENTS.release, {
-          zone: "screen",
-          method: "keyboard",
-          duration: performance.now() - this.#keyboardHoldStart
-        });
+        releaseDetail.zone = "screen";
+        releaseDetail.method = "keyboard";
+        releaseDetail.duration = performance.now() - this.#keyboardHoldStart;
+        this.#dispatch(GESTURE_EVENTS.release, releaseDetail);
       } else if (shouldToggle) {
         if (this.#video.paused) {
           this.#video.play().catch((err) => {
@@ -2889,8 +2890,9 @@
     if (!hostname) {
       return "";
     }
-    if (domainKeyCache.has(hostname)) {
-      return domainKeyCache.get(hostname);
+    const hit = domainKeyCache.get(hostname);
+    if (hit !== void 0) {
+      return hit;
     }
     let key;
     if (IPV4_RE.test(hostname)) {
@@ -3480,6 +3482,7 @@
     iframeCacheObserver = null;
     iframeCacheActive = false;
     iframeCacheDoc = null;
+    iframeCache.clear();
   }
   function ensureIframeCacheCurrent() {
     if (!iframeCacheActive || iframeCacheDoc === document) {
@@ -3803,6 +3806,9 @@
       this.ensureLoaded();
       const entry = this.#state.entries.find((candidate) => candidate.id === id);
       if (entry) {
+        if (entry.resume === position) {
+          return;
+        }
         entry.resume = position;
         entry.updatedAt = Date.now();
         this.#persist();
@@ -3987,7 +3993,9 @@
       video.addEventListener("pause", () => {
         if (typeof video.requestVideoFrameCallback === "function") {
           video.requestVideoFrameCallback((_now, metadata) => {
-            this.#saveProgress(metadata.mediaTime);
+            if (!this.#destroyed) {
+              this.#saveProgress(metadata.mediaTime);
+            }
           });
         } else {
           this.#saveProgress(shell.currentTime);
@@ -6161,9 +6169,20 @@ ${text.trimStart()}`;
     /** Stable auto-hide callback, cached so show() never re-creates a closure. */
     #autoHide = () => {
       this.#cancelAutoHide = null;
+      this.#isVisible = false;
       this.#toast.classList.remove("pf-visible");
     };
     #activeGroup = null;
+    /**
+     * Whether the toast is currently showing - the "already visible" half of
+     * the repeated-show skip below. #autoHide and hide() reset it.
+     */
+    #isVisible = false;
+    /** Render fingerprint of the last show(), for the alloc-free skip. */
+    #lastIcon = void 0;
+    #lastText = "";
+    #lastColor = "";
+    #lastHadActions = false;
     constructor(hudLayer) {
       const doc = hudLayer.ownerDocument;
       this.#pool = new DomPool({
@@ -6195,7 +6214,20 @@ ${text.trimStart()}`;
       this.#actions = this.#toast.querySelector(".pf-toast-actions");
     }
     show({ icon, text, duration = 0, color, group: group2, actions } = {}) {
+      const prevGroup = this.#activeGroup;
       this.#activeGroup = group2 ?? null;
+      const hadActions = !!actions?.length;
+      if (this.#isVisible && this.#activeGroup === prevGroup && !hadActions && !this.#lastHadActions && icon === this.#lastIcon && (text || "") === this.#lastText && (color || "") === this.#lastColor) {
+        this.#toast.classList.add("pf-visible");
+        this.#cancelAutoHide?.();
+        this.#cancelAutoHide = duration > 0 ? delay(this.#autoHide, duration) : null;
+        return;
+      }
+      this.#isVisible = true;
+      this.#lastIcon = icon;
+      this.#lastText = text || "";
+      this.#lastColor = color || "";
+      this.#lastHadActions = hadActions;
       this.#icon.textContent = "";
       const iconEl = icon ? createIconElement(icon, this.#icon.ownerDocument) : null;
       if (iconEl) {
@@ -6238,6 +6270,7 @@ ${text.trimStart()}`;
       if (group2 === void 0 || group2 === this.#activeGroup) {
         this.#cancelAutoHide?.();
         this.#cancelAutoHide = null;
+        this.#isVisible = false;
         this.#toast.classList.remove("pf-visible");
       }
     }
@@ -6668,6 +6701,10 @@ ${text.trimStart()}`;
     #filter = null;
     #panel;
     #toasts = null;
+    /** Pooled reference-box result + validity flag (see the referenceBox getter). */
+    #refBox = { width: 0, height: 0 };
+    #refBoxValid = false;
+    #refBoxObserver = null;
     /** Active wake-lock session's abort controller; the browser owns release. */
     #wakeLockAbort = null;
     #onDestroy;
@@ -6720,6 +6757,7 @@ ${text.trimStart()}`;
       this.#watchFullscreen();
       this.#watchWakeLock();
       this.#watchOrientation();
+      this.#watchReferenceBoxSize();
       this.#markManaged();
       logger.log("shell", `Shell "${this.sdk.name}" constructed`);
     }
@@ -6763,10 +6801,18 @@ ${text.trimStart()}`;
      * the frame at the screen. Returns { width, height }.
      */
     get referenceBox() {
-      if (fs) {
-        return { width: screen.width, height: screen.height };
+      if (!this.#refBoxValid) {
+        const box = this.#refBox;
+        if (fs) {
+          box.width = screen.width;
+          box.height = screen.height;
+        } else {
+          box.width = this.container.clientWidth;
+          box.height = this.container.clientHeight;
+        }
+        this.#refBoxValid = true;
       }
-      return { width: this.container.clientWidth, height: this.container.clientHeight };
+      return this.#refBox;
     }
     get shellDom() {
       return this.#shellDom;
@@ -6944,6 +6990,24 @@ ${text.trimStart()}`;
         });
       }
     }
+    /**
+     * Keep the pooled referenceBox honest: invalidate it on fullscreen flips
+     * (fs -> screen.* dims), window resizes, and container resizes. The getter
+     * stays allocation + layout-read free in the scrub/pinch hot path; only a
+     * change event forces the next read through the layout query.
+     */
+    #watchReferenceBoxSize() {
+      const invalidate = () => {
+        this.#refBoxValid = false;
+      };
+      subscribeFullscreen(invalidate, this.#scope.signal);
+      this.#dom.listen(window, "resize", invalidate, { passive: true });
+      if (typeof ResizeObserver === "function") {
+        const ro = new ResizeObserver(invalidate);
+        ro.observe(this.container);
+        this.#refBoxObserver = ro;
+      }
+    }
     #markManaged() {
       this.#dom.markAttribute(this.video, SHELL_MARKER, "");
       this.#dom.markAttribute(this.container, SHELL_MARKER, "");
@@ -6967,6 +7031,8 @@ ${text.trimStart()}`;
         this.#toasts?.destroy();
         this.#toasts = null;
         this.#scope.abort();
+        this.#refBoxObserver?.disconnect();
+        this.#refBoxObserver = null;
         this.#dom.destroy();
         this.#shellDom = null;
         this.#onDestroy?.(this);

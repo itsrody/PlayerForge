@@ -32,6 +32,12 @@ function whenDomSettled(container, { quietMs = 50, capMs = 150, signal } = {}) {
     observer.disconnect();
     settleHandle?.abort();
     capHandle?.abort();
+    // Normal settle must release the abort listener too: with `{ once: true }`
+    // it only self-removes on abort, so a quiet-page settle would otherwise
+    // keep the kernel-scope signal subscribed for the whole page lifetime.
+    if (onAbort) {
+      signal?.removeEventListener("abort", onAbort);
+    }
     resolve();
   };
 
@@ -46,7 +52,8 @@ function whenDomSettled(container, { quietMs = 50, capMs = 150, signal } = {}) {
 
   observer.observe(container, { childList: true });
 
-  signal?.addEventListener("abort", done, { once: true });
+  const onAbort = () => done();
+  signal?.addEventListener("abort", onAbort, { once: true });
 
   return promise;
 }

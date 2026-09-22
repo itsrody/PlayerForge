@@ -57,8 +57,11 @@ export function getDomainKey(hostname) {
   if (!hostname) {
     return "";
   }
-  if (domainKeyCache.has(hostname)) {
-    return domainKeyCache.get(hostname);
+  // Single Map lookup - the cache never stores undefined, so a hit vs. miss
+  // is one get() instead of has() + get().
+  const hit = domainKeyCache.get(hostname);
+  if (hit !== undefined) {
+    return hit;
   }
   let key;
   if (IPV4_RE.test(hostname)) {
@@ -945,6 +948,10 @@ function stopIframeCache() {
   iframeCacheObserver = null;
   iframeCacheActive = false;
   iframeCacheDoc = null;
+  // Drop the accumulated window->iframe map: with the observer down the cache
+  // is untracked, and a stale entry would vouch a dead frame to the
+  // fullscreen provisioner. The inline scan is the fallback after teardown.
+  iframeCache.clear();
 }
 
 /** Ensure the cache describes the CURRENT document, reseeding and rebinding the

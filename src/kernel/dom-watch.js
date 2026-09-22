@@ -62,8 +62,11 @@ let deferHandle = null;
 function flush() {
   queued = false;
   const records = pendingRecords;
+  // Double-buffer swap: hand the drained batch back as the recycled buffer
+  // instead of abandoning it for a fresh allocation (nothing longer references
+  // `records` once this synchronous fan-out completes, so reuse is safe).
   pendingRecords = recycledRecords;
-  recycledRecords = [];
+  recycledRecords = records;
   // Dispatch from a length-hold: tombstones are skipped, and slots appended
   // mid-batch (subscriptions landing during delivery) belong to the next
   // batch - subscribe/unsubscribe can't skew the current audience.
