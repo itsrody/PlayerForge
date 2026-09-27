@@ -951,10 +951,10 @@
         return () => handle.abort();
       };
       const checkAnchors = () => {
-        if (this.#removalTimers.has(video)) {
-          return;
-        }
         if (!video.isConnected) {
+          if (this.#removalTimers.has(video)) {
+            return;
+          }
           this.#removalTimers.set(video, scheduleGraceTimer(() => {
             this.#removalTimers.delete(video);
             if (!video.isConnected) {
@@ -966,6 +966,8 @@
           }));
           return;
         }
+        this.#removalTimers.get(video)?.();
+        this.#removalTimers.delete(video);
         if (video.parentElement !== anchors[0]) {
           reanchorObservers();
         }
@@ -1364,7 +1366,6 @@
     resume: {
       /** Minimum wall-clock time between incremental persists (timeupdate-driven). */
       saveIntervalMs: 6e4,
-      metadataWaitMs: 1e4,
       /** Progress at/after which the entry resets so the video restarts next time. */
       completionRatio: 0.95,
       /** Ignore tiny drifts between saves. */
@@ -3688,7 +3689,6 @@
   var RESUME_STALE_DAYS = TUNING.resume.staleDays;
   var RESUME_MAX_ENTRIES = TUNING.resume.maxEntries;
   var RESUME_DURATION_FUZZ = TUNING.resume.durationFuzz;
-  var RESUME_METADATA_WAIT_MS = TUNING.resume.metadataWaitMs;
   var RESUME_MIN_POSITION = TUNING.resume.minPosition;
   var RESUME_SAVE_EPSILON_S = TUNING.resume.saveEpsilonSeconds;
   var RESUME_COMPLETION_RATIO = TUNING.resume.completionRatio;
@@ -4000,10 +4000,13 @@
       this.#watchNavigation();
     }
     /**
-     * Resolve once the element reports a finite duration: metadata load, an
-     * error, the metadata cap, or shell death all settle the wait. Returns
-     * false when the caller must give up (destroyed / detached / no duration),
-     * so first discovery and swap re-adoption share one deadline.
+     * Resolve once the element reports a finite duration - purely event-driven:
+     * loadedmetadata / durationchange / error settle the wait, and destroy
+     * aborts the scope (which both resolves it and drops the media listeners).
+     * Returns false when the caller must give up (destroyed / detached / no
+     * duration), so first discovery and swap re-adoption share one wait with no
+     * wall-clock deadline: a slow source is adopted whenever its metadata
+     * actually arrives instead of being abandoned at a cap.
      */
     async #waitForDuration() {
       const shell = this.#shell;
@@ -4021,18 +4024,10 @@
       };
       const onLoaded = () => finishWaiting();
       const onError = () => finishWaiting();
-      let waitSignal;
-      try {
-        waitSignal = AbortSignal.any([signal, AbortSignal.timeout(RESUME_METADATA_WAIT_MS)]);
-      } catch {
-        waitSignal = signal;
-        const timeoutHandle = setTimeout(finishWaiting, RESUME_METADATA_WAIT_MS);
-        signal.addEventListener("abort", () => clearTimeout(timeoutHandle), { once: true });
-      }
-      waitSignal.addEventListener("abort", finishWaiting, { once: true });
-      video.addEventListener("loadedmetadata", onLoaded, { signal: waitSignal });
-      video.addEventListener("durationchange", onDurationChange, { signal: waitSignal });
-      video.addEventListener("error", onError, { signal: waitSignal });
+      signal.addEventListener("abort", finishWaiting, { once: true });
+      video.addEventListener("loadedmetadata", onLoaded, { signal });
+      video.addEventListener("durationchange", onDurationChange, { signal });
+      video.addEventListener("error", onError, { signal });
       await metadataReady;
       if (this.#destroyed) {
         logger.log("resume", "Shell destroyed before metadata - skipping");

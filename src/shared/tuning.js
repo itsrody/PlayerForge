@@ -70,7 +70,6 @@ export const TUNING = {
   resume: {
     /** Minimum wall-clock time between incremental persists (timeupdate-driven). */
     saveIntervalMs: 60000,
-    metadataWaitMs: 10000,
     /** Progress at/after which the entry resets so the video restarts next time. */
     completionRatio: 0.95,
     /** Ignore tiny drifts between saves. */

@@ -214,10 +214,12 @@ export class Kernel {
 
     // Arrow fn keeps the enclosing class-level `this` for timer/lifecycle access.
     const checkAnchors = () => {
-      if (this.#removalTimers.has(video)) {
-        return;
-      }
       if (!video.isConnected) {
+        // One single-shot grace per disconnect; while it is pending the timer
+        // owns the re-check (further removal mutations are the same fact).
+        if (this.#removalTimers.has(video)) {
+          return;
+        }
         this.#removalTimers.set(video, scheduleGraceTimer(() => {
           this.#removalTimers.delete(video);
           if (!video.isConnected) {
@@ -229,6 +231,13 @@ export class Kernel {
         }));
         return;
       }
+      // Connected again: any pending grace is stale - the event that brought
+      // the video back (or moved it) replaces the time-based re-check, so the
+      // stale timer is cancelled instead of firing later against outdated
+      // state, and a fresh grace (if needed) is always measured from the
+      // CURRENT disconnect. Between settled events nothing is pending.
+      this.#removalTimers.get(video)?.();
+      this.#removalTimers.delete(video);
       if (video.parentElement !== anchors[0]) {
         reanchorObservers();
       }

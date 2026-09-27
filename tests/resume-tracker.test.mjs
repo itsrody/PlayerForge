@@ -134,6 +134,19 @@ test("destroy during the metadata wait cancels it without creating the entry", a
   assert.equal(writes["pf:resume"].entries.length, 0, "no entry created after destroy");
 });
 
+test("the metadata wait is event-driven - error gives up with no timer involved", async () => {
+  delete writes["pf:resume"];
+  const { dom, video, shell } = makeEnv(null);
+  new ResumeTracker(shell);
+  await flush();
+  assert.equal(writes["pf:resume"].entries.length, 0, "still waiting on media events");
+  // The broken-source event is the give-up signal - no deadline is consulted.
+  video.dispatchEvent(new dom.window.Event("error"));
+  await flush();
+  await flush();
+  assert.equal(writes["pf:resume"].entries.length, 0, "error ended the wait without an entry");
+});
+
 test("a saved position past the threshold seeks and toasts immediately", async () => {
   writes["pf:resume"] = {
     version: 1,

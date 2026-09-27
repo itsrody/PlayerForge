@@ -25,6 +25,7 @@ const { logger } = await import("../src/shared/logger.js");
 logger.disable();
 
 const { Kernel } = await import("../src/kernel/kernel.js");
+const { FRAMEWORK_TUNING } = await import("../src/kernel/contract.js");
 
 function makeHarness() {
   const body = document.body;
@@ -104,4 +105,36 @@ test("removal watch reanchors after a parent swap and still detects removal", as
   video.remove();
   await waitFor(() => destroyed, 3000);
   assert.ok(destroyed, "the shell was torn down after removal from the swapped parent");
+});
+
+test("reconnect cancels the pending grace - a fresh one measures from the current disconnect", async () => {
+  const graceMs = FRAMEWORK_TUNING.removalGraceMs;
+  FRAMEWORK_TUNING.removalGraceMs = 700;
+  try {
+    const { kernel, video, created } = makeHarness();
+    kernel.init();
+    await waitFor(() => created.some((shell) => shell.video === video));
+    const shell = created.find((entry) => entry.video === video);
+    const wrapper = video.parentElement;
+    let destroyedAt = 0;
+    shell.destroy = () => { destroyedAt = Date.now(); };
+
+    video.remove();                        // disconnect #1 -> grace armed (fires t0+700)
+    await new Promise((r) => setTimeout(r, 50));
+    wrapper.appendChild(video);            // reconnect: the event cancels the stale grace
+    await new Promise((r) => setTimeout(r, 50));
+    const removeAt = Date.now();
+    video.remove();                        // disconnect #2 -> fresh grace (fires removeAt+700)
+    await waitFor(() => destroyedAt > 0, 3000);
+
+    // The stale grace from disconnect #1 would have fired ~600ms after
+    // disconnect #2; a grace always measured from the CURRENT disconnect
+    // cannot complete earlier than graceMs.
+    assert.ok(
+      destroyedAt - removeAt >= graceMs,
+      `grace ran ${destroyedAt - removeAt}ms after the current disconnect - stale timer was not cancelled`
+    );
+  } finally {
+    FRAMEWORK_TUNING.removalGraceMs = graceMs;
+  }
 });

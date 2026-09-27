@@ -20,7 +20,6 @@ function sortByUpdatedAt(entries, descending = false) {
 const RESUME_STALE_DAYS = TUNING.resume.staleDays;
 const RESUME_MAX_ENTRIES = TUNING.resume.maxEntries;
 const RESUME_DURATION_FUZZ = TUNING.resume.durationFuzz;
-const RESUME_METADATA_WAIT_MS = TUNING.resume.metadataWaitMs;
 const RESUME_MIN_POSITION = TUNING.resume.minPosition;
 const RESUME_SAVE_EPSILON_S = TUNING.resume.saveEpsilonSeconds;
 const RESUME_COMPLETION_RATIO = TUNING.resume.completionRatio;
@@ -402,10 +401,13 @@ export class ResumeTracker {
   }
 
   /**
-   * Resolve once the element reports a finite duration: metadata load, an
-   * error, the metadata cap, or shell death all settle the wait. Returns
-   * false when the caller must give up (destroyed / detached / no duration),
-   * so first discovery and swap re-adoption share one deadline.
+   * Resolve once the element reports a finite duration - purely event-driven:
+   * loadedmetadata / durationchange / error settle the wait, and destroy
+   * aborts the scope (which both resolves it and drops the media listeners).
+   * Returns false when the caller must give up (destroyed / detached / no
+   * duration), so first discovery and swap re-adoption share one wait with no
+   * wall-clock deadline: a slow source is adopted whenever its metadata
+   * actually arrives instead of being abandoned at a cap.
    */
   async #waitForDuration() {
     const shell = this.#shell;
@@ -413,7 +415,7 @@ export class ResumeTracker {
     if (Number.isFinite(video.duration) && video.duration > 0) {
       return true;
     }
-    // Resolving twice is a no-op, so timeout and signal races are safe.
+    // Resolving twice is a no-op, so racing media events against destroy is safe.
     const { signal } = this.#scope;
     const { promise: metadataReady, resolve: resolveMetadata } = Promise.withResolvers();
     const finishWaiting = () => resolveMetadata();
@@ -424,24 +426,10 @@ export class ResumeTracker {
     };
     const onLoaded = () => finishWaiting();
     const onError = () => finishWaiting();
-    // The metadata watchdog is the native AbortSignal.timeout shape: the
-    // combined wait signal removes the media listeners AND resolves the
-    // wait the moment the cap elapses or the shell dies, so a destroyed
-    // shell never leaves the suspended continuation alive for the full 10s.
-    // (try/catch mirrors shared/context.js - some host realms brand-check
-    // composed signals; the fallback is the old manual timer.)
-    let waitSignal;
-    try {
-      waitSignal = AbortSignal.any([signal, AbortSignal.timeout(RESUME_METADATA_WAIT_MS)]);
-    } catch {
-      waitSignal = signal;
-      const timeoutHandle = setTimeout(finishWaiting, RESUME_METADATA_WAIT_MS);
-      signal.addEventListener("abort", () => clearTimeout(timeoutHandle), { once: true });
-    }
-    waitSignal.addEventListener("abort", finishWaiting, { once: true });
-    video.addEventListener("loadedmetadata", onLoaded, { signal: waitSignal });
-    video.addEventListener("durationchange", onDurationChange, { signal: waitSignal });
-    video.addEventListener("error", onError, { signal: waitSignal });
+    signal.addEventListener("abort", finishWaiting, { once: true });
+    video.addEventListener("loadedmetadata", onLoaded, { signal });
+    video.addEventListener("durationchange", onDurationChange, { signal });
+    video.addEventListener("error", onError, { signal });
     await metadataReady;
     if (this.#destroyed) {
       logger.log("resume", "Shell destroyed before metadata - skipping");
