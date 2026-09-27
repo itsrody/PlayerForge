@@ -1,4 +1,5 @@
 import { DOMManager } from "../../shared/dom-manager.js";
+import { Scope } from "../../shared/scope.js";
 
 const STACK_OVERLAP_EM = 1.6;
 const MAX_SLOTS = 8;
@@ -42,7 +43,8 @@ export class ForgeTrack {
   #offset = 0;
   /** Records the bound cuechange so destroy can unregister it. */
   #onCueChange = null;
-  #destroyed = false;
+  /** Disposal flag; cuechange itself has no signal form (spec-forced). */
+  #scope = new Scope();
 
   constructor(video, cueLayer) {
     this.#cueLayer = cueLayer;
@@ -93,7 +95,7 @@ export class ForgeTrack {
    * the base array, which is what lets setOffset walk the two by index.
    */
   load(cues, offset = 0) {
-    if (this.#destroyed) {
+    if (this.#scope.disposed) {
       return;
     }
     const track = this.#track;
@@ -128,7 +130,7 @@ export class ForgeTrack {
    * correct.
    */
   setOffset(offset) {
-    if (this.#destroyed || offset === this.#offset) {
+    if (this.#scope.disposed || offset === this.#offset) {
       return;
     }
     const base = this.#baseCues;
@@ -163,7 +165,7 @@ export class ForgeTrack {
   }
 
   #render() {
-    if (this.#destroyed || !this.#cueLayer) {
+    if (this.#scope.disposed || !this.#cueLayer) {
       return;
     }
     const active = this.#track.activeCues;
@@ -224,7 +226,7 @@ export class ForgeTrack {
   }
 
   clear() {
-    if (this.#destroyed || !this.#lastActive.some(Boolean)) {
+    if (this.#scope.disposed || !this.#lastActive.some(Boolean)) {
       return;
     }
     for (let i = 0; i < this.#slots.length; i++) {
@@ -241,10 +243,10 @@ export class ForgeTrack {
   }
 
   destroy() {
-    if (this.#destroyed) {
+    if (this.#scope.disposed) {
       return;
     }
-    this.#destroyed = true;
+    this.#scope.dispose();
     // Unregister our native cuechange listener: the track survives (the spec
     // has no removal API) and would otherwise keep firing this renderer's
     // slot-node logic against a torn-down pool forever.

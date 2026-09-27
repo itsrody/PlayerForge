@@ -6,6 +6,9 @@ const { window } = new JSDOM("<!doctype html><html><body></body></html>");
 globalThis.window = window;
 globalThis.document = window.document;
 globalThis.MutationObserver = window.MutationObserver;
+// jsdom validates addEventListener's `signal` against its own AbortSignal
+// class; the deferred-flush visibility listener must resolve to it too.
+globalThis.AbortController = window.AbortController;
 
 const { onDomMutations } = await import("../src/shared/dom-watch.js");
 

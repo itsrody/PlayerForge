@@ -4,6 +4,7 @@ import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "..
 import { DOMManager } from "../../shared/dom-manager.js";
 import { logger } from "../../shared/logger.js";
 import { isBenignMediaPolicyError } from "../../shared/errors.js";
+import { Scope } from "../../shared/scope.js";
 
 /**
  * Pointer handlers never preventDefault - native pan/scroll over the zone is
@@ -160,9 +161,9 @@ export class InputForge {
 
   /** DOM lifecycle manager: listeners, observers, style rollbacks. */
   #dom = new DOMManager();
-  /** Sub-component scope: signal exposed via getter for action wiring. */
-  #scope = new AbortController();
-  #destroyed = false;
+  /** Lifecycle scope: signal exposed via getter for action wiring; the
+   *  disposed flag guards dispatch + destroy. */
+  #scope = new Scope();
 
   // Cached <video> box for hit-testing, invalidated on resize/fullscreen so
   // pointerdown never forces a synchronous layout flush with getBoundingClientRect.
@@ -275,7 +276,7 @@ export class InputForge {
    * fullscreenchange; exposed for explicit scoping in tests.
    */
   setTrackpadPinchEnabled(enabled) {
-    if (this.#destroyed || enabled === this.#trackpadPinchSubscribed) {
+    if (this.#scope.disposed || enabled === this.#trackpadPinchSubscribed) {
       return;
     }
     if (enabled) {
@@ -306,28 +307,31 @@ export class InputForge {
   }
 
   destroy() {
-    if (!this.#destroyed) {
-      this.#detachTrackpadPinch();
-      this.#endPointerSession();
-      this.#destroyed = true;
-      clearTimeout(this.#holdTimer);
-      this.#holdTimer = null;
-      clearTimeout(this.#keyboardHoldTimer);
-      this.#keyboardHoldTimer = null;
-      clearTimeout(this.#pinchInitTimer);
-      this.#pinchInitTimer = null;
-      this.#videoRect = null;
-      this.#pointers.clear();
-      cancelEase(this.#video);
-      // DOM lifecycle: disconnect observers, restore styles, remove elements.
-      this.#dom.destroy();
-      activeForges.delete(this);
-      if (lastActiveForge === this) {
-        lastActiveForge = null;
-      }
-      this.#resetKeyboardHold();
-      this.#scope.abort();
+    if (this.#scope.disposed) {
+      return;
     }
+    this.#detachTrackpadPinch();
+    // Release dispatches (pointer hold / scrub) must reach the action layer
+    // while the scope signal is still live - dispose() lands at the end,
+    // exactly where #scope.abort() used to.
+    this.#endPointerSession();
+    clearTimeout(this.#holdTimer);
+    this.#holdTimer = null;
+    clearTimeout(this.#keyboardHoldTimer);
+    this.#keyboardHoldTimer = null;
+    clearTimeout(this.#pinchInitTimer);
+    this.#pinchInitTimer = null;
+    this.#videoRect = null;
+    this.#pointers.clear();
+    cancelEase(this.#video);
+    // DOM lifecycle: disconnect observers, restore styles, remove elements.
+    this.#dom.destroy();
+    activeForges.delete(this);
+    if (lastActiveForge === this) {
+      lastActiveForge = null;
+    }
+    this.#resetKeyboardHold();
+    this.#scope.dispose();
   }
 
   /** Suppress the click/dblclick that follows an interactive gesture. */
@@ -416,7 +420,7 @@ export class InputForge {
     clearTimeout(this.#pinchInitTimer);
     this.#pinchInitTimer = setTimeout(() => {
       this.#pinchInitTimer = null;
-      if (this.#destroyed || this.#pointers.size < 2) {
+      if (this.#scope.disposed || this.#pointers.size < 2) {
         return;
       }
       captureFirstTwo(this.#pointers, firstTwoPointers);
@@ -523,11 +527,11 @@ export class InputForge {
 
   /** An engine can own playback when its video is loaded and not finished. */
   #isActive(forge) {
-    return !forge.#destroyed && forge.#video.readyState > 0 && !forge.#video.ended;
+    return !forge.#scope.disposed && forge.#video.readyState > 0 && !forge.#video.ended;
   }
 
   #dispatch(eventName, detail) {
-    if (!this.#destroyed && this.#eventTarget) {
+    if (!this.#scope.disposed && this.#eventTarget) {
       this.#eventTarget.dispatchEvent(pooledDispatchEvent(eventName, detail));
     }
   }
@@ -758,7 +762,7 @@ export class InputForge {
     scrubDetail.dx = totalStep;
     scrubDetail.velocity = this.#scrubVelocity;
     scrubDetail.timestamp = now;
-    if (!this.#destroyed && this.#eventTarget) {
+    if (!this.#scope.disposed && this.#eventTarget) {
       this.#eventTarget.dispatchEvent(pooledScrubEvent());
     }
   }

@@ -15,6 +15,7 @@ import { SHELL_MARKER, warmStyles, injectShell, watchShellHost } from "./chrome/
 import { ensureViewportFitCover } from "./chrome/viewport.js";
 import { requestFullscreenProvision } from "../shared/context.js";
 import { DOMManager } from "../shared/dom-manager.js";
+import { Scope } from "../shared/scope.js";
 import { yield_ } from "../shared/scheduler.js";
 
 /**
@@ -38,15 +39,14 @@ export class Shell {
   /** Pooled reference-box result + validity flag (see the referenceBox getter). */
   #refBox = { width: 0, height: 0 };
   #refBoxValid = false;
-  #refBoxObserver = null;
   /** Active wake-lock session's abort controller; the browser owns release. */
   #wakeLockAbort = null;
   #onDestroy;
-  #destroyed = false;
   /** DOM lifecycle manager: listeners, observers, elements, rollbacks. */
   #dom = new DOMManager();
-  /** Sub-component scope: signal passed to InputForge, MediaSession, etc. */
-  #scope = new AbortController();
+  /** Lifecycle scope: disposal flag + signal passed to InputForge,
+   *  MediaSession, settings, fullscreen watchers, etc. */
+  #scope = new Scope();
   /** Command plane: all playback control routes through these primitives. */
   #media;
   /** OS media-key facet, null without MediaSession support. */
@@ -205,7 +205,7 @@ export class Shell {
     }
     host.focus();
     this.#dom.listen(this.container, "pointerdown", (event) => {
-      if (this.#destroyed) {
+      if (this.#scope.disposed) {
         return;
       }
       // Common case: focus already lives on the host - no traversal needed.
@@ -220,7 +220,7 @@ export class Shell {
 
   /** Re-focus the host after a pointerdown unless focus already moved inside. */
   #restoreFocusIfNeeded(host) {
-    if (!this.#destroyed && deepestActiveElement(host) !== host) {
+    if (!this.#scope.disposed && deepestActiveElement(host) !== host) {
       host.focus();
     }
   }
@@ -336,7 +336,7 @@ export class Shell {
     // (idempotent) so a retry succeeds if the attributes were just granted,
     // e.g. an SDK iframe created after our boot-time provisioning.
     this.#dom.listen(document, "fullscreenerror", () => {
-      if (this.#destroyed || fs) {
+      if (this.#scope.disposed || fs) {
         return;
       }
       this.toastInfo("fs-block", "Fullscreen blocked by embed", "fs-block");
@@ -358,7 +358,7 @@ export class Shell {
     // down a held lock - so there is no manual lock.release() and no post-await
     // re-check for pause/ended/destroy racing the request.
     const acquire = () => {
-      if (this.#destroyed || video.paused || video.ended) {
+      if (this.#scope.disposed || video.paused || video.ended) {
         return;
       }
       // A newer acquire supersedes an in-flight one: last signal wins.
@@ -385,7 +385,7 @@ export class Shell {
   /** Lock to landscape on fullscreen entry (Android); unlock on exit. */
   #watchOrientation() {
     const unsub = subscribeFullscreen(async (active) => {
-      if (this.#destroyed) {
+      if (this.#scope.disposed) {
         return;
       }
       try {
@@ -418,9 +418,7 @@ export class Shell {
     subscribeFullscreen(invalidate, this.#scope.signal);
     this.#dom.listen(window, "resize", invalidate, { passive: true });
     if (typeof ResizeObserver === "function") {
-      const ro = new ResizeObserver(invalidate);
-      ro.observe(this.container);
-      this.#refBoxObserver = ro;
+      this.#dom.observeResize(this.container, invalidate);
     }
   }
 
@@ -430,33 +428,32 @@ export class Shell {
   }
 
   destroy() {
-    if (!this.#destroyed) {
-      this.#destroyed = true;
-      logger.log("shell", `Destroying shell "${this.sdk.name}"`);
-      // Destroy sub-components (each manages its own internal state).
-      this.#resume?.destroy();
-      this.#resume = null;
-      this.#subtitles?.destroy();
-      this.#subtitles = null;
-      this.#filter?.destroy();
-      this.#filter = null;
-      this.#wakeLockAbort?.abort();
-      this.#wakeLockAbort = null;
-      this.#inputs?.destroy();
-      this.#inputs = null;
-      this.#panel?.destroy();
-      this.#panel = null;
-      this.#toasts?.destroy();
-      this.#toasts = null;
-      // Sub-component scope (InputForge, MediaSession shared signal).
-      this.#scope.abort();
-      this.#refBoxObserver?.disconnect();
-      this.#refBoxObserver = null;
-      // DOM lifecycle: remove elements, disconnect observers, remove
-      // listeners, restore attributes/styles — all in one call.
-      this.#dom.destroy();
-      this.#shellDom = null;
-      this.#onDestroy?.(this);
+    if (this.#scope.disposed) {
+      return;
     }
+    logger.log("shell", `Destroying shell "${this.sdk.name}"`);
+    // Scope first: flips disposed (re-entrancy guard), aborts the shared
+    // signal (MediaSession/settings/fullscreen listeners die natively).
+    this.#scope.dispose();
+    // Destroy sub-components (each manages its own internal state).
+    this.#resume?.destroy();
+    this.#resume = null;
+    this.#subtitles?.destroy();
+    this.#subtitles = null;
+    this.#filter?.destroy();
+    this.#filter = null;
+    this.#wakeLockAbort?.abort();
+    this.#wakeLockAbort = null;
+    this.#inputs?.destroy();
+    this.#inputs = null;
+    this.#panel?.destroy();
+    this.#panel = null;
+    this.#toasts?.destroy();
+    this.#toasts = null;
+    // DOM lifecycle: remove elements, disconnect observers, remove
+    // listeners, restore attributes/styles — all in one call.
+    this.#dom.destroy();
+    this.#shellDom = null;
+    this.#onDestroy?.(this);
   }
 }

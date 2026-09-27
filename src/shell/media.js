@@ -1,6 +1,7 @@
 import { logger } from "../shared/logger.js";
 import { clamp } from "../shared/clamp.js";
 import { isBenignMediaPolicyError } from "../shared/errors.js";
+import { Scope } from "../shared/scope.js";
 
 /** Volume delta applied by nudgeVolume, shared with UI feedback layers. */
 export const VOLUME_STEP = 0.1;
@@ -252,7 +253,8 @@ class MediaSessionBridge {
   #session;
   #controls;
   #video;
-  #destroyed = false;
+  /** Disposal flag: guards sync/metadata refresh after release. */
+  #scope = new Scope();
   /**
    * Pre-detected once at construction: setPositionState is absent on some
    * host surfaces, and sync() rides the ~4 Hz media clock - a hoisted boolean
@@ -317,7 +319,7 @@ class MediaSessionBridge {
 
   /** playbackState plus guarded position state; safe to call per event batch. */
   sync() {
-    if (this.#destroyed) {
+    if (this.#scope.disposed) {
       return;
     }
     const session = this.#session;
@@ -353,10 +355,10 @@ class MediaSessionBridge {
   }
 
   destroy() {
-    if (this.#destroyed) {
+    if (this.#scope.disposed) {
       return;
     }
-    this.#destroyed = true;
+    this.#scope.dispose();
     if (sessionOwner === this) {
       sessionOwner = null;
     }
@@ -371,7 +373,7 @@ class MediaSessionBridge {
   }
 
   #refreshMetadata() {
-    if (this.#destroyed) {
+    if (this.#scope.disposed) {
       return;
     }
     try {

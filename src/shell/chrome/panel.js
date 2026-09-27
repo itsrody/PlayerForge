@@ -3,6 +3,7 @@ import { createIconElement } from "./icons.js";
 import { GESTURE_EVENTS } from "../inputs/actions.js";
 import { deepestActiveElement, subscribeFullscreen } from "../../shared/shadow.js";
 import { clamp } from "../../shared/clamp.js";
+import { Scope } from "../../shared/scope.js";
 import { el } from "./elements.js";
 import { getSetting } from "./config.js";
 
@@ -246,14 +247,13 @@ export class SettingsPanel {
   #sections = new Map();
   #activeSection = null;
   #sectionCounter = 0;
-  /** All panel subscriptions die with this signal. */
-  #scope = new AbortController();
+  /** All panel subscriptions die with this signal; disposal flag lives here. */
+  #scope = new Scope();
   /** Live only while the panel is open: Esc + outside-click dismissal. */
   #dismissScope = null;
   /** UA-owned Escape watcher (CloseWatcher), live with #dismissScope. */
   #closeWatcher = null;
   #backdrop = null;
-  #destroyed = false;
   #sectionBuilder = null;
 
   constructor(shell) {
@@ -299,7 +299,7 @@ export class SettingsPanel {
   }
 
   async open() {
-    if (!this.#root || this.#destroyed || this.isOpen) {
+    if (!this.#root || this.#scope.disposed || this.isOpen) {
       return;
     }
     if (this.#sectionBuilder) {
@@ -322,7 +322,7 @@ export class SettingsPanel {
   }
 
   close() {
-    if (this.#root && !this.#destroyed && this.isOpen) {
+    if (this.#root && !this.#scope.disposed && this.isOpen) {
       this.#runWithViewTransition("pf-panel-close", () => {
         this.#root.classList.remove("pf-open");
         if (this.#shellHost && this.#root.contains(deepestActiveElement(this.#shellHost))) {
@@ -352,7 +352,7 @@ export class SettingsPanel {
    * not depend on the event still bubbling to the shadow host.
    */
   #armDismissal() {
-    if (this.#dismissScope || this.#destroyed) {
+    if (this.#dismissScope || this.#scope.disposed) {
       return;
     }
     this.#dismissScope = new AbortController();
@@ -395,7 +395,7 @@ export class SettingsPanel {
   }
 
   async openSection(title) {
-    if (!this.#root || this.#destroyed) {
+    if (!this.#root || this.#scope.disposed) {
       return false;
     }
     if (this.#sectionBuilder) {
@@ -415,7 +415,7 @@ export class SettingsPanel {
 
   /** Add a section; returns the section root (or null when unusable). */
   addSection(title, icon) {
-    if (!this.#root || this.#destroyed) {
+    if (!this.#root || this.#scope.disposed) {
       return null;
     }
     const sectionId = `pf-panel-section-${++this.#sectionCounter}`;
@@ -624,19 +624,19 @@ export class SettingsPanel {
   }
 
   destroy() {
-    if (!this.#destroyed) {
-      this.#destroyed = true;
-      this.#teardownDismissal();
-      this.#scope.abort();
-      this.#root?.remove();
-      this.#root = null;
-      this.#backdrop?.remove();
-      this.#backdrop = null;
-      this.#body = null;
-      this.#tabList = null;
-      this.#sections.clear();
-      this.#activeSection = null;
+    if (this.#scope.disposed) {
+      return;
     }
+    this.#scope.dispose();
+    this.#teardownDismissal();
+    this.#root?.remove();
+    this.#root = null;
+    this.#backdrop?.remove();
+    this.#backdrop = null;
+    this.#body = null;
+    this.#tabList = null;
+    this.#sections.clear();
+    this.#activeSection = null;
   }
 
   #buildDom() {

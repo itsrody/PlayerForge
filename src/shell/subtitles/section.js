@@ -8,6 +8,7 @@ import { debounce } from "../../shared/time.js";
 import { flashElement } from "../chrome/animate.js";
 import { el } from "../chrome/elements.js";
 import { logger } from "../../shared/logger.js";
+import { Scope } from "../../shared/scope.js";
 
 const SUBTITLE_FILE_ACCEPT = ".srt,.vtt";
 const SUBTITLE_EXT_RE = /\.(srt|vtt)$/i;
@@ -44,8 +45,7 @@ export class SubtitlesSection {
   #resetBtn = null;
   /** Debounced sync-offset apply; cancelled on destroy so no trailing write lands. */
   #scheduleSyncOffset = null;
-  #scope = new AbortController();
-  #destroyed = false;
+  #scope = new Scope();
 
   constructor(shell) {
     this.#shell = shell;
@@ -58,13 +58,12 @@ export class SubtitlesSection {
   }
 
   destroy() {
-    if (this.#destroyed) {
+    if (this.#scope.disposed) {
       return;
     }
-    this.#destroyed = true;
+    this.#scope.dispose();
     this.#scheduleSyncOffset?.cancel();
     this.#scheduleSyncOffset = null;
-    this.#scope.abort();
     this.#forgeTrack?.destroy();
     this.#forgeTrack = null;
     this.#fileInput?.remove();
@@ -320,7 +319,7 @@ export class SubtitlesSection {
   }
 
   async load(file) {
-    if (this.#destroyed) {
+    if (this.#scope.disposed) {
       return;
     }
     try {
@@ -333,7 +332,7 @@ export class SubtitlesSection {
 
   /** Fetch a subtitle file from the web through the manager's xhr. */
   async loadFromUrl(rawUrl) {
-    if (this.#destroyed) {
+    if (this.#scope.disposed) {
       return;
     }
     const url = String(rawUrl || "").trim();
@@ -381,7 +380,7 @@ export class SubtitlesSection {
   }
 
   async #ingest(name, rawText) {
-    if (this.#destroyed) {
+    if (this.#scope.disposed) {
       return;
     }
     const normalizedText = /\.srt$/i.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
@@ -393,7 +392,7 @@ export class SubtitlesSection {
     const cues = await parseSubtitlesAsync(normalizedText, 0);
     // Cooperative parse yields to the browser; the section may have been torn
     // down mid-await, so re-check before touching the track/slots.
-    if (this.#destroyed) {
+    if (this.#scope.disposed) {
       return;
     }
     if (!cues.length) {

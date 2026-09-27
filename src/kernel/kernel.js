@@ -2,6 +2,7 @@ import { logger } from "../shared/logger.js";
 import { getConfigValue } from "../shared/storage.js";
 import { setDebugRuntime } from "../shared/perf-diag.js";
 import { postTask } from "../shared/scheduler.js";
+import { Scope } from "../shared/scope.js";
 import { ShellSlot } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, meetsMinSize, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
@@ -28,13 +29,14 @@ export class Kernel {
   // Weak: an adopted video orphaned by an untracked removal path must not
   // pin the element (and its whole subtree) for the page's lifetime.
   #seenVideos = new WeakSet();
-  #removalObservers = new Set();
   #removalTimers = new Map();
   /** Unsubscribe for the shared discovery tap; dropped at pagehide. */
   #stopDiscoveryTap = null;
   /** True once the full-document discovery tap has been downgraded. */
   #discoveryDowngraded = false;
-  #scope = new AbortController();
+  /** Kernel lifecycle scope: removal observers disconnect via onDispose,
+   *  grace timers cancel via the signal. */
+  #scope = new Scope();
   /** The shell host provider, registered by the shell plugin (never imported). */
   #shellProvider = null;
 
@@ -57,18 +59,16 @@ export class Kernel {
       logger.log("kernel", "Page hiding, cleaning up");
       this.#stopDiscoveryTap?.();
       this.#stopDiscoveryTap = null;
-      for (const observer of this.#removalObservers) {
-        observer.disconnect();
-      }
-      this.#removalObservers.clear();
-      // Removal-grace timers are postTask handles bound to #scope.signal, so
-      // the abort below cancels every pending grace - no manual sweep.
+      // Scope first: onDispose disconnects every removal observer, the
+      // signal cancels pending removal-grace postTasks, and the page-level
+      // pageshow/pagehide listeners drop. Lifecycle/registry teardown below
+      // then runs with all watch machinery already dead.
+      this.#scope.dispose();
       // Tear down in-flight settle waits so their observers + timers die
       // immediately instead of running the full quiet/cap window on a page
       // that is already leaving.
       this.#lifecycle.destroy();
       this.#registry.destroyAll();
-      this.#scope.abort();
     }
   };
 
@@ -243,9 +243,10 @@ export class Kernel {
 
     /** Chromium-native single-target consolidation: `MutationObserver.observe()`
      *  supports multiple root targets natively (childList filtered in C++), so
-     *  up to `watchDepth` per-video C++ wrappers collapse to one instance. */
+     *  up to `watchDepth` per-video C++ wrappers collapse to one instance.
+     *  The kernel scope disconnects it at pagehide - no per-video bookkeeping. */
     const observer = new MutationObserver(checkAnchors);
-    this.#removalObservers.add(observer);
+    this.#scope.onDispose(() => observer.disconnect());
 
     const reanchorObservers = () => {
       // MutationObserver has no per-target unobserve(): disconnect() is the
@@ -266,7 +267,6 @@ export class Kernel {
 
     const stopWatching = () => {
       observer.disconnect();
-      this.#removalObservers.delete(observer);
       this.#removalTimers.get(video)?.();
       this.#removalTimers.delete(video);
       this.#seenVideos.delete(video);

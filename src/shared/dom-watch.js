@@ -68,6 +68,9 @@ let recycledRecords = [];
 
 /** Retained handle for the hidden-tab deferred flush; null when none pending. */
 let deferHandle = null;
+/** Abort scope for the visibilitychange resume listener: flush and idle
+ *  teardown release it natively instead of pairing add/remove by hand. */
+let deferAc = null;
 
 function flush() {
   queued = false;
@@ -123,9 +126,10 @@ const onVisibilityChange = () => {
 };
 
 function flushPending() {
+  deferAc?.abort();
+  deferAc = null;
   deferHandle?.abort();
   deferHandle = null;
-  document.removeEventListener("visibilitychange", onVisibilityChange);
   flush();
 }
 
@@ -139,8 +143,9 @@ function deferFlushUntilVisible() {
   if (deferHandle) {
     return;
   }
+  deferAc = new AbortController();
   deferHandle = postTask(flushPending, { priority: "background", delay: DEFER_VISIBILITY_CAP_MS });
-  document.addEventListener("visibilitychange", onVisibilityChange);
+  document.addEventListener("visibilitychange", onVisibilityChange, { signal: deferAc.signal });
 }
 
 /**
@@ -205,9 +210,10 @@ function stopIfIdle() {
     pendingRecords = [];
     recycledRecords = [];
     slots.length = 0;
+    deferAc?.abort();
+    deferAc = null;
     deferHandle?.abort();
     deferHandle = null;
-    document.removeEventListener("visibilitychange", onVisibilityChange);
   }
 }
 

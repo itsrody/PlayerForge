@@ -4,6 +4,7 @@ import { debounce } from "../shared/time.js";
 import { clamp } from "../shared/clamp.js";
 import { TUNING } from "../shared/tuning.js";
 import { fmtPercent } from "../shared/formatters.js";
+import { Scope } from "../shared/scope.js";
 
 const CONFIG_PREFIX = "filter";
 
@@ -83,7 +84,8 @@ export class VideoFilter {
   #presetSelect = null;
   #resetBtn = null;
   #steppers = {};
-  #destroyed = false;
+  /** Disposal flag: guards #apply after teardown, home of future disposers. */
+  #scope = new Scope();
   /** Trailing persist: preview applies instantly, storage lands once the drag
    *  settles (a slider drag otherwise fires a full config write + cross-tab
    *  live-reload echo per step). Flushed on destroy. */
@@ -190,7 +192,7 @@ export class VideoFilter {
   }
 
   #apply() {
-    if (this.#destroyed || !this.#video) {
+    if (this.#scope.disposed || !this.#video) {
       return;
     }
     this.#video.style.filter = buildFilterString(this.#values);
@@ -250,10 +252,10 @@ export class VideoFilter {
   }
 
   destroy() {
-    if (this.#destroyed) {
+    if (this.#scope.disposed) {
       return;
     }
-    this.#destroyed = true;
+    this.#scope.dispose();
     // Land any trailing persist before the section dies - the last slider
     // value must not be the one that never got written.
     this.#schedulePersist.flush();

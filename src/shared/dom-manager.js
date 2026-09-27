@@ -1,22 +1,24 @@
+import { Scope } from "./scope.js";
+
 /**
  * Per-shell DOM lifecycle manager.
  *
- * Tracks every DOM artifact a shell creates — event listeners, mutation
- * observers, elements, and inline style/attribute rollbacks — and tears
- * them all down in one call. Prevents the most common class of leak in
- * complex component trees: forgetting to remove one observer or listener
- * in a rarely-tested code path.
+ * Tracks every DOM artifact a shell creates — observers, elements, and
+ * inline style/attribute rollbacks — and tears them all down in one call.
+ * Prevents the most common class of leak in complex component trees:
+ * forgetting to remove one observer or listener in a rarely-tested code
+ * path.
+ *
+ * Event listeners are NOT tracked in a registry: `listen()` hands the
+ * manager's own AbortSignal to `addEventListener`, so removal is the
+ * platform's job on dispose — no [target, event, handler, opts] tuples to
+ * retain, no manual removeEventListener sweep, and the target's listener
+ * list drops the entry at abort instead of waiting for GC.
  *
  * Hot-path code (scrub, cue rendering) stays on direct DOM access; the
  * manager only wraps lifecycle-bound operations that need cleanup.
  */
 export class DOMManager {
-  /** [target, event, handler, opts] triples for automatic removeEventListener. */
-  #listeners = [];
-  /** [observer] MutationObserver instances for automatic disconnect. */
-  #observers = [];
-  /** [observer] ResizeObserver instances for automatic disconnect. */
-  #resizeObservers = [];
   /** [element] Created elements for automatic remove(). */
   #elements = [];
   /** [el, attr, value, original] triples for attribute rollback on destroy. */
@@ -25,17 +27,23 @@ export class DOMManager {
   #styleRollbacks = [];
   /** [fn] External cleanup callbacks (e.g. dom-watch unsubscribe handles). */
   #cleanups = [];
-  #destroyed = false;
+  #scope = new Scope();
+
+  /** The lifecycle signal: aborted when this manager is destroyed. */
+  get signal() {
+    return this.#scope.signal;
+  }
 
   /**
-   * Add an event listener that is automatically removed on destroy.
-   * Returns the handler for call-site reference (e.g. passing to removeEventListener
-   * before destroy is called).
+   * Add an event listener that is automatically removed when the manager is
+   * destroyed. Returns the handler for call-site reference (e.g. passing to
+   * removeEventListener before destroy is called).
    */
   listen(target, event, handler, opts) {
-    if (this.#destroyed) return handler;
-    target.addEventListener(event, handler, opts);
-    this.#listeners.push([target, event, handler, opts]);
+    // Normalize the boolean shorthand so `{ signal }` never drops `capture`.
+    const options = typeof opts === "boolean" ? { capture: opts } : { ...opts };
+    options.signal = this.#scope.signal;
+    target.addEventListener(event, handler, options);
     return handler;
   }
 
@@ -44,10 +52,10 @@ export class DOMManager {
    * Returns the observer for manual use between creation and destroy.
    */
   observeMutations(target, opts, callback) {
-    if (this.#destroyed) return null;
+    if (this.#scope.disposed) return null;
     const observer = new MutationObserver(callback);
     observer.observe(target, opts);
-    this.#observers.push(observer);
+    this.#scope.onDispose(() => observer.disconnect());
     return observer;
   }
 
@@ -56,10 +64,10 @@ export class DOMManager {
    * Returns the observer for manual use between creation and destroy.
    */
   observeResize(target, callback) {
-    if (this.#destroyed) return null;
+    if (this.#scope.disposed) return null;
     const observer = new ResizeObserver(callback);
     observer.observe(target);
-    this.#resizeObservers.push(observer);
+    this.#scope.onDispose(() => observer.disconnect());
     return observer;
   }
 
@@ -68,7 +76,7 @@ export class DOMManager {
    * removed from the DOM on destroy.
    */
   createElement(tag, attrs, parent) {
-    if (this.#destroyed) return null;
+    if (this.#scope.disposed) return null;
     const doc = parent?.ownerDocument ?? document;
     const node = doc.createElement(tag);
     if (attrs) {
@@ -95,7 +103,7 @@ export class DOMManager {
    * attribute, the original is preserved (first-write wins).
    */
   markAttribute(el, attr, value) {
-    if (this.#destroyed) return;
+    if (this.#scope.disposed) return;
     const existing = this.#attrRollbacks.find(([e, a]) => e === el && a === attr);
     if (!existing) {
       const original = el.getAttribute(attr);
@@ -109,7 +117,7 @@ export class DOMManager {
    * automatic restoration on destroy.
    */
   markStyle(el, prop, value) {
-    if (this.#destroyed) return;
+    if (this.#scope.disposed) return;
     const existing = this.#styleRollbacks.find(([e, p]) => e === el && p === prop);
     if (!existing) {
       const original = el.style.getPropertyValue(prop);
@@ -123,7 +131,7 @@ export class DOMManager {
    * dom-watch.js or a pool destroy). Called in reverse order on destroy.
    */
   onCleanup(fn) {
-    if (this.#destroyed) {
+    if (this.#scope.disposed) {
       fn();
       return;
     }
@@ -131,26 +139,20 @@ export class DOMManager {
   }
 
   /**
-   * Register an external AbortSignal whose abort triggers cleanup of the
-   * given handler on the given target. Useful for wiring a parent scope's
-   * signal to this manager's listener registry.
-   */
-  wireSignal(target, event, handler, opts, signal) {
-    this.listen(target, event, handler, opts);
-    signal?.addEventListener("abort", () => {
-      target.removeEventListener(event, handler, opts);
-    }, { once: true });
-  }
-
-  /**
-   * Tear down every tracked artifact in reverse registration order.
-   * Idempotent — safe to call multiple times.
+   * Tear down every tracked artifact. Idempotent — safe to call multiple
+   * times: Scope.dispose() flips `disposed` before it aborts, so re-entrant
+   * calls no-op from the first line on.
    */
   destroy() {
-    if (this.#destroyed) return;
-    this.#destroyed = true;
+    if (this.#scope.disposed) return;
 
-    // External cleanups first (may reference listeners/observers).
+    // Mark disposed + abort the signal FIRST: every signal-bound listener
+    // and observer disconnect registered above is released by the platform
+    // here (onDispose runs observer disconnects), and cleanup callbacks
+    // below can no longer register new tracked artifacts.
+    this.#scope.dispose();
+
+    // External cleanups (may reference elements being removed next).
     for (let i = this.#cleanups.length - 1; i >= 0; i--) {
       try { this.#cleanups[i](); } catch {}
     }
@@ -181,21 +183,5 @@ export class DOMManager {
       this.#elements[i].remove();
     }
     this.#elements.length = 0;
-
-    // Disconnect observers.
-    for (const observer of this.#resizeObservers) {
-      observer.disconnect();
-    }
-    this.#resizeObservers.length = 0;
-    for (const observer of this.#observers) {
-      observer.disconnect();
-    }
-    this.#observers.length = 0;
-
-    // Remove event listeners.
-    for (const [target, event, handler, opts] of this.#listeners) {
-      target.removeEventListener(event, handler, opts);
-    }
-    this.#listeners.length = 0;
   }
 }

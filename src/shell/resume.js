@@ -4,6 +4,7 @@ import { TUNING } from "../shared/tuning.js";
 import { KEYS, gmSetValue, loadJsonObject, gmAddValueChangeListener, gmRemoveValueChangeListener } from "../shared/storage.js";
 import { formatTime } from "../shared/time.js";
 import { logger } from "../shared/logger.js";
+import { Scope } from "../shared/scope.js";
 
 /** Sort entries by updatedAt - ascending (oldest-first, for eviction) or
  *  descending (newest-first, for history display). */
@@ -357,15 +358,14 @@ export class ResumeTracker {
   #shell;
   #store = new ResumeStore();
   #entry = null;
-  /** Every media listener this tracker attaches dies with this signal. */
-  #scope = new AbortController();
+  /** Every media listener this tracker attaches dies with this signal; the
+   *  off-screen save observer disconnects through it as well. */
+  #scope = new Scope();
   /** Eagerly resolved context promise — kicked off in the constructor. */
   #contextPromise;
   #lastSavedPosition = 0;
   /** Wall-clock floor for persists - keeps the write cadence bounded. */
   #lastSavedWall = 0;
-  /** Off-screen save gate observer; disconnected in destroy(). */
-  #intersectionObserver = null;
   /** Pending rVFC id from the pause flush; cancelled in destroy() so a
    *  queued final-save callback can never fire into a dead shell. */
   #rvfcHandle = null;
@@ -374,7 +374,6 @@ export class ResumeTracker {
   /** True from a resource swap until the new resource has been adopted:
    *  saves are muted so the reset currentTime cannot land in the old entry. */
   #adopting = false;
-  #destroyed = false;
 
   constructor(shell) {
     this.#shell = shell;
@@ -434,7 +433,7 @@ export class ResumeTracker {
     video.addEventListener("durationchange", onDurationChange, { signal });
     video.addEventListener("error", onError, { signal });
     await metadataReady;
-    if (this.#destroyed) {
+    if (this.#scope.disposed) {
       logger.log("resume", "Shell destroyed before metadata - skipping");
       return false;
     }
@@ -510,7 +509,7 @@ export class ResumeTracker {
    */
   #watchNavigation() {
     onNavigate(() => {
-      if (this.#destroyed || !this.#entry) {
+      if (this.#scope.disposed || !this.#entry) {
         return;
       }
       this.#saveProgress(this.#shell.currentTime);
@@ -521,7 +520,7 @@ export class ResumeTracker {
   async #followRoute() {
     try {
       const context = await getPageContext();
-      if (this.#destroyed || !context || !this.#entry) {
+      if (this.#scope.disposed || !context || !this.#entry) {
         return;
       }
       const current = this.#entry;
@@ -542,7 +541,7 @@ export class ResumeTracker {
    * we are leaving - the navigation flush already holds its position.
    */
   #armReadopt() {
-    if (this.#destroyed || this.#readoptScope) {
+    if (this.#scope.disposed || this.#readoptScope) {
       return;
     }
     const ac = new AbortController();
@@ -569,13 +568,13 @@ export class ResumeTracker {
   async #readopt() {
     try {
       const context = await getPageContext();
-      if (this.#destroyed || !context) {
+      if (this.#scope.disposed || !context) {
         return;
       }
       if (!(await this.#waitForDuration())) {
         return;
       }
-      if (this.#destroyed || !this.#entry) {
+      if (this.#scope.disposed || !this.#entry) {
         return;
       }
       // Deliberately no pre-switch flush here: by loadstart the element has
@@ -640,17 +639,17 @@ export class ResumeTracker {
     // stop churning GM storage writes for a video the user cannot see. The
     // pause flush above still runs whenever playback actually pauses, so the
     // final position is never lost by this gate. IntersectionObserverInit has
-    // no `signal` member (unlike AbortSignal-friendly APIs), so the observer
-    // is held on a field and disconnected in destroy() - otherwise a shell
-    // torn down while the element stays in the page (SPA video swaps) would
-    // leak the observer + target for the rest of the page lifetime.
+    // no `signal` member, so the observer registers its disconnect with the
+    // scope - otherwise a shell torn down while the element stays in the page
+    // (SPA video swaps) would leak the observer + target for the rest of the
+    // page lifetime.
     let onScreen = true;
     if (typeof IntersectionObserver === "function") {
       const io = new IntersectionObserver(([entry]) => {
         onScreen = entry.isIntersecting;
       });
       io.observe(video);
-      this.#intersectionObserver = io;
+      this.#scope.onDispose(() => io.disconnect());
     }
     const gatedSaveIfDue = () => {
       if (onScreen) {
@@ -707,19 +706,21 @@ export class ResumeTracker {
   }
 
   destroy() {
-    this.#scope.abort();
+    if (this.#scope.disposed) {
+      return;
+    }
     this.#readoptScope?.abort();
     this.#readoptScope = null;
-    this.#intersectionObserver?.disconnect();
-    this.#intersectionObserver = null;
     if (this.#rvfcHandle != null) {
       this.#shell?.video?.cancelVideoFrameCallback?.(this.#rvfcHandle);
       this.#rvfcHandle = null;
     }
-    if (this.#entry && !this.#destroyed) {
+    // Final save while disposed is still false (#saveProgress guards on it),
+    // then the scope takes down the media listeners + off-screen observer.
+    if (this.#entry) {
       this.#saveProgress(this.#shell?.currentTime || NaN);
     }
-    this.#destroyed = true;
+    this.#scope.dispose();
     this.#store.destroy();
   }
 }
