@@ -19,7 +19,7 @@
  * documents without a usable player never boot a kernel.
  */
 import { logger } from "../shared/logger.js";
-import { watchMediaEvents, meetsMinSize, videosFromMutations } from "./sdk.js";
+import { watchMediaEvents, meetsMinSize, forEachVideoInMutations } from "./sdk.js";
 import { onDomMutations } from "./dom-watch.js";
 
 export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
@@ -54,9 +54,7 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
       if (done) {
         return;
       }
-      for (const video of videosFromMutations(mutations)) {
-        consider(video);
-      }
+      forEachVideoInMutations(mutations, consider);
     });
   };
 

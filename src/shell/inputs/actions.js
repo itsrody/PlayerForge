@@ -145,6 +145,12 @@ const stateFor = (() => {
         scrubToastText: null,
         scrubToastSecDuration: NaN,
         scrubToastSecCurrent: NaN,
+        // Pooled payload for the 100ms scrub tick: the toast manager
+        // destructures it synchronously (it never retains the object), so the
+        // same 3-field object is refilled in place instead of re-allocated
+        // every tick of a drag - same mutate-in-place discipline as the
+        // gesture detail objects.
+        scrubToast: { icon: "left-arrows", text: "", group: "scrub" },
         streakCount: 0,
         lastSkipDirection: null,
         streakResetAt: 0,
@@ -478,11 +484,10 @@ export function attachInputActions(shell, host, signal) {
       state.scrubToastSecDuration = secDuration;
       state.scrubToastSecCurrent = secCurrent;
     }
-    shell.toast({
-      icon: state.scrubDirectionMomentum >= 0 ? "right-arrows" : "left-arrows",
-      text: state.scrubToastText,
-      group: "scrub"
-    });
+    const toast = state.scrubToast;
+    toast.icon = state.scrubDirectionMomentum >= 0 ? "right-arrows" : "left-arrows";
+    toast.text = state.scrubToastText;
+    shell.toast(toast);
   }, { signal });
 
   host.addEventListener(GESTURE_EVENTS.scrubEnd, () => {

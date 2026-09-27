@@ -285,7 +285,9 @@ class MediaSessionBridge {
         }
       }
     });
-    session.playbackState = this.#video.paused ? "paused" : "playing";
+    // Initial state (playbackState + position) lands through sync(), which
+    // also seeds the dedup cache - writing playbackState here would only
+    // duplicate that first IPC.
     this.sync();
     // Posters often arrive with metadata; refresh once it exists.
     this.#video.addEventListener("loadedmetadata", () => this.#refreshMetadata(), { signal });
@@ -298,6 +300,19 @@ class MediaSessionBridge {
    *  mutable object reused across sync() calls avoids a per-event allocation
    *  on the ~4 Hz media clock (same rationale as the forge's pooled event). */
   #positionState = { duration: 0, playbackRate: 0, position: 0 };
+  /**
+   * Last state actually handed to the session. sync() rides nine media
+   * events (`timeupdate`, `volumechange`, `seeked`, ...), which routinely
+   * arrive several per playback transition with IDENTICAL values - each
+   * redundant write is a browser-process IPC for nothing. The position is
+   * quantized before comparison so sub-frame currentTime jitter (which never
+   * changes what the OS surface shows) cannot defeat the dedup.
+   */
+  #sentPlaybackState = null;
+  #sentDuration = NaN;
+  #sentPlaybackRate = NaN;
+  /** Position dedup quantum in seconds - finer than any OS progress UI shows. */
+  static #POSITION_EPSILON = 0.25;
 
   /** playbackState plus guarded position state; safe to call per event batch. */
   sync() {
@@ -305,15 +320,35 @@ class MediaSessionBridge {
       return;
     }
     const session = this.#session;
-    session.playbackState = this.#video.paused ? "paused" : "playing";
-    const { duration, playbackRate, currentTime } = this.#video;
-    if (this.#canSetPositionState && Number.isFinite(duration) && duration > 0) {
-      const state = this.#positionState;
-      state.duration = duration;
-      state.playbackRate = playbackRate;
-      state.position = currentTime < duration ? currentTime : duration;
-      session.setPositionState(state);
+    const playbackState = this.#video.paused ? "paused" : "playing";
+    if (playbackState !== this.#sentPlaybackState) {
+      this.#sentPlaybackState = playbackState;
+      session.playbackState = playbackState;
     }
+    if (!this.#canSetPositionState) {
+      return;
+    }
+    const { duration, playbackRate, currentTime } = this.#video;
+    if (!Number.isFinite(duration) || duration <= 0) {
+      return;
+    }
+    const position = currentTime < duration ? currentTime : duration;
+    const quantum = MediaSessionBridge.#POSITION_EPSILON;
+    const sentPosition = this.#positionState.position;
+    if (
+      duration === this.#sentDuration &&
+      playbackRate === this.#sentPlaybackRate &&
+      Math.abs(position - sentPosition) < quantum
+    ) {
+      return;
+    }
+    this.#sentDuration = duration;
+    this.#sentPlaybackRate = playbackRate;
+    const state = this.#positionState;
+    state.duration = duration;
+    state.playbackRate = playbackRate;
+    state.position = position;
+    session.setPositionState(state);
   }
 
   destroy() {

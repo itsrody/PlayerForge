@@ -174,7 +174,12 @@ export class Kernel {
       return;
     }
     this.#seenVideos.add(video);
-    logger.log("kernel", `${sdk.name} adopted (${video.videoWidth}x${video.videoHeight}, ${Math.round(video.duration)}s)`);
+    // Guarded like the logger contract promises: with chatter off (the
+    // default), the dimensions/duration interpolation never runs - a disabled
+    // log call must cost one boolean read, not a template build.
+    if (logger.enabled) {
+      logger.log("kernel", `${sdk.name} adopted (${video.videoWidth}x${video.videoHeight}, ${Math.round(video.duration)}s)`);
+    }
     this.#lifecycle.onVideoFound({
       video,
       container,

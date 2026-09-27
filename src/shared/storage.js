@@ -157,12 +157,19 @@ export function setConfigValue(path, value) {
  * write of the configs document. Preset/flush paths that touch many fields at
  * once avoid N serialized gmSetValue round trips (each of which re-reads and
  * re-serializes the whole doc).
+ *
+ * Clone discipline: COPY-ON-WRITE along the touched paths instead of a full
+ * `structuredClone` of the document. The whole-doc clone was the dominant CPU
+ * cost of one write, and a stepper persists a single short path per step - so
+ * only the nodes on those paths are minted fresh and every untouched branch is
+ * shared with the cached doc. Sharing is safe because a shared branch is never
+ * written through: each branch is replaced by its own copy before the walk
+ * descends into it, and leaf writes land on those copies. A defensive
+ * early-return therefore still cannot leak a partial mutation into the live
+ * cache - `doc` (and every node it uniquely owns) is simply discarded.
  */
 export function setConfigFields(fields) {
-  // Work on a copy: successful batches commit to cache+storage atomically, a
-  // defensive early-return (unsafe segment) never leaks a partial mutation
-  // into the live cache the way mutating the cached doc in place would.
-  const doc = structuredClone(readConfigDoc());
+  const doc = { ...readConfigDoc() };
   for (const [path, value] of Object.entries(fields)) {
     const segments = path.split(".");
     let node = doc;
@@ -172,11 +179,16 @@ export function setConfigFields(fields) {
         logger.warn("storage", `Unsafe config path segment "${segment}" in "${path}" — batch dropped`);
         return;
       }
-      if (node[segment] == null) {
+      const child = node[segment];
+      if (child == null) {
         node[segment] = {};
-      } else if (typeof node[segment] !== "object" || Array.isArray(node[segment])) {
+      } else if (typeof child !== "object" || Array.isArray(child)) {
         logger.warn("storage", `Non-object intermediate at "${path}" — batch dropped`);
         return;
+      } else {
+        // Re-parent a fresh copy before descending, so the write below can
+        // never reach the sub-object the cached doc still references.
+        node[segment] = { ...child };
       }
       node = node[segment];
     }
@@ -197,7 +209,7 @@ export function setConfigFields(fields) {
  * No-op when any intermediate segment or the leaf itself is missing.
  */
 export function deleteConfigField(path) {
-  const doc = structuredClone(readConfigDoc());
+  const doc = { ...readConfigDoc() };
   const segments = path.split(".");
   let node = doc;
   for (let i = 0; i < segments.length - 1; i++) {
@@ -205,9 +217,12 @@ export function deleteConfigField(path) {
     if (!isSafeKeySegment(segment)) {
       return;
     }
-    if (node == null || typeof node !== "object") {
+    const child = node == null || typeof node !== "object" ? null : node[segment];
+    if (child == null || typeof child !== "object" || Array.isArray(child)) {
       return;
     }
+    // Copy-on-write: the delete below must never reach the cached sub-doc.
+    node[segment] = { ...child };
     node = node[segment];
   }
   const last = segments.at(-1);

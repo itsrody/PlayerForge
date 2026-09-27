@@ -216,7 +216,7 @@
     setConfigFields({ [path]: value });
   }
   function setConfigFields(fields) {
-    const doc = structuredClone(readConfigDoc());
+    const doc = { ...readConfigDoc() };
     for (const [path, value] of Object.entries(fields)) {
       const segments = path.split(".");
       let node = doc;
@@ -226,11 +226,14 @@
           logger.warn("storage", `Unsafe config path segment "${segment}" in "${path}" — batch dropped`);
           return;
         }
-        if (node[segment] == null) {
+        const child = node[segment];
+        if (child == null) {
           node[segment] = {};
-        } else if (typeof node[segment] !== "object" || Array.isArray(node[segment])) {
+        } else if (typeof child !== "object" || Array.isArray(child)) {
           logger.warn("storage", `Non-object intermediate at "${path}" — batch dropped`);
           return;
+        } else {
+          node[segment] = { ...child };
         }
         node = node[segment];
       }
@@ -246,7 +249,7 @@
     }
   }
   function deleteConfigField(path) {
-    const doc = structuredClone(readConfigDoc());
+    const doc = { ...readConfigDoc() };
     const segments = path.split(".");
     let node = doc;
     for (let i = 0; i < segments.length - 1; i++) {
@@ -254,9 +257,11 @@
       if (!isSafeKeySegment(segment)) {
         return;
       }
-      if (node == null || typeof node !== "object") {
+      const child = node == null || typeof node !== "object" ? null : node[segment];
+      if (child == null || typeof child !== "object" || Array.isArray(child)) {
         return;
       }
+      node[segment] = { ...child };
       node = node[segment];
     }
     const last = segments.at(-1);
@@ -486,6 +491,7 @@
   // src/kernel/dom-watch.js
   var DEFER_VISIBILITY_CAP_MS = 500;
   var COMPACTION_RATIO = 4;
+  var PUSH_APPLY_LIMIT = 65536;
   var slots = [];
   var live = 0;
   var observer2 = null;
@@ -498,6 +504,7 @@
     queued = false;
     const records = pendingRecords;
     pendingRecords = recycledRecords;
+    pendingRecords.length = 0;
     recycledRecords = records;
     const length = slots.length;
     for (let i = 0; i < length; i++) {
@@ -560,7 +567,13 @@
     pendingRecords = [];
     recycledRecords = [];
     observer2 = new MutationObserver((records) => {
-      Array.prototype.push.apply(pendingRecords, records);
+      if (records.length < PUSH_APPLY_LIMIT) {
+        Array.prototype.push.apply(pendingRecords, records);
+      } else {
+        for (let i = 0; i < records.length; i++) {
+          pendingRecords.push(records[i]);
+        }
+      }
       if (!queued) {
         queued = true;
         queueMicrotask(scheduleFlush);
@@ -642,7 +655,8 @@
       const anchors = record.anchors;
       for (let a = 0; a < anchors.length; a++) {
         const anchor = anchors[a];
-        for (let hop = 0; hop < len; hop++) {
+        const limit = best ? best.hops : len;
+        for (let hop = 0; hop < limit; hop++) {
           if (chain[hop].matches(anchor)) {
             if (!best || hop < best.hops) {
               best = { record, el: chain[hop], hops: hop };
@@ -702,16 +716,19 @@
     }
     return null;
   }
-  function* videosFromMutations(mutations) {
+  function forEachVideoInMutations(mutations, visit) {
     for (const mutation of mutations) {
       for (const node of mutation.addedNodes) {
         if (node.nodeType !== 1) {
           continue;
         }
         if (node.localName === "video") {
-          yield node;
+          visit(node);
         } else if (node.querySelectorAll) {
-          yield* node.querySelectorAll("video");
+          const videos = node.querySelectorAll("video");
+          for (let i = 0; i < videos.length; i++) {
+            visit(videos[i]);
+          }
         }
       }
     }
@@ -744,9 +761,7 @@
   function watchDocumentVideos(onVideo) {
     const offEvents = watchMediaEvents(onVideo);
     const offMutations = onDomMutations((mutations) => {
-      for (const video of videosFromMutations(mutations)) {
-        onVideo(video);
-      }
+      forEachVideoInMutations(mutations, onVideo);
     });
     return () => {
       offEvents();
@@ -913,7 +928,9 @@
         return;
       }
       this.#seenVideos.add(video);
-      logger.log("kernel", `${sdk.name} adopted (${video.videoWidth}x${video.videoHeight}, ${Math.round(video.duration)}s)`);
+      if (logger.enabled) {
+        logger.log("kernel", `${sdk.name} adopted (${video.videoWidth}x${video.videoHeight}, ${Math.round(video.duration)}s)`);
+      }
       this.#lifecycle.onVideoFound({
         video,
         container,
@@ -1548,6 +1565,12 @@
           scrubToastText: null,
           scrubToastSecDuration: NaN,
           scrubToastSecCurrent: NaN,
+          // Pooled payload for the 100ms scrub tick: the toast manager
+          // destructures it synchronously (it never retains the object), so the
+          // same 3-field object is refilled in place instead of re-allocated
+          // every tick of a drag - same mutate-in-place discipline as the
+          // gesture detail objects.
+          scrubToast: { icon: "left-arrows", text: "", group: "scrub" },
           streakCount: 0,
           lastSkipDirection: null,
           streakResetAt: 0,
@@ -1779,11 +1802,10 @@
         state.scrubToastSecDuration = secDuration;
         state.scrubToastSecCurrent = secCurrent;
       }
-      shell.toast({
-        icon: state.scrubDirectionMomentum >= 0 ? "right-arrows" : "left-arrows",
-        text: state.scrubToastText,
-        group: "scrub"
-      });
+      const toast = state.scrubToast;
+      toast.icon = state.scrubDirectionMomentum >= 0 ? "right-arrows" : "left-arrows";
+      toast.text = state.scrubToastText;
+      shell.toast(toast);
     }, { signal });
     host.addEventListener(GESTURE_EVENTS.scrubEnd, () => {
       const state = stateFor(shell);
@@ -3562,7 +3584,11 @@
   }
   function installContextBridge() {
     const ac = new AbortController();
-    const maybeStartIframeCache = () => {
+    const maybeStartIframeCache = (event) => {
+      const type = event?.data?.type;
+      if (typeof type !== "string" || !type.startsWith("pf:")) {
+        return;
+      }
       if (!iframeCacheActive || iframeCacheDoc !== document) {
         startIframeCache(ac);
       }
@@ -3638,7 +3664,12 @@
       }
     }
     constructor() {
-      this.#listenerId = gmAddValueChangeListener(KEYS.resume, () => this.#adoptExternal());
+      this.#listenerId = gmAddValueChangeListener(KEYS.resume, (_name, _old, value, remote) => {
+        if (remote === false) {
+          return;
+        }
+        this.#adoptExternal(value);
+      });
     }
     /** Release the cross-tab change subscription (SPA re-entry / shell teardown). */
     destroy() {
@@ -3646,11 +3677,14 @@
       this.#listenerId = null;
       this.#listeners.clear();
     }
-    #adoptExternal() {
+    /** Merge an external store. `value` is the listener's own new value when it
+     *  supplied one (saves a GM read + parse); falling back to a direct read
+     *  keeps implementations that pass nothing working unchanged. */
+    #adoptExternal(value) {
       if (!this.#loaded) {
         return;
       }
-      const raw = loadJsonObject(KEYS.resume, null);
+      const raw = isValidStore(value) ? value : loadJsonObject(KEYS.resume, null);
       if (isValidStore(raw)) {
         const { added, updated } = this.#mergeRaw(raw);
         if (added || updated) {
@@ -3933,10 +3967,14 @@
       const match = this.#store.findMatch(context.domain, context.path, duration);
       if (match) {
         this.#entry = match;
-        logger.log("resume", `Matched ${match.id} - resume at ${match.resume}s`);
+        if (logger.enabled) {
+          logger.log("resume", `Matched ${match.id} - resume at ${match.resume}s`);
+        }
       } else {
         this.#entry = this.#store.createEntry(context.domain, context.path, context.title, duration);
-        logger.log("resume", `Created ${this.#entry.id} for ${context.domain}${context.path}`);
+        if (logger.enabled) {
+          logger.log("resume", `Created ${this.#entry.id} for ${context.domain}${context.path}`);
+        }
       }
       const savedPosition = Number(this.#entry.resume) || NaN;
       if (savedPosition > RESUME_MIN_POSITION) {
@@ -4325,29 +4363,6 @@ ${text.trimStart()}`;
     cues.sort((a, b) => a.start - b.start);
     return cues;
   }
-  function offsetCues(cues, offset = 0) {
-    if (offset === 0) {
-      return cues;
-    }
-    const shifted = [];
-    for (let i = 0; i < cues.length; i++) {
-      const cue = cues[i];
-      const end = cue.end + offset;
-      if (end <= 0) {
-        continue;
-      }
-      const start = cue.start + offset;
-      shifted.push({
-        start: start < 0 ? 0 : start,
-        end,
-        text: cue.text,
-        line: cue.line,
-        position: cue.position,
-        align: cue.align
-      });
-    }
-    return shifted;
-  }
 
   // src/shell/subtitles/vtt-worker-loader.js
   var BUILTIN_WORKER_SOURCE = true ? '(()=>{var M=/^(NOTE|STYLE|REGION)(?:[ \\t]|$)/,O={"&amp;":"&","&lt;":"<","&gt;":">","&nbsp;":" ","&lrm;":"‎","&rlm;":"‏"},y=/<\\/?[a-zA-Z][^>]*>|&(?:amp|lt|gt|nbsp|lrm|rlm);|&#(?:x[0-9a-fA-F]+|\\d+);/g,N=/^\\uFEFF/,R=/\\r\\n?/g;function F(e){return e.normalize("NFC").replace(N,"").replace(R,`\n`)}var m=48,w=57,E=58,b=46,S=44,v=/^\\s+$/;function C(e){return e>=m&&e<=w}function x(e){let r=e.length,n=-1,i=0;for(let s=0;s<r;s++){let l=e.charCodeAt(s);if(l===b||l===S){if(n!==-1)return null;n=s}else if(l===E){if(n!==-1)return null;i++}else if(!C(l))return null}if(n===-1||i<1||i>2)return null;let c=r-n-1;if(c<1||c>3)return null;let t=0,o=s=>{let l=0,d=0;for(;t<n&&C(e.charCodeAt(t));)l=l*10+(e.charCodeAt(t)-m),t++,d++;return{val:l,count:d}};if(i===2){let s=o(Number.MAX_SAFE_INTEGER);if(s.count===0||t>=n||e.charCodeAt(t)!==E)return null;t++;let l=o(2);if(l.count<1||l.count>2||t>=n||e.charCodeAt(t)!==E)return null;t++;let d=o(2);if(d.count!==2||t<n)return null;let p=0;for(let g=n+1;g<r;g++)p=p*10+(e.charCodeAt(g)-m);return s.val*3600+l.val*60+d.val+p/1e3}let u=o(2);if(u.count<1||u.count>2||t>=n||e.charCodeAt(t)!==E)return null;t++;let f=o(2);if(f.count!==2||t<n)return null;let a=0;for(let s=n+1;s<r;s++)a=a*10+(e.charCodeAt(s)-m);return u.val*60+f.val+a/1e3}function B(e){let r=e[2]==="x"||e[2]==="X",n=parseInt(e.slice(r?3:2,-1),r?16:10);return!(n>=1&&n<=1114111)||n>=55296&&n<=57343?"�":String.fromCodePoint(n)}function D(e){return e.replace(y,r=>r.charCodeAt(0)===38?r.charCodeAt(1)===35?B(r):O[r]:"")}var L=Object.freeze({line:85,position:50,align:void 0});function $(e){let r=e.trim();if(!r)return L;let n={line:85,position:50,align:void 0};for(let i of r.split(/\\s+/)){if(!i)continue;let c=i.indexOf(":");if(c<=0)continue;let t=i.slice(0,c),o=i.slice(c+1);t==="line"?o.endsWith("%")&&(n.line=Number(o.slice(0,-1))):t==="position"?n.position=Number(o.endsWith("%")?o.slice(0,-1):o):t==="align"&&(n.align=o)}return n}function I(e){let r=e.indexOf("-->");if(r<0)return null;let n=e.slice(0,r),i=n.trimEnd();if(i===n||!v.test(n.slice(i.length)))return null;let c=x(i);if(c==null)return null;let t=e.slice(r+3),o=0;for(;o<t.length&&(t.charCodeAt(o)===32||t.charCodeAt(o)===9);)o++;if(o===0)return null;let u=o;for(;u<t.length&&t.charCodeAt(u)!==32&&t.charCodeAt(u)!==9;)u++;let f=t.slice(o,u),a=-1;for(let d=0;d<f.length;d++){let p=f.charCodeAt(d);if(p===b||p===S){a=d;break}}if(a<0)return null;let s=0;for(;s<3&&a+1+s<f.length&&C(f.charCodeAt(a+1+s));)s++;if(s===0)return null;let l=x(f.slice(0,a+1+s));return l==null?null:{start:c,end:l,settings:$(f.slice(a+1+s)+t.slice(u))}}function _(e,r=0){let n=F(e),i=n.length,c=[],t=null,o=!1,u=!1,f=null,a=()=>{if(t&&t.end>t.start){let s=t.end+r;if(s>0){let l=D(f.join(`\n`).trim());l&&c.push({start:Math.max(t.start+r,0),end:s,text:l,line:t.settings.line,position:t.settings.position,align:t.settings.align})}}t=null,o=!1,u=!1,f=null};for(let s=0;s<=i;){let l=n.indexOf(`\n`,s),d=l===-1?i:l,p=n.slice(s,d);s=l===-1?i+1:l+1;let g=!0;for(let h=0;h<p.length;h++){let A=p.charCodeAt(h);if(A!==32&&A!==9){g=!1;break}}if(g){o&&a();continue}if(!o&&(o=!0,M.test(p))){u=!0;continue}if(!u)if(t)f.push(p);else{let h=I(p);h&&(t=h,f=[])}}return o&&a(),W(c)}function W(e){return e.sort((r,n)=>r.start-n.start),e}var P=150,T=0,k=0;typeof PerformanceObserver<"u"&&PerformanceObserver.supportedEntryTypes?.includes("long-animation-frame")&&new PerformanceObserver(e=>{for(let r of e.getEntries()){if(r.duration<P)continue;let i=(r.scripts??[]).reduce((c,t)=>c+(t.forcedStyleAndLayoutDuration??0),0);r.duration>T&&(T=r.duration,k=i)}}).observe({type:"long-animation-frame",buffered:!1});self.onmessage=e=>{let{id:r,text:n}=e.data??{};if(!(typeof r!="number"||typeof n!="string")){try{let i=_(n,0);self.postMessage({pfWorker:1,id:r,cues:i})}catch(i){self.postMessage({pfWorker:1,id:r,error:String(i&&i.message||i)})}T>0&&self.postMessage({pfWorker:1,id:r,type:"perf",durationMs:Math.round(T),forcedMs:Math.round(k*10)/10})}};})();\n' : null;
@@ -4441,6 +4456,10 @@ ${text.trimStart()}`;
   var STACK_OVERLAP_EM = 1.6;
   var MAX_SLOTS = 8;
   var TRACK_LABEL = "PlayerForge Subtitles";
+  function shiftTime(time, offset) {
+    const shifted = time + offset;
+    return shifted < 0 ? 0 : shifted;
+  }
   var ForgeTrack = class {
     #cueLayer;
     #cueLayerStyle;
@@ -4454,6 +4473,10 @@ ${text.trimStart()}`;
      *  pooled scrub payload: mutate in place, read immediately. */
     #lastRender = [];
     #lastActive = [];
+    /** Zero-offset cue base the native cues were built from; drives setOffset. */
+    #baseCues = null;
+    /** Offset already applied to the native cues (setOffset no-ops on a repeat). */
+    #offset = 0;
     /** Records the bound cuechange so destroy can unregister it. */
     #onCueChange = null;
     #destroyed = false;
@@ -4482,17 +4505,28 @@ ${text.trimStart()}`;
       };
       this.#track.addEventListener("cuechange", this.#onCueChange);
     }
-    /** Replace all cues on the track. Accepts plain cue objects from forgevtt. */
-    load(cues) {
+    /**
+     * Replace all cues on the track. Accepts plain cue objects from forgevtt.
+     * `offset` is applied while building, and the plain cues are remembered as
+     * the zero-offset base so later sync nudges can shift the native cues in
+     * place (see setOffset) instead of draining and rebuilding the list.
+     *
+     * Cues the old offsetCues()+load() path dropped entirely (shifted end <= 0,
+     * i.e. wholly before t=0) are kept as zero-length cues at t=0 instead: they
+     * can never satisfy start <= t < end, so they never enter the active set -
+     * but keeping every base cue keeps `track.cues` positionally aligned with
+     * the base array, which is what lets setOffset walk the two by index.
+     */
+    load(cues, offset = 0) {
       if (this.#destroyed) {
         return;
       }
       const track = this.#track;
-      while (track.cues.length > 0) {
-        track.removeCue(track.cues[0]);
+      for (let i = track.cues.length - 1; i >= 0; i--) {
+        track.removeCue(track.cues[i]);
       }
       for (const cue of cues) {
-        const vtt = new VTTCue(cue.start, cue.end, cue.text);
+        const vtt = new VTTCue(shiftTime(cue.start, offset), shiftTime(cue.end, offset), cue.text);
         vtt.line = cue.line;
         vtt.position = cue.position;
         if (cue.align) {
@@ -4500,6 +4534,46 @@ ${text.trimStart()}`;
         }
         track.addCue(vtt);
       }
+      this.#baseCues = cues;
+      this.#offset = offset;
+    }
+    /**
+     * Shift every loaded cue by a new sync offset, in place. Two property
+     * writes per cue replaces the old full re-offset (n plain objects) plus a
+     * drain and rebuild of the native VTTCue list: no intermediate array, no
+     * VTTCue construction, no cue-list churn. Every write re-derives from the
+     * zero-offset base, so clamping stays exact across a back-and-forth drag
+     * (no accumulated drift), and the engine repositions mutated cues itself
+     * (Blink's cueWillChange/cueDidChange path re-sorts the cue list and
+     * re-inserts into the interval tree), so active-cue scheduling stays
+     * correct.
+     */
+    setOffset(offset) {
+      if (this.#destroyed || offset === this.#offset) {
+        return;
+      }
+      const base = this.#baseCues;
+      const cues = this.#track.cues;
+      if (!base) {
+        return;
+      }
+      if (cues.length !== base.length) {
+        this.load(base, offset);
+        return;
+      }
+      for (let i = 0; i < base.length; i++) {
+        const src = base[i];
+        const cue = cues[i];
+        const start = shiftTime(src.start, offset);
+        if (cue.startTime !== start) {
+          cue.startTime = start;
+        }
+        const end = shiftTime(src.end, offset);
+        if (cue.endTime !== end) {
+          cue.endTime = end;
+        }
+      }
+      this.#offset = offset;
     }
     #render() {
       if (this.#destroyed || !this.#cueLayer) {
@@ -4586,6 +4660,8 @@ ${text.trimStart()}`;
       this.#dom.destroy();
       this.#slots = [];
       this.#lastActive = [];
+      this.#baseCues = null;
+      this.#offset = 0;
     }
   };
 
@@ -4656,9 +4732,9 @@ ${text.trimStart()}`;
     #shell;
     #forgeTrack = null;
     #trackMeta = null;
-    /** Cues parsed at zero offset; the sync stepper re-offsets this base. */
-    #baseCues = null;
+    /** Cue layer the shell owns; ForgeTrack renders its slots here. */
     #cueLayer = null;
+    /** Sync offset currently in effect; applied by ForgeTrack at load time. */
     #syncOffset = 0;
     #fileInput = null;
     #hintEl = null;
@@ -4828,7 +4904,7 @@ ${text.trimStart()}`;
       applyCueShadow(shadowStepper.getValue());
       this.#scheduleSyncOffset = debounce((offset) => {
         if (this.#trackMeta) {
-          this.#forgeTrack?.load(offsetCues(this.#baseCues, offset));
+          this.#forgeTrack?.setOffset(offset);
         }
         setConfigValue(SETTING_KEYS.syncOffset, offset);
       }, TUNING.subtitles.syncDebounceMs);
@@ -4985,8 +5061,7 @@ ${text.trimStart()}`;
         this.#forgeTrack = new ForgeTrack(this.#shell.video, this.#cueLayer);
       }
       this.#trackMeta = { name };
-      this.#baseCues = cues;
-      this.#forgeTrack.load(offsetCues(cues, this.#syncOffset));
+      this.#forgeTrack.load(cues, this.#syncOffset);
       this.#refreshHint();
       this.#toastInfo("captions", name, "subtitles");
       logger.log("subtitles", `Loaded ${name}`);
@@ -5024,7 +5099,6 @@ ${text.trimStart()}`;
       this.#forgeTrack?.destroy();
       this.#forgeTrack = null;
       this.#trackMeta = null;
-      this.#baseCues = null;
       this.#refreshHint();
     }
   };
@@ -6066,12 +6140,25 @@ ${text.trimStart()}`;
     const hint = panel.el("div", { class: "pf-panel-hint" }, sectionRoot);
     hint.textContent = "No watch history yet";
     const activeCards = [];
+    const cardRefs = /* @__PURE__ */ new WeakMap();
+    const refsFor = (card) => {
+      let refs = cardRefs.get(card);
+      if (!refs) {
+        const info = card.querySelector(".pf-history-info");
+        refs = {
+          title: info.querySelector(".pf-history-title"),
+          meta: info.querySelector(".pf-history-meta")
+        };
+        cardRefs.set(card, refs);
+      }
+      return refs;
+    };
     const cardPool = new DomPool({
       factory: () => {
         const card = panel.el("div", { class: "pf-history-card" });
         const info = panel.el("div", { class: "pf-history-info" }, card);
-        panel.el("div", { class: "pf-history-title" }, info);
-        panel.el("div", { class: "pf-history-meta" }, info);
+        const title = panel.el("div", { class: "pf-history-title" }, info);
+        const meta = panel.el("div", { class: "pf-history-meta" }, info);
         const actions = panel.el("div", { class: "pf-history-actions" }, card);
         button({
           class: "pf-btn pf-btn-icon pf-btn-ghost",
@@ -6087,13 +6174,14 @@ ${text.trimStart()}`;
           "data-action": "remove",
           icon: createIconElement("trash")
         }, actions);
+        cardRefs.set(card, { title, meta });
         return card;
       },
       reset: (card) => {
         card.dataset.entryId = "";
-        const info = card.querySelector(".pf-history-info");
-        info.querySelector(".pf-history-title").textContent = "";
-        info.querySelector(".pf-history-meta").textContent = "";
+        const refs = refsFor(card);
+        refs.title.textContent = "";
+        refs.meta.textContent = "";
         return card;
       }
     });
@@ -6136,15 +6224,13 @@ ${text.trimStart()}`;
     }
     function renderCard(entry, card) {
       card.dataset.entryId = entry.id;
-      const info = card.querySelector(".pf-history-info");
-      const title = info.querySelector(".pf-history-title");
-      title.textContent = entry.title || formatDomain(entry.domain);
-      const meta = info.querySelector(".pf-history-meta");
+      const refs = refsFor(card);
+      refs.title.textContent = entry.title || formatDomain(entry.domain);
       const parts = [formatDomain(entry.domain)];
       if (entry.duration > 0) {
         parts.push(formatTime(entry.duration));
       }
-      meta.textContent = parts.join(" · ");
+      refs.meta.textContent = parts.join(" · ");
     }
     render();
     shell.resume?.onChange?.((structural) => {
@@ -6453,7 +6539,7 @@ ${text.trimStart()}`;
     bridge.attach(signal);
     return bridge;
   }
-  var MediaSessionBridge = class {
+  var MediaSessionBridge = class _MediaSessionBridge {
     #session;
     #controls;
     #video;
@@ -6489,7 +6575,6 @@ ${text.trimStart()}`;
           }
         }
       });
-      session.playbackState = this.#video.paused ? "paused" : "playing";
       this.sync();
       this.#video.addEventListener("loadedmetadata", () => this.#refreshMetadata(), { signal });
       this.#refreshMetadata();
@@ -6500,21 +6585,50 @@ ${text.trimStart()}`;
      *  mutable object reused across sync() calls avoids a per-event allocation
      *  on the ~4 Hz media clock (same rationale as the forge's pooled event). */
     #positionState = { duration: 0, playbackRate: 0, position: 0 };
+    /**
+     * Last state actually handed to the session. sync() rides nine media
+     * events (`timeupdate`, `volumechange`, `seeked`, ...), which routinely
+     * arrive several per playback transition with IDENTICAL values - each
+     * redundant write is a browser-process IPC for nothing. The position is
+     * quantized before comparison so sub-frame currentTime jitter (which never
+     * changes what the OS surface shows) cannot defeat the dedup.
+     */
+    #sentPlaybackState = null;
+    #sentDuration = NaN;
+    #sentPlaybackRate = NaN;
+    /** Position dedup quantum in seconds - finer than any OS progress UI shows. */
+    static #POSITION_EPSILON = 0.25;
     /** playbackState plus guarded position state; safe to call per event batch. */
     sync() {
       if (this.#destroyed) {
         return;
       }
       const session = this.#session;
-      session.playbackState = this.#video.paused ? "paused" : "playing";
-      const { duration, playbackRate, currentTime } = this.#video;
-      if (this.#canSetPositionState && Number.isFinite(duration) && duration > 0) {
-        const state = this.#positionState;
-        state.duration = duration;
-        state.playbackRate = playbackRate;
-        state.position = currentTime < duration ? currentTime : duration;
-        session.setPositionState(state);
+      const playbackState = this.#video.paused ? "paused" : "playing";
+      if (playbackState !== this.#sentPlaybackState) {
+        this.#sentPlaybackState = playbackState;
+        session.playbackState = playbackState;
       }
+      if (!this.#canSetPositionState) {
+        return;
+      }
+      const { duration, playbackRate, currentTime } = this.#video;
+      if (!Number.isFinite(duration) || duration <= 0) {
+        return;
+      }
+      const position = currentTime < duration ? currentTime : duration;
+      const quantum = _MediaSessionBridge.#POSITION_EPSILON;
+      const sentPosition = this.#positionState.position;
+      if (duration === this.#sentDuration && playbackRate === this.#sentPlaybackRate && Math.abs(position - sentPosition) < quantum) {
+        return;
+      }
+      this.#sentDuration = duration;
+      this.#sentPlaybackRate = playbackRate;
+      const state = this.#positionState;
+      state.duration = duration;
+      state.playbackRate = playbackRate;
+      state.position = position;
+      session.setPositionState(state);
     }
     destroy() {
       if (this.#destroyed) {
@@ -6916,9 +7030,19 @@ ${text.trimStart()}`;
         this.#dom.listen(video, name, handler, { passive: true });
       }
       if (host) {
+        let pausedVar = null;
+        let mutedVar = null;
         const sync = () => {
-          host.style.setProperty("--pf-media-paused", video.paused ? "1" : "0");
-          host.style.setProperty("--pf-media-muted", video.muted ? "1" : "0");
+          const paused = video.paused ? "1" : "0";
+          if (paused !== pausedVar) {
+            pausedVar = paused;
+            host.style.setProperty("--pf-media-paused", paused);
+          }
+          const muted = video.muted ? "1" : "0";
+          if (muted !== mutedVar) {
+            mutedVar = muted;
+            host.style.setProperty("--pf-media-muted", muted);
+          }
         };
         sync();
         for (const evt of ["play", "pause", "volumechange"]) {
@@ -7111,9 +7235,7 @@ ${text.trimStart()}`;
         if (done) {
           return;
         }
-        for (const video of videosFromMutations(mutations)) {
-          consider(video);
-        }
+        forEachVideoInMutations(mutations, consider);
       });
     };
     const consider = (video) => {

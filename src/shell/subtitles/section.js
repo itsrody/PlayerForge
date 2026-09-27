@@ -1,7 +1,7 @@
 import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/storage.js";
 import { TUNING } from "../../shared/tuning.js";
 import { fmtPercent, fmtEm } from "../../shared/formatters.js";
-import { srtToVtt, ensureVttHeader, offsetCues } from "./forgevtt.js";
+import { srtToVtt, ensureVttHeader } from "./forgevtt.js";
 import { parseSubtitlesAsync } from "./vtt-worker-loader.js";
 import { ForgeTrack } from "./forge-track.js";
 import { debounce } from "../../shared/time.js";
@@ -30,9 +30,9 @@ export class SubtitlesSection {
   #shell;
   #forgeTrack = null;
   #trackMeta = null;
-  /** Cues parsed at zero offset; the sync stepper re-offsets this base. */
-  #baseCues = null;
+  /** Cue layer the shell owns; ForgeTrack renders its slots here. */
   #cueLayer = null;
+  /** Sync offset currently in effect; applied by ForgeTrack at load time. */
   #syncOffset = 0;
   #fileInput = null;
   #hintEl = null;
@@ -221,9 +221,10 @@ export class SubtitlesSection {
 
     this.#scheduleSyncOffset = debounce((offset) => {
       if (this.#trackMeta) {
-        // Re-offset the parsed base: one O(n) numeric pass per step instead
-        // of a full text re-parse (normalize/split/regex/entity decode).
-        this.#forgeTrack?.load(offsetCues(this.#baseCues, offset));
+        // Re-offset the loaded cues in place: two property writes per native
+        // cue instead of a full re-offset (n plain objects) plus a drain and
+        // rebuild of the track's VTTCue list.
+        this.#forgeTrack?.setOffset(offset);
       }
       setConfigValue(SETTING_KEYS.syncOffset, offset);
     }, TUNING.subtitles.syncDebounceMs);
@@ -386,9 +387,9 @@ export class SubtitlesSection {
     const normalizedText = /\.srt$/i.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
     // Cooperative parse: yields to the browser on large tracks so ingesting a
     // big VTT never blocks playback (see forgevtt.parseSubtitlesAsync), and
-    // offloads multi-megabyte tracks to a dedicated Worker. The
-    // base is parsed at zero offset and the current sync offset is applied
-    // as a numeric pass so later sync drags never re-touch the text.
+    // offloads multi-megabyte tracks to a dedicated Worker. The cues are
+    // loaded at the current sync offset in a single build pass; later sync
+    // nudges shift the native cues in place (ForgeTrack.setOffset).
     const cues = await parseSubtitlesAsync(normalizedText, 0);
     // Cooperative parse yields to the browser; the section may have been torn
     // down mid-await, so re-check before touching the track/slots.
@@ -403,8 +404,7 @@ export class SubtitlesSection {
       this.#forgeTrack = new ForgeTrack(this.#shell.video, this.#cueLayer);
     }
     this.#trackMeta = { name };
-    this.#baseCues = cues;
-    this.#forgeTrack.load(offsetCues(cues, this.#syncOffset));
+    this.#forgeTrack.load(cues, this.#syncOffset);
     this.#refreshHint();
     this.#toastInfo("captions", name, "subtitles");
     logger.log("subtitles", `Loaded ${name}`);
@@ -444,7 +444,6 @@ export class SubtitlesSection {
     this.#forgeTrack?.destroy();
     this.#forgeTrack = null;
     this.#trackMeta = null;
-    this.#baseCues = null;
     this.#refreshHint();
   }
 }

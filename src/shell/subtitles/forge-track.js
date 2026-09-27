@@ -6,6 +6,17 @@ const MAX_SLOTS = 8;
 const TRACK_LABEL = "PlayerForge Subtitles";
 
 /**
+ * Shift a base cue time by a sync offset, clamped at t=0 - the exact time the
+ * offsetCues() pass used to bake into a fresh copy of the cue list. Negative
+ * or past-the-origin times collapse to 0, so a cue wholly before t=0 becomes a
+ * zero-length cue at 0 (never active) instead of being dropped.
+ */
+function shiftTime(time, offset) {
+  const shifted = time + offset;
+  return shifted < 0 ? 0 : shifted;
+}
+
+/**
  * Subtitle track backed by the browser's native TextTrack for timing and a
  * custom DOM surface for rendering. The browser owns cue scheduling (fires
  * cuechange at exact enter/exit boundaries), while this class owns the visual
@@ -25,6 +36,10 @@ export class ForgeTrack {
    *  pooled scrub payload: mutate in place, read immediately. */
   #lastRender = [];
   #lastActive = [];
+  /** Zero-offset cue base the native cues were built from; drives setOffset. */
+  #baseCues = null;
+  /** Offset already applied to the native cues (setOffset no-ops on a repeat). */
+  #offset = 0;
   /** Records the bound cuechange so destroy can unregister it. */
   #onCueChange = null;
   #destroyed = false;
@@ -65,17 +80,31 @@ export class ForgeTrack {
     this.#track.addEventListener("cuechange", this.#onCueChange);
   }
 
-  /** Replace all cues on the track. Accepts plain cue objects from forgevtt. */
-  load(cues) {
+  /**
+   * Replace all cues on the track. Accepts plain cue objects from forgevtt.
+   * `offset` is applied while building, and the plain cues are remembered as
+   * the zero-offset base so later sync nudges can shift the native cues in
+   * place (see setOffset) instead of draining and rebuilding the list.
+   *
+   * Cues the old offsetCues()+load() path dropped entirely (shifted end <= 0,
+   * i.e. wholly before t=0) are kept as zero-length cues at t=0 instead: they
+   * can never satisfy start <= t < end, so they never enter the active set -
+   * but keeping every base cue keeps `track.cues` positionally aligned with
+   * the base array, which is what lets setOffset walk the two by index.
+   */
+  load(cues, offset = 0) {
     if (this.#destroyed) {
       return;
     }
     const track = this.#track;
-    while (track.cues.length > 0) {
-      track.removeCue(track.cues[0]);
+    // Drain from the back: the cue list is a live array, so popping the last
+    // index avoids shifting the remaining entries on every removal (the
+    // front-drain was O(n²) memmove for an n-cue track).
+    for (let i = track.cues.length - 1; i >= 0; i--) {
+      track.removeCue(track.cues[i]);
     }
     for (const cue of cues) {
-      const vtt = new VTTCue(cue.start, cue.end, cue.text);
+      const vtt = new VTTCue(shiftTime(cue.start, offset), shiftTime(cue.end, offset), cue.text);
       vtt.line = cue.line;
       vtt.position = cue.position;
       if (cue.align) {
@@ -83,6 +112,54 @@ export class ForgeTrack {
       }
       track.addCue(vtt);
     }
+    this.#baseCues = cues;
+    this.#offset = offset;
+  }
+
+  /**
+   * Shift every loaded cue by a new sync offset, in place. Two property
+   * writes per cue replaces the old full re-offset (n plain objects) plus a
+   * drain and rebuild of the native VTTCue list: no intermediate array, no
+   * VTTCue construction, no cue-list churn. Every write re-derives from the
+   * zero-offset base, so clamping stays exact across a back-and-forth drag
+   * (no accumulated drift), and the engine repositions mutated cues itself
+   * (Blink's cueWillChange/cueDidChange path re-sorts the cue list and
+   * re-inserts into the interval tree), so active-cue scheduling stays
+   * correct.
+   */
+  setOffset(offset) {
+    if (this.#destroyed || offset === this.#offset) {
+      return;
+    }
+    const base = this.#baseCues;
+    const cues = this.#track.cues;
+    if (!base) {
+      return;
+    }
+    if (cues.length !== base.length) {
+      // Defensive: the list can only diverge if a load raced this call.
+      // Rebuild rather than walk a mismatched pairing.
+      this.load(base, offset);
+      return;
+    }
+    for (let i = 0; i < base.length; i++) {
+      const src = base[i];
+      const cue = cues[i];
+      // TextTrackCue's writable timing attributes are startTime/endTime - the
+      // plain `start`/`end` names only exist on forgevtt's own cue objects.
+      // Writing `cue.start` would just create an own data property that
+      // shadows nothing: the engine keeps scheduling on the untouched
+      // startTime/endTime and activeCues would never move.
+      const start = shiftTime(src.start, offset);
+      if (cue.startTime !== start) {
+        cue.startTime = start;
+      }
+      const end = shiftTime(src.end, offset);
+      if (cue.endTime !== end) {
+        cue.endTime = end;
+      }
+    }
+    this.#offset = offset;
   }
 
   #render() {
@@ -180,5 +257,7 @@ export class ForgeTrack {
     this.#dom.destroy();
     this.#slots = [];
     this.#lastActive = [];
+    this.#baseCues = null;
+    this.#offset = 0;
   }
 }

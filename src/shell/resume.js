@@ -79,7 +79,21 @@ export class ResumeStore {
     // merge-only adoption here (never written back - the writer owns that
     // round trip). This is also the seam where a future value-sync transport
     // would land for free.
-    this.#listenerId = gmAddValueChangeListener(KEYS.resume, () => this.#adoptExternal());
+    //
+    // Two costs are cut here without weakening the merge:
+    //  - `remote === false` marks OUR OWN write echoing back through the
+    //    manager. The in-memory store is by definition already that value, so
+    //    re-reading + re-merging it would be a pure duplicate parse per save.
+    //    Anything remote (or any implementation that omits the flag) still
+    //    adopts exactly as before.
+    //  - when the change does carry the new value, it is merged straight from
+    //    the listener argument instead of paying a second GM read + parse.
+    this.#listenerId = gmAddValueChangeListener(KEYS.resume, (_name, _old, value, remote) => {
+      if (remote === false) {
+        return;
+      }
+      this.#adoptExternal(value);
+    });
   }
 
   /** Release the cross-tab change subscription (SPA re-entry / shell teardown). */
@@ -89,11 +103,14 @@ export class ResumeStore {
     this.#listeners.clear();
   }
 
-  #adoptExternal() {
+  /** Merge an external store. `value` is the listener's own new value when it
+   *  supplied one (saves a GM read + parse); falling back to a direct read
+   *  keeps implementations that pass nothing working unchanged. */
+  #adoptExternal(value) {
     if (!this.#loaded) {
       return;
     }
-    const raw = loadJsonObject(KEYS.resume, null);
+    const raw = isValidStore(value) ? value : loadJsonObject(KEYS.resume, null);
     if (isValidStore(raw)) {
       const { added, updated } = this.#mergeRaw(raw);
       if (added || updated) {
@@ -424,10 +441,16 @@ export class ResumeTracker {
     const match = this.#store.findMatch(context.domain, context.path, duration);
     if (match) {
       this.#entry = match;
-      logger.log("resume", `Matched ${match.id} - resume at ${match.resume}s`);
+      // Both branches below run once per discovered video; guarded so the
+      // default (chatter off) never builds the template.
+      if (logger.enabled) {
+        logger.log("resume", `Matched ${match.id} - resume at ${match.resume}s`);
+      }
     } else {
       this.#entry = this.#store.createEntry(context.domain, context.path, context.title, duration);
-      logger.log("resume", `Created ${this.#entry.id} for ${context.domain}${context.path}`);
+      if (logger.enabled) {
+        logger.log("resume", `Created ${this.#entry.id} for ${context.domain}${context.path}`);
+      }
     }
 
     const savedPosition = Number(this.#entry.resume) || NaN;

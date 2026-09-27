@@ -106,7 +106,13 @@ function matchSdk(video) {
     const anchors = record.anchors;
     for (let a = 0; a < anchors.length; a++) {
       const anchor = anchors[a];
-      for (let hop = 0; hop < len; hop++) {
+      // Bound the walk by the best hops so far: a match at or beyond that
+      // index cannot win (strict < keeps the earlier record/anchor), so the
+      // chain is only scanned as deep as a real improvement would need. A
+      // 0-hop best collapses the bound to 0 and the rest of the registry is
+      // walked with zero chain scans.
+      const limit = best ? best.hops : len;
+      for (let hop = 0; hop < limit; hop++) {
         if (chain[hop].matches(anchor)) {
           if (!best || hop < best.hops) {
             best = { record, el: chain[hop], hops: hop };
@@ -208,8 +214,17 @@ export function videoFromEvent(event) {
   return null;
 }
 
-/** Every <video> entering the DOM in a MutationObserver batch's added nodes. */
-export function* videosFromMutations(mutations) {
+/**
+ * Invoke `visit` for every <video> entering the DOM in a MutationObserver
+ * batch's added nodes.
+ *
+ * Callback instead of a generator: the old `function*` + `yield* NodeList`
+ * form allocated a generator object (and a NodeList iterator) per batch per
+ * subscriber, and the added-node walk is on the kernel's hot discovery path.
+ * The NodeList is walked by index here, which is also the cheapest way to
+ * drain it.
+ */
+export function forEachVideoInMutations(mutations, visit) {
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
       // Cheap element guard: text/comment nodes and the subtree we already
@@ -220,9 +235,12 @@ export function* videosFromMutations(mutations) {
         continue;
       }
       if (node.localName === "video") {
-        yield node;
+        visit(node);
       } else if (node.querySelectorAll) {
-        yield* node.querySelectorAll("video");
+        const videos = node.querySelectorAll("video");
+        for (let i = 0; i < videos.length; i++) {
+          visit(videos[i]);
+        }
       }
     }
   }
@@ -282,9 +300,7 @@ export function watchMediaEvents(onVideo, { signal } = {}) {
 export function watchDocumentVideos(onVideo) {
   const offEvents = watchMediaEvents(onVideo);
   const offMutations = onDomMutations((mutations) => {
-    for (const video of videosFromMutations(mutations)) {
-      onVideo(video);
-    }
+    forEachVideoInMutations(mutations, onVideo);
   });
   return () => {
     offEvents();

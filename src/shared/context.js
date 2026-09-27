@@ -1090,7 +1090,18 @@ export function installContextBridge() {
   // handler vouches, and the inline-scan fallback covers the pre-observer gap.
   // This listener must be registered BEFORE the handlers below so the seed
   // lands before the first vouch-check runs.
-  const maybeStartIframeCache = () => {
+  //
+  // Gated to PlayerForge's own bridge traffic: every message this frame ever
+  // vouches carries a `pf:` type, while a page's analytics/ad postMessages
+  // arrive constantly and would otherwise arm a second full-document
+  // childList+subtree observer (plus its per-batch map sweep) for the rest of
+  // the page's life on nearly every site. Non-bridge chatter now costs one
+  // typeof/startsWith check instead.
+  const maybeStartIframeCache = (event) => {
+    const type = event?.data?.type;
+    if (typeof type !== "string" || !type.startsWith("pf:")) {
+      return;
+    }
     if (!iframeCacheActive || iframeCacheDoc !== document) {
       startIframeCache(ac);
     }

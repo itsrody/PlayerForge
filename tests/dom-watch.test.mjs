@@ -83,3 +83,17 @@ test("a throwing subscriber never aborts delivery to its peers [uBO safeObserver
   offBad();
   offGood();
 });
+
+test("every flush delivers only its own batch (recycled buffers are drained)", async () => {
+  const batches = [];
+  const off = onDomMutations((records) => batches.push(records.length));
+  // One mutation + flush per round: the pool swaps buffers between flushes, so
+  // any buffer that is re-armed without being emptied re-delivers records from
+  // an earlier round alongside the current one.
+  for (let round = 0; round < 5; round++) {
+    document.body.appendChild(document.createElement("span"));
+    await tick();
+  }
+  off();
+  assert.deepEqual(batches, [1, 1, 1, 1, 1]);
+});

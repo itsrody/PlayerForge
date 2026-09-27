@@ -22,14 +22,35 @@ export function addHistorySection(panel, shell) {
   /** Tracks which cards are currently in the DOM (acquired from pool). */
   const activeCards = [];
 
+  /**
+   * Element refs captured when the pool builds a card. The card tree is
+   * fixed at factory time, so renderCard/reset re-read these instead of
+   * re-running two querySelector calls per card per render (a structural
+   * render walks every pooled card - 200 entries is 400 lookups saved).
+   */
+  const cardRefs = new WeakMap();
+
+  const refsFor = (card) => {
+    let refs = cardRefs.get(card);
+    if (!refs) {
+      const info = card.querySelector(".pf-history-info");
+      refs = {
+        title: info.querySelector(".pf-history-title"),
+        meta: info.querySelector(".pf-history-meta")
+      };
+      cardRefs.set(card, refs);
+    }
+    return refs;
+  };
+
   /** Pool of reusable card elements. Factory builds the full tree;
    *  reset clears text + buttons so renderCard() can repopulate. */
   const cardPool = new DomPool({
     factory: () => {
       const card = panel.el("div", { class: "pf-history-card" });
       const info = panel.el("div", { class: "pf-history-info" }, card);
-      panel.el("div", { class: "pf-history-title" }, info);
-      panel.el("div", { class: "pf-history-meta" }, info);
+      const title = panel.el("div", { class: "pf-history-title" }, info);
+      const meta = panel.el("div", { class: "pf-history-meta" }, info);
       const actions = panel.el("div", { class: "pf-history-actions" }, card);
       button({
         class: "pf-btn pf-btn-icon pf-btn-ghost",
@@ -45,13 +66,14 @@ export function addHistorySection(panel, shell) {
         "data-action": "remove",
         icon: createIconElement("trash")
       }, actions);
+      cardRefs.set(card, { title, meta });
       return card;
     },
     reset: (card) => {
       card.dataset.entryId = "";
-      const info = card.querySelector(".pf-history-info");
-      info.querySelector(".pf-history-title").textContent = "";
-      info.querySelector(".pf-history-meta").textContent = "";
+      const refs = refsFor(card);
+      refs.title.textContent = "";
+      refs.meta.textContent = "";
       return card;
     }
   });
@@ -109,15 +131,13 @@ export function addHistorySection(panel, shell) {
 
   function renderCard(entry, card) {
     card.dataset.entryId = entry.id;
-    const info = card.querySelector(".pf-history-info");
-    const title = info.querySelector(".pf-history-title");
-    title.textContent = entry.title || formatDomain(entry.domain);
-    const meta = info.querySelector(".pf-history-meta");
+    const refs = refsFor(card);
+    refs.title.textContent = entry.title || formatDomain(entry.domain);
     const parts = [formatDomain(entry.domain)];
     if (entry.duration > 0) {
       parts.push(formatTime(entry.duration));
     }
-    meta.textContent = parts.join(" \u00b7 ");
+    refs.meta.textContent = parts.join(" \u00b7 ");
   }
 
   render();

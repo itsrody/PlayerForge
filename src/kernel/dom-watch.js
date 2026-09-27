@@ -37,6 +37,16 @@ import { postTask, yield_ } from "../shared/scheduler.js";
 const DEFER_VISIBILITY_CAP_MS = 500;
 /** Sparsity threshold for subscriber-slot compaction. */
 const COMPACTION_RATIO = 4;
+/**
+ * Batch size above which the append switches from apply() to an index walk.
+ * apply() spreads the batch onto the call stack and V8 refuses somewhere past
+ * ~124k arguments (RangeError) - which a mass-DOM-teardown batch can reach,
+ * and which would escape the observer callback before the queue flag below is
+ * set, silently dropping the whole batch. apply() stays the fast path for
+ * every batch we actually see (measurably cheaper than an element-by-element
+ * push loop), the walk only takes over where it is safe rather than fast.
+ */
+const PUSH_APPLY_LIMIT = 65536;
 
 /**
  * Append-only subscriber slots with tombstones. A live subscription is a
@@ -66,6 +76,13 @@ function flush() {
   // instead of abandoning it for a fresh allocation (nothing longer references
   // `records` once this synchronous fan-out completes, so reuse is safe).
   pendingRecords = recycledRecords;
+  // Re-arm the incoming buffer EMPTY. The swap alone leaves the batch
+  // delivered two flushes ago inside it, and the observer only ever appends:
+  // without this, every flush from the third onward re-delivered stale
+  // records alongside the current batch (observed as [1,1,2,2,3] for five
+  // single-mutation rounds) - each one costing subscribers a redundant DOM
+  // walk over records they had already handled.
+  pendingRecords.length = 0;
   recycledRecords = records;
   // Dispatch from a length-hold: tombstones are skipped, and slots appended
   // mid-batch (subscriptions landing during delivery) belong to the next
@@ -160,7 +177,13 @@ function ensureObserver() {
     // Coalesce the batch into the pooled buffer in one place; the browser
     // already arrived with a pooled record list, so this is an append-only
     // copy with no per-record allocation.
-    Array.prototype.push.apply(pendingRecords, records);
+    if (records.length < PUSH_APPLY_LIMIT) {
+      Array.prototype.push.apply(pendingRecords, records);
+    } else {
+      for (let i = 0; i < records.length; i++) {
+        pendingRecords.push(records[i]);
+      }
+    }
     if (!queued) {
       queued = true;
       queueMicrotask(scheduleFlush);

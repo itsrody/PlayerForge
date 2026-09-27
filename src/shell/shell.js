@@ -302,9 +302,23 @@ export class Shell {
     // boundary. The :playing/:paused/:muted pseudo-classes (Chromium 153+)
     // cannot reach into shadow roots; custom properties bridge the gap.
     if (host) {
+      // Write the custom properties only when their value actually flips.
+      // volumechange fires continuously while volume/panner is dragged, and a
+      // setProperty on a hot style recolors the host subtree for nothing when
+      // neither flag changed.
+      let pausedVar = null;
+      let mutedVar = null;
       const sync = () => {
-        host.style.setProperty("--pf-media-paused", video.paused ? "1" : "0");
-        host.style.setProperty("--pf-media-muted", video.muted ? "1" : "0");
+        const paused = video.paused ? "1" : "0";
+        if (paused !== pausedVar) {
+          pausedVar = paused;
+          host.style.setProperty("--pf-media-paused", paused);
+        }
+        const muted = video.muted ? "1" : "0";
+        if (muted !== mutedVar) {
+          mutedVar = muted;
+          host.style.setProperty("--pf-media-muted", muted);
+        }
       };
       sync();
       for (const evt of ["play", "pause", "volumechange"]) {
