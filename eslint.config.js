@@ -38,6 +38,7 @@ export default [
         crypto: "readonly",
         URL: "readonly",
         TextDecoder: "readonly",
+        TextEncoder: "readonly",
         Uint8Array: "readonly",
         Int32Array: "readonly",
         Map: "readonly",

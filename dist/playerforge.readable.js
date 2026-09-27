@@ -3421,7 +3421,7 @@
     source.postMessage(message, origin);
   }
   function createFrameRelay() {
-    const pending = /* @__PURE__ */ new Map();
+    const pending2 = /* @__PURE__ */ new Map();
     return (event) => {
       const data = event && event.data;
       if (!data || typeof data !== "object") {
@@ -3432,24 +3432,24 @@
           return;
         }
         const now = Date.now();
-        for (const [nonce, entry] of pending) {
+        for (const [nonce, entry] of pending2) {
           if (entry.deadline < now) {
-            pending.delete(nonce);
+            pending2.delete(nonce);
           }
         }
-        pending.set(data.nonce, { source: event.source, origin: event.origin, deadline: now + NONCE_TTL_MS });
+        pending2.set(data.nonce, { source: event.source, origin: event.origin, deadline: now + NONCE_TTL_MS });
         const ports = event.ports || [];
         try {
           window.parent.postMessage(data, "*", ports.length ? ports : void 0);
         } catch {
           window.parent.postMessage(data, "*");
         }
-      } else if (data.type === CTX_RESPONSE_TYPE && pending.has(data.nonce)) {
+      } else if (data.type === CTX_RESPONSE_TYPE && pending2.has(data.nonce)) {
         if (event.source !== window.parent) {
           return;
         }
-        const requester = pending.get(data.nonce);
-        pending.delete(data.nonce);
+        const requester = pending2.get(data.nonce);
+        pending2.delete(data.nonce);
         requester.source?.postMessage(data, requester.origin || "*");
       }
     };
@@ -4544,7 +4544,7 @@ ${text.trimStart()}`;
   }
 
   // src/shell/subtitles/vtt-worker-loader.js
-  var BUILTIN_WORKER_SOURCE = true ? '(()=>{var M=/^(NOTE|STYLE|REGION)(?:[ \\t]|$)/,O={"&amp;":"&","&lt;":"<","&gt;":">","&nbsp;":" ","&lrm;":"‎","&rlm;":"‏"},y=/<\\/?[a-zA-Z][^>]*>|&(?:amp|lt|gt|nbsp|lrm|rlm);|&#(?:x[0-9a-fA-F]+|\\d+);/g,N=/^\\uFEFF/,R=/\\r\\n?/g;function F(e){return e.normalize("NFC").replace(N,"").replace(R,`\n`)}var m=48,w=57,E=58,b=46,S=44,v=/^\\s+$/;function C(e){return e>=m&&e<=w}function x(e){let r=e.length,n=-1,i=0;for(let s=0;s<r;s++){let l=e.charCodeAt(s);if(l===b||l===S){if(n!==-1)return null;n=s}else if(l===E){if(n!==-1)return null;i++}else if(!C(l))return null}if(n===-1||i<1||i>2)return null;let c=r-n-1;if(c<1||c>3)return null;let t=0,o=s=>{let l=0,d=0;for(;t<n&&C(e.charCodeAt(t));)l=l*10+(e.charCodeAt(t)-m),t++,d++;return{val:l,count:d}};if(i===2){let s=o(Number.MAX_SAFE_INTEGER);if(s.count===0||t>=n||e.charCodeAt(t)!==E)return null;t++;let l=o(2);if(l.count<1||l.count>2||t>=n||e.charCodeAt(t)!==E)return null;t++;let d=o(2);if(d.count!==2||t<n)return null;let p=0;for(let g=n+1;g<r;g++)p=p*10+(e.charCodeAt(g)-m);return s.val*3600+l.val*60+d.val+p/1e3}let u=o(2);if(u.count<1||u.count>2||t>=n||e.charCodeAt(t)!==E)return null;t++;let f=o(2);if(f.count!==2||t<n)return null;let a=0;for(let s=n+1;s<r;s++)a=a*10+(e.charCodeAt(s)-m);return u.val*60+f.val+a/1e3}function B(e){let r=e[2]==="x"||e[2]==="X",n=parseInt(e.slice(r?3:2,-1),r?16:10);return!(n>=1&&n<=1114111)||n>=55296&&n<=57343?"�":String.fromCodePoint(n)}function D(e){return e.replace(y,r=>r.charCodeAt(0)===38?r.charCodeAt(1)===35?B(r):O[r]:"")}var L=Object.freeze({line:85,position:50,align:void 0});function $(e){let r=e.trim();if(!r)return L;let n={line:85,position:50,align:void 0};for(let i of r.split(/\\s+/)){if(!i)continue;let c=i.indexOf(":");if(c<=0)continue;let t=i.slice(0,c),o=i.slice(c+1);t==="line"?o.endsWith("%")&&(n.line=Number(o.slice(0,-1))):t==="position"?n.position=Number(o.endsWith("%")?o.slice(0,-1):o):t==="align"&&(n.align=o)}return n}function I(e){let r=e.indexOf("-->");if(r<0)return null;let n=e.slice(0,r),i=n.trimEnd();if(i===n||!v.test(n.slice(i.length)))return null;let c=x(i);if(c==null)return null;let t=e.slice(r+3),o=0;for(;o<t.length&&(t.charCodeAt(o)===32||t.charCodeAt(o)===9);)o++;if(o===0)return null;let u=o;for(;u<t.length&&t.charCodeAt(u)!==32&&t.charCodeAt(u)!==9;)u++;let f=t.slice(o,u),a=-1;for(let d=0;d<f.length;d++){let p=f.charCodeAt(d);if(p===b||p===S){a=d;break}}if(a<0)return null;let s=0;for(;s<3&&a+1+s<f.length&&C(f.charCodeAt(a+1+s));)s++;if(s===0)return null;let l=x(f.slice(0,a+1+s));return l==null?null:{start:c,end:l,settings:$(f.slice(a+1+s)+t.slice(u))}}function _(e,r=0){let n=F(e),i=n.length,c=[],t=null,o=!1,u=!1,f=null,a=()=>{if(t&&t.end>t.start){let s=t.end+r;if(s>0){let l=D(f.join(`\n`).trim());l&&c.push({start:Math.max(t.start+r,0),end:s,text:l,line:t.settings.line,position:t.settings.position,align:t.settings.align})}}t=null,o=!1,u=!1,f=null};for(let s=0;s<=i;){let l=n.indexOf(`\n`,s),d=l===-1?i:l,p=n.slice(s,d);s=l===-1?i+1:l+1;let g=!0;for(let h=0;h<p.length;h++){let A=p.charCodeAt(h);if(A!==32&&A!==9){g=!1;break}}if(g){o&&a();continue}if(!o&&(o=!0,M.test(p))){u=!0;continue}if(!u)if(t)f.push(p);else{let h=I(p);h&&(t=h,f=[])}}return o&&a(),W(c)}function W(e){return e.sort((r,n)=>r.start-n.start),e}var P=150,T=0,k=0;typeof PerformanceObserver<"u"&&PerformanceObserver.supportedEntryTypes?.includes("long-animation-frame")&&new PerformanceObserver(e=>{for(let r of e.getEntries()){if(r.duration<P)continue;let i=(r.scripts??[]).reduce((c,t)=>c+(t.forcedStyleAndLayoutDuration??0),0);r.duration>T&&(T=r.duration,k=i)}}).observe({type:"long-animation-frame",buffered:!1});self.onmessage=e=>{let{id:r,text:n}=e.data??{};if(!(typeof r!="number"||typeof n!="string")){try{let i=_(n,0);self.postMessage({pfWorker:1,id:r,cues:i})}catch(i){self.postMessage({pfWorker:1,id:r,error:String(i&&i.message||i)})}T>0&&self.postMessage({pfWorker:1,id:r,type:"perf",durationMs:Math.round(T),forcedMs:Math.round(k*10)/10})}};})();\n' : null;
+  var BUILTIN_WORKER_SOURCE = true ? '(()=>{var y=/^(NOTE|STYLE|REGION)(?:[ \\t]|$)/,_={"&amp;":"&","&lt;":"<","&gt;":">","&nbsp;":" ","&lrm;":"‎","&rlm;":"‏"},k=/<\\/?[a-zA-Z][^>]*>|&(?:amp|lt|gt|nbsp|lrm|rlm);|&#(?:x[0-9a-fA-F]+|\\d+);/g,O=/^\\uFEFF/,M=/\\r\\n?/g;function w(e){return e.normalize("NFC").replace(O,"").replace(M,`\n`)}var E=48,R=57,m=58,x=46,b=44,F=/^\\s+$/;function A(e){return e>=E&&e<=R}function T(e){let r=e.length,n=-1,o=0;for(let i=0;i<r;i++){let c=e.charCodeAt(i);if(c===x||c===b){if(n!==-1)return null;n=i}else if(c===m){if(n!==-1)return null;o++}else if(!A(c))return null}if(n===-1||o<1||o>2)return null;let u=r-n-1;if(u<1||u>3)return null;let t=0,s=i=>{let c=0,d=0;for(;t<n&&A(e.charCodeAt(t));)c=c*10+(e.charCodeAt(t)-E),t++,d++;return{val:c,count:d}};if(o===2){let i=s(Number.MAX_SAFE_INTEGER);if(i.count===0||t>=n||e.charCodeAt(t)!==m)return null;t++;let c=s(2);if(c.count<1||c.count>2||t>=n||e.charCodeAt(t)!==m)return null;t++;let d=s(2);if(d.count!==2||t<n)return null;let p=0;for(let g=n+1;g<r;g++)p=p*10+(e.charCodeAt(g)-E);return i.val*3600+c.val*60+d.val+p/1e3}let l=s(2);if(l.count<1||l.count>2||t>=n||e.charCodeAt(t)!==m)return null;t++;let f=s(2);if(f.count!==2||t<n)return null;let a=0;for(let i=n+1;i<r;i++)a=a*10+(e.charCodeAt(i)-E);return l.val*60+f.val+a/1e3}function N(e){let r=e[2]==="x"||e[2]==="X",n=parseInt(e.slice(r?3:2,-1),r?16:10);return!(n>=1&&n<=1114111)||n>=55296&&n<=57343?"�":String.fromCodePoint(n)}function D(e){return e.replace(k,r=>r.charCodeAt(0)===38?r.charCodeAt(1)===35?N(r):_[r]:"")}var v=Object.freeze({line:85,position:50,align:void 0});function B(e){let r=e.trim();if(!r)return v;let n={line:85,position:50,align:void 0};for(let o of r.split(/\\s+/)){if(!o)continue;let u=o.indexOf(":");if(u<=0)continue;let t=o.slice(0,u),s=o.slice(u+1);t==="line"?s.endsWith("%")&&(n.line=Number(s.slice(0,-1))):t==="position"?n.position=Number(s.endsWith("%")?s.slice(0,-1):s):t==="align"&&(n.align=s)}return n}function L(e){let r=e.indexOf("-->");if(r<0)return null;let n=e.slice(0,r),o=n.trimEnd();if(o===n||!F.test(n.slice(o.length)))return null;let u=T(o);if(u==null)return null;let t=e.slice(r+3),s=0;for(;s<t.length&&(t.charCodeAt(s)===32||t.charCodeAt(s)===9);)s++;if(s===0)return null;let l=s;for(;l<t.length&&t.charCodeAt(l)!==32&&t.charCodeAt(l)!==9;)l++;let f=t.slice(s,l),a=-1;for(let d=0;d<f.length;d++){let p=f.charCodeAt(d);if(p===x||p===b){a=d;break}}if(a<0)return null;let i=0;for(;i<3&&a+1+i<f.length&&A(f.charCodeAt(a+1+i));)i++;if(i===0)return null;let c=T(f.slice(0,a+1+i));return c==null?null:{start:u,end:c,settings:B(f.slice(a+1+i)+t.slice(l))}}function S(e,r=0){let n=w(e),o=n.length,u=[],t=null,s=!1,l=!1,f=null,a=()=>{if(t&&t.end>t.start){let i=t.end+r;if(i>0){let c=D(f.join(`\n`).trim());c&&u.push({start:Math.max(t.start+r,0),end:i,text:c,line:t.settings.line,position:t.settings.position,align:t.settings.align})}}t=null,s=!1,l=!1,f=null};for(let i=0;i<=o;){let c=n.indexOf(`\n`,i),d=c===-1?o:c,p=n.slice(i,d);i=c===-1?o+1:c+1;let g=!0;for(let h=0;h<p.length;h++){let C=p.charCodeAt(h);if(C!==32&&C!==9){g=!1;break}}if(g){s&&a();continue}if(!s&&(s=!0,y.test(p))){l=!0;continue}if(!l)if(t)f.push(p);else{let h=L(p);h&&(t=h,f=[])}}return s&&a(),$(u)}function $(e){return e.sort((r,n)=>r.start-n.start),e}var I=150,W=new TextDecoder;typeof PerformanceObserver<"u"&&PerformanceObserver.supportedEntryTypes?.includes("long-animation-frame")&&new PerformanceObserver(e=>{for(let r of e.getEntries()){if(r.duration<I)continue;let n=r.scripts??[],o=0;for(let u of n)o+=u.forcedStyleAndLayoutDuration??0;self.postMessage({pfWorker:1,type:"perf",durationMs:Math.round(r.duration),forcedMs:Math.round(o*10)/10})}}).observe({type:"long-animation-frame",buffered:!1});function P(e){let r=e.length,n=new Float64Array(r*2),o=new Float64Array(r*2),u=new Array(r),t=new Array(r);for(let s=0;s<r;s++){let l=e[s],f=s*2;n[f]=l.start,n[f+1]=l.end,o[f]=l.line,o[f+1]=l.position,u[s]=l.text,t[s]=l.align}return{times:n,nums:o,texts:u,aligns:t}}self.onmessage=e=>{let{id:r,bytes:n}=e.data??{};if(!(typeof r!="number"||!(n instanceof Uint8Array)))try{let o=S(W.decode(n),0),{times:u,nums:t,texts:s,aligns:l}=P(o);self.postMessage({pfWorker:1,id:r,times:u,nums:t,texts:s,aligns:l},[u.buffer,t.buffer])}catch(o){self.postMessage({pfWorker:1,id:r,error:String(o&&o.message||o)})}};})();\n' : null;
   function workerSource() {
     if (BUILTIN_WORKER_SOURCE !== null) {
       return BUILTIN_WORKER_SOURCE;
@@ -4553,10 +4553,59 @@ ${text.trimStart()}`;
   }
   var WORKER_MIN_CHARS = 1 << 19;
   var WORKER_TIMEOUT_MS = 6e4;
-  var workerBusy = false;
+  var ENCODER = new TextEncoder();
+  var worker = null;
+  var workerUrl = null;
+  var workerBroken = false;
   var requestSeq = 0;
+  var pending = /* @__PURE__ */ new Map();
   function workerCapable() {
     return workerSource() !== null && typeof globalThis.Worker === "function" && typeof globalThis.Blob === "function" && typeof globalThis.URL?.createObjectURL === "function" && typeof globalThis.URL?.revokeObjectURL === "function";
+  }
+  function ensureWorker() {
+    if (worker !== null) {
+      return worker;
+    }
+    if (workerBroken) {
+      return null;
+    }
+    let url = null;
+    try {
+      url = globalThis.URL.createObjectURL(
+        new globalThis.Blob([workerSource()], { type: "text/javascript" })
+      );
+      worker = new globalThis.Worker(url, { name: "playerforge-vtt" });
+    } catch (err) {
+      if (url !== null) {
+        globalThis.URL.revokeObjectURL(url);
+      }
+      workerBroken = true;
+      logger.warn("subtitles", "Blob worker blocked (page CSP?), staying in-band", err);
+      return null;
+    }
+    workerUrl = url;
+    worker.onmessage = onWorkerMessage;
+    worker.onerror = onWorkerError;
+    return worker;
+  }
+  function killWorker() {
+    const inflight = [...pending.values()];
+    pending.clear();
+    const doomed = worker;
+    worker = null;
+    if (doomed !== null) {
+      doomed.onmessage = null;
+      doomed.onerror = null;
+      doomed.terminate();
+      globalThis.URL.revokeObjectURL(workerUrl);
+      workerUrl = null;
+    }
+    for (const entry of inflight) {
+      entry.fallback();
+    }
+  }
+  function onWorkerError() {
+    killWorker();
   }
   function reportWorkerJank(data) {
     if (logger.enabled) {
@@ -4566,70 +4615,87 @@ ${text.trimStart()}`;
       );
     }
   }
-  function runInWorker(text) {
-    const requestId = ++requestSeq;
-    const objectUrl = globalThis.URL.createObjectURL(
-      new globalThis.Blob([workerSource()], { type: "text/javascript" })
-    );
-    let worker;
-    try {
-      worker = new globalThis.Worker(objectUrl, { name: "playerforge-vtt" });
-    } catch (err) {
-      globalThis.URL.revokeObjectURL(objectUrl);
-      throw err;
+  function unpackCues(data) {
+    const texts = data.texts;
+    const n = texts.length;
+    const times = data.times;
+    const nums = data.nums;
+    const aligns = data.aligns;
+    const cues = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const j = i * 2;
+      cues[i] = {
+        start: times[j],
+        end: times[j + 1],
+        text: texts[i],
+        line: nums[j],
+        position: nums[j + 1],
+        align: aligns[i]
+      };
     }
-    workerBusy = true;
+    return cues;
+  }
+  function onWorkerMessage(event) {
+    const data = event.data ?? {};
+    if (data.pfWorker !== 1) {
+      return;
+    }
+    if (data.type === "perf") {
+      reportWorkerJank(data);
+      return;
+    }
+    const entry = pending.get(data.id);
+    if (entry === void 0) {
+      return;
+    }
+    pending.delete(data.id);
+    if (data.error !== void 0 || !(data.times instanceof Float64Array)) {
+      entry.fallback();
+      return;
+    }
+    entry.resolve(unpackCues(data));
+  }
+  function runInWorker(w, text) {
+    const id = ++requestSeq;
     return new Promise((resolve) => {
-      let settled = false;
-      const cleanup = () => {
-        if (settled) {
-          return;
+      pending.set(id, {
+        resolve,
+        fallback: () => {
+          parseSubtitlesAsync(text).then(resolve);
         }
-        settled = true;
-        workerBusy = false;
-        worker.terminate();
-        globalThis.URL.revokeObjectURL(objectUrl);
-      };
-      const fallback = () => {
-        if (settled) {
-          return;
+      });
+      AbortSignal.timeout(WORKER_TIMEOUT_MS).addEventListener(
+        "abort",
+        () => {
+          if (pending.has(id)) {
+            killWorker();
+          }
+        },
+        { once: true }
+      );
+      try {
+        const bytes = ENCODER.encode(text);
+        w.postMessage({ pfWorker: 1, id, bytes }, [bytes.buffer]);
+      } catch (err) {
+        const entry = pending.get(id);
+        if (entry !== void 0) {
+          pending.delete(id);
+          entry.fallback();
         }
-        cleanup();
-        parseSubtitlesAsync(text).then(resolve);
-      };
-      AbortSignal.timeout(WORKER_TIMEOUT_MS).addEventListener("abort", fallback, { once: true });
-      worker.onerror = () => fallback();
-      worker.onmessage = (event) => {
-        const data = event.data ?? {};
-        if (data.pfWorker !== 1 || data.id !== requestId) {
-          return;
-        }
-        if (data.type === "perf") {
-          reportWorkerJank(data);
-          return;
-        }
-        if (data.error) {
-          fallback();
-          return;
-        }
-        const cues = data.cues;
-        setTimeout(cleanup, 0);
-        resolve(cues);
-      };
-      worker.postMessage({ id: requestId, text });
+        logger.warn("subtitles", "Worker postMessage failed, falling back in-band", err);
+      }
     });
   }
   async function parseSubtitlesAsync2(text, offset = 0, throughWorker = false) {
-    const eligible = offset === 0 && workerCapable() && !workerBusy && (throughWorker || text.length >= WORKER_MIN_CHARS);
+    const eligible = offset === 0 && workerCapable() && (throughWorker || text.length >= WORKER_MIN_CHARS);
     if (!eligible) {
       return parseSubtitlesAsync(text, offset);
     }
-    try {
-      return await runInWorker(text);
-    } catch (err) {
-      logger.warn("subtitles", "Worker parse failed, falling back in-band", err);
+    const w = ensureWorker();
+    if (w === null) {
       return parseSubtitlesAsync(text, offset);
     }
+    return runInWorker(w, text);
   }
 
   // src/shell/subtitles/forge-track.js
