@@ -1,5 +1,6 @@
 import { logger } from "../shared/logger.js";
 import { clamp } from "../shared/clamp.js";
+import { isBenignMediaPolicyError } from "../shared/errors.js";
 
 /** Volume delta applied by nudgeVolume, shared with UI feedback layers. */
 export const VOLUME_STEP = 0.1;
@@ -57,7 +58,7 @@ export function createMediaControls({ video }) {
       } catch (err) {
         // Interruptions by new loads and autoplay-policy rejections are
         // ordinary; anything else is a real error worth surfacing.
-        if (err.name !== "AbortError" && err.name !== "NotAllowedError") {
+        if (!isBenignMediaPolicyError(err)) {
           throw err;
         }
       }
@@ -167,7 +168,7 @@ export function createMediaControls({ video }) {
           await video.requestPictureInPicture();
         }
       } catch (err) {
-        if (err.name !== "AbortError" && err.name !== "NotAllowedError") {
+        if (!isBenignMediaPolicyError(err)) {
           throw err;
         }
       }

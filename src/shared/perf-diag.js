@@ -44,7 +44,7 @@ function report(entries) {
 }
 
 function install() {
-  if (observer || enabled || typeof PerformanceObserver === "undefined") {
+  if (observer || typeof PerformanceObserver === "undefined") {
     return;
   }
   try {
@@ -66,7 +66,7 @@ function teardown() {
   observer = null;
 }
 
-export function setPerfDiag(on) {
+function setPerfDiag(on) {
   if (on === enabled) {
     return;
   }
@@ -76,4 +76,18 @@ export function setPerfDiag(on) {
   } else {
     teardown();
   }
+}
+
+/**
+ * Flip the debug runtime - console logs and the LoAF jank diagnostic - as one
+ * unit. The kernel's boot probe and the GM menu toggle both route through
+ * here, so the observer can never outlive (or miss) the log flag.
+ */
+export function setDebugRuntime(on) {
+  if (on) {
+    logger.enable();
+  } else {
+    logger.disable();
+  }
+  setPerfDiag(on);
 }

@@ -154,7 +154,10 @@ const stateFor = (() => {
         streakCount: 0,
         lastSkipDirection: null,
         streakResetAt: 0,
-        fillActive: false
+        fillActive: false,
+        // Declared here because fillFrame writes it: same key order from the
+        // start means the state object never morphs to a second hidden class.
+        priorObjectFit: ""
       };
       states.set(shell, state);
     }

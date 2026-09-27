@@ -1,6 +1,6 @@
 import SHELL_CSS from "./styles.css";
 import { logger } from "../../shared/logger.js";
-import { onDomMutations } from "../../kernel/dom-watch.js";
+import { onDomMutations } from "../../shared/dom-watch.js";
 import { SHELL_MARKER } from "../../kernel/contract.js";
 import { el } from "./elements.js";
 import { gmGetResourceText } from "../../shared/storage.js";

@@ -121,9 +121,9 @@ export class ToastManager {
     if (iconEl) {
       this.#icon.appendChild(iconEl);
     }
-    this.#icon.style.display = iconEl ? "" : "none";
+    this.#icon.hidden = !iconEl;
     this.#text.textContent = text || "";
-    this.#text.style.display = text ? "" : "none";
+    this.#text.hidden = !text;
     if (actions && actions.length) {
       this.#actions.textContent = "";
       const doc = this.#actions.ownerDocument;
@@ -142,11 +142,11 @@ export class ToastManager {
           action.onClick?.();
         });
       }
-      this.#actions.style.display = "";
+      this.#actions.hidden = false;
       this.#toast.style.pointerEvents = "auto";
     } else {
       this.#actions.textContent = "";
-      this.#actions.style.display = "none";
+      this.#actions.hidden = true;
       this.#toast.style.pointerEvents = "";
     }
     this.#toast.style.color = color || "";

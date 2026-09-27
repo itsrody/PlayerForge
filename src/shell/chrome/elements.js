@@ -33,13 +33,20 @@ export function el(tag, attrs = {}, parent = null) {
  * keys so the contract (data-action selectors) never silently drops.
  */
 export function button({ class: cls = "", title = "", "aria-label": ariaLabel = "", icon = null, ...rest }, parent = null) {
-  const node = el("button", {
-    type: "button",
-    ...(cls ? { class: cls } : {}),
-    ...(title ? { title } : {}),
-    ...(ariaLabel ? { "aria-label": ariaLabel } : {}),
-    ...rest
-  }, parent);
+  // One attrs object built by mutation: the conditional-spread form allocated
+  // up to four throwaway objects (present/absent variants) per button.
+  const attrs = { type: "button" };
+  if (cls) {
+    attrs.class = cls;
+  }
+  if (title) {
+    attrs.title = title;
+  }
+  if (ariaLabel) {
+    attrs["aria-label"] = ariaLabel;
+  }
+  Object.assign(attrs, rest);
+  const node = el("button", attrs, parent);
   if (icon) {
     node.appendChild(icon);
   }

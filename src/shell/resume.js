@@ -366,6 +366,9 @@ export class ResumeTracker {
   #lastSavedWall = 0;
   /** Off-screen save gate observer; disconnected in destroy(). */
   #intersectionObserver = null;
+  /** Pending rVFC id from the pause flush; cancelled in destroy() so a
+   *  queued final-save callback can never fire into a dead shell. */
+  #rvfcHandle = null;
   /** One-shot swap listener armed per route change; null when not armed. */
   #readoptScope = null;
   /** True from a resource swap until the new resource has been adopted:
@@ -661,14 +664,15 @@ export class ResumeTracker {
       // decoder position which may lead or lag the display. Falls back to
       // currentTime when the API is unavailable (non-Chromium, test harness).
       if (typeof video.requestVideoFrameCallback === "function") {
-        // The rVFC callback is not signal-cancellable: the pause listener dies
-        // with the scope, but a callback already queued can still fire after
-        // destroy() - guard it so a dead shell never writes a final stale save
-        // into a re-used store.
-        video.requestVideoFrameCallback((_now, metadata) => {
-          if (!this.#destroyed) {
-            this.#saveProgress(metadata.mediaTime);
-          }
+        // rVFC ids aren't AbortSignal-cancellable: keep the pending id on a
+        // field so destroy() can cancel it, and a re-pause supersedes the
+        // previous flush instead of stacking redundant saves.
+        if (this.#rvfcHandle != null) {
+          video.cancelVideoFrameCallback?.(this.#rvfcHandle);
+        }
+        this.#rvfcHandle = video.requestVideoFrameCallback((_now, metadata) => {
+          this.#rvfcHandle = null;
+          this.#saveProgress(metadata.mediaTime);
         });
       } else {
         this.#saveProgress(shell.currentTime);
@@ -708,6 +712,10 @@ export class ResumeTracker {
     this.#readoptScope = null;
     this.#intersectionObserver?.disconnect();
     this.#intersectionObserver = null;
+    if (this.#rvfcHandle != null) {
+      this.#shell?.video?.cancelVideoFrameCallback?.(this.#rvfcHandle);
+      this.#rvfcHandle = null;
+    }
     if (this.#entry && !this.#destroyed) {
       this.#saveProgress(this.#shell?.currentTime || NaN);
     }

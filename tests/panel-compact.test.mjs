@@ -141,6 +141,47 @@ test("stepper hold-to-repeat releases all timers when the panel dies mid-hold", 
   teardown();
 });
 
+test("stepper format drives display + aria-valuetext while commits stay numeric", async () => {
+  installMatchMedia();
+  const { shell, teardown } = await makeShell(false);
+  await shell.panel.open();
+
+  const parent = document.createElement("div");
+  let last = null;
+  const stepper = shell.panel.addStepper(parent, {
+    label: "Boost",
+    min: -10,
+    max: 10,
+    step: 1,
+    value: 0,
+    format: (v) => `${v > 0 ? "+" : ""}${v}s`,
+    onChange: (v) => { last = v; }
+  });
+  document.body.appendChild(parent);
+
+  // Display shows the formatter; the numeric aria primitive stays raw.
+  assert.equal(stepper.input.value, "0s");
+  assert.equal(stepper.input.getAttribute("aria-valuetext"), "0s");
+  assert.equal(stepper.input.getAttribute("aria-valuenow"), "0");
+
+  // A nudge round-trips numerically (+1s parses back to 1) and re-renders
+  // through the formatter - the internal path never feeds formatted text
+  // back into parseFloat blind.
+  const upButton = parent.querySelector(".pf-stepper-btn");
+  upButton.dispatchEvent(new window.MouseEvent("pointerdown", {
+    bubbles: true,
+    cancelable: true,
+    view: window
+  }));
+  assert.equal(stepper.getValue(), 1);
+  assert.equal(last, 1);
+  assert.equal(stepper.input.value, "+1s");
+  assert.equal(stepper.input.getAttribute("aria-valuetext"), "+1s");
+  assert.equal(stepper.input.getAttribute("aria-valuenow"), "1");
+
+  teardown();
+});
+
 test("dismissal listeners arm per open and die with the panel", async () => {
   installMatchMedia();
   const { shell, teardown } = await makeShell(false);

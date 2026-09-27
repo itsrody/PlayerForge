@@ -43,6 +43,7 @@ function createStepper({
   label,
   onChange,
   deferTextInput = false,
+  format,
   signal
 } = {}) {
   const lo = Number(min);
@@ -116,14 +117,19 @@ function createStepper({
   arrows.appendChild(upButton);
   arrows.appendChild(downButton);
 
-  const format = (v) => String(roundTo(v, decimals));
+  // Round-trip text for commit()/nudge() - always numeric so parseFloat
+  // parses it back. `format` (caller-provided) is display-only.
+  const numText = (v) => String(roundTo(v, decimals));
 
   const syncAria = () => {
     input.setAttribute("aria-valuenow", String(committed));
+    if (format) {
+      input.setAttribute("aria-valuetext", format(committed));
+    }
   };
 
   const showCommitted = () => {
-    input.value = format(committed);
+    input.value = format ? format(committed) : numText(committed);
   };
 
   const commit = (rawText) => {
@@ -133,17 +139,19 @@ function createStepper({
       return committed;
     }
     const next = roundTo(clamp(parsed, lo, hi), decimals);
-    showCommitted();
     if (next !== committed) {
       committed = next;
       syncAria();
       onChange?.(committed);
     }
+    // Render after the mutation: the old order painted the pre-commit value,
+    // so blur/Enter/nudge flashed the previous number while state advanced.
+    showCommitted();
     return committed;
   };
 
   function nudge(dir) {
-    commit(format(committed + dir * by));
+    commit(numText(committed + dir * by));
   }
 
   input.addEventListener("input", () => {
@@ -535,7 +543,7 @@ export class SettingsPanel {
     max = 100,
     step = 1,
     value,
-    _format = String,
+    format,
     onChange,
     deferTextInput = false,
     class: className,
@@ -550,6 +558,7 @@ export class SettingsPanel {
       value,
       label,
       deferTextInput,
+      format,
       onChange,
       signal: this.#scope.signal
     });

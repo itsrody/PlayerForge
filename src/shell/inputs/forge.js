@@ -3,6 +3,7 @@ import { TUNING } from "../../shared/tuning.js";
 import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../../shared/shadow.js";
 import { DOMManager } from "../../shared/dom-manager.js";
 import { logger } from "../../shared/logger.js";
+import { isBenignMediaPolicyError } from "../../shared/errors.js";
 
 /**
  * Pointer handlers never preventDefault - native pan/scroll over the zone is
@@ -616,7 +617,6 @@ export class InputForge {
       return;
     }
 
-    const now = performance.now();
     const dx = Math.abs(x - this.#startX);
     const dy = Math.abs(y - this.#startY);
 
@@ -638,7 +638,9 @@ export class InputForge {
           this.#gestureFsActive = true;
           this.#pointerOp("setPointerCapture", this.#primaryPointerId);
           this.#scrubLastX = x;
-          this.#scrubLastTime = now;
+          // event.timeStamp shares the timebase the per-move velocity filter
+          // below already reads, so the whole move stream pays no clock read.
+          this.#scrubLastTime = event.timeStamp;
           this.#scrubVelocity = 0;
         } else if (allowsIntent("swipe") && dy > SCROLL_START_PX && dy > dx * AXIS_DOMINANCE_RATIO) {
           this.#swiping = true;
@@ -954,7 +956,7 @@ export class InputForge {
     } else if (shouldToggle) {
       if (this.#video.paused) {
         this.#video.play().catch((err) => {
-          if (err.name !== "AbortError" && err.name !== "NotAllowedError") {
+          if (!isBenignMediaPolicyError(err)) {
             logger.log("forge", "bare-tap play rejected:", err.name);
           }
         });

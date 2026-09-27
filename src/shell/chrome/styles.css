@@ -313,6 +313,12 @@
         height: 1.1em;
         flex-shrink: 0;
         fill: currentColor;
+
+        /* Author display beats the UA [hidden] rule, so re-assert it here -
+           show() toggles the native hidden attribute, not inline style. */
+        &[hidden] {
+          display: none;
+        }
       }
 
       /* Text inside toast - clips with an ellipsis when a message exceeds the
@@ -322,6 +328,10 @@
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
+
+        &[hidden] {
+          display: none;
+        }
       }
 
       /* Action buttons (interactive toasts - e.g. resume prompt) */
@@ -330,6 +340,10 @@
         align-items: center;
         gap: var(--pf-space-xs);
         margin-left: var(--pf-space-xs);
+
+        &[hidden] {
+          display: none;
+        }
 
         button {
           border: none;

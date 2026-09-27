@@ -31,7 +31,7 @@
  * the fewest composed ancestor hops from the video wins; ties break by
  * registry order, then anchor order.
  */
-import { onDomMutations } from "./dom-watch.js";
+import { onDomMutations } from "../shared/dom-watch.js";
 
 const REGISTRY = [
   { name: "JW Player", anchors: [".jwplayer", ".jw-wrapper"] },

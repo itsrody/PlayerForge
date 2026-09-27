@@ -22,11 +22,23 @@ const PRESETS = {
 };
 
 const DEFAULTS = PRESETS.Default;
+const PRESET_ENTRIES = Object.entries(PRESETS);
 
 function matchPreset(values) {
-  for (const [name, preset] of Object.entries(PRESETS)) {
-    if (ALL_KEYS.every((k) => values[k] === preset[k])) {
-      return name;
+  // Index loops, no closure: matchPreset runs on every stepper change and
+  // preset select, so neither Object.entries() nor .every() may allocate.
+  for (let i = 0; i < PRESET_ENTRIES.length; i++) {
+    const preset = PRESET_ENTRIES[i][1];
+    let hit = true;
+    for (let j = 0; j < ALL_KEYS.length; j++) {
+      const key = ALL_KEYS[j];
+      if (values[key] !== preset[key]) {
+        hit = false;
+        break;
+      }
+    }
+    if (hit) {
+      return PRESET_ENTRIES[i][0];
     }
   }
   return "Custom";

@@ -15,6 +15,7 @@ import { SHELL_MARKER, warmStyles, injectShell, watchShellHost } from "./chrome/
 import { ensureViewportFitCover } from "./chrome/viewport.js";
 import { requestFullscreenProvision } from "../shared/context.js";
 import { DOMManager } from "../shared/dom-manager.js";
+import { yield_ } from "../shared/scheduler.js";
 
 /**
  * Per-video facade: wraps the media element with a stable API, injects the
@@ -69,7 +70,7 @@ export class Shell {
 
     // Yield between DOM injection and component construction so the browser
     // can process pending layout/paint work before the panel builds its tree.
-    await scheduler.yield();
+    await yield_();
 
     this.#panel = new SettingsPanel(this);
     this.#toasts = new ToastManager(this.#shellDom.hudLayer);
@@ -83,11 +84,11 @@ export class Shell {
     // wedges input handling.
     this.#panel.setSectionBuilder(async () => {
       this.#subtitles = new SubtitlesSection(this);
-      await scheduler?.yield?.();
+      await yield_();
       this.#filter = new VideoFilter(this, this.#panel);
-      await scheduler?.yield?.();
+      await yield_();
       addHistorySection(this.#panel, this);
-      await scheduler?.yield?.();
+      await yield_();
       addSettingsSection(this.#panel, this.#scope.signal);
     });
 

@@ -1,6 +1,6 @@
 import { logger } from "../shared/logger.js";
 import { getConfigValue } from "../shared/storage.js";
-import { setPerfDiag } from "../shared/perf-diag.js";
+import { setDebugRuntime } from "../shared/perf-diag.js";
 import { postTask } from "../shared/scheduler.js";
 import { ShellSlot } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
@@ -61,10 +61,8 @@ export class Kernel {
         observer.disconnect();
       }
       this.#removalObservers.clear();
-      for (const cancel of this.#removalTimers.values()) {
-        cancel();
-      }
-      this.#removalTimers.clear();
+      // Removal-grace timers are postTask handles bound to #scope.signal, so
+      // the abort below cancels every pending grace - no manual sweep.
       // Tear down in-flight settle waits so their observers + timers die
       // immediately instead of running the full quiet/cap window on a page
       // that is already leaving.
@@ -119,7 +117,7 @@ export class Kernel {
     const storedDebug = getConfigValue(DEBUG_LOGS_KEY, false);
     const hashDebug = location.hash.includes("pf-debug");
     if (storedDebug || hashDebug) {
-      this.#setDebugRuntime(true);
+      setDebugRuntime(true);
       logger.log("kernel", `Debug logs on (${[storedDebug && "setting", hashDebug && "hash"].filter(Boolean).join(" + ")})`);
     }
     const { signal } = this.#scope;
@@ -307,14 +305,5 @@ export class Kernel {
     host.dispatchEvent(new CustomEvent(GESTURE_EVENTS.panel, {
       detail: { method: "menu" }
     }));
-  }
-
-  #setDebugRuntime(on) {
-    if (on) {
-      logger.enable();
-    } else {
-      logger.disable();
-    }
-    setPerfDiag(on);
   }
 }

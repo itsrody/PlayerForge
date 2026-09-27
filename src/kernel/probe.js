@@ -20,7 +20,7 @@
  */
 import { logger } from "../shared/logger.js";
 import { watchMediaEvents, meetsMinSize, forEachVideoInMutations } from "./sdk.js";
-import { onDomMutations } from "./dom-watch.js";
+import { onDomMutations } from "../shared/dom-watch.js";
 
 export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
   let done = false;

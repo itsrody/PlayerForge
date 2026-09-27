@@ -7,7 +7,7 @@ globalThis.window = window;
 globalThis.document = window.document;
 globalThis.MutationObserver = window.MutationObserver;
 
-const { onDomMutations } = await import("../src/kernel/dom-watch.js");
+const { onDomMutations } = await import("../src/shared/dom-watch.js");
 
 function tick() {
   return new Promise((resolve) => queueMicrotask(() => setTimeout(resolve, 0)));
