@@ -89,7 +89,6 @@ function runInWorker(text) {
 
   return new Promise((resolve) => {
     let settled = false;
-    let watchTimer = 0;
 
     const cleanup = () => {
       if (settled) {
@@ -97,20 +96,25 @@ function runInWorker(text) {
       }
       settled = true;
       workerBusy = false;
-      clearTimeout(watchTimer);
       worker.terminate();
       globalThis.URL.revokeObjectURL(objectUrl);
     };
 
     // Worker death (spawn error, page CSP, uncaught throw) is never fatal:
     // hand the text back to the cooperative in-band parser and keep the
-    // exact same signature/result shape the caller expects.
+    // exact same signature/result shape the caller expects. The settled
+    // guard doubles as the watchdog's cancel: once any path has cleaned up,
+    // the still-pending AbortSignal.timeout listener becomes a no-op instead
+    // of needing a manual clearTimeout.
     const fallback = () => {
+      if (settled) {
+        return;
+      }
       cleanup();
       parseInBand(text).then(resolve);
     };
 
-    watchTimer = setTimeout(fallback, WORKER_TIMEOUT_MS);
+    AbortSignal.timeout(WORKER_TIMEOUT_MS).addEventListener("abort", fallback, { once: true });
 
     worker.onerror = () => fallback();
 

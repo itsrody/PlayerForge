@@ -12,6 +12,13 @@ const TAB_NAV_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End"]);
 /** Auto-detect compact: narrow touch viewport. matchMedia change re-applies live. */
 const COMPACT_MEDIA_QUERY = "(max-width: 480px) and (pointer: coarse)";
 
+// Live query: the open/close view transition is decoration, so a visitor who
+// asked the OS for reduced motion gets the plain update with no animation.
+// .matches is re-read per call, so a mid-session preference change applies.
+const REDUCED_MOTION_QUERY = typeof matchMedia === "function"
+  ? matchMedia("(prefers-reduced-motion: reduce)")
+  : null;
+
 function decimalsOf(step) {
   const str = String(step);
   const dot = str.indexOf(".");
@@ -235,6 +242,8 @@ export class SettingsPanel {
   #scope = new AbortController();
   /** Live only while the panel is open: Esc + outside-click dismissal. */
   #dismissScope = null;
+  /** UA-owned Escape watcher (CloseWatcher), live with #dismissScope. */
+  #closeWatcher = null;
   #backdrop = null;
   #destroyed = false;
   #sectionBuilder = null;
@@ -328,7 +337,11 @@ export class SettingsPanel {
    * Esc + outside-click dismissal exists only while the panel is open. Arming
    * it per open() keeps two document listeners out of the page's hot path for
    * shells whose panel is never (or rarely) opened; close()/destroy() abort
-   * the per-open scope, so they die with the open state.
+   * the per-open scope, so they die with the open state. Escape also gets a
+   * CloseWatcher where available (Chromium 131+, TM/Greasemonkey grants it via
+   * the same global): the UA then dismisses us even when a page-level
+   * keydown handler would otherwise swallow or reorder the event, and we do
+   * not depend on the event still bubbling to the shadow host.
    */
   #armDismissal() {
     if (this.#dismissScope || this.#destroyed) {
@@ -349,11 +362,28 @@ export class SettingsPanel {
       }
       this.close();
     }, { signal, capture: true });
+    if (typeof CloseWatcher === "function") {
+      try {
+        this.#closeWatcher = new CloseWatcher();
+        this.#closeWatcher.addEventListener("close", () => this.close(), { signal });
+      } catch {
+        // Constructor can throw where the API is gated; our keydown path above
+        // still dismisses, so the feature degrades instead of failing.
+        this.#closeWatcher = null;
+      }
+    }
   }
 
   #teardownDismissal() {
-    this.#dismissScope?.abort();
+    // Null the refs first: watcher.close() may dispatch its own `close`
+    // event synchronously, which re-enters this.close() and finds nothing
+    // left to tear down (close() itself is idempotent behind isOpen).
+    const watcher = this.#closeWatcher;
+    const scope = this.#dismissScope;
+    this.#closeWatcher = null;
     this.#dismissScope = null;
+    watcher?.close();
+    scope?.abort();
   }
 
   async openSection(title) {
@@ -772,7 +802,7 @@ export class SettingsPanel {
   }
 
   #runWithViewTransition(type, update) {
-    if (typeof document.startViewTransition === "function") {
+    if (typeof document.startViewTransition === "function" && !REDUCED_MOTION_QUERY?.matches) {
       document.startViewTransition({ types: [type], update });
     } else {
       update();

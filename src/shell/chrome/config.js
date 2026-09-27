@@ -113,9 +113,36 @@ export function getSetting(key) {
   return cache[key];
 }
 
+/**
+ * Settings reactivity bus: one module-level EventTarget so every consumer
+ * (settings section controls, and any future hot-read UI) learns about a
+ * change exactly once - own write dispatches here, the cross-tab echo lands
+ * as a no-op (changed 0) and never double-fires.
+ */
+const settingsBus = new EventTarget();
+
+function emitSettingsChanged() {
+  settingsBus.dispatchEvent(new Event("settings"));
+}
+
+/**
+ * Subscribe to settings changes; the cache is already updated when the
+ * listener runs, so re-read getSetting() directly. Returns an unsubscribe;
+ * `signal` detaches it with the caller's lifecycle.
+ */
+export function onSettingsChanged(listener, { signal } = {}) {
+  const handler = () => listener();
+  settingsBus.addEventListener("settings", handler, { signal });
+  return () => settingsBus.removeEventListener("settings", handler);
+}
+
 export function setSetting(key, value) {
+  const changed = cache[key] !== value;
   cache[key] = value;
   setConfigValue(`${SETTINGS_PREFIX}.${key}`, value);
+  if (changed) {
+    emitSettingsChanged();
+  }
 }
 
 /**
@@ -139,6 +166,7 @@ function refreshSettingsCache() {
   }
   if (changed > 0) {
     logger.log("settings", `Live-reloaded ${changed} setting(s) from storage`);
+    emitSettingsChanged();
   }
 }
 
@@ -147,9 +175,10 @@ gmAddValueChangeListener(KEYS.configs, () => refreshSettingsCache());
 /**
  * Render SETTINGS_SCHEMA into the settings panel: one labeled section per
  * group, toggles for bools, steppers for numbers. Pure function over the
- * panel API - no lifecycle of its own.
+ * panel API - aside from the reactivity subscription below, no lifecycle of
+ * its own (`signal` ties that subscription to the caller, e.g. the shell).
  */
-export function addSettingsSection(panel) {
+export function addSettingsSection(panel, signal) {
   if (!panel?.body) {
     return;
   }
@@ -157,6 +186,9 @@ export function addSettingsSection(panel) {
   if (!sectionRoot) {
     return;
   }
+
+  /** key -> widget handle(s), so a change event can re-sync without queries. */
+  const controls = new Map();
 
   let currentGroup = null;
   let groupGrid = null;
@@ -180,11 +212,13 @@ export function addSettingsSection(panel) {
       });
       checkbox.setAttribute("aria-label", definition.label);
       panel.el("span", {}, toggleLabel).textContent = definition.label;
+      controls.set(definition.key, { type: "bool", el: checkbox });
     } else if (definition.type === "options") {
       const cell = panel.el("div", { class: "pf-panel-cell pf-options-cell" }, groupGrid);
       panel.addLabel(cell, definition.label);
       const row = panel.el("div", { class: "pf-options-row" }, cell);
       const current = getSetting(definition.key);
+      const buttons = [];
       for (const opt of definition.options) {
         const btn = panel.el("button", {
           type: "button",
@@ -197,9 +231,11 @@ export function addSettingsSection(panel) {
             b.classList.toggle("pf-options-active", b === btn);
           }
         });
+        buttons.push([opt, btn]);
       }
+      controls.set(definition.key, { type: "options", buttons });
     } else {
-      panel.addControl(groupGrid, {
+      const stepper = panel.addControl(groupGrid, {
         type: "stepper",
         label: definition.label,
         min: definition.min,
@@ -213,7 +249,35 @@ export function addSettingsSection(panel) {
         deferTextInput: true,
         onChange: (parsed) => setSetting(definition.key, parsed)
       });
+      if (stepper) {
+        controls.set(definition.key, { type: "stepper", el: stepper });
+      }
     }
   }
+
+  // Re-sync widgets when a setting changes elsewhere (another tab's write, or
+  // an in-page setSetting that did not originate from these controls). Values
+  // are assigned - never .click()/.dispatchEvent - so the sync cannot echo
+  // back into setSetting. A destroyed panel (body nulled) unsubscribes.
+  let off = () => {};
+  const syncFromCache = () => {
+    if (!panel?.body) {
+      off();
+      return;
+    }
+    for (const [key, rec] of controls) {
+      const fresh = getSetting(key);
+      if (rec.type === "bool") {
+        rec.el.checked = fresh;
+      } else if (rec.type === "options") {
+        for (const [opt, btn] of rec.buttons) {
+          btn.classList.toggle("pf-options-active", opt === fresh);
+        }
+      } else {
+        rec.el.setValue(fresh);
+      }
+    }
+  };
+  off = onSettingsChanged(syncFromCache, { signal });
   logger.log("settings", "Settings section ready");
 }

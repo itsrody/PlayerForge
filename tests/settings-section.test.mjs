@@ -15,10 +15,10 @@ globalThis.GM_setValue = (key, value) => {
   configsListener?.(key, null, value, false);
 };
 
-const { addSettingsSection, getSetting, setSetting } = await import("../src/shell/chrome/config.js");
+const { addSettingsSection, getSetting, setSetting, onSettingsChanged } = await import("../src/shell/chrome/config.js");
 
 function makeFakePanel() {
-  const calls = { sections: [], labels: [], checkboxes: [], steppers: [] };
+  const calls = { sections: [], labels: [], checkboxes: [], steppers: [], buttons: [] };
   const node = (tag, attrs = {}, parent = null) => {
     const classSet = new Set(attrs.class ? attrs.class.split(" ") : []);
     const el = { tag, attrs, parent, children: [], textContent: "", ariaLabel: null };
@@ -45,7 +45,11 @@ function makeFakePanel() {
   const panel = {
     calls,
     body: {},
-    el: (tag, attrs, parent) => node(tag, attrs, parent),
+    el: (tag, attrs, parent) => {
+      const n = node(tag, attrs, parent);
+      if (tag === "button") calls.buttons.push(n);
+      return n;
+    },
     addSection: (title, id) => {
       const root = node(`section#${id}`, { title });
       calls.sections.push({ title, id, root });
@@ -65,7 +69,16 @@ function makeFakePanel() {
     },
     addStepper: (grid, options) => {
       calls.steppers.push(options);
-      return {};
+      // Real panel handle shape (panel.addStepper returns { setValue, ... }).
+      return {
+        root: {},
+        input: {},
+        getValue: () => options.value,
+        setValue(value) {
+          this.value = value;
+        },
+        setDisabled() {}
+      };
     },
     addControl: (parent, { type, ...opts }) => {
       switch (type) {
@@ -138,4 +151,59 @@ test("live-reload rejects option values outside the schema set", () => {
   writes["pf:configs"] = { version: 1, settings: { controller: { stepSeek: 7 } } };
   configsListener?.("pf:configs", null, null, true);
   assert.equal(getSetting("controller.stepSeek"), 5, "out-of-enum values fall back to the schema default");
+});
+
+test("settings changes notify subscribers exactly once (echo is a no-op)", () => {
+  setSetting("gestures.hotkeys", true); // precondition, before subscribing
+  let notifications = 0;
+  const off = onSettingsChanged(() => { notifications++; });
+  setSetting("gestures.hotkeys", false); // changed -> one dispatch; storage echo -> no dispatch
+  assert.equal(notifications, 1, "own write fired exactly one notification");
+  setSetting("gestures.hotkeys", false); // same value -> nothing
+  assert.equal(notifications, 1, "a no-op write stays silent");
+  off();
+  setSetting("gestures.hotkeys", true); // restore
+  assert.equal(notifications, 1, "unsubscribed listener is detached");
+});
+
+test("a cross-tab settings change re-syncs open controls without echoing back", () => {
+  setSetting("controller.stepSeek", 5); // precondition: 5s is the active option
+  setSetting("gestures.hotkeys", true);
+  const panel = makeFakePanel();
+  addSettingsSection(panel);
+  const hotkeys = panel.calls.checkboxes[0];
+  let echoCalls = 0;
+  const originalOnChange = hotkeys.onChange;
+  hotkeys.onChange = (value) => {
+    echoCalls++;
+    originalOnChange(value);
+  };
+  // stepSeek's option buttons render in schema order: [5s, 10s, 15s].
+  const stepButtons = panel.calls.buttons;
+  assert.equal(stepButtons.length, 3);
+  assert.ok(stepButtons[0].classList.has("pf-options-active"), "5s active by default");
+
+  // Another tab wrote: hotkeys off, stepSeek 15.
+  writes["pf:configs"] = {
+    version: 1,
+    settings: { gestures: { hotkeys: false }, controller: { stepSeek: 15 } }
+  };
+  configsListener?.("pf:configs", null, null, true);
+
+  assert.equal(hotkeys.checked, false, "checkbox follows the foreign value");
+  assert.ok(!stepButtons[0].classList.has("pf-options-active"), "5s deactivated");
+  assert.ok(stepButtons[2].classList.has("pf-options-active"), "15s activated");
+  assert.equal(echoCalls, 0, "sync assigns values only - it never re-fires onChange");
+});
+
+test("a panel destroyed mid-life unsubscribes on the next change", () => {
+  setSetting("gestures.hotkeys", true); // precondition, before the panel builds
+  const panel = makeFakePanel();
+  addSettingsSection(panel);
+  const hotkeys = panel.calls.checkboxes[0];
+  const before = hotkeys.checked;
+  panel.body = null; // panel.destroy() nulls the body
+  setSetting("gestures.hotkeys", !before);
+  assert.equal(hotkeys.checked, before, "dead panel's controls are left alone");
+  setSetting("gestures.hotkeys", before); // restore for later tests sharing the module cache
 });

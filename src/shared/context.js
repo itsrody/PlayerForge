@@ -18,6 +18,8 @@
  */
 /* - Window message types - */
 
+import { postTask } from "./scheduler.js";
+
 /**
  * The postMessage types the frame bridge sends and receives across iframe
  * edges. Inlined here - they are used only by this module, so a shared
@@ -450,7 +452,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   const { promise, resolve } = Promise.withResolvers();
   const ac = new AbortController();
   let nonce = null;
-  let retryTimer = null;
+  let retryHandle = null;
   let attemptCount = 0;
   let replyPort = null;
   let transferPort = null;
@@ -474,7 +476,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
       return;
     }
     settled = true;
-    clearTimeout(retryTimer);
+    retryHandle?.abort();
     ac.abort();
     if (replyPort) {
       if (viaPort) {
@@ -570,7 +572,10 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
     sendRequest();
     const base = CTX_RETRY_BACKOFF[Math.min(attemptCount, CTX_RETRY_BACKOFF.length - 1)];
     attemptCount++;
-    retryTimer = setTimeout(attempt, base + Math.floor(Math.random() * (CTX_RETRY_JITTER_MS + 1)));
+    retryHandle = postTask(attempt, {
+      delay: base + Math.floor(Math.random() * (CTX_RETRY_JITTER_MS + 1)),
+      signal: ac.signal
+    });
   };
   attempt();
   return promise;

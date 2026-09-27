@@ -1,5 +1,6 @@
-/**
- * Seconds -> "M:SS" (or "H:MM:SS" past the hour). Shared by toast text,
+import { postTask } from "./scheduler.js";
+
+/** Seconds -> "M:SS" (or "H:MM:SS" past the hour). Shared by toast text,
  * resume prompts, and scrub hints.
  *
  * Integer arithmetic + direct string coercion instead of Math.max/Math.floor
@@ -19,10 +20,12 @@ export function formatTime(seconds) {
   return h > 0 ? h + ":" + mm + ":" + ss : m + ":" + ss;
 }
 
-/** Cancellable setTimeout: the returned function cancels a pending run. */
+/** Cancellable delay: runs `fn` after `ms`, returned fn cancels the pending run.
+ *  Routed through postTask so the scheduler façade owns the timer (Chromium
+ *  task scheduler with the shared setTimeout fallback; same cancel contract). */
 export function delay(fn, ms) {
-  const id = setTimeout(fn, ms);
-  return () => clearTimeout(id);
+  const handle = postTask(fn, { delay: ms });
+  return () => handle.abort();
 }
 
 /**

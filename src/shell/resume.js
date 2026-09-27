@@ -1,4 +1,5 @@
 import { getPageContext, domainsMatch, domainScore, hashEntry } from "../shared/context.js";
+import { onNavigate } from "../shared/navigation.js";
 import { TUNING } from "../shared/tuning.js";
 import { KEYS, gmSetValue, loadJsonObject, gmAddValueChangeListener, gmRemoveValueChangeListener } from "../shared/storage.js";
 import { formatTime } from "../shared/time.js";
@@ -366,6 +367,11 @@ export class ResumeTracker {
   #lastSavedWall = 0;
   /** Off-screen save gate observer; disconnected in destroy(). */
   #intersectionObserver = null;
+  /** One-shot swap listener armed per route change; null when not armed. */
+  #readoptScope = null;
+  /** True from a resource swap until the new resource has been adopted:
+   *  saves are muted so the reset currentTime cannot land in the old entry. */
+  #adopting = false;
   #destroyed = false;
 
   constructor(shell) {
@@ -388,61 +394,91 @@ export class ResumeTracker {
       logger.log("resume", "Top context unavailable - skipping");
       return;
     }
-
-    const video = shell.video;
-    if (!video.duration || !isFinite(video.duration)) {
-      // Resolving twice is a no-op, so timeout and signal races are safe.
-      const { signal } = this.#scope;
-      const { promise: metadataReady, resolve: resolveMetadata } = Promise.withResolvers();
-      const finishWaiting = () => resolveMetadata();
-      const onDurationChange = () => {
-        if (video.duration && isFinite(video.duration)) {
-          finishWaiting();
-        }
-      };
-      const onLoaded = () => finishWaiting();
-      const onError = () => finishWaiting();
-      // The metadata watchdog is the native AbortSignal.timeout shape: the
-      // combined wait signal removes the media listeners AND resolves the
-      // wait the moment the cap elapses or the shell dies, so a destroyed
-      // shell never leaves the suspended continuation alive for the full 10s.
-      // (try/catch mirrors shared/context.js - some host realms brand-check
-      // composed signals; the fallback is the old manual timer.)
-      let waitSignal;
-      try {
-        waitSignal = AbortSignal.any([signal, AbortSignal.timeout(RESUME_METADATA_WAIT_MS)]);
-      } catch {
-        waitSignal = signal;
-        const timeoutHandle = setTimeout(finishWaiting, RESUME_METADATA_WAIT_MS);
-        signal.addEventListener("abort", () => clearTimeout(timeoutHandle), { once: true });
-      }
-      waitSignal.addEventListener("abort", finishWaiting, { once: true });
-      video.addEventListener("loadedmetadata", onLoaded, { signal: waitSignal });
-      video.addEventListener("durationchange", onDurationChange, { signal: waitSignal });
-      video.addEventListener("error", onError, { signal: waitSignal });
-      await metadataReady;
-      if (this.#destroyed) {
-        logger.log("resume", "Shell destroyed before metadata - skipping");
-        return;
-      }
-      if (!video.isConnected) {
-        logger.log("resume", "Video detached before metadata - skipping");
-        return;
-      }
+    if (!(await this.#waitForDuration()) || !this.#adoptEntry(context)) {
+      return;
     }
+    this.#startProgressWatch(shell);
+    this.#watchNavigation();
+  }
 
-    const duration = Number(video.duration);
+  /**
+   * Resolve once the element reports a finite duration: metadata load, an
+   * error, the metadata cap, or shell death all settle the wait. Returns
+   * false when the caller must give up (destroyed / detached / no duration),
+   * so first discovery and swap re-adoption share one deadline.
+   */
+  async #waitForDuration() {
+    const shell = this.#shell;
+    const video = shell.video;
+    if (Number.isFinite(video.duration) && video.duration > 0) {
+      return true;
+    }
+    // Resolving twice is a no-op, so timeout and signal races are safe.
+    const { signal } = this.#scope;
+    const { promise: metadataReady, resolve: resolveMetadata } = Promise.withResolvers();
+    const finishWaiting = () => resolveMetadata();
+    const onDurationChange = () => {
+      if (video.duration && isFinite(video.duration)) {
+        finishWaiting();
+      }
+    };
+    const onLoaded = () => finishWaiting();
+    const onError = () => finishWaiting();
+    // The metadata watchdog is the native AbortSignal.timeout shape: the
+    // combined wait signal removes the media listeners AND resolves the
+    // wait the moment the cap elapses or the shell dies, so a destroyed
+    // shell never leaves the suspended continuation alive for the full 10s.
+    // (try/catch mirrors shared/context.js - some host realms brand-check
+    // composed signals; the fallback is the old manual timer.)
+    let waitSignal;
+    try {
+      waitSignal = AbortSignal.any([signal, AbortSignal.timeout(RESUME_METADATA_WAIT_MS)]);
+    } catch {
+      waitSignal = signal;
+      const timeoutHandle = setTimeout(finishWaiting, RESUME_METADATA_WAIT_MS);
+      signal.addEventListener("abort", () => clearTimeout(timeoutHandle), { once: true });
+    }
+    waitSignal.addEventListener("abort", finishWaiting, { once: true });
+    video.addEventListener("loadedmetadata", onLoaded, { signal: waitSignal });
+    video.addEventListener("durationchange", onDurationChange, { signal: waitSignal });
+    video.addEventListener("error", onError, { signal: waitSignal });
+    await metadataReady;
+    if (this.#destroyed) {
+      logger.log("resume", "Shell destroyed before metadata - skipping");
+      return false;
+    }
+    if (!video.isConnected) {
+      logger.log("resume", "Video detached before metadata - skipping");
+      return false;
+    }
+    if (!(Number.isFinite(video.duration) && video.duration > 0)) {
+      logger.log("resume", "No duration available - skipping");
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Bind the tracker to the entry for `context` at the media's CURRENT
+   * duration: match-or-create, resume-seek when that entry carries a saved
+   * position, reseed the save gates. Shared by first discovery and every
+   * swap re-adoption, so an SPA route change lands on its own (path,
+   * duration) entry instead of the one discovered at boot.
+   */
+  #adoptEntry(context) {
+    const shell = this.#shell;
+    const duration = Number(shell.video.duration);
     if (!Number.isFinite(duration) || duration <= 0) {
       logger.log("resume", "No duration available - skipping");
-      return;
+      return false;
     }
 
     this.#store.cleanStale();
     const match = this.#store.findMatch(context.domain, context.path, duration);
     if (match) {
       this.#entry = match;
-      // Both branches below run once per discovered video; guarded so the
-      // default (chatter off) never builds the template.
+      // One pair of branches per adopted resource (boot + each swap); guarded
+      // so the default (chatter off) never builds the templates.
       if (logger.enabled) {
         logger.log("resume", `Matched ${match.id} - resume at ${match.resume}s`);
       }
@@ -471,10 +507,105 @@ export class ResumeTracker {
     }
 
     this.#lastSavedPosition = Number.isFinite(savedPosition) ? savedPosition : (shell.currentTime || NaN);
-    this.#startProgressWatch(shell);
+    return true;
   }
 
+  /**
+   * Follow same-document navigations (shared/navigation.js): flush the entry
+   * we are leaving - if the player swaps resources before the next
+   * timeupdate, that flush is the last write this route gets - then arm the
+   * re-adoption the swap triggers. A hash/query-only change resolves to the
+   * same (domain, path) and stops here.
+   */
+  #watchNavigation() {
+    onNavigate(() => {
+      if (this.#destroyed || !this.#entry) {
+        return;
+      }
+      this.#saveProgress(this.#shell.currentTime);
+      this.#followRoute();
+    }, { signal: this.#scope.signal });
+  }
+
+  async #followRoute() {
+    try {
+      const context = await getPageContext();
+      if (this.#destroyed || !context || !this.#entry) {
+        return;
+      }
+      const current = this.#entry;
+      if (current.path === context.path && domainsMatch(current.domain, context.domain)) {
+        return;
+      }
+      this.#armReadopt();
+    } catch (err) {
+      logger.error("resume", "Route follow after navigation failed:", err);
+    }
+  }
+
+  /**
+   * One-shot: the next resource selection on the element belongs to the route
+   * we navigated to, so adoption runs against THAT resource's metadata and
+   * duration. Saves mute (see #adopting) from the swap until adoption
+   * finishes, so the element's reset currentTime can never land in the entry
+   * we are leaving - the navigation flush already holds its position.
+   */
+  #armReadopt() {
+    if (this.#destroyed || this.#readoptScope) {
+      return;
+    }
+    const ac = new AbortController();
+    this.#readoptScope = ac;
+    const video = this.#shell.video;
+    const run = () => {
+      if (this.#readoptScope !== ac) {
+        return;
+      }
+      this.#readoptScope = null;
+      this.#adopting = true;
+      ac.abort();
+      this.#readopt();
+    };
+    video.addEventListener("loadstart", run, { signal: ac.signal, once: true });
+    // The SPA may have kicked off the new resource BEFORE it pushed history:
+    // that loadstart already fired, and waiting for a second one would strand
+    // the adoption. Adopt now when the element is mid-selection.
+    if (video.readyState === 0 && video.networkState === 2) {
+      run();
+    }
+  }
+
+  async #readopt() {
+    try {
+      const context = await getPageContext();
+      if (this.#destroyed || !context) {
+        return;
+      }
+      if (!(await this.#waitForDuration())) {
+        return;
+      }
+      if (this.#destroyed || !this.#entry) {
+        return;
+      }
+      // Deliberately no pre-switch flush here: by loadstart the element has
+      // already reset its playhead, so writing currentTime now would stamp
+      // the NEW resource's 0 onto the entry we are leaving. Its position was
+      // captured by the navigation flush plus every save before the swap
+      // (this.#adopting mutes the window in between).
+      this.#adoptEntry(context);
+    } catch (err) {
+      logger.error("resume", "Re-adoption after resource swap failed:", err);
+    } finally {
+      this.#adopting = false;
+    }
+  }
+
+  /** Save gate: entry-less or swap-in-flight states never write. */
   #saveProgress(currentTime) {
+    if (this.#adopting || !this.#entry) {
+      return;
+    }
+    const entry = this.#entry;
     if (Math.abs(currentTime - this.#lastSavedPosition) < RESUME_SAVE_EPSILON_S) {
       return;
     }
@@ -482,12 +613,12 @@ export class ResumeTracker {
     // Every persist resets the cadence floor so the timeupdate path's
     // wall gate starts counting from real writes (including flushes).
     this.#lastSavedWall = Date.now();
-    if (this.#entry.duration > 0 && currentTime / this.#entry.duration >= RESUME_COMPLETION_RATIO) {
-      this.#entry.resume = 0;
-      this.#store.updateResume(this.#entry.id, 0);
+    if (entry.duration > 0 && currentTime / entry.duration >= RESUME_COMPLETION_RATIO) {
+      entry.resume = 0;
+      this.#store.updateResume(entry.id, 0);
       return;
     }
-    this.#store.updateResume(this.#entry.id, currentTime);
+    this.#store.updateResume(entry.id, currentTime);
   }
 
   #startProgressWatch(shell) {
@@ -585,6 +716,8 @@ export class ResumeTracker {
 
   destroy() {
     this.#scope.abort();
+    this.#readoptScope?.abort();
+    this.#readoptScope = null;
     this.#intersectionObserver?.disconnect();
     this.#intersectionObserver = null;
     if (this.#entry && !this.#destroyed) {

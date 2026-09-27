@@ -305,10 +305,11 @@ export function easeTransformTo(video, transform) {
 }
 
 /**
- * Smoothly lerp a <video>'s volume from -> to over `duration` ms, cancelable.
- * Runs on the rAF beat with true timestamps so the fade is framerate-
- * independent, and lands exactly on `to`. Returns a stop() that cancels the
- * fade (leaving volume where it is) so an interrupting action can take over.
+ * Release pinch/fill scale on a shell's video: flips the fill state off,
+ * eases the transform back to none (or snaps it, when `animate` is false -
+ * the instant path also cancels any in-flight WAAPI ease and clears
+ * will-change), then hands object-fit back to what the embed had before
+ * fill mode claimed it. No-op when fill was never active.
  */
 function clearFillMode(shell, state, animate = true) {
   if (!state.fillActive) {

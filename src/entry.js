@@ -70,14 +70,20 @@ function bootstrap() {
       welcomePending = false;
       setConfigValue(KEYS.firstRun, false);
       const coarsePointer = matchMedia("(pointer: coarse)").matches;
-      const cancelHint = () => {
-        clearTimeout(hintTimer);
-        document.removeEventListener("pointerdown", cancelHint, true);
-        document.removeEventListener("keydown", cancelHint, true);
-        document.removeEventListener("wheel", cancelHint, true);
-      };
-      const hintTimer = setTimeout(() => {
-        cancelHint();
+      // One composed signal owns the hint's lifetime: the 1.2s cap and the
+      // visitor's first interaction are its sources, so either one detaches
+      // all three capture listeners - no clearTimeout plus manual
+      // removeEventListener bookkeeping. Aborting the composed signal does
+      // not cancel the cap's timer, so the flag is what keeps a dismissed
+      // hint from toasting when the cap later elapses.
+      const hintCap = AbortSignal.timeout(1200);
+      const hintDismiss = new AbortController();
+      const hintSignal = AbortSignal.any([hintDismiss.signal, hintCap]);
+      let hintCancelled = false;
+      hintCap.addEventListener("abort", () => {
+        if (hintCancelled) {
+          return;
+        }
         if (shell && shell.container?.isConnected && !shell.panel?.isOpen) {
           shell.toastHint(
             "captions",
@@ -86,10 +92,14 @@ function bootstrap() {
               : "Press S for settings · Swipe down to exit fullscreen"
           );
         }
-      }, 1200);
-      document.addEventListener("pointerdown", cancelHint, { capture: true, once: true });
-      document.addEventListener("keydown", cancelHint, { capture: true, once: true });
-      document.addEventListener("wheel", cancelHint, { capture: true, passive: true, once: true });
+      }, { once: true });
+      const cancelHint = () => {
+        hintCancelled = true;
+        hintDismiss.abort();
+      };
+      document.addEventListener("pointerdown", cancelHint, { capture: true, once: true, signal: hintSignal });
+      document.addEventListener("keydown", cancelHint, { capture: true, once: true, signal: hintSignal });
+      document.addEventListener("wheel", cancelHint, { capture: true, passive: true, once: true, signal: hintSignal });
     });
 
     // Minimal public surface: pages get the version string only. The kernel

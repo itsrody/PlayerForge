@@ -241,11 +241,14 @@ export class Kernel {
     this.#removalObservers.add(observer);
 
     const reanchorObservers = () => {
-      // Unobserve stale anchors without a full disconnect (pending records
-      // from targets that still matter are preserved).
-      for (const target of anchors) {
-        observer.unobserve(target);
-      }
+      // MutationObserver has no per-target unobserve(): disconnect() is the
+      // only way to drop the stale roots (the previous loop called a method
+      // that does not exist and threw, leaving the anchors stranded on their
+      // original parents). Records dropped by the disconnect cost nothing:
+      // this callback never reads the queue - every decision below is
+      // re-derived from live DOM state, which was just evaluated on this
+      // very call - and the next mutation lands on the re-observed roots.
+      observer.disconnect();
       anchors.length = 0;
       let anchor = video.parentElement || container;
       for (let depth = 0; anchor && depth < watchDepth; depth++, anchor = anchor.parentElement) {

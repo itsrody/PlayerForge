@@ -107,6 +107,7 @@ export default [
         Atomics: "readonly",
         WebAssembly: "readonly",
         matchMedia: "readonly",
+        CloseWatcher: "readonly",
         getComputedStyle: "readonly",
         cancelAnimationFrame: "readonly",
         requestAnimationFrame: "readonly",

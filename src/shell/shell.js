@@ -88,7 +88,7 @@ export class Shell {
       await scheduler?.yield?.();
       addHistorySection(this.#panel, this);
       await scheduler?.yield?.();
-      addSettingsSection(this.#panel);
+      addSettingsSection(this.#panel, this.#scope.signal);
     });
 
     this.#setupFocusManagement();

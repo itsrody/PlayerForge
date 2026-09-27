@@ -69,3 +69,39 @@ test("kernel.init() adopts a video already present in the parsed DOM", async () 
   assert.equal(created[0].video, video);
   assert.equal(created[0].sdk.name, "JW Player");
 });
+
+async function waitFor(cond, ms = 2000) {
+  const start = Date.now();
+  while (!cond()) {
+    if (Date.now() - start > ms) {
+      throw new Error("condition not met in time");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+test("removal watch reanchors after a parent swap and still detects removal", async () => {
+  const { kernel, video, created } = makeHarness();
+  kernel.init();
+  // This kernel adopts every video in the document (the previous test's is
+  // still mounted), so wait for OUR shell specifically.
+  await waitFor(() => created.some((shell) => shell.video === video));
+  const shell = created.find((entry) => entry.video === video);
+  let destroyed = false;
+  shell.destroy = () => { destroyed = true; };
+
+  // Reparent the VIDEO itself: its anchor chain goes stale, so the removal
+  // observer must disconnect and re-observe from the new roots. (MutationObserver
+  // has no unobserve(): the old loop called a method that does not exist, threw
+  // inside the callback, and stranded the anchors on the original parents.)
+  const swap = document.createElement("div");
+  document.body.appendChild(swap);
+  swap.appendChild(video);
+  await new Promise((resolve) => setTimeout(resolve, 20)); // MutationObserver delivery
+
+  // Removal from the NEW location is only noticed if reanchor re-observed it;
+  // a stranded watcher would silently miss this childList record.
+  video.remove();
+  await waitFor(() => destroyed, 3000);
+  assert.ok(destroyed, "the shell was torn down after removal from the swapped parent");
+});

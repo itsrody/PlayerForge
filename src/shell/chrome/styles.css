@@ -21,6 +21,11 @@
      that needs no @supports fallback.
    ------------------------------------------------------------------ */
 .pf-shell {
+  /* The HUD paints its own dark palette; opting the shadow tree into dark
+     rendering keeps UA form-control widgets (color wells, scrollbars, date
+     pickers) from flashing light against it. */
+  color-scheme: dark;
+
   /* -- Tokens: palette, borders, radii, type, motion, z-ladder -- */
   --pf-fg: #fff;                    /* primary text            */
   --pf-bg: #000;                    /* base ink                */
@@ -1303,5 +1308,25 @@
   @keyframes pf-panel-fade-in {
     from { opacity: 0; transform: scale(0.96); }
     to   { opacity: 1; transform: scale(1); }
+  }
+}
+
+/* Motion preference (declared outside @layer pf-hud so it outranks the
+   unlayered token block above by source order). Collapsing the three motion
+   tokens takes the toast drop-in, panel open/close, @starting-style, and
+   control micro-motion with them - every transition that reads them - while
+   color-only feedback stays. The panel view transition is already refused in
+   JS (panel.js REDUCED_MOTION_QUERY); neutralizing its pseudo layers here
+   covers any path that still starts one. */
+@media (prefers-reduced-motion: reduce) {
+  .pf-shell {
+    --pf-ease-duration: 0s;
+    --pf-ease-bounce: 0s;
+    --pf-ease-out: 0s;
+  }
+
+  ::view-transition-old(pf-panel),
+  ::view-transition-new(pf-panel) {
+    animation: none;
   }
 }
