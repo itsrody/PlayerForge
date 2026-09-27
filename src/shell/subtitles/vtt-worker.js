@@ -29,7 +29,7 @@ const DECODER = new TextDecoder();
 /**
  * Report every long animation frame the worker produced. LoAF in workers
  * landed in Chromium 153; the observer costs nothing when the support is
- * absent (pre-153 Chromium, jsdom test hosts).
+ * absent (the Chromium 152 floor, jsdom test hosts).
  */
 if (
   typeof PerformanceObserver !== "undefined" &&

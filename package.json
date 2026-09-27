@@ -1,7 +1,7 @@
 {
   "name": "playerforge",
   "version": "0.7.2",
-  "description": "Helium Browser (desktop) and Titanium Browser (Android), Chromium 153+ / Tampermonkey 5.5+ (MV3) exclusive HTML5 video player enhancer with gestures, hotkeys, progress resume, subtitles, and an extensible plugin system",
+  "description": "HTML5 video player  enhancer with a lot of useful features built natively for Vivaldi browser on both desktop and android platforms running by Tampermokey extension.",
   "license": "MIT",
   "type": "module",
   "scripts": {

@@ -1,9 +1,9 @@
 /**
  * ChromiumDriver lifecycle manager.
  *
- * Launches a headless Chromium/Brave 152 instance via Selenium WebDriver,
- * connects through the ChromeDriver protocol, and exposes helpers for script
- * injection, page navigation, and pointer event dispatch.
+ * Launches a headless Vivaldi (or Brave/Chrome fallback) instance via
+ * Selenium WebDriver, connects through the ChromeDriver protocol, and exposes
+ * helpers for script injection, page navigation, and pointer event dispatch.
  *
  * Usage:
  *   const driver = await ChromiumDriver.launch();
@@ -13,8 +13,10 @@
  *   await driver.destroy();
  */
 import { Builder } from "selenium-webdriver";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createServer as createHttpServer } from "node:http";
 
@@ -22,14 +24,18 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(HERE, "..", "..");
 
 /**
- * Resolve the Chromium/Brave binary path on macOS.
- * Order: BRAVE_PATH env → known macOS locations → fallback error.
+ * Resolve the Chromium-based binary path on macOS.
+ * Order: VIVALDI_PATH/BRAVE_PATH env → known locations (Vivaldi first - the
+ * supported target platform on desktop and Android) → fallback error.
  */
 function resolveBinary() {
-  if (process.env.BRAVE_PATH && existsSync(process.env.BRAVE_PATH)) {
-    return process.env.BRAVE_PATH;
+  const envPath = process.env.VIVALDI_PATH || process.env.BRAVE_PATH;
+  if (envPath && existsSync(envPath)) {
+    return envPath;
   }
   const candidates = [
+    "/Applications/Vivaldi.app/Contents/MacOS/Vivaldi",
+    join(homedir(), "Applications", "Vivaldi.app", "Contents", "MacOS", "Vivaldi"),
     "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
@@ -38,8 +44,87 @@ function resolveBinary() {
     if (existsSync(p)) return p;
   }
   throw new Error(
-    "No Chromium-based browser found. Set BRAVE_PATH or install Brave/Chrome."
+    "No Chromium-based browser found. Set VIVALDI_PATH/BRAVE_PATH or install Vivaldi."
   );
+}
+
+/**
+ * Build the WebDriver service. A chromedriver already on disk is preferred:
+ * Selenium Manager's resolve-and-download runs synchronously on the main
+ * thread and can stall for minutes on restricted networks. CHROMEDRIVER_PATH
+ * overrides the probe; without any local driver we fall back to the manager.
+ */
+/**
+ * Vivaldi reports its own product version (8.x) while the embedded Chromium
+ * is a different major - chromedriver refuses the handshake unless they
+ * match. Extract the embedded Chromium version (the most frequent
+ * `≥100.0.x.y` string in the framework binary) and wrap the launch: the shim
+ * answers --product-version/--version with it and execs the real browser for
+ * every other invocation. Non-Vivaldi binaries report honest Chromium
+ * versions already and pass through untouched.
+ */
+const versionCache = new Map();
+function wrapVivaldi(binary, dir) {
+  if (!/vivaldi/i.test(binary)) return binary;
+  let version = versionCache.get(binary);
+  if (version === undefined) {
+    version = null;
+    const appRoot = binary.match(/^(.*)\/Vivaldi\.app\//);
+    const framework = appRoot
+      ? join(appRoot[1], "Vivaldi.app", "Contents", "Frameworks",
+          "Vivaldi Framework.framework", "Versions", "Current", "Vivaldi Framework")
+      : null;
+    if (framework !== null && existsSync(framework)) {
+      try {
+        const out = execFileSync(
+          "grep",
+          ["-aoE", "[0-9]+\\.0\\.[0-9]+\\.[0-9]+", framework],
+          { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 1 << 26 }
+        );
+        const tally = new Map();
+        for (const line of out.split("\n")) {
+          const major = Number(line.slice(0, line.indexOf(".")));
+          if (!(major >= 100)) continue;
+          tally.set(line, (tally.get(line) || 0) + 1);
+        }
+        let best = null;
+        let bestN = 0;
+        for (const [v, n] of tally) {
+          if (n > bestN) { best = v; bestN = n; }
+        }
+        version = best;
+      } catch {
+        version = null;
+      }
+    }
+    versionCache.set(binary, version);
+  }
+  if (version === null) return binary;
+  const wrapper = join(dir, "vivaldi-driver-shim");
+  writeFileSync(
+    wrapper,
+    `#!/bin/sh\n` +
+      `# chromedriver handshake shim: answer the embedded Chromium version,\n` +
+      `# exec Vivaldi for everything else.\n` +
+      `for a in "$@"; do\n` +
+      `  case "$a" in\n` +
+      `    --product-version|--version) printf '%s\\n' '${version}'; exit 0;;\n` +
+      `  esac\n` +
+      `done\n` +
+      `exec '${binary}' "$@"\n`
+  );
+  chmodSync(wrapper, 0o755);
+  return wrapper;
+}
+
+function buildService(chrome) {
+  const candidates = [
+    process.env.CHROMEDRIVER_PATH,
+    "/opt/homebrew/bin/chromedriver",
+    "/usr/local/bin/chromedriver",
+  ];
+  const local = candidates.find((p) => p && existsSync(p));
+  return new chrome.ServiceBuilder(local || undefined);
 }
 
 /**
@@ -58,15 +143,18 @@ function readBundle() {
 export class ChromiumDriver {
   /** @type {import('selenium-webdriver').WebDriver} */
   #driver;
+  /** Temp profile dir backing this launch (isolated from a live session). */
+  #profileDir;
   /** @type {boolean} */
   #destroyed = false;
 
-  constructor(driver) {
+  constructor(driver, profileDir = null) {
     this.#driver = driver;
+    this.#profileDir = profileDir;
   }
 
   /**
-   * Launch a headless Chromium/Brave 152 instance.
+   * Launch a headless Vivaldi (Chromium 152) instance.
    * @param {object} [options]
    * @param {boolean} [options.headless=true] - Run headless.
    * @param {number} [options.port=0] - ChromeDriver port (0 = auto).
@@ -74,9 +162,14 @@ export class ChromiumDriver {
    */
   static async launch(options = {}) {
     const { headless = true, port = 0 } = options;
-    const binary = resolveBinary();
 
+    // An isolated profile is mandatory: without it Vivaldi's singleton
+    // forwards the launch to an already-running session (whose DevTools port
+    // never binds) and the driver waits forever.
+    const profileDir = mkdtempSync(join(tmpdir(), "pf-driver-"));
+    const binary = wrapVivaldi(resolveBinary(), profileDir);
     const args = [
+      `--user-data-dir=${profileDir}`,
       "--no-sandbox",
       "--disable-gpu",
       "--disable-dev-shm-usage",
@@ -91,22 +184,22 @@ export class ChromiumDriver {
       args.push("--headless=new");
     }
 
-    const chromeOptions = {
-      binary,
-      args,
-      // Accept insecure certs for test pages.
-      acceptInsecureCerts: true,
-    };
+    // A real Options instance is required: setChromeOptions ignores plain
+    // objects (the binary/args silently never reach chromedriver). TLS
+    // errors stay accepted for any https test page.
+    const chrome = await import("selenium-webdriver/chrome.js");
+    const chromeOptions = new chrome.Options()
+      .setChromeBinaryPath(binary)
+      .setAcceptInsecureCerts(true)
+      .addArguments(...args);
 
     const driver = await new Builder()
       .forBrowser("chrome")
       .setChromeOptions(chromeOptions)
-      .setChromeService(
-        new (await import("selenium-webdriver/chrome.js")).ServiceBuilder()
-      )
+      .setChromeService(buildService(chrome))
       .build();
 
-    return new ChromiumDriver(driver);
+    return new ChromiumDriver(driver, profileDir);
   }
 
   /** Raw Selenium WebDriver access (for advanced use). */
@@ -437,6 +530,13 @@ export class ChromiumDriver {
       await this.#driver.quit();
     } catch {
       // Already dead.
+    }
+    if (this.#profileDir !== null) {
+      try {
+        rmSync(this.#profileDir, { recursive: true, force: true });
+      } catch {
+        // Best-effort temp cleanup.
+      }
     }
   }
 }
