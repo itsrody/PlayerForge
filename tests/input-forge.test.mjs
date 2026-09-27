@@ -141,6 +141,26 @@ test("keydown arrows map through the action table with preventDefault", () => {
   controller.destroy();
 });
 
+test("same-name gestures dispatch repeatedly on the pooled event", () => {
+  const { dom, video, zone, host } = makeEnv();
+  const controller = new InputForge(video, zone, host);
+  const seen = collect(host, dom.window);
+
+  // Two dispatches under ONE CustomEvent ctor exercise the pool's stale-hit
+  // path: CustomEvent.detail is a prototype getter over an internal slot, so
+  // the old plain assignment threw in strict mode and silently dropped every
+  // gesture after the first per name (the per-test fresh jsdom ctor used to
+  // mask it; the bench's stable ctor hit it thousands of times).
+  for (let i = 0; i < 2; i++) {
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+      code: "ArrowRight", bubbles: true, cancelable: true
+    }));
+  }
+  assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.skip).length, 2,
+    "second same-name dispatch reuses the pooled event with detail intact");
+  controller.destroy();
+});
+
 test("disabling the hotkeys toggle silences arrows but Space still toggles playback", async () => {
   const { setSetting } = await import("../src/shell/chrome/config.js");
   setSetting("gestures.hotkeys", false);

@@ -29,11 +29,6 @@ export class DOMManager {
   #cleanups = [];
   #scope = new Scope();
 
-  /** The lifecycle signal: aborted when this manager is destroyed. */
-  get signal() {
-    return this.#scope.signal;
-  }
-
   /**
    * Add an event listener that is automatically removed when the manager is
    * destroyed. Returns the handler for call-site reference (e.g. passing to
@@ -45,18 +40,6 @@ export class DOMManager {
     options.signal = this.#scope.signal;
     target.addEventListener(event, handler, options);
     return handler;
-  }
-
-  /**
-   * Create a MutationObserver that is automatically disconnected on destroy.
-   * Returns the observer for manual use between creation and destroy.
-   */
-  observeMutations(target, opts, callback) {
-    if (this.#scope.disposed) return null;
-    const observer = new MutationObserver(callback);
-    observer.observe(target, opts);
-    this.#scope.onDispose(() => observer.disconnect());
-    return observer;
   }
 
   /**

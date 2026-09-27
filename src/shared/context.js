@@ -244,8 +244,19 @@ const TRAIL_PUNCT_RE = /[\s\-–—|·:,/]+$/;
  * Returns the original when the result would be empty (entirely non-Latin).
  * Trailing punctuation left behind by removed segments is cleaned up.
  */
+/** Single-slot memo for the title sanitizer. stripNonAscii runs ~8 regex
+ *  passes per call; the hot shape is the same input repeating (the top-frame
+ *  responder re-sanitizes document.title per incoming request, ownPageContext
+ *  re-resolves on every navigation probe of an unchanged title). Pure
+ *  function, so one input->output slot is always correct - alternating
+ *  inputs just miss, they never lie. */
+let titleMemoInput = null;
+let titleMemoOutput = "";
+
 function stripNonAscii(raw) {
   if (!raw) return "";
+  if (raw === titleMemoInput) return titleMemoOutput;
+  const input = raw;
   // Leading recording-code brackets are identifiers worth keeping, so pull
   // them out whole first. A code is CAPS-NUMBER; anything after that in the
   // same bracket is a qualifier (subtitle group, remux, ...) and is dropped:
@@ -264,10 +275,10 @@ function stripNonAscii(raw) {
   s = s.replace(EN_DASH_RE, " ");
   s = s.replace(NON_LATIN_RE, " ");
   s = s.replace(WS_COLLAPSE_RE, " ").replace(LEAD_PUNCT_RE, "").replace(TRAIL_PUNCT_RE, "").trim();
-  if (code) {
-    return `${code} ${s}`.trim();
-  }
-  return s || raw;
+  const out = code ? `${code} ${s}`.trim() : (s || raw);
+  titleMemoInput = input;
+  titleMemoOutput = out;
+  return out;
 }
 
 /** Reuse one in-flight bridge request across the shells sharing this frame

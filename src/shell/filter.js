@@ -24,6 +24,44 @@ const PRESETS = {
 
 const DEFAULTS = PRESETS.Default;
 const PRESET_ENTRIES = Object.entries(PRESETS);
+const PRESET_OPTIONS = Object.keys(PRESETS).concat(["Custom"]);
+
+// Static UI maps hoisted out of #buildSection: they are pure constants, so
+// building three object literals + nine format closures per VideoFilter
+// construction (once per shell, i.e. per video) was pure per-shell garbage.
+const RANGE_MAP = {
+  brightness: [0, 200, 5],
+  contrast: [0, 200, 5],
+  saturate: [0, 200, 5],
+  hue: [0, 360, 5],
+  grayscale: [0, 100, 5],
+  sepia: [0, 100, 5],
+  invert: [0, 100, 5],
+  temperature: [-100, 100, 5],
+  tint: [-100, 100, 5]
+};
+const LABEL_MAP = {
+  brightness: "Brightness",
+  contrast: "Contrast",
+  saturate: "Saturate",
+  hue: "Hue",
+  grayscale: "Grayscale",
+  sepia: "Sepia",
+  invert: "Invert",
+  temperature: "Temp",
+  tint: "Tint"
+};
+const FORMAT_MAP = {
+  brightness: fmtPercent,
+  contrast: fmtPercent,
+  saturate: fmtPercent,
+  hue: (v) => `${v}°`,
+  grayscale: fmtPercent,
+  sepia: fmtPercent,
+  invert: fmtPercent,
+  temperature: (v) => `${v > 0 ? "+" : ""}${v}`,
+  tint: (v) => `${v > 0 ? "+" : ""}${v}`
+};
 
 function matchPreset(values) {
   // Index loops, no closure: matchPreset runs on every stepper change and
@@ -107,10 +145,9 @@ export class VideoFilter {
 
     const head = panel.el("div", { class: "pf-panel-section-head" }, sectionRoot);
 
-    const presetOptions = Object.keys(PRESETS).concat(["Custom"]);
     this.#presetSelect = panel.addControl(head, {
       type: "select",
-      options: presetOptions,
+      options: PRESET_OPTIONS,
       value: "Default",
       onChange: (name) => this.#onPresetChange(name)
     });
@@ -127,51 +164,17 @@ export class VideoFilter {
 
     const grid = panel.el("div", { class: "pf-panel-grid pf-panel-grid-compact" }, sectionRoot);
 
-    const formatMap = {
-      brightness: fmtPercent,
-      contrast: fmtPercent,
-      saturate: fmtPercent,
-      hue: (v) => `${v}°`,
-      grayscale: fmtPercent,
-      sepia: fmtPercent,
-      invert: fmtPercent,
-      temperature: (v) => `${v > 0 ? "+" : ""}${v}`,
-      tint: (v) => `${v > 0 ? "+" : ""}${v}`
-    };
-    const rangeMap = {
-      brightness: [0, 200, 5],
-      contrast: [0, 200, 5],
-      saturate: [0, 200, 5],
-      hue: [0, 360, 5],
-      grayscale: [0, 100, 5],
-      sepia: [0, 100, 5],
-      invert: [0, 100, 5],
-      temperature: [-100, 100, 5],
-      tint: [-100, 100, 5]
-    };
-    const labelMap = {
-      brightness: "Brightness",
-      contrast: "Contrast",
-      saturate: "Saturate",
-      hue: "Hue",
-      grayscale: "Grayscale",
-      sepia: "Sepia",
-      invert: "Invert",
-      temperature: "Temp",
-      tint: "Tint"
-    };
-
     for (const key of ALL_KEYS) {
-      const [min, max, step] = rangeMap[key];
+      const [min, max, step] = RANGE_MAP[key];
       const stepper = panel.addControl(grid, {
         type: "stepper",
-        label: labelMap[key],
+        label: LABEL_MAP[key],
         min,
         max,
         step,
         value: DEFAULTS[key],
         head: true,
-        format: formatMap[key],
+        format: FORMAT_MAP[key],
         deferTextInput: true,
         onChange: (v) => this.#onStepperChange(key, v)
       });

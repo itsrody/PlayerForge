@@ -128,7 +128,17 @@ function pooledDispatchEvent(name, detail) {
   const Ctor = globalThis.CustomEvent;
   const stale = dispatchPool.get(name);
   if (stale && stale.Ctor === Ctor) {
-    stale.event.detail = detail;
+    // CustomEvent.detail is a prototype getter over an internal slot on
+    // spec engines (jsdom and Chromium alike) - plain assignment throws in
+    // strict mode and never updates the slot, which silently killed every
+    // gesture dispatch after the first per name. Callers pass one pooled
+    // detail object per name, so the usual path is the reference compare
+    // below (no write at all); a genuinely fresh object re-owns the
+    // property via defineProperty, whose own data property shadows the
+    // prototype getter on every engine.
+    if (stale.event.detail !== detail) {
+      Object.defineProperty(stale.event, "detail", { value: detail, configurable: true, writable: true });
+    }
     return stale.event;
   }
   const event = new Ctor(name, { detail, bubbles: false, composed: false });
