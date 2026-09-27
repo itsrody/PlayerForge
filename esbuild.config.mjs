@@ -3,8 +3,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import process from "node:process";
 
-// Minified is the default (and only shipping) output. The readable variant
-// is built alongside for the compare-bundles platform mode. Minification is
+// Minified is the only output. Minification is
 // V8/TurboFan-aware by construction: esbuild only does the safe transforms
 // (whitespace, local-identifier mangling, syntax compression) that keep
 // functions Maglev/TurboFan-compilable - it never introduces eval/with, never
@@ -217,9 +216,8 @@ if (watch) {
   console.log("[PlayerForge] watching (minified)...");
 } else {
   const minifiedOpts = { ...shared, minify: true };
-  const readableOpts = { ...shared, minify: false, outfile: "dist/playerforge.readable.js" };
 
-  // Primary: minified bundle (what Tampermonkey installs).
+  // Minified bundle (what Tampermonkey installs).
   await build(minifiedOpts);
   console.log("[PlayerForge] built minified bundle");
 
@@ -232,8 +230,4 @@ if (watch) {
   }
   verifyMinified(inMemory);
   console.log("[PlayerForge] min build verified: TM header intact, no eval/with/new Function, deterministic");
-
-  // Secondary: readable bundle for compare-bundles mode.
-  await build(readableOpts);
-  console.log("[PlayerForge] wrote dist/playerforge.readable.js");
 }

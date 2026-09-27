@@ -1,7 +1,5 @@
 {
-  "bundle parse+compile (readable)": 26832.401849948612,
   "bundle parse+compile (minified)": 10955.825496342737,
-  "bundle eval overhead (readable vs minified)": 33291.50671785029,
   "hashEntry (djb2, domain-seeded)": 87702.91611743558,
   "getDomainKey typical hosts": 973.054781742438,
   "domainsMatch boundary checks": 9058.26923076923,
