@@ -227,6 +227,11 @@ export class InputForge {
   #keyboardHoldTimer = null;
   #keyboardHolding = false;
   #keyboardHoldStart = 0;
+  /** Whether the CURRENT Space press was captured by us. The keydown decision
+   *  (shouldHandleKeys) is latched here so keyup never toggles playback for a
+   *  press we did not own (focus moved between down and up), and always
+   *  releases a hold we did. */
+  #keyboardOwn = false;
 
   // Trackpad ctrl+wheel pinch cooldown: a lazy deadline avoids per-gesture timers.
   #trackpadPinchCooldownUntil = -Infinity;
@@ -350,9 +355,25 @@ export class InputForge {
   }
 
   #resetKeyboardHold() {
-    this.#keyboardHolding = false;
+    if (this.#keyboardHolding) {
+      // Reset/teardown while Space is held must restore the boosted rate
+      // first - the pointer path releases through #endPointerSession, and
+      // the keyboard path used to drop the release here, leaving playback
+      // stuck at hold speed (e.g. destroy mid-hold on an SPA navigation).
+      this.#keyboardHolding = false;
+      this.#dispatchKeyboardRelease();
+    }
+    this.#keyboardOwn = false;
     clearTimeout(this.#keyboardHoldTimer);
     this.#keyboardHoldTimer = null;
+  }
+
+  /** Keyboard-source release, shared by keyup, blur, reconcile and teardown. */
+  #dispatchKeyboardRelease() {
+    releaseDetail.zone = "screen";
+    releaseDetail.method = "keyboard";
+    releaseDetail.duration = performance.now() - this.#keyboardHoldStart;
+    this.#dispatch(GESTURE_EVENTS.release, releaseDetail);
   }
 
   #hitTestVideo(pointerEvent) {
@@ -910,9 +931,24 @@ export class InputForge {
     if (event.code === "Space") {
       if (this.#shouldHandleKeys(false)) {
         lastActiveForge = this;
+        // Own the press end-to-end: preventDefault cancels the UA's
+        // Space-activates-video default, and stopImmediatePropagation keeps
+        // page-level handlers (a platform's own Space shortcut lives on
+        // document bubble after this capture listener) from toggling pause
+        // mid-press - a pause before the 300ms timer would starve the hold
+        // every time. Capturing ownership also lets keyup settle exactly
+        // what keydown decided, even if focus moved in between.
         event.preventDefault();
+        event.stopImmediatePropagation();
+        // A swallowed keyup (focus slipped into an iframe, a page handler
+        // ate it) would leave the boost latched and poison every later hold:
+        // settle the orphaned session first, then re-arm from a clean state.
+        if (this.#keyboardHolding) {
+          this.#keyboardHolding = false;
+          this.#dispatchKeyboardRelease();
+        }
+        this.#keyboardOwn = true;
         this.#keyboardHoldStart = performance.now();
-        this.#keyboardHolding = false;
         clearTimeout(this.#keyboardHoldTimer);
         this.#keyboardHoldTimer = setTimeout(() => {
           this.#keyboardHoldTimer = null;
@@ -924,6 +960,10 @@ export class InputForge {
             this.#dispatch(GESTURE_EVENTS.hold, holdDetail);
           }
         }, HOLD_TIMEOUT_MS);
+      } else {
+        // Not ours (text entry, foreign focus): a later keyup must not
+        // toggle playback for a press the page owned.
+        this.#keyboardOwn = false;
       }
       return;
     }
@@ -956,27 +996,33 @@ export class InputForge {
 
   /**
    * End a Space session: an active hold always releases (restoring playback
-   * rate via the action layer), a bare tap toggles play/pause - but only on
-   * a real keyup. Blur finishes silently-with-release and never toggles.
+   * rate via the action layer), a bare tap toggles play/pause - but only on a
+   * real keyup for a press keydown captured (#keyboardOwn), never for a press
+   * that started in a text field. Blur finishes silently-with-release and
+   * never toggles.
    */
   #finishKeyboardHold(allowToggle) {
     const wasHolding = this.#keyboardHolding;
-    const shouldToggle = allowToggle && !wasHolding && this.#shouldHandleKeys();
+    const owned = this.#keyboardOwn;
+    this.#keyboardOwn = false;
+    this.#keyboardHolding = false;
     clearTimeout(this.#keyboardHoldTimer);
     this.#keyboardHoldTimer = null;
-      this.#keyboardHolding = false;
-      if (wasHolding) {
-      releaseDetail.zone = "screen";
-      releaseDetail.method = "keyboard";
-      releaseDetail.duration = performance.now() - this.#keyboardHoldStart;
-      this.#dispatch(GESTURE_EVENTS.release, releaseDetail);
-    } else if (shouldToggle) {
+    if (wasHolding) {
+      this.#dispatchKeyboardRelease();
+    } else if (allowToggle && owned && this.#shouldHandleKeys()) {
       if (this.#video.paused) {
-        this.#video.play().catch((err) => {
-          if (!isBenignMediaPolicyError(err)) {
-            logger.log("forge", "bare-tap play rejected:", err.name);
-          }
-        });
+        // play() returns a promise on spec engines; guard so an odd host
+        // (test shims, minimal webviews) degrades to a silent no-op instead
+        // of a TypeError inside the keyup handler.
+        const played = this.#video.play();
+        if (played && typeof played.catch === "function") {
+          played.catch((err) => {
+            if (!isBenignMediaPolicyError(err)) {
+              logger.log("forge", "bare-tap play rejected:", err.name);
+            }
+          });
+        }
       } else {
         this.#video.pause();
       }

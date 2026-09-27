@@ -366,6 +366,118 @@ test("destroying mid-hold fires the pending release before teardown", async () =
   assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.release).length, 1);
 });
 
+/** Dispatch a Space keystroke on the document, like the host page would. */
+const space = (win, type) =>
+  win.document.dispatchEvent(new win.KeyboardEvent(type, { code: "Space", bubbles: true, cancelable: true }));
+
+test("space hold boosts after the hold timeout and releases exactly once on keyup", async (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  const controller = new InputForge(video, zone, host);
+  // t.after: an assertion failure must not leak this forge into the shared
+  // activeForges set and cascade into unrelated keyboard tests.
+  t.after(() => controller.destroy());
+  const seen = collect(host, dom.window);
+
+  space(dom.window, "keydown");
+  await sleep(350);
+  const holds = seen.filter((entry) => entry.type === GESTURE_EVENTS.hold);
+  assert.equal(holds.length, 1, "hold fires once while Space is held");
+  assert.equal(holds[0].detail.method, "keyboard");
+
+  space(dom.window, "keyup");
+  const releases = seen.filter((entry) => entry.type === GESTURE_EVENTS.release);
+  assert.equal(releases.length, 1, "keyup releases exactly once");
+  assert.equal(releases[0].detail.method, "keyboard");
+  controller.destroy();
+});
+
+test("an orphaned space hold (lost keyup) heals on the next space press", async (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+  const seen = collect(host, dom.window);
+
+  space(dom.window, "keydown");
+  await sleep(350);
+  assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.hold).length, 1);
+  // The keyup never reaches the document (focus slid into an iframe): the
+  // boost stays latched and #keyboardHolding stays true until the press is
+  // settled - the next keydown must release the orphan before re-arming.
+  space(dom.window, "keydown");
+  assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.release).length, 1,
+    "the orphaned hold is released by the next press");
+
+  await sleep(350);
+  space(dom.window, "keyup");
+  assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.hold).length, 2,
+    "the second press still holds");
+  assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.release).length, 2,
+    "holds and releases stay balanced across the orphan");
+  controller.destroy();
+});
+
+test("destroying mid space-hold fires the release before teardown", async (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+  const seen = collect(host, dom.window);
+
+  space(dom.window, "keydown");
+  await sleep(350);
+  assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.hold).length, 1);
+
+  controller.destroy();
+  assert.equal(seen.filter((entry) => entry.type === GESTURE_EVENTS.release).length, 1,
+    "teardown mid-hold must not leave playback stuck at boost speed");
+});
+
+test("an owned space press is invisible to page-level key handlers", (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+  let pageSaw = 0;
+  // A page shortcut (the platform's own Space toggle) listening on the
+  // bubble side must not run for a press PlayerForge owns - a mid-press
+  // pause from the page starves the hold timer.
+  dom.window.addEventListener("keydown", (event) => {
+    if (event.code === "Space") pageSaw++;
+  });
+
+  space(dom.window, "keydown");
+  assert.equal(pageSaw, 0, "stopImmediatePropagation must shield page handlers");
+  space(dom.window, "keyup");
+  controller.destroy();
+});
+
+test("a space press that started in a text field never toggles playback on keyup", (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  let plays = 0;
+  let pauses = 0;
+  video.play = () => {
+    plays++;
+    return Promise.resolve();
+  };
+  video.pause = () => {
+    pauses++;
+  };
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+  collect(host, dom.window);
+
+  const box = dom.window.document.createElement("textarea");
+  dom.window.document.body.appendChild(box);
+  box.focus();
+  space(dom.window, "keydown");
+  box.blur(); // focus leaves the text field before keyup arrives
+  space(dom.window, "keyup");
+  assert.equal(plays, 0, "keyup must not toggle a press the keydown never owned");
+  assert.equal(pauses, 0);
+  controller.destroy();
+});
+
 test("a focused native player button does not silence hotkeys", () => {
   const { dom, video, zone, host } = makeEnv();
   // Native SDK control-bar button inside the container - NOT pf chrome.
