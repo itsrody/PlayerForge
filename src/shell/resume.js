@@ -46,6 +46,20 @@ function isValidStore(raw) {
 }
 
 /**
+ * Project any incoming entry (disk, cross-tab, import, our own literal)
+ * onto the fixed whitelist so every in-memory entry carries the same keys.
+ * Foreign writers omit optional fields, which used to hand V8 a new hidden
+ * class per adopted entry and deoptimize every store scan over them.
+ */
+function toFixedShape(incoming) {
+  const out = {};
+  for (const key of RESUME_ENTRY_FIELDS) {
+    out[key] = incoming[key];
+  }
+  return out;
+}
+
+/**
  * Persistent store of per-video entries (keyed by path+duration hash) holding
  * the resume position. Owned by ResumeTracker; per-entry last-write-wins
  * merging keeps concurrent shells/tabs - and any future whole-blob transport -
@@ -56,6 +70,9 @@ export class ResumeStore {
   #loaded = false;
   #listenerId = null;
   #listeners = new Set();
+  /** Lazily built path -> entries buckets for findMatch; nulled at every
+   *  structural mutation so a stale bucket can never serve a match. */
+  #byPath = null;
 
   /**
    * Subscribe to store changes. The callback receives a `structural` flag -
@@ -133,14 +150,8 @@ export class ResumeStore {
     }
     const known = byId.get(incoming.id);
     if (!known) {
-      const filtered = {};
-      for (const key of RESUME_ENTRY_FIELDS) {
-        if (key in incoming) {
-          filtered[key] = incoming[key];
-        }
-      }
-      filtered.id = incoming.id;
-      byId.set(incoming.id, filtered);
+      const shaped = toFixedShape(incoming);
+      byId.set(incoming.id, shaped);
       added++;
     } else if ((incoming.updatedAt || 0) > (known.updatedAt || 0)) {
       for (const key of RESUME_ENTRY_FIELDS) {
@@ -155,8 +166,28 @@ export class ResumeStore {
     return { added, updated };
   }
   this.#state.entries = [...byId.values()];
+  this.#invalidateCaches();
   return { added, updated };
 }
+
+  /** Drop lazy lookup state; called after every structural entries change. */
+  #invalidateCaches() {
+    this.#byPath = null;
+  }
+
+  #buildByPath() {
+    const map = new Map();
+    for (const entry of this.#state.entries) {
+      const bucket = map.get(entry.path);
+      if (bucket) {
+        bucket.push(entry);
+      } else {
+        map.set(entry.path, [entry]);
+      }
+    }
+    this.#byPath = map;
+    return map;
+  }
 
   ensureLoaded() {
     if (this.#loaded) {
@@ -165,8 +196,14 @@ export class ResumeStore {
     const raw = loadJsonObject(KEYS.resume, null);
     if (isValidStore(raw)) {
       // Tolerate foreign or future writers: adopt their entries as-is and
-      // restamp our schema version - resetting would destroy history.
-      const valid = raw.entries.filter((entry) => entry && typeof entry === "object" && typeof entry.id === "string");
+      // restamp our schema version - resetting would destroy history. Each
+      // adopted entry is projected onto the fixed whitelist shape.
+      const valid = [];
+      for (const entry of raw.entries) {
+        if (entry && typeof entry === "object" && typeof entry.id === "string") {
+          valid.push(toFixedShape(entry));
+        }
+      }
       if (valid.length !== raw.entries.length) {
         logger.warn("resume", `Dropped ${raw.entries.length - valid.length} malformed entries`);
       }
@@ -183,6 +220,7 @@ export class ResumeStore {
       gmSetValue(KEYS.resume, this.#state);
       logger.log("resume", `Dropped ${stalePending} stale pending entries`);
     }
+    this.#invalidateCaches();
     this.#loaded = true;
   }
 
@@ -213,9 +251,10 @@ export class ResumeStore {
       if (isValidStore(raw)) {
         this.#mergeRaw(raw);
       }
-      // Bounds run AFTER the merge so a stale disk copy can never resurrect
-      // pruned entries - cleanup converges instead of oscillating.
+      // Bounds run AFTER the (cross-tab) merge so a stale disk copy can never
+      // resurrect pruned entries - cleanup converges instead of oscillating.
       this.#state.entries = this.#enforceBounds();
+      this.#invalidateCaches();
       this.#state.updatedAt = Date.now();
       gmSetValue(KEYS.resume, this.#state);
       this.#notify(structural);
@@ -226,12 +265,19 @@ export class ResumeStore {
 
   findMatch(domainKey, path, duration) {
     this.ensureLoaded();
+    // Path bucket first: stores hold hundreds of distinct paths, so the
+    // domain/fuzz scoring below usually runs over 1-2 candidates instead of
+    // the whole entry list.
+    const candidates = (this.#byPath || this.#buildByPath()).get(path);
+    if (!candidates) {
+      return null;
+    }
     const targetDuration = Number(duration) || NaN;
     const maxFuzz = RESUME_DURATION_FUZZ;
     let best = null;
     let bestScore = -Infinity;
-    for (const entry of this.#state.entries) {
-      if (entry.path !== path || entry.pending || !domainsMatch(entry.domain, domainKey)) {
+    for (const entry of candidates) {
+      if (entry.pending || !domainsMatch(entry.domain, domainKey)) {
         continue;
       }
       const fuzz = Math.abs(entry.duration - targetDuration);
@@ -261,7 +307,7 @@ export class ResumeStore {
     if (existingByMatch) {
       return existingByMatch;
     }
-    const entry = {
+    const entry = toFixedShape({
       id,
       domain: domainKey,
       path,
@@ -271,8 +317,9 @@ export class ResumeStore {
       resume: 0,
       createdAt: Date.now(),
       updatedAt: Date.now()
-    };
+    });
     this.#state.entries.push(entry);
+    this.#invalidateCaches();
     this.#persist(true);
     return entry;
   }
@@ -304,6 +351,7 @@ export class ResumeStore {
     const before = this.#state.entries.length;
     this.#state.entries = this.#state.entries.filter((entry) => entry.id !== id);
     if (this.#state.entries.length < before) {
+      this.#invalidateCaches();
       this.#persist(true);
     }
   }
@@ -314,6 +362,7 @@ export class ResumeStore {
     this.#state.entries = this.#enforceBounds(days);
     const removed = before - this.#state.entries.length;
     if (removed > 0) {
+      this.#invalidateCaches();
       this.#persist(true);
       logger.log("resume", `Pruned ${removed} resume entries`);
     }

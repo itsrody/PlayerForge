@@ -1,4 +1,4 @@
-import { getSetting } from "../chrome/config.js";
+import { getSetting, onSettingsChanged } from "../chrome/config.js";
 import { TUNING } from "../../shared/tuning.js";
 import { formatTime } from "../../shared/time.js";
 import { fs, subscribeFullscreen } from "../../shared/shadow.js";
@@ -86,20 +86,47 @@ for (const binding of INPUT_BINDINGS) {
 }
 
 /**
+ * Per-gesture gate snapshot for the pointer-intent decision points. The two
+ * inputs gateOpen folds - a settings key and the fullscreen latch - only ever
+ * change on their buses (settings) or the shared fs binding (fullscreen), so
+ * sampling them at change time instead of at pointer-move time is exactly as
+ * fresh while removing the settings-path lookup from the display-rate
+ * scrub/swipe decision loop. Key bindings keep sampling live per keystroke
+ * (isKeyArmed) - once per keypress is not a hot path.
+ */
+const intentsArmed = new Map();
+/** Fullscreen value the snapshot was taken against. allowsIntent revalidates
+ *  the live `fs` binding on every read: the gate's initFullscreenGate rebind
+ *  resyncs `fs` silently (no subscriber fan-out), and a snapshot that missed
+ *  such a resync would arm fullscreen-only intents on an inline page. */
+let intentsArmedFs = false;
+
+function refreshIntentGates() {
+  for (const [gesture, bindings] of BY_GESTURE) {
+    let open = false;
+    for (let i = 0; i < bindings.length; i++) {
+      if (gateOpen(bindings[i])) {
+        open = true;
+        break;
+      }
+    }
+    intentsArmed.set(gesture, open);
+  }
+  intentsArmedFs = fs;
+}
+refreshIntentGates();
+onSettingsChanged(refreshIntentGates);
+
+/**
  * True when at least one binding for the pointer-intent family is armed.
- * Sampled live at every decision point so toggles apply mid-session.
+ * Reads the precomputed snapshot (revalidated against live fs, refreshed via
+ * the settings bus), so mid-session toggles still apply at the next decision.
  */
 export function allowsIntent(gesture) {
-  const bindings = BY_GESTURE.get(gesture);
-  if (!bindings) {
-    return false;
+  if (fs !== intentsArmedFs) {
+    refreshIntentGates();
   }
-  for (let i = 0; i < bindings.length; i++) {
-    if (gateOpen(bindings[i])) {
-      return true;
-    }
-  }
-  return false;
+  return intentsArmed.get(gesture) === true;
 }
 
 /** Armed key bindings, in table order - sampled live per keystroke. */

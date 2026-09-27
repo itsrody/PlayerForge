@@ -740,7 +740,10 @@ export class InputForge {
     // against a correcting hand. Purely a velocity-shaping signal.
     const hasPredicted = hasCoalesced && typeof event.getPredictedEvents === "function";
     let velocityStep = totalStep;
-    if (hasPredicted) {
+    // Zero step: the additive term below is Math.sign(0) * (...) = 0 no
+    // matter what the prediction says, so skip the browser's array alloc
+    // (and a NaN delta can no longer poison velocityStep at rest).
+    if (hasPredicted && totalStep !== 0) {
       const predicted = event.getPredictedEvents();
       if (predicted && predicted.length) {
         velocityStep += Math.sign(totalStep) *

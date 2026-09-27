@@ -191,7 +191,12 @@ function ensureObserver() {
     }
     if (!queued) {
       queued = true;
-      queueMicrotask(scheduleFlush);
+      // scheduleFlush() runs synchronously up to its yield_() await, so the
+      // extra queueMicrotask hop the original shape paid bought nothing -
+      // the yield already provides the task boundary before dispatch.
+      scheduleFlush().catch((err) => {
+        logger.error("dom-watch", "Flush scheduling failed:", err);
+      });
     }
   });
   observer.observe(doc.documentElement, { childList: true, subtree: true });
