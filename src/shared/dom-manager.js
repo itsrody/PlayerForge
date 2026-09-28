@@ -43,18 +43,6 @@ export class DOMManager {
   }
 
   /**
-   * Create a ResizeObserver that is automatically disconnected on destroy.
-   * Returns the observer for manual use between creation and destroy.
-   */
-  observeResize(target, callback) {
-    if (this.#scope.disposed) return null;
-    const observer = new ResizeObserver(callback);
-    observer.observe(target);
-    this.#scope.onDispose(() => observer.disconnect());
-    return observer;
-  }
-
-  /**
    * Create an element and append it to a parent. The element is automatically
    * removed from the DOM on destroy.
    */

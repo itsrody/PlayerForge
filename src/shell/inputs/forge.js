@@ -462,17 +462,17 @@ export class InputForge {
   }
 
   #zoneForPoint(pointerEvent) {
-    // Edge zones only steer fullscreen gestures (dbltap edge-skip, swipe-down
-    // exit - both fs-gated), so the reference is the physical display. screen
-    // also sidesteps innerWidth's scrollbar-inclusive quirk. Guard
-    // to the window when the screen reports no size (headless/test environs).
-    const screenWidth =
-      typeof screen !== "undefined" && screen.width > 0
+    // Same geometry rule as shell.referenceBox: the physical display in
+    // fullscreen (zones only steer fs gestures), the shell host's box inline.
+    // screen also sidesteps innerWidth's scrollbar-inclusive quirk; fall back
+    // to the window when neither reports a size (headless/test environs).
+    const width =
+      fs && typeof screen !== "undefined" && screen.width > 0
         ? screen.width
-        : window.innerWidth;
-    if (pointerEvent.clientX < screenWidth * EDGE_ZONE_RATIO) {
+        : this.#zone.clientWidth || window.innerWidth;
+    if (pointerEvent.clientX < width * EDGE_ZONE_RATIO) {
       return "left-edge";
-    } else if (pointerEvent.clientX > screenWidth * EDGE_ZONE_START) {
+    } else if (pointerEvent.clientX > width * EDGE_ZONE_START) {
       return "right-edge";
     } else {
       return "screen";

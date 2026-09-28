@@ -1134,9 +1134,7 @@
     }
 
     /* Portrait phones (touch): anchor the panel as a bottom sheet - it sits
-       within thumb reach and never covers the whole video. The safe-area
-       bottom inset lifts the sheet above the Android gesture bar when
-       viewport-fit=cover is active; the env() falls back to 0 when unset. */
+       within thumb reach and never covers the whole video. */
     @media (max-width: 520px) and (pointer: coarse) {
       .pf-panel {
         top: auto;
@@ -1145,7 +1143,6 @@
         right: var(--pf-space-md);
         max-height: 62vh;
         margin: 0;
-        padding-bottom: env(safe-area-max-inset-bottom, 0px);
         border-radius: 16px 16px 0 0;
         border-left: none;
         border-right: none;
@@ -1288,7 +1285,6 @@
         border-left: none;
         border-right: none;
         border-bottom: none;
-        padding-bottom: env(safe-area-max-inset-bottom, 0px);
       }
     }
 

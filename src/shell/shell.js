@@ -1,18 +1,17 @@
 import { logger } from "../shared/logger.js";
-import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../shared/shadow.js";
+import { deepestActiveElement, isInsideShell, fs } from "../shared/shadow.js";
 import { InputForge } from "./inputs/forge.js";
 import { attachInputActions } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
 import { SubtitlesSection } from "./subtitles/section.js";
 import { VideoFilter } from "./filter.js";
 import { SettingsPanel } from "./chrome/panel.js";
-import { addSettingsSection, getSetting } from "./chrome/config.js";
+import { addSettingsSection } from "./chrome/config.js";
 import { TUNING } from "../shared/tuning.js";
 import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
 import { SHELL_MARKER, warmStyles, injectShell, watchShellHost } from "./chrome/inject.js";
-import { ensureViewportFitCover } from "./chrome/viewport.js";
 import { requestFullscreenProvision } from "../shared/context.js";
 import { DOMManager } from "../shared/dom-manager.js";
 import { Scope } from "../shared/scope.js";
@@ -36,9 +35,8 @@ export class Shell {
   #filter = null;
   #panel;
   #toasts = null;
-  /** Pooled reference-box result + validity flag (see the referenceBox getter). */
+  /** Pooled box reused by the referenceBox getter; values are rewritten on every read. */
   #refBox = { width: 0, height: 0 };
-  #refBoxValid = false;
   #onDestroy;
   /** DOM lifecycle manager: listeners, observers, elements, rollbacks. */
   #dom = new DOMManager();
@@ -99,7 +97,6 @@ export class Shell {
       signal: this.#scope.signal
     });
     this.#watchFullscreen();
-    this.#watchReferenceBoxSize();
     this.#markManaged();
     logger.log("shell", `Shell "${this.sdk.name}" constructed`);
   }
@@ -140,29 +137,22 @@ export class Shell {
   }
 
   /**
-   * Unified contextual reference box, per the PlayerForge geometry rule: in
-   * inline mode the reference is the shell's own container (the SDK container).
-   * Fullscreen reference box used for fill-mode cover scaling and scrub
-   * normalization. With the edge-to-edge bypass (see viewport.js) the
-   * fullscreen iframe draws behind the cutout edge-to-edge, so the SDK's
-   * rendered box IS the physical screen - `screen.width/height`. No env-based
-   * safe-rect narrowing is needed (or possible: env(safe-area-inset-*) does
-   * not resolve inside iframes) - the bypass already puts
-   * the frame at the screen. Returns { width, height }.
+   * Unified contextual reference box, per the PlayerForge geometry rule: the
+   * shell's own container inline, the physical screen in fullscreen (the
+   * :fullscreen rule stretches the container to the screen). Read directly at
+   * call time - no cache, no invalidation watchers; consumers read once per
+   * gesture (scrub start, pinch-out). Returns { width, height }.
    */
   get referenceBox() {
-    if (!this.#refBoxValid) {
-      const box = this.#refBox;
-      if (fs) {
-        box.width = screen.width;
-        box.height = screen.height;
-      } else {
-        box.width = this.container.clientWidth;
-        box.height = this.container.clientHeight;
-      }
-      this.#refBoxValid = true;
+    const box = this.#refBox;
+    if (fs) {
+      box.width = screen.width;
+      box.height = screen.height;
+    } else {
+      box.width = this.container.clientWidth;
+      box.height = this.container.clientHeight;
     }
-    return this.#refBox;
+    return box;
   }
 
   get shellDom() {
@@ -259,14 +249,6 @@ export class Shell {
     // so shell construction never blocks on the @resource fetch. A warm
     // background upgrade later propagates through the same shared sheet.
     warmStyles();
-    // Document-level (idempotent): make the SDK's own viewport report
-    // viewport-fit=cover so the fullscreen frame can draw behind the Android
-    // cutout edge-to-edge (see viewport.js). Gated by fullscreen.edgeToEdge:
-    // when disabled we leave the iframe at the default (the UA letterboxes to
-    // the safe area itself) and fill simply covers the letterboxed frame.
-    if (getSetting("fullscreen.edgeToEdge") !== false) {
-      ensureViewportFitCover();
-    }
     this.#shellDom = injectShell(this.container);
     if (!this.#shellDom) {
       logger.error("shell", "Failed to inject shell DOM");
@@ -346,23 +328,6 @@ export class Shell {
   exitFullscreen() {
     if (fs) {
       document.exitFullscreen()?.catch(() => {});
-    }
-  }
-
-  /**
-   * Keep the pooled referenceBox honest: invalidate it on fullscreen flips
-   * (fs -> screen.* dims), window resizes, and container resizes. The getter
-   * stays allocation + layout-read free in the scrub/pinch hot path; only a
-   * change event forces the next read through the layout query.
-   */
-  #watchReferenceBoxSize() {
-    const invalidate = () => {
-      this.#refBoxValid = false;
-    };
-    subscribeFullscreen(invalidate, this.#scope.signal);
-    this.#dom.listen(window, "resize", invalidate, { passive: true });
-    if (typeof ResizeObserver === "function") {
-      this.#dom.observeResize(this.container, invalidate);
     }
   }
 
