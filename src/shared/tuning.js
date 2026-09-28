@@ -19,6 +19,11 @@ export const TUNING = {
     trackpadCooldownMs: 500,
     /** Click/dblclick suppression window after a consumed gesture. */
     suppressWindowMs: 600,
+    /** How long an owned press keeps swallowing compat mouse-up events after
+     *  pointerup while waiting for the (possibly suppressed) click. Short
+     *  enough that hover resumes immediately; long enough that the UA's
+     *  post-pointerup mouseup never leaks to the SDK. */
+    clickSettleMs: 50,
     /** Horizontal travel that dismisses the HUD. */
     swipeExitMinPx: 100,
     /** Idle time that resets the double-tap skip streak. */

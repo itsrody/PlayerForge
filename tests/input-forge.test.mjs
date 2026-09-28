@@ -478,6 +478,148 @@ test("a space press that started in a text field never toggles playback on keyup
   controller.destroy();
 });
 
+/* --- SDK dominance contract ------------------------------------------- *
+ * The shell owns every stream a gesture can activate; the SDK sees only
+ * deliberate passthroughs: single click/tap (replayed after the dbltap
+ * window), hover, and presses outside the gesture zone. */
+
+/** SDK-side observer: bubble listeners at the same node the platform would
+ *  bind to (the container/zone), registered after the forge like a real
+ *  SDK's would be. */
+function sdkObserver(zone, win) {
+  const seen = [];
+  for (const type of ["pointerdown", "pointermove", "pointerup", "pointerover",
+    "mousedown", "mousemove", "mouseup", "touchstart", "touchend", "click", "dblclick"]) {
+    zone.addEventListener(type, (event) => seen.push(type));
+  }
+  return seen;
+}
+
+const mouse = (win, type, { x = 0, y = 0 } = {}) =>
+  new win.MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y });
+
+const touch = (win, type, { x = 0, y = 0 } = {}) => {
+  const event = new win.Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperty(event, "touches", {
+    value: type === "touchend" || type === "touchcancel" ? [] : [{ clientX: x, clientY: y }]
+  });
+  return event;
+};
+
+test("an owned hold press is completely invisible to the SDK", async (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+  const seen = collect(host, dom.window);
+  const sdk = sdkObserver(zone, dom.window);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  zone.dispatchEvent(mouse(dom.window, "mousedown", { x: 400, y: 200 }));
+  zone.dispatchEvent(touch(dom.window, "touchstart", { x: 400, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 410, y: 200 }));
+  await sleep(350); // hold fires
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 410, y: 200 }));
+  zone.dispatchEvent(mouse(dom.window, "mouseup", { x: 410, y: 200 }));
+  zone.dispatchEvent(touch(dom.window, "touchend", { x: 410, y: 200 }));
+  zone.dispatchEvent(mouse(dom.window, "click", { x: 410, y: 200 }));
+
+  assert.equal(seen.filter((e) => e.type === GESTURE_EVENTS.hold).length, 1);
+  assert.deepEqual(sdk, [],
+    "the SDK must not observe any pointer/mouse/touch/click event of an owned gesture press");
+});
+
+test("a plain single tap reaches the SDK as one click after the dbltap window", async (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  stubFullscreen(dom, true); // the dbltap intent is fullscreen-gated
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+  const seen = collect(host, dom.window);
+  const sdk = sdkObserver(zone, dom.window);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  zone.dispatchEvent(mouse(dom.window, "mousedown", { x: 400, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 400, y: 200 }));
+  zone.dispatchEvent(mouse(dom.window, "mouseup", { x: 400, y: 200 }));
+  zone.dispatchEvent(mouse(dom.window, "click", { x: 400, y: 200 }));
+  assert.deepEqual(sdk, [], "the raw press stays held back while a dbltap may still form");
+
+  await sleep(350); // dbltap window closes untouched
+  assert.equal(sdk.length, 1, "exactly one passthrough event");
+  assert.equal(sdk[0], "click", "the SDK's single click is replayed, nothing else");
+  assert.equal(seen.filter((e) => e.type === GESTURE_EVENTS.dbltap).length, 0);
+});
+
+test("a double tap leaves the SDK with no click at all", async (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  stubFullscreen(dom, true); // the dbltap intent is fullscreen-gated
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+  const seen = collect(host, dom.window);
+  const sdk = sdkObserver(zone, dom.window);
+
+  for (const x of [400, 404]) {
+    zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x, y: 200 }));
+    zone.dispatchEvent(mouse(dom.window, "mousedown", { x, y: 200 }));
+    zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x, y: 200 }));
+    zone.dispatchEvent(mouse(dom.window, "mouseup", { x, y: 200 }));
+    zone.dispatchEvent(mouse(dom.window, "click", { x, y: 200 }));
+  }
+  zone.dispatchEvent(mouse(dom.window, "dblclick", { x: 404, y: 200 }));
+  assert.equal(seen.filter((e) => e.type === GESTURE_EVENTS.dbltap).length, 1);
+
+  await sleep(350);
+  assert.deepEqual(sdk, [], "neither tap nor the dblclick may reach the SDK");
+});
+
+test("hover passes through the forge untouched", (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+  const sdk = sdkObserver(zone, dom.window);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 400, y: 200 }));
+  zone.dispatchEvent(mouse(dom.window, "mousemove", { x: 400, y: 200 }));
+  zone.dispatchEvent(new dom.window.MouseEvent("pointerover", { bubbles: true, clientX: 400, clientY: 200 }));
+  assert.deepEqual(sdk, ["pointermove", "mousemove", "pointerover"],
+    "hover input must never be mistaken for a gesture stream");
+});
+
+test("a press outside the gesture zone passes natively, immediately", (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+  const sdk = sdkObserver(zone, dom.window);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 900, y: 500 }));
+  zone.dispatchEvent(mouse(dom.window, "mousedown", { x: 900, y: 500 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 900, y: 500 }));
+  zone.dispatchEvent(mouse(dom.window, "mouseup", { x: 900, y: 500 }));
+  zone.dispatchEvent(mouse(dom.window, "click", { x: 900, y: 500 }));
+  assert.deepEqual(sdk, ["pointerdown", "mousedown", "pointerup", "mouseup", "click"],
+    "outside the video rect the zone is transparent - full native stream");
+});
+
+test("with every pointer gesture disabled the shell stops dominating", async (t) => {
+  const { setSetting } = await import("../src/shell/chrome/config.js");
+  const keys = ["gestures.scrub", "gestures.swipe", "gestures.hold", "gestures.dbltap", "gestures.pinch"];
+  for (const key of keys) setSetting(key, false);
+  t.after(() => {
+    for (const key of keys) setSetting(key, true);
+  });
+  const { dom, video, zone, host } = makeEnv();
+  stubFullscreen(dom, true); // all gestures would be armed here - settings win
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+  const sdk = sdkObserver(zone, dom.window);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 400, y: 200 }));
+  zone.dispatchEvent(mouse(dom.window, "click", { x: 400, y: 200 }));
+  assert.deepEqual(sdk, ["pointerdown", "pointerup", "click"],
+    "gestures off = zero interception, click passes with no debounce");
+});
+
 test("a focused native player button does not silence hotkeys", () => {
   const { dom, video, zone, host } = makeEnv();
   // Native SDK control-bar button inside the container - NOT pf chrome.

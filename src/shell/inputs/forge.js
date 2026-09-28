@@ -32,7 +32,21 @@ const PINCH_BASELINE_DELAY_MS = TUNING.gestures.pinchBaselineDelayMs;
 const TRACKPAD_COOLDOWN_MS = TUNING.gestures.trackpadCooldownMs;
 const SUPPRESS_WINDOW_MS = TUNING.gestures.suppressWindowMs;
 const DOUBLE_TAP_WINDOW_MS = TUNING.gestures.doubleTapWindowMs;
+const CLICK_SETTLE_MS = TUNING.gestures.clickSettleMs;
 const SCRUB_VELOCITY_TAU_S = TUNING.scrub.velocityFilterMs / 1000;
+
+/**
+ * Pointer gestures whose activation the shell must hide from the SDK. While
+ * ANY of these is armed, an owned press stops its whole pointer/mouse/touch
+ * stream at the zone's capture listeners - the SDK only ever sees native
+ * input the shell deliberately passes through (single click/tap, hover,
+ * presses outside the gesture zone).
+ */
+const POINTER_GESTURE_INTENTS = ["scrub", "swipe", "hold", "dbltap", "pinch"];
+
+/** Synthetic single-tap replays this engine dispatched - lets the capture
+ *  click handler recognize its own stand-in events and pass them through. */
+const replayedClicks = new WeakSet();
 
 /** All live input engines, used for keyboard focus arbitration. */
 const activeForges = new Set();
@@ -146,11 +160,13 @@ function pooledDispatchEvent(name, detail) {
   return event;
 }
 
-/** Click-event time on the performance.now() timebase. Synthetic events
- *  (jsdom/host tests) carry a zero timeStamp; falling back keeps the
- *  suppression window readable there. */
-function clickTime(event) {
-  return event.timeStamp > 0 ? event.timeStamp : performance.now();
+/** Deadline checks run on the performance.now() timebase the suppress
+ *  window is armed with. event.timeStamp is deliberately ignored: jsdom and
+ *  other host realms stamp epoch-based values, which would silently never
+ *  match a performance-based deadline (and in production the synchronous
+ *  capture handler makes the two readings equivalent anyway). */
+function clickTime() {
+  return performance.now();
 }
 
 /**
@@ -190,9 +206,23 @@ export class InputForge {
   #lastTapTime = -Infinity;
   #gestureZone = null;
 
-  // Click/dblclick suppression after gestures: a deadline consumed by the
-  // capture handlers when the next click actually arrives (no per-gesture timer).
+  // Click/dblclick suppression after gestures: a deadline (time-based, not
+  // one-shot) that every activation inside the window is swallowed by - the
+  // window stays armed for its full span so click AND dblclick both die.
   #suppressClickUntil = 0;
+
+  // SDK-domination state. #pointerOwned: the current press was gesture-
+  // eligible, so zone-capture stops its pointer/mouse/touch stream. #awaitClick:
+  // short post-pointerup window still swallowing the compat mouseup before the
+  // click decision. #tapReplay*: a first tap held back (a dbltap may still
+  // form) that expires into a synthetic click for the SDK.
+  #pointerOwned = false;
+  #awaitClick = false;
+  #awaitTimer = null;
+  #tapReplayTarget = null;
+  #tapReplayTimer = null;
+  #tapReplayX = 0;
+  #tapReplayY = 0;
 
   // Scrub state.
   #scrubbing = false;
@@ -264,6 +294,44 @@ export class InputForge {
     zone.addEventListener("pointercancel", (event) => this.#handlePointerCancel(event), options);
     zone.addEventListener("click", (event) => this.#handleClickCapture(event), { capture: true, signal });
     zone.addEventListener("dblclick", (event) => this.#handleDblClickCapture(event), { capture: true, signal });
+    // SDK stream dominance: the compat mouse/touch streams mirror the pointer
+    // stream, so while a press is owned they stop at this capture as well -
+    // the SDK never observes a partial sequence. touchstart/mousedown can
+    // precede (or arrive without) a tracked pointerdown, so they also probe
+    // prospective eligibility directly. Plain hover input (#pointerOwned
+    // false, no session) always passes through untouched.
+    const swallowOwned = (event) => {
+      if (this.#pointerOwned) {
+        event.stopImmediatePropagation();
+      }
+    };
+    zone.addEventListener("mousedown", (event) => {
+      if ((event.button === 0 && this.#pointerOwned) || this.#dominatesPress(event)) {
+        event.stopImmediatePropagation();
+      }
+    }, options);
+    zone.addEventListener("mousemove", swallowOwned, options);
+    zone.addEventListener("mouseup", (event) => {
+      if (event.button === 0 && (this.#pointerOwned || this.#awaitClick)) {
+        event.stopImmediatePropagation();
+      }
+    }, options);
+    zone.addEventListener("touchstart", (event) => {
+      if (this.#pointerOwned || this.#dominatesPress(event)) {
+        event.stopImmediatePropagation();
+      }
+    }, options);
+    zone.addEventListener("touchmove", swallowOwned, options);
+    zone.addEventListener("touchend", (event) => {
+      if (this.#pointerOwned || this.#awaitClick) {
+        event.stopImmediatePropagation();
+      }
+    }, options);
+    zone.addEventListener("touchcancel", (event) => {
+      if (this.#pointerOwned || this.#awaitClick) {
+        event.stopImmediatePropagation();
+      }
+    }, options);
     window.addEventListener("pointerup", (event) => this.#handlePointerUp(event), options);
     window.addEventListener("pointercancel", (event) => this.#handlePointerCancel(event), options);
     document.addEventListener("keydown", (event) => this.#handleKeydown(event), { capture: true, signal });
@@ -346,6 +414,9 @@ export class InputForge {
       lastActiveForge = null;
     }
     this.#resetKeyboardHold();
+    this.#pointerOwned = false;
+    this.#clearAwaitClick();
+    this.#cancelTapReplay();
     this.#scope.dispose();
   }
 
@@ -597,6 +668,18 @@ export class InputForge {
     } else {
       this.#pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     }
+    if (POINTER_GESTURE_INTENTS.some(allowsIntent)) {
+      // Gesture-eligible press with any pointer gesture armed: the shell owns
+      // this stream. Stop it here (zone capture, ancestor of the video) so
+      // SDK target/bubble listeners never see it, and drop any pending
+      // single-tap replay - a new press can still turn into a dbltap or a
+      // gesture, and the SDK must not be toggled mid-sequence.
+      this.#pointerOwned = true;
+      if (allowsIntent("dbltap")) {
+        this.#cancelTapReplay();
+      }
+      event.stopImmediatePropagation();
+    }
 
     if (this.#pointers.size === 2) {
       if (allowsIntent("pinch")) {
@@ -643,6 +726,9 @@ export class InputForge {
     if (pointer) {
       pointer.x = x;
       pointer.y = y;
+      if (this.#pointerOwned) {
+        event.stopImmediatePropagation();
+      }
     }
     if (this.#pointers.size === 2 && this.#pinchStartDistance > 0) {
       this.#checkPinch();
@@ -802,7 +888,18 @@ export class InputForge {
   }
 
   #handlePointerUp(event) {
+    const tracked = this.#pointers.has(event.pointerId);
+    if (tracked && this.#pointerOwned) {
+      event.stopImmediatePropagation();
+    }
     this.#pointers.delete(event.pointerId);
+    if (this.#pointers.size === 0 && this.#pointerOwned) {
+      // Session over: the click decision follows in #handleClickCapture, but
+      // the compat mouseup the UA fires between pointerup and click still
+      // belongs to our stream - keep swallowing it briefly (#awaitClick).
+      this.#pointerOwned = false;
+      this.#armAwaitClick();
+    }
     if (this.#pinchStartDistance > 0 && this.#pointers.size < 2) {
       this.#pinchStartDistance = 0;
       this.#pinchFired = false;
@@ -855,12 +952,17 @@ export class InputForge {
       const now = performance.now();
       if (now - this.#lastTapTime < DOUBLE_TAP_WINDOW_MS) {
         this.#lastTapTime = -Infinity;
+        this.#cancelTapReplay();
         this.#suppressNextActivations();
         dbltapDetail.zone = this.#gestureZone;
         dbltapDetail.method = "pointer";
         this.#dispatch(GESTURE_EVENTS.dbltap, dbltapDetail);
       } else {
+        // First tap: the real click (already swallowed at capture by the
+        // seed flag) may still belong to a future dbltap - hold it back and
+        // replay it for the SDK only if the dbltap window closes untouched.
         this.#lastTapTime = now;
+        this.#armTapReplay(event.target, event.clientX, event.clientY);
       }
     }
     this.#primaryPointerId = null;
@@ -868,7 +970,15 @@ export class InputForge {
   }
 
   #handlePointerCancel(event) {
+    const tracked = this.#pointers.has(event.pointerId);
+    if (tracked && this.#pointerOwned) {
+      event.stopImmediatePropagation();
+    }
     this.#pointers.delete(event.pointerId);
+    if (this.#pointers.size === 0) {
+      // A cancelled press ends the stream; no click is coming, so no await.
+      this.#pointerOwned = false;
+    }
     if (this.#pinchStartDistance > 0 && this.#pointers.size < 2) {
       this.#pinchStartDistance = 0;
       this.#pinchFired = false;
@@ -886,17 +996,133 @@ export class InputForge {
     this.#gestureZone = null;
   }
 
+  /** Whether this press belongs to the shell's gesture stream (zone capture
+   *  should stop it). Used for touchstart/mousedown, which can arrive before
+   *  or without the tracked pointerdown; mirrors #handlePointerDown's
+   *  eligibility: armed gestures, left button, outside shell chrome, over the
+   *  video (or joining a live session). */
+  #dominatesPress(event) {
+    if (event.button !== undefined && event.button !== 0) {
+      return false;
+    }
+    if (!POINTER_GESTURE_INTENTS.some(allowsIntent)) {
+      return false;
+    }
+    if (this.#eventTarget && isInsideShell(this.#eventTarget, event.target)) {
+      return false;
+    }
+    if (this.#pointers.size > 0) {
+      return true;
+    }
+    const point = (event.touches && event.touches[0]) || event;
+    if (point.clientX === undefined) {
+      return false;
+    }
+    return this.#hitTestVideo(point);
+  }
+
+  #armAwaitClick() {
+    this.#awaitClick = true;
+    clearTimeout(this.#awaitTimer);
+    this.#awaitTimer = setTimeout(() => this.#clearAwaitClick(), CLICK_SETTLE_MS);
+  }
+
+  #clearAwaitClick() {
+    this.#awaitClick = false;
+    clearTimeout(this.#awaitTimer);
+    this.#awaitTimer = null;
+  }
+
+  /** Hold a first tap's click back for the dbltap window; on expiry (no
+   *  second tap completed the gesture) the SDK receives a synthetic click at
+   *  the original coordinates - so a single tap still reaches the SDK while
+   *  a double tap never leaks its first click. Debounce only engages when
+   *  the dbltap intent is armed (fullscreen), so inline taps keep their
+   *  native zero-latency click. */
+  #armTapReplay(target, x, y) {
+    this.#cancelTapReplay();
+    this.#tapReplayTarget = target;
+    this.#tapReplayX = x;
+    this.#tapReplayY = y;
+    this.#tapReplayTimer = setTimeout(() => {
+      this.#tapReplayTimer = null;
+      this.#replayTapClick();
+    }, DOUBLE_TAP_WINDOW_MS);
+  }
+
+  #cancelTapReplay() {
+    clearTimeout(this.#tapReplayTimer);
+    this.#tapReplayTimer = null;
+    this.#tapReplayTarget = null;
+  }
+
+  #replayTapClick() {
+    const target = this.#tapReplayTarget;
+    this.#tapReplayTarget = null;
+    if (this.#scope.disposed || !target || !target.isConnected) {
+      return;
+    }
+    const win = target.ownerDocument && target.ownerDocument.defaultView;
+    const Ctor = (win && win.MouseEvent) || globalThis.MouseEvent;
+    if (!Ctor) {
+      return;
+    }
+    const event = new Ctor("click", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: win || null,
+      detail: 1,
+      clientX: this.#tapReplayX,
+      clientY: this.#tapReplayY
+    });
+    replayedClicks.add(event);
+    target.dispatchEvent(event);
+  }
+
   #handleClickCapture(event) {
-    if (clickTime(event) < this.#suppressClickUntil) {
-      this.#suppressClickUntil = 0;
+    // Our own single-tap stand-in: pass it to the SDK untouched.
+    if (replayedClicks.has(event)) {
+      this.#clearAwaitClick();
+      return;
+    }
+    const ownedPress = this.#awaitClick || this.#tapReplayTarget !== null;
+    this.#clearAwaitClick();
+    // Gesture window: every activation the shell consumed stays invisible -
+    // the window is a deadline, consumed by time, so a dblclick arriving
+    // after its clicks is swallowed too.
+    if (clickTime() < this.#suppressClickUntil) {
       event.stopImmediatePropagation();
       event.preventDefault();
+      return;
     }
+    if (!ownedPress) {
+      return; // Press the shell never took (SDK control, outside rect, right
+      // button): native single click passes through as-is.
+    }
+    if (this.#tapReplayTarget) {
+      // First tap of a possible dbltap - hold the real click back; the seed
+      // replays it for the SDK if the window closes without a second tap.
+      event.stopImmediatePropagation();
+      event.preventDefault();
+      return;
+    }
+    // Owned press that never seeded (long press, dbltap disarmed): a plain
+    // single click - pass natively, zero latency.
   }
 
   #handleDblClickCapture(event) {
-    if (clickTime(event) < this.#suppressClickUntil) {
-      this.#suppressClickUntil = 0;
+    if (replayedClicks.has(event)) {
+      return;
+    }
+    if (clickTime() < this.#suppressClickUntil) {
+      event.stopImmediatePropagation();
+      event.preventDefault();
+      return;
+    }
+    if (this.#tapReplayTarget) {
+      // Two slow taps (outside the dbltap window): both clicks are managed
+      // by their seeds, so the UA's dblclick stays invisible too.
       event.stopImmediatePropagation();
       event.preventDefault();
     }
