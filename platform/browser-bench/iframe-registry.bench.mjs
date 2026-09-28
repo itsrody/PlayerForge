@@ -15,7 +15,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ChromiumDriver, TestServer, createTestPage } from "../harness/chromium.mjs";
+import { FirefoxDriver, TestServer, createTestPage } from "../harness/firefox.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_BUNDLE = readFileSync(join(HERE, "..", "..", "dist", "playerforge.user.js"), "utf8");
@@ -70,7 +70,7 @@ async function measureBurst(driver, churn) {
 export default async function runIframeRegistryBench(bundle = DEFAULT_BUNDLE) {
   const server = new TestServer();
   await server.start();
-  const driver = await ChromiumDriver.launch();
+  const driver = await FirefoxDriver.launch();
   const results = [];
   const suffix = `${CHURN_NODES} nodes/burst`;
 

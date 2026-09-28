@@ -4,8 +4,8 @@
  *
  *   node platform/run.mjs test              # Node.js unit tests only
  *   node platform/run.mjs bench             # Pure-CPU benchmarks only
- *   node platform/run.mjs integration       # ChromiumDriver integration tests
- *   node platform/run.mjs browser-bench     # ChromiumDriver browser benchmarks
+ *   node platform/run.mjs integration       # FirefoxDriver integration tests
+ *   node platform/run.mjs browser-bench     # FirefoxDriver browser benchmarks
  *   node platform/run.mjs all               # Everything in sequence
  *   node platform/run.mjs ci                # test + bench + integration (no browser-bench)
  */
@@ -62,9 +62,9 @@ async function runBench() {
   }
 }
 
-// ── ChromiumDriver integration tests ────────────────────────────────
+// ── FirefoxDriver integration tests ────────────────────────────────
 async function runIntegration() {
-  log("Running ChromiumDriver integration tests...");
+  log("Running FirefoxDriver integration tests...");
   separator();
 
   const integrationDir = join(HERE, "integration");
@@ -94,7 +94,7 @@ async function runIntegration() {
 
 // ── Browser benchmarks ──────────────────────────────────────────────
 async function runBrowserBench(bundlePath) {
-  log("Running ChromiumDriver browser benchmarks...");
+  log("Running FirefoxDriver browser benchmarks...");
   separator();
 
   const benchDir = join(HERE, "browser-bench");

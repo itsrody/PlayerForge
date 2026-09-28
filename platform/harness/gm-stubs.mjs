@@ -6,11 +6,11 @@
  * runtime environment using localStorage as the backing store.
  *
  * This file is a no-op by itself — the actual stubs are wired in
- * chromium.mjs's injectGMStubs(). This module exists as a reference and
+ * firefox.mjs's injectGMStubs(). This module exists as a reference and
  * can be imported standalone for documentation purposes.
  */
 
-// The actual GM_* stubs are defined inline in chromium.mjs's injectGMStubs()
+// The actual GM_* stubs are defined inline in firefox.mjs's injectGMStubs()
 // method to keep them self-contained within the evaluateScript call. This
 // file documents the API contract:
 

@@ -1,12 +1,12 @@
 /**
  * CSS layout browser benchmark.
  *
- * Measures panel toggle and style recalculation cost in Chromium 152.
+ * Measures panel toggle and style recalculation cost in Firefox 156.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ChromiumDriver, TestServer, createTestPage } from "../harness/chromium.mjs";
+import { FirefoxDriver, TestServer, createTestPage } from "../harness/firefox.mjs";
 import { waitForShell, waitForPanel } from "../harness/page.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -18,7 +18,7 @@ const ITERATIONS = 10;
 export default async function runCssLayoutBench(bundle = DEFAULT_BUNDLE) {
   const server = new TestServer();
   await server.start();
-  const driver = await ChromiumDriver.launch();
+  const driver = await FirefoxDriver.launch();
   const results = [];
 
   try {
