@@ -81,9 +81,9 @@ function entryFor(canonical, doc) {
   let entry = cache.get(canonical);
   if (!entry || entry.doc !== doc) {
     const markup = ICONS[canonical];
-    // Parse the static SVG markup via DOMParser, never innerHTML: on MV3 /
-    // strict-CSP sites that enforce Trusted Types, innerHTML would be blocked
-    // at runtime. The markup is a fixed, trusted build-time string - not user
+    // Parse the static SVG markup via DOMParser, never innerHTML: on
+    // strict-CSP sites that enforce Trusted Types, innerHTML would be
+    // blocked at runtime. The markup is a fixed, trusted build-time string - not user
     // input - so parsing it into a detached element is the safe equivalent.
     // DOMParser is resolved from the target document's realm so the parsed
     // node comes back in the same world, regardless of which window first

@@ -1,7 +1,7 @@
 /**
  * Edge-to-edge fullscreen bypass for the SDK's iframe document.
  *
- * Chromium's Android DisplayCutoutController sets the window's
+ * Android's display-cutout handling sets the window's
  * `layoutInDisplayCutoutMode` from the viewport-fit value of the ACTIVE
  * (fullscreen) frame - and when PlayerForge fullscreens a div, the active
  * frame is THIS iframe's document, not the top page. So the top page's

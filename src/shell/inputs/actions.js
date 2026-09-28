@@ -222,15 +222,15 @@ function performSkip(shell, state, direction) {
  * exit, pinch fill, and swipe/pinch restore. A newer snap cancels the previous
  * in-flight animation so no cleanup can land mid-gesture.
  *
- * Where Element.animate (Web Animations API) is available -
- * Chromium 69+, i.e. this fork's baseline - the snap runs a WAAPI animation
- * on the compositor: one deterministic compositor animation with a real
- * finish/cancel, replacing the will-change + CSS-transition + transitionend
- * listener puzzle that could race when the transition shorthand was flipped
- * off. The video is promoted to its own compositor layer while a transform is
- * live (fill-mode, swipe/pinch restore) so Chromium composites the
- * scale/translate instead of re-rasterizing the media surface every frame;
- * the layer is released once the snap settles (or is cancelled).
+ * Where Element.animate (Web Animations API) is available - baseline on
+ * this fork - the snap runs a WAAPI animation on the compositor: one
+ * deterministic compositor animation with a real finish/cancel, replacing
+ * the will-change + CSS-transition + transitionend listener puzzle that
+ * could race when the transition shorthand was flipped off. The video is
+ * promoted to its own compositor layer while a transform is live (fill-mode,
+ * swipe/pinch restore) so the compositor renders the scale/translate instead
+ * of re-rasterizing the media surface every frame; the layer is released
+ * once the snap settles (or is cancelled).
  */
 const EASE_STYLE = EASE_SNAPPY_CURVE;
 const EASE_MS = EASE_SNAPPY_MS;
@@ -268,7 +268,7 @@ export function easeTransformTo(video, transform) {
     video.style.willChange = "transform";
   }
 
-  // WAAPI path (Chromium baseline): one compositor animation from the current
+  // WAAPI path: one compositor animation from the current
   // computed transform to the target. On finish the final value is committed
   // to an inline style and the animation is cancelled so its fill gives way;
   // on cancel (via stop() or supersession) the layer is dropped immediately.

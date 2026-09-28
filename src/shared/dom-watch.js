@@ -39,8 +39,9 @@ const DEFER_VISIBILITY_CAP_MS = 500;
 const COMPACTION_RATIO = 4;
 /**
  * Batch size above which the append switches from apply() to an index walk.
- * apply() spreads the batch onto the call stack and V8 refuses somewhere past
- * ~124k arguments (RangeError) - which a mass-DOM-teardown batch can reach,
+ * apply() spreads the batch onto the call stack and the engine refuses at
+ * some argument count with a RangeError - which a mass-DOM-teardown batch
+ * can reach,
  * and which would escape the observer callback before the queue flag below is
  * set, silently dropping the whole batch. apply() stays the fast path for
  * every batch we actually see (measurably cheaper than an element-by-element
@@ -149,10 +150,11 @@ function deferFlushUntilVisible() {
 }
 
 /**
- * Chromium-native scheduling advantage: `scheduler.yield()` lets the browser
+ * `scheduler.yield()` (where the Task Scheduling API exists - not on
+ * Firefox, where yield_() takes the rAF/noop branch) lets the browser
  * interleave input / paint between the mutation batch and the subscriber
- * dispatch. Falls back to flush() directly when the API is absent (jsdom
- * tests, non-Chromium hosts) so the test tick() helper stays compatible.
+ * dispatch. The facade's fallbacks keep the jsdom test tick() helper
+ * compatible either way.
  */
 async function scheduleFlush() {
   await yield_();

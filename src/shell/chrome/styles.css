@@ -1,5 +1,5 @@
 /* ------------------------------------------------------------------
-   PlayerForge HUD styles - Chromium 152+ native: CSS nesting, @container,
+   PlayerForge HUD styles - Firefox 156+ native: CSS nesting, @container,
    @starting-style, @property, :has, color-mix. Design tokens live on the shell
    root; every surface derives from them, so theming/contrast tuning is
    one edit. Components are grouped per tree with native nesting (&).
@@ -17,7 +17,7 @@
      In the document realm the scope root never exists, so a page that
      happens to use `.pf-panel`, `pf-toast`, `.pf-btn`, etc. can never be
      styled by PlayerForge, and PF rules can never escape the HUD subtree
-     into second SDK content. @scope is Chromium 118+; on the 152 baseline
+     into second SDK content. @scope is Firefox 133+; on the 156 baseline
      that needs no @supports fallback.
    ------------------------------------------------------------------ */
 .pf-shell {
@@ -103,7 +103,7 @@
   }
 }
 
-/* -- Low CPU-tier fidelity gate (CPU Performance API, Chromium 152+) --
+/* -- Low CPU-tier fidelity gate (device CPU tier from injectShell; --
    Set on the host element by injectShell. On a "low" device the most
    expensive visual effects - backdrop blur/saturate and promiscuous
    compositor hints - cost more than they delight, so they are turned down
@@ -272,7 +272,7 @@
       left: 50%;
       z-index: var(--pf-z-toast);
       will-change: opacity, translate;
-      /* Dedicated translate property (Chrome 104+) - keeps centering out of
+      /* Dedicated translate property (baseline everywhere) - keeps centering out of
          the transform property, so transform-based animations on the toast
          never clobber it. */
       translate: -50%;
@@ -1018,9 +1018,8 @@
       max-height: 168px;
       overflow-y: auto;
       /* One-axis scroll container: horizontal overflow is clipped, never
-         turned into a second scroller (Chromium 125+ supports clip per axis;
-         the scroll+clip two-value form stays out because it is flagged behind
-         a Chrome 153 beta flag). */
+         turned into a second scroller (overflow-x: clip is baseline here;
+         the scroll+clip two-value form stays out as a later arrival). */
       overflow-x: clip;
       scrollbar-width: thin;
       scrollbar-color: var(--pf-text-mid) transparent;
@@ -1135,8 +1134,8 @@
     }
 
     /* Portrait phones (touch): anchor the panel as a bottom sheet - it sits
-       within thumb reach and never covers the whole video. safe-area-max-inset-
-       bottom (Chrome 135+) lifts the sheet above the Android gesture bar when
+       within thumb reach and never covers the whole video. The safe-area
+       bottom inset lifts the sheet above the Android gesture bar when
        viewport-fit=cover is active; the env() falls back to 0 when unset. */
     @media (max-width: 520px) and (pointer: coarse) {
       .pf-panel {
@@ -1306,7 +1305,8 @@
     }
   }
 
-  /* View Transition for the settings panel (Chrome 140+). Scoped via
+  /* View Transition for the settings panel (startViewTransition, guarded
+     in panel.js). Scoped via
      view-transition-name on .pf-panel.pf-open; the pseudo-element layers
      cross-fade with a subtle scale on entry and a reverse on exit. */
   ::view-transition-old(pf-panel) {

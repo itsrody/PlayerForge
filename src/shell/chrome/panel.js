@@ -346,10 +346,11 @@ export class SettingsPanel {
    * it per open() keeps two document listeners out of the page's hot path for
    * shells whose panel is never (or rarely) opened; close()/destroy() abort
    * the per-open scope, so they die with the open state. Escape also gets a
-   * CloseWatcher where available (Chromium 131+, TM/Greasemonkey grants it via
-   * the same global): the UA then dismisses us even when a page-level
-   * keydown handler would otherwise swallow or reorder the event, and we do
-   * not depend on the event still bubbling to the shadow host.
+   * CloseWatcher where the host provides one (Firefox does not, so the
+   * keydown path above is the live path there): where it exists the UA then
+   * dismisses us even when a page-level keydown handler would otherwise
+   * swallow or reorder the event, and we do not depend on the event still
+   * bubbling to the shadow host.
    */
   #armDismissal() {
     if (this.#dismissScope || this.#scope.disposed) {
@@ -702,9 +703,9 @@ export class SettingsPanel {
 
   #wireEvents() {
     const { signal } = this.#scope;
-    // Live compact mode: Chromium re-fires matchMedia change on viewport
-    // crossings, so the panel tracks the breakpoint instead of a one-shot
-    // read at construction. The explicit ui.compact setting still wins - it
+    // Live compact mode: matchMedia change fires on viewport crossings, so
+    // the panel tracks the breakpoint instead of a one-shot read at
+    // construction. The explicit ui.compact setting still wins - it
     // is consulted first inside #isCompactMode and only the auto-detect path
     // consults the query. Listener dies with the panel's scope signal.
     matchMedia(COMPACT_MEDIA_QUERY).addEventListener("change", () => {

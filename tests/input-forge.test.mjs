@@ -710,7 +710,7 @@ test("computeCoverScale covers a reference box from aspect ratios alone", () => 
   dom.window.close();
 });
 
-/** A scrub pointermove whose (fake) Chromium sample streams we control. */
+/** A scrub pointermove whose (fake) coalesced sample streams we control. */
 function scrubMoveEvent(win, { x, y, coalesced, predicted, ts }) {
   const event = pointerEvent(win, "pointermove", { x, y });
   Object.defineProperty(event, "timeStamp", { value: ts });

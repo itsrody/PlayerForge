@@ -142,7 +142,8 @@ function onWorkerError() {
 }
 
 function reportWorkerJank(data) {
-  // LoAF attribution in workers is Chromium 153+; only debug runs warrant the
+  // LoAF attribution in workers exists only on hosts that ship it (not
+  // Firefox); only debug runs warrant the
   // noise - the one-message-per-janky-frame perf channel is the whole
   // debug-story, and only a resident worker ever lives to post it.
   if (logger.enabled) {

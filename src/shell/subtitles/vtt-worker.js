@@ -14,7 +14,7 @@
  * of thousands of cue objects, which measures ~3x more expensive for a
  * 5000-cue track.
  *
- * Chromium 153 extends Long Animation Frames to workers: the observer below
+ * Where the host extends Long Animation Frames to workers, the observer below
  * reports any parse that would have stalled the worker's own event loop
  * through the existing debug perf-diag channel (one message per janky frame,
  * posted asynchronously after the frame - which only a resident worker lives
@@ -27,9 +27,9 @@ const JANK_THRESHOLD_MS = 150;
 const DECODER = new TextDecoder();
 
 /**
- * Report every long animation frame the worker produced. LoAF in workers
- * landed in Chromium 153; the observer costs nothing when the support is
- * absent (the Chromium 152 floor, jsdom test hosts).
+ * Report every long animation frame the worker produced. LoAF-in-workers
+ * does not exist in Firefox, so the guard below skips installation there -
+ * the observer costs nothing when the support is absent (jsdom too).
  */
 if (
   typeof PerformanceObserver !== "undefined" &&

@@ -21,8 +21,9 @@ export function formatTime(seconds) {
 }
 
 /** Cancellable delay: runs `fn` after `ms`, returned fn cancels the pending run.
- *  Routed through postTask so the scheduler façade owns the timer (Chromium
- *  task scheduler with the shared setTimeout fallback; same cancel contract). */
+ *  Routed through postTask so the scheduler façade owns the timer (host task
+ *  scheduler where available, the shared setTimeout path on Firefox; same
+ *  cancel contract). */
 export function delay(fn, ms) {
   const handle = postTask(fn, { delay: ms });
   return () => handle.abort();

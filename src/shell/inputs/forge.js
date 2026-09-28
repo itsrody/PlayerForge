@@ -16,10 +16,10 @@ import { Scope } from "../../shared/scope.js";
 const WHEEL_CAPTURE = { capture: true, passive: false };
 
 // Gesture calibration hoisted to module consts. TUNING is static (read-only
-// after load), so binding these at module scope lets V8 treat them as
-// invariant values and fold them - Maglev/TurboFan raise constants to load,
-// instead of re-running shape-guarded property loads on every high-frequency
-// pointer/keyboard event.
+// after load), so binding these at module scope lets the JIT treat them as
+// invariant values and fold them - hoisted constants raise to load-time
+// reads instead of re-running shape-guarded property loads on every
+// high-frequency pointer/keyboard event.
 const EDGE_ZONE_RATIO = TUNING.gestures.edgeZoneRatio;
 const EDGE_ZONE_START = 1 - TUNING.gestures.edgeZoneRatio;
 const HOLD_TIMEOUT_MS = TUNING.gestures.holdTimeoutMs;
@@ -143,7 +143,7 @@ function pooledDispatchEvent(name, detail) {
   const stale = dispatchPool.get(name);
   if (stale && stale.Ctor === Ctor) {
     // CustomEvent.detail is a prototype getter over an internal slot on
-    // spec engines (jsdom and Chromium alike) - plain assignment throws in
+    // spec engines (jsdom and Firefox alike) - plain assignment throws in
     // strict mode and never updates the slot, which silently killed every
     // gesture dispatch after the first per name. Callers pass one pooled
     // detail object per name, so the usual path is the reference compare
@@ -175,10 +175,11 @@ function clickTime() {
  * decision (settings gates, fullscreen requirement) is delegated to the
  * declarative INPUT_BINDINGS list, sampled live at each decision point.
  *
- * Chromium 152+ native by design: one AbortSignal owns the entire listener
- * lifetime (destroy() === scope.abort()), all pointer listeners are passive,
- * scrub sampling consumes getCoalescedEvents(), and fullscreen truth is the
- * single shared `fs` gate (shadow.js), built on the native fullscreen event.
+ * Native by design: one AbortSignal owns the entire listener lifetime
+ * (destroy() === scope.abort()), all pointer listeners are passive, scrub
+ * sampling consumes getCoalescedEvents() where the host streams it (the
+ * live sample otherwise), and fullscreen truth is the single shared `fs`
+ * gate (shadow.js), built on the native fullscreen event.
  */
 export class InputForge {
   #video;
@@ -280,7 +281,7 @@ export class InputForge {
 
     // NOTE: the native video element is deliberately NEVER patched (no
     // own-property rewrite of play/pause). Assigning JS functions as own
-    // properties onto HTMLMediaElement mutates the instance's V8 map/expando
+    // properties onto HTMLMediaElement mutates the instance's own-property
     // shape and would swallow play()/pause() calls from the media command
     // plane, page autoplay code, and other plugins during a Space hold. The
     // UA's own Space-activates-video default is cancelled by preventDefault on
@@ -449,7 +450,7 @@ export class InputForge {
 
   #hitTestVideo(pointerEvent) {
     // Cache the box within one interaction so taps outside the HUD don't
-    // force a sync layout flush (getBoundingClientRect) on Chromium. The cache
+    // force a sync layout flush (getBoundingClientRect). The cache
     // is dropped at every pointerdown (see #handlePointerDown), so it can never
     // be served stale by a scroll or ancestor-transform move.
     if (!this.#videoRect) {
@@ -463,7 +464,7 @@ export class InputForge {
   #zoneForPoint(pointerEvent) {
     // Edge zones only steer fullscreen gestures (dbltap edge-skip, swipe-down
     // exit - both fs-gated), so the reference is the physical display. screen
-    // also sidesteps innerWidth's scrollbar-inclusive quirk on Chromium. Guard
+    // also sidesteps innerWidth's scrollbar-inclusive quirk. Guard
     // to the window when the screen reports no size (headless/test environs).
     const screenWidth =
       typeof screen !== "undefined" && screen.width > 0
@@ -807,7 +808,7 @@ export class InputForge {
   }
 
   /**
-   * Consume every coalesced sample of the move so high-rate Chromium pointer
+   * Consume every coalesced sample of the move so high-rate pointer
    * streams scrub at full fidelity; one semantic event is emitted per move.
    *
    * Real-time velocity is measured at move granularity from true event
@@ -819,7 +820,8 @@ export class InputForge {
    * signal responsive enough to track speed changes mid-stroke, so the seek
    * amount stays proportional to the hand in real time.
    *
-   * Chromium's PointerEvent.getPredictedEvents() returns extrapolated FUTURE
+   * PointerEvent.getPredictedEvents() (absent on Firefox) returns
+   * extrapolated FUTURE
    * positions. We speculatively "draw ahead" with them, matching the drawing
    * idiom in the Pointer Events spec (predict, then discard once real points
    * arrive): predicted travel feeds the VELOCITY estimate only, never the
@@ -835,7 +837,7 @@ export class InputForge {
     const hasCoalesced = typeof event.getCoalescedEvents === "function";
     const samples = hasCoalesced ? event.getCoalescedEvents() : null;
     // Coalesced samples then the live event, without materializing a combined
-    // array: high-rate Chromium pointer streams land here every move, so a
+    // array: high-rate pointer streams land here every move, so a
     // [[...samples, event]] spread per frame would allocate needlessly.
     if (samples) {
       const count = samples.length + 1;

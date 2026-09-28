@@ -1,18 +1,19 @@
 /**
- * Chromium-native task scheduler.
+ * Host task scheduler facade.
  *
- * One façade over Chromium's scheduling primitives so consumers never
+ * One façade over the host's scheduling primitives so consumers never
  * duplicate `typeof scheduler?.*` capability guards across the tree:
  *
  *   postTask(fn, { priority, delay, signal }) → { abort() }
- *     scheduler.postTask (Chromium 95+) → setTimeout fallback
+ *     scheduler.postTask (where the Task Scheduling API exists) → setTimeout
  *
  *   yield_() → Promise
- *     scheduler.yield (Chromium 129+) → requestAnimationFrame → noop
+ *     scheduler.yield (where it exists) → requestAnimationFrame → noop
  *
- * Detection runs once at module load and every export is a plain function so
- * V8 can keep the fast path inline (Maglev/TurboFan-friendly, no hidden-class
- * penalty per call).
+ * Firefox never shipped scheduler.postTask/scheduler.yield, so the
+ * setTimeout/rAF branches below are the LIVE paths on this fork, not dead
+ * fallbacks. Detection runs once at module load and every export is a plain
+ * function, so the hot path stays inline-friendly.
  */
 
 const HAS_POST_TASK =
@@ -36,8 +37,8 @@ const HAS_YIELD =
  */
 export function postTask(fn, { priority = "user-visible", delay: ms = 0, signal } = {}) {
   if (!HAS_POST_TASK) {
-    // setTimeout fallback - dead code on the Chromium 152 floor, kept for the
-    // jsdom test harness.
+    // setTimeout path: the live implementation on Firefox (and the jsdom
+    // harness); scheduler.postTask only exists on non-Firefox hosts.
     const id = setTimeout(fn, ms);
     return { abort: () => clearTimeout(id) };
   }

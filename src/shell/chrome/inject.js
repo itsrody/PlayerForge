@@ -75,16 +75,16 @@ export function ensureStyles() {
 }
 
 /**
- * Map the CPU Performance API's device tier (navigator.cpuPerformance,
- * Chromium 152+; unsigned short: 0=unknown, 1=low, 2=mid, 3=high, 4=ultra)
- * to the shell's fidelity tier. "medium" for unknown/absent, so the gate
- * degrades to the current default on hosts without the API.
+ * Map the CPU Performance API's device tier (navigator.cpuPerformance;
+ * unsigned short: 0=unknown, 1=low, 2=mid, 3=high, 4=ultra) to the shell's
+ * fidelity tier. Firefox does not expose the API, so "medium" for
+ * unknown/absent degrades the gate to the current default tier there.
  */
 function mapCpuTier(tier) {
   return tier === 1 ? "low" : tier === 3 || tier === 4 ? "high" : "medium";
 }
 
-/** Resolve the device CPU tier once (CPU Performance API, Chromium 152+). */
+/** Resolve the device CPU tier once (absent on Firefox -> default tier). */
 function detectCpuTier() {
   try {
     return mapCpuTier(navigator.cpuPerformance);

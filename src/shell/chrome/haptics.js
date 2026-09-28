@@ -1,12 +1,12 @@
 /**
- * Haptic feedback for gesture latches, via Chromium Android's Vibration API
- * (navigator.vibrate). Chromium-based mobile browsers implement the Vibration
- * API (the W3C spec note: "implemented in Chromium-based browsers"); desktop
- * Chromium and hosts without a vibrator no-op it and iOS never implements it.
+ * Haptic feedback for gesture latches, via the Vibration API
+ * (navigator.vibrate). Android Firefox implements it; desktop Firefox, hosts
+ * without a vibrator, and iOS do not - the availability check below turns
+ * every one of those into a silent no-op.
  *
- * The successor Web Haptics API (navigator.playHaptics) is still a WICG/MSEdge
- * explainer and NOT shipped in any Chromium release, so navigator.vibrate plus
- * short-pulse patterns is the only real, portable hook today.
+ * The successor Web Haptics API (navigator.playHaptics) is still a WICG
+ * explainer and shipped nowhere, so navigator.vibrate plus short-pulse
+ * patterns is the only real, portable hook today.
  *
  * Patterns are deliberately SHORT: a gesture latch is a confirm pulse, not a
  * notification (Android has the VIBRATE permission + Touch Feedback setting,

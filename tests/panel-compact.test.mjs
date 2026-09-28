@@ -9,8 +9,8 @@ const { Shell } = await import("../src/shell/shell.js");
 const { setSetting } = await import("../src/shell/chrome/config.js");
 
 /**
- * Controllable matchMedia fake: records the compact query Chromium fires
- * change for and holds a single listener slot so tests can drive a viewport
+ * Controllable matchMedia fake: records compact-query change notifications
+ * and holds a single listener slot so tests can drive a viewport
  * crossing exactly like the real MediaQueryList. jsdom has no viewport
  * engine, so the loader's static shim is replaced here per-test.
  */

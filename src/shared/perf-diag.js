@@ -3,7 +3,9 @@ import { logger } from "./logger.js";
 /**
  * Long Animation Frame (LoAF) diagnostic, active ONLY while debug logs are on.
  *
- * LoAF (Chromium 123+) reports frames delayed beyond 50ms with script
+ * LoAF (PerformanceLongAnimationFrameTiming, feature-detected below - absent
+ * in Firefox, so the diagnostic simply never installs there) reports frames
+ * delayed beyond 50ms with script
  * attribution, including forced-style/layout breakdowns. When debugging jank -
  * whether PlayerForge or an SDK caused it - this surfaces the worst offenders on
  * the console instead of requiring a tracing session. It is installed lazily on

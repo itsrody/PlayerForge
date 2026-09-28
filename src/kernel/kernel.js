@@ -241,7 +241,7 @@ export class Kernel {
       }
     };
 
-    /** Chromium-native single-target consolidation: `MutationObserver.observe()`
+    /** Single-target consolidation: `MutationObserver.observe()`
      *  supports multiple root targets natively (childList filtered in C++), so
      *  up to `watchDepth` per-video C++ wrappers collapse to one instance.
      *  The kernel scope disconnects it at pagehide - no per-video bookkeeping. */

@@ -15,8 +15,8 @@ function sortByUpdatedAt(entries, descending = false) {
   });
 }
 
-// Hoisted TUNING.resume.* scalars: mutation-free calibration, so V8 folds
-// them as invariants on the media-clock path rather than re-resolving the
+// Hoisted TUNING.resume.* scalars: mutation-free calibration, so the JIT
+// folds them as invariants on the media-clock path rather than re-resolving the
 // deep TUNING chain on every timeupdate/save decision.
 const RESUME_STALE_DAYS = TUNING.resume.staleDays;
 const RESUME_MAX_ENTRIES = TUNING.resume.maxEntries;
@@ -48,8 +48,8 @@ function isValidStore(raw) {
 /**
  * Project any incoming entry (disk, cross-tab, import, our own literal)
  * onto the fixed whitelist so every in-memory entry carries the same keys.
- * Foreign writers omit optional fields, which used to hand V8 a new hidden
- * class per adopted entry and deoptimize every store scan over them.
+ * Foreign writers omit optional fields, which used to hand the JIT a new
+ * object shape per adopted entry and deoptimize every store scan over them.
  */
 function toFixedShape(incoming) {
   const out = {};
@@ -710,7 +710,7 @@ export class ResumeTracker {
       // requestVideoFrameCallback gives the exact mediaTime of the last rendered
       // frame — the position the user actually saw — whereas currentTime is the
       // decoder position which may lead or lag the display. Falls back to
-      // currentTime when the API is unavailable (non-Chromium, test harness).
+      // currentTime when the API is unavailable (jsdom harness hosts).
       if (typeof video.requestVideoFrameCallback === "function") {
         // rVFC ids aren't AbortSignal-cancellable: keep the pending id on a
         // field so destroy() can cancel it, and a re-pause supersedes the

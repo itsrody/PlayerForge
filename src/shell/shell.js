@@ -151,7 +151,7 @@ export class Shell {
    * fullscreen iframe draws behind the cutout edge-to-edge, so the SDK's
    * rendered box IS the physical screen - `screen.width/height`. No env-based
    * safe-rect narrowing is needed (or possible: env(safe-area-inset-*) does
-   * not resolve inside iframes, Chromium #467970444) - the bypass already puts
+   * not resolve inside iframes) - the bypass already puts
    * the frame at the screen. Returns { width, height }.
    */
   get referenceBox() {
@@ -266,7 +266,7 @@ export class Shell {
     // Document-level (idempotent): make the SDK's own viewport report
     // viewport-fit=cover so the fullscreen frame can draw behind the Android
     // cutout edge-to-edge (see viewport.js). Gated by fullscreen.edgeToEdge:
-    // when disabled we leave the iframe at the default (Chrome letterboxes to
+    // when disabled we leave the iframe at the default (the UA letterboxes to
     // the safe area itself) and fill simply covers the letterboxed frame.
     if (getSetting("fullscreen.edgeToEdge") !== false) {
       ensureViewportFitCover();
@@ -300,8 +300,9 @@ export class Shell {
     }
     // Expose media state as CSS custom properties on the host so the shadow
     // DOM can style based on playing/paused/muted without crossing the realm
-    // boundary. The :playing/:paused/:muted pseudo-classes (Chromium 152+)
-    // cannot reach into shadow roots; custom properties bridge the gap.
+    // boundary. The :playing/:paused/:muted pseudo-classes (which Firefox
+    // does not ship, and which cannot reach into shadow roots anywhere)
+    // are not relied on; custom properties bridge the gap.
     if (host) {
       // Write the custom properties only when their value actually flips.
       // volumechange fires continuously while volume/panner is dragged, and a
@@ -331,7 +332,7 @@ export class Shell {
   /** Surface a hint + re-provision when a fullscreen entry is rejected. */
   #watchFullscreen() {
     // An attempt to enter fullscreen was rejected (typically because an
-    // ancestor embed lacks allowfullscreen - Chromium requires it on every
+    // ancestor embed lacks allowfullscreen - the UA requires it on every
     // frame edge). Surface a hint and re-provision the chain
     // (idempotent) so a retry succeeds if the attributes were just granted,
     // e.g. an SDK iframe created after our boot-time provisioning.
@@ -359,6 +360,12 @@ export class Shell {
     // re-check for pause/ended/destroy racing the request.
     const acquire = () => {
       if (this.#scope.disposed || video.paused || video.ended) {
+        return;
+      }
+      // Screen Wake Lock is unavailable in Firefox - so the
+      // request is gated, not assumed: without a lock, playback still holds
+      // the screen through fullscreen + mediaSession, the next-best lever.
+      if (typeof navigator.wakeLock?.request !== "function") {
         return;
       }
       // A newer acquire supersedes an in-flight one: last signal wins.
