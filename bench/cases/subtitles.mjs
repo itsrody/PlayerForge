@@ -1,34 +1,32 @@
 import { measure } from "../lib.mjs";
 import { formatTime } from "../../src/shared/time.js";
-import { timecodeToSeconds, parseSubtitles, offsetCues } from "../../src/shell/subtitles/forgevtt.js";
+import { srtToVtt } from "../../src/shell/subtitles/forgevtt.js";
 
-/** Build a realistic ~500-cue VTT document once per process. */
-function buildVtt(cueCount) {
-  const lines = ["WEBVTT", ""];
-  for (let i = 0; i < cueCount; i++) {
-    const s = (i * 4.2) % 3600;
-    const hh = String(Math.floor(s / 3600)).padStart(2, "0");
-    const mm = String(Math.floor(s / 60) % 60).padStart(2, "0");
-    const ss = String(Math.floor(s % 60)).padStart(2, "0");
-    const ms = String((i * 37) % 1000).padStart(3, "0");
-    lines.push(`${hh}:${mm}:${ss}.${ms} --> ${hh}:${mm}:${ss}.${String((+ms + 800) % 1000).padStart(3, "0")}`);
-    lines.push(`<i>Cue ${i}</i> dialogue line with some text &amp; an entity`);
-    lines.push("");
-  }
-  return lines.join("\n");
-}
+// Cue parsing and re-offsetting are Firefox's native WebVTT/TextTrack
+// backend now (blob <track> parse + remove/re-add rebuild), so the only
+// remaining forgevtt work is the SRT/VTT normalizer at ingest - measured
+// here on a realistic multi-cue SRT.
 
-const VTT_500 = buildVtt(500);
-const timecodes = ["00:01:02.345", "01:22:33.001", "00:00:07.500"];
+const SRT = [
+  "1",
+  "00:00:01,500 --> 00:00:02,500",
+  "first line with &amp; an entity",
+  "",
+  "2",
+  "00:00:03,000 --> 00:00:04,250",
+  "second line --> with an arrow",
+  "",
+  "3",
+  "00:00:05,000 --> 00:00:06,750",
+  "third line"
+].join("\r\n");
 
 export default [
-  measure("timecodeToSeconds cue lines", () => {
-    let sink = 0;
+  measure("srtToVtt normalizes a small SRT", () => {
+    let sink = null;
     return () => {
-      for (let i = 0; i < 500; i++) {
-        sink += timecodeToSeconds(timecodes[i % 3]);
-      }
-      if (sink === Infinity) throw new Error();
+      sink = srtToVtt(SRT);
+      if (!sink.startsWith("WEBVTT")) throw new Error();
     };
   }),
 
@@ -40,14 +38,5 @@ export default [
       }
       if (sink === undefined) throw new Error();
     };
-  }),
-
-  measure("parseSubtitles 500-cue VTT", () => {
-    return () => parseSubtitles(VTT_500);
-  }),
-
-  measure("offsetCues 500-cue sync re-offset", () => {
-    const base = parseSubtitles(VTT_500);
-    return () => offsetCues(base, -2.5);
   })
 ];

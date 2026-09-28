@@ -74,9 +74,15 @@ test("ForgeTrack throws a clear error when the video cannot host a track", () =>
   assert.throws(() => new ForgeTrack(null, null), /cannot host a subtitle track/i);
 });
 
-test("ForgeTrack accepts a video exposing addTextTrack", () => {
-  const track = { mode: "showing", cues: [], addEventListener() {}, addCue() {}, removeCue() {} };
-  const forgeTrack = new ForgeTrack({ addTextTrack: () => track }, null);
+test("ForgeTrack accepts a video that can host a track element", () => {
+  const track = { mode: "disabled", cues: [], addEventListener() {}, removeEventListener() {} };
+  const trackEl = { track, addEventListener() {}, removeEventListener() {}, remove() {} };
+  const video = {
+    appendChild() {},
+    querySelector: () => null,
+    ownerDocument: { createElement: () => trackEl }
+  };
+  const forgeTrack = new ForgeTrack(video, null);
   forgeTrack.destroy();
   assert.equal(track.mode, "disabled", "destroy disables the browser track");
 });

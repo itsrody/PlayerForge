@@ -48,10 +48,13 @@ test("direct: video is marked with data-pf-shell", async () => {
     await driver.injectGMStubs();
     await driver.injectScript();
     await waitForShell(driver, 8000);
-    const marked = await driver.eval(() => {
-      const video = document.getElementById("test-video");
-      return video?.getAttribute("data-pf-shell") !== null;
-    });
+    // The HUD layer appears early in #boot(); the video is only marked
+    // at the very end - poll instead of sampling once.
+    const marked = await driver.waitFor(
+      () => document.getElementById("test-video")?.getAttribute("data-pf-shell") !== null,
+      8000,
+      100
+    );
     assert.ok(marked, "Video should be marked with data-pf-shell");
   } finally {
     await driver.destroy();

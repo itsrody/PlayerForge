@@ -1,8 +1,7 @@
 import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/storage.js";
 import { TUNING } from "../../shared/tuning.js";
-import { fmtPercent, fmtEm } from "../../shared/formatters.js";
+import { fmtEm } from "../../shared/formatters.js";
 import { srtToVtt, ensureVttHeader } from "./forgevtt.js";
-import { parseSubtitlesAsync } from "./vtt-worker-loader.js";
 import { ForgeTrack } from "./forge-track.js";
 import { debounce } from "../../shared/time.js";
 import { flashElement } from "../chrome/animate.js";
@@ -17,15 +16,13 @@ const SETTING_KEYS = {
   size: "subtitles.style.size",
   color: "subtitles.style.color",
   shadow: "subtitles.style.shadow",
-  line: "subtitles.position.line",
-  horizontal: "subtitles.position.horizontal",
   syncOffset: "subtitles.sync.offset"
 };
 
 /**
- * Shell-owned subtitles section: loads .srt/.vtt files onto a video and renders
- * cues through the shell's cue layer, with caption styling, manual positioning,
- * and sync offset.
+ * Shell-owned subtitles section: loads .srt/.vtt files onto a video through
+ * Firefox's native WebVTT parser (ForgeTrack.loadText) and renders cues
+ * through the shell's cue layer, with caption styling and sync offset.
  */
 export class SubtitlesSection {
   #shell;
@@ -41,7 +38,6 @@ export class SubtitlesSection {
   #removeButton = null;
   #urlButton = null;
   #styleControls = null;
-  #positionControls = null;
   #resetBtn = null;
   /** Debounced sync-offset apply; cancelled on destroy so no trailing write lands. */
   #scheduleSyncOffset = null;
@@ -73,7 +69,6 @@ export class SubtitlesSection {
     this.#removeButton = null;
     this.#urlButton = null;
     this.#styleControls = null;
-    this.#positionControls = null;
     this.#resetBtn = null;
     this.#trackMeta = null;
     this.#cueLayer = null;
@@ -167,10 +162,10 @@ export class SubtitlesSection {
 
     this.#hintEl = panel.addHint(loadRow, "Upload your file");
 
-    // Caption style + position grid: size / color / shadow / sync / V / H.
+    // Caption style + sync grid: size / color / shadow / sync.
     const styleSection = panel.el("div", { class: "pf-panel-section" }, sectionRoot);
     const styleHead = panel.el("div", { class: "pf-panel-section-head" }, styleSection);
-    panel.addLabel(styleHead, "Style & Position");
+    panel.addLabel(styleHead, "Style & Sync");
     const styleGrid = panel.el("div", { class: "pf-panel-grid pf-panel-grid-compact" }, styleSection);
 
     const applyCueSize = (v) => this.#setCueVar("--pf-cue-font-size", `${v}em`);
@@ -220,9 +215,9 @@ export class SubtitlesSection {
 
     this.#scheduleSyncOffset = debounce((offset) => {
       if (this.#trackMeta) {
-        // Re-offset the loaded cues in place: two property writes per native
-        // cue instead of a full re-offset (n plain objects) plus a drain and
-        // rebuild of the track's VTTCue list.
+        // Rebuild the cue list at the new offset: remove + shift-from-base +
+        // re-add. Gecko does not re-index in-place time mutations reliably,
+        // while a rebuild always rebuilds scheduling correctly.
         this.#forgeTrack?.setOffset(offset);
       }
       setConfigValue(SETTING_KEYS.syncOffset, offset);
@@ -241,33 +236,7 @@ export class SubtitlesSection {
       }
     });
 
-    const verticalStepper = panel.addControl(styleGrid, {
-      type: "stepper",
-      label: "V",
-      min: 0,
-      max: 100,
-      step: 5,
-      value: getConfigValue(SETTING_KEYS.line, 85),
-      format: fmtPercent,
-      onChange: (v) => {
-        setConfigValue(SETTING_KEYS.line, v);
-      }
-    });
-    const horizontalStepper = panel.addControl(styleGrid, {
-      type: "stepper",
-      label: "H",
-      min: 0,
-      max: 100,
-      step: 5,
-      value: getConfigValue(SETTING_KEYS.horizontal, 50),
-      format: fmtPercent,
-      onChange: (v) => {
-        setConfigValue(SETTING_KEYS.horizontal, v);
-      }
-    });
-
     this.#styleControls = { size: sizeStepper, color: colorField, shadow: shadowStepper, sync: syncStepper };
-    this.#positionControls = { vertical: verticalStepper, horizontal: horizontalStepper };
 
     this.#resetBtn = panel.addControl(styleHead, {
       type: "button",
@@ -280,8 +249,6 @@ export class SubtitlesSection {
         colorField.setValue("#ffffff");
         shadowStepper.setValue(40);
         syncStepper.setValue(0);
-        verticalStepper.setValue(85);
-        horizontalStepper.setValue(50);
         flashElement(this.#resetBtn);
         this.#toastFlash("reload", "Subtitle Style Reset", "subtitles");
       }
@@ -383,27 +350,24 @@ export class SubtitlesSection {
     if (this.#scope.disposed) {
       return;
     }
-    const normalizedText = /\.srt$/i.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
-    // Cooperative parse: yields to the browser on large tracks so ingesting a
-    // big VTT never blocks playback (see forgevtt.parseSubtitlesAsync), and
-    // offloads multi-megabyte tracks to a dedicated Worker. The cues are
-    // loaded at the current sync offset in a single build pass; later sync
-    // nudges shift the native cues in place (ForgeTrack.setOffset).
-    const cues = await parseSubtitlesAsync(normalizedText, 0);
-    // Cooperative parse yields to the browser; the section may have been torn
-    // down mid-await, so re-check before touching the track/slots.
-    if (this.#scope.disposed) {
-      return;
-    }
-    if (!cues.length) {
-      this.#toastInfo("captions", "No cues found", "subtitles");
-      return;
-    }
+    // SRT is converted to VTT here; everything downstream is Firefox's
+    // native WebVTT parser - the text goes to ForgeTrack as a blob <track>
+    // src, which parses it and fires cuechange natively. Load failures
+    // (CSP, malformed documents) surface as a 0 cue count.
+    const vtt = /\.srt$/i.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
     if (!this.#forgeTrack) {
       this.#forgeTrack = new ForgeTrack(this.#shell.video, this.#cueLayer);
     }
+    const count = await this.#forgeTrack.loadText(vtt, this.#syncOffset);
+    // loadText can settle after dispose (abort); re-check before touching UI.
+    if (this.#scope.disposed) {
+      return;
+    }
+    if (!count) {
+      this.#toastInfo("captions", "No cues found", "subtitles");
+      return;
+    }
     this.#trackMeta = { name };
-    this.#forgeTrack.load(cues, this.#syncOffset);
     this.#refreshHint();
     this.#toastInfo("captions", name, "subtitles");
     logger.log("subtitles", `Loaded ${name}`);
@@ -429,10 +393,6 @@ export class SubtitlesSection {
       this.#styleControls.color.input.disabled = disabled;
       this.#styleControls.shadow.setDisabled(disabled);
       this.#styleControls.sync.setDisabled(disabled);
-    }
-    if (this.#positionControls) {
-      this.#positionControls.vertical.setDisabled(!hasTrack);
-      this.#positionControls.horizontal.setDisabled(!hasTrack);
     }
     if (this.#resetBtn) {
       this.#resetBtn.disabled = !hasTrack;

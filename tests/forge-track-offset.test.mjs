@@ -2,13 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { ForgeTrack } from "../src/shell/subtitles/forge-track.js";
-import { offsetCues } from "../src/shell/subtitles/forgevtt.js";
 
 /**
  * Mirrors the real TextTrackCue IDL: the writable timing attributes are
- * startTime/endTime. Plain `start`/`end` do not exist on a native cue (they
- * are forgevtt's own cue-object fields), so touching one throws here instead
- * of silently creating a shadow property the engine never schedules on.
+ * startTime/endTime. Plain `start`/`end` do not exist on a native cue, so
+ * touching one throws here instead of silently creating a shadow property
+ * the engine never schedules on.
  */
 class FakeVTTCue {
   constructor(start, end, text) {
@@ -36,17 +35,22 @@ class FakeVTTCue {
     throw new Error("native VTTCue has no 'end' property; use endTime");
   }
 }
-globalThis.VTTCue = FakeVTTCue;
 
+/**
+ * Fake TextTrack: cue list, add/remove, and an addCue counter so a test can
+ * tell a real rebuild (remove + re-add) from a no-op setOffset call.
+ */
 function fakeTrack() {
   const cues = [];
-  return {
+  const track = {
     cues,
     mode: "disabled",
+    addCount: 0,
     addEventListener() {},
     removeEventListener() {},
     addCue(cue) {
       cues.push(cue);
+      track.addCount++;
     },
     removeCue(cue) {
       const index = cues.indexOf(cue);
@@ -55,73 +59,90 @@ function fakeTrack() {
       }
     }
   };
+  return track;
 }
 
+/**
+ * Fake video that can host a track element: ForgeTrack creates its <track>
+ * through ownerDocument.createElement and binds trackEl.track - no real
+ * DOM or native parsing needed for the offset/rebuild mechanics.
+ */
 function makeTrack() {
   const track = fakeTrack();
-  const forgeTrack = new ForgeTrack({ addTextTrack: () => track }, null);
+  const trackEl = {
+    track,
+    src: "",
+    addEventListener() {},
+    removeEventListener() {},
+    remove() {}
+  };
+  const video = {
+    appendChild() {
+      return trackEl;
+    },
+    querySelector() {
+      return trackEl;
+    },
+    ownerDocument: {
+      createElement: () => trackEl
+    }
+  };
+  const forgeTrack = new ForgeTrack(video, null);
   return { track, forgeTrack };
 }
 
-const BASE = [
-  { start: 1, end: 2, text: "a", line: "auto", position: 50, align: "center" },
-  { start: 0.4, end: 0.8, text: "drops below zero", line: "auto", position: 50, align: "center" },
-  { start: 5.5, end: 7.25, text: "b", line: 12, position: 40, align: "start" },
-  { start: 30, end: 32, text: "c", line: "auto", position: 50, align: "center" }
+/**
+ * Pristine zero-offset expectations. Rebuild mutates the live cue objects'
+ * startTime/endTime, so tests read expected values from this spec data -
+ * never from a cue after it has been offset.
+ */
+const SPECS = [
+  { start: 1, end: 2, text: "a" },
+  { start: 0.4, end: 0.8, text: "drops below zero" },
+  { start: 5.5, end: 7.25, text: "b" },
+  { start: 30, end: 32, text: "c" }
 ];
 
-/** Expected native times for a base cue under an offset: clamped at t=0, and
- *  zero-length at 0 when the whole shifted window falls before the origin
- *  (offsetCues dropped those; setOffset keeps them as never-active stubs). */
-function expectedTimes(cue, offset) {
-  const start = Math.max(0, cue.start + offset);
-  const end = cue.end + offset <= 0 ? 0 : Math.max(0, cue.end + offset);
+function baseCues() {
+  return SPECS.map((spec) => new FakeVTTCue(spec.start, spec.end, spec.text));
+}
+
+/** Expected native times for a base spec under an offset: clamped at t=0,
+ *  and zero-length at 0 when the whole shifted window falls before the
+ *  origin (never active instead of dropped, keeping the list 1:1). */
+function expectedTimes(spec, offset) {
+  const start = Math.max(0, spec.start + offset);
+  const end = spec.end + offset <= 0 ? 0 : Math.max(0, spec.end + offset);
   return { start, end };
 }
 
-test("setOffset re-derives every cue time from the base (clamped, never drifted)", () => {
+test("adopt installs the cue list at zero offset and populates the track", () => {
   const { track, forgeTrack } = makeTrack();
-  forgeTrack.load(BASE, 0);
-  for (const offset of [2.5, -0.4, -3, 0, 1.75]) {
-    forgeTrack.setOffset(offset);
-    assert.equal(track.cues.length, BASE.length, `offset ${offset} keeps the list 1:1`);
-    BASE.forEach((base, i) => {
-      const expected = expectedTimes(base, offset);
-      assert.equal(track.cues[i].startTime, expected.start, `offset ${offset} cue ${i} start`);
-      assert.equal(track.cues[i].endTime, expected.end, `offset ${offset} cue ${i} end`);
-      assert.equal(track.cues[i].text, base.text, `offset ${offset} cue ${i} text`);
-    });
-  }
+  const cues = baseCues();
+  forgeTrack.adopt(cues);
+  assert.equal(track.cues.length, cues.length);
+  track.cues.forEach((cue, i) => assert.equal(cue, cues[i], `cue ${i} identity`));
 });
 
-test("setOffset matches the offsetCues reference for every surviving cue", () => {
+test("setOffset rebuilds every cue time from the base (clamped, never drifted)", () => {
   const { track, forgeTrack } = makeTrack();
-  forgeTrack.load(BASE, 0);
-  for (const offset of [2, -0.6, -3.25]) {
+  forgeTrack.adopt(baseCues());
+  for (const offset of [2.5, -0.4, -3, 0, 1.75]) {
     forgeTrack.setOffset(offset);
-    const reference = offsetCues(BASE, offset);
-    const survivors = BASE.filter((cue) => cue.end + offset > 0);
-    assert.equal(reference.length, survivors.length, "reference drops only fully-past cues");
-    let cursor = 0;
-    BASE.forEach((base, i) => {
-      if (base.end + offset <= 0) {
-        // Dropped by offsetCues, kept as a zero-length never-active stub.
-        assert.equal(track.cues[i].startTime, 0, "dropped cue collapses to 0");
-        assert.equal(track.cues[i].endTime, 0, "dropped cue collapses to 0");
-        return;
-      }
-      assert.equal(track.cues[i].startTime, reference[cursor].start, `offset ${offset} start`);
-      assert.equal(track.cues[i].endTime, reference[cursor].end, `offset ${offset} end`);
-      cursor++;
+    assert.equal(track.cues.length, SPECS.length, `offset ${offset} keeps the list 1:1`);
+    SPECS.forEach((spec, i) => {
+      const expected = expectedTimes(spec, offset);
+      assert.equal(track.cues[i].startTime, expected.start, `offset ${offset} cue ${i} start`);
+      assert.equal(track.cues[i].endTime, expected.end, `offset ${offset} cue ${i} end`);
+      assert.equal(track.cues[i].text, spec.text, `offset ${offset} cue ${i} text`);
     });
-    assert.equal(cursor, survivors.length);
   }
 });
 
 test("a back-and-forth drag restores the original times exactly", () => {
   const { track, forgeTrack } = makeTrack();
-  forgeTrack.load(BASE, 0);
-  const original = track.cues.map((cue) => [cue.startTime, cue.endTime]);
+  forgeTrack.adopt(baseCues());
+  const original = SPECS.map((spec) => [spec.start, spec.end]);
   forgeTrack.setOffset(-8.75);
   forgeTrack.setOffset(4.5);
   forgeTrack.setOffset(0);
@@ -130,57 +151,57 @@ test("a back-and-forth drag restores the original times exactly", () => {
   });
 });
 
-test("setOffset mutates the loaded cues instead of rebuilding the list", () => {
+test("setOffset rebuilds the list from base while keeping cue identity", () => {
   const { track, forgeTrack } = makeTrack();
-  forgeTrack.load(BASE, 0);
-  const held = [...track.cues];
+  const cues = baseCues();
+  forgeTrack.adopt(cues);
+  const addsAfterAdopt = track.addCount;
   forgeTrack.setOffset(-1.25);
+  assert.ok(track.addCount > addsAfterAdopt, "rebuild re-adds the cues");
   track.cues.forEach((cue, i) => {
-    assert.equal(cue, held[i], "same cue objects survive a re-offset");
+    assert.equal(cue, cues[i], "same cue objects survive a re-offset");
   });
-  // A repeat of the current offset is a no-op: same objects, same times.
-  const snapshot = track.cues.map((cue) => [cue.startTime, cue.endTime]);
+  // A repeat of the current offset is a no-op: no remove/re-add churn.
+  const addsAfterFirst = track.addCount;
   forgeTrack.setOffset(-1.25);
-  assert.deepEqual(track.cues.map((cue) => [cue.startTime, cue.endTime]), snapshot);
+  assert.equal(track.addCount, addsAfterFirst, "repeat offset does not rebuild");
 });
 
-test("load applies its offset in a single build pass and adopts it", () => {
+test("adopt plus an immediate offset mirrors loadText's build pass", () => {
   const { track, forgeTrack } = makeTrack();
-  forgeTrack.load(BASE, -2.5);
-  BASE.forEach((base, i) => {
-    const expected = expectedTimes(base, -2.5);
-    assert.equal(track.cues[i].startTime, expected.start);
-    assert.equal(track.cues[i].endTime, expected.end);
-  });
-  // The build already applied -2.5, so an identical offset must not re-write.
-  const held = [...track.cues];
+  forgeTrack.adopt(baseCues());
   forgeTrack.setOffset(-2.5);
-  track.cues.forEach((cue, i) => assert.equal(cue, held[i]));
-  forgeTrack.setOffset(3);
-  BASE.forEach((base, i) => {
-    const expected = expectedTimes(base, 3);
-    assert.equal(track.cues[i].startTime, expected.start);
-    assert.equal(track.cues[i].endTime, expected.end);
+  SPECS.forEach((spec, i) => {
+    const expected = expectedTimes(spec, -2.5);
+    assert.equal(track.cues[i].startTime, expected.start, `cue ${i} start`);
+    assert.equal(track.cues[i].endTime, expected.end, `cue ${i} end`);
   });
 });
 
-test("a cue list that diverges from the base is rebuilt rather than walked", () => {
+test("a list that diverges from the base heals on the next setOffset", () => {
   const { track, forgeTrack } = makeTrack();
-  forgeTrack.load(BASE, 0);
+  forgeTrack.adopt(baseCues());
   track.removeCue(track.cues[1]);
-  assert.equal(track.cues.length, BASE.length - 1);
+  assert.equal(track.cues.length, SPECS.length - 1);
   forgeTrack.setOffset(1.5);
-  assert.equal(track.cues.length, BASE.length, "rebuild restores the 1:1 pairing");
-  BASE.forEach((base, i) => {
-    const expected = expectedTimes(base, 1.5);
-    assert.equal(track.cues[i].startTime, expected.start);
-    assert.equal(track.cues[i].endTime, expected.end);
+  assert.equal(track.cues.length, SPECS.length, "rebuild restores the 1:1 pairing");
+  SPECS.forEach((spec, i) => {
+    const expected = expectedTimes(spec, 1.5);
+    assert.equal(track.cues[i].startTime, expected.start, `cue ${i} start`);
+    assert.equal(track.cues[i].endTime, expected.end, `cue ${i} end`);
   });
 });
 
 test("setOffset after destroy is a no-op", () => {
   const { forgeTrack } = makeTrack();
-  forgeTrack.load(BASE, 0);
+  forgeTrack.adopt(baseCues());
   forgeTrack.destroy();
   assert.doesNotThrow(() => forgeTrack.setOffset(5));
+});
+
+test("adopt after destroy is a no-op", () => {
+  const { track, forgeTrack } = makeTrack();
+  forgeTrack.destroy();
+  forgeTrack.adopt(baseCues());
+  assert.equal(track.cues.length, 0, "a destroyed track stays empty");
 });

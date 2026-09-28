@@ -6,7 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { FirefoxDriver, TestServer, createTestPage } from "../harness/firefox.mjs";
-import { waitForShell } from "../harness/page.mjs";
+import { waitForShell, waitForPanel } from "../harness/page.mjs";
 
 let driver;
 let server;
@@ -28,6 +28,10 @@ test("keyboard hotkey dispatches skip gesture", async () => {
   await driver.injectScript();
 
   await waitForShell(driver, 8000);
+  // InputForge's keydown listener attaches right after the panel
+  // constructor in #boot() - HUD alone resolves too early and the first
+  // dispatched key is lost.
+  await waitForPanel(driver, 8000);
 
   // The hotkey handler requires readyState > 0 on the video.
   await driver.eval(() => {
@@ -69,6 +73,8 @@ test("keyboard hotkey dispatches volume gesture", async () => {
   await driver.injectScript();
 
   await waitForShell(driver, 8000);
+  // Same race as above: wait for the panel so InputForge is wired.
+  await waitForPanel(driver, 8000);
 
   await driver.eval(() => {
     const video = document.getElementById("test-video");
