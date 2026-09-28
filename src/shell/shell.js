@@ -39,8 +39,6 @@ export class Shell {
   /** Pooled reference-box result + validity flag (see the referenceBox getter). */
   #refBox = { width: 0, height: 0 };
   #refBoxValid = false;
-  /** Active wake-lock session's abort controller; the browser owns release. */
-  #wakeLockAbort = null;
   #onDestroy;
   /** DOM lifecycle manager: listeners, observers, elements, rollbacks. */
   #dom = new DOMManager();
@@ -101,8 +99,6 @@ export class Shell {
       signal: this.#scope.signal
     });
     this.#watchFullscreen();
-    this.#watchWakeLock();
-    this.#watchOrientation();
     this.#watchReferenceBoxSize();
     this.#markManaged();
     logger.log("shell", `Shell "${this.sdk.name}" constructed`);
@@ -347,65 +343,6 @@ export class Shell {
     });
   }
 
-  /** Keep screen awake while video is playing; release on pause/ended/hidden. */
-  #watchWakeLock() {
-    const video = this.video;
-    const release = () => {
-      this.#wakeLockAbort?.abort();
-      this.#wakeLockAbort = null;
-    };
-    // The signal option hands lock lifecycle to the browser: aborting the
-    // controller drops an in-flight request (rejects with AbortError) or tears
-    // down a held lock - so there is no manual lock.release() and no post-await
-    // re-check for pause/ended/destroy racing the request.
-    const acquire = () => {
-      if (this.#scope.disposed || video.paused || video.ended) {
-        return;
-      }
-      // Screen Wake Lock is unavailable in Firefox - so the
-      // request is gated, not assumed: without a lock, playback still holds
-      // the screen through fullscreen + mediaSession, the next-best lever.
-      if (typeof navigator.wakeLock?.request !== "function") {
-        return;
-      }
-      // A newer acquire supersedes an in-flight one: last signal wins.
-      this.#wakeLockAbort?.abort();
-      const ac = new AbortController();
-      this.#wakeLockAbort = ac;
-      navigator.wakeLock.request("screen", { signal: ac.signal }).catch(() => {
-        // Aborted (superseded/paused/hidden) or policy-denied: no lock formed.
-        if (this.#wakeLockAbort === ac) {
-          this.#wakeLockAbort = null;
-        }
-      });
-    };
-    this.#dom.listen(video, "play", acquire, { passive: true });
-    this.#dom.listen(video, "pause", release, { passive: true });
-    this.#dom.listen(video, "ended", release, { passive: true });
-    this.#dom.listen(document, "visibilitychange", () => {
-      if (document.visibilityState === "visible" && !video.paused && !video.ended) {
-        acquire();
-      }
-    });
-  }
-
-  /** Lock to landscape on fullscreen entry (Android); unlock on exit. */
-  #watchOrientation() {
-    const unsub = subscribeFullscreen(async (active) => {
-      if (this.#scope.disposed) {
-        return;
-      }
-      try {
-        if (active && screen.orientation?.lock) {
-          await screen.orientation.lock("landscape");
-        } else if (!active && screen.orientation?.unlock) {
-          screen.orientation.unlock();
-        }
-      } catch {}
-    }, this.#scope.signal);
-    this.#dom.onCleanup(unsub);
-  }
-
   exitFullscreen() {
     if (fs) {
       document.exitFullscreen()?.catch(() => {});
@@ -449,8 +386,6 @@ export class Shell {
     this.#subtitles = null;
     this.#filter?.destroy();
     this.#filter = null;
-    this.#wakeLockAbort?.abort();
-    this.#wakeLockAbort = null;
     this.#inputs?.destroy();
     this.#inputs = null;
     this.#panel?.destroy();

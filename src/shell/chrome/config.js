@@ -61,13 +61,6 @@ const SETTINGS_SCHEMA = [
     group: "Features"
   },
   {
-    key: "gestures.haptics",
-    type: "bool",
-    label: "Haptic Feedback",
-    default: true,
-    group: "Features"
-  },
-  {
     key: "fullscreen.edgeToEdge",
     type: "bool",
     label: "Edge-to-edge Fullscreen",
