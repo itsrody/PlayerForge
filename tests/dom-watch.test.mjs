@@ -11,9 +11,18 @@ globalThis.MutationObserver = window.MutationObserver;
 globalThis.AbortController = window.AbortController;
 
 const { onDomMutations } = await import("../src/shared/dom-watch.js");
+const { yield_ } = await import("../src/shared/scheduler.js");
 
-function tick() {
-  return new Promise((resolve) => queueMicrotask(() => setTimeout(resolve, 0)));
+/**
+ * Wait for a scheduling boundary that is queued AFTER the observer's own
+ * flush boundary: `await null` lets the mutation-notify microtask (which
+ * posts yield_'s flush message) run first, then yield_() posts ours behind
+ * it. MessageChannel messages run in post order, ahead of timers, so the
+ * flush (or its deliberate absence) is always observable here.
+ */
+async function tick() {
+  await null;
+  await yield_();
 }
 
 test("fan-out delivers coalesced records to every subscriber", async () => {

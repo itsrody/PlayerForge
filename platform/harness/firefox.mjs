@@ -181,33 +181,9 @@ export class FirefoxDriver {
    *
    * @param {string} [script] - Script source. Reads from dist/ if omitted.
    */
-  /**
-   * Harness-only: native scheduler.yield() never resolves during
-   * selenium-driven boot in headless Firefox 156, which stalls shell.js
-   * #boot() between DOM injection and panel construction (no .pf-panel,
-   * no gesture listener, no data-pf-shell mark). The bundle's yield_()
-   * capability check runs at module load, so shadow the native method
-   * with an rAF-backed shim BEFORE the bundle executes, in every frame
-   * the bundle is injected into. Temporary stand-in while the underlying
-   * hang is investigated separately.
-   */
-  async #applyYieldShim() {
-    await this.#driver.executeScript(`
-      try {
-        if (typeof globalThis.scheduler?.yield === "function") {
-          globalThis.scheduler.yield = () =>
-            new Promise((r) => requestAnimationFrame(() => r()));
-        }
-      } catch (err) {
-        // scheduler not patchable - boot may stall; tests will surface it.
-      }
-    `);
-  }
-
   async injectScript(script) {
     const source = script || readBundle();
     const body = source.slice(source.indexOf("==/UserScript==") + 16);
-    await this.#applyYieldShim();
     await this.#driver.executeScript(body);
     // In production the script runs at document-start and catches videos via
     // MutationObserver as they're added. Post-load injection misses existing
@@ -452,7 +428,6 @@ export class FirefoxDriver {
       // Userscript bundle.
       const source = readBundle();
       const body = source.slice(source.indexOf("==/UserScript==") + 16);
-      await this.#applyYieldShim();
       await this.#driver.executeScript(body);
 
       // Wake probe.

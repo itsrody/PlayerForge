@@ -150,11 +150,11 @@ function deferFlushUntilVisible() {
 }
 
 /**
- * `scheduler.yield()` (where the Task Scheduling API exists - not on
- * Firefox, where yield_() takes the rAF/noop branch) lets the browser
- * interleave input / paint between the mutation batch and the subscriber
- * dispatch. The facade's fallbacks keep the jsdom test tick() helper
- * compatible either way.
+ * yield_() hands the browser a frame/task boundary between the mutation
+ * batch and the subscriber dispatch, so pending input/paint can interleave
+ * (rAF + backstop on visible documents, a MessageChannel task when hidden -
+ * see shared/scheduler.js). The facade's fast fallback keeps the jsdom
+ * test tick() helper compatible either way.
  */
 async function scheduleFlush() {
   await yield_();
