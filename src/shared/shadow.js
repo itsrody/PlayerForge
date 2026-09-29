@@ -5,6 +5,8 @@
  * boundaries. These two primitives bridge every gap.
  */
 
+import { createActivity } from "./activity.js";
+
 /**
  * The deepest active element, piercing open shadow boundaries.
  * When `host` has a shadow root, the shadow tracks the real focused
@@ -56,20 +58,35 @@ const fsSubscribers = new Set();
  * the single underlying `fullscreenchange` listener. Every other fs-conditioned
  * path reads `fs` directly or subscribes to transitions via subscribeFullscreen,
  * so there is one gate and one transition source regardless of shell count.
+ *
+ * A fullscreen session is an activity, so the gate is one: Gecko's
+ * `fullscreenElement` is the property, `fullscreenchange` is the edge, and
+ * the fan-out is the enter/exit effect. During the window the gate changes
+ * nothing else - there is no per-frame work to scope - which is why it reads
+ * no work scope.
  */
 export function initFullscreenGate(doc = document) {
+  // Seed the derived value explicitly: the activity only runs effects on a
+  // transition, so it will not re-assert an already-false `fs` on a later
+  // document. This is the one place that reads `fs`'s initial value.
   fs = !!doc.fullscreenElement;
-  const update = () => {
-    const next = !!doc.fullscreenElement;
-    if (next === fs) {
-      return;
+  createActivity({
+    target: doc,
+    events: ["fullscreenchange"],
+    isActive: () => !!doc.fullscreenElement,
+    onEnter: () => {
+      fs = true;
+      for (const cb of fsSubscribers) {
+        cb(true);
+      }
+    },
+    onExit: () => {
+      fs = false;
+      for (const cb of fsSubscribers) {
+        cb(false);
+      }
     }
-    fs = next;
-    for (const cb of fsSubscribers) {
-      cb(next);
-    }
-  };
-  doc.addEventListener("fullscreenchange", update);
+  });
 }
 
 /**
