@@ -11,10 +11,60 @@ import { fileURLToPath } from "node:url";
  * not prose. A comment can drift silently; a manifest entry that names a file
  * which no longer exists, or a grant that is declared but not in the built
  * header, fails the build.
+ *
+ * The load direction came first and was not enough. Every check below the
+ * original set walked manifest -> code, so a capability could be adopted with
+ * no entry at all and nothing failed: scheduler.postTask serviced the
+ * removal grace, the dom-watch defer, the lifecycle settle, the context retry
+ * and the resume throttle without ever being named, and the whole native
+ * WebVTT backend - the fork's subtitle renderer - was unrecorded too. So the
+ * scan below walks code -> manifest: every `typeof` feature-detection chain
+ * rooted at a platform global has to be classified as load-bearing
+ * (capabilities) or degrading (hostProbes), and every declared token has to
+ * appear in the files it claims. See the manifest's _comment for what the
+ * scan cannot see.
  */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(readFileSync(join(ROOT, "platform", "capabilities.json"), "utf8"));
 const esbuildConfig = readFileSync(join(ROOT, "esbuild.config.mjs"), "utf8");
+
+/**
+ * Platform globals that are lowercase, so a `typeof` on one of them counts as
+ * a platform probe even though the Capitalised heuristic below would drop it:
+ * host objects whose members are APIs (document.pictureInPictureEnabled), and
+ * the two API *functions* the shell feature-detects directly (matchMedia,
+ * requestAnimationFrame). Everything else has to be Capitalised or explicitly
+ * globalThis-prefixed to count - that is what keeps `typeof opts.signal` and
+ * `typeof entry.id` out of the scan.
+ */
+const HOST_OBJECTS = new Set([
+  "document", "navigator", "screen", "location", "history",
+  "performance", "crypto", "matchMedia", "structuredClone", "requestAnimationFrame"
+]);
+
+/** Every `typeof` chain in src/, keyed by chain -> files that read it. */
+function probeChains() {
+  const chains = new Map();
+  for (const file of sourceFiles("src")) {
+    const code = stripComments(readFileSync(join(ROOT, file), "utf8"));
+    for (const match of code.matchAll(/typeof\s+([A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)+|\??[A-Za-z_$][\w$]*)/g)) {
+      const raw = match[1];
+      const root = raw.replace(/^\??/, "").split(/[.?]/)[0];
+      const isGlobal = raw.includes(".")
+        ? raw.startsWith("globalThis.") || HOST_OBJECTS.has(root)
+        : /^[A-Z]/.test(root) || HOST_OBJECTS.has(root);
+      if (!isGlobal) {
+        continue;
+      }
+      const chain = raw.replace(/^\??/, "").replace(/\?/g, "");
+      if (!chains.has(chain)) {
+        chains.set(chain, new Set());
+      }
+      chains.get(chain).add(file);
+    }
+  }
+  return chains;
+}
 
 /** Every `// @grant X` line in the userscript banner. */
 function declaredGrants() {
@@ -124,4 +174,97 @@ test("retired capabilities do not reappear", () => {
 test("capability ids are unique", () => {
   const ids = manifest.capabilities.map((c) => c.id);
   assert.equal(new Set(ids).size, ids.length, "no duplicate capability ids");
+});
+
+/** The literals an entry is searched for: an explicit token, else the first probe
+ *  chain, else the API name, else the id - always as a list, because the code
+ *  rarely spells the capability's own name. Token is separate from id so an id
+ *  that reads like a capability name ("navigator-mediaSession") still has
+ *  something findable, and a list lets an entry name every handle it has on
+ *  the platform ("cuechange", "activeCues", "getCueAsHTML" for TextTrack). */
+function entryTokens(entry) {
+  const token = entry.token ?? entry.probes?.[0] ?? entry.api ?? entry.id;
+  return Array.isArray(token) ? token : [token];
+}
+
+/** Every entry that can claim a probe chain, with the chain it claims. */
+function probeClaims() {
+  const claims = new Map();
+  for (const entry of [...manifest.capabilities, ...manifest.hostProbes]) {
+    for (const chain of entry.probes ?? []) {
+      if (!claims.has(chain)) {
+        claims.set(chain, []);
+      }
+      claims.get(chain).push(entry.id);
+    }
+  }
+  return claims;
+}
+
+test("every feature-detection chain in src/ is classified in the manifest", () => {
+  const chains = probeChains();
+  assert.ok(chains.size >= 15, `the scan still finds the platform probes (found ${chains.size})`);
+  const claims = probeClaims();
+  for (const chain of chains.keys()) {
+    const owners = claims.get(chain) ?? [];
+    assert.equal(
+      owners.length,
+      1,
+      `\`typeof ${chain}\` (in ${[...chains.get(chain)].join(", ")}) is classified by ${owners.length} entries: ${owners.join(" + ") || "none"} - add it to capabilities (load-bearing, with a shipsInFirefox floor) or hostProbes (degrades, with a why)`
+    );
+  }
+});
+
+test("every classified probe chain still exists in the code", () => {
+  const chains = probeChains();
+  for (const [chain, owners] of probeClaims()) {
+    assert.ok(chains.has(chain), `manifest classifies \`typeof ${chain}\` (${owners.join(" + ")}) but no src/ file probes it - drop the row or fix the scan`);
+  }
+});
+
+test("a probe cannot be claimed by two entries", () => {
+  for (const [chain, owners] of probeClaims()) {
+    assert.equal(owners.length, 1, `\`typeof ${chain}\` is claimed by ${owners.join(" and ")}`);
+  }
+});
+
+test("every capability and host probe really appears in the files it claims", () => {
+  for (const entry of [...manifest.capabilities, ...manifest.hostProbes]) {
+    const tokens = entryTokens(entry);
+    for (const used of entry.usedBy) {
+      const code = stripComments(readFileSync(join(ROOT, used), "utf8"));
+      // One handle per file, not all of them: an API reached by different
+      // routes in different modules (el.animate vs video.animate) is still
+      // one entry, so a file has to carry at least one of the names.
+      const named = tokens.filter((token) => code.includes(token));
+      assert.ok(
+        named.length > 0,
+        `${entry.id} claims ${used} but none of ${tokens.map((t) => `"${t}"`).join(", ")} appear in it - the manifest describes code that moved or was deleted`
+      );
+    }
+  }
+});
+
+test("every host probe says what is lost when the host lacks it", () => {
+  for (const probe of manifest.hostProbes) {
+    assert.ok(probe.why?.trim(), `${probe.id} names what degrades without it`);
+    assert.ok(probe.usedBy?.length, `${probe.id} names where it is probed`);
+  }
+});
+
+test("a capability declares a Firefox floor and a host probe does not pretend to", () => {
+  for (const capability of manifest.capabilities) {
+    assert.equal(
+      typeof capability.shipsInFirefox,
+      "number",
+      `${capability.id} is load-bearing, so it states the floor it needs`
+    );
+  }
+  for (const probe of manifest.hostProbes) {
+    assert.equal(
+      probe.shipsInFirefox,
+      undefined,
+      `${probe.id} degrades without it, so a version floor would claim more than the code promises`
+    );
+  }
 });

@@ -3,10 +3,27 @@
     "The fork targets Gecko 156+. This file is the machine-checked record of",
     "which platform capabilities the code actually relies on, so a Chromium-",
     "shaped assumption cannot creep back in behind a plausible comment.",
+    "",
+    "capabilities = load-bearing: without it a feature is missing or wrong, and",
+    "shipsInFirefox is the floor the target must clear. hostProbes = the code",
+    "feature-detects and degrades when the host says no, with `why` naming what",
+    "is lost. The split is the point: a probe is not automatically safe, and a",
+    "new one has to be argued for rather than inherited.",
+    "",
     "tests/capabilities.test.mjs enforces it: declared grants must match the",
-    "userscript banner exactly, every usedBy/verifiedBy path must exist,",
-    "no capability may require a Firefox newer than the floor, and anything in",
-    "`retired` must not reappear in src/."
+    "userscript banner exactly, every usedBy/verifiedBy path must exist, no",
+    "capability may require a Firefox newer than the 156 floor, anything in",
+    "`retired` must not reappear in src/, every capability/hostProbe token must",
+    "really appear in the files it claims, and every `probes` chain the code",
+    "feature-detects must be classified in exactly one entry - so adopting a",
+    "new platform API cannot skip the manifest the way scheduler.postTask and",
+    "TextTrack did.",
+    "",
+    "Known boundary of the scan: it reads `typeof` chains whose root is a global or a known host object. A `typeof` probe on a local reference (video.requestPictureInPicture, cue.getCueAsHTML, event.getPredictedEvents) starts at a lowercase local name, and an unguarded bare global (new MediaMetadata) is not a typeof at all - neither is machine-visible. Both are recorded here by hand instead, and the token check keeps those rows honest too. The scan is a floor on coverage, not a ceiling.",
+    "or a known host object. A member probe on a local reference (video.",
+    "requestPictureInPicture, cue.getCueAsHTML, event.getPredictedEvents) and an",
+    "unguarded bare global (new MediaMetadata) are NOT machine-visible; those are",
+    "recorded here by hand. The scan is a floor on coverage, not a ceiling."
   ],
   "target": {
     "engine": "Gecko",
@@ -18,41 +35,100 @@
       "id": "document-startViewTransition",
       "summary": "Panel open/close animation",
       "shipsInFirefox": 144,
-      "usedBy": ["src/shell/chrome/panel.js"],
-      "verifiedBy": "platform/integration/switchboard-lifecycle.test.mjs"
+      "usedBy": [
+        "src/shell/chrome/panel.js"
+      ],
+      "verifiedBy": "platform/integration/switchboard-lifecycle.test.mjs",
+      "probes": [
+        "document.startViewTransition"
+      ],
+      "token": "startViewTransition"
     },
     {
       "id": "adoptedStyleSheets",
       "summary": "One shared stylesheet, upgraded in place across shadow roots",
       "shipsInFirefox": 101,
-      "usedBy": ["src/shell/chrome/inject.js"],
+      "usedBy": [
+        "src/shell/chrome/inject.js"
+      ],
       "verifiedBy": "platform/integration/css-adoption.test.mjs"
     },
     {
       "id": "MessageChannel",
       "summary": "Unforgeable child-to-ancestor context pipe",
       "shipsInFirefox": 41,
-      "usedBy": ["src/shared/context.js"],
-      "verifiedBy": "platform/integration/switchboard-lifecycle.test.mjs"
+      "usedBy": [
+        "src/shared/context.js",
+        "src/shared/scheduler.js"
+      ],
+      "verifiedBy": "platform/integration/switchboard-lifecycle.test.mjs",
+      "probes": [
+        "MessageChannel"
+      ]
     },
     {
       "id": "requestVideoFrameCallback",
       "summary": "Frame-clock sampling for the jank watchdog and resume timing",
       "shipsInFirefox": 132,
-      "usedBy": ["src/shell/resume.js"],
+      "usedBy": [
+        "src/shell/resume.js"
+      ],
       "verifiedBy": "tests/resume-tracker.test.mjs"
     },
     {
       "id": "navigator-mediaSession",
       "summary": "Media key integration",
       "shipsInFirefox": 111,
-      "usedBy": ["src/shell/media.js"]
+      "usedBy": [
+        "src/shell/media.js"
+      ],
+      "token": "mediaSession"
     },
     {
       "id": "AbortSignal",
       "summary": "Lifecycle cancellation, including AbortSignal.any/timeout",
       "shipsInFirefox": 124,
-      "usedBy": ["src/shared/context.js"]
+      "usedBy": [
+        "src/shared/context.js"
+      ]
+    },
+    {
+      "id": "scheduler-postTask",
+      "summary": "Priority + delay + abort task scheduling behind every deferred path: removal grace, dom-watch defer, lifecycle settle, context retry, resume throttle",
+      "shipsInFirefox": 142,
+      "usedBy": [
+        "src/shared/scheduler.js"
+      ],
+      "verifiedBy": "tests/scheduler-native.test.mjs",
+      "probes": [
+        "globalThis.scheduler.postTask"
+      ],
+      "note": "Facade detection runs once at module load, so the branch Gecko takes is only reachable by seeding the global before import - hence the separate test file. scheduler.yield is deliberately not used; see the module header."
+    },
+    {
+      "id": "TextTrack",
+      "summary": "Native WebVTT parsing, cuechange scheduling at exact enter/exit boundaries, and VTTCue.getCueAsHTML() for spec-whitelisted cue markup",
+      "token": [
+        "cuechange",
+        "activeCues",
+        "getCueAsHTML"
+      ],
+      "shipsInFirefox": 31,
+      "usedBy": [
+        "src/shell/subtitles/forge-track.js"
+      ],
+      "verifiedBy": "tests/forge-track-render.test.mjs",
+      "note": "The renderer never parses cue text: getCueAsHTML is why <b>/<i>/<c>/ruby survive as real nodes. 31 covers VTTCue, its geometry, and getCueAsHTML together; region support would be 59."
+    },
+    {
+      "id": "MediaMetadata",
+      "summary": "Rich OS media-surface metadata (title, artist, artwork) for the media session",
+      "shipsInFirefox": 63,
+      "usedBy": [
+        "src/shell/media.js"
+      ],
+      "verifiedBy": "tests/media-controls.test.mjs",
+      "note": "Constructed unguarded, so this is an implicit dependency: tests/loader.mjs shims MediaMetadata because no test host has it."
     }
   ],
   "grants": [
@@ -95,21 +171,247 @@
       "summary": "The @grant for Tampermonkey's URL event",
       "why": "Nothing in the fork subscribes to route changes: same-document navigation is out of scope, so there is no consumer to receive the event. Re-granting it would widen the permission surface for zero coverage.",
       "matchPattern": "@grant\\s+window\\.onurlchange",
-      "mustNotAppearIn": ["esbuild.config.mjs"]
+      "mustNotAppearIn": [
+        "esbuild.config.mjs"
+      ]
     },
     {
       "id": "long-animation-frame",
       "summary": "PerformanceLongAnimationFrameTiming",
       "why": "Gecko does not implement LoAF. The rAF frame-gap watchdog in src/shared/perf-diag.js is the debug-only replacement.",
       "matchPattern": "PerformanceLongAnimationFrameTiming|long-animation-frame|longAnimationFrame",
-      "mustNotAppearIn": ["src/"]
+      "mustNotAppearIn": [
+        "src/"
+      ]
     },
     {
       "id": "GM_setClipboard",
       "summary": "Manager clipboard write",
       "why": "Never called by any feature, so the grant would be dead permission surface. Use navigator.clipboard instead.",
       "matchPattern": "GM_setClipboard",
-      "mustNotAppearIn": ["src/", "esbuild.config.mjs"]
+      "mustNotAppearIn": [
+        "src/",
+        "esbuild.config.mjs"
+      ]
+    }
+  ],
+  "hostProbes": [
+    {
+      "id": "document",
+      "api": "document",
+      "summary": "Is there a document at all?",
+      "why": "yield_() needs visibilityState to decide between a frame and a task. Node and worker hosts have no document, and both resolve on a MessageChannel task instead.",
+      "usedBy": [
+        "src/shared/scheduler.js"
+      ],
+      "probes": [
+        "document"
+      ]
+    },
+    {
+      "id": "requestAnimationFrame",
+      "api": "requestAnimationFrame",
+      "summary": "Frame boundary for yield_() and the jank watchdog",
+      "why": "Absent on Node/jsdom, where yield_ falls back to a MessageChannel task behind a 50ms backstop, so boot cannot stall on a host that never paints.",
+      "usedBy": [
+        "src/shared/perf-diag.js",
+        "src/shared/scheduler.js"
+      ],
+      "probes": [
+        "requestAnimationFrame"
+      ]
+    },
+    {
+      "id": "IntersectionObserver",
+      "api": "IntersectionObserver",
+      "summary": "Off-screen gate that stops media-clock writes for players the user cannot see",
+      "why": "Without it the gate stays open, which is the safe direction: saves continue, nothing is lost.",
+      "usedBy": [
+        "src/shell/resume.js"
+      ],
+      "probes": [
+        "IntersectionObserver"
+      ]
+    },
+    {
+      "id": "matchMedia",
+      "api": "matchMedia",
+      "summary": "Compact-mode auto-detect and the panel breakpoint listener",
+      "why": "jsdom has no viewport engine; matches is false, so the shell never auto-switches to compact and no listener fires.",
+      "usedBy": [
+        "src/shell/chrome/panel.js"
+      ],
+      "probes": [
+        "matchMedia"
+      ]
+    },
+    {
+      "id": "CloseWatcher",
+      "api": "CloseWatcher",
+      "summary": "UA-owned Escape watcher for the panel",
+      "why": "Gecko does not implement it, so the fork's own keydown Escape path is the live one on every target. The branch exists for hosts that do.",
+      "usedBy": [
+        "src/shell/chrome/panel.js"
+      ],
+      "probes": [
+        "CloseWatcher"
+      ],
+      "note": "Documented as absent on the target platform, not merely unimplemented."
+    },
+    {
+      "id": "screen",
+      "api": "screen",
+      "summary": "Fullscreen size sanity check",
+      "why": "Heads without a screen object skip the check rather than measuring against a bogus viewport.",
+      "usedBy": [
+        "src/shell/inputs/forge.js"
+      ],
+      "probes": [
+        "screen"
+      ]
+    },
+    {
+      "id": "pictureInPictureEnabled",
+      "api": "document.pictureInPictureEnabled",
+      "summary": "Feature gate for the picture-in-picture entry point",
+      "why": "The PiP button is hidden when the gate is absent, and the toggle re-checks requestPictureInPicture on the element, which is what keeps a host that would reject the call from ever reaching it. Without either, the player simply has no picture-in-picture entry point.",
+      "usedBy": [
+        "src/shell/media.js"
+      ],
+      "probes": [
+        "document.pictureInPictureEnabled"
+      ],
+      "token": [
+        "document.pictureInPictureEnabled",
+        "requestPictureInPicture"
+      ]
+    },
+    {
+      "id": "GM_registerMenuCommand",
+      "api": "GM_registerMenuCommand",
+      "summary": "Manager-owned debug menu entry",
+      "why": "A manager that does not provide it simply has no menu; the settings surface carries the same switch.",
+      "usedBy": [
+        "src/shared/storage.js"
+      ],
+      "probes": [
+        "GM_registerMenuCommand"
+      ]
+    },
+    {
+      "id": "GM_unregisterMenuCommand",
+      "api": "GM_unregisterMenuCommand",
+      "summary": "Detaches the menu entry",
+      "why": "Missing remover is handled by no-op, so a teardown cannot throw on a manager without it.",
+      "usedBy": [
+        "src/shared/storage.js"
+      ],
+      "probes": [
+        "GM_unregisterMenuCommand"
+      ]
+    },
+    {
+      "id": "GM_addValueChangeListener",
+      "api": "GM_addValueChangeListener",
+      "summary": "Cross-tab change notification",
+      "why": "Without it resume entries do not sync live between tabs; they still sync on next load.",
+      "usedBy": [
+        "src/shared/storage.js"
+      ],
+      "probes": [
+        "GM_addValueChangeListener"
+      ]
+    },
+    {
+      "id": "GM_removeValueChangeListener",
+      "api": "GM_removeValueChangeListener",
+      "summary": "Detaches the change listener",
+      "why": "A grant without its remover is exactly the case that leaks, so the remover is probed too and no-ops.",
+      "usedBy": [
+        "src/shared/storage.js"
+      ],
+      "probes": [
+        "GM_removeValueChangeListener"
+      ]
+    },
+    {
+      "id": "GM_getResourceText",
+      "api": "GM_getResourceText",
+      "summary": "Manager-cached stylesheet warm-load",
+      "why": "Absent, the injected stylesheet is adopted on its own; the warm path is an optimisation.",
+      "usedBy": [
+        "src/shared/storage.js"
+      ],
+      "probes": [
+        "GM_getResourceText"
+      ]
+    },
+    {
+      "id": "GM_info",
+      "api": "GM_info",
+      "summary": "Manager and script identity for the about/diagnostics surface",
+      "why": "Deliberately unprobed and ungranted: Tampermonkey exposes GM_info to a script with no grants, so bare use is correct. Declared here so nobody 'fixes' it by adding a grant - the grant-equality test would then fail on a permission that buys nothing.",
+      "usedBy": [
+        "src/entry.js"
+      ]
+    },
+    {
+      "id": "WebAnimations",
+      "api": "WebAnimations",
+      "summary": "Compositor-side accent flash and the transform transition",
+      "why": "flashElement() returns early and the settings/toast flash is simply skipped, and the transform path falls back to its rAF setter - both are cosmetic, so no version floor is claimed.",
+      "usedBy": [
+        "src/shell/chrome/animate.js",
+        "src/shell/inputs/actions.js"
+      ],
+      "token": [
+        "el.animate",
+        "video.animate"
+      ],
+      "note": "Two guarded call sites, one degradation story: the first has no fallback (nothing flashes), the second has an rAF one. getAnimations()/effect.getKeyframes() are optional-chained or typeof-guarded inside the same pass."
+    },
+    {
+      "id": "checkVisibility",
+      "api": "checkVisibility",
+      "summary": "Skips a parked video whose opacity or visibility is already collapsed",
+      "why": "Falls through to the rect-only path below it, so the candidate scan still works; only the cheap reject is lost.",
+      "usedBy": [
+        "src/kernel/sdk.js"
+      ],
+      "token": "checkVisibility"
+    },
+    {
+      "id": "getCoalescedEvents",
+      "api": "getCoalescedEvents",
+      "summary": "Full-rate pointer sampling for the forge scrub gesture",
+      "why": "The single event's coordinates are used instead, so a fast drag samples less densely - the gesture stays correct, just coarser.",
+      "usedBy": [
+        "src/shell/inputs/forge.js"
+      ],
+      "token": "getCoalescedEvents"
+    },
+    {
+      "id": "getPredictedEvents",
+      "api": "getPredictedEvents",
+      "summary": "Predicts the pointer type a touch is becoming, to pick the drag affordance early",
+      "why": "Nothing is lost on the target: Gecko does not implement it, so the shipped path is already the fallback. Recorded so the typeof guard is not mistaken for dead code.",
+      "usedBy": [
+        "src/shell/inputs/forge.js"
+      ],
+      "token": "getPredictedEvents",
+      "note": "Absent on Firefox, like CloseWatcher - the branch exists for hosts that do ship it."
+    },
+    {
+      "id": "fullscreen",
+      "api": "fullscreen",
+      "summary": "The document-wide fullscreen gate, its transition events, and the exit call",
+      "why": "The gate is driven by fullscreenchange and only latches from a real fullscreenElement, so a host without the API never sets fs and document.exitFullscreen() is unreachable; entering degrades to the blocked-embed hint.",
+      "usedBy": [
+        "src/shared/shadow.js",
+        "src/shell/shell.js"
+      ],
+      "token": "fullscreen",
+      "note": "Not machine-visible: entry is a requestFullscreen() on a local element reference, exit is guarded by the fs value rather than a typeof."
     }
   ]
 }
