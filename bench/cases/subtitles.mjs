@@ -1,4 +1,4 @@
-import { measure } from "../lib.mjs";
+import { define } from "../lib.mjs";
 import { formatTime } from "../../src/shared/time.js";
 import { srtToVtt } from "../../src/shell/subtitles/forgevtt.js";
 
@@ -22,7 +22,7 @@ const SRT = [
 ].join("\r\n");
 
 export default [
-  measure("srtToVtt normalizes a small SRT", () => {
+  define("srtToVtt normalizes a small SRT", () => {
     let sink = null;
     return () => {
       sink = srtToVtt(SRT);
@@ -30,7 +30,7 @@ export default [
     };
   }),
 
-  measure("formatTime scrub ticks", () => {
+  define("formatTime scrub ticks", () => {
     let sink = "";
     return () => {
       for (let i = 0; i < 300; i++) {

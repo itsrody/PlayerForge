@@ -1,4 +1,4 @@
-import { measure } from "../lib.mjs";
+import { define } from "../lib.mjs";
 import { JSDOM } from "jsdom";
 import { register } from "node:module";
 
@@ -79,7 +79,7 @@ function pointerEvent(win, type, { id = 1, x = 0, y = 0 } = {}) {
 const MOVES = 30;
 
 export default [
-  measure("scrub per-move dispatch (down + 30 moves)", () => {
+  define("scrub per-move dispatch (down + 30 moves)", () => {
     const { dom, video, zone, host } = makeEnv();
     const controller = new InputForge(video, zone, host);
     let scrubCount = 0;

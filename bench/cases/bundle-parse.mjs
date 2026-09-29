@@ -7,7 +7,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { measure } from "../lib.mjs";
+import { define } from "../lib.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DIST = join(HERE, "..", "..", "dist");
@@ -22,7 +22,7 @@ const cases = [];
 
 if (minifiedBundle) {
   cases.push(
-    measure("bundle parse+compile (minified)", () => {
+    define("bundle parse+compile (minified)", () => {
       const body = minifiedBundle.slice(minifiedBundle.indexOf("==/UserScript==") + 16);
       return () => {
         // new Function triggers V8 parse + compile without executing the IIFE.

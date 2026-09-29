@@ -1,4 +1,4 @@
-import { measure } from "../lib.mjs";
+import { define } from "../lib.mjs";
 import { findSdkForVideo } from "../../src/kernel/sdk.js";
 
 /** Selector-satisfying fake node - enough surface for composedAncestry(). */
@@ -34,7 +34,7 @@ const freshVideo = () => buildTree().video;
 findSdkForVideo(video);
 
 export default [
-  measure("findSdkForVideo full scan (Plyr tree)", () => {
+  define("findSdkForVideo full scan (Plyr tree)", () => {
     let sink;
     return () => {
       sink = findSdkForVideo(freshVideo());
@@ -43,7 +43,7 @@ export default [
     };
   }),
 
-  measure("findSdkForVideo repeat query (memo hit)", () => {
+  define("findSdkForVideo repeat query (memo hit)", () => {
     let sink;
     return () => {
       sink = findSdkForVideo(video);
@@ -51,7 +51,7 @@ export default [
     };
   }),
 
-  measure("findSdkForVideo miss (generic markup)", () => {
+  define("findSdkForVideo miss (generic markup)", () => {
     // ".player" is deliberately unregistered - generic player markup stays unrecognized.
     const div = fakeNode([".player"], null);
     const bareVideo = fakeNode([], div);

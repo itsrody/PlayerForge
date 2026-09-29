@@ -1,1 +1,7 @@
 node_modules/
+
+# A/B benchmark reference worktree (bench/ab.mjs)
+.ab-worktree/
+
+# Browser capability/feature probes are scratch, never committed
+platform/scratch/

@@ -84,6 +84,103 @@ function readBundle() {
   return readFileSync(bundle, "utf8");
 }
 
+/**
+ * Live sessions, so an interrupted run cannot orphan a browser.
+ *
+ * geckodriver is a separate process: when the node process dies without
+ * quitting the session, the Firefox it started outlives it. That is how a
+ * cancelled integration run leaves a headless Firefox and its geckodriver
+ * behind. `test.after` teardown only covers the paths that get to run, so the
+ * process itself is the backstop - it owns the sessions no matter how the
+ * process ends.
+ */
+const liveDrivers = new Set();
+let processGuardsInstalled = false;
+
+function installProcessGuards() {
+  if (processGuardsInstalled) {
+    return;
+  }
+  processGuardsInstalled = true;
+
+  const shutdown = async () => {
+    const sessions = [...liveDrivers];
+    liveDrivers.clear();
+    await Promise.allSettled(sessions.map((d) => d.destroy()));
+  };
+
+  // Ctrl-C / kill: quit the browsers, then exit with the signal's own code so
+  // the shell still reports the run as interrupted. A second signal gives up
+  // on the graceful path - a wedged quit() must not make an interrupted run
+  // look like a hung one.
+  for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]]) {
+    let signalled = false;
+    process.on(signal, () => {
+      if (signalled) {
+        process.exit(code);
+      }
+      signalled = true;
+      shutdown().finally(() => process.exit(code));
+    });
+  }
+  // A crash outside the test runner (a throwing hook, an unhandled rejection)
+  // ends the loop without running `test.after`, but it is still async-capable.
+  for (const [event, code] of [["uncaughtException", 1], ["unhandledRejection", 1]]) {
+    process.on(event, (err) => {
+      console.error(`[harness] ${event} - shutting down live sessions before exit:`, err);
+      shutdown().finally(() => process.exit(code));
+    });
+  }
+  // Normal end of the run, including one that ended in a failing test.
+  process.on("beforeExit", () => {
+    if (liveDrivers.size > 0) {
+      shutdown();
+    }
+  });
+  // `exit` runs no async work, and ServiceBuilder.kill() is a promise, so the
+  // last resort has to be synchronous. Walk the process tree this node process
+  // owns - geckodriver is spawned by selenium as a direct child of node, and
+  // the headless Firefox as a child of geckodriver, so both are descendants
+  // and neither is reachable from the driver object. Deepest first: killing a
+  // parent does not reap its children.
+  //
+  // Scoping to descendants of THIS pid is what keeps this away from the user's
+  // own browser, which is emphatically not ours to kill.
+  process.on("exit", () => {
+    if (liveDrivers.size === 0) {
+      return;
+    }
+    const childrenOf = (pid) => {
+      try {
+        return execFileSync("pgrep", ["-P", String(pid)], { encoding: "utf8" })
+          .split("\n")
+          .filter(Boolean)
+          .map(Number);
+      } catch {
+        return []; // No children, or pgrep is unavailable.
+      }
+    };
+    const tree = [];
+    const collect = (pid, depth) => {
+      if (depth > 4) {
+        return; // Firefox does not nest this deep; refuse to guess further.
+      }
+      for (const child of childrenOf(pid)) {
+        collect(child, depth + 1);
+        tree.push(child);
+      }
+    };
+    collect(process.pid, 0);
+    for (const pid of tree) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+  });
+}
+
 export class FirefoxDriver {
   /** @type {import('selenium-webdriver').WebDriver} */
   #driver;
@@ -92,6 +189,8 @@ export class FirefoxDriver {
 
   constructor(driver) {
     this.#driver = driver;
+    liveDrivers.add(this);
+    installProcessGuards();
   }
 
   /**
@@ -460,6 +559,7 @@ export class FirefoxDriver {
   async destroy() {
     if (this.#destroyed) return;
     this.#destroyed = true;
+    liveDrivers.delete(this);
     try {
       await this.#driver.quit();
     } catch {

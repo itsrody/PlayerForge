@@ -1,4 +1,4 @@
-import { measure } from "../lib.mjs";
+import { define } from "../lib.mjs";
 
 const STORE_KEY = "pf:resume";
 let backing = {};
@@ -35,7 +35,7 @@ const seeded = new ResumeStore();
 backing = { [STORE_KEY]: seed() };
 
 export default [
-  measure("resume findMatch over 200 entries", () => {
+  define("resume findMatch over 200 entries", () => {
     let sink;
     return () => {
       for (let i = 0; i < 20; i++) {
@@ -45,7 +45,7 @@ export default [
     };
   }),
 
-  measure("resume createEntry fresh store (hash+persist)", () => {
+  define("resume createEntry fresh store (hash+persist)", () => {
     return () => {
       backing = { [STORE_KEY]: { version: 1, entries: [] } };
       const store = new ResumeStore();
@@ -55,7 +55,7 @@ export default [
     };
   }),
 
-  measure("resume updateResume persist+merge (200 entries)", () => {
+  define("resume updateResume persist+merge (200 entries)", () => {
     const freshStore = new ResumeStore();
     return () => {
       for (let i = 0; i < 20; i++) {

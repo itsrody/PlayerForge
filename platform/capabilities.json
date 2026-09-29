@@ -1,0 +1,122 @@
+{
+  "_comment": [
+    "The fork targets Gecko 156+. This file is the machine-checked record of",
+    "which platform capabilities the code actually relies on, so a Chromium-",
+    "shaped assumption cannot creep back in behind a plausible comment.",
+    "tests/capabilities.test.mjs enforces it: declared grants must match the",
+    "userscript banner exactly, every usedBy/verifiedBy path must exist,",
+    "no capability may require a Firefox newer than the floor, and anything in",
+    "`retired` must not reappear in src/."
+  ],
+  "target": {
+    "engine": "Gecko",
+    "minFirefox": 156,
+    "manager": "Tampermonkey MV2 5.5+"
+  },
+  "capabilities": [
+    {
+      "id": "navigation-currententrychange",
+      "summary": "SPA route changes, including pushState-only ones",
+      "shipsInFirefox": 147,
+      "usedBy": ["src/shared/navigation.js"],
+      "verifiedBy": "platform/integration/navigation.test.mjs"
+    },
+    {
+      "id": "document-startViewTransition",
+      "summary": "Panel open/close animation",
+      "shipsInFirefox": 144,
+      "usedBy": ["src/shell/chrome/panel.js"],
+      "verifiedBy": "platform/integration/switchboard-lifecycle.test.mjs"
+    },
+    {
+      "id": "adoptedStyleSheets",
+      "summary": "One shared stylesheet, upgraded in place across shadow roots",
+      "shipsInFirefox": 101,
+      "usedBy": ["src/shell/chrome/inject.js"],
+      "verifiedBy": "platform/integration/css-adoption.test.mjs"
+    },
+    {
+      "id": "MessageChannel",
+      "summary": "Unforgeable child-to-ancestor context pipe",
+      "shipsInFirefox": 41,
+      "usedBy": ["src/shared/context.js"],
+      "verifiedBy": "platform/integration/switchboard-lifecycle.test.mjs"
+    },
+    {
+      "id": "requestVideoFrameCallback",
+      "summary": "Frame-clock sampling for the jank watchdog and resume timing",
+      "shipsInFirefox": 132,
+      "usedBy": ["src/shell/resume.js"],
+      "verifiedBy": "tests/resume-tracker.test.mjs"
+    },
+    {
+      "id": "navigator-mediaSession",
+      "summary": "Media key integration",
+      "shipsInFirefox": 111,
+      "usedBy": ["src/shell/media.js"]
+    },
+    {
+      "id": "AbortSignal",
+      "summary": "Lifecycle cancellation, including AbortSignal.any/timeout",
+      "shipsInFirefox": 124,
+      "usedBy": ["src/shared/context.js"]
+    }
+  ],
+  "grants": [
+    {
+      "api": "GM_getValue",
+      "why": "Manager-scoped storage: readable from any @match origin, unlike a page origin's localStorage."
+    },
+    {
+      "api": "GM_setValue",
+      "why": "Same store as GM_getValue."
+    },
+    {
+      "api": "GM_addValueChangeListener",
+      "why": "Cross-tab notification for pf:configs - the one capability the page origin cannot provide."
+    },
+    {
+      "api": "GM_removeValueChangeListener",
+      "why": "Detaches the above; a grant without its remover cannot clean up."
+    },
+    {
+      "api": "GM_registerMenuCommand",
+      "why": "Manager-owned menu entry (debug toggle)."
+    },
+    {
+      "api": "GM_unregisterMenuCommand",
+      "why": "Detaches the above."
+    },
+    {
+      "api": "GM_getResourceText",
+      "why": "Manager-cached stylesheet warm-load, upgraded in place over the embedded sheet."
+    },
+    {
+      "api": "GM_xmlhttpRequest",
+      "why": "CORS-bypassing subtitle fetch from user-supplied hosts."
+    }
+  ],
+  "retired": [
+    {
+      "id": "window.onurlchange-grant",
+      "summary": "The @grant for Tampermonkey's URL event",
+      "why": "Superseded by navigation.currententrychange (Firefox 147), which also fires for pushState. Re-granting it would widen permission surface for zero added coverage. The feature-detect in src/shared/navigation.js is fine - the GRANT is what was retired.",
+      "matchPattern": "@grant\\s+window\\.onurlchange",
+      "mustNotAppearIn": ["esbuild.config.mjs"]
+    },
+    {
+      "id": "long-animation-frame",
+      "summary": "PerformanceLongAnimationFrameTiming",
+      "why": "Gecko does not implement LoAF. The rAF frame-gap watchdog in src/shared/perf-diag.js is the debug-only replacement.",
+      "matchPattern": "PerformanceLongAnimationFrameTiming|long-animation-frame|longAnimationFrame",
+      "mustNotAppearIn": ["src/"]
+    },
+    {
+      "id": "GM_setClipboard",
+      "summary": "Manager clipboard write",
+      "why": "Never called by any feature, so the grant would be dead permission surface. Use navigator.clipboard instead.",
+      "matchPattern": "GM_setClipboard",
+      "mustNotAppearIn": ["src/", "esbuild.config.mjs"]
+    }
+  ]
+}

@@ -433,3 +433,60 @@ test("a hash-only navigation does not re-adopt - same path, same entry", async (
 
   tracker.destroy();
 });
+
+test("pause flush uses the rendered frame's mediaTime and cancels superseded frames", async () => {
+  // jsdom has no requestVideoFrameCallback, so the fallback branch above is the
+  // only one the other tests can reach. This installs a frame clock so the
+  // Gecko path (platform/capabilities.json: requestVideoFrameCallback) is
+  // actually exercised rather than merely declared.
+  writes["pf:resume"] = {
+    version: 1,
+    entries: [{ id: "ccc", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
+  };
+  const { dom, video, shell } = makeEnv(600);
+  const queued = new Map();
+  const cancelled = [];
+  let next = 1;
+  video.requestVideoFrameCallback = (cb) => {
+    const id = next++;
+    queued.set(id, cb);
+    return id;
+  };
+  video.cancelVideoFrameCallback = (id) => {
+    cancelled.push(id);
+    queued.delete(id);
+  };
+  const tracker = new ResumeTracker(shell);
+  await flush();
+  await flush();
+  const stored = () => writes["pf:resume"].entries[0].resume;
+  const pause = () => video.dispatchEvent(new dom.window.Event("pause"));
+  const deliverFrame = (mediaTime) => {
+    const [id, cb] = [...queued][0];
+    queued.delete(id);
+    cb(0, { mediaTime });
+  };
+
+  // The decoder position is a decoy: it leads the display, so saving it would
+  // move the resume marker to a frame the user never saw.
+  shell.currentTime = 10;
+  pause();
+  assert.equal(queued.size, 1, "pause defers the save to the next frame instead of writing currentTime");
+  assert.equal(stored(), 0, "nothing is persisted until the frame arrives");
+
+  shell.currentTime = 999;
+  deliverFrame(42);
+  assert.equal(stored(), 42, "the rendered frame's mediaTime wins over currentTime");
+
+  // A second pause supersedes the still-pending frame rather than stacking a
+  // second save; ids are not AbortSignal-cancellable, so this is explicit.
+  pause();
+  const pending = [...queued][0][0];
+  pause();
+  assert.deepEqual(cancelled, [pending], "the superseded frame callback is cancelled");
+
+  // A frame still outstanding at teardown must not fire into a dead tracker.
+  const outstanding = [...queued][0][0];
+  tracker.destroy();
+  assert.ok(cancelled.includes(outstanding), "destroy() cancels the pending frame callback");
+});
