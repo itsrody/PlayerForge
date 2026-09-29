@@ -484,28 +484,27 @@ test("installContextBridge survives a document whose root element is not parsed 
   globalThis.MutationObserver = win.MutationObserver;
 
   // Fresh nested frames at document-start can expose a document with no root
-  // element yet. The cache observer must not throw out of the bridge install -
-  // entry.js installs the bridge BEFORE the video probe, so a throw here would
-  // silently kill capture in that frame.
+  // element yet. The install must not throw on it - entry.js installs the
+  // bridge BEFORE the video probe, so a throw here would silently kill capture
+  // in that frame.
   Object.defineProperty(win.document, "documentElement", { value: null, configurable: true });
 
   let stop = null;
   assert.doesNotThrow(() => { stop = installContextBridge(); });
 
-  // With the bridge torn down (cache inactive), the provisioner's fallback
-  // scan still vouches an iframe - proving the install never poisoned the
-  // message vouch on its way out.
-  stop();
+  // The vouch is a live scan, so it works with the bridge installed or torn
+  // down - the install never poisoned it on its way in or out.
   const child = win.document.createElement("iframe");
   win.document.body.append(child);
   const provision = createTopFrameProvisioner();
   provision({ data: { type: FS_REQUEST_TYPE }, source: child.contentWindow, origin: "https://kid.test" });
   assert.equal(child.hasAttribute("allowfullscreen"), true);
 
+  stop();
   stopContextPipe();
 });
 
-test("live iframe registry stays current under non-iframe churn", async () => {
+test("frame vouch reflects the live frame set under DOM churn", async () => {
   const { window: win } = dom();
   globalThis.window = win;
   globalThis.location = win.location;
@@ -514,8 +513,8 @@ test("live iframe registry stays current under non-iframe churn", async () => {
 
   const stop = installContextBridge();
   // Drive the real provisioner through the installed bridge: a grant only
-  // lands when iframeElementForWindow() vouches the source, so the cache's
-  // contents are observable through the allowfullscreen attribute.
+  // lands when iframeElementForWindow() vouches the source, so the vouch is
+  // observable through the allowfullscreen attribute.
   const provision = (source) => {
     win.dispatchEvent(new win.MessageEvent("message", {
       data: { type: FS_REQUEST_TYPE },
@@ -528,9 +527,9 @@ test("live iframe registry stays current under non-iframe churn", async () => {
   win.document.body.append(child);
   await new Promise((resolve) => setTimeout(resolve, 0));
   provision(child.contentWindow);
-  assert.equal(child.hasAttribute("allowfullscreen"), true, "observed iframe is vouched");
+  assert.equal(child.hasAttribute("allowfullscreen"), true, "live iframe is vouched");
 
-  // SPA-style churn of entirely unrelated nodes must not disturb the entry.
+  // SPA-style churn of entirely unrelated nodes must not disturb the vouch.
   for (let i = 0; i < 5; i++) {
     const host = win.document.createElement("div");
     host.appendChild(win.document.createElement("span"));
@@ -541,19 +540,20 @@ test("live iframe registry stays current under non-iframe churn", async () => {
   provision(child.contentWindow);
   assert.equal(child.hasAttribute("allowfullscreen"), true, "iframe survives unrelated churn");
 
-  // Iframes nested in an added container register through the subtree scan.
+  // An iframe nested in an added container is vouched like any other.
   const suite = win.document.createElement("div");
   const inner = win.document.createElement("iframe");
   suite.appendChild(inner);
   win.document.body.append(suite);
   await new Promise((resolve) => setTimeout(resolve, 0));
   provision(inner.contentWindow);
-  assert.equal(inner.hasAttribute("allowfullscreen"), true, "added-subtree scan registers nested iframes");
+  assert.equal(inner.hasAttribute("allowfullscreen"), true, "nested iframe is vouched");
 
-  // Removing the whole container drops the inner frame from the cache - the
-  // isConnected sweep covers removals the added-node scan cannot see. Clear
-  // the attribute first: an earlier grant would leave it set on the detached
-  // iframe, so a fresh provision must NOT re-add it when the vouch fails.
+  // Removing the container drops the frame from the live set, so the vouch
+  // fails on the very next message - there is no registry to go stale, which
+  // is exactly why this holds without any sweep. Clear the attribute first: an
+  // earlier grant would leave it set on the detached iframe, so a fresh
+  // provision must NOT re-add it when the vouch fails.
   suite.remove();
   await new Promise((resolve) => setTimeout(resolve, 0));
   inner.removeAttribute("allowfullscreen");
@@ -563,14 +563,16 @@ test("live iframe registry stays current under non-iframe churn", async () => {
   stop();
 });
 
-test("iframe registry arms lazily on the first bridged message", async () => {
+test("the frame bridge never constructs a document observer", async () => {
   const { window: win } = dom();
   globalThis.window = win;
   globalThis.location = win.location;
   globalThis.document = win.document;
 
-  // Count observer constructions: pages with no child frames must never arm
-  // the whole-document observer until the first bridged message proves one.
+  // The vouch used to be served by a whole-document MutationObserver armed on
+  // the first bridged message. Now it is a live contentWindow comparison, so
+  // the bridge must not build an observer at all - pages that embed players in
+  // frames pay nothing for it, however much they mutate.
   const RealMO = win.MutationObserver;
   let constructions = 0;
   class CountingMO extends RealMO {
@@ -583,8 +585,6 @@ test("iframe registry arms lazily on the first bridged message", async () => {
   win.MutationObserver = CountingMO;
 
   const stop = installContextBridge();
-  assert.equal(constructions, 0, "no observer armed before any bridged message");
-
   const child = win.document.createElement("iframe");
   win.document.body.append(child);
   const provision = (source) => {
@@ -596,12 +596,9 @@ test("iframe registry arms lazily on the first bridged message", async () => {
   };
 
   provision(child.contentWindow);
-  assert.equal(constructions, 1, "first message armed the registry exactly once");
-  assert.equal(child.hasAttribute("allowfullscreen"), true, "synchronous seed registered the live iframe before the handler vouched");
-
-  // The guard is idempotent: further messages never re-arm.
   provision(child.contentWindow);
-  assert.equal(constructions, 1, "later messages do not construct another observer");
+  assert.equal(constructions, 0, "bridged messages never construct an observer");
+  assert.equal(child.hasAttribute("allowfullscreen"), true, "and the vouch still works");
 
   stop();
   globalThis.MutationObserver = RealMO;

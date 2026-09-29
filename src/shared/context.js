@@ -809,22 +809,6 @@ function isOwnFrame(source) {
   if (!source) {
     return false;
   }
-  if (iframeCacheActive) {
-    ensureIframeCacheCurrent();
-    const hit = iframeCache.get(source);
-    if (hit) {
-      // Direct child registered by the live registry: O(1) instead of the
-      // frame-tree walk. A detached element is rejected and dropped here -
-      // matching the walk's connected-only querySelectorAll.
-      if (hit.isConnected) {
-        return true;
-      }
-      iframeCache.delete(source);
-      return false;
-    }
-    // Not a direct child of this document; it may still be a nested
-    // descendant behind readable same-origin layers - walk for those.
-  }
   const scan = (doc, depth) => {
     if (depth > 4) {
       return false;
@@ -847,192 +831,21 @@ function isOwnFrame(source) {
   return scan(document, 0);
 }
 
-/* - 4a. Live iframe registry - */
-
 /**
- * Live map from <iframe> contentWindow -> element, refreshed by an observer
- * that lives only while the bridge is installed AND messages have been seen.
- * Without it, every relayed message rewound the full frame tree via
- * querySelectorAll - O(frametree) per message on iframe-heavy pages. Armed
- * lazily on the first bridged message (see installContextBridge), so the vast
- * majority of pages - which have no child frames to vouch - never pay for the
- * whole-document observer at all.
+ * The direct <iframe> child of THIS document whose contentWindow is `win`, or
+ * null.
  *
- * This is self-contained to the shared layer (no dependency on the kernel's
- * dom-watch dispatcher, which is installed lazily and may not exist when the
- * bridge boots at document-start) and torn down by the bridge teardown, so a
- * top frame that never relays pays no ongoing cost. Cross-origin iframe
- * elements are still readable (contentWindow stays accessible across origins),
- * so a cross-origin child's element is resolvable here - which is exactly what
- * the fullscreen provisioner and frame relay need to vouch event.source.
- *
- * WeakMap-keyed by contentWindow: dead frames release their entries with their
- * window instead of pinning a detached document, so removals need no sweep -
- * every read rejects a detached element via isConnected and drops it.
+ * The vouch is a question the platform answers directly: `contentWindow` is a
+ * live property of the element, so comparing it against the message source
+ * resolves "is this window one of my own direct child frames" exactly, with no
+ * bookkeeping to keep in step with the DOM. querySelectorAll only walks the
+ * live document, so a removed frame stops vouching the moment it leaves - no
+ * sweep, no staleness window, no observer.
  */
-const iframeCache = new WeakMap();
-/** Document the cache currently describes. Tracked so a document swap (fresh
- *  page / test harness) reseeds instead of serving a stale map. */
-let iframeCacheDoc = null;
-/** True once the iframe registry observer is live. Armed lazily by
- *  installContextBridge on the first bridged message - pages with no child
- *  frames never arm it. Before that - e.g. handlers used directly -
- *  iframeElementForWindow scans inline so the vouch stays correct even
- *  unseeded. */
-let iframeCacheActive = false;
-/** Observer driving the cache; lifecycled by startIframeCache/stopIframeCache. */
-let iframeCacheObserver = null;
-
-/** (Re)build the cache from the live <iframe> set. ContentWindow never throws,
- *  so this is safe across same- and cross-origin subtrees. Only used for the
- *  initial install and a document swap reseed - ongoing updates are
- *  differential (diffIframeCache). No clear(): the WeakMap releases entries
- *  with their windows on its own, and reads against old windows are rejected
- *  by the isConnected check anyway. */
-function seedIframeCache() {
-  for (const ifr of document.querySelectorAll("iframe")) {
-    const win = ifr.contentWindow;
-    if (win) {
-      iframeCache.set(win, ifr);
-    }
-  }
-}
-
-/** Register one <iframe> element under its contentWindow. Idempotent: moved or
- *  re-inserted frames just update the entry in place (Map keyed by window). */
-function registerIframe(ifr) {
-  const win = ifr.contentWindow;
-  if (win) {
-    iframeCache.set(win, ifr);
-  }
-}
-
-/** Register every <iframe> inside one added node (an `<iframe>` itself, or a
- *  container subtree). Scoped to the added node only - the old full reseed
- *  walked the whole document every batch even when nothing changed. */
-function collectIframes(node) {
-  if (!node || node.nodeType !== 1) {
-    return;
-  }
-  if (node.localName === "iframe") {
-    registerIframe(node);
-    return;
-  }
-  const set = node.querySelectorAll("iframe");
-  for (let i = 0; i < set.length; i++) {
-    registerIframe(set[i]);
-  }
-}
-
-/** Keep the cache diffed against one observer batch: added nodes register any
- *  iframes they carry (an `<iframe>` itself, or a container subtree). Removals
- *  need no sweep - the WeakMap drops dead windows with their documents and
- *  every read rejects a detached element via isConnected, so a frame removed
- *  anywhere (including inside a dropped ancestor subtree) stops vouching on
- *  its next message rather than on the next batch. */
-function diffIframeCache(records) {
-  for (const record of records) {
-    const added = record.addedNodes;
-    for (let i = 0; i < added.length; i++) {
-      collectIframes(added[i]);
-    }
-  }
-}
-
-/** Install the cache observer bound to the current document. Returns an
- *  AbortSignal teardown. Degrades gracefully when MutationObserver is absent
- *  (jsdom without an explicit binding): the cache stays inactive and
- *  iframeElementForWindow falls back to a scan, so the bridge's message
- *  handling never depends on it.
- *
- *  Idempotent: re-arming for the same document is a no-op, and a previous
- *  document's cache is discarded before rebind (browser/tab navigations hand
- *  the script a fresh document object).
- *
- *  The observe target falls back to `document` when the root element has not
- *  been parsed yet (fresh nested frames at document-start): observing the
- *  document node covers the same subtree and never throws on a missing
- *  documentElement - a throw here would abort entry.js's boot BEFORE the
- *  video probe, silently killing capture in that frame.
- */
-function startIframeCache(ac) {
-  if (typeof MutationObserver !== "function") {
-    return;
-  }
-  if (iframeCacheActive && iframeCacheDoc === document) {
-    return;
-  }
-  if (iframeCacheActive) {
-    stopIframeCache();
-  }
-  seedIframeCache();
-  iframeCacheDoc = document;
-  iframeCacheActive = true;
-  iframeCacheObserver = new MutationObserver(diffIframeCache);
-  try {
-    iframeCacheObserver.observe(document.documentElement || document, { childList: true, subtree: true });
-  } catch {
-    // Root not available yet (or observer rejected): drop the cache instead of
-    // throwing out of the bridge install - scans remain the fallback vouch.
-    stopIframeCache();
-    return;
-  }
-  ac.signal.addEventListener("abort", () => {
-    stopIframeCache();
-  }, { once: true });
-}
-
-function stopIframeCache() {
-  iframeCacheObserver?.disconnect();
-  iframeCacheObserver = null;
-  iframeCacheActive = false;
-  iframeCacheDoc = null;
-  // Entries need no clear: the WeakMap releases them with their windows, and
-  // a stale (detached) element fails the isConnected read check - so neither
-  // the fullscreen provisioner nor the relay can vouch a dead frame. The
-  // inline scan is the fallback after teardown.
-}
-
-/** Ensure the cache describes the CURRENT document, reseeding and rebinding the
- *  observer if the document swapped underneath us (fresh jsdom/page). */
-function ensureIframeCacheCurrent() {
-  if (!iframeCacheActive || iframeCacheDoc === document) {
-    return;
-  }
-  if (typeof MutationObserver !== "function") {
-    stopIframeCache();
-    return;
-  }
-  // Cache belongs to a previous document - rebind to the live one.
-  iframeCacheObserver?.disconnect();
-  seedIframeCache();
-  iframeCacheDoc = document;
-  try {
-    iframeCacheObserver = new MutationObserver(diffIframeCache);
-    iframeCacheObserver.observe(document.documentElement, { childList: true, subtree: true });
-  } catch {
-    stopIframeCache();
-  }
-}
-
-/** The direct <iframe> child of THIS document whose contentWindow is `win`, or null. */
 function iframeElementForWindow(win) {
   if (!win) {
     return null;
   }
-  if (iframeCacheActive) {
-    ensureIframeCacheCurrent();
-    const hit = iframeCache.get(win);
-    if (hit) {
-      if (hit.isConnected) {
-        return hit;
-      }
-      iframeCache.delete(win);
-    }
-    return null;
-  }
-  // Fallback before the bridge seeds the cache (or when handlers are used
-  // directly): scan inline so the vouch never silently drops.
   for (const iframe of document.querySelectorAll("iframe")) {
     if (iframe.contentWindow === win) {
       return iframe;
@@ -1142,10 +955,7 @@ export function installContextBridge() {
   // postMessage a page ever sent (analytics/ad traffic included) run three
   // dispatches and three polymorphic event.data reads. The pf: gate below
   // keeps non-bridge chatter at a single typeof/startsWith, then routes by
-  // the exact message type. The lazy iframe-registry arm stays first within
-  // this handler, so a synchronously-seeded cache still lands before the
-  // vouch-check of the handler that runs next - the ordering the old
-  // registration order guaranteed. Sibling routes stay isolated the way
+  // the exact message type. Sibling routes stay isolated the way
   // separate listeners were: a throw in one must not eat the next.
   window.addEventListener("message", (event) => {
     const data = event && event.data;
@@ -1156,16 +966,10 @@ export function installContextBridge() {
     if (typeof type !== "string" || !type.startsWith("pf:")) {
       return;
     }
-    // The live iframe registry exists only to vouch incoming bridged messages
-    // against this document's own <iframe> children - never for anything
-    // message-free. On the vast majority of pages (no child frames) the
-    // whole-document MutationObserver therefore never needs to exist, so arm
-    // it lazily on the first bridged message: the seed registers live frames
-    // before any handler vouches, and the inline-scan fallback covers the
-    // pre-observer gap.
-    if (!iframeCacheActive || iframeCacheDoc !== document) {
-      startIframeCache(ac);
-    }
+    // Vouching an incoming bridged message against this document's own
+    // <iframe> children is a live `contentWindow` comparison, so it costs
+    // nothing to keep idle: no registry, no whole-document observer armed on
+    // the first message, no per-batch maintenance on pages that never bridge.
     try {
       if (type === CTX_REQUEST_TYPE || type === CTX_RESPONSE_TYPE) {
         onContext(event);
