@@ -1,7 +1,7 @@
 /**
  * Resume restore integration tests.
  *
- * Tests the full resume lifecycle in a real Firefox 156 instance.
+ * Tests the full resume lifecycle in a real Firefox 157 instance.
  */
 import test from "node:test";
 import assert from "node:assert/strict";

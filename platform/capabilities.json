@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "The fork targets Gecko 156+. This file is the machine-checked record of",
+    "The fork targets Gecko 157+. This file is the machine-checked record of",
     "which platform capabilities the code actually relies on, so a Chromium-",
     "shaped assumption cannot creep back in behind a plausible comment.",
     "",
@@ -12,7 +12,7 @@
     "",
     "tests/capabilities.test.mjs enforces it: declared grants must match the",
     "userscript banner exactly, every usedBy/verifiedBy path must exist, no",
-    "capability may require a Firefox newer than the 156 floor, anything in",
+    "capability may require a Firefox newer than the 157 floor, anything in",
     "`retired` must not reappear in src/, every capability/hostProbe token must",
     "really appear in the files it claims, and every `probes` chain the code",
     "feature-detects must be classified in exactly one entry - so adopting a",
@@ -27,7 +27,7 @@
   ],
   "target": {
     "engine": "Gecko",
-    "minFirefox": 156,
+    "minFirefox": 157,
     "manager": "Tampermonkey MV2 5.5+"
   },
   "capabilities": [
@@ -101,7 +101,7 @@
       ],
       "verifiedBy": "tests/scheduler-native.test.mjs",
       "token": "globalThis.scheduler.postTask",
-      "note": "Called unconditionally on the 156 floor, so there is no probe to classify; the jsdom test host gets a timer-backed polyfill from tests/loader.mjs. scheduler.yield is deliberately not used; see the module header."
+      "note": "Called unconditionally on the 157 floor, so there is no probe to classify; the jsdom test host gets a timer-backed polyfill from tests/loader.mjs. scheduler.yield is deliberately not used; see the module header."
     },
     {
       "id": "TextTrack",

@@ -405,7 +405,7 @@ function requestPageContextOverPipe(timeoutMs, deadline) {
     }
   };
 
-  // AbortSignal.any() is native on the Firefox 156 floor, but the test harness
+  // AbortSignal.any() is native on the Firefox 157 floor, but the test harness
   // binds AbortController to jsdom's class (jsdom validates { signal } on its
   // own targets) and Node's brand check rejects jsdom signals in any() - so
   // the manual-deadline fallback below is load-bearing for tests, not dead.
@@ -485,7 +485,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   let transferPort = null;
   let settled = false;
 
-  // AbortSignal.any() + AbortSignal.timeout() on the Firefox 156 floor - but the
+  // AbortSignal.any() + AbortSignal.timeout() on the Firefox 157 floor - but the
   // test harness binds AbortController to jsdom's class, and Node's brand
   // check rejects those signals in any(). Feature-detect and fall back to
   // manual deadline tracking so both runtimes keep working.

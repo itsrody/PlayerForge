@@ -2,7 +2,7 @@
  * Host task scheduler facade.
  *
  * One facade over the host's scheduling primitives so consumers never
- * duplicate capability guards across the tree. The Firefox 156 floor always
+ * duplicate capability guards across the tree. The Firefox 157 floor always
  * has scheduler.postTask and requestAnimationFrame, so there is no production
  * fallback: the jsdom test host gets a timer-backed polyfill installed once by
  * tests/loader.mjs instead of a branch no Gecko build would take.
@@ -15,7 +15,7 @@
  *     a frame boundary can run layout/paint first) → MessageChannel task
  *     (hidden documents, where rAF does not run)
  *
- * Firefox 156 ships both scheduler.yield() and scheduler.postTask(), but
+ * Firefox 157 ships both scheduler.yield() and scheduler.postTask(), but
  * yield() is deliberately NOT used here:
  *
  *   - It is non-Baseline (WICG Prioritized Task Scheduling); relying on it

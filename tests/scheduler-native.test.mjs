@@ -6,7 +6,7 @@ import { getEventListeners } from "node:events";
  * The branch Firefox runs, and the branch CI never did.
  *
  * shared/scheduler.js calls `globalThis.scheduler.postTask` unconditionally
- * (the Firefox 156 floor always has it), so there is no production fallback
+ * (the Firefox 157 floor always has it), so there is no production fallback
  * for Node to reach. Node has no `scheduler` global at all, so the harness
  * polyfill in tests/loader.mjs normally provides one; this file replaces it
  * with a faithful double to pin the contract the facade relies on: the

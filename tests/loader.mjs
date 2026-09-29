@@ -54,7 +54,7 @@ if (typeof globalThis.matchMedia !== "function") {
   });
 }
 if (typeof globalThis.scheduler?.postTask !== "function") {
-  // The Firefox 156 floor always has the Task Scheduling API; Node/jsdom does
+  // The Firefox 157 floor always has the Task Scheduling API; Node/jsdom does
   // not, and src/shared/scheduler.js calls scheduler.postTask unconditionally
   // (no production fallback). This is the task source the facade would take
   // natively: a timer-backed task whose promise rejects with AbortError when

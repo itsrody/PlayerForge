@@ -194,7 +194,7 @@ export class FirefoxDriver {
   }
 
   /**
-   * Launch a headless Firefox (156+) instance.
+   * Launch a headless Firefox (157+) instance.
    * @param {object} [options]
    * @param {boolean} [options.headless=true] - Run headless.
    * @param {Record<string, any>} [options.preferences] - Extra profile prefs.

@@ -11,7 +11,7 @@ import { postTask, yield_ } from "../src/shared/scheduler.js";
  * MessageChannel task when it is not.
  *
  * The postTask() tests here cover the OTHER half of the facade. postTask now
- * calls scheduler.postTask unconditionally (the Firefox 156 floor always has
+ * calls scheduler.postTask unconditionally (the Firefox 157 floor always has
  * it), and this Node/jsdom host has no native scheduler, so those cases run
  * against the timer-backed polyfill installed by tests/loader.mjs. The native
  * task contract is pinned separately in scheduler-native.test.mjs; the abort
