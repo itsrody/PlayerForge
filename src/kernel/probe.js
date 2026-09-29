@@ -18,7 +18,7 @@
  * The first size-qualified candidate fires onCandidate exactly once;
  * documents without a usable player never boot a kernel.
  */
-import { logger } from "../shared/logger.js";
+import { logger } from "../shared/diagnostics.js";
 import { watchMediaEvents, meetsMinSize, forEachVideoInMutations } from "./sdk.js";
 import { onDomMutations } from "../shared/dom-watch.js";
 

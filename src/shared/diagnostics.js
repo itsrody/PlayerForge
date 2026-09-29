@@ -1,8 +1,79 @@
-import { logger } from "./logger.js";
+/**
+ * Debug runtime: the console logger and the debug-only jank watchdog, kept
+ * together because they share one toggle. `setDebugRuntime` flips both so the
+ * frame loop can never outlive (or miss) the log flag.
+ */
+
+/* - Logger - */
+
+const PREFIX = "[PlayerForge]";
+
+const STYLES = {
+  kernel: "color: #FF6B35; font-weight: bold",
+  shell: "color: #4ECDC4; font-weight: bold",
+  warn: "color: #F38181; font-weight: bold",
+  error: "color: #AA0000; font-weight: bold"
+};
 
 /**
- * Jank diagnostic, active ONLY while debug logs are on.
- *
+ * Chatter (log/group) is compiled out at runtime until enable() flips it -
+ * page-facing cost of a disabled log call is one boolean check, no string
+ * building, no console I/O. warn/error stay unconditional: they mark
+ * exceptional paths and must surface even in silent mode.
+ */
+let chatterEnabled = false;
+
+function styleFor(channel) {
+  return STYLES[channel] || "";
+}
+
+function log(channel, ...args) {
+  if (!chatterEnabled) {
+    return;
+  }
+  console.log(`%c${PREFIX}%c[${channel}]`, "color: #FF6B35", styleFor(channel), ...args);
+}
+
+function group(channel, label) {
+  if (!chatterEnabled) {
+    return;
+  }
+  console.group(`%c${PREFIX}%c[${channel}] ${label}`, "color: #FF6B35", styleFor(channel));
+}
+
+function groupEnd() {
+  console.groupEnd();
+}
+
+function warn(channel, ...args) {
+  console.warn(`%c${PREFIX}%c[${channel}]`, "color: #FF6B35", STYLES.warn, ...args);
+}
+
+function error(channel, ...args) {
+  console.error(`%c${PREFIX}%c[${channel}]`, "color: #FF6B35", STYLES.error, ...args);
+}
+
+export const logger = {
+  log,
+  warn,
+  error,
+  group,
+  groupEnd,
+  /** Enable chatter - wired to the #pf-debug hash / debug setting in kernel. */
+  enable() {
+    chatterEnabled = true;
+  },
+  disable() {
+    chatterEnabled = false;
+  },
+  get enabled() {
+    return chatterEnabled;
+  }
+};
+
+/* - Jank diagnostic (active ONLY while debug logs are on) - */
+
+/**
  * The obvious source for this is LoAF (PerformanceLongAnimationFrameTiming),
  * which reports frames delayed past 50ms with script attribution. Gecko has
  * never shipped it - `long-animation-frame` is a Chromium-only
@@ -32,7 +103,7 @@ const JANK_THRESHOLD_MS = 150;
 const FLUSH_WINDOW_MS = 5000;
 
 let rafId = null;
-let enabled = false;
+let perfEnabled = false;
 /** Timestamp of the previous frame; the gap to the current one is the measure. */
 let lastFrameAt = 0;
 /** Start of the current reporting window. */
@@ -91,10 +162,10 @@ function teardown() {
 }
 
 function setPerfDiag(on) {
-  if (on === enabled) {
+  if (on === perfEnabled) {
     return;
   }
-  enabled = on;
+  perfEnabled = on;
   if (on) {
     install();
   } else {

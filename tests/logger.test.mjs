@@ -11,7 +11,7 @@ test("logger chatter gates on enable/disable, warn stays unconditional", async (
   console.warn = () => { warnCalls++; };
 
   try {
-    const { logger } = await import("../src/shared/logger.js");
+    const { logger } = await import("../src/shared/diagnostics.js");
 
     // Fresh module state: silent until enabled.
     logger.log("test", "hidden");

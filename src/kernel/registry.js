@@ -1,4 +1,4 @@
-import { logger } from "../shared/logger.js";
+import { logger } from "../shared/diagnostics.js";
 
 /** Holds the single live shell. PlayerForge is one-shell-per-session by design. */
 export class ShellSlot {

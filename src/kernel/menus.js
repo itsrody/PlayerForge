@@ -1,5 +1,5 @@
 import { gmRegisterMenu, gmUnregisterMenu, getConfigValue, setConfigValue } from "../shared/storage.js";
-import { setDebugRuntime } from "../shared/perf-diag.js";
+import { setDebugRuntime } from "../shared/diagnostics.js";
 import { DEBUG_LOGS_KEY } from "./contract.js";
 
 /**

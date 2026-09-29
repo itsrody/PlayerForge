@@ -21,7 +21,7 @@ globalThis.AbortController = dom.window.AbortController;
 globalThis.requestAnimationFrame = (cb) => setTimeout(cb, 0);
 globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
 
-const { logger } = await import("../src/shared/logger.js");
+const { logger } = await import("../src/shared/diagnostics.js");
 logger.disable();
 
 const { Kernel } = await import("../src/kernel/kernel.js");

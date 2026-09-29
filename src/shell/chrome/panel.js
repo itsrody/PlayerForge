@@ -1,8 +1,8 @@
-import { logger } from "../../shared/logger.js";
+import { logger } from "../../shared/diagnostics.js";
 import { createIconElement } from "./icons.js";
 import { GESTURE_EVENTS } from "../inputs/actions.js";
 import { deepestActiveElement, subscribeFullscreen } from "../../shared/shadow.js";
-import { clamp } from "../../shared/clamp.js";
+import { clamp } from "../../shared/primitives.js";
 import { Scope } from "../../shared/scope.js";
 import { el } from "./elements.js";
 import { getSetting } from "./config.js";

@@ -1,12 +1,12 @@
 import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/storage.js";
 import { TUNING } from "../../shared/tuning.js";
-import { fmtEm } from "../../shared/formatters.js";
+import { fmtEm } from "../../shared/primitives.js";
 import { srtToVtt, ensureVttHeader } from "./forgevtt.js";
 import { ForgeTrack } from "./forge-track.js";
-import { debounce } from "../../shared/time.js";
+import { debounce } from "../../shared/scheduler.js";
 import { flashElement } from "../chrome/animate.js";
 import { el } from "../chrome/elements.js";
-import { logger } from "../../shared/logger.js";
+import { logger } from "../../shared/diagnostics.js";
 import { Scope } from "../../shared/scope.js";
 
 const SUBTITLE_FILE_ACCEPT = ".srt,.vtt";

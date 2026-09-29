@@ -3,8 +3,8 @@
  * panel renderer for that schema.
  */
 import { configStore, getConfigValue, setConfigValue } from "../../shared/storage.js";
-import { logger } from "../../shared/logger.js";
-import { fmtSeconds } from "../../shared/formatters.js";
+import { logger } from "../../shared/diagnostics.js";
+import { fmtSeconds } from "../../shared/primitives.js";
 
 const SETTINGS_PREFIX = "settings";
 

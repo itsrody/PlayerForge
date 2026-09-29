@@ -4,7 +4,7 @@ import { installMenuCommands } from "./kernel/menus.js";
 import { installContextBridge, requestFullscreenProvision } from "./shared/context.js";
 import { installVideoProbe } from "./kernel/probe.js";
 import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/sdk.js";
-import { logger } from "./shared/logger.js";
+import { logger } from "./shared/diagnostics.js";
 import { shouldSkipUrl } from "./kernel/guard.js";
 import { KEYS, getConfigValue, setConfigValue, deleteConfigField } from "./shared/storage.js";
 import { initFullscreenGate } from "./shared/shadow.js";

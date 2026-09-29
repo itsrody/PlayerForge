@@ -1,5 +1,5 @@
 import { define } from "../lib.mjs";
-import { formatTime } from "../../src/shared/time.js";
+import { formatTime } from "../../src/shared/primitives.js";
 import { srtToVtt } from "../../src/shell/subtitles/forgevtt.js";
 
 // Cue parsing and re-offsetting are Firefox's native WebVTT/TextTrack

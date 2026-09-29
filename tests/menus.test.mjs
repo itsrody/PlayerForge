@@ -24,7 +24,7 @@ console.warn = () => {};
 
 const { installMenuCommands } = await import("../src/kernel/menus.js");
 const { getConfigValue } = await import("../src/shared/storage.js");
-const { logger } = await import("../src/shared/logger.js");
+const { logger } = await import("../src/shared/diagnostics.js");
 
 function debugMenu() {
   return registered.find((h) => h.title.includes("Debug Logs"));

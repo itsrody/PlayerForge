@@ -1,4 +1,4 @@
-import { logger } from "../shared/logger.js";
+import { logger } from "../shared/diagnostics.js";
 import { deepestActiveElement, isInsideShell, fs } from "../shared/shadow.js";
 import { InputForge } from "./inputs/forge.js";
 import { attachInputActions } from "./inputs/actions.js";

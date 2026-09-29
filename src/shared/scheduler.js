@@ -105,6 +105,59 @@ export function postTask(fn, { priority = "user-visible", delay: ms = 0, signal 
 }
 
 /**
+ * Cancellable delay: runs `fn` after `ms`, returned fn cancels the pending run.
+ * Routes through postTask so the scheduler facade owns the timer (host task
+ * scheduler where available, the shared setTimeout path elsewhere; same cancel
+ * contract either way).
+ *
+ * @param {Function} fn
+ * @param {number} ms
+ * @returns {() => void} cancel
+ */
+export function delay(fn, ms) {
+  const handle = postTask(fn, { delay: ms });
+  return () => handle.abort();
+}
+
+/**
+ * Trailing-edge debounce. Re-calling within the window reschedules. The
+ * returned function carries `.flush()` (run a pending call now) and
+ * `.cancel()` (drop a pending call) for teardown paths - a trailing write
+ * must land before e.g. a filter section dies.
+ *
+ * @param {Function} fn
+ * @param {number} ms
+ */
+export function debounce(fn, ms) {
+  let cancel = null;
+  let pendingArgs = null;
+  const debounced = (...args) => {
+    pendingArgs = args;
+    cancel?.();
+    cancel = delay(() => {
+      cancel = null;
+      fn(...pendingArgs);
+      pendingArgs = null;
+    }, ms);
+  };
+  debounced.flush = () => {
+    if (!cancel) {
+      return;
+    }
+    cancel();
+    cancel = null;
+    fn(...pendingArgs);
+    pendingArgs = null;
+  };
+  debounced.cancel = () => {
+    cancel?.();
+    cancel = null;
+    pendingArgs = null;
+  };
+  return debounced;
+}
+
+/**
  * Resolve on the next task. MessageChannel first: its tasks are not timer-
  * throttled on Gecko, so hidden tabs still make progress; setTimeout is the
  * fallback for hosts without it. Both ports are closed once the message

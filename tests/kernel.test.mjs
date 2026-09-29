@@ -26,7 +26,7 @@ if (typeof globalThis.GM_removeValueChangeListener !== "function") {
 }
 
 // Suppress logger output during tests.
-const { logger } = await import("../src/shared/logger.js");
+const { logger } = await import("../src/shared/diagnostics.js");
 logger.disable();
 
 const { Kernel } = await import("../src/kernel/kernel.js");

@@ -1,4 +1,4 @@
-import { logger } from "./logger.js";
+import { logger } from "./diagnostics.js";
 
 /** The whole GM storage namespace: every root key lives here. */
 export const KEYS = {

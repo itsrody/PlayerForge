@@ -1,9 +1,8 @@
 import { getConfigValue, setConfigFields } from "../shared/storage.js";
 import { flashElement } from "./chrome/animate.js";
-import { debounce } from "../shared/time.js";
-import { clamp } from "../shared/clamp.js";
+import { debounce } from "../shared/scheduler.js";
+import { clamp, fmtPercent } from "../shared/primitives.js";
 import { TUNING } from "../shared/tuning.js";
-import { fmtPercent } from "../shared/formatters.js";
 import { Scope } from "../shared/scope.js";
 
 const CONFIG_PREFIX = "filter";

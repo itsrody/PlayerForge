@@ -1,8 +1,8 @@
 import { getPageContext, domainsMatch, domainScore, hashEntry } from "../shared/context.js";
 import { TUNING } from "../shared/tuning.js";
 import { KEYS, gmSetValue, loadJsonObject, gmAddValueChangeListener, gmRemoveValueChangeListener } from "../shared/storage.js";
-import { formatTime } from "../shared/time.js";
-import { logger } from "../shared/logger.js";
+import { formatTime } from "../shared/primitives.js";
+import { logger } from "../shared/diagnostics.js";
 import { Scope } from "../shared/scope.js";
 import { createActivity } from "../shared/activity.js";
 

@@ -1,6 +1,5 @@
-import { logger } from "../shared/logger.js";
-import { clamp } from "../shared/clamp.js";
-import { isBenignMediaPolicyError } from "../shared/errors.js";
+import { logger } from "../shared/diagnostics.js";
+import { clamp, isBenignMediaPolicyError } from "../shared/primitives.js";
 import { Scope } from "../shared/scope.js";
 
 /** Volume delta applied by nudgeVolume, shared with UI feedback layers. */

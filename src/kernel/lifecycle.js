@@ -1,4 +1,4 @@
-import { logger } from "../shared/logger.js";
+import { logger } from "../shared/diagnostics.js";
 import { postTask } from "../shared/scheduler.js";
 
 /**

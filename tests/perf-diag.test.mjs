@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { setDebugRuntime } from "../src/shared/perf-diag.js";
+import { setDebugRuntime } from "../src/shared/diagnostics.js";
 
 /**
  * The jank diagnostic is a debug-only rAF frame-gap watchdog (Gecko has no

@@ -1,6 +1,6 @@
 import { getSetting, onSettingsChanged } from "../chrome/config.js";
 import { TUNING } from "../../shared/tuning.js";
-import { formatTime } from "../../shared/time.js";
+import { formatTime } from "../../shared/primitives.js";
 import { fs, subscribeFullscreen } from "../../shared/shadow.js";
 import { GESTURE_EVENTS } from "../../kernel/contract.js";
 import { EASE_SNAPPY_CURVE, EASE_SNAPPY_MS } from "../../shared/timing.js";

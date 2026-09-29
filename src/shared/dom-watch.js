@@ -30,7 +30,7 @@
  * and resumed on visibility, so a backgrounded SPA doesn't fight its own
  * throttled idle budget with mutation scans.
  */
-import { logger } from "./logger.js";
+import { logger } from "./diagnostics.js";
 import { postTask, yield_ } from "./scheduler.js";
 
 /** Cap on how long a hidden document's mutation batch stays deferred. */

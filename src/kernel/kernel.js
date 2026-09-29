@@ -1,6 +1,6 @@
-import { logger } from "../shared/logger.js";
+import { logger } from "../shared/diagnostics.js";
 import { getConfigValue } from "../shared/storage.js";
-import { setDebugRuntime } from "../shared/perf-diag.js";
+import { setDebugRuntime } from "../shared/diagnostics.js";
 import { postTask } from "../shared/scheduler.js";
 import { Scope } from "../shared/scope.js";
 import { ShellSlot } from "./registry.js";

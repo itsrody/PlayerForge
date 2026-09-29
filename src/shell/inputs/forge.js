@@ -2,8 +2,8 @@ import { allowsIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo
 import { TUNING } from "../../shared/tuning.js";
 import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../../shared/shadow.js";
 import { DOMManager } from "../../shared/dom-manager.js";
-import { logger } from "../../shared/logger.js";
-import { isBenignMediaPolicyError } from "../../shared/errors.js";
+import { logger } from "../../shared/diagnostics.js";
+import { isBenignMediaPolicyError } from "../../shared/primitives.js";
 import { Scope } from "../../shared/scope.js";
 
 /**
