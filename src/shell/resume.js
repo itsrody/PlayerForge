@@ -4,6 +4,7 @@ import { KEYS, gmSetValue, loadJsonObject, gmAddValueChangeListener, gmRemoveVal
 import { formatTime } from "../shared/time.js";
 import { logger } from "../shared/logger.js";
 import { Scope } from "../shared/scope.js";
+import { createActivity } from "../shared/activity.js";
 
 /** Sort entries by updatedAt - ascending (oldest-first, for eviction) or
  *  descending (newest-first, for history display). */
@@ -399,8 +400,11 @@ export class ResumeStore {
 /**
  * Shell-owned playback tracker: persists progress per (domain, path, duration)
  * and resumes where the user left off, with a "Start over" toast action.
- * Saves are media-clock driven: a passive `timeupdate` listener (which only
- * fires while playback advances) plus an immediate flush on pause and destroy.
+ * Saves are media-clock driven, and the clock only ticks while the playhead
+ * advances - so the `timeupdate` listener lives inside a playback activity,
+ * alongside an immediate flush of the last rendered frame on the exit edge
+ * (pause/ended/emptied), a `seeked` save while paused, and a final flush on
+ * destroy.
  */
 export class ResumeTracker {
   #shell;
@@ -571,14 +575,11 @@ export class ResumeTracker {
     // position gate is seeded from the saved position earlier in #init.
     this.#lastSavedWall = Date.now();
 
-    // `timeupdate` fires while the playhead advances (~4 Hz continuous), so the
-    // media clock itself is the save crank: no interval to keep alive, and a
-    // video that is "playing" but stalled simply stops writing. Position alone
-    // does not bound write frequency - a fast-forward or scrub trips the
-    // epsilon every ~3 s of content - so the wall floor keeps the incremental
-    // cadence where the old interval put it (≤1 write per saveIntervalMs). The
-    // `pause` flush below is fully immediate, so the "pause to pause" contract
-    // still lands the final position regardless of the floor.
+    // Position alone does not bound write frequency - a fast-forward or scrub
+    // trips the epsilon every ~3 s of content - so the wall floor keeps the
+    // incremental cadence where the old interval put it (≤1 write per
+    // saveIntervalMs). The exit flush is fully immediate, so the "pause to
+    // pause" contract still lands the final position regardless of the floor.
     const saveIfDue = () => {
       if (shell.paused || Date.now() - this.#lastSavedWall < TUNING.resume.saveIntervalMs) {
         return;
@@ -608,27 +609,54 @@ export class ResumeTracker {
         saveIfDue();
       }
     };
-    video.addEventListener("timeupdate", gatedSaveIfDue, { signal, passive: true });
-    video.addEventListener("pause", () => {
-      // requestVideoFrameCallback gives the exact mediaTime of the last rendered
-      // frame — the position the user actually saw — whereas currentTime is the
-      // decoder position which may lead or lag the display. Falls back to
-      // currentTime when the API is unavailable (jsdom harness hosts).
-      if (typeof video.requestVideoFrameCallback === "function") {
-        // rVFC ids aren't AbortSignal-cancellable: keep the pending id on a
-        // field so destroy() can cancel it, and a re-pause supersedes the
-        // previous flush instead of stacking redundant saves.
-        if (this.#rvfcHandle != null) {
-          video.cancelVideoFrameCallback?.(this.#rvfcHandle);
-        }
-        this.#rvfcHandle = video.requestVideoFrameCallback((_now, metadata) => {
-          this.#rvfcHandle = null;
-          this.#saveProgress(metadata.mediaTime);
-        });
-      } else {
+    // The media clock is the save crank, but it only ticks while the playhead
+    // advances - so it belongs to the playback activity and is torn down on the
+    // exit edge rather than idling through a pause. Whatever the clock cannot
+    // cover while stopped is handled by the exit flush and the seeked save
+    // below.
+    createActivity({
+      target: video,
+      events: ["play", "playing", "pause", "ended", "emptied"],
+      isActive: () => !shell.paused,
+      signal,
+      onEnter: (work) => {
+        video.addEventListener("timeupdate", gatedSaveIfDue, { signal: work.signal, passive: true });
+      },
+      onExit: () => this.#flushProgress(video)
+    });
+
+    // A seek is a boundary event the media clock cannot cover while paused: the
+    // exit flush saved the pre-seek position, so a paused scrub would otherwise
+    // resume at the stale marker. Persist the settled position on `seeked`
+    // itself when paused; during playback the media clock already carries it.
+    video.addEventListener("seeked", () => {
+      if (shell.paused) {
         this.#saveProgress(shell.currentTime);
       }
     }, { signal, passive: true });
+  }
+
+  /**
+   * Persist the exact position of the last rendered frame on the playback exit
+   * edge, preferring requestVideoFrameCallback's mediaTime - the position the
+   * user actually saw - over currentTime, the decoder position which may lead
+   * or lag the display. Falls back to currentTime when the API is unavailable
+   * (jsdom harness). rVFC ids are not AbortSignal-cancellable, so the pending
+   * id is held on a field: destroy() cancels it, and a flush that races an
+   * undelivered frame supersedes it instead of stacking a redundant save.
+   */
+  #flushProgress(video) {
+    if (typeof video.requestVideoFrameCallback === "function") {
+      if (this.#rvfcHandle != null) {
+        video.cancelVideoFrameCallback?.(this.#rvfcHandle);
+      }
+      this.#rvfcHandle = video.requestVideoFrameCallback((_now, metadata) => {
+        this.#rvfcHandle = null;
+        this.#saveProgress(metadata.mediaTime);
+      });
+    } else {
+      this.#saveProgress(this.#shell.currentTime);
+    }
   }
 
   /** Clipboard bridge passthroughs (see ResumeStore exportData/importData). */

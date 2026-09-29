@@ -366,7 +366,7 @@ test("off-screen IntersectionObserver observation gates incremental resume saves
   }
 });
 
-test("pause flush uses the rendered frame's mediaTime and cancels superseded frames", async () => {
+test("pause exit flush uses the rendered frame's mediaTime and cancels superseded frames", async () => {
   // jsdom has no requestVideoFrameCallback, so the fallback branch above is the
   // only one the other tests can reach. This installs a frame clock so the
   // Gecko path (platform/capabilities.json: requestVideoFrameCallback) is
@@ -392,28 +392,44 @@ test("pause flush uses the rendered frame's mediaTime and cancels superseded fra
   await flush();
   await flush();
   const stored = () => writes["pf:resume"].entries[0].resume;
-  const pause = () => video.dispatchEvent(new dom.window.Event("pause"));
+  // The activity reads the shell's paused property at event time, so the
+  // harness flips it exactly as Gecko would before firing the edge.
+  const play = () => {
+    shell.paused = false;
+    video.dispatchEvent(new dom.window.Event("play"));
+  };
+  const pause = () => {
+    shell.paused = true;
+    video.dispatchEvent(new dom.window.Event("pause"));
+  };
   const deliverFrame = (mediaTime) => {
     const [id, cb] = [...queued][0];
     queued.delete(id);
     cb(0, { mediaTime });
   };
 
+  // The flush belongs to the exit edge, so playback must have started.
+  play();
+
   // The decoder position is a decoy: it leads the display, so saving it would
   // move the resume marker to a frame the user never saw.
   shell.currentTime = 10;
+
   pause();
-  assert.equal(queued.size, 1, "pause defers the save to the next frame instead of writing currentTime");
+  assert.equal(queued.size, 1, "the exit flush defers the save to the next frame instead of writing currentTime");
   assert.equal(stored(), 0, "nothing is persisted until the frame arrives");
 
   shell.currentTime = 999;
   deliverFrame(42);
   assert.equal(stored(), 42, "the rendered frame's mediaTime wins over currentTime");
 
-  // A second pause supersedes the still-pending frame rather than stacking a
-  // second save; ids are not AbortSignal-cancellable, so this is explicit.
+  // A quick play/pause cycle while a frame is still outstanding supersedes it
+  // rather than stacking a second save; rVFC ids are not AbortSignal-
+  // cancellable, so this is explicit.
+  play();
   pause();
   const pending = [...queued][0][0];
+  play();
   pause();
   assert.deepEqual(cancelled, [pending], "the superseded frame callback is cancelled");
 
@@ -421,4 +437,37 @@ test("pause flush uses the rendered frame's mediaTime and cancels superseded fra
   const outstanding = [...queued][0][0];
   tracker.destroy();
   assert.ok(cancelled.includes(outstanding), "destroy() cancels the pending frame callback");
+});
+
+test("a paused seek persists the settled position; the detached clock cannot", async () => {
+  writes["pf:resume"] = {
+    version: 1,
+    entries: [{ id: "seek", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
+  };
+  const { dom, video, shell } = makeEnv(600);
+  // The wall floor suppresses incremental saves, so the seek must bypass it.
+  TUNING.resume.saveIntervalMs = 60000;
+  const tracker = new ResumeTracker(shell);
+  await flush();
+  await flush();
+  const stored = () => writes["pf:resume"].entries[0].resume;
+
+  shell.paused = false;
+  video.dispatchEvent(new dom.window.Event("play"));
+  shell.currentTime = 30;
+  shell.paused = true;
+  video.dispatchEvent(new dom.window.Event("pause"));
+  assert.equal(stored(), 30, "the exit flush persists the pre-seek position");
+
+  // The clock listener is gone while paused (and the floor would block a
+  // qualifying move anyway), so an incremental tick cannot save the scrub.
+  shell.currentTime = 300;
+  video.dispatchEvent(new dom.window.Event("timeupdate"));
+  assert.equal(stored(), 30, "no clock save while paused");
+
+  // The seeked edge is the one that carries a paused scrub.
+  video.dispatchEvent(new dom.window.Event("seeked"));
+  assert.equal(stored(), 300, "paused seek persisted the settled position");
+
+  tracker.destroy();
 });
