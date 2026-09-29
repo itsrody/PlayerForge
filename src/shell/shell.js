@@ -15,6 +15,7 @@ import { SHELL_MARKER, warmStyles, injectShell, watchShellHost } from "./chrome/
 import { requestFullscreenProvision } from "../shared/context.js";
 import { DOMManager } from "../shared/dom-manager.js";
 import { Scope } from "../shared/scope.js";
+import { createActivity } from "../shared/activity.js";
 import { yield_ } from "../shared/scheduler.js";
 
 /**
@@ -280,9 +281,29 @@ export class Shell {
     const handler = () => {
       this.#mediaSession?.sync();
     };
+    // Boundary events (play/pause/ended/seeked/durationchange/...) are rare and
+    // must land even while paused - a seek or a volume change still has to
+    // reach the OS surface - so they stay attached for the shell's life.
     for (const name of MEDIA_SESSION_SYNC_EVENTS) {
-      this.#dom.listen(video, name, handler, { passive: true });
+      if (name !== "timeupdate") {
+        this.#dom.listen(video, name, handler, { passive: true });
+      }
     }
+    // `timeupdate` is the only continuous one: it is the ~4 Hz media clock, and
+    // it only ticks while the playhead advances. That makes playback the
+    // activity it belongs to, so it is attached for the playing window and
+    // detached when the window closes - the clock listener does not exist while
+    // paused, and the exit flush hands the OS surface the final position.
+    createActivity({
+      target: video,
+      events: ["play", "playing", "pause", "ended", "emptied"],
+      isActive: () => !video.paused && !video.ended,
+      signal: this.#scope.signal,
+      onEnter: (work) => {
+        video.addEventListener("timeupdate", handler, { signal: work.signal, passive: true });
+      },
+      onExit: handler
+    });
     // Expose media state as CSS custom properties on the host so the shadow
     // DOM can style based on playing/paused/muted without crossing the realm
     // boundary. The :playing/:paused/:muted pseudo-classes (which Firefox
