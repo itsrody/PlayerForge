@@ -860,7 +860,8 @@ test("video-less documents never open a mutation observer", async () => {
   globalThis.window = win;
   globalThis.document = win.document;
 
-  // Instrument: any full-document observer dom-watch would create shows up here.
+  // Instrument: any full-document observer the shared mutation feed would
+  // create shows up here.
   const RealMO = win.MutationObserver;
   let constructions = 0;
   class CountingMO extends RealMO {

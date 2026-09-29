@@ -1,3 +1,5 @@
+import { applyAttrs } from "../../shared/dom-manager.js";
+
 /**
  * Shell-owned DOM construction helpers. Every HUD/settings/subtitle element is
  * built through these so createElement + attribute + append never repeats
@@ -9,18 +11,15 @@
 /**
  * Create an element, apply attribute map, and append to `parent` in one call.
  * `style` values given as objects are merged into the element's style (not
- * set as attributes). Returns the element; callers set textContent/children
- * as needed.
+ * set as attributes), `on*` entries become listeners. Attribute handling is
+ * shared/dom-manager.js's applyAttrs so this factory and the lifecycle-tracked
+ * DOMManager.createElement cannot drift into different rules; no signal is
+ * passed here, so `on*` listeners live and die with their node. Returns the
+ * element; callers set textContent/children as needed.
  */
 export function el(tag, attrs = {}, parent = null) {
   const node = (parent?.ownerDocument ?? document).createElement(tag);
-  for (const [key, value] of Object.entries(attrs)) {
-    if (key === "style" && typeof value === "object") {
-      Object.assign(node.style, value);
-    } else {
-      node.setAttribute(key, value);
-    }
-  }
+  applyAttrs(node, attrs);
   parent?.appendChild(node);
   return node;
 }

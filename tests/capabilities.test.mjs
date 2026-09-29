@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
  * The load direction came first and was not enough. Every check below the
  * original set walked manifest -> code, so a capability could be adopted with
  * no entry at all and nothing failed: scheduler.postTask serviced the
- * removal grace, the dom-watch defer, the lifecycle settle, the context retry
+ * removal grace, the mutation-dispatch defer, the lifecycle settle, the context retry
  * and the resume throttle without ever being named, and the whole native
  * WebVTT backend - the fork's subtitle renderer - was unrecorded too. So the
  * scan below walks code -> manifest: every `typeof` feature-detection chain

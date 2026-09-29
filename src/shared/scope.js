@@ -16,7 +16,8 @@
  *                   calls no-op), aborts the signal, then runs disposers.
  *
  * Disposer errors are isolated (one throw never strands the rest), matching
- * the dispatch-isolation policy used across dom-watch and the emitters.
+ * the dispatch-isolation policy used across the shared mutation feed and the
+ * emitters.
  * Public class APIs keep their `destroy()` name and simply delegate here.
  */
 export class Scope {

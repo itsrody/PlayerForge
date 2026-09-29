@@ -31,7 +31,7 @@
  * the fewest composed ancestor hops from the video wins; ties break by
  * registry order, then anchor order.
  */
-import { onDomMutations } from "../shared/dom-watch.js";
+import { onDomMutations } from "../shared/dom-manager.js";
 
 const REGISTRY = [
   { name: "JW Player", anchors: [".jwplayer", ".jw-wrapper"] },
@@ -292,7 +292,7 @@ export function watchMediaEvents(onVideo, { signal } = {}) {
 
 /**
  * Full discovery tap used by the kernel's permanent rider: capture media
- * events plus the shared dom-watch dispatcher, multiplexed to a subscriber.
+ * events plus the shared mutation dispatcher, multiplexed to a subscriber.
  * This is the heavier signal (it keeps a full-document childList+subtree
  * observer alive while subscribed); the boot probe prefers watchMediaEvents.
  * Returns the unsubscribe function.

@@ -94,7 +94,7 @@
     },
     {
       "id": "scheduler-postTask",
-      "summary": "Priority + delay + abort task scheduling behind every deferred path: removal grace, dom-watch defer, lifecycle settle, context retry, resume throttle",
+      "summary": "Priority + delay + abort task scheduling behind every deferred path: removal grace, mutation-dispatch defer, lifecycle settle, context retry, resume throttle",
       "shipsInFirefox": 142,
       "usedBy": [
         "src/shared/scheduler.js"

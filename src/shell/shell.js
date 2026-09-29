@@ -70,7 +70,7 @@ export class Shell {
     await yield_();
 
     this.#panel = new SettingsPanel(this);
-    this.#toasts = new ToastManager(this.#shellDom.hudLayer);
+    this.#toasts = new ToastManager(this.#shellDom.hudLayer, this.#dom);
     this.#inputs = new InputForge(this.video, this.container, this.shellHost);
     attachInputActions(this, this.shellHost, this.#inputs.signal);
     this.#resume = new ResumeTracker(this);
@@ -270,9 +270,10 @@ export class Shell {
     if (style.position === "static") {
       this.#dom.markStyle(this.container, "position", "relative");
     }
-    // Parasite watchdog: re-attach host if evicted by SDK.
-    const dropWatch = watchShellHost(this.container, this.#shellDom.host);
-    this.#dom.onCleanup(dropWatch);
+    // Parasite watchdog: re-attach host if evicted by SDK. The reconnect
+    // subscription is manager-owned, so the watchdog's arm/disarm cycle stops
+    // at shell destroy without a paired cleanup handle here.
+    watchShellHost(this.container, this.#shellDom.host, this.#dom);
   }
 
   #forwardMediaEvents() {

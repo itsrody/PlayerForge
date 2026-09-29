@@ -10,8 +10,12 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https
 globalThis.window = dom.window;
 globalThis.location = dom.window.location;
 globalThis.document = dom.window.document;
+// The section's manager hands its AbortSignal to addEventListener, which
+// jsdom type-checks against its own AbortSignal class.
+globalThis.AbortController = dom.window.AbortController;
 
 const { addHistorySection } = await import("../src/shell/chrome/history.js");
+const { DOMManager } = await import("../src/shared/dom-manager.js");
 
 let sectionRoot = null;
 function makeFakePanel() {
@@ -38,6 +42,9 @@ function makeFakeShell() {
   const entries = [];
   return {
     entries,
+    // The real shell lends one manager to every section; the pooled cards and
+    // the delegated listener register against it.
+    dom: new DOMManager(),
     notify: (structural) => listener?.(structural),
     resume: {
       getEntries: () => entries,
@@ -76,6 +83,7 @@ test("History re-renders on structural store changes only", () => {
   assert.equal(list.querySelector(".pf-history-title")?.textContent, "Show");
   assert.ok(list.querySelector(".pf-history-meta")?.textContent.includes("Youtube"));
   assert.ok(list.querySelector(".pf-history-meta")?.textContent.includes("5:00"));
+  shell.dom.destroy();
 });
 
 test("History ignores position-only store updates", () => {
@@ -92,6 +100,7 @@ test("History ignores position-only store updates", () => {
   shell.notify(false);
   assert.equal(list.querySelectorAll(".pf-history-card").length, 1, "a position save leaves the list untouched");
   assert.equal(list.querySelector(".pf-history-title")?.textContent, "Show");
+  shell.dom.destroy();
 });
 
 test("History restores the hint when the list empties", () => {
@@ -109,6 +118,7 @@ test("History restores the hint when the list empties", () => {
   shell.notify(true);
   assert.equal(list.querySelectorAll(".pf-history-card").length, 0);
   assert.equal(hint.hidden, false, "removing the last entry shows the hint again");
+  shell.dom.destroy();
 });
 
 test("History removing a middle entry keeps the remaining cards in order", () => {
@@ -142,4 +152,35 @@ test("History removing a middle entry keeps the remaining cards in order", () =>
     ["Alpha", "Charlie"],
     "the survivor card is re-labeled, not the oldest one dropped"
   );
+  shell.dom.destroy();
+});
+
+test("History teardown is the shell manager's job", () => {
+  const panel = makeFakePanel();
+  const shell = makeFakeShell();
+  addHistorySection(panel, shell);
+  const list = sectionRoot.querySelector(".pf-history-list");
+
+  shell.entries.push({ id: "e1", domain: "youtube", path: "/watch", title: "Show", duration: 300, resume: 0 });
+  shell.notify(true);
+  assert.equal(list.querySelectorAll(".pf-history-card").length, 1);
+
+  // The section used to hand back nothing to tear down: the pool was a bare
+  // DomPool and the delegated listener was a plain addEventListener, so both
+  // outlived the shell. The manager's dispose is now the whole teardown.
+  shell.dom.destroy();
+  assert.equal(list.querySelectorAll(".pf-history-card").length, 0, "pooled cards removed with the manager");
+
+  // The delegated listener went with the same signal: a click on a card that
+  // arrives after teardown must not reach the store.
+  const late = dom.window.document.createElement("div");
+  late.className = "pf-history-card";
+  late.dataset.entryId = "e1";
+  const removeBtn = dom.window.document.createElement("button");
+  removeBtn.dataset.action = "remove";
+  late.appendChild(removeBtn);
+  list.appendChild(late);
+
+  removeBtn.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+  assert.equal(shell.entries.length, 1, "the delegated listener was released");
 });

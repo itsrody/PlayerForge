@@ -1,6 +1,5 @@
 import SHELL_CSS from "./styles.css";
 import { logger } from "../../shared/diagnostics.js";
-import { onDomMutations } from "../../shared/dom-watch.js";
 import { SHELL_MARKER } from "../../kernel/contract.js";
 import { el } from "./elements.js";
 import { gmGetResourceText } from "../../shared/storage.js";
@@ -113,10 +112,11 @@ export function injectShell(container) {
  * delays, or surrender heuristics: a page that keeps fighting gets fought
  * back indefinitely, and a stalemate is the user's to settle.
  *
- * Returns a cleanup function that disconnects all observers and stops the
- * watchdog. Call it on shell destroy.
+ * Returns nothing: the watchdog's whole lifetime - the container observer,
+ * the arm/disarm cycle and the reconnect subscription - is registered
+ * against the shell's DOMManager, so it dies with the shell.
  */
-export function watchShellHost(container, host) {
+export function watchShellHost(container, host, dom) {
   let scheduled = false;
   /** Armed only while the container is out of the document. */
   let detachWatch = null;
@@ -142,11 +142,11 @@ export function watchShellHost(container, host) {
   };
 
   // While detached, ANY document mutation may be the re-insertion - ride
-  // the shared dom-watch dispatcher instead of owning a full-document
+  // the shared mutation dispatcher instead of owning a full-document
   // observer. The `scheduled` latch makes redundant wake-ups free.
   const armReconnectWatch = () => {
     if (!detachWatch) {
-      detachWatch = onDomMutations(schedule);
+      detachWatch = dom.watch(schedule);
     }
   };
 
@@ -167,8 +167,8 @@ export function watchShellHost(container, host) {
   });
   observer.observe(container, { childList: true });
 
-  return () => {
+  dom.onCleanup(() => {
     observer.disconnect();
     dropReconnectWatch();
-  };
+  });
 }

@@ -1,4 +1,3 @@
-import { DomPool } from "../../shared/dom-pool.js";
 import { formatTime } from "../../shared/primitives.js";
 import { flashElement } from "./animate.js";
 import { button } from "./elements.js";
@@ -14,6 +13,12 @@ export function addHistorySection(panel, shell) {
   if (!sectionRoot) {
     return;
   }
+
+  // The shell's DOMManager is the owner of everything this section creates -
+  // the delegated listener and the card pool both register against it, so
+  // shell destroy tears the section down without this function having to
+  // return a teardown that its single caller had to remember to call.
+  const dom = shell.dom;
 
   const list = panel.el("div", { class: "pf-history-list" }, sectionRoot);
   const hint = panel.el("div", { class: "pf-panel-hint" }, sectionRoot);
@@ -45,7 +50,7 @@ export function addHistorySection(panel, shell) {
 
   /** Pool of reusable card elements. Factory builds the full tree;
    *  reset clears text + buttons so renderCard() can repopulate. */
-  const cardPool = new DomPool({
+  const cardPool = dom.pool({
     factory: () => {
       const card = panel.el("div", { class: "pf-history-card" });
       const info = panel.el("div", { class: "pf-history-info" }, card);
@@ -83,7 +88,7 @@ export function addHistorySection(panel, shell) {
   // cross-tab adds) and the pool shrinks, so listener lifetime must not ride
   // the card/pool cycle - render() and shrink() never attach or detach a
   // listener. Button clicks bubble up through the card to the list.
-  list.addEventListener("click", (event) => {
+  dom.listen(list, "click", (event) => {
     const btn = event.target.closest("[data-action]");
     const card = event.target.closest(".pf-history-card");
     if (!btn || !card) {
