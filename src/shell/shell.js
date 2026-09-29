@@ -97,7 +97,6 @@ export class Shell {
       signal: this.#scope.signal
     });
     this.#watchFullscreen();
-    this.#markManaged();
     logger.log("shell", `Shell "${this.sdk.name}" constructed`);
   }
 
@@ -257,6 +256,14 @@ export class Shell {
     // Register host for auto-removal on destroy and mark managed attributes.
     this.#dom.onCleanup(() => this.#shellDom?.host.remove());
     this.#dom.markAttribute(this.#shellDom.host, SHELL_MARKER, "");
+    // Mark the video/container in the same synchronous block as the injection.
+    // The kernel treats the marker as "this video already has a shell"
+    // (kernel.js #adoptVideo) and the stylesheet uses it as the fullscreen
+    // hook, so leaving the video unmarked for the rest of boot - which spans
+    // several yields while the panel builds - is a real window: the HUD is
+    // already live and queryable, but the video claims to be unmanaged. A
+    // second adoption in that window would boot a duplicate shell onto it.
+    this.#markManaged();
     // Restore container position if we changed it from static.
     const style = getComputedStyle(this.container);
     if (style.position === "static") {

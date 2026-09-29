@@ -96,141 +96,308 @@ export function loadJsonObject(key, fallback) {
   return raw && typeof raw === "object" ? raw : fallback;
 }
 
-let configCache = null;
-
-/**
- * The whole configs document, parsed at most once and served from a module
- * cache afterwards. GM storage is a sync localStorage parse per call - the
- * hot read paths (repeated getConfigValue, the cross-tab refresh loop) were
- * re-parsing the entire doc every time. Writers refresh the cache in place;
- * external (cross-tab) writes invalidate it via invalidateConfigCache().
- */
-function readConfigDoc() {
-  if (configCache == null) {
-    configCache = loadJsonObject(KEYS.configs, { version: 1 });
-  }
-  return configCache;
-}
-
-/** Drop the cached configs doc after an external (cross-tab) write. */
-export function invalidateConfigCache() {
-  configCache = null;
-}
-
 function isSafeKeySegment(key) {
   return key !== "__proto__" && key !== "constructor" && key !== "prototype";
 }
 
-function persistConfig(doc) {
-  try {
-    gmSetValue(KEYS.configs, doc);
-  } catch (err) {
-    logger.error("storage", "Failed to persist config:", err);
-    return false;
-  }
-  configCache = doc;
-  return true;
-}
-
-export function getConfigValue(path, fallback) {
-  let node = readConfigDoc();
-  for (const segment of path.split(".")) {
-    // Same segment guard as writes - a hostile stored doc must not turn a
-    // read path into prototype traversal either.
-    if (!isSafeKeySegment(segment)) {
-      return fallback;
-    }
-    if (node == null || typeof node !== "object") {
-      return fallback;
-    }
-    node = node[segment];
-  }
-  return node === undefined ? fallback : node;
-}
-
-export function setConfigValue(path, value) {
-  setConfigFields({ [path]: value });
+function isPlainObject(value) {
+  return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
 /**
- * Apply several dotted config fields (and their values) in one read-modify-
- * write of the configs document. Preset/flush paths that touch many fields at
- * once avoid N serialized gmSetValue round trips (each of which re-reads and
- * re-serializes the whole doc).
+ * Dotted LEAF paths whose value differs between two documents, collected into
+ * `out`. Subscribers filter on exact leaf paths, so the report has to land on
+ * the paths they actually read:
  *
- * Clone discipline: COPY-ON-WRITE along the touched paths instead of a full
- * `structuredClone` of the document. The whole-doc clone was the dominant CPU
- * cost of one write, and a stepper persists a single short path per step - so
- * only the nodes on those paths are minted fresh and every untouched branch is
- * shared with the cached doc. Sharing is safe because a shared branch is never
- * written through: each branch is replaced by its own copy before the walk
- * descends into it, and leaf writes land on those copies. A defensive
- * early-return therefore still cannot leak a partial mutation into the live
- * cache - `doc` (and every node it uniquely owns) is simply discarded.
+ * - branch vs branch: descend, so unchanged siblings stay unreported
+ * - absent/leaf vs branch (a subtree ARRIVED): descend into the new branch, so
+ *   the leaves a subscriber reads are the ones announced
+ * - branch vs absent/leaf (a subtree COLLAPSED): report both the collapsing
+ *   path and the leaves it held. The leaves are gone - their subscribers must
+ *   re-read and fall back to defaults - and the new value at the collapsing
+ *   path belongs to no descendant, so it has to be announced in its own right
+ * - leaf vs leaf: compare directly
+ *
+ * Both roots are normalized to plain objects before the call, so the walk
+ * always descends at the top and `out` is non-empty whenever it reports a
+ * change: a subscriber can treat "no paths" as a genuine no-op.
  */
-export function setConfigFields(fields) {
-  const doc = { ...readConfigDoc() };
-  for (const [path, value] of Object.entries(fields)) {
+function collectChangedPaths(previous, next, prefix, out) {
+  const previousIsBranch = isPlainObject(previous);
+  const nextIsBranch = isPlainObject(next);
+  if (!previousIsBranch && !nextIsBranch) {
+    if (previous !== next && prefix) {
+      out.add(prefix);
+    }
+    return previous !== next;
+  }
+  if (previousIsBranch && nextIsBranch) {
+    let changed = false;
+    for (const segment of new Set([...Object.keys(previous), ...Object.keys(next)])) {
+      const path = prefix ? `${prefix}.${segment}` : segment;
+      if (collectChangedPaths(previous[segment], next[segment], path, out)) {
+        changed = true;
+      }
+    }
+    return changed;
+  }
+  if (!previousIsBranch) {
+    // A subtree ARRIVED: descend and announce the leaves a subscriber reads.
+    // No need for the branch path itself - nothing reads it.
+    for (const segment of Object.keys(next)) {
+      collectChangedPaths(undefined, next[segment], `${prefix}.${segment}`, out);
+    }
+    return true;
+  }
+  // A subtree COLLAPSED into a leaf or was removed outright. Announce the
+  // collapsing path - that is where the new value lives, and it belongs to no
+  // descendant - plus the leaves it held, whose subscribers must re-read and
+  // fall back to their defaults.
+  if (prefix) {
+    out.add(prefix);
+  }
+  for (const segment of Object.keys(previous)) {
+    collectChangedPaths(previous[segment], undefined, `${prefix}.${segment}`, out);
+  }
+  return true;
+}
+
+/**
+ * The configs document, owned by one object.
+ *
+ * The previous shape was two module globals coupled by an imperative
+ * protocol: storage.js cached the parsed doc and exported
+ * invalidateConfigCache(), and the settings module called it from its
+ * GM_addValueChangeListener callback - discarding the new value the
+ * callback had just been handed, re-reading pf:configs from manager
+ * storage, and re-coercing every setting to find out what changed. So
+ * every local settings write cost a cache drop, a full re-parse and N
+ * path walks, and every cross-tab write cost the same.
+ *
+ * GM_addValueChangeListener(name, (name, oldValue, newValue, remote))
+ * already delivers the replaced document. The store adopts that value
+ * instead of re-fetching it, diffs it against the doc it already holds,
+ * and publishes the changed paths. Nothing polls, nothing re-reads, and
+ * the diff is the subscription filter: a write to settings.gestures.hold
+ * no longer re-coerces the other seven settings.
+ *
+ * Writes notify from the paths they know they touched, so the manager's
+ * own echo of a local write diffs to nothing and stays a no-op - the
+ * double-fire guard is now a property of the diff, not a hand-maintained
+ * "changed 0" counter.
+ */
+export class ConfigStore {
+  #doc = null;
+  #listeners = new Set();
+  #watched = false;
+
+  /** The configs document, parsed at most once per adoption. */
+  doc() {
+    if (this.#doc == null) {
+      this.#doc = loadJsonObject(KEYS.configs, { version: 1 });
+    }
+    return this.#doc;
+  }
+
+  /** Read a dotted path out of the owned document. */
+  get(path, fallback) {
+    let node = this.doc();
+    for (const segment of path.split(".")) {
+      // Same segment guard as writes - a hostile stored doc must not turn a
+      // read path into prototype traversal either.
+      if (!isSafeKeySegment(segment)) {
+        return fallback;
+      }
+      if (node == null || typeof node !== "object") {
+        return fallback;
+      }
+      node = node[segment];
+    }
+    return node === undefined ? fallback : node;
+  }
+
+  /**
+   * Apply several dotted config fields (and their values) in one read-modify-
+   * write of the configs document. Preset/flush paths that touch many fields at
+   * once avoid N serialized gmSetValue round trips (each of which re-reads and
+   * re-serializes the whole doc).
+   *
+   * Clone discipline: COPY-ON-WRITE along the touched paths instead of a full
+   * `structuredClone` of the document. The whole-doc clone was the dominant CPU
+   * cost of one write, and a stepper persists a single short path per step - so
+   * only the nodes on those paths are minted fresh and every untouched branch is
+   * shared with the cached doc. Sharing is safe because a shared branch is never
+   * written through: each branch is replaced by its own copy before the walk
+   * descends into it, and leaf writes land on those copies. A defensive
+   * early-return therefore still cannot leak a partial mutation into the live
+   * cache - `doc` (and every node it uniquely owns) is simply discarded.
+   */
+  set(fields) {
+    const previous = this.doc();
+    const doc = { ...previous };
+    const written = [];
+    for (const [path, value] of Object.entries(fields)) {
+      const segments = path.split(".");
+      let node = doc;
+      for (let i = 0; i < segments.length - 1; i++) {
+        const segment = segments[i];
+        if (!isSafeKeySegment(segment)) {
+          logger.warn("storage", `Unsafe config path segment "${segment}" in "${path}" — batch dropped`);
+          return false;
+        }
+        const child = node[segment];
+        if (child == null) {
+          node[segment] = {};
+        } else if (typeof child !== "object" || Array.isArray(child)) {
+          logger.warn("storage", `Non-object intermediate at "${path}" — batch dropped`);
+          return false;
+        } else {
+          // Re-parent a fresh copy before descending, so the write below can
+          // never reach the sub-object the cached doc still references.
+          node[segment] = { ...child };
+        }
+        node = node[segment];
+      }
+      const last = segments.at(-1);
+      if (!isSafeKeySegment(last)) {
+        logger.warn("storage", `Unsafe config leaf segment "${last}" in "${path}" — batch dropped`);
+        return false;
+      }
+      node[last] = value;
+      written.push(path);
+    }
+    return this.#persist(doc, previous, written);
+  }
+
+  /**
+   * Remove one dotted field from the configs document (migration sweeps).
+   * No-op when any intermediate segment or the leaf itself is missing.
+   */
+  remove(path) {
+    const previous = this.doc();
+    const doc = { ...previous };
     const segments = path.split(".");
     let node = doc;
     for (let i = 0; i < segments.length - 1; i++) {
       const segment = segments[i];
       if (!isSafeKeySegment(segment)) {
-        logger.warn("storage", `Unsafe config path segment "${segment}" in "${path}" — batch dropped`);
-        return;
+        return false;
       }
-      const child = node[segment];
-      if (child == null) {
-        node[segment] = {};
-      } else if (typeof child !== "object" || Array.isArray(child)) {
-        logger.warn("storage", `Non-object intermediate at "${path}" — batch dropped`);
-        return;
-      } else {
-        // Re-parent a fresh copy before descending, so the write below can
-        // never reach the sub-object the cached doc still references.
-        node[segment] = { ...child };
+      const child = node == null || typeof node !== "object" ? null : node[segment];
+      if (child == null || typeof child !== "object" || Array.isArray(child)) {
+        return false;
       }
+      // Copy-on-write: the delete below must never reach the cached sub-doc.
+      node[segment] = { ...child };
       node = node[segment];
     }
     const last = segments.at(-1);
-    if (!isSafeKeySegment(last)) {
-      logger.warn("storage", `Unsafe config leaf segment "${last}" in "${path}" — batch dropped`);
+    if (!isSafeKeySegment(last) || node == null || typeof node !== "object" || !Object.hasOwn(node, last)) {
+      return false;
+    }
+    delete node[last];
+    return this.#persist(doc, previous, [path]);
+  }
+
+  /**
+   * Install a document that came from somewhere other than this store (a
+   * cross-tab write, a manager reset, a test) and publish what moved.
+   * This is the production path for external changes - the GM listener
+   * hands the value straight in, so adoption never touches storage.
+   */
+  adopt(value, { remote = false } = {}) {
+    const previous = this.#doc;
+    const next = isPlainObject(value) ? value : { version: 1 };
+    if (previous == null) {
+      // Cold store: the first read is not a change anything can react to.
+      this.#doc = next;
+      return [];
+    }
+    const paths = new Set();
+    if (!collectChangedPaths(previous, next, "", paths)) {
+      return [];
+    }
+    this.#doc = next;
+    this.#emit(paths, remote);
+    return paths;
+  }
+
+  /**
+   * Subscribe to config changes. The listener receives the changed leaf
+   * paths, so it can re-read exactly those; the document already reflects
+   * them when it runs. Returns an unsubscribe; `signal` detaches it with
+   * the caller's lifecycle. Subscribing is also what starts the manager
+   * change listener - a frame that never reads settings never pays for
+   * the notification.
+   */
+  onChange(listener, { signal } = {}) {
+    this.#listeners.add(listener);
+    this.#watch();
+    const off = () => this.#listeners.delete(listener);
+    if (signal) {
+      signal.addEventListener("abort", off, { once: true });
+    }
+    return off;
+  }
+
+  #watch() {
+    if (this.#watched) {
       return;
     }
-    node[last] = value;
+    this.#watched = true;
+    gmAddValueChangeListener(KEYS.configs, (_name, _previous, value, remote) => {
+      // A delivered plain object IS the new document - adopt it rather than
+      // re-reading what we were just told. Anything else (a key deleted by
+      // another tab arrives as undefined) means the delivered value cannot
+      // describe the new state, so fall back to what storage holds now.
+      const next = isPlainObject(value) ? value : loadJsonObject(KEYS.configs, { version: 1 });
+      this.adopt(next, { remote: remote === true });
+    });
   }
-  if (!persistConfig(doc)) {
-    return;
+
+  #emit(paths, remote) {
+    for (const listener of [...this.#listeners]) {
+      listener({ paths, remote, doc: this.#doc });
+    }
+  }
+
+  /**
+   * Publish the write, then hand the doc to the manager. The doc is
+   * installed BEFORE gmSetValue so a manager that echoes local writes
+   * synchronously diffs against the new value and stays quiet; a failed
+   * write rolls the cache back.
+   */
+  #persist(doc, previous, written) {
+    this.#doc = doc;
+    try {
+      gmSetValue(KEYS.configs, doc);
+    } catch (err) {
+      logger.error("storage", "Failed to persist config:", err);
+      this.#doc = previous;
+      return false;
+    }
+    this.#emit(new Set(written), false);
+    return true;
   }
 }
 
-/**
- * Remove one dotted field from the configs document (migration sweeps).
- * No-op when any intermediate segment or the leaf itself is missing.
- */
+export const configStore = new ConfigStore();
+
+/** Read a dotted config path, or `fallback` when unset/unreadable. */
+export function getConfigValue(path, fallback) {
+  return configStore.get(path, fallback);
+}
+
+export function setConfigValue(path, value) {
+  configStore.set({ [path]: value });
+}
+
+/** Apply many dotted config fields in one read-modify-write. */
+export function setConfigFields(fields) {
+  configStore.set(fields);
+}
+
+/** Remove one dotted config field (migration sweeps). */
 export function deleteConfigField(path) {
-  const doc = { ...readConfigDoc() };
-  const segments = path.split(".");
-  let node = doc;
-  for (let i = 0; i < segments.length - 1; i++) {
-    const segment = segments[i];
-    if (!isSafeKeySegment(segment)) {
-      return;
-    }
-    const child = node == null || typeof node !== "object" ? null : node[segment];
-    if (child == null || typeof child !== "object" || Array.isArray(child)) {
-      return;
-    }
-    // Copy-on-write: the delete below must never reach the cached sub-doc.
-    node[segment] = { ...child };
-    node = node[segment];
-  }
-  const last = segments.at(-1);
-  if (!isSafeKeySegment(last) || node == null || typeof node !== "object" || !Object.hasOwn(node, last)) {
-    return;
-  }
-  delete node[last];
-  if (!persistConfig(doc)) {
-    return;
-  }
+  configStore.remove(path);
 }

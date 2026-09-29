@@ -2,7 +2,7 @@
  * User-settings engine: defaults, schema, cached accessors, and the generic
  * panel renderer for that schema.
  */
-import { KEYS, getConfigValue, setConfigValue, invalidateConfigCache, gmAddValueChangeListener } from "../../shared/storage.js";
+import { configStore, getConfigValue, setConfigValue } from "../../shared/storage.js";
 import { logger } from "../../shared/logger.js";
 import { fmtSeconds } from "../../shared/formatters.js";
 
@@ -64,7 +64,13 @@ const SETTINGS_SCHEMA = [
     key: "ui.compact",
     type: "bool",
     label: "Compact Panel",
-    default: false,
+    // Deliberately NO default. This setting is a tri-state: true/false are
+    // explicit choices, and absent means "let the panel auto-detect a narrow
+    // touch viewport". With a default of false the tri-state collapsed - the
+    // seeded value was always an explicit `false`, Panel's #isCompactMode
+    // returned on it, and the matchMedia auto-detect below never ran on a
+    // fresh install. undefined is the only default that means "no opinion".
+    default: undefined,
     group: "Interface"
   }
 ];
@@ -123,27 +129,30 @@ export function onSettingsChanged(listener, { signal } = {}) {
 }
 
 export function setSetting(key, value) {
-  const changed = cache[key] !== value;
-  cache[key] = value;
+  // No local bookkeeping: the store publishes the write synchronously, so
+  // refreshSettingsCache has already re-coerced and emitted by the time this
+  // returns. Going through the write also means a caller cannot smuggle an
+  // uncoerced value into the cache - getSetting() stays trustworthy.
   setConfigValue(`${SETTINGS_PREFIX}.${key}`, value);
-  if (changed) {
-    emitSettingsChanged();
-  }
 }
 
 /**
- * Live reload across tabs: pf:configs lives in shared manager storage,
- * so a write from any other tab re-seeds this cache and every event-time
+ * Live reload across tabs: pf:configs lives in shared manager storage, so a
+ * write from any other tab re-seeds this cache and every event-time
  * getSetting() consumer picks it up on its next read. Our own writes echo
  * back through the same path and land as no-ops.
+ *
+ * The store hands us the changed leaf paths, so this re-coerces only the
+ * settings that actually moved instead of re-reading the whole document -
+ * a write to one gesture toggles one, not all eight.
  */
-function refreshSettingsCache() {
-  // A cross-tab writer replaced pf:configs behind our back - drop the cached
-  // doc so the per-key re-reads below come from the fresh manager value.
-  invalidateConfigCache();
+function refreshSettingsCache(paths) {
   let changed = 0;
   for (const definition of SETTINGS_SCHEMA) {
     const key = definition.key;
+    if (paths && !paths.has(`${SETTINGS_PREFIX}.${key}`)) {
+      continue;
+    }
     const fresh = coerceSetting(definition, getConfigValue(`${SETTINGS_PREFIX}.${key}`, DEFAULT_SETTINGS[key]));
     if (cache[key] !== fresh) {
       cache[key] = fresh;
@@ -156,7 +165,7 @@ function refreshSettingsCache() {
   }
 }
 
-gmAddValueChangeListener(KEYS.configs, () => refreshSettingsCache());
+configStore.onChange(({ paths }) => refreshSettingsCache(paths));
 
 /**
  * Render SETTINGS_SCHEMA into the settings panel: one labeled section per
