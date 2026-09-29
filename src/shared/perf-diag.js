@@ -1,71 +1,93 @@
 import { logger } from "./logger.js";
 
 /**
- * Long Animation Frame (LoAF) diagnostic, active ONLY while debug logs are on.
+ * Jank diagnostic, active ONLY while debug logs are on.
  *
- * LoAF (PerformanceLongAnimationFrameTiming, feature-detected below - absent
- * in Firefox, so the diagnostic simply never installs there) reports frames
- * delayed beyond 50ms with script
- * attribution, including forced-style/layout breakdowns. When debugging jank -
- * whether PlayerForge or an SDK caused it - this surfaces the worst offenders on
- * the console instead of requiring a tracing session. It is installed lazily on
- * the first debug run and torn down on disable, so a production user without
- * debug toggled pays exactly zero cost: no observer, no buffered entries.
+ * The obvious source for this is LoAF (PerformanceLongAnimationFrameTiming),
+ * which reports frames delayed past 50ms with script attribution. Gecko has
+ * never shipped it - `long-animation-frame` is a Chromium-only
+ * PerformanceObserver entry type - so a LoAF observer on this fork never
+ * installs and the diagnostic was dead weight on the only platform we ship.
+ *
+ * What Gecko does have is the frame clock itself: every
+ * requestAnimationFrame callback receives the frame's timestamp, so the gap
+ * between consecutive frames IS the long-frame measurement, taken on the same
+ * clock the compositor drives. The tradeoff is honest and worth stating: we
+ * see WHEN a frame was late, not WHICH script caused it - attributing the
+ * stall needs a tracing session (about:performance, profiler), not a
+ * PerformanceObserver entry type this engine does not implement.
+ *
+ * Cost contract: nothing installs until debug is toggled on, and the rAF loop
+ * is cancelled the moment it goes off, so a user without debug pays exactly
+ * zero - no observer, no loop, no buffer. Slow frames accumulate and flush on
+ * a fixed window, worst-first and capped, so a janky minute logs a handful of
+ * lines instead of a flood.
  */
 
 /** Report only the worst few per flush so the console isn't flooded. */
 const MAX_REPORT = 3;
-/** Only frames that crossed an interaction or took > this long are worth noise. */
+/** Only frames this long are worth reporting. */
 const JANK_THRESHOLD_MS = 150;
+/** How often buffered slow frames are flushed to the console. */
+const FLUSH_WINDOW_MS = 5000;
 
-let observer = null;
+let rafId = null;
 let enabled = false;
+/** Timestamp of the previous frame; the gap to the current one is the measure. */
+let lastFrameAt = 0;
+/** Start of the current reporting window. */
+let windowStart = 0;
+/** Frame gaps seen in the current window, flushed worst-first. */
+let slowFrames = [];
 
-function report(entries) {
-  const list = entries.getEntries();
-  const worst = list
-    .filter((e) => e.duration >= JANK_THRESHOLD_MS)
-    .sort((a, b) => b.duration - a.duration)
-    .slice(0, MAX_REPORT);
-  for (const entry of worst) {
-    const blocked = entry.blockingDuration ?? 0;
-    const forced = entry.scripts?.reduce((sum, s) => sum + (s.forcedStyleAndLayoutDuration ?? 0), 0) ?? 0;
-    logger.warn(
-      "perf",
-      `LoAF ${entry.duration.toFixed(0)}ms (blocking ${blocked.toFixed(0)}ms, forced style+layout ${forced.toFixed(1)}ms)`
-    );
-    for (const script of entry.scripts ?? []) {
-      if (script.name) {
-        logger.warn("perf", `  - ${script.name}`);
-      }
-      if (script.forcedStyleAndLayoutDuration > 0) {
-        logger.warn("perf", `     forced style+layout ${script.forcedStyleAndLayoutDuration.toFixed(1)}ms`);
-      }
-    }
+function flushSlowFrames() {
+  if (slowFrames.length === 0) {
+    return;
+  }
+  const worst = slowFrames.sort((a, b) => b - a).slice(0, MAX_REPORT);
+  for (const gap of worst) {
+    logger.warn("perf", `long frame: ${gap.toFixed(0)}ms between animation frames`);
+  }
+  slowFrames = [];
+}
+
+function onFrame(now) {
+  rafId = requestAnimationFrame(onFrame);
+  const gap = now - lastFrameAt;
+  lastFrameAt = now;
+  if (gap >= JANK_THRESHOLD_MS) {
+    slowFrames.push(gap);
+  }
+  if (now - windowStart >= FLUSH_WINDOW_MS) {
+    windowStart = now;
+    flushSlowFrames();
   }
 }
 
 function install() {
-  if (observer || typeof PerformanceObserver === "undefined") {
+  if (rafId !== null || typeof requestAnimationFrame !== "function") {
     return;
   }
-  try {
-    if (!PerformanceObserver.supportedEntryTypes.includes("long-animation-frame")) {
-      return;
-    }
-    observer = new PerformanceObserver(report);
-    observer.observe({ type: "long-animation-frame", buffered: false });
-  } catch {
-    observer = null;
-  }
+  slowFrames = [];
+  // The first frame only seeds the clock. Reporting the gap from zero would
+  // be an artifact of when debug was switched on, not a measurement of
+  // anything the page did.
+  rafId = requestAnimationFrame((now) => {
+    lastFrameAt = now;
+    windowStart = now;
+    rafId = requestAnimationFrame(onFrame);
+  });
 }
 
 function teardown() {
-  if (!observer) {
+  if (rafId === null) {
     return;
   }
-  observer.disconnect();
-  observer = null;
+  cancelAnimationFrame(rafId);
+  rafId = null;
+  // Whatever was buffered when debug went off is exactly the jank the user
+  // was watching - report it before dropping it.
+  flushSlowFrames();
 }
 
 function setPerfDiag(on) {
@@ -81,9 +103,9 @@ function setPerfDiag(on) {
 }
 
 /**
- * Flip the debug runtime - console logs and the LoAF jank diagnostic - as one
- * unit. The kernel's boot probe and the GM menu toggle both route through
- * here, so the observer can never outlive (or miss) the log flag.
+ * Flip the debug runtime - console logs and the jank diagnostic - as one unit.
+ * The kernel's boot probe and the GM menu toggle both route through here, so
+ * the frame loop can never outlive (or miss) the log flag.
  */
 export function setDebugRuntime(on) {
   if (on) {

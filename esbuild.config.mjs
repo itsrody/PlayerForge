@@ -72,7 +72,6 @@ const banner = `// ==UserScript==
 // @grant        GM_addValueChangeListener
 // @grant        GM_removeValueChangeListener
 // @grant        GM_getResourceText
-// @grant        window.onurlchange
 // @grant        GM_xmlhttpRequest
 // @connect      *
 // @connect      https://www.subtitlecat.com
