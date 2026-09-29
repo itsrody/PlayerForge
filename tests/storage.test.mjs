@@ -249,6 +249,68 @@ test("onChange detaches with an AbortSignal", () => {
   assert.equal(calls, 1, "the signal-detached listener stopped receiving");
 });
 
+test("the configs GM listener is removed when the last subscriber goes away", async () => {
+  const { ConfigStore } = await import("../src/shared/storage.js");
+  const added = [];
+  const removed = [];
+  const realAdd = globalThis.GM_addValueChangeListener;
+  const realRemove = globalThis.GM_removeValueChangeListener;
+  globalThis.GM_addValueChangeListener = (key, cb) => {
+    added.push({ key, cb });
+    return added.length;
+  };
+  globalThis.GM_removeValueChangeListener = (handle) => {
+    removed.push(handle);
+  };
+  try {
+    const store = new ConfigStore();
+    store.adopt({ version: 1 });
+    const offA = store.onChange(() => {});
+    const offB = store.onChange(() => {});
+    assert.equal(added.length, 1, "subscribing starts the manager listener");
+    assert.equal(added[0].key, KEYS.configs);
+
+    offA();
+    assert.deepEqual(removed, [], "another consumer is still listening");
+
+    // The handle used to be dropped on the floor, so the GM subscription
+    // outlived every subscriber and each remote write kept being adopted into
+    // a document nobody read.
+    offB();
+    assert.deepEqual(removed, [1], "the last unsubscribe removed the GM listener");
+  } finally {
+    globalThis.GM_addValueChangeListener = realAdd;
+    globalThis.GM_removeValueChangeListener = realRemove;
+  }
+});
+
+test("re-subscribing after an unwatch window re-arms and re-reads", async () => {
+  const { ConfigStore } = await import("../src/shared/storage.js");
+  const realAdd = globalThis.GM_addValueChangeListener;
+  const realRemove = globalThis.GM_removeValueChangeListener;
+  let added = 0;
+  globalThis.GM_addValueChangeListener = () => ++added;
+  globalThis.GM_removeValueChangeListener = () => {};
+  try {
+    stored = { [KEYS.configs]: { version: 1, ui: { volume: 0.2 } } };
+    const store = new ConfigStore();
+    const off = store.onChange(() => {});
+    off();
+
+    // A cross-tab write lands while nothing is subscribed: with the listener
+    // gone there is no notification, so the cached doc is now a document the
+    // store has no way to know is stale.
+    stored[KEYS.configs] = { version: 1, ui: { volume: 0.8 } };
+
+    store.onChange(() => {});
+    assert.equal(added, 2, "a new subscriber re-armed the GM listener");
+    assert.equal(store.doc().ui.volume, 0.8, "the re-armed store did not serve a stale document");
+  } finally {
+    globalThis.GM_addValueChangeListener = realAdd;
+    globalThis.GM_removeValueChangeListener = realRemove;
+  }
+});
+
 test("setConfigFields commits the cache in sync with storage", () => {
   seed({ filter: { brightness: 100 } });
   setConfigFields({ "filter.brightness": 150, "filter.contrast": 110 });

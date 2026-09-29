@@ -138,3 +138,52 @@ test("reconnect cancels the pending grace - a fresh one measures from the curren
     FRAMEWORK_TUNING.removalGraceMs = graceMs;
   }
 });
+test("a shell that fails to boot is retried exactly once, then abandoned", async () => {
+  // Fresh video so the counter is ours alone: every kernel in this file adopts
+  // every video in the shared body, and the earlier harnesses are still live.
+  const wrapper = document.createElement("div");
+  wrapper.className = "jwplayer";
+  const video = document.createElement("video");
+  wrapper.appendChild(video);
+  document.body.appendChild(wrapper);
+  video.getBoundingClientRect = () => ({ width: 640, height: 360, top: 0, left: 0, right: 640, bottom: 360 });
+  video.checkVisibility = () => true;
+
+  let attempts = 0;
+  const kernel = new Kernel();
+  kernel.registerShellProvider({
+    create({ video: v, container, sdk }) {
+      if (v === video) {
+        attempts++;
+      }
+      return {
+        video: v,
+        container,
+        sdk,
+        ready: Promise.reject(new Error("boot boom")),
+        destroy() {}
+      };
+    }
+  });
+  kernel.init();
+  await waitFor(() => attempts >= 1, 3000);
+
+  // The shell rolls its own DOM back, so the video is unmarked and adoptable
+  // again. A media event is the real re-discovery signal: the mutation feed
+  // only visits videos in ADDED nodes, so it would never re-offer a video that
+  // is already sitting in the DOM - which is the whole point of the re-arm.
+  const nudge = () => video.dispatchEvent(new dom.window.Event("loadeddata", { bubbles: true }));
+  for (let i = 0; i < 60 && attempts < 2; i++) {
+    nudge();
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  assert.equal(attempts, 2, "the failed video was re-armed for exactly one retry");
+
+  // Unbounded re-arming would spin on every event, so a deterministically
+  // throwing boot has to be final on its second failure.
+  for (let i = 0; i < 24; i++) {
+    nudge();
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  assert.equal(attempts, 2, "a boot that keeps throwing does not spin on the discovery tap");
+});

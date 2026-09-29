@@ -159,6 +159,35 @@ test("compaction cannot let a stale unsubscribe tombstone a live peer [regressio
   assert.deepEqual(seen, [], "the reindexed peer's off() reached its own slot");
 });
 
+test("a subscription made before the root element exists still receives [regression]", async () => {
+  // A document-start userscript is evaluated before the parser has produced the
+  // root element - the whole point of instant injection. The feed used to bail
+  // out silently in that window with no retry, so this subscriber would have
+  // been wired to nothing for the life of the page. It has to survive the root
+  // element arriving afterwards.
+  const root = document.documentElement;
+  root.remove();
+  assert.equal(document.documentElement, null, "the pre-parser window is modelled");
+
+  let calls = 0;
+  const off = onDomMutations(() => {
+    calls++;
+  });
+
+  // The parser's own output lands now: root element, then body, then content.
+  const fresh = document.createElement("html");
+  document.appendChild(fresh);
+  const body = document.createElement("body");
+  fresh.appendChild(body);
+  await tick();
+  body.appendChild(document.createElement("div"));
+  await tick();
+
+  off();
+  assert.ok(calls >= 2, `the feed was live through the rebuild (${calls} batches)`);
+  assert.ok(document.body, "the document is usable again");
+});
+
 /* ==================================================================
    §2 — DOMManager
    ================================================================== */

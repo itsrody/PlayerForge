@@ -70,15 +70,26 @@ function whenDomSettled(container, { quietMs = 50, capMs = 150, signal } = {}) {
 export class LifecycleManager {
   #registry;
   #onShellCreated;
+  /** Told which video's shell failed to come up, so the kernel can re-arm. */
+  #onShellFailed;
   #shellFactory = null;
   /** Videos with a settle wait in flight - dedups repeated discovery. */
   #pending = new Set();
   /** Abort source for in-flight settle waits; aborted by destroy() (pagehide). */
   #scope = new AbortController();
 
-  constructor(registry, onShellCreated) {
+  /**
+   * @param {object} registry shell slot
+   * @param {(shell: object) => void} onShellCreated ready-shell fan-out
+   * @param {(video: HTMLVideoElement) => void} [onShellFailed] a boot that
+   *   threw after the shell rolled itself back. The shell has already undone
+   *   its DOM by then, so the video is unmarked and adoptable again - the
+   *   callback decides whether to re-arm it.
+   */
+  constructor(registry, onShellCreated, onShellFailed) {
     this.#registry = registry;
     this.#onShellCreated = onShellCreated;
+    this.#onShellFailed = onShellFailed;
   }
 
   setShellFactory(factory) {
@@ -115,6 +126,15 @@ export class LifecycleManager {
       logger.log("lifecycle", `Shell created for ${sdk.name}`);
     } catch (err) {
       logger.error("lifecycle", `Failed to create shell for ${sdk.name}:`, err);
+      // The shell rolls its own DOM back before rethrowing, so the video is
+      // unmarked and adoptable again. Re-arm it - without this the kernel's
+      // seen-set kept the video claimed forever and one transient boot throw
+      // cost that player PlayerForge for the rest of the document. Re-arming
+      // is safe even when the throw came from #onShellCreated rather than the
+      // boot: a shell that did come up left SHELL_MARKER on the video, and
+      // #adoptVideo refuses a marked one, so a healthy video still gets no
+      // second shell.
+      this.#onShellFailed?.(video);
     }
   }
 

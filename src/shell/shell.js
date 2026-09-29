@@ -12,7 +12,7 @@ import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
 import { SHELL_MARKER, warmStyles, injectShell, watchShellHost } from "./chrome/inject.js";
-import { requestFullscreenProvision } from "../shared/context.js";
+import { replayFullscreenProvision } from "../shared/context.js";
 import { DOMManager } from "../shared/dom-manager.js";
 import { Scope } from "../shared/scope.js";
 import { createActivity } from "../shared/activity.js";
@@ -55,7 +55,18 @@ export class Shell {
     this.sdk = sdk;
     this.#onDestroy = onDestroy;
     this.#media = createMediaControls({ video });
-    this.ready = this.#boot();
+    // A boot that throws AFTER #injectDom has marked the video would otherwise
+    // strand a half-live shell: the caller only logs, the video keeps its
+    // SHELL_MARKER, and the kernel refuses to adopt a marked video for the
+    // life of the document. Roll the half-built shell back here, where the
+    // instance is still reachable, then re-throw so the caller still sees the
+    // failure and can allow a retry. destroy() is null-safe across every
+    // sub-component and idempotent via the scope.
+    this.ready = this.#boot().catch((err) => {
+      logger.error("shell", `Shell "${this.sdk.name}" boot failed - rolling back`, err);
+      this.destroy();
+      throw err;
+    });
   }
 
   /** Resolves when the shell DOM and HUD are live. Styles load is awaited. */
@@ -349,7 +360,10 @@ export class Shell {
       }
       this.toastInfo("fs-block", "Fullscreen blocked by embed", "fs-block");
       if (window.top !== window) {
-        requestFullscreenProvision();
+        // The replay entry point, not the boot-time one: the latch entry.js
+        // spent at shell-ready is already set by now, so a request through it
+        // would be dropped and the retry would fail the same way.
+        replayFullscreenProvision();
       }
     });
   }

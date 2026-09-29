@@ -190,11 +190,16 @@ export class ConfigStore {
   #doc = null;
   #listeners = new Set();
   #watched = false;
+  /** GM listener handle for the configs key, kept so it can be removed. */
+  #watchHandle = null;
+  /** An unwatch window could have missed remote writes; re-read before serving. */
+  #stale = false;
 
   /** The configs document, parsed at most once per adoption. */
   doc() {
-    if (this.#doc == null) {
+    if (this.#stale || this.#doc == null) {
       this.#doc = loadJsonObject(KEYS.configs, { version: 1 });
+      this.#stale = false;
     }
     return this.#doc;
   }
@@ -333,7 +338,18 @@ export class ConfigStore {
   onChange(listener, { signal } = {}) {
     this.#listeners.add(listener);
     this.#watch();
-    const off = () => this.#listeners.delete(listener);
+    const off = () => {
+      if (!this.#listeners.delete(listener)) {
+        return;
+      }
+      // Last consumer gone, so drop the manager listener with it. The GM
+      // subscription outlives the subscribers that justified it otherwise,
+      // and a frame that has torn its shell down keeps adopting every remote
+      // write for a document nobody reads.
+      if (this.#listeners.size === 0) {
+        this.#unwatch();
+      }
+    };
     if (signal) {
       signal.addEventListener("abort", off, { once: true });
     }
@@ -345,7 +361,9 @@ export class ConfigStore {
       return;
     }
     this.#watched = true;
-    gmAddValueChangeListener(KEYS.configs, (_name, _previous, value, remote) => {
+    // Keep the handle: without it the subscription can never be removed, which
+    // is the whole point of tying the GM listener's life to #listeners.
+    this.#watchHandle = gmAddValueChangeListener(KEYS.configs, (_name, _previous, value, remote) => {
       // A delivered plain object IS the new document - adopt it rather than
       // re-reading what we were just told. Anything else (a key deleted by
       // another tab arrives as undefined) means the delivered value cannot
@@ -353,6 +371,20 @@ export class ConfigStore {
       const next = isPlainObject(value) ? value : loadJsonObject(KEYS.configs, { version: 1 });
       this.adopt(next, { remote: remote === true });
     });
+  }
+
+  #unwatch() {
+    if (!this.#watched) {
+      return;
+    }
+    this.#watched = false;
+    gmRemoveValueChangeListener(this.#watchHandle);
+    this.#watchHandle = null;
+    // With the GM listener gone there is nothing to hear a remote write, and
+    // nothing polls, so the cached document can silently fall behind. The doc
+    // is only as fresh as the stream behind it; mark it so the next reader
+    // re-reads instead of serving a document it cannot know is stale.
+    this.#stale = true;
   }
 
   #emit(paths, remote) {

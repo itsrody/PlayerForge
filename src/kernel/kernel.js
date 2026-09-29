@@ -29,6 +29,10 @@ export class Kernel {
   // Weak: an adopted video orphaned by an untracked removal path must not
   // pin the element (and its whole subtree) for the page's lifetime.
   #seenVideos = new WeakSet();
+  /** Videos that already consumed their one post-failure retry. Weak, and read
+   *  only on the failure path - a boot that throws deterministically must not
+   *  be re-attempted on every mutation record, so the second failure is final. */
+  #bootRetried = new WeakSet();
   #removalTimers = new Map();
   /** Unsubscribe for the shared discovery tap; dropped at pagehide. */
   #stopDiscoveryTap = null;
@@ -74,7 +78,11 @@ export class Kernel {
 
   constructor() {
     this.#registry = new ShellSlot();
-    this.#lifecycle = new LifecycleManager(this.#registry, (shell) => this.#notifyShellCreated(shell));
+    this.#lifecycle = new LifecycleManager(
+      this.#registry,
+      (shell) => this.#notifyShellCreated(shell),
+      (video) => this.#onShellBootFailed(video)
+    );
     this.#lifecycle.setShellFactory((discovery) => this.#createShell(discovery));
   }
 
@@ -152,6 +160,24 @@ export class Kernel {
     this.#discoveryDowngraded = true;
     this.#stopDiscoveryTap?.();
     this.#stopDiscoveryTap = watchMediaEvents((video) => this.#adoptVideo(video));
+  }
+
+  /**
+   * A shell's boot threw. If the boot failed, the shell already rolled its own
+   * DOM back, so the video lost SHELL_MARKER and is adoptable again; if a shell
+   * came up fine, the marker is still there and #adoptVideo refuses it either
+   * way. Exactly one retry is allowed for the first case: the full-document
+   * discovery tap feeds this path one record per mutation, so an unbounded
+   * re-arm would spin on a deterministically-throwing boot. The second failure
+   * is final and the video goes back into the seen-set.
+   */
+  #onShellBootFailed(video) {
+    if (this.#bootRetried.has(video)) {
+      this.#seenVideos.add(video);
+      return;
+    }
+    this.#bootRetried.add(video);
+    this.#seenVideos.delete(video);
   }
 
   /** Adopt the video, emit discovery and start removal watching. */

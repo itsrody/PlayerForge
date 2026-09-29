@@ -894,16 +894,39 @@ function grantFullscreen(frameElement) {
 /**
  * Sender side, called by a video-bearing frame: request fullscreen provisioning
  * (allowfullscreen + allow="fullscreen") on every ancestor iframe up the chain.
- * Granting is a one-shot, idempotent operation per frame (ancestors install
- * their provisioners at document start, well before the first request made
- * here), so further requests would only replay the same hops - latch it.
+ * Boot-time provisioning is a one-shot per frame: ancestors install their
+ * provisioners at document start, well before the first request made here, so
+ * replaying the same hops on every shell would be pure noise - latch it.
  */
 let fullscreenProvisionSent = false;
+/** Floor between two recovery re-provisions of the same chain. */
+const FS_REPLAY_COOLDOWN_MS = 1000;
+let lastProvisionReplay = 0;
 export function requestFullscreenProvision() {
   if (fullscreenProvisionSent) {
     return;
   }
   fullscreenProvisionSent = true;
+  window.parent?.postMessage({ type: FS_REQUEST_TYPE }, "*");
+}
+
+/**
+ * Re-provision the chain after a fullscreen entry was REJECTED.
+ *
+ * Deliberately not gated by the boot-time latch: entry.js already spent that
+ * latch when the shell came up, so gating the replay on it made this recovery
+ * unreachable in exactly the case it exists for - an SDK iframe created (or
+ * granted) after we provisioned, where the attributes are missing right now
+ * and a retry can still succeed. Granting stays idempotent; the cooldown is
+ * what keeps a caller that retries in a loop from re-posting the same hops on
+ * every failure.
+ */
+export function replayFullscreenProvision() {
+  const now = Date.now();
+  if (now - lastProvisionReplay < FS_REPLAY_COOLDOWN_MS) {
+    return;
+  }
+  lastProvisionReplay = now;
   window.parent?.postMessage({ type: FS_REQUEST_TYPE }, "*");
 }
 

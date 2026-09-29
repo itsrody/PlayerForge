@@ -178,7 +178,7 @@ async function scheduleFlush() {
 
 function ensureObserver() {
   const doc = globalThis.document;
-  if (!doc?.documentElement) {
+  if (!doc) {
     return;
   }
   if (observer && observedDoc === doc) {
@@ -216,7 +216,17 @@ function ensureObserver() {
       });
     }
   });
-  observer.observe(doc.documentElement, { childList: true, subtree: true });
+  // The DOCUMENT node is the target, not document.documentElement. A
+  // document-start userscript is evaluated AHEAD of the parser, before the
+  // root element exists - that early window is the entire point of instant
+  // injection, and the old documentElement target made it fatal: the guard
+  // bailed out with no retry, so any subscriber that arrived in that window
+  // was wired to a feed that could never produce a record for the life of the
+  // page, while its `live` count kept the observer from ever being reclaimed.
+  // The document node always exists, and observing it is a strict superset of
+  // the old subtree: it additionally reports the root element being inserted
+  // or replaced.
+  observer.observe(doc, { childList: true, subtree: true });
   observedDoc = doc;
 }
 

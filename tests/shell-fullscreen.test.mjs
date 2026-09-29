@@ -9,33 +9,46 @@ const { Shell } = await import("../src/shell/shell.js");
 const { initFsGate, setFullscreen } = await import("./fs-gate.mjs");
 const { subscribeFullscreen } = await import("../src/shared/shadow.js");
 const { getSetting, setSetting } = await import("../src/shell/chrome/config.js");
-
-async function makeShell() {
-  const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+const { requestFullscreenProvision, FS_REQUEST_TYPE } = await import("../src/shared/context.js");
+async function makeShell({ embedded = false } = {}) {
+  const outer = new JSDOM("<!doctype html><html><body></body></html>", {
     url: "https://www.youtube.com/watch?v=1"
   });
-  globalThis.window = dom.window;
-  globalThis.location = dom.window.location;
-  globalThis.document = dom.window.document;
+  // An embedded frame is the only shape where window.top !== window, which is
+  // exactly the branch the fullscreen re-provision lives behind, so that case
+  // has to be a real frame rather than a stubbed `top`.
+  let dom = outer;
+  let win = outer.window;
+  if (embedded) {
+    const frame = outer.window.document.createElement("iframe");
+    outer.window.document.body.appendChild(frame);
+    win = frame.contentWindow;
+    dom = { window: win };
+  }
+  globalThis.window = win;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
   // Wire the shared fs gate to this environment BEFORE any shell/forge
   // subscribes, so subscriptions see the one shared transition source.
   initFsGate(dom);
-  globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
-  globalThis.MutationObserver = dom.window.MutationObserver;
+  globalThis.getComputedStyle = win.getComputedStyle.bind(win);
+  globalThis.MutationObserver = win.MutationObserver;
   // jsdom rejects foreign-realm AbortSignals in listener options.
-  globalThis.AbortController = dom.window.AbortController;
+  globalThis.AbortController = win.AbortController;
   // inject.js builds a constructable stylesheet against the ambient realm;
   // provide a realm-local fake so the suite never depends on jsdom CSS support.
   globalThis.CSSStyleSheet = class {
     replaceSync() {}
   };
-  Object.defineProperty(dom.window.document, "adoptedStyleSheets", {
-    value: [], writable: true, configurable: true
+  Object.defineProperty(win.document, "adoptedStyleSheets", {
+    value: [],
+    writable: true,
+    configurable: true
   });
 
-  const container = dom.window.document.createElement("div");
-  dom.window.document.body.appendChild(container);
-  const video = dom.window.document.createElement("video");
+  const container = win.document.createElement("div");
+  win.document.body.appendChild(container);
+  const video = win.document.createElement("video");
   container.appendChild(video);
 
   const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
@@ -46,9 +59,8 @@ async function makeShell() {
     delete globalThis.CSSStyleSheet;
   };
 
-  return { dom, shell, container, video, teardown };
+  return { dom, shell, container, video, teardown, parent: outer.window };
 }
-
 test("checkmark is false until an element goes fullscreen", async () => {
   const { shell, teardown } = await makeShell();
   assert.equal(shell.fullscreen, false);
@@ -139,6 +151,33 @@ test("rejected fullscreen while already fullscreen shows no hint", async () => {
   const toasts = shell.shellDom.hudLayer.querySelectorAll("pf-toast.pf-visible");
   assert.equal(toasts.length, 0, "no blocked hint while already fullscreen");
   teardown();
+});
+
+test("a rejected fullscreen re-provisions the chain after boot already spent the latch", async () => {
+  const { dom, shell, parent, teardown } = await makeShell({ embedded: true });
+
+  // The handler posts to window.parent, which is the outer frame here.
+  const posted = [];
+  const original = parent.postMessage.bind(parent);
+  parent.postMessage = (msg) => posted.push(msg);
+  try {
+    // entry.js spends the boot-time latch the moment the shell comes up, long
+    // before any fullscreen attempt. That is why recovery cannot ride the same
+    // entry point - a spent latch would silently drop the replay.
+    requestFullscreenProvision();
+    requestFullscreenProvision();
+    assert.equal(posted.length, 1, "boot-time provisioning posted once and latched");
+
+    dom.window.document.dispatchEvent(new dom.window.Event("fullscreenerror"));
+    assert.deepEqual(
+      posted[1],
+      { type: FS_REQUEST_TYPE },
+      "the rejected attempt re-provisioned the ancestor chain"
+    );
+  } finally {
+    parent.postMessage = original;
+    teardown();
+  }
 });
 
 test("referenceBox in fullscreen is the physical screen", async () => {

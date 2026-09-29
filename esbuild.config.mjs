@@ -16,9 +16,16 @@ import process from "node:process";
 // The banner below is the single version source. Runtime reads the installed
 // script's real version through GM_info.script.version, so bumping @version
 // here is all a release takes.
-// Instant-injection note: @run-at document-start + @sandbox raw are what make
-// real document-start work under Tampermonkey 5.5+ MV2 for Firefox. PF never
-// assumes the DOM is ready at eval, so it is safe under instant injection.
+// Instant-injection note: PF never assumes the DOM exists at eval, so it is
+// correct under whatever @run-at the manager actually grants - including true
+// document-start, where the shared mutation feed subscribes to the Document
+// node before documentElement is parsed. What the metadata does NOT guarantee:
+// Tampermonkey's default Firefox "Content Script" mode has no real
+// document-start (it injects at document-idle regardless of @run-at) - that
+// needs the UserScripts API or Content Script API inject mode. And @sandbox raw
+// is what puts PF in the page realm (no cloneInto/unsafeWindow), but a page CSP
+// can demote it to a JavaScript USERSCRIPT_WORLD, which breaks that
+// assumption. Neither is something the script can assert about itself.
 const banner = `// ==UserScript==
 // @name         PlayerForge
 // @namespace    https://github.com/PlayerForge

@@ -12,6 +12,7 @@ import {
   createFrameRelay,
   installContextBridge,
   requestFullscreenProvision,
+  replayFullscreenProvision,
   createTopFrameProvisioner,
   createFrameProvisioner,
   FS_REQUEST_TYPE,
@@ -929,6 +930,44 @@ test("requestFullscreenProvision posts a provisioning request to the parent", ()
     requestFullscreenProvision();
     requestFullscreenProvision();
     assert.equal(sent, null);
+  } finally {
+    win.parent.postMessage = original;
+  }
+});
+
+test("replayFullscreenProvision re-provisions after the boot-time latch is spent", async () => {
+  // Fresh module instance: the boot-time latch is module state and the test
+  // above already spent the one on the shared import, so this has to establish
+  // its own precondition rather than inherit it.
+  const { requestFullscreenProvision: request, replayFullscreenProvision: replay } = await import(
+    "../src/shared/context.js?fs-provision-replay"
+  );
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.parent = win.parent;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  const sent = [];
+  const original = win.parent.postMessage.bind(win.parent);
+  win.parent.postMessage = (msg) => sent.push(msg);
+  try {
+    // Boot-time provisioning spends the latch, exactly as entry.js does when
+    // the shell comes up - long before any fullscreen attempt is made.
+    request();
+    request();
+    assert.equal(sent.length, 1, "boot-time provisioning is still a one-shot");
+
+    // A REJECTED fullscreen entry has to re-provision anyway: an SDK iframe
+    // created (or granted) after boot is exactly the case recovery exists for,
+    // and gating the replay on the spent latch made it a no-op.
+    replay();
+    assert.equal(sent.length, 2, "the recovery re-provision reached the parent");
+
+    // A caller that retries in a loop must not re-post the same hops on every
+    // failure, so repeats inside the cooldown are suppressed.
+    replay();
+    assert.equal(sent.length, 2, "replays inside the cooldown are suppressed");
   } finally {
     win.parent.postMessage = original;
   }
