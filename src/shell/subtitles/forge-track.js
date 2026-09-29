@@ -30,7 +30,14 @@ function shiftTime(time, offset) {
  * each other, matching the old renderer.
  */
 function lineTop(line, snapToLines, i) {
-  const overlap = `${i * STACK_OVERLAP_EM}em`;
+  // The stack term is a number, unit added at each use. Baking the unit in
+  // produced "1.6emem", which fails the <length-percentage> syntax that
+  // @property declares for --pf-cue-top - and a registered custom property
+  // silently discards a non-matching value, so every cue after the first in a
+  // stack quietly fell back to the 85% initial and piled up on the first one.
+  // The registered initial plus var()'s own fallback are what kept that
+  // invisible: no error, just overlapping captions.
+  const overlap = i * STACK_OVERLAP_EM;
   if (snapToLines && typeof line === "number") {
     return line < 0
       ? `calc(100% + ${line} * 1lh - ${overlap}em)`

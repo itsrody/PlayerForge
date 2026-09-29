@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { yield_ } from "../src/shared/scheduler.js";
+import { getEventListeners } from "node:events";
+import { postTask, yield_ } from "../src/shared/scheduler.js";
 
 /**
  * yield_() must never depend on scheduler.yield (non-Baseline, and it
@@ -8,6 +9,14 @@ import { yield_ } from "../src/shared/scheduler.js";
  * shared/scheduler.js header). These tests pin the two branches it does
  * use: a frame boundary with a hard backstop when rAF is usable, and a
  * MessageChannel task when it is not.
+ *
+ * The postTask() tests here cover the OTHER half of the façade - the
+ * setTimeout path, which is the live implementation on Node/jsdom and the
+ * only one these hosts can take. The native branch has its own file
+ * (scheduler-native.test.mjs) because the branch is chosen once at module
+ * load, and a fake scheduler has to exist before the import to reach it.
+ * The contract is deliberately identical on both, so the signal and abort
+ * cases are asserted in both places.
  */
 
 test("task path (no rAF): resolves on a task, not a microtask", async () => {
@@ -96,4 +105,47 @@ test("double-fire rAF: the settle guard keeps resolution single", async () => {
   } finally {
     globalThis.requestAnimationFrame = originalRAF;
   }
+});
+
+test("postTask fallback: this host has no scheduler, so the timer branch is live", () => {
+  assert.equal(typeof globalThis.scheduler, "undefined", "the setTimeout branch is the one under test");
+});
+
+test("postTask fallback: runs after the requested delay", async () => {
+  let ran = 0;
+  postTask(() => ran++, { delay: 15 });
+  assert.equal(ran, 0, "not synchronous");
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(ran, 1, "the delay elapsed before the callback");
+});
+
+test("postTask fallback: handle.abort() cancels a pending task", async () => {
+  let ran = 0;
+  const handle = postTask(() => ran++, { delay: 10 });
+  handle.abort();
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(ran, 0, "a kernel destroy drops the pending removal grace");
+  assert.doesNotThrow(() => handle.abort(), "abort is idempotent");
+});
+
+test("postTask fallback: an owner signal cancels the task, then detaches", async () => {
+  const owner = new AbortController();
+  let ran = 0;
+  postTask(() => ran++, { delay: 10, signal: owner.signal });
+  assert.equal(getEventListeners(owner.signal, "abort").length, 1);
+  owner.abort();
+  assert.equal(getEventListeners(owner.signal, "abort").length, 0, "listener dropped on abort");
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(ran, 0, "the context retry stops with its scope");
+});
+
+test("postTask fallback: a task that runs detaches from its owner signal", async () => {
+  const owner = new AbortController();
+  postTask(() => {}, { delay: 5, signal: owner.signal });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(
+    getEventListeners(owner.signal, "abort").length,
+    0,
+    "a fired task leaves nothing behind on a scope signal"
+  );
 });

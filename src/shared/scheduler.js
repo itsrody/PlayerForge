@@ -59,8 +59,28 @@ export function postTask(fn, { priority = "user-visible", delay: ms = 0, signal 
   if (!HAS_POST_TASK) {
     // setTimeout path: the live implementation on jsdom/Node hosts; on
     // Firefox 156+ scheduler.postTask exists and takes the native branch.
-    const id = setTimeout(fn, ms);
-    return { abort: () => clearTimeout(id) };
+    // It follows `signal` exactly like the native branch does, because the
+    // contract above is one contract: two callers (the context handshake
+    // retry, the kernel removal grace) pass a signal and only one of them
+    // keeps the handle, so a host-dependent cancellation rule would leave a
+    // task running after its owner died.
+    let id = 0;
+    const dropOwnerSignal = () => signal?.removeEventListener("abort", onOwnerAbort);
+    const onOwnerAbort = () => {
+      dropOwnerSignal();
+      clearTimeout(id);
+    };
+    signal?.addEventListener("abort", onOwnerAbort, { once: true });
+    id = setTimeout(() => {
+      dropOwnerSignal();
+      fn();
+    }, ms);
+    return {
+      abort: () => {
+        dropOwnerSignal();
+        clearTimeout(id);
+      }
+    };
   }
   const ac = new AbortController();
   const dropOwnerSignal = () => signal?.removeEventListener("abort", onOwnerAbort);
