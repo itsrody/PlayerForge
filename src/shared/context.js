@@ -330,14 +330,25 @@ export async function getPageContext() {
 }
 
 /**
- * Backoff table (ms) for bridge request retries. The fixed 1200ms poll the
- * bridge previously used intentionally avoided hammering the parent chain, but
- * cost up to a full second of latency whenever the child raced the ancestors'
- * document-start message handlers (the common embed case). An exponential
- * backoff with jitter is just as sparing in the worst case yet answers a ready
- * parent within one short retry. Initial low latency for the typical
- * already-listening parent; jitter (<=250ms) prevents a thundering herd when
- * several nested frames boot simultaneously.
+ * Backoff table (ms) for bridge request retries.
+ *
+ * This is NOT removable polling, and the distinction matters: there is no
+ * event that means "my ancestor installed the bridge". postMessage is
+ * stateless - a readiness announcement an ancestor sent before this frame's
+ * script evaluated is gone, and no browser API surfaces the parent's
+ * listeners - so the only way to learn the chain is up is to keep asking.
+ * The retry is a bounded handshake over a lossy channel, not a cache waiting
+ * to be fed.
+ *
+ * The table replaced a fixed 1200ms poll, which spared requests but cost up
+ * to a full second whenever the child raced the ancestors' document-start
+ * handlers (the common embed case). Exponential backoff with jitter answers
+ * an already-listening parent within one short retry, stays just as sparing
+ * in the worst case, and the jitter (<=250ms) prevents a thundering herd
+ * when several nested frames boot at once. The table is per REQUEST, and
+ * getPageContext() memoizes the in-flight promise, so this costs at most one
+ * short handshake per frame session - and nothing at all in the common case
+ * where the first request is already answered.
  */
 const CTX_RETRY_BACKOFF = [60, 150, 320, 640];
 const CTX_RETRY_JITTER_MS = 250;
