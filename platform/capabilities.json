@@ -100,10 +100,8 @@
         "src/shared/scheduler.js"
       ],
       "verifiedBy": "tests/scheduler-native.test.mjs",
-      "probes": [
-        "globalThis.scheduler.postTask"
-      ],
-      "note": "Facade detection runs once at module load, so the branch Gecko takes is only reachable by seeding the global before import - hence the separate test file. scheduler.yield is deliberately not used; see the module header."
+      "token": "globalThis.scheduler.postTask",
+      "note": "Called unconditionally on the 156 floor, so there is no probe to classify; the jsdom test host gets a timer-backed polyfill from tests/loader.mjs. scheduler.yield is deliberately not used; see the module header."
     },
     {
       "id": "TextTrack",

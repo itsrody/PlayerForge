@@ -5,19 +5,19 @@ import { getEventListeners } from "node:events";
 /**
  * The branch Firefox runs, and the branch CI never did.
  *
- * shared/scheduler.js picks its implementation once, at module load, from
- * `typeof globalThis.scheduler?.postTask`. Node has no `scheduler` global, so
- * every test in the tree - and every assertion written before this file -
- * covered the setTimeout fallback that no Gecko host ever takes. The native
- * branch is what services the removal grace, the dom-watch defer, the
- * lifecycle settle pair, the context retry and the resume throttle, and it is
- * the branch with the interesting contract: the returned handle does not own
- * the task, it owns an AbortController wired to the task's own signal.
+ * shared/scheduler.js calls `globalThis.scheduler.postTask` unconditionally
+ * (the Firefox 156 floor always has it), so there is no production fallback
+ * for Node to reach. Node has no `scheduler` global at all, so the harness
+ * polyfill in tests/loader.mjs normally provides one; this file replaces it
+ * with a faithful double to pin the contract the facade relies on: the
+ * returned handle does not own the task, it owns an AbortController wired to
+ * the task's own signal.
  *
- * Seeding the global BEFORE the import is the whole trick - the module is
- * evaluated by the dynamic import below, and node's test runner gives this
- * file its own process, so nothing has loaded it yet. The first test asserts
- * the branch is live rather than trusting the setup.
+ * Seeding the global before the first call is what makes every assertion
+ * below hit the double - node's test runner gives this file its own process,
+ * so nothing has called postTask yet when the import below evaluates
+ * scheduler.js. The first test asserts the double is live rather than
+ * trusting the setup.
  */
 
 const scheduled = [];

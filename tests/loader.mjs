@@ -53,3 +53,31 @@ if (typeof globalThis.matchMedia !== "function") {
     removeEventListener() {}
   });
 }
+if (typeof globalThis.scheduler?.postTask !== "function") {
+  // The Firefox 156 floor always has the Task Scheduling API; Node/jsdom does
+  // not, and src/shared/scheduler.js calls scheduler.postTask unconditionally
+  // (no production fallback). This is the task source the facade would take
+  // natively: a timer-backed task whose promise rejects with AbortError when
+  // its signal aborts - the shape task.catch(() => {}) in the facade expects.
+  globalThis.scheduler = {
+    postTask(callback, { delay = 0, signal } = {}) {
+      return new Promise((resolve, reject) => {
+        const abortError = () => new DOMException("The task was aborted.", "AbortError");
+        if (signal?.aborted) {
+          reject(abortError());
+          return;
+        }
+        let timer = 0;
+        const onAbort = () => {
+          clearTimeout(timer);
+          reject(abortError());
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+        timer = setTimeout(() => {
+          signal?.removeEventListener("abort", onAbort);
+          resolve(callback());
+        }, delay);
+      });
+    }
+  };
+}

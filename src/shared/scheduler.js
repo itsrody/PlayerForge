@@ -1,16 +1,19 @@
 /**
  * Host task scheduler facade.
  *
- * One façade over the host's scheduling primitives so consumers never
- * duplicate `typeof scheduler?.*` capability guards across the tree:
+ * One facade over the host's scheduling primitives so consumers never
+ * duplicate capability guards across the tree. The Firefox 156 floor always
+ * has scheduler.postTask and requestAnimationFrame, so there is no production
+ * fallback: the jsdom test host gets a timer-backed polyfill installed once by
+ * tests/loader.mjs instead of a branch no Gecko build would take.
  *
  *   postTask(fn, { priority, delay, signal }) → { abort() }
- *     scheduler.postTask (where the Task Scheduling API exists) → setTimeout
+ *     scheduler.postTask (required on the floor)
  *
  *   yield_() → Promise
  *     requestAnimationFrame raced with a hard backstop (visible documents, so
  *     a frame boundary can run layout/paint first) → MessageChannel task
- *     (hidden documents and hosts without rAF)
+ *     (hidden documents, where rAF does not run)
  *
  * Firefox 156 ships both scheduler.yield() and scheduler.postTask(), but
  * yield() is deliberately NOT used here:
@@ -26,13 +29,9 @@
  *     leaving no panel, no data-pf-shell mark, and a logger-only error.
  *
  * postTask itself behaves correctly in that same shape (only the yield
- * continuation is poisoned), so the native postTask path stays as-is.
- * Detection runs once at module load and every export is a plain function,
- * so the hot path stays inline-friendly.
+ * continuation is poisoned), so postTask is called directly. Every export is
+ * a plain function, so the hot path stays inline-friendly.
  */
-
-const HAS_POST_TASK =
-  typeof globalThis.scheduler?.postTask === "function";
 
 /**
  * Hard cap on the rAF wait. A visible document should produce a frame within
@@ -56,32 +55,6 @@ const RAF_BACKSTOP_MS = 50;
  * @returns {{ abort(): void }}
  */
 export function postTask(fn, { priority = "user-visible", delay: ms = 0, signal } = {}) {
-  if (!HAS_POST_TASK) {
-    // setTimeout path: the live implementation on jsdom/Node hosts; on
-    // Firefox 156+ scheduler.postTask exists and takes the native branch.
-    // It follows `signal` exactly like the native branch does, because the
-    // contract above is one contract: two callers (the context handshake
-    // retry, the kernel removal grace) pass a signal and only one of them
-    // keeps the handle, so a host-dependent cancellation rule would leave a
-    // task running after its owner died.
-    let id = 0;
-    const dropOwnerSignal = () => signal?.removeEventListener("abort", onOwnerAbort);
-    const onOwnerAbort = () => {
-      dropOwnerSignal();
-      clearTimeout(id);
-    };
-    signal?.addEventListener("abort", onOwnerAbort, { once: true });
-    id = setTimeout(() => {
-      dropOwnerSignal();
-      fn();
-    }, ms);
-    return {
-      abort: () => {
-        dropOwnerSignal();
-        clearTimeout(id);
-      }
-    };
-  }
   const ac = new AbortController();
   const dropOwnerSignal = () => signal?.removeEventListener("abort", onOwnerAbort);
   const onOwnerAbort = () => {
@@ -106,9 +79,8 @@ export function postTask(fn, { priority = "user-visible", delay: ms = 0, signal 
 
 /**
  * Cancellable delay: runs `fn` after `ms`, returned fn cancels the pending run.
- * Routes through postTask so the scheduler facade owns the timer (host task
- * scheduler where available, the shared setTimeout path elsewhere; same cancel
- * contract either way).
+ * Routes through postTask so the scheduler facade owns the timer (a host task
+ * scheduler natively, the harness polyfill in tests; same cancel contract).
  *
  * @param {Function} fn
  * @param {number} ms

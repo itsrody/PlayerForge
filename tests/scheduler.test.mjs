@@ -10,13 +10,12 @@ import { postTask, yield_ } from "../src/shared/scheduler.js";
  * use: a frame boundary with a hard backstop when rAF is usable, and a
  * MessageChannel task when it is not.
  *
- * The postTask() tests here cover the OTHER half of the façade - the
- * setTimeout path, which is the live implementation on Node/jsdom and the
- * only one these hosts can take. The native branch has its own file
- * (scheduler-native.test.mjs) because the branch is chosen once at module
- * load, and a fake scheduler has to exist before the import to reach it.
- * The contract is deliberately identical on both, so the signal and abort
- * cases are asserted in both places.
+ * The postTask() tests here cover the OTHER half of the facade. postTask now
+ * calls scheduler.postTask unconditionally (the Firefox 156 floor always has
+ * it), and this Node/jsdom host has no native scheduler, so those cases run
+ * against the timer-backed polyfill installed by tests/loader.mjs. The native
+ * task contract is pinned separately in scheduler-native.test.mjs; the abort
+ * and signal cases are asserted in both places.
  */
 
 test("task path (no rAF): resolves on a task, not a microtask", async () => {
@@ -107,11 +106,15 @@ test("double-fire rAF: the settle guard keeps resolution single", async () => {
   }
 });
 
-test("postTask fallback: this host has no scheduler, so the timer branch is live", () => {
-  assert.equal(typeof globalThis.scheduler, "undefined", "the setTimeout branch is the one under test");
+test("postTask: this host has no native scheduler, so the harness polyfill is live", () => {
+  assert.equal(
+    typeof globalThis.scheduler?.postTask,
+    "function",
+    "tests/loader.mjs installs the task source postTask calls"
+  );
 });
 
-test("postTask fallback: runs after the requested delay", async () => {
+test("postTask: runs after the requested delay", async () => {
   let ran = 0;
   postTask(() => ran++, { delay: 15 });
   assert.equal(ran, 0, "not synchronous");
@@ -119,7 +122,7 @@ test("postTask fallback: runs after the requested delay", async () => {
   assert.equal(ran, 1, "the delay elapsed before the callback");
 });
 
-test("postTask fallback: handle.abort() cancels a pending task", async () => {
+test("postTask: handle.abort() cancels a pending task", async () => {
   let ran = 0;
   const handle = postTask(() => ran++, { delay: 10 });
   handle.abort();
@@ -128,7 +131,7 @@ test("postTask fallback: handle.abort() cancels a pending task", async () => {
   assert.doesNotThrow(() => handle.abort(), "abort is idempotent");
 });
 
-test("postTask fallback: an owner signal cancels the task, then detaches", async () => {
+test("postTask: an owner signal cancels the task, then detaches", async () => {
   const owner = new AbortController();
   let ran = 0;
   postTask(() => ran++, { delay: 10, signal: owner.signal });
@@ -139,7 +142,7 @@ test("postTask fallback: an owner signal cancels the task, then detaches", async
   assert.equal(ran, 0, "the context retry stops with its scope");
 });
 
-test("postTask fallback: a task that runs detaches from its owner signal", async () => {
+test("postTask: a task that runs detaches from its owner signal", async () => {
   const owner = new AbortController();
   postTask(() => {}, { delay: 5, signal: owner.signal });
   await new Promise((resolve) => setTimeout(resolve, 40));

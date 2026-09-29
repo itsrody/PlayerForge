@@ -203,7 +203,10 @@ function probeClaims() {
 
 test("every feature-detection chain in src/ is classified in the manifest", () => {
   const chains = probeChains();
-  assert.ok(chains.size >= 14, `the scan still finds the platform probes (found ${chains.size})`);
+  // Floor guards against the scan silently matching nothing, not a census:
+  // scheduler.postTask is required unconditionally on the floor, so its probe
+  // is gone and the count dropped 14 -> 13.
+  assert.ok(chains.size >= 13, `the scan still finds the platform probes (found ${chains.size})`);
   const claims = probeClaims();
   for (const chain of chains.keys()) {
     const owners = claims.get(chain) ?? [];
