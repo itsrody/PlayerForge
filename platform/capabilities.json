@@ -19,9 +19,9 @@
     "new platform API cannot skip the manifest the way scheduler.postTask and",
     "TextTrack did.",
     "",
-    "Known boundary of the scan: it reads `typeof` chains whose root is a global or a known host object. A `typeof` probe on a local reference (video.requestPictureInPicture, cue.getCueAsHTML, event.getPredictedEvents) starts at a lowercase local name, and an unguarded bare global (new MediaMetadata) is not a typeof at all - neither is machine-visible. Both are recorded here by hand instead, and the token check keeps those rows honest too. The scan is a floor on coverage, not a ceiling.",
-    "or a known host object. A member probe on a local reference (video.",
-    "requestPictureInPicture, cue.getCueAsHTML, event.getPredictedEvents) and an",
+    "Known boundary of the scan: it reads `typeof` chains whose root is a global or a known host object. A `typeof` probe on a local reference (cue.getCueAsHTML, event.getPredictedEvents) starts at a lowercase local name, and an unguarded bare global (new MediaMetadata) is not a typeof at all - neither is machine-visible. Both are recorded here by hand instead, and the token check keeps those rows honest too. The scan is a floor on coverage, not a ceiling.",
+    "or a known host object. A member probe on a local reference (cue.",
+    "getCueAsHTML, event.getPredictedEvents) and an",
     "unguarded bare global (new MediaMetadata) are NOT machine-visible; those are",
     "recorded here by hand. The scan is a floor on coverage, not a ceiling."
   ],
@@ -268,22 +268,6 @@
       ],
       "probes": [
         "screen"
-      ]
-    },
-    {
-      "id": "pictureInPictureEnabled",
-      "api": "document.pictureInPictureEnabled",
-      "summary": "Feature gate for the picture-in-picture entry point",
-      "why": "The PiP button is hidden when the gate is absent, and the toggle re-checks requestPictureInPicture on the element, which is what keeps a host that would reject the call from ever reaching it. Without either, the player simply has no picture-in-picture entry point.",
-      "usedBy": [
-        "src/shell/media.js"
-      ],
-      "probes": [
-        "document.pictureInPictureEnabled"
-      ],
-      "token": [
-        "document.pictureInPictureEnabled",
-        "requestPictureInPicture"
       ]
     },
     {

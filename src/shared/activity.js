@@ -5,10 +5,10 @@ import { Scope } from "./scope.js";
  * properties.
  *
  * The shell does no work until something happens. An activity is that
- * something: playback advancing, a fullscreen session, a picture-in-picture
- * window, a visible tab. Each activity answers one question - is it active? -
- * the way the platform answers it, by reading Gecko's property at the moment
- * Gecko fires its event, never from a copy that can drift out of sync.
+ * something: playback advancing, a fullscreen session, a visible tab. Each
+ * activity answers one question - is it active? - the way the platform answers
+ * it, by reading Gecko's property at the moment Gecko fires its event, never
+ * from a copy that can drift out of sync.
  *
  *   const playback = createActivity({
  *     target: video,

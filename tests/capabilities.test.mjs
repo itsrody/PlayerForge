@@ -31,7 +31,7 @@ const esbuildConfig = readFileSync(join(ROOT, "esbuild.config.mjs"), "utf8");
 /**
  * Platform globals that are lowercase, so a `typeof` on one of them counts as
  * a platform probe even though the Capitalised heuristic below would drop it:
- * host objects whose members are APIs (document.pictureInPictureEnabled), and
+ * host objects whose members are APIs (document.startViewTransition), and
  * the two API *functions* the shell feature-detects directly (matchMedia,
  * requestAnimationFrame). Everything else has to be Capitalised or explicitly
  * globalThis-prefixed to count - that is what keeps `typeof opts.signal` and
@@ -203,7 +203,7 @@ function probeClaims() {
 
 test("every feature-detection chain in src/ is classified in the manifest", () => {
   const chains = probeChains();
-  assert.ok(chains.size >= 15, `the scan still finds the platform probes (found ${chains.size})`);
+  assert.ok(chains.size >= 14, `the scan still finds the platform probes (found ${chains.size})`);
   const claims = probeClaims();
   for (const chain of chains.keys()) {
     const owners = claims.get(chain) ?? [];
