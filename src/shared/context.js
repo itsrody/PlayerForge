@@ -284,7 +284,8 @@ function stripNonAscii(raw) {
 /** Reuse one in-flight bridge request across the shells sharing this frame
  *  (a page hosting several videos boots one shell per video, so without this
  *  each would round-trip the parent chain to resolve the same context). The
- *  memo is cleared on settle, never cached: SPA path changes re-resolve.
+ *  memo is cleared on settle, never cached: a title that lands late has to be
+ *  re-normalized by the next request.
  */
 let frameContextBridge = null;
 
@@ -640,9 +641,9 @@ const CTX_PIPE_IDLE_MS = 60_000;
 
 /**
  * Handler for the top frame: answers validated context requests. Context is
- * resolved per request (not captured at install time) so late titles and SPA
- * route changes are reflected. Requests qualify when they originate from our
- * own origin or from one of this document's <iframe> descendants.
+ * resolved per request (not captured at install time) so a late-loading
+ * title is reflected. Requests qualify when they originate from our own
+ * origin or from one of this document's <iframe> descendants.
  *
  * The payload deliberately omits document.title: any embed in the page can
  * pass the frame-tree vouch, and the title is the one field with nothing to

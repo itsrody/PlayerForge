@@ -15,13 +15,6 @@
   },
   "capabilities": [
     {
-      "id": "navigation-currententrychange",
-      "summary": "SPA route changes, including pushState-only ones",
-      "shipsInFirefox": 147,
-      "usedBy": ["src/shared/navigation.js"],
-      "verifiedBy": "platform/integration/navigation.test.mjs"
-    },
-    {
       "id": "document-startViewTransition",
       "summary": "Panel open/close animation",
       "shipsInFirefox": 144,
@@ -100,7 +93,7 @@
     {
       "id": "window.onurlchange-grant",
       "summary": "The @grant for Tampermonkey's URL event",
-      "why": "Superseded by navigation.currententrychange (Firefox 147), which also fires for pushState. Re-granting it would widen permission surface for zero added coverage. The feature-detect in src/shared/navigation.js is fine - the GRANT is what was retired.",
+      "why": "Nothing in the fork subscribes to route changes: same-document navigation is out of scope, so there is no consumer to receive the event. Re-granting it would widen the permission surface for zero coverage.",
       "matchPattern": "@grant\\s+window\\.onurlchange",
       "mustNotAppearIn": ["esbuild.config.mjs"]
     },

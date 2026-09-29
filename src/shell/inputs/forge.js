@@ -431,7 +431,7 @@ export class InputForge {
       // Reset/teardown while Space is held must restore the boosted rate
       // first - the pointer path releases through #endPointerSession, and
       // the keyboard path used to drop the release here, leaving playback
-      // stuck at hold speed (e.g. destroy mid-hold on an SPA navigation).
+      // stuck at hold speed (e.g. destroy mid-hold on a player swap).
       this.#keyboardHolding = false;
       this.#dispatchKeyboardRelease();
     }
