@@ -645,10 +645,15 @@ const CTX_PIPE_IDLE_MS = 60_000;
  * title is reflected. Requests qualify when they originate from our own
  * origin or from one of this document's <iframe> descendants.
  *
- * The payload deliberately omits document.title: any embed in the page can
- * pass the frame-tree vouch, and the title is the one field with nothing to
- * offer resume matching (domain + path + duration drive identity). Domain
- * and path stay because cross-origin players cannot function without them.
+ * The payload carries {domain, path, title}. The title is display metadata -
+ * history rows and resume entry labels render it - and is deliberately NOT
+ * part of match identity, which is domain + path + duration (findMatch), so a
+ * page renaming its title never splits an existing resume chain. It is
+ * sanitized at the source (stripNonAscii drops non-Latin script runs and
+ * release tags) because the recipient only has to be a frame this document
+ * embeds: the cross-origin player case is exactly who needs it, and the
+ * bounded disclosure is the page's own show name. Domain and path stay
+ * because a cross-origin player cannot function without them.
  */
 export function createTopFrameResponder(resolveContext, ownOrigin = location.origin, post = defaultPostToSource) {
   // Ports that established a private pipe get a persistent handler: after the

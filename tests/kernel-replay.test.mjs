@@ -187,3 +187,31 @@ test("a shell that fails to boot is retried exactly once, then abandoned", async
   }
   assert.equal(attempts, 2, "a boot that keeps throwing does not spin on the discovery tap");
 });
+
+test("a bfcache pagehide keeps shell-created listeners live for the restored page", async () => {
+  const { kernel, video, created } = makeHarness();
+  kernel.init();
+  await waitFor(() => created.some((shell) => shell.video === video));
+
+  // persisted: true is the bfcache case. The kernel must NOT tear down here -
+  // the page is coming back, so whoever registered a shell-created listener
+  // still has to hear about the next shell. (A real pagehide is the branch
+  // that releases the set; clearing it unconditionally would break exactly
+  // this restore path.)
+  const hide = new dom.window.Event("pagehide");
+  hide.persisted = true;
+  dom.window.dispatchEvent(hide);
+
+  const before = created.length;
+  const wrapper = document.createElement("div");
+  wrapper.className = "jwplayer";
+  const late = document.createElement("video");
+  wrapper.appendChild(late);
+  document.body.appendChild(wrapper);
+  late.getBoundingClientRect = () => ({ width: 640, height: 360, top: 0, left: 0, right: 640, bottom: 360 });
+  late.checkVisibility = () => true;
+  late.dispatchEvent(new dom.window.Event("loadeddata", { bubbles: true }));
+
+  await waitFor(() => created.length > before, 3000);
+  assert.equal(created.length, before + 1, "the restored page still notifies its shell-created listener");
+});

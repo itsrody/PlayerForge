@@ -68,6 +68,13 @@ export class Kernel {
       // pageshow/pagehide listeners drop. Lifecycle/registry teardown below
       // then runs with all watch machinery already dead.
       this.#scope.dispose();
+      // Subscribers too. The kernel owns this set, so it owns its release:
+      // callers register and drop the returned unsubscribe (nothing re-registers
+      // a listener per page, so there is no double-fire to guard), and a
+      // discarded page should not keep the closures alive. Deliberately inside
+      // the !persisted branch - a bfcache hide restores the page, and the
+      // reconcile path above still needs whoever registered to be listening.
+      this.#createdListeners.clear();
       // Tear down in-flight settle waits so their observers + timers die
       // immediately instead of running the full quiet/cap window on a page
       // that is already leaving.
@@ -95,7 +102,14 @@ export class Kernel {
     this.#shellProvider = provider;
   }
 
-  /** Register a shell-ready listener directly; returns an unsubscribe. */
+  /**
+   * Register a shell-ready listener directly; returns an unsubscribe.
+   *
+   * The kernel owns this set and releases it on a real pagehide, so a caller
+   * that registers once per document (entry.js does) does not have to thread
+   * the unsubscribe anywhere. The handle is still returned for callers that DO
+   * register per-shell or conditionally.
+   */
   onShellCreated(cb) {
     this.#createdListeners.add(cb);
     return () => this.#createdListeners.delete(cb);
