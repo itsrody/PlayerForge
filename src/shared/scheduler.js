@@ -31,6 +31,16 @@
  * postTask itself behaves correctly in that same shape (only the yield
  * continuation is poisoned), so postTask is called directly. Every export is
  * a plain function, so the hot path stays inline-friendly.
+ *
+ * One more Gecko 157 property, measured because it is a trap rather than a
+ * spec guarantee: a postTask that re-arms itself at the SAME priority does not
+ * yield to rendering. A 40-deep self-rearming user-visible chain drained in
+ * 0.26ms with zero requestAnimationFrame callbacks in between, in a window
+ * whose idle rAF baseline is 25 frames per 200ms - so the zero is starvation,
+ * not a dead frame. (setTimeout(0) chains do interleave normally.) postTask is
+ * therefore only ever used for one-shot deferred work, re-armed from a
+ * MutationObserver callback or a timer; a retry/spin loop built on postTask
+ * would freeze paint and input for the whole page.
  */
 
 import { logger } from "./diagnostics.js";

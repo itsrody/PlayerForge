@@ -80,8 +80,10 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
       return;
     }
     const present = document.querySelectorAll("video");
-    for (const video of present) {
-      consider(video);
+    // Index walk, not for..of: a static NodeList is a cheap array underneath,
+    // and the iterator protocol here costs more than the walk it replaces.
+    for (let i = 0; i < present.length; i++) {
+      consider(present[i]);
     }
     if (!done && present.length) {
       // Static video(s) exist but none qualified yet - keep the observer armed

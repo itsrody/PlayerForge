@@ -33,7 +33,13 @@ export class Kernel {
    *  only on the failure path - a boot that throws deterministically must not
    *  be re-attempted on every mutation record, so the second failure is final. */
   #bootRetried = new WeakSet();
-  #removalTimers = new Map();
+  /** Pending disconnect graces, keyed by the video that is going away. Weak,
+   *  and only ever probed per-video (has/get/set/delete - never iterated):
+   *  the entry is removed by the grace callback, but on pagehide the task is
+   *  aborted, so that callback never runs. A strong Map would then pin a
+   *  detached video and its whole subtree for the rest of the document's
+   *  life, which is exactly what the Weak sets above refuse to do. */
+  #removalTimers = new WeakMap();
   /** Unsubscribe for the shared discovery tap; dropped at pagehide. */
   #stopDiscoveryTap = null;
   /** True once the full-document discovery tap has been downgraded. */

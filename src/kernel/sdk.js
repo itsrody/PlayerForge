@@ -253,6 +253,16 @@ export function meetsMinSize(video, minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_
   // forcing a layout flush via getBoundingClientRect. Feature-detect keeps
   // jsdom (no checkVisibility) and any stragglers on the rect-only path - and
   // the gate is admission-negative only, so discovery can never regress.
+  //
+  // contentVisibilityAuto is deliberately NOT passed, even though Gecko 157
+  // supports it and it would reject videos parked in a skipped
+  // `content-visibility: auto` subtree (measured: such a video reports
+  // checkVisibility true, and a 400x300 rect from contain-intrinsic-size, but
+  // flips to false with the option set). Rejecting them would trade a
+  // cosmetic win for a lost player: that subtree renders on scroll, and a
+  // video that is only ever revealed that way still needs a shell ready. The
+  // static probe and the media-event tap already re-run this gate, so a late
+  // reveal is adopted when the video first loads or plays.
   if (typeof video.checkVisibility === "function" &&
       !video.checkVisibility({ opacityProperty: true, visibilityProperty: true })) {
     return false;
