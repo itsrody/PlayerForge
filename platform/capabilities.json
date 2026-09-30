@@ -19,11 +19,7 @@
     "new platform API cannot skip the manifest the way scheduler.postTask and",
     "TextTrack did.",
     "",
-    "Known boundary of the scan: it reads `typeof` chains whose root is a global or a known host object. A `typeof` probe on a local reference (cue.getCueAsHTML, event.getPredictedEvents) starts at a lowercase local name, and an unguarded bare global (new MediaMetadata) is not a typeof at all - neither is machine-visible. Both are recorded here by hand instead, and the token check keeps those rows honest too. The scan is a floor on coverage, not a ceiling.",
-    "or a known host object. A member probe on a local reference (cue.",
-    "getCueAsHTML, event.getPredictedEvents) and an",
-    "unguarded bare global (new MediaMetadata) are NOT machine-visible; those are",
-    "recorded here by hand. The scan is a floor on coverage, not a ceiling."
+    "Known boundary of the scan: it reads `typeof` chains whose root is a global or a known host object. A member probe on a local reference (cue.getCueAsHTML, el.requestFullscreen) starts at a lowercase local name, and an unguarded bare global (new MediaMetadata) is not a typeof at all - neither is machine-visible. Those are recorded here by hand instead, and the token check keeps the rows honest too. The scan is a floor on coverage, not a ceiling."
   ],
   "target": {
     "engine": "Gecko",
@@ -43,6 +39,19 @@
         "document.startViewTransition"
       ],
       "token": "startViewTransition"
+    },
+    {
+      "id": "CloseWatcher",
+      "summary": "UA-owned dismissal watcher for the settings panel: the UA closes the panel on Esc (and the Android back button) even when a page-level keydown handler swallows or reorders the event before it reaches the shadow host",
+      "shipsInFirefox": 149,
+      "usedBy": [
+        "src/shell/chrome/panel.js"
+      ],
+      "verifiedBy": "tests/panel-compact.test.mjs",
+      "probes": [
+        "CloseWatcher"
+      ],
+      "note": "Enabled by default in Gecko 149 (bug 1966073), below the 157 floor, so the watcher in #armDismissal is the live dismissal path on every supported target and the guarded keydown/pointerdown document listeners are the fallback rather than the primary. The probe is kept because the constructor can still throw on a host that gates the interface; the catch degrades to the keydown path instead of failing."
     },
     {
       "id": "adoptedStyleSheets",
@@ -183,6 +192,15 @@
       ]
     },
     {
+      "id": "predicted-pointer-events",
+      "summary": "PointerEvent.getPredictedEvents()",
+      "why": "Gecko exposes the method but not the behaviour: since 89 it has been a shim that returns an empty sequence for every UA-generated event (bug 1702175, 'getPredictedEvents can just return empty sequence normally'), and the real implementation (bug 1550461) is still open. So the typeof guard in the scrub path passed on the 157 floor while the call could never contribute a sample - it bought nothing and cost one array allocation on every non-zero pointer move in a path written to allocate nothing per move. Scrub velocity is measured from coalesced and live samples only.",
+      "matchPattern": "getPredictedEvents",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
       "id": "GM_setClipboard",
       "summary": "Manager clipboard write",
       "why": "Never called by any feature, so the grant would be dead permission surface. Use navigator.clipboard instead.",
@@ -242,19 +260,6 @@
       "probes": [
         "matchMedia"
       ]
-    },
-    {
-      "id": "CloseWatcher",
-      "api": "CloseWatcher",
-      "summary": "UA-owned Escape watcher for the panel",
-      "why": "Gecko does not implement it, so the fork's own keydown Escape path is the live one on every target. The branch exists for hosts that do.",
-      "usedBy": [
-        "src/shell/chrome/panel.js"
-      ],
-      "probes": [
-        "CloseWatcher"
-      ],
-      "note": "Documented as absent on the target platform, not merely unimplemented."
     },
     {
       "id": "screen",
@@ -371,17 +376,6 @@
         "src/shell/inputs/forge.js"
       ],
       "token": "getCoalescedEvents"
-    },
-    {
-      "id": "getPredictedEvents",
-      "api": "getPredictedEvents",
-      "summary": "Predicts the pointer type a touch is becoming, to pick the drag affordance early",
-      "why": "Nothing is lost on the target: Gecko does not implement it, so the shipped path is already the fallback. Recorded so the typeof guard is not mistaken for dead code.",
-      "usedBy": [
-        "src/shell/inputs/forge.js"
-      ],
-      "token": "getPredictedEvents",
-      "note": "Absent on Firefox, like CloseWatcher - the branch exists for hosts that do ship it."
     },
     {
       "id": "fullscreen",

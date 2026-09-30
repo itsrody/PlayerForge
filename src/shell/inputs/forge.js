@@ -820,17 +820,15 @@ export class InputForge {
    * signal responsive enough to track speed changes mid-stroke, so the seek
    * amount stays proportional to the hand in real time.
    *
-   * PointerEvent.getPredictedEvents() (absent on Firefox) returns
-   * extrapolated FUTURE
-   * positions. We speculatively "draw ahead" with them, matching the drawing
-   * idiom in the Pointer Events spec (predict, then discard once real points
-   * arrive): predicted travel feeds the VELOCITY estimate only, never the
-   * confirmed seek delta (#scrubLastX stays pinned to real samples). Because
-   * scrub's amount is a monotonic function of velocity, a fresher, higher
-   * velocity read makes the response feel ahead of the hand - lower perceived
-   * latency - while the absolute position stays grounded in real motion, so a
-   * prediction can never overshoot or drift a fast flick. Prediction is
-   * bounded: only the first predicted sample, capped to the confirmed travel.
+   * PointerEvent.getPredictedEvents() used to speculatively "draw ahead" of
+   * the hand here. It is gone: Gecko exposes the method but not the
+   * behaviour - since 89 it has been a shim returning an empty sequence for
+   * every UA-generated event (bug 1702175), and the real implementation
+   * (bug 1550461) is still open. The typeof guard therefore passed on the
+   * 157 floor while the call could never return a sample, so it bought
+   * nothing and cost one array allocation on every non-zero move in a path
+   * written to allocate nothing per move. capabilities.json holds the token
+   * retired so it cannot return behind the same guard.
    */
   #advanceScrub(event) {
     let totalStep = 0;
@@ -853,27 +851,10 @@ export class InputForge {
       this.#scrubLastX = event.clientX;
     }
 
-    // Speculative velocity wash: the first predicted pointer beats the live
-    // event just enough to pull the velocity estimate forward, but is clamped
-    // to a fraction of the confirmed step so it can never dominate or reverse
-    // against a correcting hand. Purely a velocity-shaping signal.
-    const hasPredicted = hasCoalesced && typeof event.getPredictedEvents === "function";
-    let velocityStep = totalStep;
-    // Zero step: the additive term below is Math.sign(0) * (...) = 0 no
-    // matter what the prediction says, so skip the browser's array alloc
-    // (and a NaN delta can no longer poison velocityStep at rest).
-    if (hasPredicted && totalStep !== 0) {
-      const predicted = event.getPredictedEvents();
-      if (predicted && predicted.length) {
-        velocityStep += Math.sign(totalStep) *
-          Math.min(Math.abs(predicted[0].clientX - event.clientX), Math.abs(totalStep));
-      }
-    }
-
     const now = event.timeStamp;
     const dt = (now - this.#scrubLastTime) / 1000;
     this.#scrubLastTime = now;
-    const instantVelocity = dt > 0.001 ? velocityStep / dt : 0;
+    const instantVelocity = dt > 0.001 ? totalStep / dt : 0;
     const alpha = dt > 0 ? 1 - Math.exp(-dt / SCRUB_VELOCITY_TAU_S) : 0;
     this.#scrubVelocity += alpha * (instantVelocity - this.#scrubVelocity);
     // Emit via the pooled event: the payload and the Event both ride reused

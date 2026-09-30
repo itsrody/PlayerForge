@@ -233,9 +233,11 @@ function createStepper({
  * API: features declare controls through parameterized builders
  * (addStepper/addButton/addCheckbox/...) instead of assembling DOM.
  * The root is a plain sheet in the HUD layer under the host's z-index
- * doctrine; open/close is a class flip on display, and Esc plus
- * outside-click dismissal are ours (guarded document listeners).
- * Arrow-key tab navigation likewise stays ours.
+ * doctrine; open/close is a class flip on display. Dismissal runs through a
+ * UA CloseWatcher where the host has one - it does on the whole 157 floor -
+ * with guarded document keydown/pointerdown listeners as the fallback.
+ * Arrow-key tab navigation is ours; the popover/Top Layer path that would
+ * have owned it was reverted (see the z-index doctrine).
  */
 export class SettingsPanel {
   #hudLayer;
@@ -345,12 +347,16 @@ export class SettingsPanel {
    * Esc + outside-click dismissal exists only while the panel is open. Arming
    * it per open() keeps two document listeners out of the page's hot path for
    * shells whose panel is never (or rarely) opened; close()/destroy() abort
-   * the per-open scope, so they die with the open state. Escape also gets a
-   * CloseWatcher where the host provides one (Firefox does not, so the
-   * keydown path above is the live path there): where it exists the UA then
-   * dismisses us even when a page-level keydown handler would otherwise
-   * swallow or reorder the event, and we do not depend on the event still
-   * bubbling to the shadow host.
+   * the per-open scope, so they die with the open state.
+   *
+   * Gecko has shipped CloseWatcher by default since 149 (bug 1966073), below
+   * the 157 floor, so the watcher below is the LIVE path on every supported
+   * target and the two document listeners are the fallback. That ordering is
+   * the point: with the watcher armed, the UA dismisses us even when a
+   * page-level keydown handler would otherwise swallow or reorder the event,
+   * and we no longer depend on it still bubbling to the shadow host. On
+   * Android the same watcher is what the back button consumes, so the panel
+   * closes on back rather than letting the press reach the page.
    */
   #armDismissal() {
     if (this.#dismissScope || this.#scope.disposed) {

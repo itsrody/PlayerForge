@@ -723,7 +723,13 @@ function scrubMoveEvent(win, { x, y, coalesced, predicted, ts }) {
   return event;
 }
 
-test("predicted pointer travel lifts scrub velocity but never the confirmed delta", () => {
+/**
+ * Drive one pointerdown plus two rightward scrub moves and report the second
+ * move's scrub payload. `predicted` plants a getPredictedEvents() on the final
+ * move the way a UA that actually implements prediction would, so the same
+ * gesture can be run with and without the hint.
+ */
+function runScrub(predicted) {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true);
   Object.defineProperty(video, "currentTime", { value: 0, writable: true, configurable: true });
@@ -732,31 +738,41 @@ test("predicted pointer travel lifts scrub velocity but never the confirmed delt
 
   // pointerdown at x=100 latches the start; then two scrub moves to the right.
   zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 100, y: 200 }));
-  // Move 1: confirmed 20px travel, no prediction -> dx is exactly 20.
+  // Move 1: confirmed 20px travel -> dx is exactly 20.
   zone.dispatchEvent(scrubMoveEvent(dom.window, {
     x: 120, y: 205, ts: 1000, coalesced: [{ clientX: 120, clientY: 205 }]
   }));
-  // Move 2: confirmed +10px, predicted +9px further ahead (same sign, capped).
+  // Move 2: confirmed +10px.
   zone.dispatchEvent(scrubMoveEvent(dom.window, {
     x: 130, y: 208, ts: 1050,
     coalesced: [{ clientX: 130, clientY: 208 }],
-    predicted: [{ clientX: 139, clientY: 211 }]
+    predicted
   }));
 
   const scrubs = seen.filter((entry) => entry.type === GESTURE_EVENTS.scrub);
-  // The confirmed dx payload is grounded in real samples (10px here, plus the
-  // 20px from move 1 -> this event's dx is the 10px move).
-  assert.equal(scrubs[1].detail.dx, 10, "dx stays pinned to confirmed motion");
-  // The prediction only shapes velocity: a +9px prediction on a +10px step
-  // must raise the velocity estimate above the confirmed-only value.
-  const dtSec = 0.05;
-  const confirmedOnlyVelocity = 10 / dtSec;
-  assert.ok(
-    scrubs[1].detail.velocity > confirmedOnlyVelocity,
-    `prediction raised velocity (${scrubs[1].detail.velocity} > ${confirmedOnlyVelocity})`
-  );
+  const detail = { ...scrubs[1].detail };
   controller.destroy();
   dom.window.close();
+  return detail;
+}
+
+test("scrub velocity comes from confirmed samples; a prediction hint changes nothing", () => {
+  const confirmedOnly = runScrub(undefined);
+  // dx is grounded in real samples (10px here), never in predicted travel.
+  assert.equal(confirmedOnly.dx, 10, "dx stays pinned to confirmed motion");
+  assert.ok(confirmedOnly.velocity > 0, "velocity is computed from the confirmed step");
+
+  // Gecko exposes getPredictedEvents but never populates it (bug 1702175), so
+  // the retired branch could only ever add an allocation, never a sample. If it
+  // comes back, the hinted run's velocity rises above the confirmed-only value
+  // and this fails; platform/capabilities.json holds the token retired.
+  const hinted = runScrub([{ clientX: 139, clientY: 211 }]);
+  assert.equal(hinted.dx, confirmedOnly.dx, "a prediction hint does not move the payload");
+  assert.equal(
+    hinted.velocity,
+    confirmedOnly.velocity,
+    "a prediction hint does not lift velocity"
+  );
 });
 
 test("swipe-down drag promotes a compositor layer, released on restore", () => {

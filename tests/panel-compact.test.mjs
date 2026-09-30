@@ -71,8 +71,76 @@ async function makeShell(autoDetect) {
   const teardown = () => {
     shell.destroy();
     delete globalThis.matchMedia;
+    delete globalThis.CloseWatcher;
   };
   return { dom, shell, container, video, teardown };
+}
+
+/**
+ * CloseWatcher fake. Gecko has shipped the interface on by default since 149
+ * (bug 1966073), below the 157 floor, so in production this - not the keydown
+ * listener - is the live dismissal path, and without a fake here the branch in
+ * #armDismissal would never execute under the harness. It models the parts
+ * panel.js actually depends on: a UA-initiated close (Esc, or the Android back
+ * button) fires `close`; close() fires `close` and THEN deactivates, which is
+ * why #teardownDismissal nulls its refs before calling it; and a listener
+ * registered with a signal detaches when that signal aborts.
+ */
+function installCloseWatcher() {
+  const instances = [];
+  class FakeCloseWatcher {
+    static throwOnConstruct = false;
+    #listeners = new Set();
+    #closed = false;
+    constructor() {
+      if (FakeCloseWatcher.throwOnConstruct) {
+        throw new TypeError("CloseWatcher is gated on this host");
+      }
+      instances.push(this);
+    }
+    addEventListener(type, fn, opts) {
+      if (type !== "close") {
+        return;
+      }
+      this.#listeners.add(fn);
+      opts?.signal?.addEventListener?.("abort", () => this.#listeners.delete(fn), { once: true });
+    }
+    removeEventListener(type, fn) {
+      if (type === "close") {
+        this.#listeners.delete(fn);
+      }
+    }
+    /** UA-initiated close: Esc, or the Android back button. */
+    requestClose() {
+      if (this.#closed) {
+        return;
+      }
+      this.#fire();
+    }
+    /** Script-initiated close: fires `close`, then deactivates. */
+    close() {
+      if (this.#closed) {
+        return;
+      }
+      this.#fire();
+      this.#closed = true;
+      this.#listeners.clear();
+    }
+    destroy() {
+      this.#closed = true;
+      this.#listeners.clear();
+    }
+    get closed() {
+      return this.#closed;
+    }
+    #fire() {
+      for (const fn of [...this.#listeners]) {
+        fn({ type: "close" });
+      }
+    }
+  }
+  globalThis.CloseWatcher = FakeCloseWatcher;
+  return { instances, FakeCloseWatcher };
 }
 
 test("compact class tracks a live viewport crossing while open", async () => {
@@ -216,6 +284,57 @@ test("dismissal listeners arm per open and die with the panel", async () => {
     cancelable: true
   }));
   assert.equal(shell.panel.isOpen, false, "a press outside the shell closes the open panel");
+
+  teardown();
+});
+
+test("the UA CloseWatcher dismisses the open panel on the target floor", async () => {
+  installMatchMedia();
+  const watcher = installCloseWatcher();
+  const { shell, teardown } = await makeShell(false);
+  await shell.panel.open();
+  assert.equal(watcher.instances.length, 1, "opening the panel arms a UA close watcher");
+
+  // Closed by the UA itself (its own Esc dispatch, or the Android back button)
+  // - no keydown of ours has to reach the shadow host for this to work.
+  watcher.instances[0].requestClose();
+  assert.equal(shell.panel.isOpen, false, "the watcher's close event closed the panel");
+
+  teardown();
+});
+
+test("closing the panel deactivates its watcher and survives the re-entrant close", async () => {
+  installMatchMedia();
+  const watcher = installCloseWatcher();
+  const { shell, teardown } = await makeShell(false);
+  await shell.panel.open();
+  const instance = watcher.instances[0];
+
+  // close() fires `close` before deactivating, which re-enters the panel's own
+  // close(). The refs are nulled first so that re-entry finds nothing left to
+  // tear down; this asserts the panel survives the round trip and can reopen.
+  assert.doesNotThrow(() => shell.panel.close());
+  assert.equal(instance.closed, true, "the watcher was deactivated with the open state");
+  assert.equal(shell.panel.isOpen, false);
+
+  await shell.panel.open();
+  assert.equal(shell.panel.isOpen, true, "the panel reopens after the re-entrant close");
+  assert.equal(watcher.instances.length, 2, "a fresh watcher arms for the next open");
+
+  teardown();
+});
+
+test("a CloseWatcher that cannot be constructed degrades to the keydown path", async () => {
+  installMatchMedia();
+  const watcher = installCloseWatcher();
+  watcher.FakeCloseWatcher.throwOnConstruct = true;
+  const { shell, teardown } = await makeShell(false);
+  await shell.panel.open();
+  assert.equal(watcher.instances.length, 0, "the gated constructor never produced a watcher");
+  assert.equal(shell.panel.isOpen, true, "the panel still opened without the watcher");
+
+  document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  assert.equal(shell.panel.isOpen, false, "the fallback keydown path still dismisses");
 
   teardown();
 });
