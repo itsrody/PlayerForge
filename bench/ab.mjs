@@ -19,7 +19,7 @@
  * node_modules by normal upward lookup.
  */
 import { execFileSync } from "node:child_process";
-import { rmSync, existsSync, copyFileSync, readFileSync } from "node:fs";
+import { rmSync, existsSync, copyFileSync } from "node:fs";
 import { join, relative, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 

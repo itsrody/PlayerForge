@@ -4,7 +4,11 @@ import { register } from "node:module";
 
 // Node has no CSS module support; the esbuild bundle inlines styles.css, but
 // forge.js -> inject.js imports it. Short-circuit it the same way tests do.
-register("file:///Users/itsrody/Documents/Projects/PlayerForge/tests/css-hook.mjs", import.meta.url);
+// Relative to this file so the path survives a checkout anywhere and the A/B
+// ref worktree - a hardcoded absolute path made module.register() throw at
+// import time, which took down `npm run bench`, `npm run ci` and side B of
+// the A/B before a single case ran.
+register("../../tests/css-hook.mjs", import.meta.url);
 
 // jsdom lacks several platform APIs the Gecko-only production code uses
 // unconditionally; shim the bare globals the forge's constructor touches.
@@ -81,7 +85,9 @@ const MOVES = 30;
 export default [
   define("scrub per-move dispatch (down + 30 moves)", () => {
     const { dom, video, zone, host } = makeEnv();
-    const controller = new InputForge(video, zone, host);
+    // The handle itself is never read - the constructor is the point: it binds
+    // the pointer/gesture listeners this case is measuring.
+    new InputForge(video, zone, host);
     let scrubCount = 0;
     host.addEventListener(GESTURE_EVENTS.scrub, () => { scrubCount++; });
 

@@ -53,7 +53,7 @@ test("play is inert before metadata loads", async () => {
 });
 
 test("controls engage once metadata is loaded (readyState 4)", async () => {
-  const { dom, video, controls } = makeEnv(4);
+  const { video, controls } = makeEnv(4);
   Object.defineProperty(video, "duration", { value: 120, configurable: true });
   video.play = () => Promise.resolve();
 

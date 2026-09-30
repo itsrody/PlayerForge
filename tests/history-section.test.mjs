@@ -30,7 +30,7 @@ function makeFakePanel() {
   };
   return {
     el: (tag, attrs, parent) => node(tag, attrs, parent),
-    addSection: (title, id) => {
+    addSection: (title, _id) => {
       sectionRoot = node("div", { title });
       return sectionRoot;
     }

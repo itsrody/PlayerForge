@@ -8,7 +8,6 @@ globalThis.GM_setValue = () => {};
 const { Shell } = await import("../src/shell/shell.js");
 const { initFsGate, setFullscreen } = await import("./fs-gate.mjs");
 const { subscribeFullscreen } = await import("../src/shared/shadow.js");
-const { getSetting, setSetting } = await import("../src/shell/chrome/config.js");
 const { requestFullscreenProvision, FS_REQUEST_TYPE } = await import("../src/shared/context.js");
 async function makeShell({ embedded = false } = {}) {
   const outer = new JSDOM("<!doctype html><html><body></body></html>", {
@@ -154,7 +153,7 @@ test("rejected fullscreen while already fullscreen shows no hint", async () => {
 });
 
 test("a rejected fullscreen re-provisions the chain after boot already spent the latch", async () => {
-  const { dom, shell, parent, teardown } = await makeShell({ embedded: true });
+  const { dom, parent, teardown } = await makeShell({ embedded: true });
 
   // The handler posts to window.parent, which is the outer frame here.
   const posted = [];

@@ -64,7 +64,7 @@ function wheelEvent(win, { deltaY, ctrlKey }) {
 }
 
 /** Collector for gesture CustomEvents fired on the host. */
-function collect(host, win) {
+function collect(host, _win) {
   const seen = [];
   for (const name of Object.values(GESTURE_EVENTS)) {
     host.addEventListener(name, (event) => {
@@ -486,11 +486,11 @@ test("a space press that started in a text field never toggles playback on keyup
 /** SDK-side observer: bubble listeners at the same node the platform would
  *  bind to (the container/zone), registered after the forge like a real
  *  SDK's would be. */
-function sdkObserver(zone, win) {
+function sdkObserver(zone, _win) {
   const seen = [];
   for (const type of ["pointerdown", "pointermove", "pointerup", "pointerover",
     "mousedown", "mousemove", "mouseup", "touchstart", "touchend", "click", "dblclick"]) {
-    zone.addEventListener(type, (event) => seen.push(type));
+    zone.addEventListener(type, (_event) => seen.push(type));
   }
   return seen;
 }
@@ -792,7 +792,7 @@ test("swipe-down drag promotes a compositor layer, released on restore", () => {
 });
 
 test("fill pinch owns object-fit: contain and restores it on clear", () => {
-  const { dom, video, zone, host } = makeEnv();
+  const { dom, video, host } = makeEnv();
   stubFullscreen(dom, true);
   Object.defineProperty(video, "videoWidth", { value: 1920, configurable: true });
   Object.defineProperty(video, "videoHeight", { value: 1080, configurable: true });

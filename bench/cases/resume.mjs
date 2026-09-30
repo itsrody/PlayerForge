@@ -56,10 +56,19 @@ export default [
   }),
 
   define("resume updateResume persist+merge (200 entries)", () => {
-    const freshStore = new ResumeStore();
+    // Seed and force the lazy load HERE, in the factory. Every factory in
+    // this file runs at import time, before any body executes - and the
+    // previous case replaces `backing` with a 10-entry store on its way past.
+    // Loading lazily inside the measured body therefore found 10 hashed ids,
+    // `updateResume("e180")` matched nothing, and the whole body was skipped:
+    // the row measured 20 no-op lookups, never touching merge or persist.
+    // Forcing the load now pins the 200 seeded entries in memory.
+    backing = { [STORE_KEY]: seed() };
+    const store = new ResumeStore();
+    store.getEntries();
     return () => {
       for (let i = 0; i < 20; i++) {
-        freshStore.updateResume(`e${180 + i}`, 100 + i);
+        store.updateResume(`e${180 + i}`, 100 + i);
       }
     };
   })

@@ -12,7 +12,6 @@ import {
   createFrameRelay,
   installContextBridge,
   requestFullscreenProvision,
-  replayFullscreenProvision,
   createTopFrameProvisioner,
   createFrameProvisioner,
   FS_REQUEST_TYPE,

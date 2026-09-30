@@ -50,7 +50,7 @@ function makeRealm() {
 // the life of the document, and the HUD stayed in the container. The boot
 // rollback is what makes the video adoptable again.
 test("a boot that throws after injection rolls the shell DOM back", async () => {
-  const { dom, container, video } = makeRealm();
+  const { container, video } = makeRealm();
   const native = globalThis.getComputedStyle;
   // Delegate until the video is marked - i.e. until #markManaged has run - then
   // fail. getComputedStyle is the first call after the markers go on, so this
@@ -72,7 +72,7 @@ test("a boot that throws after injection rolls the shell DOM back", async () => 
 });
 
 test("destroy() stays idempotent after a failed boot rolled back", async () => {
-  const { dom, container, video } = makeRealm();
+  const { container, video } = makeRealm();
   const native = globalThis.getComputedStyle;
   globalThis.getComputedStyle = (el) => {
     if (video.hasAttribute(SHELL_MARKER)) {
