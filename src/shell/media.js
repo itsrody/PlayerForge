@@ -151,10 +151,22 @@ export function createMediaControls({ video }) {
       video.playbackRate = speed;
     },
 
+    /**
+     * The one control that is NOT gated on isReady(), and the asymmetry is
+     * deliberate: this is a RESTORE, not a command.
+     *
+     * Every other primitive no-ops before metadata because it needs a timeline
+     * to act on. Writing playbackRate needs none - Gecko 157 accepts the write
+     * at readyState 0 (measured: setting 1.0 on an emptied element sticks).
+     * Gating it means a readiness drop DURING a hold strands the video at hold
+     * speed permanently: an SDK that reassigns src or calls load() while the
+     * user holds fires `emptied` (readyState 0), the release finds the gate
+     * shut, and nothing ever puts the rate back - the user is left watching
+     * everything at 2x with no control that explains it. That is the same
+     * stranded-boost bug the keyboard hold path already had to be patched for
+     * (see forge.js #resetKeyboardHold); this is the readiness-drop variant.
+     */
     endBoost(speed) {
-      if (!isReady()) {
-        return;
-      }
       video.playbackRate = speed;
     }
   };
@@ -248,7 +260,14 @@ class MediaSessionBridge {
     session.setActionHandler("seekforward", (details) => controls.skip(details?.seekOffset || 10));
     session.setActionHandler("seekto", (details) => {
       if (details?.seekTime != null) {
-        if (details.fastSeek) {
+        // fastSeek is a Gecko extension, not Baseline: it ships on the whole
+        // 157 floor but is absent on the jsdom host (and would be on any host
+        // that drops it). Calling it unguarded threw a TypeError straight into
+        // the page's error channel from inside a UA action handler - and
+        // Gecko DOES send seekto with fastSeek set from its own media keys.
+        // Fall back to the clamped command-plane seek, which is the same
+        // intent without the extension.
+        if (details.fastSeek && typeof video.fastSeek === "function") {
           video.fastSeek(details.seekTime);
         } else {
           controls.seekTo(details.seekTime);

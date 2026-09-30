@@ -33,12 +33,37 @@ test("every control is inert before metadata loads (readyState 0)", async () => 
   controls.setVolume(0.3);
   controls.nudgeVolume("up");
   controls.beginBoost(2);
-  controls.endBoost(1);
   controls.pause();
   await controls.togglePlay();
   await controls.play();
 
   assert.deepEqual(snap(), before, "no control touches the video before load");
+});
+
+test("endBoost restores the rate even after readiness drops mid-hold", () => {
+  // A hold that straddles a readiness drop must still put the rate back.
+  // `emptied` (src reassigned / load() called under the user's finger) sends
+  // readyState to 0; gating the RESTORE on readiness stranded the video at
+  // hold speed for the rest of the session. Gecko accepts the write at
+  // readyState 0, so the restore has no reason to be gated.
+  const { video, controls } = makeEnv(4);
+  controls.beginBoost(2);
+  assert.equal(video.playbackRate, 2, "boost engaged while ready");
+
+  Object.defineProperty(video, "readyState", { value: 0, configurable: true });
+  controls.endBoost(1);
+
+  assert.equal(video.playbackRate, 1, "release restores the rate after `emptied`");
+});
+
+test("endBoost at readyState 0 from a cold start is a no-op in effect", () => {
+  // The restore writes the rate verbatim, so a release that never boosted
+  // writes back the saved rate rather than corrupting one. Pinned so the
+  // ungated write cannot quietly become a no-op that strands a live boost.
+  const { video, controls } = makeEnv(0);
+  video.playbackRate = 1.5;
+  controls.endBoost(1);
+  assert.equal(video.playbackRate, 1);
 });
 
 test("play is inert before metadata loads", async () => {
@@ -195,4 +220,90 @@ test("URL.canParse gates MediaSession poster artwork", () => {
     delete globalThis.document;
     delete globalThis.location;
   }
+});
+
+/** Session double that RECORDS action handlers, so a UA action can be fired. */
+function makeActionSession() {
+  const handlers = new Map();
+  return {
+    handlers,
+    playbackState: "none",
+    metadata: null,
+    setActionHandler(action, fn) {
+      handlers.set(action, fn);
+    },
+    setPositionState() {}
+  };
+}
+
+/**
+ * Claim a session against a video and hand back the seekto handler. jsdom's
+ * media element has NO fastSeek, which is exactly the host that used to throw.
+ */
+function claimSeekto({ withFastSeek = false, readyState = 4, duration = 120 } = {}) {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+    url: "https://example.com/watch?v=1"
+  });
+  const video = dom.window.document.createElement("video");
+  Object.defineProperty(video, "readyState", { value: readyState, configurable: true });
+  Object.defineProperty(video, "duration", { value: duration, configurable: true });
+  const fastSeekCalls = [];
+  if (withFastSeek) {
+    video.fastSeek = (t) => fastSeekCalls.push(t);
+  }
+
+  const session = makeActionSession();
+  const controls = createMediaControls({ video });
+  const scope = new dom.window.AbortController();
+  const saved = {
+    doc: globalThis.document, loc: globalThis.location,
+    md: globalThis.MediaMetadata, ac: globalThis.AbortController,
+  };
+  globalThis.document = dom.window.document;
+  globalThis.location = dom.window.location;
+  globalThis.MediaMetadata = class MediaMetadata { constructor(o) { this.o = o; } };
+  globalThis.AbortController = dom.window.AbortController;
+  try {
+    claimMediaSession({ controls, video, signal: scope.signal, session });
+  } finally {
+    globalThis.document = saved.doc;
+    globalThis.location = saved.loc;
+    globalThis.MediaMetadata = saved.md;
+    globalThis.AbortController = saved.ac;
+  }
+  return { video, session, fastSeekCalls, seekto: session.handlers.get("seekto") };
+}
+
+test("seekto uses the clamped command plane when fastSeek is not requested", () => {
+  const { video, seekto } = claimSeekto();
+  seekto({ seekTime: 42 });
+  assert.equal(video.currentTime, 42, "plain seekto lands on the requested time");
+
+  seekto({ seekTime: 9999 });
+  assert.equal(video.currentTime, 120, "and stays clamped to duration");
+});
+
+test("seekto takes the Gecko fastSeek path when the host provides it", () => {
+  const { video, fastSeekCalls, seekto } = claimSeekto({ withFastSeek: true });
+  seekto({ seekTime: 42, fastSeek: true });
+  assert.deepEqual(fastSeekCalls, [42], "fastSeek is used when present");
+  assert.equal(video.currentTime, 0, "and bypasses the clamped seek");
+});
+
+test("seekto survives a host without fastSeek instead of throwing", () => {
+  // Regression: an unguarded video.fastSeek() threw a TypeError into the
+  // page's error channel from inside a UA action handler. Gecko itself sends
+  // seekto with fastSeek set from its own media keys, so the flag cannot be
+  // treated as implying the method exists.
+  const { video, seekto } = claimSeekto({ withFastSeek: false });
+  assert.doesNotThrow(() => seekto({ seekTime: 42, fastSeek: true }), "no TypeError on a host without fastSeek");
+  assert.equal(video.currentTime, 42, "falls back to the clamped command-plane seek");
+});
+
+test("seekto without a seekTime is inert", () => {
+  const { video, seekto } = claimSeekto();
+  seekto({});
+  seekto({ fastSeek: true });
+  seekto(undefined);
+  assert.equal(video.currentTime, 0, "no target means no seek");
 });
