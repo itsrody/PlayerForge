@@ -461,8 +461,18 @@ try {
     const seen = new Set(baseline);
     return (await readConsoleErrors()).filter((t) => !seen.has(t));
   };
+  // Gecko's m.error flag is NOT a severity filter: a content console.warn is
+  // never recorded at all, but a "Layout was forced before the page was fully
+  // loaded" FOUC warning IS recorded with error:true, and it arrives whenever PF
+  // happens to force layout early. Left in, it made this check fail on roughly
+  // one run in five for a condition that is not a failure. The message text
+  // carries the real severity, so filter on that instead.
   const ours = [...servers.map((s) => s.url), `moz-extension://${origin}`];
-  const attributable = (errs) => errs.filter((t) => !/favicon/i.test(t) && ours.some((o) => t.includes(o)));
+  const attributable = (errs) => errs.filter(
+    (t) => !/favicon/i.test(t) &&
+           !/JavaScript Warning:/i.test(t) &&
+           ours.some((o) => t.includes(o))
+  );
   const finalErrors = attributable(await newErrorsSinceBaseline(errorBaseline));
   check(
     "no uncaught errors from a fixture page, any frame, or the manager's realm",

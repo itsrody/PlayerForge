@@ -23,7 +23,10 @@
  *                     forwards but does not relay the ANSWER back is a distinct
  *                     failure from a relay that never receives the request.
  *   switchboard       N cross-origin cards, one live iframe at a time, the rest
- *                     placeholders. Tests churn: boot, switch, destroy.
+ *                     placeholders. Tested in both placeholder strategies,
+ *                     because the realm dies in both and only the ELEMENT
+ *                     differs - see the parked test for what that does and
+ *                     does not buy.
  *
  * A placeholder is asserted as a NEGATIVE case in two forms, because they are
  * different claims: a frame element that never received a src must produce no
@@ -291,7 +294,7 @@ test("switchboard: one live cross-origin card, the rest placeholders", async () 
   assert.ok(allPlaceholder, "every card starts as a placeholder");
 
   // Card 1 live, with real media in it.
-  await driver.eval(() => window.__loadIframe(1));
+  assert.equal(await driver.eval(() => window.__loadIframe(1)), true, "card 1 activated");
   await until(() => driver.eval(() => window.__waitForIframeLoad(1).catch(() => false)));
   await driver.injectScriptInFrame("active-frame");
   const st = await until(async () => {
@@ -305,9 +308,17 @@ test("switchboard: one live cross-origin card, the rest placeholders", async () 
     1,
     "exactly one frame is live"
   );
+  // __getPlaceholderCount is defined in both modes, so a swap-mode caller gets
+  // a number rather than a ReferenceError. In swap mode the frame is gone
+  // entirely, so the count comes from the card state.
+  assert.equal(
+    await driver.eval(() => window.__getPlaceholderCount()),
+    2,
+    "swap mode counts placeholder cards, and the two inactive ones qualify"
+  );
 
   // Switching must leave no second frame behind.
-  await driver.eval(() => window.__switchTo(2));
+  assert.equal(await driver.eval(() => window.__switchTo(2)), true, "card 2 activated");
   await until(() => driver.eval(() => window.__waitForIframeLoad(2).catch(() => false)));
   assert.equal(
     await driver.eval(() => window.__getLoadedCount()),
@@ -317,7 +328,7 @@ test("switchboard: one live cross-origin card, the rest placeholders", async () 
   assert.equal(await driver.eval(() => window.__getActiveIndex()), 2, "the new card is active");
 
   // Unloading the live card returns to all-placeholder.
-  await driver.eval(() => window.__unloadIframe());
+  assert.equal(await driver.eval(() => window.__unloadIframe()), true, "the live card unloaded");
   assert.equal(await driver.eval(() => window.__getLoadedCount()), 0, "unloading leaves nothing live");
   const backToPlaceholder = await driver.eval(() =>
     Array.from(document.querySelectorAll(".server-card")).every((c) =>
@@ -333,6 +344,11 @@ test("switchboard parked mode: persistent src-less frames stay inert", async () 
   // assigns src to that same element instead of creating a new one. This asserts
   // the negative case a swap fixture structurally cannot: a frame that never
   // received a src must produce NO shell, before anything is clicked.
+  //
+  // What this mode does NOT do is keep the frame's realm alive. A src assignment
+  // is a navigation, so the document and everything in it die exactly as they do
+  // in swap mode - verified, not assumed. What persists is the element and its
+  // box, which is why this test asserts element reuse and not realm survival.
   const cards = [];
   for (let i = 0; i < 3; i++) {
     const s = servers[i];
@@ -369,6 +385,38 @@ test("switchboard parked mode: persistent src-less frames stay inert", async () 
     "a frame that never received a src must not get a shell"
   );
 
+  // The realm does NOT survive activation. A src assignment is a navigation, so
+  // the document is torn down and PF's registrations with it - this is NOT a
+  // mode where a frame's realm is kept alive.
+  //
+  // Card 0 is the only one readable from the top document: it is served by the
+  // same origin as the parent. This runs BEFORE card 1 is activated, and asserts
+  // the return value, because __loadIframe returns false when a card is already
+  // live - a silent no-op that leaves a stamp in place and makes this assertion
+  // pass for entirely the wrong reason.
+  const stamp = await driver.eval(() => {
+    const w = document.getElementById("parked-frame-0").contentWindow;
+    w.__stamp = "before-activation";
+    return w.__stamp;
+  });
+  assert.equal(stamp, "before-activation", "the parked frame's window was reachable");
+  assert.equal(await driver.eval(() => window.__loadIframe(0)), true, "card 0 activated");
+  await until(() => driver.eval(() => window.__waitForIframeLoad(0).catch(() => false)));
+  assert.equal(
+    await driver.eval(() => {
+      const w = document.getElementById("parked-frame-0").contentWindow;
+      return w.__stamp ?? null;
+    }),
+    null,
+    "activation navigates the frame, so its realm is torn down just as in swap mode"
+  );
+  assert.equal(await driver.eval(() => window.__unloadIframe()), true, "card 0 unloaded");
+  assert.equal(
+    await driver.eval(() => window.__getPlaceholderCount()),
+    3,
+    "unloading returns every card to the placeholder state"
+  );
+
   // Tag the element the fixture is about to activate. If activation replaced it
   // rather than assigning to it, the tag is gone - which is the whole difference
   // between this fixture and the swap one, and the easiest thing to get wrong
@@ -378,7 +426,7 @@ test("switchboard parked mode: persistent src-less frames stay inert", async () 
   });
 
   // Activating assigns src to the existing element; the frame is reused.
-  await driver.eval(() => window.__loadIframe(1));
+  assert.equal(await driver.eval(() => window.__loadIframe(1)), true, "card 1 activated");
   await until(() => driver.eval(() => window.__waitForIframeLoad(1).catch(() => false)));
   await driver.injectScriptInFrame("parked-frame-1");
   const st = await until(async () => {
@@ -441,7 +489,7 @@ test("switchboard nested: a relay deep enough to break a shallow one", async () 
   await driver.navigate(parent);
   await driver.injectScript();
 
-  await driver.eval(() => window.__loadIframe(0));
+  assert.equal(await driver.eval(() => window.__loadIframe(0)), true, "card 0 activated");
   await until(() => driver.eval(() => window.__waitForIframeLoad(0).catch(() => false)));
   await driver.injectScriptInFramePath(["active-frame", "inner-frame"]);
 

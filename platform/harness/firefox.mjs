@@ -1235,13 +1235,21 @@ export function createSwitchboardPage(parentServer, childServers, options = {}) 
   //           its realm, listener, shell and bridge ports all die with the frame.
   //   parked  every card owns a PERMANENT src-less <iframe> placeholder, and
   //           activation assigns src to that same element rather than creating
-  //           one. The frames persist across switches with no src, which is the
-  //           shape a real page has between embeds, and it is the case that can
-  //           strand state: a frame that is never torn down but is also never
-  //           torn down cleanly.
+  //           one. The frames hold their box across switches, which is the shape
+  //           a real page has between embeds.
   //
-  // parked mode also asserts something swap cannot: that PF builds NO shell for a
-  // frame that has never been given a src.
+  // The realm is destroyed either way - a src assignment is a navigation, so
+  // both modes tear down the document, the GM listener, the shell and the bridge
+  // ports. What parked mode changes is which state CAN survive: anything hung
+  // off the ELEMENT rather than the realm. A shadow host, an attached
+  // MutationObserver, a leftover child node - all of those outlive an unload in
+  // parked mode and are gone in swap mode, because swap throws the element away.
+  // That is the stranding risk this mode exists to expose, and it is a real
+  // difference in what the kernel has to clean up, not a difference in the
+  // frame's lifetime.
+  //
+  // parked mode also asserts something swap structurally cannot: that PF builds
+  // NO shell for a frame that has never been given a src.
   const { width = 1280, height = 720, placeholderMode = "swap" } = options;
   if (!["swap", "parked"].includes(placeholderMode)) {
     throw new Error(`createSwitchboardPage: placeholderMode must be swap|parked, got ${placeholderMode}`);
@@ -1333,9 +1341,13 @@ export function createSwitchboardPage(parentServer, childServers, options = {}) 
       if (!srv) return false;
       const iframe = ${isParked ? `(parkedFrames[index] ||= document.createElement("iframe"))` : 'document.createElement("iframe")'};
       iframe.id = ${isParked ? '"parked-frame-" + index' : '"active-frame"'};
-      // Assigning src to the parked element navigates the EXISTING frame rather
-      // than replacing it, so the content window and its realm identity persist
-      // across the assignment.
+      // Assigning src navigates the existing element rather than replacing it.
+      // What that preserves is the ELEMENT and its layout box; what it does NOT
+      // preserve is the realm. A navigation creates a new document, so the
+      // content window, its realm identity and everything PF registered in it
+      // are torn down here exactly as they are in swap mode - a value stamped on
+      // window before activation is gone afterwards. Do not read this mode as
+      // "the frame survives"; it is "the frame's box survives".
       iframe.src = srv.url;
       iframe.allowFullscreen = true;
       iframe.setAttribute("frameborder", "0");
@@ -1382,9 +1394,17 @@ export function createSwitchboardPage(parentServer, childServers, options = {}) 
         .filter((f) => f.getAttribute("src")).length
     ` : "activeIframe ? 1 : 0"};
 
-    // Parked mode only: the frames that exist but are not showing anything.
-    window.__getPlaceholderCount = () => Array.from(document.querySelectorAll(".server-card iframe"))
-      .filter((f) => !f.getAttribute("src")).length;
+    // How many cards are not currently showing a frame. Defined in both modes:
+    // leaving it parked-only made a swap-mode caller fail with a ReferenceError
+    // rather than a number. In swap mode a placeholder is a card with no iframe
+    // at all, so it counts card state; in parked mode the iframe is always there
+    // and only its src comes and goes, so it counts src-less frames.
+    window.__getPlaceholderCount = () => ${isParked ? `
+      Array.from(document.querySelectorAll(".server-card iframe"))
+        .filter((f) => !f.getAttribute("src")).length
+    ` : `
+      Array.from(document.querySelectorAll(".server-card.placeholder")).length
+    `};
 
     window.__waitForIframeLoad = (index, timeoutMs = 10000) => {
       return new Promise((resolve, reject) => {
