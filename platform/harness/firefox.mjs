@@ -195,6 +195,17 @@ export class FirefoxDriver {
 
   /**
    * Launch a headless Firefox (157+) instance.
+   *
+   * privacy.reduceTimerPrecision is OFF for every launch. Firefox clamps
+   * performance.now() to 1ms by default to blunt timing attacks, and that
+   * clamp is not a detail for a benchmark harness - it is the whole
+   * measurement. Under it a synchronous op (a classList toggle plus a forced
+   * layout flush is ~0.5us) reads as exactly 0, and a burst of 2000 of them
+   * lands inside a single tick, so every sub-millisecond row collapses to
+   * 0.00 and a recorded baseline of 0 can never be compared. Turning the
+   * clamp off restores a 20us clock, which is fine for a local test browser
+   * and is the only reason the micro rows below mean anything.
+   *
    * @param {object} [options]
    * @param {boolean} [options.headless=true] - Run headless.
    * @param {Record<string, any>} [options.preferences] - Extra profile prefs.
@@ -217,6 +228,7 @@ export class FirefoxDriver {
       .setPreference("browser.shell.checkDefaultBrowser", false)
       .setPreference("datareporting.policy.dataSubmissionEnabled", false)
       .setPreference("toolkit.telemetry.reportingpolicy.firstRun", false)
+      .setPreference("privacy.reduceTimerPrecision", false)
       .addArguments(...args);
     for (const [key, value] of Object.entries(preferences)) {
       ffOptions.setPreference(key, value);
@@ -260,6 +272,59 @@ export class FirefoxDriver {
    */
   async eval(fn, ...args) {
     return this.#driver.executeScript(fn, ...args);
+  }
+
+  /**
+   * Measure a sub-clock-tick op by running it until a wall-clock budget is
+   * spent, then dividing.
+   *
+   * Even with privacy.reduceTimerPrecision off the page clock ticks every
+   * ~20us, so an op that costs less than that (a classList toggle plus a
+   * forced layout flush is ~0.5us) reads as a flat 0 no matter how many
+   * samples you take - the samples are not noisy, they are all identically
+   * zero. Running the op N times inside ONE timed region and dividing by N
+   * buys back resolution: 25ms of budget at 0.5us/op is ~50k iterations, so
+   * the per-op figure lands two orders of magnitude above the tick.
+   *
+   * `op` MUST be idempotent - it runs tens of thousands of times, so it has
+   * to leave the page in the state it found (toggling a class twice, adding
+   * and removing the same sheet). Anything with a one-shot side effect does
+   * not belong here; measure it per-op and accept the tick, or restructure
+   * the bench so the unit is large enough to see.
+   *
+   * `setup` runs once, untimed, before the loop. Use it for anything the op
+   * would otherwise re-do per iteration (element lookups and node
+   * construction in particular - both cost more than the op being measured
+   * and would dominate the result). It communicates with `op` through page
+   * state, since a DOM node cannot cross the WebDriver boundary. `args` are
+   * JSON-serializable and forwarded to both `setup` and `op`; the idiomatic
+   * use is to pass a per-sample value (a sample index) to `setup` and leave
+   * it on page state for `op` to read.
+   *
+   * @param {((...args: any[]) => void)|null} setup - Untimed, once per call.
+   * @param {(...args: any[]) => void} op - Idempotent; serialized into the page.
+   * @param {object} [options]
+   * @param {number} [options.budgetMs=25] - Wall-clock target for one sample.
+   * @param {any[]} [options.args=[]] - Serializable args for setup and op.
+   * @returns {Promise<{perOp: number, ops: number, elapsed: number}>}
+   */
+  async amplifiedEval(setup, op, { budgetMs = 25, args = [] } = {}) {
+    const source = `
+      const __args = ${JSON.stringify(args)};
+      ${setup ? `(${setup.toString()})(...__args);` : ""}
+      const budget = ${budgetMs};
+      const op = ${op.toString()};
+      const t0 = performance.now();
+      let ops = 0;
+      let elapsed = 0;
+      do {
+        op(...__args);
+        ops += 1;
+        elapsed = performance.now() - t0;
+      } while (elapsed < budget);
+      return { perOp: elapsed / ops, ops, elapsed };
+    `;
+    return this.eval(source);
   }
 
   /**

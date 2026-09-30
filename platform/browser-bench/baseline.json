@@ -1,11 +1,13 @@
 {
-  "panel toggle open/close (2 rAF cycles)": 31,
-  "forced style recalculation (classList toggle + offsetHeight)": 0,
-  "adopted stylesheet add/remove cycle": 0,
+  "panel toggle open/close (2 rAF cycles)": 31.359999999999673,
+  "adopted stylesheet add/remove cycle": 0.4000000000014552,
   "keyboard → gesture dispatch (ArrowRight → skip)": 0,
   "pointer events → dbltap gesture recognition": 0,
-  "cue slot create → mutate → remove (DOM)": 0,
-  "batch cue update (8 slots, show + text + hide)": 0,
-  "shell boot (navigate → inject → HUD)": 74.05583400000069,
-  "script injection (injectScript only)": 7.643749999999272
+  "cue slot create → mutate → remove (DOM)": 0.016202203499675955,
+  "batch cue update (8 slots, show + text + hide)": 0.07306122448979974,
+  "shell boot (navigate → inject → HUD)": 76.45999999999185,
+  "script injection (injectScript only)": 7.555709000000206,
+  "forced style recalc + layout (--pf-media-paused write, amplified)": 0.24752475247524752,
+  "mutation burst, no PF (120 nodes/burst, 8 iframes)": 0.10000000000002274,
+  "mutation burst, PF discovery feed live (120 nodes/burst, 8 iframes)": 0.11999999999999034
 }

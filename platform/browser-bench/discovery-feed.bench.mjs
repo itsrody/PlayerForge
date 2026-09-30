@@ -39,7 +39,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_BUNDLE = readFileSync(join(HERE, "..", "..", "dist", "playerforge.user.js"), "utf8");
 
 const BATCHES = 7;
-const ITERATIONS = 8;
+const ITERATIONS = 25;
 const FRAME_COUNT = 8;
 const CHURN_NODES = 120;
 

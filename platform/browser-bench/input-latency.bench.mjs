@@ -12,8 +12,8 @@ import { waitForShell } from "../harness/page.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_BUNDLE = readFileSync(join(HERE, "..", "..", "dist", "playerforge.user.js"), "utf8");
 
-const BATCHES = 7;
-const ITERATIONS = 20;
+const BATCHES = 9;
+const ITERATIONS = 40;
 
 export default async function runInputLatencyBench(bundle = DEFAULT_BUNDLE) {
   const server = new TestServer();
@@ -64,10 +64,21 @@ export default async function runInputLatencyBench(bundle = DEFAULT_BUNDLE) {
     }
 
     keyTimes.sort((a, b) => a - b);
+    // gateable: false on both rows below. These are async end-to-end round
+    // trips (dispatch -> forge -> recognizer -> CustomEvent) that cost ~20-80us,
+    // i.e. 1-4 clock ticks at the ~20us resolution the harness runs with. Each
+    // sample is therefore a small integer number of ticks, the median snaps
+    // between those levels run to run, and spread runs ±50-300% - wider than
+    // the ±20% regression gate, so a baseline here would flake rather than
+    // detect. They cannot be amplified the way the sync rows are: the op is a
+    // promise, and repeating it would fire tens of thousands of real skips /
+    // dbltaps, which both mutates playback state and changes the very debounce
+    // behaviour being measured. Reported for visibility, not gated.
     results.push({
       name: "keyboard → gesture dispatch (ArrowRight → skip)",
       medianMsPerOp: keyTimes[Math.floor(keyTimes.length / 2)],
       spread: (keyTimes[keyTimes.length - 1] - keyTimes[0]) / keyTimes[Math.floor(keyTimes.length / 2)],
+      gateable: false,
     });
 
     // Benchmark: pointer double-tap recognition.
@@ -123,6 +134,7 @@ export default async function runInputLatencyBench(bundle = DEFAULT_BUNDLE) {
       name: "pointer events → dbltap gesture recognition",
       medianMsPerOp: pointerTimes[Math.floor(pointerTimes.length / 2)],
       spread: (pointerTimes[pointerTimes.length - 1] - pointerTimes[0]) / pointerTimes[Math.floor(pointerTimes.length / 2)],
+      gateable: false,
     });
   } finally {
     await driver.destroy();
