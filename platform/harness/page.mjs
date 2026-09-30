@@ -92,3 +92,26 @@ export async function getComputedStyle(driver, selector, property) {
     property
   );
 }
+
+/**
+ * Wait until the test page's media is genuinely playable.
+ *
+ * `readyState` is read by the userscript through the native accessor, so a
+ * page-world override is invisible to it: a test that needs HAVE_METADATA has
+ * to give the element real media and wait for the element to report it.
+ */
+export async function waitForMediaReady(driver, timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const readyState = await driver.eval(
+      () => document.getElementById("test-video")?.readyState ?? -1
+    );
+    if (readyState > 0) {
+      return readyState;
+    }
+    if (Date.now() > deadline) {
+      throw new Error(`test video never became ready (readyState=${readyState})`);
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}

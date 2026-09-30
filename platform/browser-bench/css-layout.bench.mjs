@@ -18,13 +18,15 @@ const ITERATIONS = 40;
 export default async function runCssLayoutBench(bundle = DEFAULT_BUNDLE) {
   const server = new TestServer();
   await server.start();
-  const driver = await FirefoxDriver.launch();
+  // The native harness registers the userscript once at startup, so a
+  // custom build is chosen at launch rather than injected afterwards.
+  const driver = await FirefoxDriver.launch({ bundle });
   const results = [];
 
   try {
     await driver.navigate(createTestPage(server));
     await driver.injectGMStubs();
-    await driver.injectScript(bundle);
+    await driver.injectScript();
     await waitForShell(driver, 8000);
     await waitForPanel(driver, 8000);
 

@@ -5,8 +5,8 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { FirefoxDriver, TestServer, createTestPage } from "../harness/firefox.mjs";
-import { waitForShell, waitForPanel } from "../harness/page.mjs";
+import { FirefoxDriver, TestServer, createTestPage, createTestMedia } from "../harness/firefox.mjs";
+import { waitForShell, waitForPanel, waitForMediaReady } from "../harness/page.mjs";
 
 let driver;
 let server;
@@ -23,8 +23,7 @@ test.after(async () => {
 });
 
 test("keyboard hotkey dispatches skip gesture", async () => {
-  await driver.navigate(createTestPage(server));
-  await driver.injectGMStubs();
+  await driver.navigate(createTestPage(server, { videoSrc: createTestMedia(server, 90) }));
   await driver.injectScript();
 
   await waitForShell(driver, 8000);
@@ -33,11 +32,9 @@ test("keyboard hotkey dispatches skip gesture", async () => {
   // dispatched key is lost.
   await waitForPanel(driver, 8000);
 
-  // The hotkey handler requires readyState > 0 on the video.
-  await driver.eval(() => {
-    const video = document.getElementById("test-video");
-    if (video) Object.defineProperty(video, "readyState", { value: 4, configurable: true });
-  });
+  // The hotkey handler requires readyState > 0 on the video, read through the
+  // native accessor from the userscript realm, so the media has to be real.
+  await waitForMediaReady(driver, 8000);
 
   await driver.eval(() => {
     window.__pfGestureLog = [];
@@ -68,18 +65,13 @@ test("keyboard hotkey dispatches skip gesture", async () => {
 });
 
 test("keyboard hotkey dispatches volume gesture", async () => {
-  await driver.navigate(createTestPage(server));
-  await driver.injectGMStubs();
+  await driver.navigate(createTestPage(server, { videoSrc: createTestMedia(server, 90) }));
   await driver.injectScript();
 
   await waitForShell(driver, 8000);
   // Same race as above: wait for the panel so InputForge is wired.
   await waitForPanel(driver, 8000);
-
-  await driver.eval(() => {
-    const video = document.getElementById("test-video");
-    if (video) Object.defineProperty(video, "readyState", { value: 4, configurable: true });
-  });
+  await waitForMediaReady(driver, 8000);
 
   await driver.eval(() => {
     window.__pfGestureLog = [];

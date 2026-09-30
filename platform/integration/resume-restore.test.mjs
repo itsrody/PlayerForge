@@ -5,12 +5,15 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { FirefoxDriver, TestServer, createTestPage } from "../harness/firefox.mjs";
+import { FirefoxDriver, TestServer, createTestPage, createTestMedia } from "../harness/firefox.mjs";
 import { waitForShell } from "../harness/page.mjs";
 import { getDomainKey } from "../../src/shared/context.js";
 
 let driver;
 let server;
+
+/** Long enough that a 42s resume seek has somewhere to land. */
+const MEDIA_SECONDS = 90;
 
 test.before(async () => {
   server = new TestServer();
@@ -24,32 +27,22 @@ test.after(async () => {
 });
 
 test("shell creates resume entry for new video", async () => {
-  await driver.navigate(createTestPage(server));
-  await driver.injectGMStubs({ storage: {} });
+  // Real media, not a faked duration: the userscript runs in its own realm,
+  // where video.duration is read through the native accessor, so a page-world
+  // override is invisible and the tracker would skip for the wrong reason.
+  await driver.navigate(createTestPage(server, { videoSrc: createTestMedia(server, 90) }));
   await driver.injectScript();
 
   await waitForShell(driver, 8000);
 
-  // Set video duration so the resume tracker can create an entry.
-  await driver.eval(() => {
-    const video = document.getElementById("test-video");
-    if (video) {
-      Object.defineProperty(video, "duration", { value: 600, configurable: true });
-      video.dispatchEvent(new Event("durationchange", { bubbles: true }));
-      video.dispatchEvent(new Event("loadedmetadata", { bubbles: true }));
-    }
-  });
-
-  // Wait for the resume tracker to process.
+  // Wait for the resume tracker to adopt the media.
   await new Promise((r) => setTimeout(r, 1500));
 
-  const hasEntry = await driver.eval(() => {
-    const stored = window.__pfGMStorage?.["pf:resume"];
-    if (!stored || !stored.entries) return false;
-    return stored.entries.length > 0;
-  });
-
-  assert.ok(hasEntry, "Resume store should have an entry for the video");
+  const stored = await driver.gmStorage();
+  assert.ok(
+    stored["pf:resume"]?.entries?.length > 0,
+    "Resume store should have an entry for the video"
+  );
 });
 
 test("shell restores position from saved resume", async () => {
@@ -59,7 +52,7 @@ test("shell restores position from saved resume", async () => {
   // matched nothing and the test exercised createEntry instead of restore.
   // getDomainKey is what normalizes "127.0.0.1" to "127-0-0-1"; seeding the
   // raw hostname missed on domain even with the right path.
-  const url = createTestPage(server);
+  const url = createTestPage(server, { videoSrc: createTestMedia(server, MEDIA_SECONDS) });
   const path = new URL(url).pathname;
   const domain = getDomainKey(new URL(url).hostname);
   const savedEntry = {
@@ -69,28 +62,22 @@ test("shell restores position from saved resume", async () => {
       domain,
       path,
       title: "Test Page",
-      duration: 600,
+      duration: MEDIA_SECONDS,
       resume: 42,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     }]
   };
 
+  // The store is inlined when the add-on registers at startup, so it cannot be
+  // changed for a document that already loaded: this test needs its own browser.
+  await driver.destroy();
+  driver = await FirefoxDriver.launch({ storage: { "pf:resume": savedEntry } });
+
   await driver.navigate(url);
-  await driver.injectGMStubs({ storage: { "pf:resume": savedEntry } });
   await driver.injectScript();
 
   await waitForShell(driver, 8000);
-
-  // Set video duration so the resume tracker can match.
-  await driver.eval(() => {
-    const video = document.getElementById("test-video");
-    if (video) {
-      Object.defineProperty(video, "duration", { value: 600, configurable: true });
-      video.dispatchEvent(new Event("durationchange", { bubbles: true }));
-      video.dispatchEvent(new Event("loadedmetadata", { bubbles: true }));
-    }
-  });
 
   await new Promise((r) => setTimeout(r, 2000));
 
@@ -102,8 +89,20 @@ test("shell restores position from saved resume", async () => {
     `expected the saved position (42s) to be restored, got currentTime=${currentTime}`);
 
   // And the entry must have been matched, not duplicated by createEntry.
-  const stored = await driver.eval(() => (window.__pfGMStorage?.["pf:resume"]?.entries ?? []).length);
-  assert.equal(stored, 1, "restore must reuse the saved entry, not create a second one");
+  // Restoring writes nothing on its own: the position it restored is the one
+  // already on disk. Move the playhead past the save epsilon, and the save
+  // that follows is what proves which entry was adopted.
+  await driver.eval(() => {
+    document.getElementById("test-video").currentTime = 50;
+  });
+  await new Promise((r) => setTimeout(r, 2000));
+
+  const entries = (await driver.gmStorage())["pf:resume"]?.entries ?? [];
+  assert.equal(entries.length, 1, "restore must reuse the saved entry, not create a second one");
+  assert.ok(
+    Math.abs(entries[0].resume - 50) < 2,
+    `the adopted entry should hold the new position, got ${entries[0].resume}`
+  );
 });
 
 test("shell survives page mutations during resume tracking", async () => {

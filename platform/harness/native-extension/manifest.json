@@ -1,0 +1,31 @@
+{
+  "manifest_version": 2,
+  "name": "PlayerForge native userscript harness",
+  "version": "1.0",
+  "description": "Runs the PlayerForge userscript through Firefox's native userScripts API so the integration suite exercises the real FireMonkey injection realm and GM semantics.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "pf-harness@playerforge.test",
+      "strict_min_version": "153.0"
+    }
+  },
+  "permissions": [
+    "<all_urls>",
+    "storage",
+    "user_scripts",
+    "menus"
+  ],
+  "background": {
+    "scripts": [
+      "content/background.js"
+    ],
+    "persistent": true
+  },
+  "user_scripts": {
+    "api_script": "content/api.js"
+  },
+  "web_accessible_resources": [
+    "api-gm.js",
+    "probe.js"
+  ]
+}

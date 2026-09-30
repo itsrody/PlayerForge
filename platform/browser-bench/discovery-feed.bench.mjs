@@ -109,7 +109,9 @@ const shrinkVideoBelowGate = (driver) => driver.eval(
 export default async function runDiscoveryFeedBench(bundle = DEFAULT_BUNDLE) {
   const server = new TestServer();
   await server.start();
-  const driver = await FirefoxDriver.launch();
+  // The native harness registers the userscript once at startup, so a
+  // custom build is chosen at launch rather than injected afterwards.
+  const driver = await FirefoxDriver.launch({ bundle });
   const results = [];
   const suffix = `${CHURN_NODES} nodes/burst, ${FRAME_COUNT} iframes`;
 
@@ -143,7 +145,7 @@ export default async function runDiscoveryFeedBench(bundle = DEFAULT_BUNDLE) {
         document.body.appendChild(f);
       }
     }, FRAME_COUNT);
-    await driver.injectScript(bundle);
+    await driver.injectScript();
     results.push({
       name: `mutation burst, PF discovery feed live (${suffix})`,
       ...(await measureBurst(driver, CHURN_NODES)),

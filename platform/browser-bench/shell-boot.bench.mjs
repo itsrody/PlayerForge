@@ -17,7 +17,9 @@ const BATCHES = 7;
 export default async function runShellBootBench(bundle = DEFAULT_BUNDLE) {
   const server = new TestServer();
   await server.start();
-  const driver = await FirefoxDriver.launch();
+  // The native harness registers the userscript once at startup, so a
+  // custom build is chosen at launch rather than injected afterwards.
+  const driver = await FirefoxDriver.launch({ bundle });
   const results = [];
 
   try {
@@ -28,7 +30,7 @@ export default async function runShellBootBench(bundle = DEFAULT_BUNDLE) {
       const t0 = performance.now();
       await driver.navigate(url);
       await driver.injectGMStubs();
-      await driver.injectScript(bundle);
+      await driver.injectScript();
       await waitForShell(driver, 5000);
       bootTimes.push(performance.now() - t0);
     }
@@ -50,7 +52,7 @@ export default async function runShellBootBench(bundle = DEFAULT_BUNDLE) {
       await driver.navigate(url);
       await driver.injectGMStubs();
       const t0 = performance.now();
-      await driver.injectScript(bundle);
+      await driver.injectScript();
       injectTimes.push(performance.now() - t0);
     }
 

@@ -14,12 +14,18 @@
  *   await driver.destroy();
  */
 import { Builder } from "selenium-webdriver";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createServer as createHttpServer } from "node:http";
+import { ControlServer, buildExtension } from "./native.mjs";
+
+/** Promise-based sleep. */
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(HERE, "..", "..");
@@ -184,6 +190,17 @@ function installProcessGuards() {
 export class FirefoxDriver {
   /** @type {import('selenium-webdriver').WebDriver} */
   #driver;
+  /** Native userScripts control channel; see native.mjs. */
+  #control = null;
+  #nativeAddon = null;
+  /** Bundle currently registered with the add-on. */
+  #registeredBody = null;
+  /** Store contents the next page load should start from. */
+  #pendingSeed = null;
+  /** Diagnostic count at the last navigate(), see injectScript(). */
+  #realmMark = 0;
+  /** Store contents the startup registration is built with. */
+  #initialStorage = {};
   /** @type {boolean} */
   #destroyed = false;
 
@@ -209,16 +226,23 @@ export class FirefoxDriver {
    * @param {object} [options]
    * @param {boolean} [options.headless=true] - Run headless.
    * @param {Record<string, any>} [options.preferences] - Extra profile prefs.
+   * @param {Record<string, any>} [options.storage] - Initial GM store contents.
+   *   Inlined into the startup registration, because GM_getValue is
+   *   synchronous and a document_start script cannot wait on the add-on. It is
+   *   therefore fixed for the whole session: a test that needs a specific store
+   *   has to launch its own driver with it.
+   * @param {string} [options.bundle] - Bundle source, defaults to dist/.
    * @returns {Promise<FirefoxDriver>}
    */
   static async launch(options = {}) {
-    const { headless = true, preferences = {} } = options;
+    const { headless = true, preferences = {}, args: extraArgs = [] } = options;
 
     const firefox = await import("selenium-webdriver/firefox.js");
     const args = [];
     if (headless) {
       args.push("-headless");
     }
+    args.push(...extraArgs);
 
     // geckodriver mints a fresh temp profile per session, so no manual
     // profile isolation is needed. TLS errors stay accepted for any https
@@ -229,6 +253,10 @@ export class FirefoxDriver {
       .setPreference("datareporting.policy.dataSubmissionEnabled", false)
       .setPreference("toolkit.telemetry.reportingpolicy.firstRun", false)
       .setPreference("privacy.reduceTimerPrecision", false)
+      // The userScripts API is off unless a profile opts in, and with it off
+      // register() resolves but never injects - the failure looks exactly like
+      // a broken harness rather than a disabled feature.
+      .setPreference("extensions.userScripts.enabled", true)
       .addArguments(...args);
     for (const [key, value] of Object.entries(preferences)) {
       ffOptions.setPreference(key, value);
@@ -244,7 +272,56 @@ export class FirefoxDriver {
       .setFirefoxService(buildService(firefox))
       .build();
 
-    return new FirefoxDriver(driver);
+    const session = new FirefoxDriver(driver);
+    // The bundle must run in the isolated userScript realm, which WebDriver's
+    // executeScript cannot reach, so every session gets a temporary add-on
+    // that registers it through browser.userScripts.
+    await session.#installNativeExtension(options.bundle || readBundle(), options.storage);
+    return session;
+  }
+
+  /**
+   * Install the native userScripts add-on for this session and start its
+   * control channel. Called once from launch().
+   */
+  async #installNativeExtension(bundle, storage) {
+    this.#control = await new ControlServer().start();
+    this.#initialStorage = storage || {};
+    // Published before the add-on is installed, so the extension's startup
+    // fetch always finds both the body and the store to inline into it.
+    this.#control.setBundle(bundle, this.#initialStorage);
+    this.#registeredBody = bundle;
+    // launch() must not hand back a browser that cannot run the script yet:
+    // the add-on registers on startup, and a page loaded before that lands
+    // gets nothing, which surfaces as an unexplained missing shell.
+    const startup = new Promise((resolve, reject) => {
+      const off = this.#control.onDiagnostic((d) => {
+        if (!d) return;
+        if (d.ev === "startup-registered") { off(); resolve(); }
+        if (d.ev === "startup-failed") { off(); reject(new Error(d.msg)); }
+      });
+    });
+
+    const bytes = buildExtension(this.#control.port);
+    // installAddon writes the archive to a temp file itself; selenium's
+    // signature wants a path, so hand it a stable one under the OS temp dir.
+    const xpiPath = join(tmpdir(), `pf-harness-${process.pid}-${this.#control.port}.xpi`);
+    writeFileSync(xpiPath, bytes);
+    const addonId = await this.#driver.installAddon(xpiPath, true);
+    this.#nativeAddon = { xpiPath, addonId };
+    await Promise.race([
+      startup,
+      delay(15000).then(() => { throw new Error("the harness add-on never registered"); })
+    ]);
+
+    // Registering in the parent process is not the same as the content process
+    // knowing about it, and the very first document a session loads is created
+    // immediately, so it can win that race and get no script at all. One
+    // throwaway load, waited on until the userscript reports, closes the gap.
+    const probeMark = this.#control.diagnosticCount();
+    const probeUrl = `http://127.0.0.1:${this.#control.port}/probe-page`;
+    await this.#driver.get(probeUrl);
+    await this.#control.waitForRealm(probeMark, 20000);
   }
 
   /** Raw Selenium WebDriver access (for advanced use). */
@@ -257,7 +334,10 @@ export class FirefoxDriver {
    * @param {string} url
    */
   async navigate(url) {
-    await this.#driver.get(url);
+    // Everything reported from here on belongs to this document, so a report
+    // still in flight from the previous one cannot be mistaken for it.
+    this.#realmMark = this.#control.diagnosticCount();
+    await this.#loadUrl(url);
   }
 
   /**
@@ -340,82 +420,102 @@ export class FirefoxDriver {
   }
 
   /**
-   * Inject the userscript bundle into the page. Must be called after navigate()
-   * and before the video element is added (to simulate document-start timing).
+   * Confirm the userscript ran on the current document and wake its players.
+   *
+   * There is nothing to inject: the add-on registered the bundle at startup, so
+   * the document that navigate() loaded already ran it at document-start, in
+   * the manager's own realm. Navigating again here would race the load that is
+   * already in flight and can leave the session on about:blank.
    *
    * @param {string} [script] - Script source. Reads from dist/ if omitted.
    */
-  async injectScript(script) {
-    const source = script || readBundle();
-    const body = source.slice(source.indexOf("==/UserScript==") + 16);
-    await this.#driver.executeScript(body);
-    // In production the script runs at document-start and catches videos via
-    // MutationObserver as they're added. Post-load injection misses existing
-    // DOM — wake the kernel's discovery tap by firing a media event on every
-    // <video> in the page.
-    await this.#driver.executeScript(`
-      for (const v of document.querySelectorAll("video")) {
-        v.dispatchEvent(new Event("loadeddata", { bubbles: true }));
-      }
-    `);
+  async injectScript(script, options = {}) {
+    if (script) {
+      // A caller-supplied bundle cannot be registered after startup (see
+      // native-extension/content/background.js), so say so plainly instead of
+      // silently running the registered one.
+      throw new Error(
+        "injectScript(script) is not supported by the native harness: the " +
+        "userscript is registered once at startup and cannot be replaced"
+      );
+    }
+    await this.#control.waitForRealm(this.#realmMark);
+    await this.wakePlayers();
   }
 
   /**
-   * Inject GM_* API stubs into the page context. Must be called before
-   * injectScript() so the userscript finds the globals it expects.
+   * Seed the userscript's storage before injectScript().
+   *
+   * The GM layer itself now lives in the add-on's api-gm.js, inside the
+   * userScript realm, with FireMonkey's semantics (see native-extension/).
+   * What remains configurable per test is only the initial store contents.
    *
    * @param {object} [options]
    * @param {Record<string, any>} [options.storage] - Initial storage backing.
    */
   async injectGMStubs(options = {}) {
-    const { storage = {} } = options;
-    const stubSource = readFileSync(
-      join(HERE, "gm-stubs.mjs"),
-      "utf8"
-    );
-    // Evaluate the stub module as a self-contained script that populates
-    // globalThis with all GM_* APIs.
-    const initScript = `
-      ${stubSource}
-      window.__pfGMStorage = ${JSON.stringify(storage)};
-      window.__pfGMListeners = {};
-      window.GM_getValue = function(key, fallback) {
-        const s = window.__pfGMStorage;
-        return key in s ? s[key] : fallback;
-      };
-      window.GM_setValue = function(key, value) {
-        window.__pfGMStorage[key] = value;
-      };
-      window.GM_deleteValue = function(key) {
-        delete window.__pfGMStorage[key];
-      };
-      window.GM_registerMenuCommand = function(title, fn) {
-        const id = 'menu_' + title;
-        window.__pfGMListeners[id] = fn;
-        return id;
-      };
-      window.GM_unregisterMenuCommand = function(id) {
-        delete window.__pfGMListeners[id];
-      };
-      window.GM_addValueChangeListener = function(key, cb) {
-        const id = ' listener_' + key + '_' + Date.now();
-        window.__pfGMListeners[id] = { key, cb };
-        return id;
-      };
-      window.GM_removeValueChangeListener = function(id) {
-        delete window.__pfGMListeners[id];
-      };
-      window.GM_getResourceText = function(name) {
-        return Promise.resolve('');
-      };
-      window.GM_info = {
-        script: { version: '0.7.1-test' },
-        scriptHandler: 'Tampermonkey',
-        version: '5.5.0'
-      };
-      window.GM_xmlhttpRequest = function() {};
-    `;
-    await this.#driver.executeScript(initScript);
+    // The userscript's store is inlined when the add-on registers at startup,
+    // so this cannot change it for a document that already loaded. What it can
+    // still do is reset the add-on's copy, which is what the script writes
+    // through, so tests that assert on it start from a known state.
+    await this.#control.send({ op: "storage", storage: options.storage ?? {} });
+  }
+
+  /**
+   * Load a URL and wait until the document has really committed.
+   *
+   * `get()` returns while the top-level browsing context is still the previous
+   * about:blank - on the very first navigation of a session it sometimes never
+   * leaves it at all. Reading the URL straight afterwards then reports the old
+   * document, which is indistinguishable from a userscript that never ran, so
+   * the wait is on the committed URL rather than on `get()` returning.
+   */
+  async #loadUrl(url) {
+    await this.#driver.get(url);
+    const target = url.split("?")[0];
+    const deadline = Date.now() + 10000;
+    for (;;) {
+      const href = await this.#driver.getCurrentUrl().catch(() => "");
+      // A stale about:blank cannot match here: the target is the real URL, so
+      // startsWith is already false. The extra guard used to reject it would
+      // also reject a real navigation *to* about:blank, which is how a test
+      // disposes the shell and flushes the store.
+      if (href.startsWith(target)) {
+        return;
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`navigation to ${url} never committed (still at ${href})`);
+      }
+      await delay(100);
+    }
+  }
+
+
+  /**
+   * Read the userscript's GM store.
+   *
+   * The store lives in the add-on, not the page, so assertions about what
+   * PlayerForge persisted cannot go through `window` any more.
+   *
+   * @returns {Promise<Record<string, any>>}
+   */
+  async gmStorage() {
+    const { storage } = await this.#control.send({ op: "storage.get" });
+    return storage;
+  }
+
+  /**
+   * Observe diagnostics reported from inside the userScript realm.
+   *
+   * WebDriver only sees the page world, so a kernel that throws in the
+   * userScript realm looks identical to one that never ran. These reports are
+   * the harness's only window into that realm.
+   *
+   * @param {(payload: object) => void} listener
+   * @returns {() => void} Unsubscribe.
+   */
+  onNativeDiagnostic(listener) {
+    return this.#control.onDiagnostic(listener);
   }
 
   /**
@@ -512,71 +612,40 @@ export class FirefoxDriver {
 
   /**
    * Inject GM stubs + userscript into a specific frame.
-   * Simulates Tampermonkey's per-frame injection.
+   * Simulates the manager's per-frame injection.
    * @param {number|string} frameId - Frame index or name.
    * @param {object} [gmOptions] - Passed to injectGMStubs.
    */
   async injectScriptInFrame(frameId, gmOptions = {}) {
+    if (gmOptions.storage !== undefined) {
+      await this.injectGMStubs({ storage: gmOptions.storage });
+    }
+    // allFrames is the honest equivalent of the banner's @allFrames true, and
+    // it is set on the startup registration, so a frame needs no injection of
+    // its own - only the same wake-up the top document gets.
+    await this.injectScript();
     await this.#driver.switchTo().frame(frameId);
     try {
-      // GM stubs first.
-      const stubSource = readFileSync(join(HERE, "gm-stubs.mjs"), "utf8");
-      const initScript = `
-        ${stubSource}
-        window.__pfGMStorage = ${JSON.stringify(gmOptions.storage || {})};
-        window.__pfGMListeners = {};
-        window.GM_getValue = function(key, fallback) {
-          const s = window.__pfGMStorage;
-          return key in s ? s[key] : fallback;
-        };
-        window.GM_setValue = function(key, value) {
-          window.__pfGMStorage[key] = value;
-        };
-        window.GM_deleteValue = function(key) {
-          delete window.__pfGMStorage[key];
-        };
-        window.GM_registerMenuCommand = function(title, fn) {
-          const id = 'menu_' + title;
-          window.__pfGMListeners[id] = fn;
-          return id;
-        };
-        window.GM_unregisterMenuCommand = function(id) {
-          delete window.__pfGMListeners[id];
-        };
-        window.GM_addValueChangeListener = function(key, cb) {
-          const id = ' listener_' + key + '_' + Date.now();
-          window.__pfGMListeners[id] = { key, cb };
-          return id;
-        };
-        window.GM_removeValueChangeListener = function(id) {
-          delete window.__pfGMListeners[id];
-        };
-        window.GM_getResourceText = function(name) {
-          return Promise.resolve('');
-        };
-        window.GM_info = {
-          script: { version: '0.7.1-test' },
-          scriptHandler: 'Tampermonkey',
-          version: '5.5.0'
-        };
-        window.GM_xmlhttpRequest = function() {};
-      `;
-      await this.#driver.executeScript(initScript);
-
-      // Userscript bundle.
-      const source = readBundle();
-      const body = source.slice(source.indexOf("==/UserScript==") + 16);
-      await this.#driver.executeScript(body);
-
-      // Wake probe.
-      await this.#driver.executeScript(`
-        for (const v of document.querySelectorAll("video")) {
-          v.dispatchEvent(new Event("loadeddata", { bubbles: true }));
-        }
-      `);
+      await this.wakePlayers();
     } finally {
       await this.#driver.switchTo().defaultContent();
     }
+  }
+
+  /**
+   * Nudge videos that were added after the kernel booted.
+   *
+   * The script runs at document-start, before a test can inject a <video>, so
+   * the shell's detection pass has already been and gone by the time the
+   * element exists. A loadeddata event is the closest thing to the real thing
+   * that a test-created element can be told.
+   */
+  async wakePlayers() {
+    await this.#driver.executeScript(`
+      for (const v of document.querySelectorAll("video")) {
+        v.dispatchEvent(new Event("loadeddata", { bubbles: true }));
+      }
+    `);
   }
 
   /**
@@ -604,6 +673,13 @@ export class FirefoxDriver {
     } catch {
       // Already dead.
     }
+    // The add-on dies with the session, but its control socket and packed
+    // archive are this process's to release.
+    await this.#control?.stop().catch(() => {});
+    if (this.#nativeAddon !== null) {
+      rmSync(this.#nativeAddon.xpiPath, { force: true });
+      this.#nativeAddon = null;
+    }
     // geckodriver owns its per-session temp profile and removes it on quit.
   }
 }
@@ -612,6 +688,48 @@ export class FirefoxDriver {
  * Minimal HTTP test server for integration tests.
  * Serves test pages on localhost so `shouldSkipUrl()` doesn't reject them.
  */
+/**
+ * Serve a real, playable media file and return its URL.
+ *
+ * A test cannot fake `video.duration` by defining the property: the userscript
+ * runs in its own realm, where `duration` is read through the native accessor
+ * and a page-world override is invisible. Anything that needs a real duration
+ * or a real seek therefore needs real media, so this synthesises a silent WAV
+ * of the requested length - no binary assets, no encoder dependency.
+ *
+ * @param {TestServer} server
+ * @param {number} [seconds=60] - Duration; must exceed any seek under test.
+ * @returns {string} URL to use as a `<video>` src.
+ */
+export function createTestMedia(server, seconds = 60) {
+  const sampleRate = 8000;
+  const sampleCount = Math.round(sampleRate * seconds);
+  const data = Buffer.alloc(sampleCount, 128); // 8-bit unsigned, 128 is silence
+  const header = Buffer.alloc(44);
+
+  header.write("RIFF", 0, "ascii");
+  header.writeUInt32LE(36 + data.length, 4);
+  header.write("WAVE", 8, "ascii");
+  header.write("fmt ", 12, "ascii");
+  header.writeUInt32LE(16, 16);            // PCM fmt chunk size
+  header.writeUInt16LE(1, 20);             // format: PCM
+  header.writeUInt16LE(1, 22);             // channels
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate, 28);    // byte rate
+  header.writeUInt16LE(1, 32);             // block align
+  header.writeUInt16LE(8, 34);             // bits per sample
+  header.write("data", 36, "ascii");
+  header.writeUInt32LE(data.length, 40);
+
+  const path = `/test-media-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.wav`;
+  server.addPageWithHeaders(path, Buffer.concat([header, data]), {
+    "Content-Type": "audio/wav",
+    "Content-Length": String(44 + data.length),
+    "Accept-Ranges": "bytes"
+  });
+  return `${server.url}${path}`;
+}
+
 export class TestServer {
   #server;
   #port;
@@ -619,7 +737,10 @@ export class TestServer {
 
   constructor() {
     this.#server = createHttpServer((req, res) => {
-      const path = req.url || "/";
+      // Route by pathname: a query string is part of the document identity for
+      // caching, not a different page, and tests rely on being able to bust the
+      // cache without losing the page.
+      const path = new URL(req.url || "/", "http://127.0.0.1").pathname;
       const entry = this.#pages.get(path);
       if (entry) {
         const headers = { "Content-Type": "text/html; charset=utf-8", ...entry.headers };
