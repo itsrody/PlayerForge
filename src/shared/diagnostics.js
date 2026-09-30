@@ -1,7 +1,7 @@
 /**
- * Debug runtime: the console logger and the debug-only jank watchdog, kept
- * together because they share one toggle. `setDebugRuntime` flips both so the
- * frame loop can never outlive (or miss) the log flag.
+ * Debug runtime: the console logger and the debug-only jank diagnostics, kept
+ * together because they share one toggle. `setDebugRuntime` flips both so no
+ * observer can ever outlive (or miss) the log flag.
  */
 
 /* - Logger - */
@@ -93,6 +93,25 @@ export const logger = {
  * zero - no observer, no loop, no buffer. Slow frames accumulate and flush on
  * a fixed window, worst-first and capped, so a janky minute logs a handful of
  * lines instead of a flood.
+ *
+ * What the frame clock structurally CANNOT see: a slow event handler that
+ * still finishes inside its frame. The gap measures paint, not work, so a
+ * 300ms click handler on a page holding 60fps looks perfectly healthy here.
+ * Event Timing is the orthogonal signal - it measures handler-to-paint latency
+ * directly, and `interactionId` groups the keydown/pointerdown/keyup/pointerup
+ * quartet of one interaction so we can report the interaction, not its parts.
+ *
+ * Honest limits on Gecko: this is a supplement, never a replacement. There is
+ * no `PerformanceScriptTiming`, so entries carry no per-script attribution -
+ * we learn THAT an interaction was slow, never WHICH handler made it slow.
+ * `event` is present in `supportedEntryTypes` on 157 (verified), unlike
+ * `longtask` and `long-animation-frame`, so this is the only interaction-latency
+ * signal available on our one shipping engine.
+ *
+ * It also closes a hole the frame clock has by construction: `install` and
+ * `teardown` drive the observer under their own guards rather than the rAF
+ * ones, because a page that never drops a frame (or a context with no rAF at
+ * all) must still be able to report a slow handler.
  */
 
 /** Report only the worst few per flush so the console isn't flooded. */
@@ -102,6 +121,15 @@ const JANK_THRESHOLD_MS = 150;
 /** How often buffered slow frames are flushed to the console. */
 const FLUSH_WINDOW_MS = 5000;
 
+/**
+ * Interaction latency floor. 200ms is the INP "good" boundary, so anything
+ * under it is not worth a console line; the observer's own durationThreshold
+ * is set lower (the spec's 16ms floor) purely to keep the entry queue small.
+ */
+const INTERACTION_THRESHOLD_MS = 200;
+/** Spec minimum for PerformanceObserver durationThreshold. */
+const OBSERVER_THRESHOLD_MS = 16;
+
 let rafId = null;
 let perfEnabled = false;
 /** Timestamp of the previous frame; the gap to the current one is the measure. */
@@ -110,6 +138,16 @@ let lastFrameAt = 0;
 let windowStart = 0;
 /** Frame gaps seen in the current window, flushed worst-first. */
 let slowFrames = [];
+
+/* - Interaction latency (Event Timing) - */
+
+let eventObserver = null;
+/**
+ * Worst duration per interactionId. Keying by id collapses the four events of
+ * one interaction (keydown/pointerdown/keyup/pointerup) into a single
+ * worst-of report, so a slow click logs one line, not four.
+ */
+let slowInteractions = new Map();
 
 function flushSlowFrames() {
   if (slowFrames.length === 0) {
@@ -132,10 +170,73 @@ function onFrame(now) {
   if (now - windowStart >= FLUSH_WINDOW_MS) {
     windowStart = now;
     flushSlowFrames();
+    // Same window, different clock: a minute can be all long frames and no
+    // slow interactions, so the rAF flush is not guaranteed to run.
+    flushSlowInteractions();
   }
 }
 
+function flushSlowInteractions() {
+  if (slowInteractions.size === 0) {
+    return;
+  }
+  const worst = [...slowInteractions.values()].sort((a, b) => b.duration - a.duration).slice(0, MAX_REPORT);
+  for (const entry of worst) {
+    logger.warn("perf", `slow interaction: ${entry.duration.toFixed(0)}ms (${entry.name})`);
+  }
+  slowInteractions = new Map();
+}
+
+/**
+ * Keep only the slowest entry per interactionId. Entries without an
+ * interactionId are pointer/key *downs* that never completed a full
+ * interaction quartet (e.g. a lone keyup), so they carry no latency verdict.
+ */
+function onEventEntries(list) {
+  for (const entry of list) {
+    if (!entry.interactionId || entry.duration < INTERACTION_THRESHOLD_MS) {
+      continue;
+    }
+    const seen = slowInteractions.get(entry.interactionId);
+    if (!seen || entry.duration > seen.duration) {
+      slowInteractions.set(entry.interactionId, { duration: entry.duration, name: entry.name });
+    }
+  }
+}
+
+function installEventTiming() {
+  if (eventObserver !== null || typeof PerformanceObserver !== "function") {
+    return;
+  }
+  // Feature-detect via supportedEntryTypes rather than trusting observe() to
+  // throw: an unknown type rejects asynchronously, which would escape the
+  // try/catch and surface as an unhandled rejection instead of a clean skip.
+  if (!PerformanceObserver.supportedEntryTypes?.includes("event")) {
+    return;
+  }
+  try {
+    eventObserver = new PerformanceObserver(onEventEntries);
+    eventObserver.observe({ type: "event", durationThreshold: OBSERVER_THRESHOLD_MS, buffered: true });
+  } catch {
+    eventObserver = null;
+  }
+}
+
+function teardownEventTiming() {
+  if (eventObserver === null) {
+    return;
+  }
+  eventObserver.disconnect();
+  eventObserver = null;
+  // Same rationale as the frame loop: buffered slow interactions are exactly
+  // what the user was staring at when they switched debug off.
+  flushSlowInteractions();
+}
+
 function install() {
+  // Independent of the rAF guard below: Event Timing does not need a frame
+  // clock, so a jank-free page still reports slow interactions.
+  installEventTiming();
   if (rafId !== null || typeof requestAnimationFrame !== "function") {
     return;
   }
@@ -151,6 +252,10 @@ function install() {
 }
 
 function teardown() {
+  // The observer is torn down on its own guard, NOT under the rAF one: a
+  // context with no requestAnimationFrame still gets interaction timings, and
+  // an early return here would strand the observer past the debug toggle.
+  teardownEventTiming();
   if (rafId === null) {
     return;
   }
