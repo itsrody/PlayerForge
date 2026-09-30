@@ -284,26 +284,30 @@ test("the configs GM listener is removed when the last subscriber goes away", as
   }
 });
 
-test("value-change subscriptions share one manager listener per key", async () => {
+test("two shells on one key each keep an independent subscription", async () => {
+  // Violentmonkey 2.49.0's shape: injected-web.js mints a fresh id per call
+  // (`s || (s = x("VMvc"), n[s] = cb)`) into a per-key table and delivers to
+  // every registration, so the handle is the manager's own and passes straight
+  // through. PlayerForge has more than one live subscriber per key - every
+  // shell owns a ResumeStore - so this pins that neither shadows nor silences
+  // the other.
   const { gmAddValueChangeListener, gmRemoveValueChangeListener } = await import("../src/shared/storage.js");
-  const KEY = "pf:test:fanout";
+  const KEY = "pf:test:multi-subscriber";
   const added = [];
   const removed = [];
   const live = new Map();
   const realAdd = globalThis.GM_addValueChangeListener;
   const realRemove = globalThis.GM_removeValueChangeListener;
-  // FireMonkey v3's shape: the handle it hands back IS the key, and its
-  // valueChange table is a single slot per key, so a second registration
-  // would silently replace the first and any destroy would delete the
-  // survivor. Tampermonkey and Violentmonkey instead mint an id per call.
+  let next = 0;
   globalThis.GM_addValueChangeListener = (key, cb) => {
-    added.push(key);
-    live.set(key, cb);
-    return key;
+    const id = `VMvc${++next}`;
+    added.push([key, id]);
+    live.set(id, cb);
+    return id;
   };
-  globalThis.GM_removeValueChangeListener = (handle) => {
-    removed.push(handle);
-    live.delete(handle);
+  globalThis.GM_removeValueChangeListener = (id) => {
+    removed.push(id);
+    live.delete(id);
   };
   try {
     const seenA = [];
@@ -311,25 +315,25 @@ test("value-change subscriptions share one manager listener per key", async () =
     const handleA = gmAddValueChangeListener(KEY, (...args) => seenA.push(args));
     const handleB = gmAddValueChangeListener(KEY, (...args) => seenB.push(args));
 
-    assert.deepEqual(added, [KEY], "two subscribers, one manager listener");
-    assert.notEqual(handleA, handleB, "each caller gets a distinct handle");
-    assert.notEqual(handleA, KEY, "handles are ours, not the manager's key handle");
+    assert.equal(added.length, 2, "the manager sees one subscription per caller");
+    assert.notEqual(handleA, handleB, "each caller gets a distinct manager id");
 
-    live.get(KEY)(KEY, 1, 2, true);
+    for (const cb of live.values()) cb(KEY, 1, 2, true);
     assert.equal(seenA.length, 1, "first subscriber delivered to");
     assert.equal(seenB.length, 1, "second subscriber delivered to, not dropped");
 
-    // Dropping one subscriber must not silence the other: every shell owns a
-    // ResumeStore, so a teardown that took the shared manager listener with it
-    // would kill cross-tab resume on all the younger shells.
+    // A teardown must remove only its own subscription: every shell owns a
+    // ResumeStore, so removing the wrong id would kill cross-tab resume on
+    // every younger shell.
     gmRemoveValueChangeListener(handleA);
-    assert.deepEqual(removed, [], "the manager subscription outlives one of two subscribers");
-    live.get(KEY)(KEY, 2, 3, true);
+    assert.deepEqual(removed, [handleA], "only the removed shell's id is unregistered");
+    live.get(handleB)(KEY, 2, 3, true);
     assert.equal(seenA.length, 1, "the removed subscriber stopped receiving");
     assert.equal(seenB.length, 2, "the surviving subscriber still receives");
 
     gmRemoveValueChangeListener(handleB);
-    assert.deepEqual(removed, [KEY], "the last unsubscribe frees the manager listener");
+    assert.deepEqual(removed, [handleA, handleB], "both removals forwarded");
+    assert.equal(live.size, 0, "nothing left registered");
   } finally {
     globalThis.GM_addValueChangeListener = realAdd;
     globalThis.GM_removeValueChangeListener = realRemove;

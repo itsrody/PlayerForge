@@ -81,20 +81,21 @@ test("register forwards the options object as the third argument", () => {
   uninstall();
 });
 
-test("a manager that returns no handle still keeps exactly one live command", () => {
-  // FireMonkey v3's registerMenuCommand is `command[text] = onclick` with no
-  // return value, and its unregister takes the caption. The debug caption
-  // carries its own state, so if the undefined return were taken at face
-  // value the `debugId != null` guard would skip every unregister and each
-  // toggle would strand the previous caption in the menu for the page's life.
+test("toggling recaptions in place instead of accumulating commands", () => {
+  // Violentmonkey 2.49.0 keys an entry on `opts.id || caption` and returns that
+  // key, so unregistering with the returned handle really does remove the entry
+  // it registered. The debug caption carries its own :On/:Off state, so if the
+  // unregister were skipped the menu would gain one dead entry per toggle.
   const live = new Map();
   const realRegister = globalThis.GM_registerMenuCommand;
   const realUnregister = globalThis.GM_unregisterMenuCommand;
-  globalThis.GM_registerMenuCommand = (title, fn) => {
-    live.set(title, fn);
+  globalThis.GM_registerMenuCommand = (title, fn, options) => {
+    const key = (options && options.id) || title;
+    live.set(key, fn);
+    return key;
   };
-  globalThis.GM_unregisterMenuCommand = (name) => {
-    live.delete(name);
+  globalThis.GM_unregisterMenuCommand = (key) => {
+    live.delete(key);
   };
   try {
     const uninstall = installMenuCommands();

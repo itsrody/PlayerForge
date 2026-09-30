@@ -24,16 +24,16 @@
   "target": {
     "engine": "Gecko",
     "minFirefox": 157,
-    "manager": "FireMonkey MV2 v3 (Firefox 153+)"
+    "manager": "Violentmonkey MV2 2.49+"
   },
   "managerContract": {
     "injectionContext": {
-      "value": "userScript",
-      "why": "FireMonkey v3 injects a @grant-ed script into an isolated userScript context, not the page realm that Tampermonkey and Violentmonkey use. This is why the banner pins no @sandbox / @inject-into: there is no directive that would give PF a page-realm global it needs, and it never reads one. The live risk is not GM_* but constructable stylesheets - a CSSStyleSheet built in the userScript realm has to be adoptable into a page-owned shadow root, which is the one thing the realm change can plausibly break (src/shell/chrome/inject.js). Verified on Firefox 157 against a real FireMonkey v3 build driving the shipped bundle through browser.userScripts: `new CSSStyleSheet()` + `replaceSync()` works, `document.adoptedStyleSheets` accepts the sheet, and the same sheet is adopted into a page-owned shadow root - all from the userScript realm. Isolation also holds: window.PlayerForge and the GM_* globals are absent from the page world. Not inferred."
+      "value": "content",
+      "why": "Violentmonkey 2.49.0 runs a @grant-ed script in an isolated content realm, not the page world, which is the default for @inject-into auto once any @grant is present. That is why the banner pins no @sandbox / @inject-into: there is no directive that would give PF a page-realm global it needs, and it never reads one - SDK detection is selector-based against the composed DOM ancestry. The realm is unobservable to PF, and that was verified rather than assumed, on a real 2.49.0 build driving the shipped bundle: the kernel boots, finds a Plyr-anchored video, and adopts it into an open shadow root with an adopted stylesheet, while window.PlayerForge and the GM_* globals are absent from the page world. A cross-realm constructable stylesheet was the one integration point a realm change could plausibly break (src/shell/chrome/inject.js) and it works. Not inferred."
     },
     "allFrames": {
       "value": true,
-      "why": "The banner sets @allFrames true explicitly. Tampermonkey and Violentmonkey already default sub-frame injection to true; FireMonkey v3's meta.js reads `case 'allFrames': data.allFrames = value !== 'false'` and otherwise leaves it false, so omitting the line would silently stop PF reaching a player inside a nested embed. This is the only banner key where the three managers disagree by default."
+      "why": "The banner sets @allFrames true explicitly, but that line is INERT on the shipping target: 2.49.0 has no allFrames meta key at all - the string appears nowhere in the shipped XPI. It gates sub-frames with @noframes instead, and its script collector skips any script whose noframes flag is set, so PF reaches every frame by default. The line is kept only for a Tampermonkey user, whose Firefox build defaults sub-frame injection to true but whose Content Script mode also grants no real document_start."
     }
   },
   "capabilities": [
@@ -169,40 +169,43 @@
   "grants": [
     {
       "api": "GM_getValue",
-      "why": "Manager-scoped storage: readable from any @match origin, unlike a page origin's localStorage."
+      "why": "Manager-scoped storage: readable from any @match origin, unlike a page origin's localStorage.",
+      "managerShape": "2.49.0 reads the script's value table synchronously and hands stored values back as real objects, unwrapped from the JSON-tagged form. PF reads its whole config document through this during boot, so a promise-returning shape would deadlock the entry path."
     },
     {
       "api": "GM_setValue",
       "why": "Same store as GM_getValue.",
-      "managerShape": "FireMonkey v3 updates the manager cache synchronously but persists asynchronously; Tampermonkey and Violentmonkey are synchronous end to end. PF always reads back through GM_getValue against that same cache and never confirms a commit via a write round-trip, so the lag is not observable."
+      "managerShape": "2.49.0 updates the script's value table synchronously; PF reads back through GM_getValue against that same table and never confirms a commit with a write round-trip."
     },
     {
       "api": "GM_addValueChangeListener",
       "why": "Cross-tab notification for pf:configs - the one capability the page origin cannot provide.",
-      "managerShape": "FireMonkey v3 stores valueChange[key] = callback and returns the KEY: one listener per key, never fires for the script's own writes, and always reports remote=true. Tampermonkey and Violentmonkey mint a distinct id per call and fire own writes with remote=false. src/shared/storage.js therefore subscribes to the manager once per key and fans out locally, so every shell's ResumeStore keeps an independent unsubscribe on either shape."
+      "managerShape": "2.49.0 mints a FRESH id per call (`s || (s = x(\"VMvc\"), n[s] = cb)`) into a per-key table and delivers to every registration, so each shell's ResumeStore keeps an independent id and unsubscribe with no fan-out of PF's own. This is the one shape that made a per-key fan-out look necessary under a previous target; it is not."
     },
     {
       "api": "GM_removeValueChangeListener",
       "why": "Detaches the above; a grant without its remover cannot clean up.",
-      "managerShape": "Takes the id on Tampermonkey/Violentmonkey and the storage key on FireMonkey v3, so it is only ever called with a handle the matching add call returned. storage.js keeps its own handle-to-key map for this reason."
+      "managerShape": "Takes the id 2.49.0 minted, walking the per-key tables to find it. PF only ever calls it with a handle its matching add call returned, so the id is always valid."
     },
     {
       "api": "GM_registerMenuCommand",
       "why": "Manager-owned menu entry (debug toggle).",
-      "managerShape": "FireMonkey v3's body is command[text] = onclick and it returns undefined, so the caption is the only handle its GM_unregisterMenuCommand(name) accepts. The debug caption carries its own :On/:Off state, so gmRegisterMenu falls back to the title whenever the manager hands back nothing - without that, every toggle would strand its predecessor in the menu."
+      "managerShape": "2.49.0 clones its third argument, sets opts.text from the caption, keys the entry on `opts.id || caption` and RETURNS that key - so the options object is the correct type there and the handle is always usable, with no fallback needed."
     },
     {
       "api": "GM_unregisterMenuCommand",
-      "why": "Detaches the above."
+      "why": "Detaches the above.",
+      "managerShape": "Deletes by the key registerMenuCommand returned, so the pair is used symmetrically: PF stores the returned handle and hands it straight back."
     },
     {
       "api": "GM_getResourceText",
-      "why": "Manager-cached stylesheet warm-load, upgraded in place over the embedded sheet."
+      "why": "Manager-cached stylesheet warm-load, upgraded in place over the embedded sheet.",
+      "managerShape": "Present and resolved synchronously; verified callable in the content realm on 2.49.0, which is what the shell's stylesheet upgrade depends on."
     },
     {
       "api": "GM_xmlhttpRequest",
       "why": "CORS-bypassing subtitle fetch from user-supplied hosts.",
-      "managerShape": "Callback-based with a numeric status and responseText on all three targets. Reach depends on the banner's @connect *: Tampermonkey and Violentmonkey honour the wildcard literally, while FireMonkey v3's meta.js drops any @connect value containing '*' and api-gm.js enforces only when connect[0] is set - so the wildcard is discarded rather than honoured there, and the fetch is still permitted either way."
+      "managerShape": "Callback-based with a numeric status and responseText on 2.49.0. api-gm.js only enforces a host allowlist when one is configured, so the banner's @connect * is what permits subtitle fetches to user-supplied hosts."
     }
   ],
   "retired": [

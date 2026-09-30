@@ -12,6 +12,7 @@
     "bench": "node bench/run.mjs",
     "bench:record": "node bench/run.mjs --record",
     "integration": "node platform/run.mjs integration",
+    "vm-smoke": "node platform/vm-smoke.mjs",
     "browser-bench": "node platform/run.mjs browser-bench",
     "browser-bench:record": "node platform/run.mjs browser-bench --record",
     "ci": "node platform/run.mjs ci",

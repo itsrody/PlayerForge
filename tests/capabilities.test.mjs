@@ -168,21 +168,23 @@ test("the banner's @allFrames matches the manager contract", () => {
   );
 });
 
-test("grants whose manager shape differs record it", () => {
-  // These five are the ones where FireMonkey v3 is not a drop-in for
-  // Tampermonkey/Violentmonkey. Each difference is absorbed in
-  // src/shared/storage.js, so a future reader who finds that wrapper has to be
-  // able to find out which manager forced each decision.
+test("every grant records the contract it is verified against", () => {
+  // Violentmonkey 2.49.0 is the shipping target, so there is no longer a
+  // "the other manager differs here" carve-out: each grant's shape is the
+  // contract PF actually codes against, and a reader who finds a wrapper in
+  // src/shared/storage.js must be able to find out which VM behaviour forced
+  // it. Enumerated so a new grant cannot be added silently unrecorded.
   const shaped = manifest.grants.filter((g) => g.managerShape).map((g) => g.api).sort();
   assert.deepEqual(
     shaped,
-    ["GM_addValueChangeListener", "GM_registerMenuCommand", "GM_removeValueChangeListener", "GM_setValue", "GM_xmlhttpRequest"],
-    "the grants with a non-TM/VM manager shape are enumerated, not left to memory"
+    [...manifest.grants.map((g) => g.api)].sort(),
+    "every grant carries the manager shape it was verified against"
   );
   for (const grant of manifest.grants) {
-    if (grant.managerShape) {
-      assert.ok(grant.managerShape.trim().length > 40, `${grant.api} explains the shape difference`);
-    }
+    assert.ok(
+      grant.managerShape.trim().length > 40,
+      `${grant.api} explains its shape rather than gesturing at it`
+    );
   }
 });
 
