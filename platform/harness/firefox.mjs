@@ -505,6 +505,39 @@ export class FirefoxDriver {
   }
 
   /**
+   * Write to the GM store as if from another browsing context.
+   *
+   * Seeding at launch cannot express "another tab saved a new position while
+   * this page was open", which is the only thing that exercises
+   * GM_addValueChangeListener delivery. This goes through extension storage
+   * rather than the page realm's GM_setValue, so the realm's absorbed view goes
+   * stale and the harness's pump sees a genuine remote change - the same shape
+   * of event a real second tab produces.
+   *
+   * @param {Record<string, any>} patch Keys to write.
+   * @returns {Promise<Record<string, any>>} The store as it stands afterwards.
+   */
+  async gmRemoteWrite(patch) {
+    const { storage } = await this.#control.send({ op: "storage.write", patch });
+    return storage;
+  }
+
+  /**
+   * Delete a key as if from another browsing context.
+   *
+   * A deleted key must arrive at listeners as `undefined` rather than as a
+   * silent no-op, so this exists alongside gmRemoteWrite rather than being
+   * folded into it as a null.
+   *
+   * @param {string} key
+   * @returns {Promise<Record<string, any>>}
+   */
+  async gmRemoteDelete(key) {
+    const { storage } = await this.#control.send({ op: "storage.delete", key });
+    return storage;
+  }
+
+  /**
    * Observe diagnostics reported from inside the userScript realm.
    *
    * WebDriver only sees the page world, so a kernel that throws in the
@@ -794,6 +827,12 @@ function buildTestPageHtml(options = {}) {
     videoSrc = "",
     width = 1280,
     height = 720,
+    // >1 renders that many independently-anchored Plyr players in ONE document.
+    // Separate frames would not do: each frame gets its own userScript realm and
+    // its own GM listener table, so their subscriptions could never collide. The
+    // same-key multi-subscriber case only exists with several players sharing a
+    // realm, which is what a page with a main player plus an embed actually is.
+    players = 1,
   } = options;
 
   const videoAttrs = videoSrc ? `src="${videoSrc}"` : "";
@@ -813,11 +852,12 @@ function buildTestPageHtml(options = {}) {
   </style>
 </head>
 <body>
+  ${Array.from({ length: players }, (_, i) => `
   <div class="plyr" data-plyr>
     <div class="plyr__video-wrapper">
-      <video id="test-video" ${videoAttrs} preload="metadata"></video>
+      <video id="test-video${i === 0 ? "" : `-${i}`}" ${videoAttrs} preload="metadata"></video>
     </div>
-  </div>
+  </div>`).join("")}
 </body>
 </html>`;
 }

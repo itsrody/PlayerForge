@@ -12,6 +12,9 @@
 // is dispatched, so the add-on never spins.
 //
 //   {op:"storage", storage}          seed the store used by the next injection
+//   {op:"storage.write", patch}      cross-context write while a document is live
+//   {op:"storage.delete", key}       cross-context delete, same distinction
+//   {op:"storage.get"}               read the store as it stands now
 //   {op:"register", body, allFrames} replace the registration (custom bundle)
 //
 // Results come back on /result as {id, ok, error?, ...}; anything the
@@ -92,6 +95,24 @@ async function handle(command) {
   }
 
   if (command.op === "storage.get") {
+    return { storage: await browser.storage.local.get(null) };
+  }
+
+  // A cross-context write. The seed op above can only run before a document
+  // loads, so it cannot express "another tab saved a new position while this
+  // page is open" - which is the only way to exercise GM_addValueChangeListener
+  // delivery. Writing straight to extension storage is what makes this
+  // faithful: it reaches the content script through browser.storage.onChanged,
+  // never through the page realm's own GM_setValue, so the realm's absorbed
+  // view goes stale and pump() sees a genuine remote change.
+  if (command.op === "storage.write") {
+    await browser.storage.local.set(command.patch || {});
+    return { storage: await browser.storage.local.get(null) };
+  }
+
+  // A cross-context delete, the same distinction applied to a removed key.
+  if (command.op === "storage.delete") {
+    await browser.storage.local.remove(command.key);
     return { storage: await browser.storage.local.get(null) };
   }
 
