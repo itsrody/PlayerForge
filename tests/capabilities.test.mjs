@@ -156,6 +156,36 @@ test("every grant states why the manager API is required", () => {
   }
 });
 
+test("the banner's @allFrames matches the manager contract", () => {
+  // The three supported managers disagree here by default: TM/VM inject into
+  // sub-frames unless told otherwise, FireMonkey v3 does not. So the banner
+  // has to say it out loud, and the manifest has to record that it means to.
+  const contract = manifest.managerContract.allFrames;
+  assert.equal(contract.value, true, "PF needs sub-frame injection for nested embeds");
+  assert.ok(
+    /^\/\/ @allFrames\s+true$/m.test(esbuildConfig),
+    "the banner must carry an explicit @allFrames true - FireMonkey defaults it false"
+  );
+});
+
+test("grants whose manager shape differs record it", () => {
+  // These five are the ones where FireMonkey v3 is not a drop-in for
+  // Tampermonkey/Violentmonkey. Each difference is absorbed in
+  // src/shared/storage.js, so a future reader who finds that wrapper has to be
+  // able to find out which manager forced each decision.
+  const shaped = manifest.grants.filter((g) => g.managerShape).map((g) => g.api).sort();
+  assert.deepEqual(
+    shaped,
+    ["GM_addValueChangeListener", "GM_registerMenuCommand", "GM_removeValueChangeListener", "GM_setValue", "GM_xmlhttpRequest"],
+    "the grants with a non-TM/VM manager shape are enumerated, not left to memory"
+  );
+  for (const grant of manifest.grants) {
+    if (grant.managerShape) {
+      assert.ok(grant.managerShape.trim().length > 40, `${grant.api} explains the shape difference`);
+    }
+  }
+});
+
 test("retired capabilities do not reappear", () => {
   for (const retired of manifest.retired) {
     const pattern = new RegExp(retired.matchPattern);

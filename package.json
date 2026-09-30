@@ -1,7 +1,7 @@
 {
   "name": "playerforge",
   "version": "0.7.2",
-  "description": "HTML5 video player enhancer with a lot of useful features, built natively for Firefox 157+ (desktop and Android) running under Tampermonkey MV2 5.5+.",
+  "description": "HTML5 video player enhancer, built natively for Firefox 157+ (desktop and Android) running under Violentmonkey MV2 2.49+.",
   "license": "MIT",
   "type": "module",
   "scripts": {

@@ -15,12 +15,35 @@ export function gmSetValue(key, value) {
   GM_setValue(key, value);
 }
 
-/** Returns a handle for gmUnregisterMenu, or null when unavailable. */
+/**
+ * Returns a handle for gmUnregisterMenu, or null when unavailable.
+ *
+ * The options object is forwarded as-is. The target managers disagree about
+ * the third position and none of them reject an object there:
+ *  - Tampermonkey documents `options` (id / title / autoClose / accessKey) and
+ *    returns the command id.
+ *  - Violentmonkey MV2 2.49's injected-web.js does `opts = Object.assign({},
+ *    opts)` and then reads `opts.id` (falling back to the caption) and
+ *    `opts.text`, so an object is the correct type there and `undefined` is
+ *    also fine.
+ *  - FireMonkey v3's api-gm.js signature is registerMenuCommand(text, onclick,
+ *    accessKey) and its whole body is `command[text] = onclick`: the third
+ *    argument is ignored, and THE RETURN VALUE IS undefined.
+ *
+ * That last point is why the `?? title` below exists. FireMonkey keys menu
+ * entries by caption, so the caption is exactly what its
+ * GM_unregisterMenuCommand(name) expects - but a manager that mints no id at
+ * all would otherwise hand back undefined, and every caller's `handle != null`
+ * guard would then skip the unregister and leave a dead entry behind. The
+ * debug command's caption carries its own state (`Debug Logs:On` / `:Off`), so
+ * without a usable handle each toggle would strand the previous caption in the
+ * manager's menu.
+ */
 export function gmRegisterMenu(title, onClick, options) {
   if (typeof GM_registerMenuCommand !== "function") {
     return null;
   }
-  return GM_registerMenuCommand(title, onClick, options);
+  return GM_registerMenuCommand(title, onClick, options) ?? title;
 }
 
 /** Takes the handle returned by gmRegisterMenu. */
@@ -31,18 +54,78 @@ export function gmUnregisterMenu(handle) {
   GM_unregisterMenuCommand(handle);
 }
 
+/**
+ * Value-change subscriptions, fanned out one manager listener per key.
+ *
+ * Tampermonkey and Violentmonkey mint a fresh id per call and deliver to every
+ * registration. FireMonkey v3 does not: api-gm.js does
+ * `valueChange[key] = callback` and returns the KEY, so a second subscription
+ * on the same key silently REPLACES the first, and removing either one removes
+ * whichever is currently registered. PlayerForge genuinely has more than one
+ * live subscriber per key - every shell owns a ResumeStore, so a page with a
+ * player plus a nested embed would otherwise have the older shell's
+ * cross-tab resume feed dead, and the first shell torn down would delete the
+ * newer shell's subscription.
+ *
+ * So subscribe to the manager once per key and dispatch locally, handing each
+ * caller its own opaque handle. That restores per-caller unsubscribe
+ * independently of what the manager returns.
+ */
+const changeListeners = new Map();
+const changeHandleKeys = new Map();
+
 export function gmAddValueChangeListener(key, callback) {
   if (typeof GM_addValueChangeListener !== "function") {
     return null;
   }
-  return GM_addValueChangeListener(key, callback);
+  let entry = changeListeners.get(key);
+  if (!entry) {
+    entry = { subscribers: new Map(), next: 0 };
+    changeListeners.set(key, entry);
+    entry.managerHandle = GM_addValueChangeListener(key, (name, oldValue, newValue, remote) => {
+      for (const subscriber of [...entry.subscribers.values()]) {
+        try {
+          subscriber(name, oldValue, newValue, remote);
+        } catch (error) {
+          // Independent manager listeners never shared a dispatch loop, so one
+          // subscriber throwing must not starve the rest. Surfaces here rather
+          // than being swallowed.
+          logger.error("storage", "value-change subscriber threw", error);
+        }
+      }
+    });
+  }
+  const handle = `pf-listener:${key}:${++entry.next}`;
+  changeHandleKeys.set(handle, key);
+  entry.subscribers.set(handle, callback);
+  return handle;
 }
 
 export function gmRemoveValueChangeListener(handle) {
-  if (handle == null || typeof GM_removeValueChangeListener !== "function") {
+  if (handle == null) {
     return;
   }
-  GM_removeValueChangeListener(handle);
+  const key = changeHandleKeys.get(handle);
+  if (key === undefined) {
+    // Not one of ours - a raw manager handle, so pass it straight through.
+    if (typeof GM_removeValueChangeListener === "function") {
+      GM_removeValueChangeListener(handle);
+    }
+    return;
+  }
+  // Bookkeeping is released even when the manager cannot unsubscribe, so a
+  // manager that exposes no remove never leaves a dead entry behind: a later
+  // subscription re-arms from scratch instead of latching onto a key whose
+  // manager-side listener was never really torn down.
+  changeHandleKeys.delete(handle);
+  const entry = changeListeners.get(key);
+  if (!entry || !entry.subscribers.delete(handle) || entry.subscribers.size) {
+    return;
+  }
+  changeListeners.delete(key);
+  if (typeof GM_removeValueChangeListener === "function") {
+    GM_removeValueChangeListener(entry.managerHandle);
+  }
 }
 
 export function gmGetResourceText(name) {
@@ -53,10 +136,10 @@ export function gmGetResourceText(name) {
 }
 
 /**
- * TM-API policy: a manager API is used only where it uniquely supplies a
+ * Manager-API policy: a manager API is used only where it uniquely supplies a
  * capability the page cannot - multi-tab manager storage + change
  * notification (configs/resume), CORS-bypassing XHR (@connect * subtitle
- * fetch), manager-cached resource warm-load, TM menu, GM_info. Everything
+ * fetch), manager-cached resource warm-load, manager menu, GM_info. Everything
  * DOM/media/styling-side (MutationObserver, TextTrack/VTTCue,
  * adoptedStyleSheets, fullscreen) stays native; the efficient,
  * reliable implementation wins, and for those domains the native one always

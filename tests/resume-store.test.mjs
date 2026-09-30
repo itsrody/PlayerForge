@@ -204,6 +204,10 @@ test("value change listener hot-reloads foreign writes", () => {
     gm.writeExternal({ version: 1, entries: [entry({ id: "remote-tab" })] });
     fire();
     assert.ok(store.findMatch("youtube", "/watch", 600));
+    // Subscriptions are shared per key across every store, so a store left
+    // subscribed would keep the registry entry alive and hide whether the next
+    // store's destroy() actually reaches the manager.
+    store.destroy();
   } finally {
     delete globalThis.GM_addValueChangeListener;
   }

@@ -284,6 +284,88 @@ test("the configs GM listener is removed when the last subscriber goes away", as
   }
 });
 
+test("value-change subscriptions share one manager listener per key", async () => {
+  const { gmAddValueChangeListener, gmRemoveValueChangeListener } = await import("../src/shared/storage.js");
+  const KEY = "pf:test:fanout";
+  const added = [];
+  const removed = [];
+  const live = new Map();
+  const realAdd = globalThis.GM_addValueChangeListener;
+  const realRemove = globalThis.GM_removeValueChangeListener;
+  // FireMonkey v3's shape: the handle it hands back IS the key, and its
+  // valueChange table is a single slot per key, so a second registration
+  // would silently replace the first and any destroy would delete the
+  // survivor. Tampermonkey and Violentmonkey instead mint an id per call.
+  globalThis.GM_addValueChangeListener = (key, cb) => {
+    added.push(key);
+    live.set(key, cb);
+    return key;
+  };
+  globalThis.GM_removeValueChangeListener = (handle) => {
+    removed.push(handle);
+    live.delete(handle);
+  };
+  try {
+    const seenA = [];
+    const seenB = [];
+    const handleA = gmAddValueChangeListener(KEY, (...args) => seenA.push(args));
+    const handleB = gmAddValueChangeListener(KEY, (...args) => seenB.push(args));
+
+    assert.deepEqual(added, [KEY], "two subscribers, one manager listener");
+    assert.notEqual(handleA, handleB, "each caller gets a distinct handle");
+    assert.notEqual(handleA, KEY, "handles are ours, not the manager's key handle");
+
+    live.get(KEY)(KEY, 1, 2, true);
+    assert.equal(seenA.length, 1, "first subscriber delivered to");
+    assert.equal(seenB.length, 1, "second subscriber delivered to, not dropped");
+
+    // Dropping one subscriber must not silence the other: every shell owns a
+    // ResumeStore, so a teardown that took the shared manager listener with it
+    // would kill cross-tab resume on all the younger shells.
+    gmRemoveValueChangeListener(handleA);
+    assert.deepEqual(removed, [], "the manager subscription outlives one of two subscribers");
+    live.get(KEY)(KEY, 2, 3, true);
+    assert.equal(seenA.length, 1, "the removed subscriber stopped receiving");
+    assert.equal(seenB.length, 2, "the surviving subscriber still receives");
+
+    gmRemoveValueChangeListener(handleB);
+    assert.deepEqual(removed, [KEY], "the last unsubscribe frees the manager listener");
+  } finally {
+    globalThis.GM_addValueChangeListener = realAdd;
+    globalThis.GM_removeValueChangeListener = realRemove;
+  }
+});
+
+test("a throwing value-change subscriber does not starve its peers", async () => {
+  const { gmAddValueChangeListener, gmRemoveValueChangeListener } = await import("../src/shared/storage.js");
+  const KEY = "pf:test:fanout-throw";
+  let fire;
+  const realError = console.error;
+  globalThis.GM_addValueChangeListener = (key, cb) => {
+    fire = cb;
+    return key;
+  };
+  globalThis.GM_removeValueChangeListener = () => {};
+  console.error = () => {};
+  try {
+    const seen = [];
+    const handleA = gmAddValueChangeListener(KEY, () => {
+      throw new Error("subscriber blew up");
+    });
+    const handleB = gmAddValueChangeListener(KEY, (...args) => seen.push(args));
+    // Independent manager listeners never shared a dispatch loop, so fanning
+    // out locally must not let one bad subscriber skip the rest.
+    fire(KEY, 1, 2, true);
+    assert.equal(seen.length, 1, "the healthy subscriber still received the event");
+    gmRemoveValueChangeListener(handleA);
+    gmRemoveValueChangeListener(handleB);
+  } finally {
+    console.error = realError;
+    delete globalThis.GM_addValueChangeListener;
+    delete globalThis.GM_removeValueChangeListener;
+  }
+});
+
 test("re-subscribing after an unwatch window re-arms and re-reads", async () => {
   const { ConfigStore } = await import("../src/shared/storage.js");
   const realAdd = globalThis.GM_addValueChangeListener;

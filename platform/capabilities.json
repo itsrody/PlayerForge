@@ -24,7 +24,17 @@
   "target": {
     "engine": "Gecko",
     "minFirefox": 157,
-    "manager": "Tampermonkey MV2 5.5+"
+    "manager": "FireMonkey MV2 v3 (Firefox 153+)"
+  },
+  "managerContract": {
+    "injectionContext": {
+      "value": "userScript",
+      "why": "FireMonkey v3 injects a @grant-ed script into an isolated userScript context, not the page realm that Tampermonkey and Violentmonkey use. This is why the banner pins no @sandbox / @inject-into: there is no directive that would give PF a page-realm global it needs, and it never reads one. The live risk is not GM_* but constructable stylesheets - a CSSStyleSheet built in the userScript realm has to be adoptable into a page-owned shadow root, which is the one thing the realm change can plausibly break (src/shell/chrome/inject.js). Verified on Firefox 157 against a real FireMonkey v3 build driving the shipped bundle through browser.userScripts: `new CSSStyleSheet()` + `replaceSync()` works, `document.adoptedStyleSheets` accepts the sheet, and the same sheet is adopted into a page-owned shadow root - all from the userScript realm. Isolation also holds: window.PlayerForge and the GM_* globals are absent from the page world. Not inferred."
+    },
+    "allFrames": {
+      "value": true,
+      "why": "The banner sets @allFrames true explicitly. Tampermonkey and Violentmonkey already default sub-frame injection to true; FireMonkey v3's meta.js reads `case 'allFrames': data.allFrames = value !== 'false'` and otherwise leaves it false, so omitting the line would silently stop PF reaching a player inside a nested embed. This is the only banner key where the three managers disagree by default."
+    }
   },
   "capabilities": [
     {
@@ -163,19 +173,23 @@
     },
     {
       "api": "GM_setValue",
-      "why": "Same store as GM_getValue."
+      "why": "Same store as GM_getValue.",
+      "managerShape": "FireMonkey v3 updates the manager cache synchronously but persists asynchronously; Tampermonkey and Violentmonkey are synchronous end to end. PF always reads back through GM_getValue against that same cache and never confirms a commit via a write round-trip, so the lag is not observable."
     },
     {
       "api": "GM_addValueChangeListener",
-      "why": "Cross-tab notification for pf:configs - the one capability the page origin cannot provide."
+      "why": "Cross-tab notification for pf:configs - the one capability the page origin cannot provide.",
+      "managerShape": "FireMonkey v3 stores valueChange[key] = callback and returns the KEY: one listener per key, never fires for the script's own writes, and always reports remote=true. Tampermonkey and Violentmonkey mint a distinct id per call and fire own writes with remote=false. src/shared/storage.js therefore subscribes to the manager once per key and fans out locally, so every shell's ResumeStore keeps an independent unsubscribe on either shape."
     },
     {
       "api": "GM_removeValueChangeListener",
-      "why": "Detaches the above; a grant without its remover cannot clean up."
+      "why": "Detaches the above; a grant without its remover cannot clean up.",
+      "managerShape": "Takes the id on Tampermonkey/Violentmonkey and the storage key on FireMonkey v3, so it is only ever called with a handle the matching add call returned. storage.js keeps its own handle-to-key map for this reason."
     },
     {
       "api": "GM_registerMenuCommand",
-      "why": "Manager-owned menu entry (debug toggle)."
+      "why": "Manager-owned menu entry (debug toggle).",
+      "managerShape": "FireMonkey v3's body is command[text] = onclick and it returns undefined, so the caption is the only handle its GM_unregisterMenuCommand(name) accepts. The debug caption carries its own :On/:Off state, so gmRegisterMenu falls back to the title whenever the manager hands back nothing - without that, every toggle would strand its predecessor in the menu."
     },
     {
       "api": "GM_unregisterMenuCommand",
@@ -187,13 +201,14 @@
     },
     {
       "api": "GM_xmlhttpRequest",
-      "why": "CORS-bypassing subtitle fetch from user-supplied hosts."
+      "why": "CORS-bypassing subtitle fetch from user-supplied hosts.",
+      "managerShape": "Callback-based with a numeric status and responseText on all three targets. Reach depends on the banner's @connect *: Tampermonkey and Violentmonkey honour the wildcard literally, while FireMonkey v3's meta.js drops any @connect value containing '*' and api-gm.js enforces only when connect[0] is set - so the wildcard is discarded rather than honoured there, and the fetch is still permitted either way."
     }
   ],
   "retired": [
     {
       "id": "window.onurlchange-grant",
-      "summary": "The @grant for Tampermonkey's URL event",
+      "summary": "The @grant for a manager's URL-change event",
       "why": "Nothing in the fork subscribes to route changes: same-document navigation is out of scope, so there is no consumer to receive the event. Re-granting it would widen the permission surface for zero coverage.",
       "matchPattern": "@grant\\s+window\\.onurlchange",
       "mustNotAppearIn": [
@@ -355,7 +370,7 @@
       "id": "GM_info",
       "api": "GM_info",
       "summary": "Manager and script identity for the about/diagnostics surface",
-      "why": "Deliberately unprobed and ungranted: Tampermonkey exposes GM_info to a script with no grants, so bare use is correct. Declared here so nobody 'fixes' it by adding a grant - the grant-equality test would then fail on a permission that buys nothing.",
+      "why": "Deliberately unprobed and ungranted: the manager exposes GM_info to a script with no grants (true of both Tampermonkey MV2 and Violentmonkey MV2), so bare use is correct. Declared here so nobody 'fixes' it by adding a grant - the grant-equality test would then fail on a permission that buys nothing.",
       "usedBy": [
         "src/entry.js"
       ]
