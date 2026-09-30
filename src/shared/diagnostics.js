@@ -138,6 +138,45 @@ let lastFrameAt = 0;
 let windowStart = 0;
 /** Frame gaps seen in the current window, flushed worst-first. */
 let slowFrames = [];
+/**
+ * True while the frame clock is being re-established after the document was
+ * hidden, so gaps are not measured. Gecko suspends rAF in a hidden document and
+ * does NOT resume with one big gap: it hands back a burst of catch-up frames
+ * instead. Measured in 157, the burst GROWS with the time spent hidden and the
+ * gaps DOUBLE - 1s hidden gave [1006], 3s gave [1005, 1003, 997], 10s gave
+ * [1005, 1005, 2006, 4003, 1985] and 30s gave [1002, 1002, 2005, 4005, 8001,
+ * 13991]. Every one is over JANK_THRESHOLD_MS, so an unguarded loop reports a
+ * backgrounded tab as a burst of jank events - pure artifact, and the whole
+ * point of this diagnostic is to attribute slowness to page work.
+ *
+ * Cleared on the first sub-threshold gap, which is the signal that the
+ * compositor is running again.
+ */
+let resyncing = false;
+/** Catch-up frames already swallowed in the current resync window. */
+let resyncFrames = 0;
+/**
+ * Ceiling on the swallow, so a page that comes back from a background tab
+ * genuinely janking is not silenced forever by the flag waiting for a healthy
+ * frame that never comes. Sized far above the measured burst: the gap sizes
+ * double while the frame COUNT grows logarithmically, so even an hours-long
+ * background stays well inside this.
+ */
+const MAX_RESYNC_FRAMES = 32;
+/** Document the visibility listener is bound to; null when there is none. */
+let visDoc = null;
+
+/**
+ * Flips the resync flag when the document is backgrounded. Lives with the rAF
+ * loop (armed in install, released in teardown) so it can never outlive it or
+ * be missing when the loop starts.
+ */
+function onVisibilityChange() {
+  if (visDoc?.visibilityState === "hidden") {
+    resyncing = true;
+    resyncFrames = 0;
+  }
+}
 
 /* - Interaction latency (Event Timing) - */
 
@@ -164,6 +203,17 @@ function onFrame(now) {
   rafId = requestAnimationFrame(onFrame);
   const gap = now - lastFrameAt;
   lastFrameAt = now;
+  if (resyncing) {
+    // Catch-up frames after a hidden->visible transition measure Gecko's
+    // compositor re-establishment, not the page. Keep the clock current and
+    // resume measuring once the cadence is healthy again - or once the burst
+    // outruns its ceiling, so a page that comes back janky is still reported.
+    resyncFrames += 1;
+    if (gap < JANK_THRESHOLD_MS || resyncFrames >= MAX_RESYNC_FRAMES) {
+      resyncing = false;
+    }
+    return;
+  }
   if (gap >= JANK_THRESHOLD_MS) {
     slowFrames.push(gap);
   }
@@ -249,6 +299,12 @@ function install() {
     windowStart = now;
     rafId = requestAnimationFrame(onFrame);
   });
+  // Resolved through globalThis and guarded, never as a bare `document`: this
+  // module has no document dependency of its own (its tests drive it with no
+  // DOM at all), and a bare reference would turn a debug-only diagnostic into a
+  // ReferenceError in any realm without one.
+  visDoc = globalThis.document ?? null;
+  visDoc?.addEventListener("visibilitychange", onVisibilityChange);
 }
 
 function teardown() {
@@ -256,6 +312,12 @@ function teardown() {
   // context with no requestAnimationFrame still gets interaction timings, and
   // an early return here would strand the observer past the debug toggle.
   teardownEventTiming();
+  // Released before the rAF early return, so the listener can never outlive
+  // the loop it exists to protect.
+  visDoc?.removeEventListener("visibilitychange", onVisibilityChange);
+  visDoc = null;
+  resyncing = false;
+  resyncFrames = 0;
   if (rafId === null) {
     return;
   }

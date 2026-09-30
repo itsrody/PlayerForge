@@ -283,3 +283,161 @@ test("the observer survives a context with no requestAnimationFrame", () => {
     console.warn = originalWarn;
   }
 });
+
+/* - Backgrounding (Gecko rAF catch-up) - */
+
+/**
+ * Replay of the frame sequence measured in Firefox 157: a tab backgrounded for
+ * 3s does not resume with ONE big gap, it comes back with three ~1000ms
+ * catch-up frames before the cadence returns to 8ms. `visibilitychange` is
+ * stubbed so the loop sees the same signal the real engine sends.
+ */
+function withVisibility(body) {
+  const originalDoc = globalThis.document;
+  const listeners = [];
+  let state = "visible";
+  globalThis.document = {
+    get visibilityState() {
+      return state;
+    },
+    addEventListener(type, fn) {
+      if (type === "visibilitychange") {
+        listeners.push(fn);
+      }
+    },
+    removeEventListener(type) {
+      if (type === "visibilitychange") {
+        listeners.length = 0;
+      }
+    }
+  };
+  const hide = () => {
+    state = "hidden";
+    for (const fn of [...listeners]) {
+      fn();
+    }
+  };
+  try {
+    body({ hide });
+  } finally {
+    globalThis.document = originalDoc;
+  }
+}
+
+test("Gecko's post-background catch-up frames are not reported as jank", () => {
+  withFrameClock(({ step, advanceTo, warnings }) => {
+    withVisibility(({ hide }) => {
+      setDebugRuntime(true);
+      step(0); // seeds
+      step(16);
+      step(32);
+
+      // Background the tab. Gecko suspends rAF, so no frames arrive here.
+      hide();
+
+      // The measured catch-up burst on return: three ~1000ms frames...
+      step(1037);
+      step(2042);
+      step(3039);
+      // ...then the cadence recovers.
+      step(3051);
+      step(3059);
+      step(3067);
+      advanceTo(7000); // step in 16ms frames: a direct jump would fake jank
+      setDebugRuntime(false);
+    });
+    assert.equal(warnings.length, 0, "a backgrounded tab fabricates no jank reports");
+  });
+});
+
+test("real jank is still reported after a backgrounding round trip", () => {
+  withFrameClock(({ step, advanceTo, warnings }) => {
+    withVisibility(({ hide }) => {
+      setDebugRuntime(true);
+      step(0);
+      step(16);
+      hide();
+      step(1037); // catch-up
+      step(1055); // cadence healthy again -> resync clears
+      step(2000); // a REAL 945ms stall, well past the threshold
+      advanceTo(8000);
+      setDebugRuntime(false);
+    });
+    assert.equal(warnings.length, 1, "the resync window does not disable the diagnostic");
+    assert.match(warnings[0], /long frame: 945ms/);
+  });
+});
+
+test("a long background whose catch-up gaps double is still not jank", () => {
+  // Measured Gecko 157 for 30s hidden: [1002, 1002, 2005, 4005, 8001, 13991].
+  // The burst GROWS with the time hidden, so a cap sized to a 3s hide would
+  // start reporting these.
+  const burst = [1002, 1002, 2005, 4005, 8001, 13991];
+  withFrameClock(({ step, advanceTo, warnings }) => {
+    withVisibility(({ hide }) => {
+      setDebugRuntime(true);
+      let t = 0;
+      step(0);
+      step(16);
+      hide();
+      for (const gap of burst) {
+        t += gap;
+        step(t);
+      }
+      step(t + 12); // cadence healthy again
+      advanceTo(t + 6000);
+      setDebugRuntime(false);
+    });
+    assert.equal(warnings.length, 0, "a 30s background fabricates no jank reports");
+  });
+});
+
+test("a page janking straight out of a background is reported again", () => {
+  // The resync wait must not silence a genuinely broken page: every frame
+  // over threshold, so no healthy frame ever arrives to end the window.
+  withFrameClock(({ step, advanceTo, warnings }) => {
+    withVisibility(({ hide }) => {
+      setDebugRuntime(true);
+      step(0);
+      step(16);
+      hide();
+      step(1016); // catch-up
+      let t = 1016;
+      // The page comes back and every single frame is 200ms of work.
+      for (let i = 0; i < 40; i += 1) {
+        t += 200;
+        step(t);
+      }
+      advanceTo(t + 6000);
+      setDebugRuntime(false);
+    });
+    assert.ok(warnings.length > 0, "the resync window does not disable the diagnostic forever");
+    assert.match(warnings[0], /long frame: 200ms/);
+  });
+});
+
+test("repeated backgrounding keeps swallowing catch-up frames", () => {
+  // The ceiling counts frames WITHIN one resync window, so the counter has to
+  // start over on every hide. Left accumulating it passes 32 after enough
+  // background cycles and every later resync window is cut off short, which
+  // puts the real catch-up frames straight back into the report.
+  const burst = [1002, 1002, 2005, 4005, 8001, 13991];
+  withFrameClock(({ step, warnings }) => {
+    withVisibility(({ hide }) => {
+      setDebugRuntime(true);
+      let t = 0;
+      step(t);
+      step((t += 16));
+      // 7 cycles x 6 frames = 42, past the 32 ceiling.
+      for (let cycle = 0; cycle < 7; cycle += 1) {
+        hide();
+        for (const gap of burst) {
+          step((t += gap));
+        }
+        step((t += 12));
+      }
+      setDebugRuntime(false);
+    });
+    assert.equal(warnings.length, 0, "the resync counter resets per background, not per session");
+  });
+});

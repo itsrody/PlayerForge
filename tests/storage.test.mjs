@@ -405,3 +405,44 @@ test("setConfigFields commits the cache in sync with storage", () => {
   assert.equal(getConfigValue("filter.contrast"), 110);
   assert.equal(stored[KEYS.configs].filter.brightness, 150);
 });
+
+/* - Key-set fast path (collectChangedPaths) - */
+
+/**
+ * The diff takes a same-shape fast path when both branches hold the same keys,
+ * which is every ordinary settings write. These cases pin the boundary of that
+ * shortcut: two branches of EQUAL LENGTH but different key sets must still
+ * take the general path, or a rename would report nothing at all.
+ */
+test("equal-length branches with different keys still report both sides", () => {
+  configStore.adopt({ ui: { volume: 0.5, compact: false } });
+  // Same key count, one key RENAMED: a length-only check would call this a
+  // same-shape write and drop the change entirely.
+  const renamed = configStore.adopt({ ui: { volume: 0.5, dense: false } });
+  assert.deepEqual([...renamed].sort(), ["ui.compact", "ui.dense"], "a renamed key is both lost and gained");
+
+  // Same again at the top level, where the check runs on the root branch.
+  configStore.adopt({ alpha: 1, beta: 2 });
+  const swapped = configStore.adopt({ alpha: 1, gamma: 2 });
+  assert.deepEqual([...swapped].sort(), ["beta", "gamma"], "a top-level rename is reported on both keys");
+});
+
+test("a same-shape write reports only the leaf that moved", () => {
+  configStore.adopt({
+    version: 1,
+    settings: { controller: { stepSeek: 5 }, gestures: { hold: true, scrub: true } }
+  });
+  const paths = configStore.adopt({
+    version: 1,
+    settings: { controller: { stepSeek: 10 }, gestures: { hold: true, scrub: true } }
+  });
+  assert.deepEqual([...paths], ["settings.controller.stepSeek"], "the fast path still walks every leaf");
+});
+
+test("a same-shape write into a branch that also changed shape reports both", () => {
+  configStore.adopt({ settings: { gestures: { hold: true, scrub: true }, ui: { compact: false } } });
+  // settings changes shape (a leaf is removed) AND keeps two same-shape
+  // branches: the removed leaf must not be lost by the shortcut.
+  const paths = configStore.adopt({ settings: { gestures: { hold: false, scrub: true } } });
+  assert.deepEqual([...paths].sort(), ["settings.gestures.hold", "settings.ui", "settings.ui.compact"]);
+});
