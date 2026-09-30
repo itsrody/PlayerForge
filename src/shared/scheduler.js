@@ -33,6 +33,8 @@
  * a plain function, so the hot path stays inline-friendly.
  */
 
+import { logger } from "./diagnostics.js";
+
 /**
  * Hard cap on the rAF wait. A visible document should produce a frame within
  * ~16-33ms, but rAF can be starved (minimized/occluded window, headless
@@ -47,8 +49,12 @@ const RAF_BACKSTOP_MS = 50;
  * Returns a `{ abort() }` handle that cancels the pending task. Abort is real,
  * not cosmetic: the handle owns an AbortController and also follows `signal`
  * when one is passed, so pagehide/kernel teardown lands the task immediately
- * instead of letting it fire (or leak) later. The abort rejection of the
- * underlying postTask promise is swallowed - callers never await it.
+ * instead of letting it fire (or leak) later. The underlying postTask promise
+ * is never awaited by callers, so its rejection is handled here - but only the
+ * abort rejection is ignored. A throw from `fn` is a real defect and is
+ * reported, because swallowing it made every task callback fail silently:
+ * dom-manager's deferred flush runs inside a task, and a throw there lost the
+ * whole batch with no console output and no logger.error.
  *
  * @param {Function} fn
  * @param {{ priority?: string, delay?: number, signal?: AbortSignal }} opts
@@ -61,14 +67,27 @@ export function postTask(fn, { priority = "user-visible", delay: ms = 0, signal 
     dropOwnerSignal();
     ac.abort();
   };
+  // An abort listener added to an ALREADY-aborted signal never fires, so a
+  // caller that hands us a disposed scope would otherwise get a task that
+  // runs to completion after teardown. Check the flag up front.
+  if (signal?.aborted) {
+    ac.abort();
+    return { abort: () => {} };
+  }
   signal?.addEventListener("abort", onOwnerAbort, { once: true });
   const task = globalThis.scheduler.postTask(() => {
     dropOwnerSignal();
     fn();
   }, { priority, delay: ms, signal: ac.signal });
   // Aborting the task rejects its promise; nobody awaits it, so keep the
-  // rejection off the unhandled-rejection path.
-  task.catch(() => {});
+  // rejection off the unhandled-rejection path. A callback that threw is a
+  // different failure and must not disappear with it.
+  task.catch((err) => {
+    if (ac.signal.aborted) {
+      return;
+    }
+    logger.error("scheduler", "postTask callback threw", err);
+  });
   return {
     abort: () => {
       dropOwnerSignal();

@@ -75,7 +75,15 @@ if (typeof globalThis.scheduler?.postTask !== "function") {
         signal?.addEventListener("abort", onAbort, { once: true });
         timer = setTimeout(() => {
           signal?.removeEventListener("abort", onAbort);
-          resolve(callback());
+          // A throw from the callback must REJECT, which is what Gecko's
+          // Task Scheduling API does. resolve(callback()) lets a synchronous
+          // throw escape the timer as an uncaught exception instead, so the
+          // host silently diverged from the browser the floor targets.
+          try {
+            resolve(callback());
+          } catch (err) {
+            reject(err);
+          }
         }, delay);
       });
     }

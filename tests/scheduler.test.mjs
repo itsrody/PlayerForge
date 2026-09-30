@@ -152,3 +152,47 @@ test("postTask: a task that runs detaches from its owner signal", async () => {
     "a fired task leaves nothing behind on a scope signal"
   );
 });
+
+test("postTask: a throwing callback is reported, not silently swallowed [regression]", async () => {
+  // `task.catch(() => {})` existed to silence the abort rejection, but it also
+  // erased genuine throws. dom-manager's deferred flush runs inside a task, so
+  // a fault there lost the whole batch with no console output at all.
+  const seen = [];
+  const original = console.error;
+  console.error = (...args) => { seen.push(args.map(String).join(" ")); };
+  try {
+    postTask(() => { throw new Error("boom-from-task"); });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  } finally {
+    console.error = original;
+  }
+  assert.ok(
+    seen.some((line) => line.includes("boom-from-task")),
+    `expected the task error to be reported, console.error saw: ${JSON.stringify(seen)}`
+  );
+});
+
+test("postTask: an abort rejection stays silent [regression]", async () => {
+  const seen = [];
+  const original = console.error;
+  console.error = (...args) => { seen.push(args.map(String).join(" ")); };
+  try {
+    const handle = postTask(() => {}, { delay: 50 });
+    handle.abort();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  } finally {
+    console.error = original;
+  }
+  assert.deepEqual(seen, [], "a deliberate abort is not an error and must stay quiet");
+});
+
+test("postTask: an already-aborted signal cancels instead of scheduling [regression]", async () => {
+  // addEventListener("abort", ...) on an already-aborted signal never fires, so
+  // this task used to run to completion - work continuing after teardown.
+  const owner = new AbortController();
+  owner.abort();
+  let ran = false;
+  postTask(() => { ran = true; }, { delay: 5, signal: owner.signal });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(ran, false, "a task handed a disposed scope must never run");
+});

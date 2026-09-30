@@ -19,6 +19,12 @@ const SETTING_KEYS = {
   syncOffset: "subtitles.sync.offset"
 };
 
+/** Single source of truth for the shadow value, shared by the panel apply and
+ *  the post-creation re-apply so the two can never drift. */
+const cueShadowValue = (strength) => strength
+  ? `1px 1px ${Math.round(strength / 6)}px rgba(0, 0, 0, ${(0.4 + strength / 100 * 0.6).toFixed(2)})`
+  : "none";
+
 /**
  * Shell-owned subtitles section: loads .srt/.vtt files onto a video through
  * Firefox's native WebVTT parser (ForgeTrack.loadText) and renders cues
@@ -195,9 +201,7 @@ export class SubtitlesSection {
     });
     this.#setCueVar("--pf-cue-color", colorField.getValue());
 
-    const applyCueShadow = (strength) => this.#setCueVar("--pf-cue-text-shadow", strength
-      ? `1px 1px ${Math.round(strength / 6)}px rgba(0, 0, 0, ${(0.4 + strength / 100 * 0.6).toFixed(2)})`
-      : "none");
+    const applyCueShadow = (strength) => this.#setCueVar("--pf-cue-text-shadow", cueShadowValue(strength));
     const shadowStepper = panel.addControl(styleGrid, {
       type: "stepper",
       label: "Shadow",
@@ -259,6 +263,23 @@ export class SubtitlesSection {
 
   #setCueVar(prop, value) {
     this.#forgeTrack?.setVar(prop, value);
+  }
+
+  /**
+   * Push the persisted cue styling onto the live track.
+   *
+   * #forgeTrack is created LAZILY, on the first file load, but the styling is
+   * applied while the panel is built - #setCueVar is optional-chained, so that
+   * apply silently hit a null track and did nothing. Consequence: a user's
+   * saved size/colour/shadow only reached the track after they touched the
+   * matching stepper, and a stepper moved BEFORE loading a file was discarded
+   * along with the early apply. Both paths re-apply here, off the persisted
+   * config, so the track is styled correctly the moment it exists.
+   */
+  #applyCueVars() {
+    this.#setCueVar("--pf-cue-font-size", fmtEm(getConfigValue(SETTING_KEYS.size, 1.2)));
+    this.#setCueVar("--pf-cue-color", getConfigValue(SETTING_KEYS.color, "#ffffff"));
+    this.#setCueVar("--pf-cue-text-shadow", cueShadowValue(getConfigValue(SETTING_KEYS.shadow, 40)));
   }
 
   #toastFlash(icon, text, group) {
@@ -357,6 +378,9 @@ export class SubtitlesSection {
     const vtt = /\.srt$/i.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
     if (!this.#forgeTrack) {
       this.#forgeTrack = new ForgeTrack(this.#shell.video, this.#cueLayer);
+      // The panel applied these before any track existed; re-apply now that
+      // there is a cue layer to write to.
+      this.#applyCueVars();
     }
     const count = await this.#forgeTrack.loadText(vtt, this.#syncOffset);
     // loadText can settle after dispose (abort); re-check before touching UI.

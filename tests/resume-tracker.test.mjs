@@ -161,7 +161,7 @@ test("a saved position past the threshold seeks and toasts immediately", async (
       updatedAt: Date.now()
     }]
   };
-  const { dom, video, shell } = makeEnv(600);
+  const { shell } = makeEnv(600);
   const tracker = new ResumeTracker(shell);
   await flush();
   await flush();
@@ -228,7 +228,7 @@ test("autoplaying video seeks immediately without waiting for canplay", async ()
       updatedAt: Date.now()
     }]
   };
-  const { dom, video, shell } = makeEnv(600);
+  const { video, shell } = makeEnv(600);
   Object.defineProperty(video, "paused", { value: false, configurable: true });
   Object.defineProperty(video, "readyState", { value: 4, configurable: true });
   const tracker = new ResumeTracker(shell);
@@ -470,4 +470,50 @@ test("a paused seek persists the settled position; the detached clock cannot", a
   assert.equal(stored(), 300, "paused seek persisted the settled position");
 
   tracker.destroy();
+});
+
+test("a completed video resets the STORED position, not just the in-memory one [regression]", async () => {
+  // #entry is the store's own live entry object, so pre-assigning
+  // entry.resume = 0 made updateResume's no-op guard see 0 === 0, return
+  // early and skip #persist(). The in-memory value read 0 so the reset looked
+  // like it worked, but the finished video kept its ~95% position on disk and
+  // resumed near the end on every visit.
+  writes["pf:resume"] = {
+    version: 1,
+    entries: [{ id: "bbb", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 570, createdAt: 0, updatedAt: Date.now() }]
+  };
+  const { dom, video, shell } = makeEnv(600);
+  TUNING.resume.saveIntervalMs = 0;
+  shell.paused = false;
+  shell.currentTime = 570;
+  const tracker = new ResumeTracker(shell);
+  await flush();
+  await flush();
+  await flush();
+  assert.equal(writes["pf:resume"].entries[0].resume, 570, "restored position is in storage");
+
+  // 595/600 = 99.2% - past the completion ratio.
+  shell.currentTime = 595;
+  video.dispatchEvent(new dom.window.Event("timeupdate"));
+  assert.equal(writes["pf:resume"].entries[0].resume, 0,
+    "completion reset must reach disk, otherwise the video resumes near the end forever");
+  tracker.destroy();
+});
+
+test("destroy while paused at 0 stores 0, not a NaN that serializes to null [regression]", async () => {
+  writes["pf:resume"] = {
+    version: 1,
+    entries: [{ id: "ccc", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 120, createdAt: 0, updatedAt: 1 }]
+  };
+  const { shell } = makeEnv(600);
+  const tracker = new ResumeTracker(shell);
+  await flush();
+  await flush();
+  await flush();
+  shell.currentTime = 0;
+  shell.paused = true;
+  tracker.destroy();
+  const entry = writes["pf:resume"].entries[0];
+  assert.equal(entry.resume, 0, "a real 0 position must not become NaN -> null");
+  assert.notEqual(entry.resume, null);
 });

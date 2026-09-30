@@ -25,6 +25,25 @@ const DEFAULTS = PRESETS.Default;
 const PRESET_ENTRIES = Object.entries(PRESETS);
 const PRESET_OPTIONS = Object.keys(PRESETS).concat(["Custom"]);
 
+/**
+ * Coerce a stored filter value to a number, falling back to `def` only when
+ * the stored value is not a usable number.
+ *
+ * The obvious `Number(raw) || def` is wrong here: 0 is a legitimate,
+ * user-reachable value for brightness, contrast and saturate (their steppers
+ * start at 0, and the B&W preset stores saturate: 0), so the `||` threw away
+ * exactly the value the user picked and substituted the default instead.
+ * Reject only what is genuinely not a number - null, undefined, empty string,
+ * NaN, Infinity.
+ */
+function coerceNumber(raw, def) {
+  if (raw === null || raw === undefined || raw === "") {
+    return def;
+  }
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : def;
+}
+
 // Static UI maps hoisted out of #buildSection: they are pure constants, so
 // building three object literals + nine format closures per VideoFilter
 // construction (once per shell, i.e. per video) was pure per-shell garbage.
@@ -88,7 +107,7 @@ function buildFilterString(values) {
   const tempSat = Math.abs(Number(values.temperature) || 0) * 0.15;
   const tintHue = (Number(values.tint) || 0) * 0.2;
   const totalHue = (Number(values.hue) || 0) + tempHue + tintHue;
-  const totalSat = (values.saturate || DEFAULTS.saturate) + tempSat;
+  const totalSat = (Number(values.saturate) || 0) + tempSat;
 
   if (values.brightness !== DEFAULTS.brightness) {
     parts.push(`brightness(${values.brightness}%)`);
@@ -185,7 +204,7 @@ export class VideoFilter {
     for (const key of ALL_KEYS) {
       const def = DEFAULTS[key];
       const raw = getConfigValue(`${CONFIG_PREFIX}.${key}`, def);
-      this.#values[key] = typeof def === "number" ? (Number(raw) || def) : (raw ?? def);
+      this.#values[key] = typeof def === "number" ? coerceNumber(raw, def) : (raw ?? def);
     }
     for (const key of ALL_KEYS) {
       this.#steppers[key]?.setValue(this.#values[key]);

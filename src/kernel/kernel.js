@@ -303,6 +303,19 @@ export class Kernel {
         observer.observe(anchor, { childList: true });
         anchors.push(anchor);
       }
+      /**
+       * Sentinel: the first ancestor ABOVE the watched range. MutationObserver
+       * only reports mutations of the nodes it observes, so removing the
+       * outermost watched anchor was a childList change on a node nobody
+       * watched - no record, no checkAnchors, and the video stayed claimed
+       * forever (shell, listeners, marker, #seenVideos entry). When the chain
+       * ends at the document `anchor` is null and there is nothing to watch.
+       * Kept out of `anchors` deliberately: that array is the watched RANGE,
+       * and anchors[0] means "the video's parent" to checkAnchors.
+       */
+      if (anchor && !anchors.includes(anchor)) {
+        observer.observe(anchor, { childList: true });
+      }
     };
 
     const stopWatching = () => {

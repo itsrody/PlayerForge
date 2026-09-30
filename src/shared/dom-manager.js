@@ -484,6 +484,18 @@ export class DOMManager {
           el.setAttribute(attr, original);
         }
       }
+      // Release the baseline so the NEXT manager to touch this element
+      // records a fresh one. The WeakMap is process-wide and first-write-wins,
+      // so a surviving entry would suppress a later manager's rollback
+      // registration entirely (markAttribute only pushes to #attrTouched when
+      // it creates the record). That stranded SHELL_MARKER on the <video>
+      // across a shell teardown, and the kernel refuses to adopt a marked
+      // video for the life of the document - so a player that the host SPA
+      // removed and re-inserted could never be shelled again. Releasing here
+      // keeps the documented first-write-wins behaviour for managers that are
+      // genuinely live at the same time (both would have to mark before
+      // either destroys) without leaking the record past teardown.
+      attrOriginals.delete(el);
     }
     this.#attrTouched.length = 0;
 
@@ -496,6 +508,7 @@ export class DOMManager {
           el.style.removeProperty(prop);
         }
       }
+      styleOriginals.delete(el);
     }
     this.#styleTouched.length = 0;
 

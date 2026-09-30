@@ -215,3 +215,69 @@ test("a bfcache pagehide keeps shell-created listeners live for the restored pag
   await waitFor(() => created.length > before, 3000);
   assert.equal(created.length, before + 1, "the restored page still notifies its shell-created listener");
 });
+
+test("removal watch observes one node ABOVE the walked range [regression]", async () => {
+  // MutationObserver only reports mutations of the nodes it observes, so
+  // removing the OUTERMOST watched anchor was a childList change on its parent
+  // - one level further out, and unobserved. No record was delivered,
+  // checkAnchors never ran, and the video stayed claimed forever: shell alive,
+  // listeners attached, marker set, #seenVideos entry held. Nothing could
+  // reclaim it, because that same missing record is what a re-anchor needs.
+  //
+  // The guarantee is bounded by design (MAX_REMOVAL_DEPTH=8, no subtree
+  // observation on a big page), so this pins the boundary case: the walked
+  // range PLUS the one sentinel level above it.
+  const wrapper = document.createElement("div");
+  wrapper.className = "jwplayer";
+  const video = document.createElement("video");
+  wrapper.appendChild(video);
+  video.getBoundingClientRect = () => ({ width: 640, height: 360, top: 0, left: 0, right: 640, bottom: 360 });
+  video.checkVisibility = () => true;
+
+  // Nest well past the cap so the walk stops on its depth limit, not on the
+  // end of the chain - otherwise the sentinel is never needed (the document
+  // itself ends up observed and everything is caught).
+  const MAX_REMOVAL_DEPTH = 8; // mirrors the cap in src/kernel/kernel.js
+  let node = wrapper;
+  for (let i = 0; i < 14; i++) {
+    const layer = document.createElement("div");
+    node.appendChild(layer);
+    node = layer;
+  }
+  node.appendChild(video);
+  document.body.appendChild(wrapper);
+
+  const ancestors = [];
+  for (let n = video.parentElement; n; n = n.parentElement) {
+    ancestors.push(n);
+  }
+  assert.ok(
+    ancestors.length > MAX_REMOVAL_DEPTH,
+    `chain must exceed the cap for this to test anything, got ${ancestors.length}`
+  );
+
+  const created = [];
+  const kernel = new Kernel();
+  kernel.onShellCreated((shell) => created.push(shell));
+  kernel.registerShellProvider({
+    create({ video: v, container, sdk }) {
+      return { video: v, container, sdk, ready: Promise.resolve(), destroy() {} };
+    }
+  });
+  kernel.init();
+  await waitFor(() => created.some((shell) => shell.video === video));
+  const shell = created.find((entry) => entry.video === video);
+  let destroyed = false;
+  shell.destroy = () => { destroyed = true; };
+
+  // The outermost WATCHED anchor. Detaching it is a mutation on its parent,
+  // which only the sentinel level makes observable.
+  const outermostWatched = ancestors[MAX_REMOVAL_DEPTH - 1];
+  outermostWatched.remove();
+  await new Promise((resolve) => setTimeout(resolve, 20)); // MutationObserver delivery
+  await waitFor(() => destroyed, 3000);
+  assert.ok(
+    destroyed,
+    "the shell was torn down after the outermost watched anchor was detached"
+  );
+});

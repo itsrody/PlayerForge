@@ -312,3 +312,39 @@ test("preset apply persists all fields in a single write", async () => {
   assert.equal(Object.keys(writes["pf:configs"]?.filter ?? {}).length, 9, "all color fields persisted in one doc");
   filter.destroy();
 });
+
+test("a stored 0 saturate survives the reload path and desaturates the video [regression]", () => {
+  // 0 is a real, reachable value (the stepper range starts at 0 and the B&W
+  // preset stores saturate: 0). `Number(raw) || def` and
+  // `values.saturate || DEFAULTS.saturate` both turned it into 100, so a
+  // user who desaturated the video got full colour back with no way to tell
+  // why.
+  cleanWrites();
+  configStore.adopt({ version: 1, filter: { saturate: 0 } });
+
+  const video = makeFakeVideo();
+  const filter = new VideoFilter(makeFakeShell(video), makeFakePanel());
+  assert.match(video.style.filter, /saturate\(0%\)/, "stored 0 must not become the default 100");
+  filter.destroy();
+});
+
+test("a stored 0 brightness and contrast survive the reload path [regression]", () => {
+  cleanWrites();
+  configStore.adopt({ version: 1, filter: { brightness: 0, contrast: 0 } });
+
+  const video = makeFakeVideo();
+  const filter = new VideoFilter(makeFakeShell(video), makeFakePanel());
+  assert.match(video.style.filter, /brightness\(0%\)/);
+  assert.match(video.style.filter, /contrast\(0%\)/);
+  filter.destroy();
+});
+
+test("garbage stored values still fall back to the default", () => {
+  cleanWrites();
+  configStore.adopt({ version: 1, filter: { saturate: "nonsense" } });
+
+  const video = makeFakeVideo();
+  const filter = new VideoFilter(makeFakeShell(video), makeFakePanel());
+  assert.equal(video.style.filter, "none", "unusable input falls back, not NaN leaking into the string");
+  filter.destroy();
+});

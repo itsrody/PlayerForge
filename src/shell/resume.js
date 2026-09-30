@@ -560,7 +560,13 @@ export class ResumeTracker {
     // wall gate starts counting from real writes (including flushes).
     this.#lastSavedWall = Date.now();
     if (entry.duration > 0 && currentTime / entry.duration >= RESUME_COMPLETION_RATIO) {
-      entry.resume = 0;
+      // Do NOT pre-assign entry.resume here. `entry` is the store's own live
+      // object (createEntry returns the pushed entry, findMatch returns out of
+      // #state.entries), so writing 0 first made updateResume's no-op guard
+      // compare 0 === 0, return early, and skip #persist() - the completed
+      // video kept its ~95% position on disk and resumed near the end on
+      // every visit, while the in-memory value read 0 so the reset looked
+      // like it had worked. updateResume assigns and persists on its own.
       this.#store.updateResume(entry.id, 0);
       return;
     }
@@ -696,7 +702,13 @@ export class ResumeTracker {
     // Final save while disposed is still false (#saveProgress guards on it),
     // then the scope takes down the media listeners + off-screen observer.
     if (this.#entry) {
-      this.#saveProgress(this.#shell?.currentTime || NaN);
+      // `?? NaN`, not `|| NaN`: a shell torn down while paused at 0 is a real
+      // position, and `0 || NaN` wrote NaN into the store, which serialized to
+      // null and still bumped updatedAt - re-sorting a never-played video to
+      // the top of History. Line 545's `|| NaN` is deliberately different: an
+      // absent saved position must stay "unknown" so the first real write is
+      // not suppressed.
+      this.#saveProgress(this.#shell?.currentTime ?? NaN);
     }
     this.#scope.dispose();
     this.#store.destroy();

@@ -429,3 +429,41 @@ test("DomPool recycles pre-made elements, shrinks, and clears every node it prod
   assert.equal(el.children.length, 0, "idle and checked-out nodes alike are gone");
   el.remove();
 });
+
+test("a later manager records a fresh baseline after an earlier one destroys [regression]", () => {
+  // The process-wide WeakMap is first-write-wins, and markAttribute only
+  // registers a rollback when it CREATES the record. If a destroyed manager
+  // left its entry behind, the next manager would skip registration entirely
+  // and its own destroy would restore nothing.
+  const el = host();
+  const a = new DOMManager();
+  a.markAttribute(el, "data-pf", "");
+  a.markStyle(el, "position", "relative");
+  assert.equal(el.getAttribute("data-pf"), "");
+  a.destroy();
+  assert.equal(el.getAttribute("data-pf"), null, "first manager rolled back");
+
+  const b = new DOMManager();
+  b.markAttribute(el, "data-pf", "");
+  b.markStyle(el, "position", "relative");
+  b.destroy();
+  assert.equal(el.getAttribute("data-pf"), null, "second manager must roll back too");
+  assert.equal(el.style.getPropertyValue("position"), "", "and so must its style");
+  el.remove();
+});
+
+test("sequential managers do not capture each other's leftovers [regression]", () => {
+  const el = host();
+  const first = new DOMManager();
+  first.markAttribute(el, "data-pf", "");
+  first.destroy();
+
+  const second = new DOMManager();
+  second.markAttribute(el, "data-pf", "");
+  // Still standing here - the marker is live, exactly as the kernel's
+  // SHELL_MARKER adoption guard expects.
+  assert.equal(el.getAttribute("data-pf"), "");
+  second.destroy();
+  assert.equal(el.getAttribute("data-pf"), null, "no marker stranded on the video");
+  el.remove();
+});
