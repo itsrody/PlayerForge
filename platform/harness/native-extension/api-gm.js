@@ -9,19 +9,27 @@
 //
 // Everything below lands on the userScript's own global, so the bundle body
 // that runs after this entry sees plain GM_* identifiers. Semantics deliberately
-// match FireMonkey v3, not the old lenient TM/VM-shaped stubs, so the suite
-// validates the code the migration actually ships:
+// match Violentmonkey 2.49.0, not the older lenient stubs, so the suite
+// validates the code that actually ships:
 //
-//   GM_registerMenuCommand       -> undefined; the caption is the handle
-//   GM_unregisterMenuCommand     -> takes that caption
-//   GM_addValueChangeListener    -> returns the key, one callback per key
-//   GM_removeValueChangeListener -> takes that key
+//   GM_registerMenuCommand       -> returns options.id || caption
+//   GM_unregisterMenuCommand     -> takes that key
+//   GM_addValueChangeListener    -> fresh id per call, many per key
+//   GM_removeValueChangeListener -> takes that id
 //   value changes                -> other-context writes only, remote === true
 //   GM_getValue / GM_getResourceText -> synchronous
+//
+// Modelling the real manager matters most for the listener table. An earlier
+// version of this file held one callback per key and returned the key, which is
+// FireMonkey's shape; under that model a second shell subscribing to the same
+// key silently displaced the first and the suite still passed, because nothing
+// here covered two shells on one key. VM instead mints a fresh id per call
+// (`s || (s = x("VMvc"), n[s] = cb)`) into a per-key table and delivers to every
+// registration, so the harness now does the same and dispatch iterates a list.
 (function () {
   var STORAGE = {};
   var META = null;
-  var listeners = Object.create(null); // key -> callback
+  var listeners = Object.create(null); // key -> { id -> callback }
   var menuCaptions = [];
   var tick = null;
 
@@ -31,10 +39,14 @@
     return fresh;
   }
 
-  // FireMonkey never delivers a script's own writes back to its change
-  // listeners, and always reports remote === true. The harness has no second
-  // tab to write from, so cross-context writes are simulated by re-reading the
-  // privileged snapshot and firing a listener for any key that moved.
+  // The harness delivers only cross-context writes and always reports
+  // remote === true, which is the conservative direction: a listener that
+  // mishandles a same-context echo fails to react, rather than one that
+  // mishandles a genuine remote change acting on a value the user did not move
+  // here. VM's callback carries a `remote` flag precisely to separate the two.
+  // There is no second tab to write from, so cross-context writes are simulated
+  // by re-reading the privileged snapshot and firing a listener for any key that
+  // moved.
   function pump() {
     if (Object.keys(listeners).length === 0) {
       tick = null;
@@ -47,19 +59,29 @@
       if (Object.is(next, STORAGE[key])) continue;
       var oldValue = STORAGE[key];
       STORAGE[key] = next;
-      try {
-        listeners[key](key, oldValue, next, true);
-      } catch (e) {
-        // One misbehaving subscriber must not stop the others.
-        console.error("[harness] value-change subscriber threw", e);
+      // Every registration under the key hears about the change, and one
+      // misbehaving subscriber must not stop the rest - which is exactly the
+      // case the removed per-key fan-out used to be responsible for.
+      for (var id in listeners[key]) {
+        try {
+          listeners[key][id](key, oldValue, next, true);
+        } catch (e) {
+          console.error("[harness] value-change subscriber threw", e);
+        }
       }
     }
     tick = setTimeout(pump, 100);
   }
 
-  function watch(key) {
+  var nextListenerId = 0;
+
+  function watch(key, callback) {
+    var table = listeners[key];
+    if (!table) table = listeners[key] = Object.create(null);
+    var id = "VMvc" + ++nextListenerId; // VM's own id prefix
+    table[id] = callback;
     if (tick === null) tick = setTimeout(pump, 100);
-    return key;
+    return id;
   }
 
   sync();
@@ -80,22 +102,38 @@
   };
 
   globalThis.GM_addValueChangeListener = function (key, callback) {
-    listeners[key] = callback; // FireMonkey keeps exactly one per key
-    return watch(key);
+    return watch(key, callback);
   };
 
-  globalThis.GM_removeValueChangeListener = function (handle) {
-    delete listeners[handle];
+  globalThis.GM_removeValueChangeListener = function (id) {
+    // VM walks the keys looking for the id rather than indexing by it, so a
+    // stale or foreign handle is a no-op instead of a crash.
+    for (var key in listeners) {
+      if (id in listeners[key]) {
+        delete listeners[key][id];
+        if (Object.keys(listeners[key]).length === 0) delete listeners[key];
+        return;
+      }
+    }
   };
 
-  globalThis.GM_registerMenuCommand = function (caption) {
-    menuCaptions.push(caption);
-    return undefined;
+  // VM clones the options object, keys the entry on options.id || caption and
+  // returns that key, so the handle is always usable - unlike the manager this
+  // file used to model, which returned undefined and forced the caller to invent
+  // a handle from the caption.
+  globalThis.GM_registerMenuCommand = function (caption, onClick, options) {
+    var key = (options && options.id) || caption;
+    menuCaptions.push({ caption: caption, key: key, onClick: onClick, options: options });
+    return key;
   };
 
-  globalThis.GM_unregisterMenuCommand = function (caption) {
-    var i = menuCaptions.indexOf(caption);
-    if (i !== -1) menuCaptions.splice(i, 1);
+  globalThis.GM_unregisterMenuCommand = function (key) {
+    for (var i = 0; i < menuCaptions.length; i++) {
+      if (menuCaptions[i].key === key) {
+        menuCaptions.splice(i, 1);
+        return;
+      }
+    }
   };
 
   // Synchronous, as under FireMonkey. The harness deliberately serves an empty

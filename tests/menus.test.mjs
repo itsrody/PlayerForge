@@ -4,9 +4,10 @@ import assert from "node:assert/strict";
 const registered = [];
 let nextId = 1;
 // Record the FULL argument list, not just (title, fn): the point of the third
-// position is that the two target managers disagree about its type (TM wants an
-// options object, Violentmonkey's legacy signature wants an accessKey string),
-// so a stub that only captures two params cannot enforce anything about it.
+// position is its type and the handle that comes back, so a stub that only
+// captures two params cannot enforce anything about either. Violentmonkey
+// 2.49.0 clones the options object, keys the entry on options.id || caption and
+// returns that key.
 const calls = [];
 globalThis.GM_registerMenuCommand = (...args) => {
   calls.push(args);

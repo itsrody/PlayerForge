@@ -32,8 +32,8 @@
       "why": "Violentmonkey 2.49.0 runs a @grant-ed script in an isolated content realm, not the page world, which is the default for @inject-into auto once any @grant is present. That is why the banner pins no @sandbox / @inject-into: there is no directive that would give PF a page-realm global it needs, and it never reads one - SDK detection is selector-based against the composed DOM ancestry. The realm is unobservable to PF, and that was verified rather than assumed, on a real 2.49.0 build driving the shipped bundle: the kernel boots, finds a Plyr-anchored video, and adopts it into an open shadow root with an adopted stylesheet, while window.PlayerForge and the GM_* globals are absent from the page world. A cross-realm constructable stylesheet was the one integration point a realm change could plausibly break (src/shell/chrome/inject.js) and it works. Not inferred."
     },
     "allFrames": {
-      "value": true,
-      "why": "The banner sets @allFrames true explicitly, but that line is INERT on the shipping target: 2.49.0 has no allFrames meta key at all - the string appears nowhere in the shipped XPI. It gates sub-frames with @noframes instead, and its script collector skips any script whose noframes flag is set, so PF reaches every frame by default. The line is kept only for a Tampermonkey user, whose Firefox build defaults sub-frame injection to true but whose Content Script mode also grants no real document_start."
+      "value": "every frame, by omission",
+      "why": "The banner declares no frame key at all. Violentmonkey 2.49.0 has no allFrames meta key - the string appears nowhere in the shipped XPI - and gates sub-frames with @noframes instead: its script collector skips any script whose noframes flag is set, so a script that says nothing runs in every frame. An @allFrames line was previously shipped here for Tampermonkey's benefit and has been removed, since VM is the only supported manager and a key that manager does not implement is a claim about a manager nobody runs. Sub-frame coverage does not depend on any declaration; PF self-guards per frame, so a frame containing no player is a no-op."
     }
   },
   "capabilities": [
@@ -373,7 +373,7 @@
       "id": "GM_info",
       "api": "GM_info",
       "summary": "Manager and script identity for the about/diagnostics surface",
-      "why": "Deliberately unprobed and ungranted: the manager exposes GM_info to a script with no grants (true of both Tampermonkey MV2 and Violentmonkey MV2), so bare use is correct. Declared here so nobody 'fixes' it by adding a grant - the grant-equality test would then fail on a permission that buys nothing.",
+      "why": "Deliberately unprobed and ungranted: Violentmonkey 2.49.0 exposes GM_info to a script with no grants, so bare use is correct. Declared here so nobody 'fixes' it by adding a grant - the grant-equality test would then fail on a permission that buys nothing.",
       "usedBy": [
         "src/entry.js"
       ]

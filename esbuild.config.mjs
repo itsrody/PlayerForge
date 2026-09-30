@@ -31,15 +31,13 @@ import process from "node:process";
 // realm would claim a guarantee PF does not need, and on Firefox a page CSP can
 // demote a page-realm injection anyway.
 //
-// @allFrames is set explicitly rather than relied on. Violentmonkey 2.49.0
-// has no `allFrames` key at all - the string does not appear anywhere in the
-// shipped XPI - and gates sub-frames with `@noframes` instead, injecting into
-// every frame unless that key is present. So the line is inert on the shipping
-// target and kept only so a Tampermonkey user still gets sub-frame injection:
-// its Firefox build defaults Content Script mode (no document_start) unless a
-// userscript-API injection mode is chosen, and defaults allFrames true. PF
-// self-guards per frame anyway (a shell needs a video to adopt), so an extra
-// top-frame boot is a no-op.
+// No @allFrames, because Violentmonkey has no such key: the string does not
+// appear anywhere in the 2.49.0 XPI. It gates sub-frames with @noframes
+// instead, injecting into every frame unless that key is present, so PF
+// reaches sub-frames with nothing declared. An @allFrames line here would be
+// a claim about a manager nobody runs, and would mislead the next reader into
+// thinking sub-frame coverage depends on it. PF self-guards per frame anyway
+// (a shell needs a video to adopt), so a frame with no player is a no-op.
 //
 // A granted script runs in Violentmonkey's CONTENT realm, not the page's. That
 // is the default for `@inject-into auto` once any @grant is present, and PF
@@ -121,7 +119,6 @@ const banner = `// ==UserScript==
 // @exclude      *://*.reddit.com/*
 // @exclude      *://reddit.com/*
 // @exclude      *://*.tumblr.com/*
-// @allFrames    true
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_registerMenuCommand

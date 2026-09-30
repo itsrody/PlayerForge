@@ -156,15 +156,25 @@ test("every grant states why the manager API is required", () => {
   }
 });
 
-test("the banner's @allFrames matches the manager contract", () => {
-  // The three supported managers disagree here by default: TM/VM inject into
-  // sub-frames unless told otherwise, FireMonkey v3 does not. So the banner
-  // has to say it out loud, and the manifest has to record that it means to.
+test("the banner declares no frame key, because the manager has none", () => {
+  // Violentmonkey 2.49.0 has no allFrames meta key - the string appears nowhere
+  // in the shipped XPI - and injects into every frame unless @noframes is set.
+  // Sub-frame coverage therefore comes from saying nothing, and the assertion
+  // that matters is that the banner has not started claiming otherwise: an
+  // @allFrames line is a statement about a manager nobody runs, and it would
+  // read as though sub-frame coverage depended on it.
   const contract = manifest.managerContract.allFrames;
-  assert.equal(contract.value, true, "PF needs sub-frame injection for nested embeds");
   assert.ok(
-    /^\/\/ @allFrames\s+true$/m.test(esbuildConfig),
-    "the banner must carry an explicit @allFrames true - FireMonkey defaults it false"
+    /omission/i.test(contract.value),
+    "the manifest records sub-frame coverage as coming from the absence of a key"
+  );
+  assert.ok(
+    !/^\/\/ @allFrames\b/m.test(esbuildConfig),
+    "no @allFrames line: Violentmonkey does not implement the key"
+  );
+  assert.ok(
+    !/^\/\/ @noframes\b/m.test(esbuildConfig),
+    "no @noframes either - that key would actually suppress sub-frames under VM"
   );
 });
 

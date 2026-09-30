@@ -44,7 +44,6 @@
 // @exclude      *://*.reddit.com/*
 // @exclude      *://reddit.com/*
 // @exclude      *://*.tumblr.com/*
-// @allFrames    true
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM_registerMenuCommand
