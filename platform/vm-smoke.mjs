@@ -16,9 +16,26 @@
  *    the shell host and its shadow root are the honest signal.
  *  - It does not use a bare <video>. PF's SDK detection is selector-based on the
  *    composed DOM ancestry and the kernel deliberately rejects a video with no
- *    SDK anchor, so an anchorless fixture silently proves nothing. The page is
- *    built by createTestPage(), the same Plyr-shaped tree the integration suite
- *    uses, and it carries real media because adoption needs readyState > 0.
+ *    SDK anchor, so an anchorless fixture silently proves nothing. The pages are
+ *    built by the shared fixture builders, the same Plyr-shaped trees the
+ *    integration suite uses, and they carry real media because adoption needs
+ *    readyState > 0.
+ *
+ * It covers all five embed topologies, not just the top document, because that
+ * is where the manager is doing something this harness cannot fake: real VM
+ * injects the userscript into EVERY frame at document-start, so a shell inside a
+ * frame proves the manager injected there on its own. The frames are on
+ * genuinely different origins (same host, different ports), so the cross-origin
+ * cases cross a real boundary rather than a simulated one:
+ *
+ *   direct              top document
+ *   same-origin iframe  the bridge is never needed, so a broken one is invisible
+ *   cross-origin iframe window.top throws; the bridge is the only way through
+ *   nested iframe       two hops, so a relay that forwards but never replies
+ *                       fails here and nowhere else
+ *   switchboard         N cross-origin cards, one live; both placeholder
+ *                       strategies, because "nothing is loaded" and "a src-less
+ *                       frame stays inert" are different claims
  *
  * Usage: node platform/vm-smoke.mjs [path/to/violentmonkey.xpi]
  *        VIOLENTMONKEY_XPI=/path/to/vm.xpi node platform/vm-smoke.mjs
@@ -32,7 +49,16 @@ import { readFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TestServer, createTestPage, createTestMedia } from "./harness/firefox.mjs";
+import {
+  createTestPage,
+  createTestMedia,
+  createIframeChildPage,
+  createIframeParentPage,
+  createNestedIframePages,
+  createMultiOriginServersN,
+  createSwitchboardChildPage,
+  createSwitchboardPage,
+} from "./harness/firefox.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -66,10 +92,12 @@ const bundle = readFileSync(BUNDLE, "utf8");
 const expectedVersion = BANNER_VERSION.exec(bundle)?.[1];
 const EXPECTED_GRANTS = (bundle.match(/^\/\/\s*@grant\s+\S+/gm) || []).length;
 
-// A Plyr-anchored page with real media: the SDK anchor is what the kernel
-// looks for, and the media is what makes readyState > 0 so a shell is adopted.
-const server = new TestServer();
-await server.start();
+// Five origins. The direct case needs one, but an iframe case only proves
+// anything if the frame is on a genuinely different origin than its embedder -
+// same host, different port is a different origin, which is enough and is what
+// the bridge actually has to cross.
+const servers = await createMultiOriginServersN(5);
+const server = servers[0];
 const pageUrl = createTestPage(server, { videoSrc: createTestMedia(server, 90) });
 server.addPage("/vm-bundle.user.js", bundle);
 const bundleUrl = `${server.url}/vm-bundle.user.js`;
@@ -89,6 +117,28 @@ const driver = await new Builder()
   // normal content script without this.
   .setFirefoxService(new firefox.ServiceBuilder().addArguments("--allow-system-access"))
   .build();
+
+/**
+ * Read every error the console service has recorded, from the chrome context.
+ * Services is a global there; importing resource://gre/modules/Services.sys.mjs
+ * by path fails, because Marionette evaluates in a sandbox whose module loader
+ * is not the system one.
+ */
+const readConsoleErrors = async () => {
+  await driver.setContext("chrome");
+  try {
+    return await driver.executeScript(`
+      const list = Services.console.getMessageArray
+        ? Services.console.getMessageArray()
+        : Array.from(Services.console.getMessageList() || []);
+      return list
+        .filter((m) => m.error)
+        .map((m) => (m.sourceName || "") + " :: " + (m.errorMessage || m.message || ""));
+    `);
+  } finally {
+    await driver.setContext("content");
+  }
+};
 
 const checks = [];
 const check = (name, ok, detail) => {
@@ -167,6 +217,9 @@ try {
     `runAt=${installed && installed.runAt}`
   );
 
+  // Baseline for the error diff, taken before a single fixture page loads.
+  const errorBaseline = await readConsoleErrors();
+
   // Boot the real page. The shell host is the honest signal because the DOM is
   // shared: a content-realm script that adopts a video puts the host where the
   // page realm can see it, even though window.PlayerForge stays hidden there.
@@ -201,13 +254,224 @@ try {
   );
   check("media was real (readyState > 0)", probe.readyState > 0, `readyState=${probe.readyState}`);
 
-  const pageErrors = await driver.executeScript(`
-    return (window.__pfErrors || []).filter((m) => !/favicon/i.test(m));
-  `);
-  check("no uncaught page errors", pageErrors.length === 0, JSON.stringify(pageErrors));
+  // ── Embed topologies ────────────────────────────────────────────────
+  //
+  // Everything above runs in the top document. These are the shapes PF is
+  // actually shipped into, and they are where the manager differs most: real VM
+  // injects the userscript into every frame at document-start, with no wake-up
+  // nudge and no harness to call. A shell in a frame therefore proves the
+  // manager injected AND PF adopted there on its own, and each frame's DOM is
+  // only visible from inside that frame - so every check below has to switch
+  // into the frame rather than looking for it from the top.
+  const probeFrame = async (url, framePath, videoId = "test-video") => {
+    await driver.get(url);
+    const ctx = driver.switchTo();
+    for (const id of framePath) await ctx.frame(id);
+    let p = null;
+    try {
+      for (let i = 0; i < 40; i++) {
+        p = await driver.executeScript(`
+          const v = document.getElementById(arguments[0]);
+          return {
+            url: location.pathname,
+            shellHosts: document.querySelectorAll(".pf-shell").length,
+            shadowOpen: !!(document.querySelector(".pf-shell") || {}).shadowRoot,
+            marked: !!(v && v.hasAttribute("data-pf-shell")),
+            readyState: v ? v.readyState : -1,
+          };
+        `, videoId);
+        if (p.shellHosts > 0 && p.readyState > 0) break;
+        await sleep(500);
+      }
+    } finally {
+      await driver.switchTo().defaultContent();
+    }
+    return p || { shellHosts: 0, readyState: -1 };
+  };
+
+  // same-origin: the child is served by the same server as the parent
+  {
+    const media = createTestMedia(servers[1], 90);
+    const child = createIframeChildPage(servers[1], { videoSrc: media });
+    const parent = createIframeParentPage(servers[1], child, { iframeId: "child-frame" });
+    const p = await probeFrame(parent, ["child-frame"]);
+    check(
+      "same-origin iframe: adopted with no wake-up",
+      p.shellHosts > 0 && p.marked && p.readyState > 0,
+      `hosts=${p.shellHosts} marked=${p.marked} readyState=${p.readyState}`
+    );
+  }
+
+  // cross-origin: child on servers[2], parent on servers[0], so window.top
+  // throws in the frame and the page context can only arrive over the bridge
+  {
+    const media = createTestMedia(servers[2], 90);
+    const child = createIframeChildPage(servers[2], { videoSrc: media });
+    const parent = createIframeParentPage(servers[0], child, { iframeId: "child-frame" });
+    const p = await probeFrame(parent, ["child-frame"]);
+    const blocked = await (async () => {
+      const ctx = driver.switchTo();
+      await ctx.frame("child-frame");
+      try {
+        return await driver.executeScript(`
+          try { return { ok: true, path: window.top.location.pathname }; }
+          catch (e) { return { ok: false, name: e.name }; }
+        `);
+      } finally {
+        await driver.switchTo().defaultContent();
+      }
+    })();
+    check(
+      "cross-origin iframe: adopted, and really cross-origin",
+      p.shellHosts > 0 && p.readyState > 0 && blocked.ok === false,
+      `hosts=${p.shellHosts} readyState=${p.readyState} topBlocked=${blocked.name}`
+    );
+  }
+
+  // nested: parent -> relay -> video, the video two hops from the top document
+  {
+    const media = createTestMedia(servers[3], 90);
+    const { parentUrl } = createNestedIframePages(servers[0], servers[3], { depth: 3, videoSrc: media });
+    const p = await probeFrame(parentUrl, ["outer-frame", "inner-frame"]);
+    check(
+      "nested iframe: video adopted two frames down",
+      p.shellHosts > 0 && p.marked && p.readyState > 0,
+      `hosts=${p.shellHosts} marked=${p.marked} readyState=${p.readyState} at=${p.url}`
+    );
+  }
+
+  // switchboard: N cross-origin cards, one live at a time, the rest inert.
+  // Both placeholder strategies, because they are different claims: swap
+  // proves teardown is real (nothing survives a switch), parked proves a frame
+  // that never got a src never produced a shell.
+  {
+    const cards = [];
+    for (let i = 0; i < 3; i++) {
+      cards.push({
+        name: `Server ${i}`,
+        url: createSwitchboardChildPage(servers[i], {
+          name: `Server ${i}`,
+          videoSrc: createTestMedia(servers[i], 90),
+          id: `video-${i}`,
+        }),
+      });
+    }
+
+    // swap
+    const swapParent = createSwitchboardPage(servers[0], cards, { placeholderMode: "swap" });
+    await driver.get(swapParent);
+    const beforeClick = await driver.executeScript(`
+      return { loaded: window.__getLoadedCount(),
+               allPlaceholder: Array.from(document.querySelectorAll(".server-card"))
+                 .every((c) => c.classList.contains("placeholder")) };
+    `);
+    check(
+      "switchboard: nothing loaded, every card a placeholder",
+      beforeClick.loaded === 0 && beforeClick.allPlaceholder,
+      JSON.stringify(beforeClick)
+    );
+
+    await driver.executeScript(`return window.__loadIframe(1);`);
+    await driver.wait(async () => driver.executeScript(`return window.__getLoadedCount() === 1;`), 10000);
+    const swapCtx = driver.switchTo();
+    await swapCtx.frame("active-frame");
+    let sp = null;
+    try {
+      for (let i = 0; i < 40; i++) {
+        sp = await driver.executeScript(`
+          const v = document.getElementById("video-1");
+          return { shellHosts: document.querySelectorAll(".pf-shell").length,
+                   readyState: v ? v.readyState : -1 };
+        `);
+        if (sp.shellHosts > 0 && sp.readyState > 0) break;
+        await sleep(500);
+      }
+    } finally {
+      await driver.switchTo().defaultContent();
+    }
+    check(
+      "switchboard: live card adopted its media",
+      sp && sp.shellHosts > 0 && sp.readyState > 0,
+      `hosts=${sp && sp.shellHosts} readyState=${sp && sp.readyState}`
+    );
+
+    await driver.executeScript(`return window.__switchTo(2);`);
+    await driver.wait(async () => driver.executeScript(`return window.__getLoadedCount() === 1;`), 10000);
+    const afterSwitch = await driver.executeScript(`
+      return { loaded: window.__getLoadedCount(), frames: document.querySelectorAll("#iframe-slot iframe").length };
+    `);
+    check(
+      "switchboard: switching leaves exactly one frame",
+      afterSwitch.loaded === 1 && afterSwitch.frames === 1,
+      JSON.stringify(afterSwitch)
+    );
+
+    // parked
+    const parkedParent = createSwitchboardPage(servers[0], cards, { placeholderMode: "parked" });
+    await driver.get(parkedParent);
+    const parkedIdle = await driver.executeScript(`
+      const fs = Array.from(document.querySelectorAll(".server-card iframe"));
+      return { frames: fs.length, withSrc: fs.filter((f) => f.getAttribute("src")).length,
+               topShells: document.querySelectorAll(".pf-shell").length };
+    `);
+    // A src-less frame has an about:blank document, and VM may well inject into
+    // it. What must not happen is a SHELL: there is no media to adopt there, so
+    // a shell would mean PF built a player for a frame that never loaded.
+    check(
+      "switchboard parked: src-less frames stay inert",
+      parkedIdle.frames === 3 && parkedIdle.withSrc === 0 && parkedIdle.topShells === 0,
+      JSON.stringify(parkedIdle)
+    );
+    await sleep(1500);
+    const parkedStillIdle = await driver.executeScript(`
+      return document.querySelectorAll(".pf-shell").length;
+    `);
+    check(
+      "switchboard parked: still no shell after the manager settles",
+      parkedStillIdle === 0,
+      `topShells=${parkedStillIdle}`
+    );
+  }
+
+  // Real uncaught-error collection. The old check read window.__pfErrors, which
+  // nothing in this repository ever writes, so it could not fail and the
+  // "no uncaught page errors" line was decoration. The console service in the
+  // chrome context records errors from every frame AND from the userscript's
+  // content realm, which is the coverage the check was claiming and which no
+  // per-page window variable can provide.
+  //
+  // Three things keep it honest rather than noisy:
+  //  - It is a DIFF against a snapshot taken before any page was loaded, so
+  //    Firefox's own startup complaints (ClientID telemetry on a fresh profile,
+  //    for one) are never attributed to PF.
+  //  - It keeps a POSITIVE allowlist - a fixture origin, or the manager's own
+  //    extension origin - rather than a denylist of platform noise. A denylist
+  //    grows one entry per Firefox quirk and silently swallows real errors;
+  //    an allowlist states exactly whose failures this check is about.
+  //  - Both are needed. A userscript error is reported against the script the
+  //    manager compiled, so its source is the extension origin; a page or frame
+  //    error is reported against the fixture URL. PF can fail in either place.
+  //
+  // Deliberately NOT filtered, because PF causes it and a reader should see it:
+  // Firefox's PictureInPictureChild throws InvalidStateError from its own
+  // MutationObserver on every video DOM mutation. It is a platform-internal
+  // error with no bearing on PF's behaviour, and it is left in the output rather
+  // than added to an allowlist as a special case.
+  const newErrorsSinceBaseline = async (baseline) => {
+    const seen = new Set(baseline);
+    return (await readConsoleErrors()).filter((t) => !seen.has(t));
+  };
+  const ours = [...servers.map((s) => s.url), `moz-extension://${origin}`];
+  const attributable = (errs) => errs.filter((t) => !/favicon/i.test(t) && ours.some((o) => t.includes(o)));
+  const finalErrors = attributable(await newErrorsSinceBaseline(errorBaseline));
+  check(
+    "no uncaught errors from a fixture page, any frame, or the manager's realm",
+    finalErrors.length === 0,
+    finalErrors.length ? JSON.stringify(finalErrors.slice(0, 3)) : "clean"
+  );
 } finally {
   await driver.quit().catch(() => {});
-  await server.stop();
+  for (const s of servers) await s.stop().catch(() => {});
 }
 
 const failed = checks.filter((c) => !c.ok);

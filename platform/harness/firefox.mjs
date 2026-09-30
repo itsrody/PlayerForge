@@ -612,7 +612,19 @@ export class FirefoxDriver {
    * @returns {Promise<T>}
    */
   async evalInFrame(frameId, fn, ...args) {
-    await this.#driver.switchTo().frame(frameId);
+    return this.evalInFramePath([frameId], fn, ...args);
+  }
+
+  /**
+   * Read from a frame that is N levels down. Same chain-walking reason as
+   * injectScriptInFramePath(): frame ids resolve relative to the current
+   * context, so a nested read needs the whole path.
+   *
+   * @param {(string|number)[]} frameIds Chain, outermost first.
+   */
+  async evalInFramePath(frameIds, fn, ...args) {
+    const ctx = this.#driver.switchTo();
+    for (const id of frameIds) await ctx.frame(id);
     try {
       return await this.#driver.executeScript(fn, ...args);
     } finally {
@@ -650,6 +662,22 @@ export class FirefoxDriver {
    * @param {object} [gmOptions] - Passed to injectGMStubs.
    */
   async injectScriptInFrame(frameId, gmOptions = {}) {
+    return this.injectScriptInFramePath([frameId], gmOptions);
+  }
+
+  /**
+   * Wake a frame that is N levels down, not just a direct child.
+   *
+   * switchTo().frame() resolves against the CURRENT context, so a one-id call
+   * only ever reaches a direct child. A nested fixture therefore needs the
+   * whole chain walked one hop at a time - and a test that forgets to does not
+   * fail, it hangs until a NoSuchElementError arrives from the wrong context.
+   * Taking the whole path in one call makes the depth explicit at the call site
+   * and keeps the restore in one place.
+   *
+   * @param {(string|number)[]} frameIds Chain, outermost first.
+   */
+  async injectScriptInFramePath(frameIds, gmOptions = {}) {
     if (gmOptions.storage !== undefined) {
       await this.injectGMStubs({ storage: gmOptions.storage });
     }
@@ -657,7 +685,8 @@ export class FirefoxDriver {
     // it is set on the startup registration, so a frame needs no injection of
     // its own - only the same wake-up the top document gets.
     await this.injectScript();
-    await this.#driver.switchTo().frame(frameId);
+    const ctx = this.#driver.switchTo();
+    for (const id of frameIds) await ctx.frame(id);
     try {
       await this.wakePlayers();
     } finally {
@@ -920,14 +949,19 @@ export function createBlankPage(server) {
  * @returns {string} URL to the child page.
  */
 export function createIframeChildPage(server, options = {}) {
-  const { title = "Iframe Video" } = options;
+  // videoSrc must be an absolute URL: the child is usually served from a
+  // DIFFERENT TestServer than the one that hosts the media, so a bare path would
+  // resolve against the child's own origin and 404. Pass
+  // createTestMedia(childServer, seconds) for the server that actually renders.
+  const { title = "Iframe Video", videoSrc = "", id = "test-video" } = options;
+  const videoAttrs = videoSrc ? `src="${videoSrc}"` : "";
   const html = `<!DOCTYPE html>
 <html>
 <head><title>${title}</title></head>
 <body>
   <div class="plyr" data-plyr>
     <div class="plyr__video-wrapper">
-      <video id="test-video" preload="metadata"></video>
+      <video id="${id}" ${videoAttrs} preload="metadata"></video>
     </div>
   </div>
 </body>
@@ -949,7 +983,25 @@ export function createIframeChildPage(server, options = {}) {
  * @returns {string} URL to the parent page.
  */
 export function createIframeParentPage(server, childUrl, options = {}) {
-  const { title = "Parent Page", iframeId = "child-frame", width = 1280, height = 720 } = options;
+  const {
+    title = "Parent Page",
+    iframeId = "child-frame",
+    width = 1280,
+    height = 720,
+    // Extra frames beyond the first, as {id, url}. A frame with no url is a
+    // PLACEHOLDER: a same-shaped <iframe> with no src, which is what a page
+    // holds between embeds. PF must find no video there, so the fixture can
+    // assert the negative case rather than only the happy path.
+    frames = [],
+  } = options;
+
+  const frameHtml = [{ id: iframeId, url: childUrl }, ...frames]
+    .map((f) => {
+      const src = f.url ? ` src="${f.url}"` : "";
+      return `  <iframe id="${f.id}"${src} width="${width}" height="${height}" allowfullscreen></iframe>`;
+    })
+    .join("\n");
+
   const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -961,7 +1013,7 @@ export function createIframeParentPage(server, childUrl, options = {}) {
   </style>
 </head>
 <body>
-  <iframe id="${iframeId}" src="${childUrl}" width="${width}" height="${height}" allowfullscreen></iframe>
+${frameHtml}
 </body>
 </html>`;
   const path = `/iframe-parent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`;
@@ -974,38 +1026,75 @@ export function createIframeParentPage(server, childUrl, options = {}) {
  *
  * @param {TestServer} parentServer - Parent page origin.
  * @param {TestServer} iframeServer - Cross-origin iframe origin (different port).
+ * @param {object} [options]
+ * @param {2|3} [options.depth=3] - 2: parent -> video. 3: parent -> relay -> video.
+ * @param {string} [options.videoSrc] - ABSOLUTE media URL for the video frame.
+ * @param {string} [options.parentFrameId] - Id of the parent's iframe.
+ * @param {string} [options.relayFrameId] - Id of the relay's iframe.
+ * @param {string} [options.title] - Video frame title.
  * @returns {{ parentUrl: string, outerIframeUrl: string, innerIframeUrl: string }}
  */
-export function createNestedIframePages(parentServer, iframeServer) {
-  // Inner iframe: same-origin with iframeServer, contains the video.
+export function createNestedIframePages(parentServer, iframeServer, options = {}) {
+  // The shape is parent(parentServer) -> outer(iframeServer) -> inner(iframeServer).
+  // The inner frame is SAME-ORIGIN with the outer, so this covers the one case
+  // the bridge must handle without postMessage: an ancestor reachable by direct
+  // property read, behind a cross-origin hop that is not.
+  //
+  //   depth 2 (default)  parent -> video          parentServer, iframeServer
+  //   depth 3             parent -> relay -> video
+  //
+  // With depth 3 the video still lives on iframeServer, so media and identity
+  // behaviour stay comparable between the two; only the number of hops changes.
+  const {
+    depth = 3,
+    videoSrc = "",
+    parentFrameId = "outer-frame",
+    relayFrameId = "inner-frame",
+    title = "Nested Iframe Video",
+  } = options;
+  if (depth < 2 || depth > 3) {
+    throw new Error(`createNestedIframePages: depth must be 2 or 3, got ${depth}`);
+  }
+
+  const uniq = (p) => `${p}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  // The innermost frame always holds the video, on iframeServer.
+  const videoAttrs = videoSrc ? `src="${videoSrc}"` : "";
   const innerHtml = `<!DOCTYPE html>
 <html>
-<head><title>Nested Iframe Video</title></head>
+<head><title>${title}</title></head>
 <body>
   <div class="plyr" data-plyr>
     <div class="plyr__video-wrapper">
-      <video id="test-video" preload="metadata"></video>
+      <video id="test-video" ${videoAttrs} preload="metadata"></video>
     </div>
   </div>
 </body>
 </html>`;
-  const innerPath = `/nested-inner-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`;
+  const innerPath = uniq("/nested-inner") + ".html";
   iframeServer.addPage(innerPath, innerHtml);
   const innerIframeUrl = `${iframeServer.url}${innerPath}`;
 
-  // Outer iframe: cross-origin (iframeServer), loads the inner iframe.
-  const outerHtml = `<!DOCTYPE html>
+  let embedUrl = innerIframeUrl;
+  let embedId = relayFrameId;
+
+  if (depth === 3) {
+    // Relay: cross-origin relative to the parent, embeds the video frame.
+    const outerHtml = `<!DOCTYPE html>
 <html>
 <head><title>Cross-Origin Relay Frame</title></head>
-<body>
-  <iframe id="inner-frame" src="${innerIframeUrl}" width="1280" height="720" allowfullscreen></iframe>
+<body style="margin:0;padding:0">
+  <iframe id="${relayFrameId}" src="${innerIframeUrl}" width="1280" height="720" allowfullscreen></iframe>
 </body>
 </html>`;
-  const outerPath = `/nested-outer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`;
-  iframeServer.addPage(outerPath, outerHtml);
-  const outerIframeUrl = `${iframeServer.url}${outerPath}`;
+    const outerPath = uniq("/nested-outer") + ".html";
+    iframeServer.addPage(outerPath, outerHtml);
+    embedUrl = `${iframeServer.url}${outerPath}`;
+    embedId = parentFrameId;
+  } else {
+    embedId = parentFrameId;
+  }
 
-  // Parent page: parentServer origin, loads the outer iframe.
   const parentHtml = `<!DOCTYPE html>
 <html>
 <head>
@@ -1017,14 +1106,14 @@ export function createNestedIframePages(parentServer, iframeServer) {
   </style>
 </head>
 <body>
-  <iframe id="outer-frame" src="${outerIframeUrl}" width="1280" height="720" allowfullscreen></iframe>
+  <iframe id="${embedId}" src="${embedUrl}" width="1280" height="720" allowfullscreen></iframe>
 </body>
 </html>`;
-  const parentPath = `/nested-parent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`;
+  const parentPath = uniq("/nested-parent") + ".html";
   parentServer.addPage(parentPath, parentHtml);
   const parentUrl = `${parentServer.url}${parentPath}`;
 
-  return { parentUrl, outerIframeUrl, innerIframeUrl };
+  return { parentUrl, outerIframeUrl: embedUrl, innerIframeUrl };
 }
 
 /**
@@ -1059,17 +1148,25 @@ export async function createMultiOriginServersN(count) {
  * @param {TestServer} server
  * @param {object} [options]
  * @param {string} [options.name] - Server display name.
+ * @param {string} [options.videoSrc] - ABSOLUTE media URL. Give each card its
+ *   own video id: a shared #test-video across cards makes "the new card loaded"
+ *   and "the old card never went away" indistinguishable.
+ * @param {string} [options.id] - Video element id.
  * @returns {string} URL to the child page.
  */
 export function createSwitchboardChildPage(server, options = {}) {
-  const { name = "Server" } = options;
+  // Each card needs a DISTINCT video id: the switchboard asserts per-card
+  // identity after a switch, and two cards both calling it #test-video is
+  // indistinguishable from one card reusing itself.
+  const { name = "Server", videoSrc = "", id = "test-video" } = options;
+  const videoAttrs = videoSrc ? `src="${videoSrc}"` : "";
   const html = `<!DOCTYPE html>
 <html>
 <head><title>${name}</title></head>
-<body>
+<body style="margin:0;padding:0">
   <div class="plyr" data-plyr>
     <div class="plyr__video-wrapper">
-      <video id="test-video" preload="metadata"></video>
+      <video id="${id}" ${videoAttrs} preload="metadata"></video>
     </div>
   </div>
 </body>
@@ -1088,11 +1185,20 @@ export function createSwitchboardChildPage(server, options = {}) {
  * @param {TestServer} videoServer - Server hosting the video page.
  * @param {object} [options]
  * @param {string} [options.name] - Display name for the relay page.
+ * @param {string} [options.videoSrc] - ABSOLUTE media URL. It is served by
+ *   videoServer, since that is the origin whose document loads the media.
+ * @param {string} [options.id] - Video element id in the innermost frame.
  * @returns {string} URL to the relay page (the entry point for the switchboard).
  */
 export function createNestedSwitchboardChildPage(relayServer, videoServer, options = {}) {
-  const { name = "Nested" } = options;
-  const videoUrl = createSwitchboardChildPage(videoServer, { name: `${name} (video)` });
+  // videoSrc is served by videoServer, since that is the origin whose document
+  // actually loads the media.
+  const { name = "Nested", videoSrc = "", id = "test-video" } = options;
+  const videoUrl = createSwitchboardChildPage(videoServer, {
+    name: `${name} (video)`,
+    videoSrc,
+    id,
+  });
   const html = `<!DOCTYPE html>
 <html>
 <head><title>${name} relay</title></head>
@@ -1121,8 +1227,27 @@ export function createNestedSwitchboardChildPage(relayServer, videoServer, optio
  * @returns {string} URL to the parent page.
  */
 export function createSwitchboardPage(parentServer, childServers, options = {}) {
-  const { width = 1280, height = 720 } = options;
+  // Two placeholder strategies, because they are different tests:
+  //
+  //   swap    (default) one shared #iframe-slot, and activating a card appends a
+  //           NEW iframe while the previous one is .remove()d. Nothing dormant
+  //           survives a switch, so this measures teardown: when a card unloads,
+  //           its realm, listener, shell and bridge ports all die with the frame.
+  //   parked  every card owns a PERMANENT src-less <iframe> placeholder, and
+  //           activation assigns src to that same element rather than creating
+  //           one. The frames persist across switches with no src, which is the
+  //           shape a real page has between embeds, and it is the case that can
+  //           strand state: a frame that is never torn down but is also never
+  //           torn down cleanly.
+  //
+  // parked mode also asserts something swap cannot: that PF builds NO shell for a
+  // frame that has never been given a src.
+  const { width = 1280, height = 720, placeholderMode = "swap" } = options;
+  if (!["swap", "parked"].includes(placeholderMode)) {
+    throw new Error(`createSwitchboardPage: placeholderMode must be swap|parked, got ${placeholderMode}`);
+  }
   const serversJson = JSON.stringify(childServers);
+  const isParked = placeholderMode === "parked";
 
   const html = `<!DOCTYPE html>
 <html>
@@ -1145,6 +1270,9 @@ export function createSwitchboardPage(parentServer, childServers, options = {}) 
       background: #000; position: relative;
     }
     #iframe-slot iframe { border: none; width: 100%; height: 100%; }
+    /* parked mode: each card holds a real, persistent, src-less frame. */
+    .server-card iframe { border: none; width: 100%; height: ${Math.round(height / 2)}px; display: block; }
+    .server-card.placeholder iframe { opacity: 0.35; }
   </style>
 </head>
 <body>
@@ -1152,6 +1280,7 @@ export function createSwitchboardPage(parentServer, childServers, options = {}) 
   <div id="iframe-slot"></div>
   <script>
     const SERVERS = ${serversJson};
+    const parkedFrames = [];
     const slot = document.getElementById("iframe-slot");
     const list = document.getElementById("server-list");
     let activeIndex = -1;
@@ -1164,6 +1293,23 @@ export function createSwitchboardPage(parentServer, childServers, options = {}) 
       card.className = "server-card placeholder";
       card.textContent = srv.name;
       card.dataset.index = i;
+      if (${isParked ? "true" : "false"}) {
+        // A real iframe element that simply has no src yet. Not a div, not a
+        // detached node: the point is that a frame which never received a src
+        // must stay inert, and only a real frame can prove that.
+        const parked = document.createElement("iframe");
+        parked.id = "parked-frame-" + i;
+        parked.setAttribute("frameborder", "0");
+        parked.allowFullscreen = true;
+        card.appendChild(parked);
+        // Register it, or activation cannot find it: parkedFrames is what
+        // __loadIframe hands the src to, and an unregistered placeholder means
+        // __loadIframe builds a SECOND iframe while this one stays inert. The
+        // result looks right - one live frame, three placeholders - and is
+        // exactly the case the fixture exists to rule out, so it would pass
+        // while testing nothing.
+        parkedFrames[i] = parked;
+      }
       card.addEventListener("click", () => {
         if (activeIndex === i) {
           window.__unloadIframe();
@@ -1185,12 +1331,15 @@ export function createSwitchboardPage(parentServer, childServers, options = {}) 
       if (activeIframe) return false;
       const srv = SERVERS[index];
       if (!srv) return false;
-      const iframe = document.createElement("iframe");
-      iframe.id = "active-frame";
+      const iframe = ${isParked ? `(parkedFrames[index] ||= document.createElement("iframe"))` : 'document.createElement("iframe")'};
+      iframe.id = ${isParked ? '"parked-frame-" + index' : '"active-frame"'};
+      // Assigning src to the parked element navigates the EXISTING frame rather
+      // than replacing it, so the content window and its realm identity persist
+      // across the assignment.
       iframe.src = srv.url;
       iframe.allowFullscreen = true;
       iframe.setAttribute("frameborder", "0");
-      slot.appendChild(iframe);
+      if (!iframe.parentNode) slot.appendChild(iframe);
       activeIframe = iframe;
       activeIndex = index;
       // Track the load event.
@@ -1205,7 +1354,12 @@ export function createSwitchboardPage(parentServer, childServers, options = {}) 
 
     window.__unloadIframe = () => {
       if (!activeIframe) return false;
-      activeIframe.remove();
+      ${isParked ? `
+      // Parked frames are NOT removed. Clearing src unloads the document, which
+      // is what destroys the realm, but the element itself stays - so a
+      // re-activation reuses the same frame the user never actually saw removed.
+      activeIframe.removeAttribute("src");
+      ` : `activeIframe.remove();`}
       activeIframe = null;
       activeLoadPromise = null;
       activeIndex = -1;
@@ -1220,7 +1374,17 @@ export function createSwitchboardPage(parentServer, childServers, options = {}) 
 
     window.__getActiveIndex = () => activeIndex;
 
-    window.__getLoadedCount = () => activeIframe ? 1 : 0;
+    // How many frames currently hold a document. In swap mode that is the
+    // activeIframe check; in parked mode it is derived from the DOM, since the
+    // elements persist and only their src comes and goes.
+    window.__getLoadedCount = () => ${isParked ? `
+      Array.from(document.querySelectorAll("#iframe-slot iframe, .server-card iframe"))
+        .filter((f) => f.getAttribute("src")).length
+    ` : "activeIframe ? 1 : 0"};
+
+    // Parked mode only: the frames that exist but are not showing anything.
+    window.__getPlaceholderCount = () => Array.from(document.querySelectorAll(".server-card iframe"))
+      .filter((f) => !f.getAttribute("src")).length;
 
     window.__waitForIframeLoad = (index, timeoutMs = 10000) => {
       return new Promise((resolve, reject) => {
