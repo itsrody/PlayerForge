@@ -517,3 +517,260 @@ test("destroy while paused at 0 stores 0, not a NaN that serializes to null [reg
   assert.equal(entry.resume, 0, "a real 0 position must not become NaN -> null");
   assert.notEqual(entry.resume, null);
 });
+
+test("two players in one document share one store, so a delete cannot come back", async () => {
+  // There is one resume store per document. Each tracker used to build its own,
+  // so a row deleted through one player's History was rewritten by the other
+  // player's next save out of its stale copy - the user deleted a row and it
+  // reappeared. Sharing the store makes the second player's save land on the
+  // state the delete already pruned.
+  delete writes["pf:resume"];
+  const subscribes = [];
+  globalThis.GM_addValueChangeListener = (key, cb) => {
+    subscribes.push({ key, cb });
+    return `sub${subscribes.length}`;
+  };
+  globalThis.GM_removeValueChangeListener = () => {};
+
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+    url: "https://www.youtube.com/watch?v=1"
+  });
+  globalThis.AbortController = dom.window.AbortController;
+  globalThis.window = dom.window;
+  globalThis.location = dom.window.location;
+  globalThis.document = dom.window.document;
+
+  const shellFor = () => {
+    const video = dom.window.document.createElement("video");
+    dom.window.document.body.appendChild(video);
+    Object.defineProperty(video, "duration", { value: 600, configurable: true });
+    return {
+      video,
+      currentTime: 0,
+      paused: true,
+      seeks: [],
+      toasts: [],
+      media: { seekTo(t) { this.video.currentTime = t; } },
+      toast() {},
+      toastAction() {}
+    };
+  };
+
+  const first = new ResumeTracker(shellFor());
+  await flush();
+  await flush();
+  const second = new ResumeTracker(shellFor());
+  await flush();
+  await flush();
+
+  const id = first.getEntries()[0]?.id;
+  assert.ok(id, "the first tracker created the entry");
+  assert.equal(subscribes.length, 1, `one document means one pf:resume subscription, got ${subscribes.length}`);
+  assert.equal(second.getEntries().length, 1, "the second player sees the same entry");
+
+  // Player 1 deletes it from History.
+  first.removeEntry(id);
+  assert.equal(writes["pf:resume"].entries.length, 0, "the delete reached storage");
+  assert.equal(second.getEntries().length, 0, "and the other player's list, live");
+
+  // Player 2's next save must have nothing to write back.
+  second.resetEntry(id);
+  assert.equal(writes["pf:resume"].entries.length, 0, "a sibling player must not resurrect the deleted row");
+
+  first.destroy();
+  second.destroy();
+  globalThis.GM_addValueChangeListener = undefined;
+  globalThis.GM_removeValueChangeListener = undefined;
+});
+
+test("a cross-tab write reaches every player's History list", async () => {
+  delete writes["pf:resume"];
+  let deliver = null;
+  globalThis.GM_addValueChangeListener = (key, cb) => {
+    deliver = cb;
+    return "sub";
+  };
+  globalThis.GM_removeValueChangeListener = () => {};
+
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+    url: "https://www.youtube.com/watch?v=1"
+  });
+  globalThis.AbortController = dom.window.AbortController;
+  globalThis.window = dom.window;
+  globalThis.location = dom.window.location;
+  globalThis.document = dom.window.document;
+
+  const shellFor = () => {
+    const video = dom.window.document.createElement("video");
+    dom.window.document.body.appendChild(video);
+    Object.defineProperty(video, "duration", { value: 600, configurable: true });
+    return {
+      video, currentTime: 0, paused: true, seeks: [], toasts: [],
+      media: { seekTo(t) { this.video.currentTime = t; } }, toast() {}, toastAction() {}
+    };
+  };
+
+  const first = new ResumeTracker(shellFor());
+  await flush();
+  await flush();
+  const second = new ResumeTracker(shellFor());
+  await flush();
+  await flush();
+
+  const structural = [];
+  first.onChange((s) => structural.push(["first", s]));
+  second.onChange((s) => structural.push(["second", s]));
+
+  // Another tab writes a brand-new row.
+  const now = Date.now();
+  deliver("pf:resume", null, {
+    version: 1,
+    entries: [{
+      id: "from-another-tab", domain: "youtube", path: "/elsewhere", title: "Elsewhere",
+      duration: 600, resume: 5, createdAt: now, updatedAt: now
+    }]
+  }, true);
+
+  assert.equal(first.getEntries().length, 2, "player 1 adopted the foreign row");
+  assert.equal(second.getEntries().length, 2, "player 2 sees it too, without its own read");
+  assert.deepEqual(
+    structural.filter(([, s]) => s).map(([who]) => who),
+    ["first", "second"],
+    "both History lists were told to re-render"
+  );
+
+  first.destroy();
+  second.destroy();
+  globalThis.GM_addValueChangeListener = undefined;
+  globalThis.GM_removeValueChangeListener = undefined;
+});
+/** A bare document, distinct per call, with the globals the tracker reads. */
+function newDoc() {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+    url: "https://www.youtube.com/watch?v=1"
+  });
+  globalThis.AbortController = dom.window.AbortController;
+  globalThis.window = dom.window;
+  globalThis.location = dom.window.location;
+  globalThis.document = dom.window.document;
+  return dom.window.document;
+}
+
+/**
+ * A shell anchored to a NEW video in the current document, so several shells
+ * can share one document - which is the only arrangement in which they share
+ * one resume store, and therefore the only arrangement that can test sharing.
+ */
+function makeShellIn(doc, duration = 600) {
+  const video = doc.createElement("video");
+  Object.defineProperty(video, "duration", { value: duration, configurable: true });
+  doc.body.appendChild(video);
+  const seeks = [];
+  return {
+    video,
+    currentTime: 0,
+    paused: true,
+    seeks,
+    toasts: [],
+    media: {
+      seekTo(time) {
+        seeks.push(time);
+        video.currentTime = time;
+      }
+    },
+    toast() {},
+    toastAction() {}
+  };
+}
+
+test("a destroyed tracker stops hearing store changes while a sibling keeps them", async () => {
+  // The shared store outlives any single player, so a History panel whose shell
+  // was torn down must not stay subscribed to it. Before the unsubscribe was
+  // bound to the tracker's own scope, the stale callback kept running for as
+  // long as ANY tracker in the document lived, re-rendering a detached shadow
+  // root on every cross-tab write.
+  delete writes["pf:resume"];
+  const subscribes = [];
+  globalThis.GM_addValueChangeListener = (key, cb) => {
+    subscribes.push({ key, cb });
+    return `sub${subscribes.length}`;
+  };
+  globalThis.GM_removeValueChangeListener = () => {};
+
+  const doc = newDoc();
+  const first = new ResumeTracker(makeShellIn(doc));
+  const second = new ResumeTracker(makeShellIn(doc));
+  await flush();
+  await flush();
+
+  const heard = [];
+  first.onChange(() => heard.push("first"));
+  second.onChange(() => heard.push("second"));
+
+  first.destroy();
+
+  const now = Date.now();
+  // One shared store, so one subscription carries the write to every listener.
+  // The GM callback is (name, oldValue, newValue, remote).
+  const listener = subscribes.find((s) => s.key === "pf:resume");
+  listener.cb(
+    "pf:resume",
+    null,
+    {
+      version: 1,
+      entries: [{
+        id: "after-teardown", domain: "youtube", path: "/later", title: "Later",
+        duration: 600, resume: 9, createdAt: now, updatedAt: now
+      }]
+    },
+    true
+  );
+
+  assert.deepEqual(heard, ["second"], "only the surviving tracker's listener ran");
+  assert.equal(second.getEntries().length, 2, "the live store still absorbed the write");
+
+  second.destroy();
+  globalThis.GM_addValueChangeListener = undefined;
+  globalThis.GM_removeValueChangeListener = undefined;
+});
+
+test("a tracker destroyed after its document was replaced still releases its store", async () => {
+  // The release has to name the realm the store was acquired against. Recomputing
+  // "the current document" at teardown time loses the WeakMap entry, and then
+  // nothing ever destroys the store: its GM subscription outlives every tracker,
+  // and the next document builds a SECOND store on pf:resume - which is the
+  // divergent-copies bug the sharing exists to prevent.
+  delete writes["pf:resume"];
+  const subscribes = [];
+  const removed = [];
+  globalThis.GM_addValueChangeListener = (key, cb) => {
+    subscribes.push({ key, cb });
+    return `sub${subscribes.length}`;
+  };
+  globalThis.GM_removeValueChangeListener = (id) => removed.push(id);
+
+  const docA = newDoc();
+  const doomed = new ResumeTracker(makeShellIn(docA));
+  await flush();
+  const docB = newDoc();
+  const live = new ResumeTracker(makeShellIn(docB));
+  await flush();
+
+  assert.equal(
+    subscribes.length,
+    2,
+    "each document built its own store, rather than one store spanning both"
+  );
+
+  doomed.destroy();
+  assert.deepEqual(
+    removed,
+    ["sub1"],
+    "the abandoned document's subscription was removed even though it was no longer current"
+  );
+
+  live.destroy();
+  assert.deepEqual(removed, ["sub1", "sub2"], "the live document's store releases on its own turn");
+  globalThis.GM_addValueChangeListener = undefined;
+  globalThis.GM_removeValueChangeListener = undefined;
+});

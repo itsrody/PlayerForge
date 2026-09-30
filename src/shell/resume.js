@@ -245,11 +245,21 @@ export class ResumeStore {
     return kept.slice(kept.length - RESUME_MAX_ENTRIES);
   }
 
-  #persist(structural = false) {
+  #persist(structural = false, reassert = null) {
     try {
       const raw = loadJsonObject(KEYS.resume, null);
       if (isValidStore(raw)) {
         this.#mergeRaw(raw);
+      }
+      // The merge above runs against the PRE-write disk snapshot, which by
+      // definition still holds every row this store just removed - a real
+      // manager deserializes per read, so that snapshot never aliases the
+      // array the removal emptied. Left alone, the merge saw the deleted row
+      // as unknown, added it back, and the write landed it: the History
+      // "remove" button reported success and the row never went anywhere. Any
+      // local intent that the merge can undo is therefore re-asserted after it.
+      if (reassert) {
+        reassert();
       }
       // Bounds run AFTER the (cross-tab) merge so a stale disk copy can never
       // resurrect pruned entries - cleanup converges instead of oscillating.
@@ -348,11 +358,15 @@ export class ResumeStore {
 
   removeEntry(id) {
     this.ensureLoaded();
+    // Shared with #persist, which re-runs it after the cross-tab merge.
+    const drop = () => {
+      this.#state.entries = this.#state.entries.filter((entry) => entry.id !== id);
+    };
     const before = this.#state.entries.length;
-    this.#state.entries = this.#state.entries.filter((entry) => entry.id !== id);
+    drop();
     if (this.#state.entries.length < before) {
       this.#invalidateCaches();
-      this.#persist(true);
+      this.#persist(true, drop);
     }
   }
 
@@ -398,6 +412,70 @@ export class ResumeStore {
 }
 
 /**
+ * One ResumeStore per document, refcounted by the trackers using it.
+ *
+ * There is exactly one resume store on a page - one `pf:resume` value, one
+ * entry list - so a second store is a second copy of it that can only disagree
+ * with the first. It did: each player built its own, and every save re-read the
+ * disk and merged it into whichever copy was writing, so a row deleted from one
+ * player's History came straight back the moment another player saved. Two
+ * copies also meant two GM change subscriptions and one full read + parse per
+ * player at boot, for a store that is identical in all of them.
+ *
+ * Keyed by document, not module scope: a userscript realm is per document, so
+ * same-origin and cross-origin frames each keep their own store (they have
+ * their own GM table anyway), while every player inside one document shares
+ * this one. The last tracker out drops the store and its subscription with it.
+ */
+const FALLBACK_REALM = {};
+const realmStores = new WeakMap();
+
+function currentRealm() {
+  return typeof document === "undefined" ? FALLBACK_REALM : document;
+}
+
+/**
+ * Acquire this document's shared store, along with the realm it belongs to.
+ *
+ * The realm comes back because a release has to be able to name the entry it is
+ * releasing. A WeakMap cannot be enumerated, so a teardown that recomputed
+ * "the current document" at release time could not find its own entry once the
+ * ambient document had moved on - the store would never be destroyed, its GM
+ * subscription would outlive every tracker, and the next acquire would build a
+ * SECOND store on the same key, which is the divergent-copies bug this sharing
+ * exists to prevent.
+ */
+function acquireResumeStore() {
+  const realm = currentRealm();
+  let entry = realmStores.get(realm);
+  if (!entry) {
+    entry = { store: new ResumeStore(), refs: 0 };
+    realmStores.set(realm, entry);
+  }
+  entry.refs++;
+  return { store: entry.store, realm };
+}
+
+function releaseResumeStore(handle) {
+  if (!handle) {
+    return;
+  }
+  const { store, realm } = handle;
+  const entry = realmStores.get(realm);
+  // A handle can only name the realm it was acquired against, so a mismatch here
+  // means the table is already inconsistent; dropping the handle is the safe
+  // answer, since destroying a store other trackers still hold would be worse.
+  if (!entry || entry.store !== store) {
+    return;
+  }
+  if (--entry.refs > 0) {
+    return;
+  }
+  realmStores.delete(realm);
+  store.destroy();
+}
+
+/**
  * Shell-owned playback tracker: persists progress per (domain, path, duration)
  * and resumes where the user left off, with a "Start over" toast action.
  * Saves are media-clock driven, and the clock only ticks while the playhead
@@ -408,7 +486,8 @@ export class ResumeStore {
  */
 export class ResumeTracker {
   #shell;
-  #store = new ResumeStore();
+  #handle = acquireResumeStore();
+  #store = this.#handle.store;
   #entry = null;
   /** Every media listener this tracker attaches dies with this signal; the
    *  off-screen save observer disconnects through it as well. */
@@ -688,7 +767,15 @@ export class ResumeTracker {
 
   /** Subscribe to store changes (see ResumeStore#onChange). */
   onChange(cb) {
-    return this.#store.onChange(cb);
+    const off = this.#store.onChange(cb);
+    // The unsubscribe has to die with THIS tracker, not with the store. The store
+    // is shared by every player in the document and normally outlives any single
+    // one of them, so a History panel that subscribed and then had its shell
+    // torn down would keep getting called - holding a detached shadow root and
+    // re-rendering a panel nobody can see - until the last tracker in the
+    // document finally released the store.
+    this.#scope.onDispose(off);
+    return off;
   }
 
   destroy() {
@@ -711,6 +798,6 @@ export class ResumeTracker {
       this.#saveProgress(this.#shell?.currentTime ?? NaN);
     }
     this.#scope.dispose();
-    this.#store.destroy();
+    releaseResumeStore(this.#handle);
   }
 }

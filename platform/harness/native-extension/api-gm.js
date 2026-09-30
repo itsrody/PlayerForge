@@ -193,6 +193,32 @@
     return watch(key, callback);
   };
 
+  // Canary: a harness-owned SECOND registration on a key the code under test
+  // already listens to, so the per-key table's fan-out stays covered even when
+  // the code registers exactly one subscriber.
+  //
+  // PlayerForge used to build a ResumeStore per player, so two players in one
+  // document put two callbacks on pf:resume and the suite could prove the table
+  // delivers to both. There is now one store per document, so that arrangement
+  // is no longer reachable from the code - and a table that regressed to one
+  // callback per key (FireMonkey's shape, and the bug this file was written
+  // against) would go unnoticed again, because nothing would displace anything.
+  //
+  // The DOM is the one thing the page world and the userScript world share, so
+  // a test arms this by dispatching an event; the page cannot call into this
+  // realm directly, and injecting code here is not an option because the
+  // add-on's file entry is registered once at startup.
+  document.addEventListener("pf-harness-canary", function (event) {
+    var key = event.detail && event.detail.key;
+    if (!key) {
+      return;
+    }
+    var id = watch(key, function () {
+      report({ ev: "gm:canary", key: key, id: id });
+    });
+    report({ ev: "gm:canary-armed", key: key, id: id, total: Object.keys(listeners[key]).length });
+  });
+
   globalThis.GM_removeValueChangeListener = function (id) {
     // VM walks the keys looking for the id rather than indexing by it, so a
     // stale or foreign handle is a no-op instead of a crash.

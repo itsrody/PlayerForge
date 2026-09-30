@@ -22,7 +22,14 @@ function installGm(initial) {
   globalThis.GM_setValue = (key, value) => {
     if (key === STORE_KEY) {
       writes.push(value);
-      data = value;
+      // Structured-clone on the way out too, as a real manager does. Storing
+      // the caller's own object made `data` alias the store's #state, so a
+      // removal appeared to work only because the "disk snapshot" #persist
+      // merges was the very array the removal had just emptied. Violentmonkey
+      // deserializes per read, so a store that loaded from disk (i.e. every
+      // real page) had a disk snapshot that still held the deleted row, and the
+      // merge put it straight back.
+      data = JSON.parse(JSON.stringify(value));
     }
   };
   return {
@@ -292,5 +299,54 @@ test("onChange flags structural vs position-only updates", () => {
   store.updateResume("imp", 1);
   assert.deepEqual(seen, [], "unsubscribed listeners are ignored");
 
+  store.destroy();
+});
+
+test("removeEntry actually deletes: the persist merge must not resurrect it", () => {
+  // #persist() re-reads the PRE-write disk snapshot and merges it in, so a
+  // removal used to be undone by the very write that was supposed to land it:
+  // the entry was gone from #state, the merge found it "unknown" on disk and
+  // added it straight back, and the button reported success while History kept
+  // the row forever. The old test only asserted that onChange fired, which is
+  // why this survived - notify() ran on a resurrecting write too.
+  //
+  // This is a store that LOADED from disk, which is every real page: the entry
+  // below is adopted rather than created here, so #state and the disk snapshot
+  // are genuinely separate objects when the removal happens.
+  const gm = installGm({
+    version: 1,
+    entries: [entry({ id: "adopted", domain: "youtube", path: "/watch", resume: 42 })]
+  });
+  const store = new ResumeStore();
+  store.ensureLoaded();
+  assert.equal(store.getEntries().length, 1, "precondition: the entry is loaded");
+
+  store.removeEntry("adopted");
+
+  assert.equal(gm.latest().entries.length, 0, "the entry must be gone from storage");
+  assert.equal(store.getEntries().length, 0, "and gone from memory");
+  store.destroy();
+});
+
+test("a removal survives a cross-tab write of the same row in the same window", () => {
+  // The merge is LWW on updatedAt, and a foreign writer can land the deleted row
+  // again. What must not happen is OUR OWN pre-write snapshot doing it - the
+  // snapshot #persist merges is the store as it was before this write, so it
+  // always "still" contains the row a removal just dropped. Re-asserting the
+  // removal after the merge is what keeps the button honest.
+  const gm = installGm({ version: 1, entries: [] });
+  const store = new ResumeStore();
+  const created = store.createEntry("youtube", "/watch", "T", 600);
+  store.updateResume(created.id, 42);
+  store.removeEntry(created.id);
+  assert.equal(gm.latest().entries.length, 0, "the delete landed");
+
+  // A genuinely foreign writer brings the row back - that is the merge's job.
+  gm.writeExternal({
+    version: 1,
+    entries: [entry({ id: created.id, domain: "youtube", path: "/watch", updatedAt: Date.now() + 60000 })]
+  });
+  store.createEntry("youtube", "/other", "Other", 600);
+  assert.equal(gm.latest().entries.length, 2, "a foreign row is still adopted, not dropped");
   store.destroy();
 });
