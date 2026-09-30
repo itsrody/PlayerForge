@@ -281,3 +281,75 @@ test("removal watch observes one node ABOVE the walked range [regression]", asyn
     "the shell was torn down after the outermost watched anchor was detached"
   );
 });
+
+test("two players in one document: removing either tears down only that shell", async () => {
+  // The registry used to be a single slot, so the second registration evicted
+  // the first and getByVideo() could no longer find it. Removing the FIRST
+  // player then destroyed nothing at all: its hotkey listeners, its observers
+  // and its pf:resume subscription stayed live.
+  const body = document.body;
+  const addPlayer = (id) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "jwplayer";
+    const video = document.createElement("video");
+    video.id = id;
+    wrapper.appendChild(video);
+    body.appendChild(wrapper);
+    video.getBoundingClientRect = () => ({ width: 640, height: 360, top: 0, left: 0, right: 640, bottom: 360 });
+    video.checkVisibility = () => true;
+    return { wrapper, video };
+  };
+
+  const first = addPlayer("first");
+  const second = addPlayer("second");
+
+  const created = [];
+  const destroyed = [];
+  const kernel = new Kernel();
+  kernel.onShellCreated((shell) => created.push(shell));
+  kernel.registerShellProvider({
+    create({ video, container, sdk, onDestroy }) {
+      return {
+        video,
+        container,
+        sdk,
+        ready: Promise.resolve(),
+        destroy() {
+          destroyed.push(video.id);
+          onDestroy?.();
+        }
+      };
+    }
+  });
+  kernel.init();
+
+  // Scoped to THIS test's videos: earlier cases in this file leave their
+  // players in the shared document.body, and kernel.init() adopts whatever it
+  // finds, so counting the whole list can be satisfied by someone else's shell.
+  const mine = () => created.filter((s) => s.video === first.video || s.video === second.video);
+  await waitFor(() => mine().length === 2);
+  assert.equal(mine().length, 2, "both players in one document get a shell");
+
+  // Remove the FIRST player. It is not the most recent, so this is exactly the
+  // lookup the single slot could not answer.
+  first.video.remove();
+  await waitFor(() => destroyed.includes("first"));
+  assert.deepEqual(
+    destroyed.filter((id) => id === "first" || id === "second"),
+    ["first"],
+    "the removed player's shell is torn down"
+  );
+
+  // The survivor is untouched and still registered.
+  assert.equal(second.video.isConnected, true);
+  assert.equal(mine().length, 2, "the survivor's shell is still live");
+
+  // And the reverse order, so the fix is not just "the last one survives".
+  second.video.remove();
+  await waitFor(() => destroyed.includes("second"));
+  assert.deepEqual(
+    destroyed.filter((id) => id === "first" || id === "second"),
+    ["first", "second"],
+    "the survivor tears down on its own removal"
+  );
+});

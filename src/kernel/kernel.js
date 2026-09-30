@@ -3,7 +3,7 @@ import { getConfigValue } from "../shared/storage.js";
 import { setDebugRuntime } from "../shared/diagnostics.js";
 import { postTask } from "../shared/scheduler.js";
 import { Scope } from "../shared/scope.js";
-import { ShellSlot } from "./registry.js";
+import { ShellRegistry } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, meetsMinSize, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
@@ -90,7 +90,7 @@ export class Kernel {
   };
 
   constructor() {
-    this.#registry = new ShellSlot();
+    this.#registry = new ShellRegistry();
     this.#lifecycle = new LifecycleManager(
       this.#registry,
       (shell) => this.#notifyShellCreated(shell),
