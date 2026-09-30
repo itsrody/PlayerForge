@@ -205,7 +205,7 @@
     {
       "api": "GM_xmlhttpRequest",
       "why": "CORS-bypassing subtitle fetch from user-supplied hosts.",
-      "managerShape": "Callback-based with a numeric status and responseText on 2.49.0. api-gm.js only enforces a host allowlist when one is configured, so the banner's @connect * is what permits subtitle fetches to user-supplied hosts."
+      "managerShape": "Callback-based with a numeric status and responseText on 2.49.0. Its @connect is parsed and stored but NOT enforced in MV2: a script declaring `@connect 127.0.0.2` still fetched 127.0.0.1 and got 200, and a dead-port `@connect 127.0.0.1:1` did the same, so it is neither host- nor port-matched. The banner's `@connect *` is therefore not what permits these fetches. Do not cite the native harness's api-gm.js here - it enforces a host allowlist, but it is the test double, not the manager."
     }
   ],
   "retired": [

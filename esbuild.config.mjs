@@ -64,9 +64,17 @@ import process from "node:process";
 // GM_getResourceText is present. GM_info is defined un-granted.
 // GM_xmlhttpRequest is callback-based with a numeric status and responseText.
 //
-// @connect * is left exactly as it is. api-gm.js only enforces a host allowlist
-// when one is configured, so the wildcard is what permits subtitle fetches to
-// user-supplied hosts - which is the entire point of the grant.
+// @connect * is NOT what makes subtitle fetching work, and the previous version
+// of this comment claimed it was, by citing api-gm.js - the native harness's GM
+// bridge, not the shipping manager. Measured against a real 2.49.0 build:
+// Violentmonkey MV2 parses @connect into the script's config and then never
+// consults it for GM_xmlhttpRequest. A script declaring `@connect 127.0.0.2` -
+// a host nothing is listening on - still fetched 127.0.0.1 and got 200, and a
+// dead-port `@connect 127.0.0.1:1` did the same, so it is neither host- nor
+// port-matched. The line is kept because a manager that DOES enforce the key
+// would need it, not because VM does. Anyone who later "tightens" it and finds
+// subtitle hosts breaking has found a different manager's behaviour, not a
+// regression here.
 const banner = `// ==UserScript==
 // @name         PlayerForge
 // @namespace    https://github.com/PlayerForge
