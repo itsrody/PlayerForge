@@ -68,33 +68,34 @@ test("shell creates subtitle section in panel", async () => {
   await driver.injectScript();
 
   await waitForShell(driver, 8000);
-
-  const hasSubtitleSection = await driver.eval(() => {
-    const panel = document.querySelector(".pf-panel");
-    if (!panel) return false;
-    return panel.textContent.includes("Subtitles");
+  await waitForPanel(driver, 8000);
+  // The panel only builds its sections once it is actually opened, so the
+  // check has to open it first - otherwise this asserted nothing at all.
+  await driver.eval(() => {
+    const host = document.querySelector(".pf-shell");
+    host.dispatchEvent(new CustomEvent("pf:gesture-panel", { detail: { method: "test" } }));
   });
 
-  assert.ok(true, "Subtitle section existence checked without crash");
-});
-
-test("VTT parse does not crash in browser context", async () => {
-  await driver.navigate(createTestPage(server));
-  await driver.injectGMStubs();
-  await driver.injectScript();
-
-  await waitForShell(driver, 8000);
-
-  const parseResult = await driver.eval(() => {
-    try {
-      return { ok: true, shellAlive: !!document.querySelector(".pf-shell") };
-    } catch (e) {
-      return { ok: false, error: e.message };
+  // The panel lives in the shell's shadow root, and a section's title is held
+  // on its tab button's data-title - the section div itself carries no text.
+  const hasSubtitleSection = await driver.eval(async () => {
+    for (let i = 0; i < 50; i++) {
+      const shell = document.querySelector(".pf-shell");
+      const root = shell?.shadowRoot;
+      const tabs = root?.querySelectorAll(".pf-panel-tab[data-title]");
+      if (tabs) {
+        for (const tab of tabs) {
+          if (tab.dataset.title === "Subtitles") {
+            return true;
+          }
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
+    return false;
   });
 
-  assert.ok(parseResult.ok, "VTT parser should not throw in browser context");
-  assert.ok(parseResult.shellAlive, "Shell should remain alive after VTT parse");
+  assert.ok(hasSubtitleSection, "panel should contain a Subtitles section once opened");
 });
 
 test("subtitle cue layer exists in shadow root", async () => {
@@ -134,19 +135,12 @@ test("subtitle cues are hidden when no track is active", async () => {
 test("file input feeds Firefox's native VTT parser with full cue settings", async () => {
   await bootWithSubtitlesInput();
 
-  const parsed = await driver.eval(async () => {
+  // VTT_SETTINGS travels as an argument: the page function is serialized and
+  // re-parsed in the browser, so a captured binding would be undefined there.
+  const parsed = await driver.eval(async (vttText) => {
     const input = document.querySelector('input[type="file"]');
-    const vtt = [
-      "WEBVTT",
-      "",
-      "00:00:00.000 --> 00:00:10.000 line:10% position:25% align:start",
-      "first cue",
-      "",
-      "00:00:05.000 --> 00:00:15.000 line:2 position:80% align:end",
-      "second cue"
-    ].join("\n");
     const dataTransfer = new DataTransfer();
-    dataTransfer.items.add(new File([vtt], "native.vtt", { type: "text/vtt" }));
+    dataTransfer.items.add(new File([vttText], "native.vtt", { type: "text/vtt" }));
     input.files = dataTransfer.files;
     input.dispatchEvent(new Event("change", { bubbles: true }));
 
@@ -168,7 +162,7 @@ test("file input feeds Firefox's native VTT parser with full cue settings", asyn
       }
     }
     return { ok: false };
-  });
+  }, VTT_SETTINGS);
 
   assert.ok(parsed.ok, "native blob <track> parse lands cues");
   assert.equal(parsed.count, 2, "both cues parsed");
@@ -183,6 +177,12 @@ test("file input feeds Firefox's native VTT parser with full cue settings", asyn
   assert.equal(parsed.c1.line, 2, "integer line parsed natively");
   assert.equal(parsed.c1.snap, true, "integer line keeps snapToLines");
   assert.equal(parsed.c1.align, "end", "second cue align");
+  // The vacuous "VTT parse does not crash" test that used to sit here was the
+  // only shell-alive-after-parse check; keep that claim on the real test.
+  assert.ok(
+    await driver.eval(() => !!document.querySelector(".pf-shell")),
+    "shell survives a native parse in the page"
+  );
 });
 
 test("sync stepper rebuilds native cue times from the zero-offset base", async () => {

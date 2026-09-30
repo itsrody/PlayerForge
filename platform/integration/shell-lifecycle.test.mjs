@@ -6,8 +6,8 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { FirefoxDriver, TestServer, createTestPage, createPlyrPage, createBlankPage } from "../harness/firefox.mjs";
-import { waitForShell, waitForPanel, waitForSelector, countElements } from "../harness/page.mjs";
+import { FirefoxDriver, TestServer, createTestPage, createPlyrPage } from "../harness/firefox.mjs";
+import { waitForShell, waitForPanel, countElements } from "../harness/page.mjs";
 
 let driver;
 let server;

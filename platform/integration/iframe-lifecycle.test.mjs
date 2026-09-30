@@ -19,7 +19,7 @@ import {
   createNestedIframePages,
   createMultiOriginServers,
 } from "../harness/firefox.mjs";
-import { waitForShell, waitForShellInFrame, waitForPanel, countElements } from "../harness/page.mjs";
+import { waitForShell, waitForShellInFrame } from "../harness/page.mjs";
 
 // ── Scenario 1: Direct video (baseline) ──────────────────────────────
 

@@ -16,7 +16,7 @@
 import { Builder } from "selenium-webdriver";
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createServer as createHttpServer } from "node:http";
@@ -419,40 +419,6 @@ export class FirefoxDriver {
   }
 
   /**
-   * Dispatch a pointer event at the given coordinates.
-   *
-   * @param {"pointerdown"|"pointermove"|"pointerup"} type
-   * @param {number} x
-   * @param {number} y
-   * @param {object} [opts]
-   * @param {number} [opts.button=0]
-   * @param {number} [opts.pointerId=1]
-   */
-  async dispatchPointer(type, x, y, opts = {}) {
-    const { button = 0, pointerId = 1 } = opts;
-    // Use Selenium ActionSequence for pointer events.
-    const { Actions } = await import("selenium-webdriver/lib/input.js");
-    const actions = this.#driver.actions({ async: true });
-
-    // Map our pointer types to Selenium actions.
-    const coords = { x, y, width: 1, height: 1 };
-    if (type === "pointerdown") {
-      await actions
-        .move({ origin: "viewport", x, y })
-        .press({ button })
-        .perform();
-    } else if (type === "pointermove") {
-      await actions
-        .move({ origin: "viewport", x, y })
-        .perform();
-    } else if (type === "pointerup") {
-      await actions
-        .release({ button })
-        .perform();
-    }
-  }
-
-  /**
    * Dispatch a mouse event at the given coordinates (simpler than pointer).
    *
    * @param {"mousedown"|"mousemove"|"mouseup"|"click"} type
@@ -477,14 +443,22 @@ export class FirefoxDriver {
 
   /**
    * Wait for a condition in the page context.
-   * @param {() => boolean} conditionFn
+   *
+   * `args` are forwarded to every evaluate, because a page function cannot
+   * close over a Node-side value: the source is serialized and re-parsed in
+   * the page, so anything it needs from the test must arrive as an argument.
+   *
+   * @param {(...args: any[]) => any} conditionFn
    * @param {number} [timeoutMs=5000]
    * @param {number} [intervalMs=50]
+   * @param {...any} args - Serializable arguments for the condition.
+   * @throws {Error} if the condition is still falsy at the deadline.
+   * @returns {Promise<any>} the first truthy value the condition returned.
    */
-  async waitFor(conditionFn, timeoutMs = 5000, intervalMs = 50) {
+  async waitFor(conditionFn, timeoutMs = 5000, intervalMs = 50, ...args) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const result = await this.#driver.executeScript(conditionFn);
+      const result = await this.#driver.executeScript(conditionFn, ...args);
       if (result) return result;
       await new Promise((r) => setTimeout(r, intervalMs));
     }
