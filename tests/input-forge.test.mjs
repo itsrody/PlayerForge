@@ -193,7 +193,7 @@ test("disabling the hotkeys toggle silences arrows but Space still toggles playb
   }
 });
 
-test("focus arbitration: the last active controller owns page-level keys", () => {
+test("focus arbitration: a fresh multi-player page still has exactly one key owner", () => {
   const { dom, video, zone, host } = makeEnv();
   const video2 = dom.window.document.createElement("video");
   dom.window.document.body.appendChild(video2);
@@ -209,20 +209,176 @@ test("focus arbitration: the last active controller owns page-level keys", () =>
   const seenA = collect(host, dom.window);
   const seenB = collect(host2, dom.window);
 
+  // Nothing has been touched, both players are loaded and paused. The old gate
+  // answered "is this the last-touched engine?" here, which nothing had ever
+  // set, so the keystroke reached NOBODY and stayed dead until a click. Exactly
+  // one engine must own it, and with no stronger signal boot order breaks the
+  // tie.
   dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
     code: "ArrowRight", bubbles: true, cancelable: true
   }));
-  assert.equal(seenA.length + seenB.length, 0, "no owner chosen yet");
+  assert.equal(seenA.length + seenB.length, 1, "exactly one owner, never none and never both");
+  assert.equal(seenA.length, 1, "boot order breaks an otherwise total tie");
 
+  // A touch moves ownership, and the previous owner must let it go entirely.
   zone2.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
   zone2.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 400, y: 200 }));
   dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
     code: "ArrowRight", bubbles: true, cancelable: true
   }));
-  assert.equal(seenA.length, 0);
+  assert.equal(seenA.length, 1, "the untouched owner must not also claim");
   assert.equal(seenB.length, 1);
   controllerA.destroy();
   controllerB.destroy();
+});
+
+test("key arbitration: the playing player wins over an idle one when neither was touched", () => {
+  const { dom, video, zone, host } = makeEnv();
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  const video2 = dom.window.document.createElement("video");
+  dom.window.document.body.appendChild(video2);
+  video2.getBoundingClientRect = video.getBoundingClientRect;
+  Object.defineProperty(video2, "readyState", { value: 4, configurable: true });
+  Object.defineProperty(video2, "paused", { value: true, configurable: true });
+  const zone2 = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(zone2);
+  const host2 = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(host2);
+
+  // Boot the IDLE player first, so boot order alone would hand it the key and
+  // only the playing rung can redirect ownership to the other one.
+  const controllerB = new InputForge(video2, zone2, host2);
+  const controllerA = new InputForge(video, zone, host);
+  const seenA = collect(host, dom.window);
+  const seenB = collect(host2, dom.window);
+
+  dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+    code: "ArrowRight", bubbles: true, cancelable: true
+  }));
+  assert.equal(seenA.length, 1, "the in-motion player should answer");
+  assert.equal(seenB.length, 0);
+  controllerA.destroy();
+  controllerB.destroy();
+});
+
+test("key arbitration: focus inside a player outranks a playing sibling", () => {
+  const { dom, video, zone, host } = makeEnv();
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  const video2 = dom.window.document.createElement("video");
+  dom.window.document.body.appendChild(video2);
+  video2.getBoundingClientRect = video.getBoundingClientRect;
+  Object.defineProperty(video2, "readyState", { value: 4, configurable: true });
+  Object.defineProperty(video2, "paused", { value: true, configurable: true });
+  const zone2 = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(zone2);
+  const host2 = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(host2);
+  // A non-interactive focus holder: a pf BUTTON would legitimately keep
+  // arrows for itself, which is a different rule entirely.
+  const focused = dom.window.document.createElement("div");
+  focused.setAttribute("tabindex", "-1");
+  host2.appendChild(focused);
+  focused.focus();
+  assert.equal(dom.window.document.activeElement, focused);
+
+  const controllerA = new InputForge(video, zone, host);
+  const controllerB = new InputForge(video2, zone2, host2);
+  const seenA = collect(host, dom.window);
+  const seenB = collect(host2, dom.window);
+
+  dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+    code: "ArrowRight", bubbles: true, cancelable: true
+  }));
+  assert.equal(seenA.length, 0, "a playing sibling must not steal keys from focused chrome");
+  assert.equal(seenB.length, 1);
+  controllerA.destroy();
+  controllerB.destroy();
+});
+
+test("key arbitration: destroying the owner hands keys to the survivor", () => {
+  const { dom, video, zone, host } = makeEnv();
+  const video2 = dom.window.document.createElement("video");
+  dom.window.document.body.appendChild(video2);
+  video2.getBoundingClientRect = video.getBoundingClientRect;
+  Object.defineProperty(video2, "readyState", { value: 4, configurable: true });
+  const zone2 = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(zone2);
+  const host2 = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(host2);
+
+  const controllerA = new InputForge(video, zone, host);
+  const controllerB = new InputForge(video2, zone2, host2);
+  const seenA = collect(host, dom.window);
+  const seenB = collect(host2, dom.window);
+
+  controllerA.destroy();
+  dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+    code: "ArrowRight", bubbles: true, cancelable: true
+  }));
+  assert.equal(seenA.length, 0);
+  assert.equal(seenB.length, 1, "the surviving player must pick the page up");
+  controllerB.destroy();
+
+  // With every engine gone the broker must leave no listener holding the page.
+  dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+    code: "ArrowRight", bubbles: true, cancelable: true
+  }));
+  assert.equal(seenB.length, 1, "a torn-down broker must not claim anything");
+});
+
+test("an engine left over from another realm cannot claim this one's keys", () => {
+  // A player that was never torn down still holds a loaded video, but it
+  // belongs to a different document. The broker is realm-scoped, so it must not
+  // arbitrate here - and it registered FIRST, so without the realm filter it
+  // would win every keystroke on this page and starve the live player.
+  const first = makeEnv();
+  const stale = new InputForge(first.video, first.zone, first.host);
+  const staleSeen = collect(first.host, first.dom.window);
+
+  const second = makeEnv();
+  const video = second.video;
+  const zone = second.zone;
+  const host = second.host;
+  const fresh = new InputForge(video, zone, host);
+  const freshSeen = collect(host, second.dom.window);
+
+  second.dom.window.document.dispatchEvent(new second.dom.window.KeyboardEvent("keydown", {
+    code: "ArrowRight", bubbles: true, cancelable: true
+  }));
+  assert.equal(freshSeen.length, 1, "the live realm's player must answer");
+  assert.equal(staleSeen.length, 0, "a foreign-realm engine must never claim");
+
+  fresh.destroy();
+  stale.destroy();
+});
+
+test("N players share one document keydown/keyup listener pair", () => {
+  const { dom, video, zone, host } = makeEnv();
+  const added = [];
+  const realAdd = dom.window.document.addEventListener.bind(dom.window.document);
+  dom.window.document.addEventListener = (type, fn, opts) => {
+    if (type === "keydown" || type === "keyup") {
+      added.push({ type, opts });
+    }
+    return realAdd(type, fn, opts);
+  };
+  const engines = [new InputForge(video, zone, host)];
+  for (let i = 0; i < 3; i++) {
+    const v = dom.window.document.createElement("video");
+    dom.window.document.body.appendChild(v);
+    v.getBoundingClientRect = video.getBoundingClientRect;
+    Object.defineProperty(v, "readyState", { value: 4, configurable: true });
+    const z = dom.window.document.createElement("div");
+    dom.window.document.body.appendChild(z);
+    const h = dom.window.document.createElement("div");
+    dom.window.document.body.appendChild(h);
+    engines.push(new InputForge(v, z, h));
+  }
+  assert.equal(added.length, 2, "four players must still install exactly one keydown + one keyup");
+  assert.ok(added.every((a) => a.opts.capture === true), "shared keys stay capture-phase");
+  for (const engine of engines) {
+    engine.destroy();
+  }
 });
 
 test("trackpad ctrl+wheel pinches in fullscreen with a cooldown window", () => {
