@@ -1,4 +1,4 @@
-import { allowsIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo, cancelEase } from "./actions.js";
+import { allowsIntent, allowsAnyIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo, cancelEase } from "./actions.js";
 import { TUNING } from "../../shared/tuning.js";
 import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../../shared/shadow.js";
 import { DOMManager } from "../../shared/dom-manager.js";
@@ -34,15 +34,6 @@ const SUPPRESS_WINDOW_MS = TUNING.gestures.suppressWindowMs;
 const DOUBLE_TAP_WINDOW_MS = TUNING.gestures.doubleTapWindowMs;
 const CLICK_SETTLE_MS = TUNING.gestures.clickSettleMs;
 const SCRUB_VELOCITY_TAU_S = TUNING.scrub.velocityFilterMs / 1000;
-
-/**
- * Pointer gestures whose activation the shell must hide from the SDK. While
- * ANY of these is armed, an owned press stops its whole pointer/mouse/touch
- * stream at the zone's capture listeners - the SDK only ever sees native
- * input the shell deliberately passes through (single click/tap, hover,
- * presses outside the gesture zone).
- */
-const POINTER_GESTURE_INTENTS = ["scrub", "swipe", "hold", "dbltap", "pinch"];
 
 /** Synthetic single-tap replays this engine dispatched - lets the capture
  *  click handler recognize its own stand-in events and pass them through. */
@@ -262,6 +253,13 @@ export class InputForge {
    *  press we did not own (focus moved between down and up), and always
    *  releases a hold we did. */
   #keyboardOwn = false;
+  /** Event.code values whose CURRENT press we own end-to-end: the first press
+   *  took preventDefault + stopImmediatePropagation, so its auto-repeats must
+   *  be shielded identically - otherwise the page's own handlers (platform
+   *  Space shortcut, arrow scroll/seek) fire at repeat rate throughout a hold
+   *  we are simultaneously driving. Latched per owned press, released per
+   *  keyup/blur/reset; never latches a press the page owned. */
+  #ownedKeyCodes = new Set();
 
   // Trackpad ctrl+wheel pinch cooldown: a lazy deadline avoids per-gesture timers.
   #trackpadPinchCooldownUntil = -Infinity;
@@ -275,8 +273,11 @@ export class InputForge {
     this.#zone = zone;
     this.#eventTarget = eventTarget;
     const { signal } = this.#scope;
-    // Track touch-action for automatic rollback on destroy.
+    // Track touch-action (kills scroll/pinch takeover) and user-select (kills
+    // native selection highlight + its hit-testing while scrubbing over page
+    // text) for automatic rollback on destroy.
     this.#dom.markStyle(zone, "touch-action", "none");
+    this.#dom.markStyle(zone, "user-select", "none");
 
     // NOTE: the native video element is deliberately NEVER patched (no
     // own-property rewrite of play/pause). Assigning JS functions as own
@@ -435,6 +436,7 @@ export class InputForge {
       this.#dispatchKeyboardRelease();
     }
     this.#keyboardOwn = false;
+    this.#ownedKeyCodes.clear();
     clearTimeout(this.#keyboardHoldTimer);
     this.#keyboardHoldTimer = null;
   }
@@ -668,7 +670,7 @@ export class InputForge {
     } else {
       this.#pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     }
-    if (POINTER_GESTURE_INTENTS.some(allowsIntent)) {
+    if (allowsAnyIntent()) {
       // Gesture-eligible press with any pointer gesture armed: the shell owns
       // this stream. Stop it here (zone capture, ancestor of the video) so
       // SDK target/bubble listeners never see it, and drop any pending
@@ -857,10 +859,13 @@ export class InputForge {
     // against a correcting hand. Purely a velocity-shaping signal.
     const hasPredicted = hasCoalesced && typeof event.getPredictedEvents === "function";
     let velocityStep = totalStep;
-    // Zero step: the additive term below is Math.sign(0) * (...) = 0 no
-    // matter what the prediction says, so skip the browser's array alloc
-    // (and a NaN delta can no longer poison velocityStep at rest).
-    if (hasPredicted && totalStep !== 0) {
+    // Sub-pixel gate: the additive term is clamped to the confirmed step
+    // (Math.min below), so a sub-pixel prediction contributes at most
+    // sub-pixel to the smoothed velocity - skip the browser's array alloc
+    // for the whole sub-pixel traffic high-rate pointers produce. Also covers
+    // the zero step (sign(0) term is 0 anyway; a NaN delta can no longer
+    // poison velocityStep at rest).
+    if (hasPredicted && Math.abs(totalStep) >= 1) {
       const predicted = event.getPredictedEvents();
       if (predicted && predicted.length) {
         velocityStep += Math.sign(totalStep) *
@@ -1005,7 +1010,7 @@ export class InputForge {
     if (event.button !== undefined && event.button !== 0) {
       return false;
     }
-    if (!POINTER_GESTURE_INTENTS.some(allowsIntent)) {
+    if (!allowsAnyIntent()) {
       return false;
     }
     if (this.#eventTarget && isInsideShell(this.#eventTarget, event.target)) {
@@ -1152,8 +1157,18 @@ export class InputForge {
    */
   #handleKeydown(event) {
     if (event.repeat) {
+      // Mirror the first press's ownership decision: repeats of an owned key
+      // are shielded from the page exactly like that press was; repeats of a
+      // press the page owned keep leaking untouched.
+      if (this.#ownedKeyCodes.has(event.code)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
       return;
     }
+    // Fresh press: re-latch from scratch so a swallowed earlier keyup can
+    // never keep shielding a press this one no longer owns.
+    this.#ownedKeyCodes.delete(event.code);
     if (event.code === "Space") {
       if (this.#shouldHandleKeys(false)) {
         lastActiveForge = this;
@@ -1174,6 +1189,7 @@ export class InputForge {
           this.#dispatchKeyboardRelease();
         }
         this.#keyboardOwn = true;
+        this.#ownedKeyCodes.add("Space");
         this.#keyboardHoldStart = performance.now();
         clearTimeout(this.#keyboardHoldTimer);
         this.#keyboardHoldTimer = setTimeout(() => {
@@ -1206,6 +1222,7 @@ export class InputForge {
       lastActiveForge = this;
       event.preventDefault();
       event.stopImmediatePropagation();
+      this.#ownedKeyCodes.add(event.code);
       keyDetail.method = "keyboard";
       keyDetail.direction = binding.direction;
       this.#dispatch(binding.emit, keyDetail);
@@ -1214,6 +1231,7 @@ export class InputForge {
   }
 
   #handleKeyup(event) {
+    this.#ownedKeyCodes.delete(event.code);
     if (event.code !== "Space") {
       return;
     }
@@ -1231,6 +1249,7 @@ export class InputForge {
     const wasHolding = this.#keyboardHolding;
     const owned = this.#keyboardOwn;
     this.#keyboardOwn = false;
+    this.#ownedKeyCodes.delete("Space");
     this.#keyboardHolding = false;
     clearTimeout(this.#keyboardHoldTimer);
     this.#keyboardHoldTimer = null;

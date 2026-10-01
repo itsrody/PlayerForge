@@ -364,8 +364,11 @@ export class SettingsPanel {
     }, { signal });
     document.addEventListener("pointerdown", (event) => {
       // The whole host counts as "inside", so a press on the panel or its
-      // HUD siblings toggles without a close/reopen flicker.
-      if (event.composedPath().includes(this.#shellHost)) {
+      // HUD siblings toggles without a close/reopen flicker. Shadow
+      // retargeting makes target === host exactly when the press landed in
+      // the host's (shadow-only) subtree - no composedPath() array to
+      // allocate per outside press.
+      if (event.target === this.#shellHost) {
         return;
       }
       this.close();

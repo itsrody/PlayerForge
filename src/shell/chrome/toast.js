@@ -3,7 +3,6 @@ import { delay } from "../../shared/time.js";
 import { flashElement } from "./animate.js";
 import { button } from "./elements.js";
 import { createIconElement } from "./icons.js";
-import { DOMManager } from "../../shared/dom-manager.js";
 
 /**
  * Single toast surface hosted in the shell HUD layer: icon + text +
@@ -28,8 +27,6 @@ export class ToastManager {
   #icon;
   #text;
   #actions;
-  /** DOM lifecycle manager: pool and timer cleanup on destroy. */
-  #dom = new DOMManager();
   /** Cancel handle for the pending auto-hide, null when none is scheduled. */
   #cancelAutoHide = null;
   /** Stable auto-hide callback, cached so show() never re-creates a closure. */
@@ -165,7 +162,6 @@ export class ToastManager {
   }
 
   destroy() {
-    this.#dom.destroy();
     this.#cancelAutoHide?.();
     this.#cancelAutoHide = null;
     this.#pool.destroy();

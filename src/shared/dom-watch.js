@@ -50,10 +50,15 @@ const PUSH_APPLY_LIMIT = 65536;
 
 /**
  * Append-only subscriber slots with tombstones. A live subscription is a
- * [handler] slot; unsubscribe writes a null tombstone without reindexing.
- * `live` counts active slots so teardown stays automatic. This replaces a
- * Set-snapshot fan-out: the per-batch `[...subscribers]` allocation is gone
- * from the mutation hot path.
+ * [handler] slot; unsubscribe nulls the handler *inside its own slot* rather
+ * than writing a positional tombstone - the returned off() closes over the
+ * slot object, so compaction can reindex slots freely without orphaning any
+ * unsubscribe handle (a positional handle would write to a stale index after
+ * compaction: no-op at best - leaking a zombie subscriber that keeps the
+ * observer alive forever - or killing whichever subscriber now sits at that
+ * index). `live` counts active slots so teardown stays automatic. This
+ * replaces a Set-snapshot fan-out: the per-batch `[...subscribers]`
+ * allocation is gone from the mutation hot path.
  */
 const slots = [];
 let live = 0;
@@ -93,7 +98,7 @@ function flush() {
   const length = slots.length;
   for (let i = 0; i < length; i++) {
     const slot = slots[i];
-    if (!slot) {
+    if (!slot || !slot[0]) {
       continue;
     }
     // uBO safeObserverHandler rule: one throwing consumer must never abort
@@ -108,11 +113,14 @@ function flush() {
 
   // uBO compaction rule: tombstoned slots are reindexed once they outnumber
   // live slots 4:1 - a churny page can't grow the slot array without bound.
+  // Safe because unsubscribe tracks slot identity (see onDomMutations), not
+  // slot position.
   if (live > 0 && slots.length > live * COMPACTION_RATIO) {
     let write = 0;
     for (let i = 0; i < slots.length; i++) {
-      if (slots[i]) {
-        slots[write++] = slots[i];
+      const slot = slots[i];
+      if (slot && slot[0]) {
+        slots[write++] = slot;
       }
     }
     slots.length = write;
@@ -224,13 +232,16 @@ function stopIfIdle() {
 
 export function onDomMutations(handler, { signal } = {}) {
   ensureObserver();
-  slots.push([handler]);
+  const slot = [handler];
+  slots.push(slot);
   live += 1;
-  const index = slots.length - 1;
   const off = () => {
-    if (slots[index]) {
-      slots[index] = null;
+    if (slot[0]) {
+      slot[0] = null;
       live -= 1;
+      // Release the abort listener on manual unsubscribe too - otherwise the
+      // signal retains this closure until it aborts (possibly never).
+      signal?.removeEventListener("abort", off);
     }
     stopIfIdle();
   };

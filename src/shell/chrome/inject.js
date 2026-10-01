@@ -50,8 +50,12 @@ export function warmStyles() {
     // malformed resource must not clobber the working embedded sheet - the
     // upgrade is strictly-monotonic, so the shell can never go blank from a
     // pathological fetch. replaceSync throws on invalid CSS; catch it and
-    // keep the last-good sheet rather than risk a blank UI.
-    if (css && css.trim().length > 0) {
+    // keep the last-good sheet rather than risk a blank UI. In production the
+    // @resource text is byte-identical to the embedded sheet (same esbuild
+    // minifier, same source), so skip the redundant replaceSync: re-parsing
+    // 19 KB and restyling the document + every adopted shadow root right at
+    // first-video dimming buys nothing.
+    if (css && css !== SHELL_CSS && css.trim().length > 0) {
       try {
         // Replace in place: adopted sheets everywhere see the upgrade.
         sharedSheet.replaceSync(css);

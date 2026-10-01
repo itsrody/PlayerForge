@@ -100,6 +100,18 @@ const intentsArmed = new Map();
  *  resyncs `fs` silently (no subscriber fan-out), and a snapshot that missed
  *  such a resync would arm fullscreen-only intents on an inline page. */
 let intentsArmedFs = false;
+/**
+ * Pointer gestures whose activation the shell must hide from the SDK. While
+ * ANY of these is armed, an owned press stops its whole pointer/mouse/touch
+ * stream at the zone's capture listeners - the SDK only ever sees native
+ * input the shell deliberately passes through (single click/tap, hover,
+ * presses outside the gesture zone).
+ */
+export const POINTER_GESTURE_INTENTS = ["scrub", "swipe", "hold", "dbltap", "pinch"];
+/** Precomputed OR of POINTER_GESTURE_INTENTS over intentsArmed: pointerdown
+ *  ownership checked it via a 5-iteration `.some(allowsIntent)` scan per
+ *  press (and again from #dominatesPress); one boolean read replaces both. */
+let anyPointerArmed = false;
 
 function refreshIntentGates() {
   for (const [gesture, bindings] of BY_GESTURE) {
@@ -112,6 +124,14 @@ function refreshIntentGates() {
     }
     intentsArmed.set(gesture, open);
   }
+  let anyPointer = false;
+  for (let i = 0; i < POINTER_GESTURE_INTENTS.length; i++) {
+    if (intentsArmed.get(POINTER_GESTURE_INTENTS[i]) === true) {
+      anyPointer = true;
+      break;
+    }
+  }
+  anyPointerArmed = anyPointer;
   intentsArmedFs = fs;
 }
 refreshIntentGates();
@@ -127,6 +147,15 @@ export function allowsIntent(gesture) {
     refreshIntentGates();
   }
   return intentsArmed.get(gesture) === true;
+}
+
+/** Any pointer-intent family member armed - the press-ownership gate. Same
+ *  snapshot revalidation as allowsIntent, without the per-call scan. */
+export function allowsAnyIntent() {
+  if (fs !== intentsArmedFs) {
+    refreshIntentGates();
+  }
+  return anyPointerArmed;
 }
 
 /** Armed key bindings, in table order - sampled live per keystroke. */

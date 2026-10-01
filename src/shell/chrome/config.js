@@ -170,7 +170,16 @@ function refreshSettingsCache() {
   }
 }
 
-gmAddValueChangeListener(KEYS.configs, () => refreshSettingsCache());
+// Own writes echo back too (remote === false): our cache was already updated
+// by setSetting before the write, so skip the invalidation + full-doc re-parse
+// it would trigger - the resume store applies the same guard (resume.js).
+// Implementations that omit the 4th arg behave exactly as before.
+gmAddValueChangeListener(KEYS.configs, (_name, _old, _value, remote) => {
+  if (remote === false) {
+    return;
+  }
+  refreshSettingsCache();
+});
 
 /**
  * Render SETTINGS_SCHEMA into the settings panel: one labeled section per

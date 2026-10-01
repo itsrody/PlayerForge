@@ -452,6 +452,40 @@ test("an owned space press is invisible to page-level key handlers", (t) => {
   controller.destroy();
 });
 
+test("auto-repeats of an owned press stay shielded; unowned repeats keep leaking", (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+  const pageSaw = [];
+  dom.window.addEventListener("keydown", (event) => {
+    pageSaw.push({ code: event.code, repeat: event.repeat });
+  });
+  const down = (repeat) =>
+    dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+      code: "Space", bubbles: true, cancelable: true, repeat
+    }));
+
+  // Owned press: the first keydown AND every auto-repeat must be invisible -
+  // the page's own Space shortcut must not fire at repeat rate mid-hold.
+  down(false);
+  down(true);
+  down(true);
+  assert.equal(pageSaw.length, 0, "owned press + repeats shielded from page handlers");
+
+  // keyup releases the shield latch; the next press starts in a text field,
+  // so the page owns it - both the press and its repeat must reach the page.
+  space(dom.window, "keyup");
+  const box = dom.window.document.createElement("textarea");
+  dom.window.document.body.appendChild(box);
+  box.focus();
+  down(false);
+  down(true);
+  assert.equal(pageSaw.length, 2, "unowned press and its repeat reach the page");
+  assert.equal(pageSaw[1].repeat, true);
+  box.blur();
+  controller.destroy();
+});
+
 test("a space press that started in a text field never toggles playback on keyup", (t) => {
   const { dom, video, zone, host } = makeEnv();
   let plays = 0;

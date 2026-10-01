@@ -292,42 +292,43 @@ export class Shell {
   #forwardMediaEvents() {
     const video = this.video;
     const host = this.#shellDom?.host;
-    const handler = () => {
-      this.#mediaSession?.sync();
-    };
-    for (const name of MEDIA_SESSION_SYNC_EVENTS) {
-      this.#dom.listen(video, name, handler, { passive: true });
-    }
     // Expose media state as CSS custom properties on the host so the shadow
     // DOM can style based on playing/paused/muted without crossing the realm
     // boundary. The :playing/:paused/:muted pseudo-classes (Chromium 156+,
     // absent on the 154 floor - verified via selector probes) cannot select
     // the page's video from inside our shadow root either way; custom
     // properties bridge the gap.
-    if (host) {
-      // Write the custom properties only when their value actually flips.
-      // volumechange fires continuously while volume/panner is dragged, and a
-      // setProperty on a hot style recolors the host subtree for nothing when
-      // neither flag changed.
-      let pausedVar = null;
-      let mutedVar = null;
-      const sync = () => {
-        const paused = video.paused ? "1" : "0";
-        if (paused !== pausedVar) {
-          pausedVar = paused;
-          host.style.setProperty("--pf-media-paused", paused);
+    let pausedVar = null;
+    let mutedVar = null;
+    const cssSync = host
+      ? () => {
+          // Write the custom properties only when their value actually flips.
+          // volumechange fires continuously while volume/panner is dragged, and
+          // a setProperty on a hot style recolors the host subtree for nothing
+          // when neither flag changed.
+          const paused = video.paused ? "1" : "0";
+          if (paused !== pausedVar) {
+            pausedVar = paused;
+            host.style.setProperty("--pf-media-paused", paused);
+          }
+          const muted = video.muted ? "1" : "0";
+          if (muted !== mutedVar) {
+            mutedVar = muted;
+            host.style.setProperty("--pf-media-muted", muted);
+          }
         }
-        const muted = video.muted ? "1" : "0";
-        if (muted !== mutedVar) {
-          mutedVar = muted;
-          host.style.setProperty("--pf-media-muted", muted);
-        }
-      };
-      sync();
-      for (const evt of ["play", "pause", "volumechange"]) {
-        this.#dom.listen(video, evt, sync, { passive: true });
-      }
+      : null;
+    // One registration set for both concerns: play/pause/volumechange are in
+    // MEDIA_SESSION_SYNC_EVENTS, so separate css-sync listeners would double-
+    // dispatch those three hottest state events into two closures each.
+    const handler = () => {
+      this.#mediaSession?.sync();
+      cssSync?.();
+    };
+    for (const name of MEDIA_SESSION_SYNC_EVENTS) {
+      this.#dom.listen(video, name, handler, { passive: true });
     }
+    cssSync?.();
   }
 
   /** Surface a hint + re-provision when a fullscreen entry is rejected. */

@@ -314,8 +314,14 @@ class MediaSessionBridge {
   #sentPlaybackState = null;
   #sentDuration = NaN;
   #sentPlaybackRate = NaN;
-  /** Position dedup quantum in seconds - finer than any OS progress UI shows. */
-  static #POSITION_EPSILON = 0.25;
+  /** Position dedup quantum in seconds. timeupdate ticks at ~250 ms, so a
+   *  finer quantum passed every tick (0.25 is not < 0.25) and pushed the
+   *  write straight through: 4 browser IPCs/s during steady playback. 1 s
+   *  dedups the whole tick stream to ~1 IPC/s - no OS progress UI renders
+   *  finer - while duration/rate flips and pause still write immediately
+   *  (their own guards bypass the quantum), and a seek catches up within a
+   *  second of continuous playback. */
+  static #POSITION_EPSILON = 1;
 
   /** playbackState plus guarded position state; safe to call per event batch. */
   sync() {

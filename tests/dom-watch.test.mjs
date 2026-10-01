@@ -100,3 +100,37 @@ test("every flush delivers only its own batch (recycled buffers are drained)", a
   off();
   assert.deepEqual(batches, [1, 1, 1, 1, 1]);
 });
+
+test("unsubscribe still works after slot compaction (identity-stable handles)", async () => {
+  // Regression: off() used to close over the subscribe-time index. With 5
+  // subscribers and 4 gone, the next flush compacts (5 > 1*4), moving the
+  // survivor from index 4 to index 0 - after which the survivor's off()
+  // wrote to a stale index, no-opped, and left a zombie subscriber (and the
+  // document observer) running forever.
+  const counts = { s0: 0, s1: 0, s2: 0, s3: 0, s4: 0 };
+  const offs = Object.keys(counts).map((id) => onDomMutations(() => counts[id]++));
+  for (let i = 0; i < 4; i++) {
+    offs[i]();
+  }
+
+  document.body.appendChild(document.createElement("div"));
+  await tick();
+  assert.equal(counts.s4, 1, "survivor received the pre-compaction batch");
+  // End of that flush: compaction ran, survivor slot moved to index 0.
+
+  offs[4]();
+  document.body.appendChild(document.createElement("div"));
+  await tick();
+  assert.equal(counts.s4, 1, "survivor stopped after its off() at the compacted position");
+
+  // Double-off must be inert, and post-compaction subscribers must survive
+  // the old handle (a positional off() would tombstone their slot instead).
+  let fresh = 0;
+  const offFresh = onDomMutations(() => fresh++);
+  offs[4]();
+  document.body.appendChild(document.createElement("div"));
+  await tick();
+  assert.equal(fresh, 1, "post-compaction subscriber keeps receiving");
+  assert.equal(counts.s4, 1, "zombie never resurrects");
+  offFresh();
+});
