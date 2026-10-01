@@ -8,6 +8,10 @@ import { fmtSeconds } from "../../shared/formatters.js";
 
 const SETTINGS_PREFIX = "settings";
 
+/** Unique-id seed for option-group labels (one settings section per shell). */
+let optionsGroupCounter = 0;
+const ARROW_DIRECTIONS = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+
 const SETTINGS_SCHEMA = [
   {
     key: "controller.stepSeek",
@@ -224,25 +228,60 @@ export function addSettingsSection(panel, signal) {
       controls.set(definition.key, { type: "bool", el: checkbox });
     } else if (definition.type === "options") {
       const cell = panel.el("div", { class: "pf-panel-cell pf-options-cell" }, groupGrid);
-      panel.addLabel(cell, definition.label);
+      const groupLabel = panel.addLabel(cell, definition.label);
       const row = panel.el("div", { class: "pf-options-row" }, cell);
+      // Radio semantics: one roving stop per group, aria-checked mirrors the
+      // active button, arrows move + select like a native radio group.
+      groupLabel.id = `pf-options-group-${optionsGroupCounter++}`;
+      row.setAttribute("role", "radiogroup");
+      row.setAttribute("aria-labelledby", groupLabel.id);
       const current = getSetting(definition.key);
       const buttons = [];
+      const syncOptions = (active) => {
+        let checked = false;
+        for (const [opt, btn] of buttons) {
+          const on = opt === active;
+          checked = checked || on;
+          btn.classList.toggle("pf-options-active", on);
+          btn.setAttribute("aria-checked", on ? "true" : "false");
+          btn.tabIndex = on ? 0 : -1;
+        }
+        // A stale value outside the enum must not collapse the tab stops.
+        if (!checked && buttons.length) {
+          buttons[0][1].tabIndex = 0;
+        }
+      };
       for (const opt of definition.options) {
         const btn = panel.el("button", {
           type: "button",
-          class: opt === current ? "pf-btn pf-options-btn pf-options-active" : "pf-btn pf-options-btn"
+          role: "radio",
+          class: "pf-btn pf-options-btn"
         }, row);
         btn.textContent = definition.fmt(opt);
         btn.addEventListener("click", () => {
           setSetting(definition.key, opt);
-          for (const b of row.children) {
-            b.classList.toggle("pf-options-active", b === btn);
-          }
+          syncOptions(opt);
         });
         buttons.push([opt, btn]);
       }
-      controls.set(definition.key, { type: "options", buttons });
+      row.addEventListener("keydown", (event) => {
+        const direction = ARROW_DIRECTIONS[event.key];
+        if (!direction) {
+          return;
+        }
+        const index = buttons.findIndex(([, btn]) => btn === event.target);
+        if (index === -1) {
+          return;
+        }
+        event.preventDefault();
+        const next = (index + direction + buttons.length) % buttons.length;
+        const [opt, btn] = buttons[next];
+        setSetting(definition.key, opt);
+        syncOptions(opt);
+        btn.focus();
+      });
+      syncOptions(current);
+      controls.set(definition.key, { type: "options", sync: syncOptions });
     } else {
       const stepper = panel.addControl(groupGrid, {
         type: "stepper",
@@ -279,9 +318,7 @@ export function addSettingsSection(panel, signal) {
       if (rec.type === "bool") {
         rec.el.checked = fresh;
       } else if (rec.type === "options") {
-        for (const [opt, btn] of rec.buttons) {
-          btn.classList.toggle("pf-options-active", opt === fresh);
-        }
+        rec.sync(fresh);
       } else {
         rec.el.setValue(fresh);
       }

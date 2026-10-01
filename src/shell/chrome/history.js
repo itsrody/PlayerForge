@@ -36,7 +36,9 @@ export function addHistorySection(panel, shell) {
       const info = card.querySelector(".pf-history-info");
       refs = {
         title: info.querySelector(".pf-history-title"),
-        meta: info.querySelector(".pf-history-meta")
+        meta: info.querySelector(".pf-history-meta"),
+        resetBtn: card.querySelector('[data-action="reset"]'),
+        removeBtn: card.querySelector('[data-action="remove"]')
       };
       cardRefs.set(card, refs);
     }
@@ -52,21 +54,21 @@ export function addHistorySection(panel, shell) {
       const title = panel.el("div", { class: "pf-history-title" }, info);
       const meta = panel.el("div", { class: "pf-history-meta" }, info);
       const actions = panel.el("div", { class: "pf-history-actions" }, card);
-      button({
+      const resetBtn = button({
         class: "pf-btn pf-btn-icon pf-btn-ghost",
         title: "Reset",
         "aria-label": "Reset resume position",
         "data-action": "reset",
         icon: createIconElement("reload")
       }, actions);
-      button({
+      const removeBtn = button({
         class: "pf-btn pf-btn-icon pf-btn-ghost",
         title: "Remove",
         "aria-label": "Remove from history",
         "data-action": "remove",
         icon: createIconElement("trash")
       }, actions);
-      cardRefs.set(card, { title, meta });
+      cardRefs.set(card, { title, meta, resetBtn, removeBtn });
       return card;
     },
     reset: (card) => {
@@ -74,6 +76,10 @@ export function addHistorySection(panel, shell) {
       const refs = refsFor(card);
       refs.title.textContent = "";
       refs.meta.textContent = "";
+      // Generic labels while pooled: a card must never announce its previous
+      // entry's name between renders.
+      refs.resetBtn.setAttribute("aria-label", "Reset resume position");
+      refs.removeBtn.setAttribute("aria-label", "Remove from history");
       return card;
     }
   });
@@ -132,7 +138,16 @@ export function addHistorySection(panel, shell) {
   function renderCard(entry, card) {
     card.dataset.entryId = entry.id;
     const refs = refsFor(card);
-    refs.title.textContent = entry.title || formatDomain(entry.domain);
+    const name = entry.title || formatDomain(entry.domain);
+    refs.title.textContent = name;
+    // Announce which entry each icon acts on (two identical buttons per card).
+    if (name) {
+      refs.resetBtn.setAttribute("aria-label", `Reset resume position for ${name}`);
+      refs.removeBtn.setAttribute("aria-label", `Remove ${name} from history`);
+    } else {
+      refs.resetBtn.setAttribute("aria-label", "Reset resume position");
+      refs.removeBtn.setAttribute("aria-label", "Remove from history");
+    }
     const parts = [formatDomain(entry.domain)];
     if (entry.duration > 0) {
       parts.push(formatTime(entry.duration));

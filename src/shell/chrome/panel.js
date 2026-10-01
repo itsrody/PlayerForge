@@ -270,6 +270,8 @@ export class SettingsPanel {
   #closeWatcher = null;
   #backdrop = null;
   #sectionBuilder = null;
+  /** Element focused at open(); close() hands focus back to it (A1). */
+  #returnFocus = null;
 
   constructor(shell) {
     this.#hudLayer = shell.shellDom?.hudLayer;
@@ -325,6 +327,9 @@ export class SettingsPanel {
     if (!this.#body.childElementCount) {
       return;
     }
+    // Snapshot the opener before focus moves into the panel; close() hands
+    // focus back to it (native showModal() behavior), not just the host.
+    this.#returnFocus = deepestActiveElement(this.#shellHost);
     this.#armDismissal();
     this.#runWithViewTransition("pf-panel-open", () => {
       this.#root.classList.toggle("pf-compact", this.#isCompactMode());
@@ -338,13 +343,27 @@ export class SettingsPanel {
 
   close() {
     if (this.#root && !this.#scope.disposed && this.isOpen) {
+      const opener = this.#returnFocus;
+      this.#returnFocus = null;
+      const hadFocusInside = this.#root.contains(deepestActiveElement(this.#shellHost));
       this.#runWithViewTransition("pf-panel-close", () => {
         this.#root.classList.remove("pf-open");
-        if (this.#shellHost && this.#root.contains(deepestActiveElement(this.#shellHost))) {
+      });
+      // Dismissal dies before focus moves: the focusin containment handler
+      // would yank an outside-the-shell opener straight back to the tab.
+      this.#teardownDismissal();
+      if (hadFocusInside) {
+        // Back to the opener (native showModal() restore) when it is still a
+        // live element - body/null (nothing was focused) and a disconnected
+        // opener (SPA navigation) fall back to the shell host instead.
+        const live = opener && opener !== document.body
+          && opener !== document.documentElement && opener.isConnected;
+        if (live) {
+          opener.focus();
+        } else if (this.#shellHost) {
           this.#shellHost.focus();
         }
-      });
-      this.#teardownDismissal();
+      }
     }
   }
 

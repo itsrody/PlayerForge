@@ -373,8 +373,17 @@
           padding: 6px 10px;
           cursor: pointer;
 
-          &:hover {
-            background: rgba(255, 255, 255, 0.28);
+          /* Hover effects are gated on a real hover device - a touch press
+             must not leave a stale highlight behind. */
+          @media (hover: hover) {
+            &:hover {
+              background: rgba(255, 255, 255, 0.28);
+            }
+          }
+
+          /* Press feedback: instant dim, no transition (native :active feel). */
+          &:active {
+            filter: brightness(0.9);
           }
 
           /* Icon-only action buttons - pill, sized to the toast text line */
@@ -511,9 +520,15 @@
             fill: currentColor;
           }
 
-          &:hover {
-            background: transparent;
-            color: var(--pf-fg);
+          @media (hover: hover) {
+            &:hover {
+              background: transparent;
+              color: var(--pf-fg);
+            }
+          }
+
+          &:active {
+            filter: brightness(0.9);
           }
         }
       }
@@ -529,9 +544,15 @@
         padding: 5px 8px;
         border-radius: var(--pf-radius-xs);
 
-        &:hover {
-          background: var(--pf-border);
-          color: var(--pf-fg);
+        @media (hover: hover) {
+          &:hover {
+            background: var(--pf-border);
+            color: var(--pf-fg);
+          }
+        }
+
+        &:active {
+          filter: brightness(0.9);
         }
 
         &:focus-visible {
@@ -840,6 +861,12 @@
         outline-offset: 2px;
       }
 
+      /* Press feedback: instant dim (no transition) on every pf button -
+         covers the accent, ghost and options flavors alike. */
+      &:active:not(:disabled) {
+        filter: brightness(0.9);
+      }
+
       &:disabled,
       &:disabled:hover {
         opacity: 0.35;
@@ -863,8 +890,10 @@
       background: var(--pf-surface-mid);
       color: inherit;
 
-      &:hover {
-        background: var(--pf-surface-strong);
+      @media (hover: hover) {
+        &:hover {
+          background: var(--pf-surface-strong);
+        }
       }
 
       &:disabled,
@@ -929,9 +958,15 @@
           fill: currentColor;
         }
 
-        &:hover {
-          color: var(--pf-fg);
-          background: var(--pf-surface-mid);
+        @media (hover: hover) {
+          &:hover {
+            color: var(--pf-fg);
+            background: var(--pf-surface-mid);
+          }
+        }
+
+        &:active:not(:disabled) {
+          filter: brightness(0.9);
         }
 
         &:first-child {
@@ -973,8 +1008,10 @@
       font-size: var(--pf-font-sm);
       line-height: 1.3;
 
-      &:hover {
-        background: var(--pf-surface-mid);
+      @media (hover: hover) {
+        &:hover {
+          background: var(--pf-surface-mid);
+        }
       }
 
       input {
@@ -1024,8 +1061,10 @@
       color: inherit;
       border-radius: var(--pf-radius-sm);
 
-      &:hover {
-        background: var(--pf-surface-strong);
+      @media (hover: hover) {
+        &:hover {
+          background: var(--pf-surface-strong);
+        }
       }
     }
 
@@ -1069,8 +1108,10 @@
       content-visibility: auto;
       contain-intrinsic-size: auto 56px;
 
-      &:hover {
-        background: var(--pf-surface-mid);
+      @media (hover: hover) {
+        &:hover {
+          background: var(--pf-surface-mid);
+        }
       }
     }
 

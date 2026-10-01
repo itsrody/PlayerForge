@@ -616,7 +616,12 @@ export class InputForge {
       return false;
     }
     const tag = el.tagName;
-    if (tag === "SELECT" || tag === "OPTION" || tag === "INPUT") {
+    if (tag === "SELECT" || tag === "OPTION") {
+      // Letter keys in a focused select are native typeahead, not hotkeys -
+      // even KeyS (panel toggle, allowControlFocus) yields to them.
+      return false;
+    }
+    if (tag === "INPUT") {
       return !!allowControlFocus;
     }
     if (tag === "BUTTON") {
