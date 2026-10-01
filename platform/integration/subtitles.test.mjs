@@ -1,7 +1,7 @@
 /**
  * Subtitles integration tests.
  *
- * Tests the subtitle track lifecycle in a real Chromium 152 instance.
+ * Tests the subtitle track lifecycle in a real Chromium 154 instance.
  */
 import test from "node:test";
 import assert from "node:assert/strict";

@@ -1,7 +1,7 @@
 /**
  * ChromiumDriver lifecycle manager.
  *
- * Launches a headless Vivaldi (or Brave/Chrome fallback) instance via
+ * Launches a headless Helium (or Vivaldi/Brave/Chrome fallback) instance via
  * Selenium WebDriver, connects through the ChromeDriver protocol, and exposes
  * helpers for script injection, page navigation, and pointer event dispatch.
  *
@@ -13,7 +13,7 @@
  *   await driver.destroy();
  */
 import { Builder } from "selenium-webdriver";
-import { readFileSync, existsSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { readFileSync, existsSync, mkdtempSync, rmSync, writeFileSync, chmodSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -25,15 +25,18 @@ const PROJECT_ROOT = join(HERE, "..", "..");
 
 /**
  * Resolve the Chromium-based binary path on macOS.
- * Order: VIVALDI_PATH/BRAVE_PATH env → known locations (Vivaldi first - the
- * supported target platform on desktop and Android) → fallback error.
+ * Order: HELIUM_PATH/VIVALDI_PATH/BRAVE_PATH env → known locations (Helium
+ * first - the supported desktop target; Titanium shares its Chromium base)
+ * → fallback error.
  */
 function resolveBinary() {
-  const envPath = process.env.VIVALDI_PATH || process.env.BRAVE_PATH;
+  const envPath = process.env.HELIUM_PATH || process.env.VIVALDI_PATH || process.env.BRAVE_PATH;
   if (envPath && existsSync(envPath)) {
     return envPath;
   }
   const candidates = [
+    "/Applications/Helium.app/Contents/MacOS/Helium",
+    join(homedir(), "Applications", "Helium.app", "Contents", "MacOS", "Helium"),
     "/Applications/Vivaldi.app/Contents/MacOS/Vivaldi",
     join(homedir(), "Applications", "Vivaldi.app", "Contents", "MacOS", "Vivaldi"),
     "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
@@ -44,7 +47,7 @@ function resolveBinary() {
     if (existsSync(p)) return p;
   }
   throw new Error(
-    "No Chromium-based browser found. Set VIVALDI_PATH/BRAVE_PATH or install Vivaldi."
+    "No Chromium-based browser found. Set HELIUM_PATH or install Helium Browser."
   );
 }
 
@@ -55,57 +58,87 @@ function resolveBinary() {
  * overrides the probe; without any local driver we fall back to the manager.
  */
 /**
- * Vivaldi reports its own product version (8.x) while the embedded Chromium
- * is a different major - chromedriver refuses the handshake unless they
- * match. Extract the embedded Chromium version (the most frequent
- * `≥100.0.x.y` string in the framework binary) and wrap the launch: the shim
- * answers --product-version/--version with it and execs the real browser for
- * every other invocation. Non-Vivaldi binaries report honest Chromium
- * versions already and pass through untouched.
+ * Fork-branded browsers report their own product version (Vivaldi 8.x,
+ * Helium 0.18.x) while the embedded Chromium is a different major -
+ * chromedriver refuses the handshake unless they match. Wrap the launch: the
+ * shim answers --product-version/--version with the embedded Chromium version
+ * and execs the real browser for every other invocation. Chrome/Chromium/
+ * Brave report honest Chromium versions already and pass through untouched.
  */
 const versionCache = new Map();
-function wrapVivaldi(binary, dir) {
-  if (!/vivaldi/i.test(binary)) return binary;
+
+/**
+ * Helium's embedded Chromium version, read from the framework bundle's
+ * Versions/ directory (named after the Chromium version, e.g. 154.0.8037.92).
+ * Reading the directory beats probing `--version`: a running instance swallows
+ * every unknown flag and forwards it to the existing session, so the probe
+ * would hang or return nothing exactly when Helium is already open.
+ */
+function heliumChromiumVersion(binary) {
+  if (!/helium/i.test(binary)) return null;
+  const appRoot = binary.match(/^(.*)\/Helium\.app\//);
+  if (appRoot === null) return null;
+  const versions = join(
+    appRoot[1], "Helium.app", "Contents", "Frameworks",
+    "Helium Framework.framework", "Versions"
+  );
+  if (!existsSync(versions)) return null;
+  try {
+    return readdirSync(versions).find((d) => /^\d+\.\d+\.\d+\.\d+$/.test(d)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Vivaldi's embedded Chromium version: the most frequent `≥100.0.x.y` string
+ * in the framework binary. Non-Vivaldi binaries return null untouched.
+ */
+function vivaldiChromiumVersion(binary) {
+  if (!/vivaldi/i.test(binary)) return null;
+  const appRoot = binary.match(/^(.*)\/Vivaldi\.app\//);
+  const framework = appRoot
+    ? join(appRoot[1], "Vivaldi.app", "Contents", "Frameworks",
+        "Vivaldi Framework.framework", "Versions", "Current", "Vivaldi Framework")
+    : null;
+  if (framework === null || !existsSync(framework)) return null;
+  try {
+    const out = execFileSync(
+      "grep",
+      ["-aoE", "[0-9]+\\.0\\.[0-9]+\\.[0-9]+", framework],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 1 << 26 }
+    );
+    const tally = new Map();
+    for (const line of out.split("\n")) {
+      const major = Number(line.slice(0, line.indexOf(".")));
+      if (!(major >= 100)) continue;
+      tally.set(line, (tally.get(line) || 0) + 1);
+    }
+    let best = null;
+    let bestN = 0;
+    for (const [v, n] of tally) {
+      if (n > bestN) { best = v; bestN = n; }
+    }
+    return best;
+  } catch {
+    return null;
+  }
+}
+
+function wrapBrowser(binary, dir) {
+  if (!/(vivaldi|helium)/i.test(binary)) return binary;
   let version = versionCache.get(binary);
   if (version === undefined) {
-    version = null;
-    const appRoot = binary.match(/^(.*)\/Vivaldi\.app\//);
-    const framework = appRoot
-      ? join(appRoot[1], "Vivaldi.app", "Contents", "Frameworks",
-          "Vivaldi Framework.framework", "Versions", "Current", "Vivaldi Framework")
-      : null;
-    if (framework !== null && existsSync(framework)) {
-      try {
-        const out = execFileSync(
-          "grep",
-          ["-aoE", "[0-9]+\\.0\\.[0-9]+\\.[0-9]+", framework],
-          { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 1 << 26 }
-        );
-        const tally = new Map();
-        for (const line of out.split("\n")) {
-          const major = Number(line.slice(0, line.indexOf(".")));
-          if (!(major >= 100)) continue;
-          tally.set(line, (tally.get(line) || 0) + 1);
-        }
-        let best = null;
-        let bestN = 0;
-        for (const [v, n] of tally) {
-          if (n > bestN) { best = v; bestN = n; }
-        }
-        version = best;
-      } catch {
-        version = null;
-      }
-    }
+    version = heliumChromiumVersion(binary) ?? vivaldiChromiumVersion(binary);
     versionCache.set(binary, version);
   }
   if (version === null) return binary;
-  const wrapper = join(dir, "vivaldi-driver-shim");
+  const wrapper = join(dir, "browser-driver-shim");
   writeFileSync(
     wrapper,
     `#!/bin/sh\n` +
       `# chromedriver handshake shim: answer the embedded Chromium version,\n` +
-      `# exec Vivaldi for everything else.\n` +
+      `# exec the real browser for everything else.\n` +
       `for a in "$@"; do\n` +
       `  case "$a" in\n` +
       `    --product-version|--version) printf '%s\\n' '${version}'; exit 0;;\n` +
@@ -154,7 +187,7 @@ export class ChromiumDriver {
   }
 
   /**
-   * Launch a headless Vivaldi (Chromium 152) instance.
+   * Launch a headless Helium (Chromium 154) instance.
    * @param {object} [options]
    * @param {boolean} [options.headless=true] - Run headless.
    * @param {number} [options.port=0] - ChromeDriver port (0 = auto).
@@ -163,11 +196,11 @@ export class ChromiumDriver {
   static async launch(options = {}) {
     const { headless = true, port = 0 } = options;
 
-    // An isolated profile is mandatory: without it Vivaldi's singleton
+    // An isolated profile is mandatory: without it the browser's singleton
     // forwards the launch to an already-running session (whose DevTools port
     // never binds) and the driver waits forever.
     const profileDir = mkdtempSync(join(tmpdir(), "pf-driver-"));
-    const binary = wrapVivaldi(resolveBinary(), profileDir);
+    const binary = wrapBrowser(resolveBinary(), profileDir);
     const args = [
       `--user-data-dir=${profileDir}`,
       "--no-sandbox",

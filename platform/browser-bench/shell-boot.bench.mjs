@@ -1,7 +1,7 @@
 /**
  * Shell boot browser benchmark.
  *
- * Measures the time from navigation to HUD ready in a real Chromium 152 instance.
+ * Measures the time from navigation to HUD ready in a real Chromium 154 instance.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

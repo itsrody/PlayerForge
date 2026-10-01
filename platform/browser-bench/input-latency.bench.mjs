@@ -1,7 +1,7 @@
 /**
  * Input latency browser benchmark.
  *
- * Measures pointer event → gesture CustomEvent dispatch latency in Chromium 152.
+ * Measures pointer event → gesture CustomEvent dispatch latency in Chromium 154.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

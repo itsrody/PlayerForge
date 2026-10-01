@@ -300,7 +300,7 @@ export class Shell {
     }
     // Expose media state as CSS custom properties on the host so the shadow
     // DOM can style based on playing/paused/muted without crossing the realm
-    // boundary. The :playing/:paused/:muted pseudo-classes (Chromium 152+)
+    // boundary. The :playing/:paused/:muted pseudo-classes (Chromium 154+)
     // cannot reach into shadow roots; custom properties bridge the gap.
     if (host) {
       // Write the custom properties only when their value actually flips.

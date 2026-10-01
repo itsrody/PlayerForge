@@ -1,7 +1,7 @@
 /**
  * CSS adoption integration tests.
  *
- * Verifies the constructable stylesheet injection pipeline in Chromium 152.
+ * Verifies the constructable stylesheet injection pipeline in Chromium 154.
  */
 import test from "node:test";
 import assert from "node:assert/strict";

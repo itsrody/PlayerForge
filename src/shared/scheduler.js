@@ -36,7 +36,7 @@ const HAS_YIELD =
  */
 export function postTask(fn, { priority = "user-visible", delay: ms = 0, signal } = {}) {
   if (!HAS_POST_TASK) {
-    // setTimeout fallback - dead code on the Chromium 152 floor, kept for the
+    // setTimeout fallback - dead code on the Chromium 154 floor, kept for the
     // jsdom test harness.
     const id = setTimeout(fn, ms);
     return { abort: () => clearTimeout(id) };

@@ -1,7 +1,7 @@
 /**
  * CSS layout browser benchmark.
  *
- * Measures panel toggle and style recalculation cost in Chromium 152.
+ * Measures panel toggle and style recalculation cost in Chromium 154.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
