@@ -4,7 +4,7 @@ import { formatTime } from "../../shared/time.js";
 import { fs, subscribeFullscreen } from "../../shared/shadow.js";
 import { GESTURE_EVENTS } from "../../kernel/contract.js";
 import { gestureHaptic } from "../chrome/haptics.js";
-import { EASE_SNAPPY_CURVE, EASE_SNAPPY_MS } from "../../shared/timing.js";
+import { EASE_SNAPPY_CURVE, EASE_SNAPPY_MS, REDUCED_MOTION } from "../../shared/timing.js";
 
 export { GESTURE_EVENTS };
 
@@ -309,6 +309,13 @@ export function easeTransformTo(video, transform) {
   const prior = pendingEase.get(video);
   if (prior) {
     prior();
+  }
+  // Reduced motion: commit the target with no snap - identical end state,
+  // zero animation (the CSS side already collapses its eases to 0s).
+  if (REDUCED_MOTION?.matches) {
+    video.style.transition = "";
+    video.style.transform = transform;
+    return;
   }
   if (transform) {
     video.style.willChange = "transform";

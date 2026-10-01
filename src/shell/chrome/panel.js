@@ -237,7 +237,8 @@ function createStepper({
       input.disabled = disabled;
       upButton.disabled = disabled;
       downButton.disabled = disabled;
-      root.classList.toggle("pf-stepper-disabled", disabled);
+      // Visual/pointer disabled state derives from :has(:disabled) in CSS -
+      // no class to mirror here.
     }
   };
 }
@@ -386,7 +387,7 @@ export class SettingsPanel {
         return;
       }
       this.close();
-    }, { signal, capture: true });
+    }, { signal, capture: true, passive: true });
     // Focus containment: the backdrop already blocks clicks into the page,
     // but Tab/Shift+Tab would still walk focus out of the "modal" into the
     // controls behind it. Focus landing outside the host pulls back to the
@@ -769,11 +770,13 @@ export class SettingsPanel {
     // boundary into the SDK. The backdrop covers the rest of the shell, but
     // clicks that land ON the panel itself would otherwise bubble up through
     // the composed path to page-level handlers. Bubble phase so panel controls
-    // (tabs, buttons) receive events first.
+    // (tabs, buttons) receive events first. Passive: the handlers only
+    // stopPropagation - they never cancel a default, so the renderer may skip
+    // the touch-action/scrollability check entirely.
     for (const type of ["pointerdown", "pointerup", "click", "touchstart", "touchend"]) {
       this.#root.addEventListener(type, (event) => {
         event.stopPropagation();
-      }, { signal });
+      }, { signal, passive: true });
     }
 
     // Any fullscreen transition dismisses the panel; the shared transition

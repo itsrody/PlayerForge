@@ -29,6 +29,10 @@ export class ToastManager {
   #actions;
   /** Cancel handle for the pending auto-hide, null when none is scheduled. */
   #cancelAutoHide = null;
+  /** Whether the pointer/focus is over the toast (auto-hide held for WCAG 2.2.1). */
+  #paused = false;
+  /** Duration to schedule with when a held toast resumes (full duration, like a fresh show). */
+  #pausedDuration = 0;
   /** Stable auto-hide callback, cached so show() never re-creates a closure. */
   #autoHide = () => {
     this.#cancelAutoHide = null;
@@ -62,16 +66,26 @@ export class ToastManager {
         toast.appendChild(icon);
         toast.appendChild(text);
         toast.appendChild(actions);
-        // Inline, not stylesheet: ".pf-hud-layer > *" re-enables pointer events
-        // on every HUD child and would let the hidden pill swallow clicks across
-        // the player's top strip. show() flips this to "auto" only when action
-        // buttons ride along; the hide path resets to "" which lands back here.
-        toast.style.pointerEvents = "none";
+        // Live region: every show() rewrites text/instant content, and the
+        // announcement rides the accessibility tree rather than focus.
+        toast.setAttribute("role", "status");
+        toast.setAttribute("aria-atomic", "true");
+        // Hold the auto-hide while the pointer rests on the pill or an action
+        // button has focus, so a keyboard/mouse user can actually reach the
+        // buttons before the toast vanishes (WCAG 2.2.1). Pointer events only
+        // reach the pill when the stylesheet makes it interactive, so purely
+        // informational toasts keep their fixed lifetime.
+        toast.addEventListener("pointerenter", () => this.#pauseAutoHide());
+        toast.addEventListener("pointerleave", () => this.#resumeAutoHide());
+        toast.addEventListener("focusin", () => this.#pauseAutoHide());
+        toast.addEventListener("focusout", () => this.#resumeAutoHide());
+        // Pointer-events follow the stylesheet now (hidden/informational = none,
+        // visible + actions = auto) - no inline writes that could go stale
+        // across pool reuse.
         hudLayer.appendChild(toast);
         return toast;
       },
       reset: (toast) => {
-        toast.style.pointerEvents = "none";
         toast.style.color = "";
         return toast;
       }
@@ -102,8 +116,7 @@ export class ToastManager {
       (color || "") === this.#lastColor
     ) {
       this.#toast.classList.add("pf-visible");
-      this.#cancelAutoHide?.();
-      this.#cancelAutoHide = duration > 0 ? delay(this.#autoHide, duration) : null;
+      this.#scheduleAutoHide(duration);
       return;
     }
     this.#isVisible = true;
@@ -140,16 +153,39 @@ export class ToastManager {
         });
       }
       this.#actions.hidden = false;
-      this.#toast.style.pointerEvents = "auto";
     } else {
       this.#actions.textContent = "";
       this.#actions.hidden = true;
-      this.#toast.style.pointerEvents = "";
     }
     this.#toast.style.color = color || "";
     this.#toast.classList.add("pf-visible");
+    this.#scheduleAutoHide(duration);
+  }
+
+  /** (Re)arm the auto-hide after a show; held while #paused, deferred to resume. */
+  #scheduleAutoHide(duration) {
+    this.#pausedDuration = duration;
     this.#cancelAutoHide?.();
-    this.#cancelAutoHide = duration > 0 ? delay(this.#autoHide, duration) : null;
+    this.#cancelAutoHide = duration > 0 && !this.#paused ? delay(this.#autoHide, duration) : null;
+  }
+
+  #pauseAutoHide() {
+    if (this.#paused) {
+      return;
+    }
+    this.#paused = true;
+    this.#cancelAutoHide?.();
+    this.#cancelAutoHide = null;
+  }
+
+  #resumeAutoHide() {
+    if (!this.#paused) {
+      return;
+    }
+    this.#paused = false;
+    if (this.#isVisible && this.#pausedDuration > 0) {
+      this.#cancelAutoHide = delay(this.#autoHide, this.#pausedDuration);
+    }
   }
 
   hide(group) {
@@ -162,8 +198,7 @@ export class ToastManager {
   }
 
   destroy() {
-    this.#cancelAutoHide?.();
-    this.#cancelAutoHide = null;
+    this.#pauseAutoHide();
     this.#pool.destroy();
   }
 }

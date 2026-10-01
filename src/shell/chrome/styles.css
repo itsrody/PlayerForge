@@ -175,6 +175,18 @@
       > .pf-cue-layer {
         pointer-events: none;
       }
+
+      /* The toast is the one HUD child whose pointer-events flip: dead while
+         hidden or purely informational (the pill must not swallow clicks),
+         live only when it is visible AND carries action buttons. Beats the
+         `> *` auto rule on specificity, so JS never writes inline styles. */
+      > pf-toast {
+        pointer-events: none;
+      }
+
+      > pf-toast.pf-visible:has(.pf-toast-actions:not([hidden])) {
+        pointer-events: auto;
+      }
     }
 
     /* - Media state styling - */
@@ -225,7 +237,12 @@
       --pf-cue-x: -50%;
 
       position: absolute;
-      inset: 0;
+      /* Excludes notches and gesture bars: percentage-positioned cues
+         (.pf-cue top: 85%, line anchors) resolve against this padding box,
+         so captions never sit behind the Android 3-button/gesture bar or a
+         landscape camera cutout. env() falls back to 0 when unset. */
+      inset: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+        env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
       overflow: hidden;
       pointer-events: none;
       z-index: var(--pf-z-hud);
@@ -867,7 +884,7 @@
       border-radius: var(--pf-radius-md);
       background: var(--pf-surface-soft);
       overflow: hidden;
-      transition: border-color 0.12s ease;
+      transition: border-color var(--pf-ease-duration) ease;
 
       &:focus-within {
         border-color: var(--pf-accent);
@@ -933,7 +950,10 @@
       font-weight: 600;
     }
 
-    .pf-stepper-disabled {
+    /* Disabled state derives from the actual :disabled controls - the JS class
+       this replaces only ever toggled in lockstep with them, so no handler
+       has to mirror state onto the root element. */
+    .pf-stepper:has(:disabled) {
       opacity: 0.45;
       pointer-events: none;
     }
@@ -1033,6 +1053,9 @@
       overflow: clip auto;
       scrollbar-width: thin;
       scrollbar-color: var(--pf-text-mid) transparent;
+      /* Wheel/trackpad momentum at the ends must die inside the list, not
+         rubber-band the panel (or the page behind it) once it's exhausted. */
+      overscroll-behavior: contain;
     }
 
     .pf-history-card {
@@ -1101,10 +1124,14 @@
       .pf-options-btn { padding: 7px 14px; font-size: var(--pf-font-lg); }
       .pf-options-row { gap: var(--pf-space-md); }
       .pf-panel-body { padding: 10px 12px 12px; }
-      .pf-panel-close { padding: 6px 10px; font-size: 18px; }
-      .pf-panel-tab { padding: 9px 10px; font-size: var(--pf-font-sm); }
+      /* ~44px thumb floor: the base rules size for dense desktop panels. */
+      .pf-panel-close { padding: 12px 14px; font-size: 18px; }
+      .pf-panel-tab { padding: 13px 12px; font-size: var(--pf-font-sm); }
       .pf-btn { padding: 11px 12px; font-size: var(--pf-font-lg); }
-      .pf-panel .pf-stepper { height: 32px; }
+      .pf-panel .pf-stepper { height: 40px; }
+      .pf-panel .pf-stepper .pf-stepper-arrows { width: 36px; }
+      .pf-toast-actions button { min-height: 44px; padding: 10px 14px; }
+      .pf-toast-actions button:has(svg) { width: 44px; height: 44px; padding: 0; }
       .pf-panel input[type="color"] { height: 28px; }
       .pf-panel input[type="checkbox"] { width: 40px; height: 24px; }
       .pf-panel input[type="checkbox"]::before { width: 18px; height: 18px; }

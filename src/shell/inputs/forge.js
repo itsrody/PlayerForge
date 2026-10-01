@@ -352,6 +352,9 @@ export class InputForge {
     subscribeFullscreen(() => {
       this.setTrackpadPinchEnabled(fs);
     }, this.#scope.signal);
+    // Reconcile now, not just on the next change: a shell that spawns while
+    // already fullscreen must get the wheel listener from frame one.
+    this.setTrackpadPinchEnabled(fs);
 
     activeForges.add(this);
   }
@@ -1157,6 +1160,18 @@ export class InputForge {
         pinchDetail.method = "trackpad";
         pinchDetail.direction = event.deltaY < 0 ? "out" : "in";
         this.#dispatch(GESTURE_EVENTS.pinch, pinchDetail);
+      }
+      return;
+    }
+    // Plain wheel in fullscreen: the document behind the fullscreen surface
+    // has nothing to show, so don't let the gesture chain into it (edge
+    // rubber-banding / pull-to-refresh). Propagation still flows so listeners
+    // inside the shell (panel scrollers, SDK hover handlers) behave normally -
+    // wheel over the panel itself is left scrollable.
+    if (fs && !event.ctrlKey) {
+      const path = event.composedPath?.() || [];
+      if (!path.some((node) => node.classList?.contains("pf-panel"))) {
+        event.preventDefault();
       }
     }
   }

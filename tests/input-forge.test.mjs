@@ -239,9 +239,18 @@ test("trackpad ctrl+wheel pinches in fullscreen with a cooldown window", () => {
   assert.equal(pinches[0].detail.direction, "out");
   assert.equal(pinches[0].detail.method, "trackpad");
 
-  const passive = new dom.window.MouseEvent("wheel", { bubbles: true, cancelable: true });
-  zone.dispatchEvent(passive);
-  assert.equal(passive.defaultPrevented, false, "plain wheel untouched");
+  // Fullscreen plain wheel: the chain into the (invisible) document is
+  // stopped - except over the panel, whose scroller keeps its wheel.
+  const plain = wheelEvent(dom.window, { deltaY: -100, ctrlKey: false });
+  zone.dispatchEvent(plain);
+  assert.equal(plain.defaultPrevented, true, "fullscreen plain wheel stops document scroll chaining");
+
+  const panel = dom.window.document.createElement("div");
+  panel.className = "pf-panel";
+  zone.appendChild(panel);
+  const overPanel = wheelEvent(dom.window, { deltaY: -100, ctrlKey: false });
+  panel.dispatchEvent(overPanel);
+  assert.equal(overPanel.defaultPrevented, false, "wheel over the panel still scrolls");
   controller.destroy();
 });
 

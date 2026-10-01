@@ -19,6 +19,15 @@ import { Scope } from "../shared/scope.js";
 import { yield_ } from "../shared/scheduler.js";
 
 /**
+ * Surfaces that legitimately own the native context menu inside the shell:
+ * form fields (paste/copy/spellcheck) and contenteditable regions. Tested
+ * against the deep (shadow-composed) event target, so panel inputs inside
+ * the shadow root resolve via their own ancestor chain.
+ */
+const EDITABLE_SELECTOR =
+  "input, textarea, [contenteditable]:not([contenteditable='false'])";
+
+/**
  * Per-video facade: wraps the media element with a stable API, injects the
  * HUD, hosts the input layer, playback tracking, subtitles, and settings
  * panel, tracks fullscreen state, and wires MediaSession.
@@ -192,6 +201,14 @@ export class Shell {
 
   #suppressContextMenu() {
     this.#dom.listen(this.container, "contextmenu", (event) => {
+      // Editable surfaces (panel inputs, select popups, contenteditable)
+      // keep the native context menu - paste/copy/spellcheck is part of
+      // native-feel field editing. Everything else stays suppressed so the
+      // page's menu never covers the shell.
+      const deep = event.composedPath?.()[0];
+      if (deep && typeof deep.closest === "function" && deep.closest(EDITABLE_SELECTOR)) {
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
     }, { capture: true });
@@ -418,10 +435,15 @@ export class Shell {
     const invalidate = () => {
       this.#refBoxValid = false;
     };
+    // Fullscreen flips re-read screen.* dims; the container RO covers every
+    // inline-mode layout change (zoom, URL bar, panel). window.resize is only
+    // a fallback for hosts without ResizeObserver - kept out of the default
+    // path so the page never pays a per-shell resize listener.
     subscribeFullscreen(invalidate, this.#scope.signal);
-    this.#dom.listen(window, "resize", invalidate, { passive: true });
     if (typeof ResizeObserver === "function") {
       this.#dom.observeResize(this.container, invalidate);
+    } else {
+      this.#dom.listen(window, "resize", invalidate, { passive: true });
     }
   }
 
