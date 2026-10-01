@@ -300,8 +300,10 @@ export class Shell {
     }
     // Expose media state as CSS custom properties on the host so the shadow
     // DOM can style based on playing/paused/muted without crossing the realm
-    // boundary. The :playing/:paused/:muted pseudo-classes (Chromium 154+)
-    // cannot reach into shadow roots; custom properties bridge the gap.
+    // boundary. The :playing/:paused/:muted pseudo-classes (Chromium 156+,
+    // absent on the 154 floor - verified via selector probes) cannot select
+    // the page's video from inside our shadow root either way; custom
+    // properties bridge the gap.
     if (host) {
       // Write the custom properties only when their value actually flips.
       // volumechange fires continuously while volume/panner is dragged, and a

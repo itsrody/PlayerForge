@@ -1016,12 +1016,11 @@
       flex-direction: column;
       gap: 4px;
       max-height: 168px;
-      overflow-y: auto;
       /* One-axis scroll container: horizontal overflow is clipped, never
-         turned into a second scroller (Chromium 125+ supports clip per axis;
-         the scroll+clip two-value form stays out because it is flagged behind
-         a Chrome 153 beta flag). */
-      overflow-x: clip;
+         turned into a second scroller. The two-value scroll+clip form shipped
+         in Chromium 154 (probe-verified: `overflow: clip auto` maps x=clip,
+         y=auto), so one shorthand covers both axes. */
+      overflow: clip auto;
       scrollbar-width: thin;
       scrollbar-color: var(--pf-text-mid) transparent;
       content-visibility: auto;
