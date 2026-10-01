@@ -35,6 +35,10 @@ export class SubtitlesSection {
   #cueLayer = null;
   /** Sync offset currently in effect; applied by ForgeTrack at load time. */
   #syncOffset = 0;
+  /** Stored V/H placement overrides (0-100) or null until first customized;
+   *  applied to the track on load and on every stepper change. */
+  #cueLine = null;
+  #cuePosition = null;
   #fileInput = null;
   #hintEl = null;
   #loadButton = null;
@@ -50,6 +54,10 @@ export class SubtitlesSection {
   constructor(shell) {
     this.#shell = shell;
     this.#syncOffset = Number(getConfigValue(SETTING_KEYS.syncOffset, 0)) || 0;
+    const storedLine = Number(getConfigValue(SETTING_KEYS.line, null));
+    const storedPos = Number(getConfigValue(SETTING_KEYS.horizontal, null));
+    this.#cueLine = Number.isFinite(storedLine) ? storedLine : null;
+    this.#cuePosition = Number.isFinite(storedPos) ? storedPos : null;
     this.#cueLayer = shell.shellDom?.cueLayer || null;
     this.#fileInput = this.#createFileInput(shell);
     this.#buildPanelUi(shell);
@@ -251,6 +259,8 @@ export class SubtitlesSection {
       format: fmtPercent,
       onChange: (v) => {
         setConfigValue(SETTING_KEYS.line, v);
+        this.#cueLine = v;
+        this.#applyPlacement();
       }
     });
     const horizontalStepper = panel.addControl(styleGrid, {
@@ -263,6 +273,8 @@ export class SubtitlesSection {
       format: fmtPercent,
       onChange: (v) => {
         setConfigValue(SETTING_KEYS.horizontal, v);
+        this.#cuePosition = v;
+        this.#applyPlacement();
       }
     });
 
@@ -292,6 +304,12 @@ export class SubtitlesSection {
 
   #setCueVar(prop, value) {
     this.#forgeTrack?.setVar(prop, value);
+  }
+
+  /** Push the stored V/H overrides onto the live track (no-op without one -
+   *  track creation applies them at load time instead). */
+  #applyPlacement() {
+    this.#forgeTrack?.setPlacement({ line: this.#cueLine, position: this.#cuePosition });
   }
 
   #toastFlash(icon, text, group) {
@@ -401,6 +419,7 @@ export class SubtitlesSection {
     }
     if (!this.#forgeTrack) {
       this.#forgeTrack = new ForgeTrack(this.#shell.video, this.#cueLayer);
+      this.#applyPlacement();
     }
     this.#trackMeta = { name };
     this.#forgeTrack.load(cues, this.#syncOffset);

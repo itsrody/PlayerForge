@@ -19,7 +19,7 @@
  * documents without a usable player never boot a kernel.
  */
 import { logger } from "../shared/logger.js";
-import { watchMediaEvents, meetsMinSize, forEachVideoInMutations } from "./sdk.js";
+import { watchMediaEvents, meetsMinSize, createSizeGate, forEachVideoInMutations } from "./sdk.js";
 import { onDomMutations } from "../shared/dom-watch.js";
 
 export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
@@ -27,12 +27,17 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
   let escalated = false;
   let offMutations = null;
   let stopEvents = null;
+  // Re-checks candidates that failed the size gate when their box grows; the
+  // RO callback lands off the mutation batch, and a candidate that only
+  // reaches player size later would otherwise never fire onCandidate.
+  const sizeGate = createSizeGate({ minWidth, minHeight });
 
   const detach = () => {
     stopEvents?.();
     stopEvents = null;
     offMutations?.();
     offMutations = null;
+    sizeGate.stop();
   };
 
   const finish = () => {
@@ -67,8 +72,14 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
       return;
     }
     // A real <video> exists but isn't player-sized yet - commit to the
-    // observer so SDK-inserted siblings that may qualify are caught.
+    // observer so SDK-inserted siblings that may qualify are caught, and
+    // keep this one under a size gate so its own late growth also boots us.
     escalate();
+    sizeGate.watch(video, () => {
+      if (!done) {
+        finish();
+      }
+    });
   };
 
   stopEvents = watchMediaEvents(consider);

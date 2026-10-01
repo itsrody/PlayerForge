@@ -5,7 +5,7 @@ import { postTask } from "../shared/scheduler.js";
 import { Scope } from "../shared/scope.js";
 import { ShellSlot } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
-import { findSdkForVideo, meetsMinSize, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
+import { findSdkForVideo, meetsMinSize, createSizeGate, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
 
 /**
@@ -34,6 +34,9 @@ export class Kernel {
   #stopDiscoveryTap = null;
   /** True once the full-document discovery tap has been downgraded. */
   #discoveryDowngraded = false;
+  /** Lazily built growth gate for videos that failed meetsMinSize (see
+   *  #adoptVideo); stopped with the kernel scope. */
+  #sizeGate = null;
   /** Kernel lifecycle scope: removal observers disconnect via onDispose,
    *  grace timers cancel via the signal. */
   #scope = new Scope();
@@ -164,6 +167,18 @@ export class Kernel {
       return;
     }
     if (!meetsMinSize(video)) {
+      // Not player-sized yet: a one-shot rect here would strand the video
+      // forever unless an unrelated media event re-ran adoption. The size
+      // gate re-enters this method the moment the box qualifies (RO
+      // callbacks run off the mutation batch, with layout already fresh).
+      if (!this.#sizeGate && !this.#scope.disposed) {
+        this.#sizeGate = createSizeGate();
+        this.#scope.onDispose(() => {
+          this.#sizeGate?.stop();
+          this.#sizeGate = null;
+        });
+      }
+      this.#sizeGate?.watch(video, () => this.#adoptVideo(video));
       return;
     }
     const container = sdk.container;

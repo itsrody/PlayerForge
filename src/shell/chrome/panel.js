@@ -188,15 +188,29 @@ function createStepper({
     } else if (event.key === "Enter") {
       event.preventDefault();
       commit(input.value);
-      input.blur();
+      // Commit but keep focus: Tab continues through the panel instead of
+      // dropping to <body> and restarting from the document.
     } else if (event.key === "Escape") {
       event.preventDefault();
       showCommitted();
-      input.blur();
+      if (input.dataset.pfEscArmed) {
+        // Second Esc: the edit is already reverted - let this one reach the
+        // panel's document-level dismiss handler (and the CloseWatcher's
+        // close event, whose watcher consumed its free pass above).
+        delete input.dataset.pfEscArmed;
+      } else {
+        // First Esc: revert only. Swallow it here so it can't bubble to the
+        // panel's document keydown listener and close the whole panel.
+        input.dataset.pfEscArmed = "1";
+        event.stopPropagation();
+      }
     }
   });
 
-  input.addEventListener("blur", () => commit(input.value));
+  input.addEventListener("blur", () => {
+    delete input.dataset.pfEscArmed;
+    commit(input.value);
+  });
 
   root.appendChild(input);
   root.appendChild(arrows);
@@ -373,10 +387,33 @@ export class SettingsPanel {
       }
       this.close();
     }, { signal, capture: true });
+    // Focus containment: the backdrop already blocks clicks into the page,
+    // but Tab/Shift+Tab would still walk focus out of the "modal" into the
+    // controls behind it. Focus landing outside the host pulls back to the
+    // active tab - the native showModal() confinement, without moving the
+    // panel into the top layer (which would fight the z-index doctrine and
+    // the view-transition open animation).
+    document.addEventListener("focusin", (event) => {
+      const target = event.target;
+      if (target !== this.#shellHost && !this.#shellHost.contains(target)) {
+        const activeTab = this.#root.querySelector(".pf-panel-tab-active") || this.#closeButton;
+        activeTab?.focus();
+      }
+    }, { signal });
     if (typeof CloseWatcher === "function") {
       try {
         this.#closeWatcher = new CloseWatcher();
-        this.#closeWatcher.addEventListener("close", () => this.close(), { signal });
+        this.#closeWatcher.addEventListener("close", () => {
+          // The watcher fires on the Escape KEYUP, after a focused field's
+          // keydown already consumed that press to revert its edit (armed
+          // via pfEscArmed). That first Esc must not dismiss the panel -
+          // the next one will, through either path.
+          const active = deepestActiveElement(this.#shellHost);
+          if (active?.dataset?.pfEscArmed) {
+            return;
+          }
+          this.close();
+        }, { signal });
       } catch {
         // Constructor can throw where the API is gated; our keydown path above
         // still dismisses, so the feature degrades instead of failing.
@@ -435,6 +472,9 @@ export class SettingsPanel {
     tab.className = "pf-panel-tab";
     tab.id = `pf-panel-tab-${this.#sectionCounter}`;
     tab.dataset.title = title;
+    // Roving tabindex: the tablist is one Tab stop (#activateSection moves
+    // tabindex 0 to the selected tab); arrows already do the rest.
+    tab.tabIndex = -1;
     tab.setAttribute("role", "tab");
     tab.setAttribute("aria-selected", "false");
     tab.setAttribute("aria-controls", sectionId);
@@ -664,7 +704,7 @@ export class SettingsPanel {
     const root = document.createElement("div");
     root.className = "pf-panel";
     root.setAttribute("role", "dialog");
-    root.setAttribute("aria-modal", "false");
+    root.setAttribute("aria-modal", "true");
     root.setAttribute("aria-label", "PlayerForge controls");
 
     // Compact mode: apply class based on setting or auto-detect mobile viewport.
@@ -802,6 +842,7 @@ export class SettingsPanel {
         prev.hidden = true;
         prevTab.classList.remove("pf-panel-tab-active");
         prevTab.setAttribute("aria-selected", "false");
+        prevTab.tabIndex = -1;
       }
     }
     targetSection.hidden = false;
@@ -809,6 +850,7 @@ export class SettingsPanel {
     if (targetTab) {
       targetTab.classList.add("pf-panel-tab-active");
       targetTab.setAttribute("aria-selected", "true");
+      targetTab.tabIndex = 0;
     }
     this.#activeSection = targetSection;
   }

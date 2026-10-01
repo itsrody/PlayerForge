@@ -201,6 +201,13 @@ const stateFor = (() => {
         scrubToastText: null,
         scrubToastSecDuration: NaN,
         scrubToastSecCurrent: NaN,
+        // rVFC-backed readout: mediaTime of the last frame actually presented
+        // this scrub (decoder currentTime can lead/lag the display - same
+        // rationale as resume.js's pause flush), the video the loop was armed
+        // on (SPA swap guard), and the pending callback handle.
+        scrubPresentedTime: null,
+        scrubRvfcVideo: null,
+        scrubRvfcId: 0,
         // Pooled payload for the 100ms scrub tick: the toast manager
         // destructures it synchronously (it never retains the object), so the
         // same 3-field object is refilled in place instead of re-allocated
@@ -220,6 +227,16 @@ const stateFor = (() => {
     return state;
   };
 })();
+
+/** Cancel the scrub's frame loop if one is armed; safe to call any time. */
+function cancelScrubFrameLoop(state) {
+  if (state.scrubRvfcVideo) {
+    state.scrubRvfcVideo.cancelVideoFrameCallback?.(state.scrubRvfcId);
+    state.scrubRvfcVideo = null;
+    state.scrubRvfcId = 0;
+  }
+  state.scrubPresentedTime = null;
+}
 
 function performSkip(shell, state, direction) {
   const now = performance.now();
@@ -509,6 +526,22 @@ export function attachInputActions(shell, host, signal) {
       state.scrubSensitivity = SCRUB_SENSITIVITY;
       state.scrubDirectionMomentum = 0;
       gestureHaptic("scrub");
+      // Frame-accurate readout for this scrub: a short-lived rVFC loop tracks
+      // the frame the user actually SAW (post-seek frames fire even while
+      // paused), falling back to currentTime until the first one lands.
+      cancelScrubFrameLoop(state);
+      const scrubVideo = shell.video;
+      if (typeof scrubVideo.requestVideoFrameCallback === "function") {
+        state.scrubRvfcVideo = scrubVideo;
+        const onFrame = (_now, metadata) => {
+          if (!state.scrubbing || state.scrubRvfcVideo !== scrubVideo) {
+            return;
+          }
+          state.scrubPresentedTime = metadata.mediaTime;
+          state.scrubRvfcId = scrubVideo.requestVideoFrameCallback(onFrame);
+        };
+        state.scrubRvfcId = scrubVideo.requestVideoFrameCallback(onFrame);
+      }
     }
 
     if (Math.abs(detail.dx) < SCRUB_DEAD_ZONE_PX) {
@@ -536,11 +569,15 @@ export function attachInputActions(shell, host, signal) {
     state.lastScrubToastAt = now;
     // Cache the formatted time string: rebuild only when the visible second
     // changes, not every 100ms tick — avoids 3 string allocations per display
-    // tick during scrub.
+    // tick during scrub. Value prefers the presented-frame mediaTime (screen
+    // truth); decoder currentTime only until the first post-seek frame lands
+    // or when an SPA swap replaced the element mid-scrub.
+    const shownTime = (state.scrubRvfcVideo === shell.video ? state.scrubPresentedTime : null)
+      ?? shell.video.currentTime;
     const secDuration = Math.floor(state.scrubDuration);
-    const secCurrent = Math.floor(shell.video.currentTime);
+    const secCurrent = Math.floor(shownTime);
     if (secDuration !== state.scrubToastSecDuration || secCurrent !== state.scrubToastSecCurrent) {
-      state.scrubToastText = `${formatTime(state.scrubDuration)} / ${formatTime(shell.video.currentTime)}`;
+      state.scrubToastText = `${formatTime(state.scrubDuration)} / ${formatTime(shownTime)}`;
       state.scrubToastSecDuration = secDuration;
       state.scrubToastSecCurrent = secCurrent;
     }
@@ -556,6 +593,7 @@ export function attachInputActions(shell, host, signal) {
       return;
     }
     state.scrubbing = false;
+    cancelScrubFrameLoop(state);
     state.scrubDirectionMomentum = 0;
     state.scrubDuration = 0;
     state.scrubSlowGain = 0;
@@ -566,6 +604,11 @@ export function attachInputActions(shell, host, signal) {
     state.scrubToastSecCurrent = NaN;
     shell.hideToast("scrub");
   }, { signal });
+
+  // rVFC ids aren't AbortSignal-cancellable: drop any live scrub frame loop
+  // with the same scope signal these listeners die on (shell teardown can
+  // land mid-scrub, and the re-arming callback would otherwise outlive us).
+  signal.addEventListener("abort", () => cancelScrubFrameLoop(stateFor(shell)), { once: true });
 
   host.addEventListener(GESTURE_EVENTS.swipeStart, ({ detail }) => {
     if (detail.direction === "down") {

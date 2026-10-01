@@ -266,6 +266,55 @@ export function meetsMinSize(video, minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_
 }
 
 /**
+ * Growth-aware companion to meetsMinSize: watches candidates that failed the
+ * gate and calls back the first time their box actually qualifies. The
+ * ResizeObserver's initial + resize callbacks fire off the mutation batch
+ * (layout already computed, no forced flush) and keep re-checking a video
+ * that was inserted small and only later sized by CSS - the case a one-shot
+ * rect read at insert time can never adopt. jsdom has no ResizeObserver, so
+ * the fallback reuses today's synchronous gate.
+ *
+ * One gate instance per watcher (probe/kernel): `watch` dedupes repeated
+ * signals for the same element, `stop` tears everything down with the owner.
+ */
+export function createSizeGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_VIDEO_HEIGHT } = {}) {
+  if (typeof ResizeObserver !== "function") {
+    return {
+      watch(video, onQualify) {
+        if (meetsMinSize(video, minWidth, minHeight)) {
+          onQualify();
+        }
+      },
+      stop() {}
+    };
+  }
+  const waiting = new Map();
+  const observer = new ResizeObserver((entries, ro) => {
+    for (const { target } of entries) {
+      if (meetsMinSize(target, minWidth, minHeight)) {
+        ro.unobserve(target);
+        const onQualify = waiting.get(target);
+        waiting.delete(target);
+        onQualify?.();
+      }
+    }
+  });
+  return {
+    watch(video, onQualify) {
+      if (waiting.has(video)) {
+        return;
+      }
+      waiting.set(video, onQualify);
+      observer.observe(video);
+    },
+    stop() {
+      observer.disconnect();
+      waiting.clear();
+    }
+  };
+}
+
+/**
  * Capture-phase media-event tap with NO mutation observer - the cheap signal
  * used by the two-phase boot probe before it commits to a full-document
  * observer. Media events travel the composed path to document, so even

@@ -41,6 +41,11 @@ export class ForgeTrack {
   #baseCues = null;
   /** Offset already applied to the native cues (setOffset no-ops on a repeat). */
   #offset = 0;
+  /** Global placement overrides from the panel's V/H steppers (0-100), or
+   *  null to keep each cue's own line/position (default until the user moves
+   *  a stepper). Applied per render, so a change re-lays active slots. */
+  #lineOverride = null;
+  #positionOverride = null;
   /** Records the bound cuechange so destroy can unregister it. */
   #onCueChange = null;
   /** Disposal flag; cuechange itself has no signal form (spec-forced). */
@@ -176,8 +181,8 @@ export class ForgeTrack {
         continue;
       }
       const cue = active[i];
-      const line = cue.line;
-      const position = cue.position;
+      const line = this.#lineOverride ?? cue.line;
+      const position = this.#positionOverride ?? cue.position;
       const align = cue.align || "center";
       const prev = this.#lastRender[i];
       // Numeric dirty checks: skip string construction when values match
@@ -240,6 +245,20 @@ export class ForgeTrack {
 
   setVar(prop, value) {
     this.#cueLayerStyle?.setProperty(prop, value);
+  }
+
+  /**
+   * Global caption placement (panel V/H steppers): 0-100 percentages, or null
+   * to fall back to each cue's own line/position. Re-renders active slots so
+   * the move lands immediately instead of at the next cue change.
+   */
+  setPlacement({ line = null, position = null } = {}) {
+    if (this.#scope.disposed || (line === this.#lineOverride && position === this.#positionOverride)) {
+      return;
+    }
+    this.#lineOverride = line;
+    this.#positionOverride = position;
+    this.#render();
   }
 
   destroy() {

@@ -332,6 +332,14 @@ export class InputForge {
       if (this.#pointerOwned || this.#awaitClick) {
         event.stopImmediatePropagation();
       }
+      // A host can deliver touchcancel without its pointercancel pair; the
+      // swallow alone would leave #pointerOwned/#awaitClick latched and the
+      // compat stream eaten until some later pointerup. A cancelled touch
+      // reclaims every tracked pointer - the sweep is idempotent when the
+      // paired pointercancel already ran (and vice versa).
+      for (const id of [...this.#pointers.keys()]) {
+        this.#cancelTrackedPointer(id);
+      }
     }, options);
     window.addEventListener("pointerup", (event) => this.#handlePointerUp(event), options);
     window.addEventListener("pointercancel", (event) => this.#handlePointerCancel(event), options);
@@ -975,11 +983,16 @@ export class InputForge {
   }
 
   #handlePointerCancel(event) {
-    const tracked = this.#pointers.has(event.pointerId);
-    if (tracked && this.#pointerOwned) {
+    if (this.#pointers.has(event.pointerId) && this.#pointerOwned) {
       event.stopImmediatePropagation();
     }
-    this.#pointers.delete(event.pointerId);
+    this.#cancelTrackedPointer(event.pointerId);
+  }
+
+  /** Reclaim one tracked pointer: shared by pointercancel and the touchcancel
+   *  sweep below, so both paths run identical idempotent teardown. */
+  #cancelTrackedPointer(pointerId) {
+    this.#pointers.delete(pointerId);
     if (this.#pointers.size === 0) {
       // A cancelled press ends the stream; no click is coming, so no await.
       this.#pointerOwned = false;
@@ -993,7 +1006,7 @@ export class InputForge {
     // gesture, hit-test fighting, lost capture) - the interaction was never a
     // completed user gesture. Never commit a swipe, and never arm/seed the
     // double-tap window from a cancelled touch.
-    if (this.#primaryPointerId === null || event.pointerId !== this.#primaryPointerId) {
+    if (this.#primaryPointerId === null || pointerId !== this.#primaryPointerId) {
       return;
     }
     this.#endPointerSession();

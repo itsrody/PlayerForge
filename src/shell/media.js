@@ -205,8 +205,10 @@ export const MEDIA_SESSION_SYNC_EVENTS = new Set([
 ]);
 
 const SESSION_ACTIONS = ["play", "pause", "stop", "seekbackward", "seekforward", "seekto"];
-/** Cleared defensively on teardown: managers remember stale handlers. */
-const CLEAR_ACTIONS = [...SESSION_ACTIONS, "previoustrack", "nexttrack"];
+/** Cleared defensively on teardown - but ONLY actions this bridge registered.
+ *  prev/next track were never ours: nulling them wiped the host page's own
+ *  OS media controls on every shell teardown. */
+const CLEAR_ACTIONS = SESSION_ACTIONS;
 
 /** The bridge whose media currently owns navigator.mediaSession. */
 let sessionOwner = null;
@@ -218,7 +220,10 @@ let sessionOwner = null;
  */
 function buildSessionMetadata(video) {
   const artwork = video.poster && URL.canParse(video.poster, location.href)
-    ? [{ src: new URL(video.poster, location.href).href }]
+    // sizes="any": OS artwork pickers (Android lock screen, desktop thumbnail
+    // surfaces) select by declared dimensions; an entry without sizes is the
+    // weakest form and can be skipped outright.
+    ? [{ src: new URL(video.poster, location.href).href, sizes: "any" }]
     : [];
   const title = document.title?.trim();
   if (!title && !artwork.length) {
@@ -229,6 +234,19 @@ function buildSessionMetadata(video) {
     artist: location.hostname || undefined,
     artwork
   });
+}
+
+/**
+ * Fingerprint of the metadata inputs (title + poster). Empty when the DOM
+ * realm is absent (test harness without a global document), which keeps the
+ * staleness check and the stored key equal so refresh never loops there.
+ */
+function metadataKeyOf(video) {
+  try {
+    return `${document.title} ${video.poster}`;
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -288,13 +306,15 @@ class MediaSessionBridge {
         }
       }
     });
+    // Metadata first so sync()'s staleness check (title/poster fingerprint)
+    // finds a fresh key instead of re-refreshing on this very first call.
+    this.#refreshMetadata();
     // Initial state (playbackState + position) lands through sync(), which
     // also seeds the dedup cache - writing playbackState here would only
     // duplicate that first IPC.
     this.sync();
     // Posters often arrive with metadata; refresh once it exists.
     this.#video.addEventListener("loadedmetadata", () => this.#refreshMetadata(), { signal });
-    this.#refreshMetadata();
     signal.addEventListener("abort", () => this.destroy(), { once: true });
     logger.log("media", "MediaSession claimed - handlers registered");
   }
@@ -314,6 +334,11 @@ class MediaSessionBridge {
   #sentPlaybackState = null;
   #sentDuration = NaN;
   #sentPlaybackRate = NaN;
+  /** Fingerprint of the metadata inputs (title + poster) at last refresh.
+   *  SPA/now-playing surfaces mutate document.title and video.poster without
+   *  any metadata-load event; sync() rides the media clock, so a cheap string
+   *  compare there re-arms OS surfaces the moment either changes. */
+  #metadataKey = "";
   /** Position dedup quantum in seconds. timeupdate ticks at ~250 ms, so a
    *  finer quantum passed every tick (0.25 is not < 0.25) and pushed the
    *  write straight through: 4 browser IPCs/s during steady playback. 1 s
@@ -327,6 +352,12 @@ class MediaSessionBridge {
   sync() {
     if (this.#scope.disposed) {
       return;
+    }
+    // SPA/now-playing surfaces mutate document.title and video.poster without
+    // any metadata-load event; the ~4 Hz media clock already runs through
+    // sync(), so a cheap string compare re-arms OS surfaces on either change.
+    if (this.#metadataKey !== metadataKeyOf(this.#video)) {
+      this.#refreshMetadata();
     }
     const session = this.#session;
     const playbackState = this.#video.paused ? "paused" : "playing";
@@ -385,5 +416,6 @@ class MediaSessionBridge {
     try {
       this.#session.metadata = buildSessionMetadata(this.#video);
     } catch {}
+    this.#metadataKey = metadataKeyOf(this.#video);
   }
 }
