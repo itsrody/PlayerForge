@@ -6,8 +6,15 @@
  *   node platform/run.mjs bench             # Pure-CPU benchmarks only
  *   node platform/run.mjs integration       # ChromiumDriver integration tests
  *   node platform/run.mjs browser-bench     # ChromiumDriver browser benchmarks
+ *   node platform/run.mjs visual            # HUD glass capture + material invariants
  *   node platform/run.mjs all               # Everything in sequence
- *   node platform/run.mjs ci                # test + bench + integration (no browser-bench)
+ *   node platform/run.mjs ci                # test + bench + integration (no browser work)
+ *
+ * Both browser-backed modes are deliberately excluded from `ci` and announced
+ * instead: `browser-bench` because a timing gate is meaningless on a shared
+ * runner, and `visual` because it needs a real browser and a stable renderer,
+ * which is exactly what a CI container is not. A gate that fails for
+ * environmental reasons teaches people to re-run it until it goes green.
  */
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -51,11 +58,29 @@ function separator() {
 async function runTests() {
   log("Running Node.js unit tests...");
   separator();
+
+  // Scoped to tests/*.test.mjs explicitly, matching the `test` npm script.
+  // Bare `node --test` recursively discovers the WHOLE repo, which swept in
+  // platform/integration/*.test.mjs too: 434 tests here against 367 for
+  // `npm test`. That put 67 ChromiumDriver tests inside the "unit tests" step,
+  // where they ran under node --test's default FILE parallelism - many browsers
+  // at once, the exact starvation documented in runIntegration below. It is
+  // also why `ci` paid for the browser suite twice: once here in parallel, then
+  // again serially in runIntegration.
+  const unitDir = join(HERE, "..", "tests");
+  const unitFiles = readdirSync(unitDir)
+    .filter((f) => f.endsWith(".test.mjs"))
+    .sort();
+  if (unitFiles.length === 0) {
+    log("No unit test files found.");
+    return;
+  }
+
   try {
-    execSync("node --import ./tests/loader.mjs --test", {
-      cwd: PROJECT_ROOT,
-      stdio: "inherit",
-    });
+    execSync(
+      `node --import ./tests/loader.mjs --test ${unitFiles.map((f) => join(unitDir, f)).join(" ")}`,
+      { cwd: PROJECT_ROOT, stdio: "inherit" }
+    );
     log("Unit tests passed.");
   } catch {
     log("Unit tests FAILED.");
@@ -265,6 +290,36 @@ async function runBrowserBench(bundlePath) {
   return allResults;
 }
 
+// ── HUD glass visual capture ────────────────────────────────────────
+async function runVisual() {
+  log("Running HUD glass visual capture...");
+  separator();
+
+  // Spawned as a child process rather than imported, so the tool keeps its
+  // own exit-code contract (0 pass, 1 material invariant failed, 2 no
+  // baseline) and this runner inherits it instead of re-deriving it. An
+  // exception thrown across an import boundary would collapse those three
+  // distinct outcomes into one non-zero code.
+  try {
+    execSync("node platform/visual/hud-glass.mjs --compare", {
+      cwd: PROJECT_ROOT,
+      stdio: "inherit",
+      timeout: 300_000,
+    });
+    log("Visual capture passed.");
+  } catch (err) {
+    // execSync throws on non-zero exit. 2 means the baseline is missing, which
+    // is a setup problem rather than a regression, so it is called out
+    // separately instead of reading as a failed design check.
+    if (err.status === 2) {
+      log("Visual capture has no baseline — run `npm run visual:record` first.");
+      process.exit(2);
+    }
+    log("Visual capture FAILED — the HUD glass changed materially.");
+    process.exit(1);
+  }
+}
+
 // ── Main ────────────────────────────────────────────────────────────
 log(`PlayerForge platform runner — mode: ${mode}`);
 
@@ -281,20 +336,27 @@ switch (mode) {
   case "browser-bench":
     await runBrowserBench();
     break;
+  case "visual":
+    await runVisual();
+    break;
   case "all":
     await runTests();
     await runBench();
     await runIntegration();
     await runBrowserBench();
+    await runVisual();
     break;
   case "ci":
     await runTests();
     await runBench();
     await runIntegration();
+    log("Skipping browser-bench (timing gate is not meaningful on a shared runner).");
+    log("Skipping visual (needs a real browser and a stable renderer).");
+    log("Run `npm run visual` locally before shipping a HUD change.");
     break;
   default:
     console.error(`\n  Unknown mode: ${mode}`);
-    console.error("  Usage: node platform/run.mjs [test|bench|integration|browser-bench|all|ci]");
+    console.error("  Usage: node platform/run.mjs [test|bench|integration|browser-bench|visual|all|ci]");
     process.exit(1);
 }
 

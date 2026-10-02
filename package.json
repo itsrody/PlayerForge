@@ -14,7 +14,7 @@
     "integration": "node platform/run.mjs integration",
     "browser-bench": "node platform/run.mjs browser-bench",
     "browser-bench:record": "node platform/run.mjs browser-bench --record",
-    "visual": "node platform/visual/hud-glass.mjs --compare",
+    "visual": "node platform/run.mjs visual",
     "visual:record": "node platform/visual/hud-glass.mjs --record",
     "ci": "node platform/run.mjs ci",
     "platform": "node platform/run.mjs all",
