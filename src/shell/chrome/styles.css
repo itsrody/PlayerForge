@@ -31,23 +31,45 @@
   --pf-bg: #000;                    /* base ink                */
   --pf-accent: #4a9eff;             /* interaction accent      */
 
-  /* Liquid-glass surface system: one translucent dark tint, a specular
-     top-of-sheet sheen, a rim-lit hairline edge, and a soft drop shadow - all
-     static paint, so each visible surface costs exactly one composited blur
-     layer. The backdrop-filter blurs + saturates what is behind the glass,
-     which keeps the tint see-through while light text stays legible over
-     arbitrary video. */
-  --pf-glass-tint: color-mix(in srgb, var(--pf-bg) 60%, transparent);
+  /* Liquid-glass surface system, tuned against macOS 27 rather than the 2025
+     launch. macOS 27 shipped a transparency slider, defaults to "a touch of
+     frosting", and explicitly raised corner radii - Apple walked the material
+     back from maximum see-through. This HUD sits on top of arbitrary video, so
+     that is the correct direction for us too: more tint and more blur buy
+     legibility over bright footage at the same time as they cost less of the
+     picture. Apple's HIG frames it as glass "limiting the range of background
+     color information" so the foreground keeps its contrast.
+
+     Four stacked layers, per the documented material structure:
+       1. refracted/blurred backdrop  -> --pf-blur-lg (blur + saturate + brightness)
+       2. colourless adaptive tint     -> --pf-glass-tint
+       3. specular sheen across the top-> --pf-glass-sheen
+       4. rim light on the edge        -> --pf-glass-inner / --pf-glass-border
+
+     All of it is static paint, so a visible surface still costs exactly one
+     composited blur layer - the per-control accents below reuse these tokens
+     without adding another backdrop-filter. Genuine refraction (feDisplacementMap
+     or a shader) was deliberately not used: over a playing video it would cost
+     far more than the lensing is worth, and that perf contract is load-bearing
+     for the cpu-tier="low" fallback. */
+  --pf-glass-tint: color-mix(in srgb, var(--pf-bg) 74%, transparent);
   --pf-glass-sheen: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0.18) 0%,
-    rgba(255, 255, 255, 0.06) 30%,
-    rgba(255, 255, 255, 0) 62%
+    rgba(255, 255, 255, 0.2) 0%,
+    rgba(255, 255, 255, 0.07) 34%,
+    rgba(255, 255, 255, 0) 68%
   );
-  --pf-glass-inner: inset 0 1px 0 rgba(255, 255, 255, 0.34),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.07);
-  --pf-glass-shadow: var(--pf-glass-inner), 0 18px 48px rgba(0, 0, 0, 0.52);
-  --pf-glass-border: 1px solid rgba(255, 255, 255, 0.18);
+  /* Top edge catches the specular highlight; the bottom rim is the light that
+     refracts back up through the material, which is what stops the sheet
+     reading as a flat translucent rectangle. */
+  --pf-glass-inner: inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  /* Two shadows, because a larger control is a thicker material: a tight
+     contact shadow that anchors the edge, then a wide ambient one for depth. */
+  --pf-glass-shadow: var(--pf-glass-inner), 0 2px 6px rgba(0, 0, 0, 0.34),
+    0 22px 60px rgba(0, 0, 0, 0.55);
+  --pf-glass-border: 1px solid rgba(255, 255, 255, 0.2);
 
   --pf-surface: rgba(0, 0, 0, 0.8);              /* opaque fallback for glass  */
   --pf-surface-soft: rgba(255, 255, 255, 0.04);  /* cells, stepper, toggle bg   */
@@ -62,10 +84,13 @@
   --pf-text-mid: rgba(255, 255, 255, 0.7);       /* meta / hint emphasis        */
   --pf-text-soft: rgba(255, 255, 255, 0.65);     /* uppercase labels            */
 
+  /* macOS 27 raised corner radii across the OS as a deliberate correction to
+     Tahoe's tighter rounding, so the whole scale steps up here. --pf-radius-xs
+     was also inverted (7px > sm's 6px); it is now genuinely the smallest step. */
   --pf-radius-pill: 999px;
-  --pf-radius-lg: 12px;
-  --pf-radius-md: 8px;
-  --pf-radius-sm: 6px;
+  --pf-radius-lg: 18px;
+  --pf-radius-md: 12px;
+  --pf-radius-sm: 10px;
   --pf-radius-xs: 7px;
 
   --pf-font-xs: 11px;
@@ -77,9 +102,34 @@
   --pf-ease-curve: cubic-bezier(0.22, 1, 0.36, 1);
   --pf-ease-bounce: 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
   --pf-ease-out: 0.2s cubic-bezier(0.4, 0, 1, 1);
+  /* Liquid Glass moves on a spring, not a bezier: it overshoots slightly and
+     settles. linear() carries a real spring's sampled curve, which a two-point
+     cubic only approximates. Chromium 113+, so it needs no fallback on the
+     154 baseline. */
+  --pf-ease-spring: linear(
+    0,
+    0.006 3.1%,
+    0.025 6.2%,
+    0.101 12.5%,
+    0.539 25.3%,
+    0.721 31.2%,
+    0.849 37.1%,
+    0.937 43%,
+    0.968 46.6%,
+    0.991 50.5%,
+    1.006 55%,
+    1.015 60.4%,
+    1.017 69.2%,
+    1.001 85.5%,
+    1
+  );
 
-  --pf-blur-sm: blur(18px) saturate(1.8);
-  --pf-blur-lg: blur(26px) saturate(1.9);
+  /* The brightness() term is the adaptive-legibility layer: it clamps how much
+     range the backdrop can contribute, so white HUD text keeps its contrast
+     over bright footage instead of competing with it. Saturate keeps the
+     colour that survived the clamp feeling lit rather than washed out. */
+  --pf-blur-sm: blur(26px) saturate(1.7) brightness(0.78);
+  --pf-blur-lg: blur(36px) saturate(1.8) brightness(0.72);
 
   --pf-space-xs: 4px;
   --pf-space-sm: 6px;
@@ -129,6 +179,8 @@
      none of the sheen/edge/shadow paint. */
   --pf-glass-tint: var(--pf-surface);
   --pf-glass-sheen: none;
+  /* --pf-glass-shadow carries the rim light, so it is what carries the edge
+     treatment; clearing the token alone would leak the new inset rim. */
   --pf-glass-shadow: none;
   --pf-glass-border: none;
   --pf-blur-sm: none;
@@ -142,7 +194,9 @@
   .pf-shell {
     --pf-glass-tint: var(--pf-surface);
     --pf-glass-sheen: none;
-    --pf-glass-shadow: none;
+    /* --pf-glass-shadow carries the rim light, so it is what carries the edge
+     treatment; clearing the token alone would leak the new inset rim. */
+  --pf-glass-shadow: none;
     --pf-glass-border: none;
     --pf-blur-sm: none;
     --pf-blur-lg: none;
@@ -328,6 +382,8 @@
       background-image: var(--pf-glass-sheen);
       border: var(--pf-glass-border);
       box-shadow: var(--pf-glass-shadow);
+      /* A pill this small sits over moving footage without a sheet to anchor it, so
+         it leans on the blur's brightness clamp rather than on tint alone. */
       backdrop-filter: var(--pf-blur-sm);
       color: var(--pf-toast-color);
       padding: 6px 16px;
@@ -474,6 +530,9 @@
 
       /* Liquid glass: same tint/sheen/edge/shadow system as the toast, at the
          larger blur radius suited to the sheet's size. */
+      /* The panel sits over video, so it carries the heaviest legibility clamp of the
+     two surfaces - brightness() well under 1 keeps white HUD text readable even
+     when the footage behind it is a bright sky. */
       background-color: var(--pf-glass-tint);
       background-image: var(--pf-glass-sheen);
       border: var(--pf-glass-border);
@@ -487,10 +546,12 @@
       opacity: 0;
       translate: 0 12px;
       scale: 0.98;
+      /* Liquid Glass animates on a spring, so the panel's open/close - the one motion
+       large enough for that to read - uses it. */
       transition:
-        opacity var(--pf-ease-duration) var(--pf-ease-curve),
-        translate var(--pf-ease-duration) var(--pf-ease-curve),
-        scale var(--pf-ease-duration) var(--pf-ease-curve),
+        opacity var(--pf-ease-duration) var(--pf-ease-spring),
+        translate var(--pf-ease-duration) var(--pf-ease-spring),
+        scale var(--pf-ease-duration) var(--pf-ease-spring),
         display var(--pf-ease-duration) allow-discrete;
 
       &.pf-open {
@@ -923,9 +984,14 @@
       vertical-align: middle;
     }
 
+    /* Controls borrow the material's rim and specular but NOT its backdrop-filter:
+       another blur inside a sheet that already has one is the exact cost the
+       one-layer-per-surface rule exists to avoid. This is the highlight layer
+       alone, which is free, so the buttons still read as glass. */
     .pf-btn-ghost {
       background: var(--pf-surface-mid);
       color: inherit;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
 
       @media (hover: hover) {
         &:hover {
@@ -949,6 +1015,8 @@
       border: 1px solid var(--pf-border);
       border-radius: var(--pf-radius-md);
       background: var(--pf-surface-soft);
+      /* Rim + top specular, no extra backdrop-filter (see .pf-btn-ghost). */
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
       overflow: hidden;
       transition: border-color var(--pf-ease-duration) ease;
 
