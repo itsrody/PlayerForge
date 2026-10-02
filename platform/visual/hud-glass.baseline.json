@@ -1,0 +1,56 @@
+{
+  "note": "Recorded by platform/visual/hud-glass.mjs --record. Legibility/radius are the values to watch when retuning the glass tokens.",
+  "tokens": {
+    "backdropFilter": "blur(36px) saturate(1.8) brightness(0.72)",
+    "backgroundColor": "color(srgb 0 0 0 / 0.74)",
+    "blurLg": "blur(36px)saturate(1.8)brightness(0.72)",
+    "borderRadius": "18px",
+    "boxShadow": "rgba(255, 255, 255, 0.42) 0px 1px 0px 0px inset, rgba(255, 255, 255, 0.1) 0px -1px 0px 0px inset, rgba(255, 255, 255, 0.06) 0px 0px 0px 1px inset, rgba(0, 0, 0, 0.34) 0px 2px 6px 0px, rgba(0, 0, 0, 0.55) 0px 22px 60px 0px",
+    "glassTint": "color-mix(in srgb,#000/**/74%,transparent)",
+    "radiusLg": "18px"
+  },
+  "panelOpen": {
+    "found": true,
+    "box": {
+      "w": 390,
+      "h": 255
+    },
+    "interiorLuma": [
+      61,
+      49,
+      40,
+      33,
+      31
+    ],
+    "legibilityDelta": [
+      69,
+      78,
+      85,
+      90,
+      91
+    ],
+    "minLegibilityDelta": 69,
+    "rimLuma": [
+      76,
+      157,
+      75,
+      75,
+      74,
+      74
+    ],
+    "rimPeak": 157,
+    "cornerRun": [
+      3,
+      1,
+      6,
+      9,
+      11,
+      10,
+      12,
+      13,
+      15,
+      14
+    ],
+    "cornerRounded": true
+  }
+}
