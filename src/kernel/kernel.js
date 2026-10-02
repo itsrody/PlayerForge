@@ -36,7 +36,7 @@ export class Kernel {
   #discoveryDowngraded = false;
   /** Lazily built observer-driven layout-presence gate for videos that failed
    *  meetsMinSize (see #adoptVideo); stopped with the kernel scope. */
-  #sizeGate = null;
+  #layoutGate = null;
   /** Kernel lifecycle scope: removal observers disconnect via onDispose,
    *  grace timers cancel via the signal. */
   #scope = new Scope();
@@ -169,8 +169,9 @@ export class Kernel {
    * capture-mode media-event tap. On MPA pages there is no second player to
    * surface, so keeping the per-mutation scan alive for the whole page taxes
    * every DOM change for nothing; the media-event tap still catches a
-   * script-lazy SDK player that fires loadeddata/play, so discovery never goes
-   * fully quiet. Idempotent; pagehide still tears the remaining tap down.
+   * script-lazy SDK player that fires loadedmetadata/loadeddata/play, so
+   * discovery never goes fully quiet, and #onRegistryEmpty re-arms the full tap
+   * if that shell later leaves. Idempotent; pagehide tears the tap down.
    */
   #downgradeDiscoveryTap() {
     if (this.#discoveryDowngraded) {
@@ -179,6 +180,22 @@ export class Kernel {
     this.#discoveryDowngraded = true;
     this.#stopDiscoveryTap?.();
     this.#stopDiscoveryTap = watchMediaEvents((video) => this.#adoptVideo(video));
+  }
+
+  /**
+   * The kernel's single observer-driven layout-presence gate: built on first
+   * need and torn down with the kernel scope. Returns null once the scope is
+   * disposed, so a late adoption after pagehide has nothing to wait for.
+   */
+  #ensureLayoutGate() {
+    if (!this.#layoutGate && !this.#scope.disposed) {
+      this.#layoutGate = createLayoutGate();
+      this.#scope.onDispose(() => {
+        this.#layoutGate?.stop();
+        this.#layoutGate = null;
+      });
+    }
+    return this.#layoutGate;
   }
 
   /** Adopt the video, emit discovery and start removal watching. */
@@ -196,14 +213,7 @@ export class Kernel {
       // gate re-enters this method the moment the delivered box qualifies
       // (RO callbacks run off the mutation batch, with layout already fresh,
       // and the size is read from the observation rather than a fresh reflow).
-      if (!this.#sizeGate && !this.#scope.disposed) {
-        this.#sizeGate = createLayoutGate();
-        this.#scope.onDispose(() => {
-          this.#sizeGate?.stop();
-          this.#sizeGate = null;
-        });
-      }
-      this.#sizeGate?.watch(video, () => this.#adoptVideo(video));
+      this.#ensureLayoutGate()?.watch(video, () => this.#adoptVideo(video));
       return;
     }
     const container = sdk.container;

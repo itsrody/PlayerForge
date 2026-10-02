@@ -21,8 +21,8 @@
  * The shell-facing descriptor carries name + the resolved container (plus the
  * matched anchor element and its hop distance, both computed free during the
  * scan), so the kernel has one source of truth for SDK identity AND shell
- * placement. The descriptor is cached - same object per video on every
- * re-query.
+ * placement. The descriptor is cached per video (same object across re-queries
+ * while its ancestry holds; invalidated when the video is re-parented).
  *
  * Reserved for future needs (not implemented): corroborating selectors,
  * version gates. Adding an SDK = one record plus one fixture test.
@@ -55,9 +55,10 @@ export const MIN_VIDEO_WIDTH = 100;
 export const MIN_VIDEO_HEIGHT = 60;
 
 /**
- * Repeat-query memo: discovery calls findSdkForVideo + findContainer on the
- * same element back to back, and SPA frameworks re-ask about surviving
- * videos. WeakMap keys die with their videos - session-only, never persisted.
+ * Repeat-query memo: findSdkForVideo resolves both SDK identity and container
+ * in one scan, is often asked about the same element back to back, and SPA
+ * frameworks re-ask about surviving videos. WeakMap keys die with their videos
+ * - session-only, never persisted.
  *
  * Each entry is stamped with the parent the scan saw, because the cache is
  * only valid while that ancestry holds: SDKs routinely take a bare <video>
@@ -205,11 +206,6 @@ export function resolveContainer({ record, el }) {
   return el;
 }
 
-/** @deprecated Use the descriptor's `container` field instead. */
-export function findContainer(video) {
-  return findSdkForVideo(video)?.container ?? null;
-}
-
 /**
  * Resolve the real <video> for a media event. Media events don't bubble, but
  * capture listeners on document still receive them through the composed path -
@@ -262,14 +258,17 @@ export function forEachVideoInMutations(mutations, visit) {
 }
 
 /**
- * CSS-presence pre-gate, shared by the synchronous and observer-driven size
- * gates: false when the element (or a content-visibility:auto subtree it sits
- * in) is not currently generating a painted box. `contentVisibilityAuto`
+ * CSS-presence pre-gate shared by the synchronous size gate, the
+ * observer-driven layout gate, and the probe's escalation decision: false when
+ * the element (or a content-visibility:auto subtree it sits in) is not
+ * currently generating a painted box. `contentVisibilityAuto`
  * covers the case the old two-option call missed - a `content-visibility:
  * auto` player scrolled out of view keeps a layout placeholder (non-zero box)
  * but is skipped from rendering, so a stale size would wrongly admit it.
- * Feature-detected: jsdom without checkVisibility stays on the rect-only path,
- * and the gate is admission-negative only, so discovery can never regress.
+ * Feature-detected: hosts without checkVisibility (jsdom, older engines) report
+ * present, so removal of the API can only make us more permissive, never less -
+ * it gates both size admission and the probe's escalation decision, and a false
+ * "present" costs at most the work we did before the check existed.
  */
 export function hasPresentBox(el) {
   return typeof el.checkVisibility !== "function"

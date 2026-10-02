@@ -5,10 +5,10 @@
  * actually shows a video candidate - without paying for a full-document
  * MutationObserver on pages that never host a player.
  *
- * Phase 1 (cheap, no observer): capture-phase loadeddata/play listeners plus
- * a one-time DOM-ready <video> presence check. SDK players fire media events
- * through the composed path, so a real player surfaces here with zero subtree
- * observer cost.
+ * Phase 1 (cheap, no observer): capture-phase loadedmetadata/loadeddata/play
+ * listeners plus a one-time DOM-ready <video> presence check. SDK players fire
+ * media events through the composed path, so a real player surfaces here with
+ * zero subtree observer cost.
  *
  * Escalation (commits to the full-document observer) happens only once there
  * is evidence of a player: a rendered static <video> in the parsed DOM, or a
