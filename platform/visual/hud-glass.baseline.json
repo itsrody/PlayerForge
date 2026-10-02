@@ -16,31 +16,31 @@
       "h": 239
     },
     "interiorLuma": [
-      74,
+      82,
+      85,
+      81,
       75,
-      75,
-      61,
-      50
+      62
     ],
     "legibilityDelta": [
-      59,
-      56,
-      54,
-      67,
-      77
+      51,
+      46,
+      48,
+      53,
+      65
     ],
-    "minLegibilityDelta": 54,
+    "minLegibilityDelta": 46,
     "rimLuma": [
-      82,
-      64,
-      38,
-      38,
-      38,
-      40
+      90,
+      66,
+      42,
+      42,
+      42,
+      43
     ],
-    "rimPeak": 82,
-    "rimInterior": 40,
-    "rimLift": 1.05,
+    "rimPeak": 66,
+    "rimInterior": 43,
+    "rimLift": 0.5348837209302325,
     "cornerRun": [
       3,
       8,

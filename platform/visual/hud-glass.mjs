@@ -178,19 +178,28 @@ export function measureGlass(path) {
     deltas.push(outL - inL);
   }
 
-  // Specular rim: a bright hairline on the top edge, darkening just inside it.
+  // Rows just inside the sheet's top edge. dy 0 is the 1px border itself, so it
+  // is excluded from the rim test below - see the note on why.
   const rim = [0, 1, 2, 3, 4, 5].map((dy) => luma(img, midX, box.y0 + dy));
 
-  // Measured as a lift over the surface just below it, not as an absolute
-  // luminance. An absolute threshold silently encodes one tint choice: the
-  // original was luma >= 110, which matched a 0.42-alpha rim over a 74% tint and
-  // false-failed a 0.3-alpha rim over a 58% tint even though the highlight was
-  // plainly visible. A relative test asks the design-independent question - is
-  // the edge brighter than the surface under it - so it survives future tint
-  // changes. Deleting the rim entirely still fails it, because the edge then
-  // measures flat (verified: 75,75,74,74,73,73 -> 0% lift).
-  const rimPeak = Math.max(...rim);
-  const rimInterior = Math.max(...rim.slice(2));
+  // The specular highlight is the inset rim sitting just INSIDE the 1px border,
+  // so it has to be measured from dy 1 down, with the border at dy 0 excluded.
+  //
+  // Including dy 0 - as this originally did - measured the border, not the rim,
+  // and produced a number that looked fine while testing nothing. The border is
+  // always present, so the old metric could not distinguish "has a specular
+  // highlight" from "has a 1px white border". It even moved the wrong way when
+  // the sheen was deleted: the rim read 221% brighter, because deleting the
+  // sheen darkened the interior while the untouched border stayed put, so
+  // border-minus-interior grew. A metric that rises when the effect under test
+  // is removed is worse than no metric.
+  //
+  // Measured as a lift over the surface below it rather than as an absolute
+  // luminance, so it does not silently encode one tint choice. Deleting both the
+  // sheen and the rim flattens dy 1-3 to the interior and this reads 0%.
+  const rimBand = rim.slice(1, 4);
+  const rimInterior = Math.max(rim[4], rim[5]);
+  const rimPeak = Math.max(...rimBand);
   const rimLift = rimInterior > 0 ? (rimPeak - rimInterior) / rimInterior : 0;
 
   // Corner geometry: count dark pixels per row across the top-left corner. A
@@ -237,18 +246,23 @@ const HOSTILE_PAGE = `<!DOCTYPE html>
 <script>
   // A live MediaStream, not a canvas dataURL: the kernel's probe gates on a
   // decodable readyState and real dimensions, and a dataURL clip never gets
-  // there. Animation keeps the backdrop moving so over-transparency and
-  // banding show up rather than hiding behind a static gradient.
+  // there.
+  //
+  // Painted ONCE, deliberately. An earlier version animated the backdrop, which
+  // made the measurements unusable rather than more realistic: rim lift came out
+  // bimodal at 41% or ~110% depending purely on what happened to be behind the
+  // top edge when the screenshot was taken - a 2.6x spread no tolerance band can
+  // honestly absorb. A regression gate needs a repeatable input. Whether the HUD
+  // stays legible while footage actually MOVES beneath it is a real question,
+  // but it is a motion question, and it belongs in a pass with the video running
+  // - not as noise inside a numeric gate.
   const c=document.createElement("canvas");c.width=960;c.height=540;
   const x=c.getContext("2d");
-  (function paint(){
-    const g=x.createLinearGradient(0,0,960,540);
-    g.addColorStop(0,"#ff9500");g.addColorStop(.5,"#af52de");g.addColorStop(1,"#00c7be");
-    x.fillStyle=g;x.fillRect(0,0,960,540);
-    x.fillStyle="rgba(255,255,255,.5)";x.beginPath();
-    x.arc(480,270,90+Math.sin(Date.now()/400)*60,0,7);x.fill();
-    requestAnimationFrame(paint);
-  })();
+  const g=x.createLinearGradient(0,0,960,540);
+  g.addColorStop(0,"#ff9500");g.addColorStop(.5,"#af52de");g.addColorStop(1,"#00c7be");
+  x.fillStyle=g;x.fillRect(0,0,960,540);
+  x.fillStyle="rgba(255,255,255,.5)";x.beginPath();
+  x.arc(480,270,90,0,7);x.fill();
   const v=document.getElementById("v");
   v.muted=true;v.playsInline=true;
   v.srcObject=c.captureStream(30);
@@ -415,13 +429,15 @@ async function main() {
       ["glass-tint", base.tokens.glassTint, res.tokens.glassTint],
     ];
 
-    // Pixel measurements are NOT exact. The backdrop animates on purpose, so
-    // what sits behind the panel differs every run: repeated captures of the
-    // identical bundle gave a min legibility delta of 72, 68 and 48, and a rim
-    // peak of 154, 153 and 158. Gating on equality here would fail on nothing
-    // and train the reader to ignore the output. So these are compared against a
-    // tolerance band and only a breach of it counts.
-    const TOLERANCE = 0.3;
+    // Pixel measurements are near-exact. The backdrop is painted once rather than
+    // animated, and with a repeatable input five consecutive captures of the
+    // identical bundle produced byte-identical numbers, so the band exists only
+    // to absorb a renderer or platform difference rather than to hide real
+    // movement. It was +/-30% while the backdrop animated, because rim lift then
+    // swung bimodally between 41% and 110% - a 2.6x spread that no honest band
+    // could cover. Fixing the input shrank the noise far more than tightening
+    // the band did.
+    const TOLERANCE = 0.1;
     const ranged = [
       ["min legibility delta", base.panelOpen.minLegibilityDelta, m.minLegibilityDelta],
       ["rim lift", base.panelOpen.rimLift, m.rimLift],
@@ -438,7 +454,7 @@ async function main() {
       const verdict = drift <= TOLERANCE ? "ok      " : "DRIFT   ";
       console.log(`    ${verdict} ${name}: ${was} -> ${now} (${(drift * 100).toFixed(0)}%, +/-${TOLERANCE * 100}% band)`);
     }
-    console.log("    note: pixel rows carry a wide band because the backdrop animates;");
+    console.log("    note: pixel rows use a +/-10% band over a fixed backdrop;");
     console.log("          tokens above are the exact signal when retuning the glass.");
   }
 
