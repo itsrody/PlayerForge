@@ -8,12 +8,22 @@
  * the pf:configs field the rest of PlayerForge already reads, so the HUD panel
  * and the manager UI are two doors onto one value rather than two settings.
  *
- * Edit detection needs a snapshot. A value that merely EXISTS in manager
- * storage is not evidence of an edit - it is there because the UserConfig
- * block declares a default. So pf:configs keeps the last imported value per
- * field (`power.imported`), and only a value that DIFFERS from its snapshot is
- * treated as a manager-side edit. Without that, the declared defaults would
- * overwrite whatever the person set in the HUD panel on the very first boot.
+ * Edit detection needs a snapshot, because a manager value that merely EXISTS
+ * carries no information. ScriptCat does not leave unedited UserConfig keys
+ * absent: its worker synthesizes `<group>.<key>` as `stored ?? declared
+ * default` and ships that whole map to the script, so GM_getValue("power.x")
+ * answers with the schema default whether or not anyone ever touched the
+ * manager UI. Presence therefore proves nothing - and worse, treating those
+ * synthesized defaults as real edits would reset every HUD-panel setting on
+ * every boot, forever.
+ *
+ * So pf:configs keeps the last imported value per field (`power.imported`) and
+ * a manager value is adopted only when it DIFFERS from its snapshot. First
+ * contact records the snapshot and adopts nothing, which is what keeps the
+ * upgrade from reverting panel settings to the schema defaults. Comparing
+ * against the snapshot (not against the declared default) is also what makes a
+ * person who edits a field BACK to its default land correctly: the snapshot
+ * still holds their previous value, so the revert is a genuine diff.
  *
  * One direction only, on purpose: a HUD-panel edit is not pushed back to the
  * manager. Manager storage is the manager's to write, and PF never widens its
@@ -51,11 +61,12 @@ function coerce(field, value) {
 
 /**
  * Fold any manager-side power-config edits into pf:configs. Returns the number
- * of fields adopted (0 when there is nothing new), so the caller can log it.
+ * of fields adopted (0 on first contact and when there is nothing new), so the
+ * caller can log it.
  */
 export function importManagerConfig() {
   const seen = getConfigValue(POWER_SNAPSHOT_PATH, null);
-  const previous = seen && typeof seen === "object" && !Array.isArray(seen) ? seen : {};
+  const previous = seen && typeof seen === "object" && !Array.isArray(seen) ? seen : null;
   const fields = {};
   const snapshot = {};
   let adopted = 0;
@@ -68,13 +79,14 @@ export function importManagerConfig() {
       logger.warn("power", `Unreadable manager value for "${field.id}":`, err);
       continue;
     }
-    // Absent means the person never touched it in the manager UI - the schema
-    // default is not stored, so this is the "leave PF's own value alone" case.
+    // Defensive only: a manager that does not synthesize (the test harness,
+    // or a future manager that stops materializing defaults) leaves untouched
+    // keys absent, and absent means "leave PF's own value alone".
     if (value === undefined) {
       continue;
     }
     snapshot[field.id] = value;
-    if (Object.is(previous[field.id], value)) {
+    if (!previous || Object.is(previous[field.id], value)) {
       continue;
     }
     const coerced = coerce(field, value);
@@ -86,6 +98,15 @@ export function importManagerConfig() {
     adopted++;
   }
 
+  if (!previous) {
+    // First contact: record what the manager currently reports and change
+    // nothing. Those values are the schema defaults ScriptCat just synthesized
+    // (or, on a later run, the last thing we adopted), not evidence of an edit.
+    if (Object.keys(snapshot).length) {
+      setConfigFields({ [POWER_SNAPSHOT_PATH]: snapshot });
+    }
+    return 0;
+  }
   if (!adopted) {
     return 0;
   }
