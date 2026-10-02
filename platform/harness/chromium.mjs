@@ -326,6 +326,12 @@ export class ChromiumDriver {
    *   hangs. A caller-owned directory is never deleted on destroy.
    * @param {boolean} [options.keepProfile=false] - Skip cleanup of the temp
    *   profile on destroy, so it can be inspected.
+   * @param {"desktop"|"touch"|null} [options.emulatePointer="desktop"] - Input
+   *   capabilities reported to `(hover: ...)` and `(pointer: ...)`. "desktop"
+   *   declares a mouse, matching what a developer's machine reports; "touch"
+   *   declares a finger. `null` leaves the host's own reporting, which differs
+   *   between headless macOS and headless Linux - pass it only to measure that
+   *   difference, never to assert behaviour.
    * @returns {Promise<ChromiumDriver>}
    */
   static async launch(options = {}) {
@@ -336,7 +342,8 @@ export class ChromiumDriver {
       prefs = null,
       extraArgs = [],
       profileDir: suppliedProfileDir = null,
-      keepProfile = false
+      keepProfile = false,
+      emulatePointer = "desktop"
     } = options;
 
     // An isolated profile is mandatory: without it the browser's singleton
@@ -368,6 +375,20 @@ export class ChromiumDriver {
       "--no-first-run",
       "--disable-web-security",
     ];
+    // Headless reports input capabilities from the host, and the hosts disagree:
+    // headless Linux has no input devices and answers (hover: hover) and
+    // (pointer: fine) with false, while headless macOS answers true. PF branches
+    // on (pointer: coarse) for the first-run hint and gates a dozen hover/pointer
+    // blocks in the panel stylesheet, so an unpinned run silently exercises
+    // different UI per platform - the welcome hint appears on CI and not on a
+    // developer's machine. Pinning declares "this is a desktop with a mouse",
+    // which is the default environment the suite is written against.
+    // Blink enums: HoverType hover=2, PointerType fine=4.
+    if (emulatePointer === "desktop") {
+      args.push("--blink-settings=availableHoverTypes=2,primaryHoverType=2,availablePointerTypes=4,primaryPointerType=4");
+    } else if (emulatePointer === "touch") {
+      args.push("--blink-settings=availableHoverTypes=1,primaryHoverType=1,availablePointerTypes=2,primaryPointerType=2");
+    }
     // --disable-extensions would defeat the point of loading an extension, and
     // --disable-component-extensions-with-background-pages is NOT set because
     // an MV3 service worker (how ScriptCat injects) needs to start. With no

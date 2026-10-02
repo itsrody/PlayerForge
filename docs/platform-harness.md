@@ -133,10 +133,19 @@ surface is irrelevant. PF's logger is `console.*` only, so without this its
 - Cross-origin behaviour is not separately controlled. A checked child→parent
   window write did not succeed with the flag present, but no flag-off control was
   run for it, so the flag's effect there is unverified rather than absent.
-- Headless platforms disagree about `(hover: hover)` and `(pointer: fine)`:
-  headless Linux reports false, headless macOS true. PF branches on
-  `(pointer: coarse)` for the first-run hint, so results are platform-dependent
-  unless the launch pins them.
+- Headless reports input capabilities from the host, and the hosts disagree:
+  headless Linux answers `(hover: hover)` and `(pointer: fine)` with false where
+  headless macOS answers true. Every launch now pins desktop semantics
+  (`launch({ emulatePointer: "desktop" })`), which PF depends on — it branches on
+  `(pointer: coarse)` for the first-run hint and gates ~12 `(hover: hover)` /
+  `(pointer: coarse)` blocks in the panel stylesheet. Pass `emulatePointer:
+  "touch"` to reach the finger paths, which are otherwise untestable;
+  `platform/integration/harness-environment.test.mjs` locks both so host drift
+  fails loudly instead of silently changing what every UI test exercises.
+- `(prefers-reduced-motion: reduce)` is **true** in headless and is not pinned,
+  so `src/shared/timing.js` reports reduced motion in the suite. That is
+  currently consistent across hosts, but it is implicit — a timing-sensitive
+  assertion would be measuring the reduced-motion path without saying so.
 - The session's static server sends only a content type. CSP, redirects and
   status codes need a server that can set headers, so those belong in a
   committed fixture rather than the session.
