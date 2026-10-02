@@ -276,7 +276,6 @@ export class InputForge {
     this.#video = video;
     this.#zone = zone;
     this.#eventTarget = eventTarget;
-    const { signal } = this.#scope;
     // Track touch-action (kills scroll/pinch takeover) and user-select (kills
     // native selection highlight + its hit-testing while scrubbing over page
     // text) for automatic rollback on destroy.
@@ -292,6 +291,21 @@ export class InputForge {
     // the capture-phase keydown handler, so no interception shim is needed;
     // the bare-tap toggle below calls the native methods directly.
 
+    this.#wirePointerStream();
+    this.#wireCompatStreamSuppression();
+    this.#wireInterruptSafety();
+    this.#wireTrackpadPinch();
+
+    activeForges.add(this);
+  }
+
+  /**
+   * The primary pointer stream, plus the click/dblclick capture that lets the
+   * zone veto a tap the page would otherwise act on.
+   */
+  #wirePointerStream() {
+    const { signal } = this.#scope;
+    const zone = this.#zone;
     const options = { capture: true, passive: true, signal };
     zone.addEventListener("pointerdown", (event) => this.#handlePointerDown(event), options);
     zone.addEventListener("pointermove", (event) => this.#handlePointerMove(event), options);
@@ -302,12 +316,20 @@ export class InputForge {
     zone.addEventListener("lostpointercapture", (event) => this.#handleLostCapture(event), options);
     zone.addEventListener("click", (event) => this.#handleClickCapture(event), { capture: true, signal });
     zone.addEventListener("dblclick", (event) => this.#handleDblClickCapture(event), { capture: true, signal });
-    // SDK stream dominance: the compat mouse/touch streams mirror the pointer
-    // stream, so while a press is owned they stop at this capture as well -
-    // the SDK never observes a partial sequence. touchstart/mousedown can
-    // precede (or arrive without) a tracked pointerdown, so they also probe
-    // prospective eligibility directly. Plain hover input (#pointerOwned
-    // false, no session) always passes through untouched.
+  }
+
+  /**
+   * SDK stream dominance: the compat mouse/touch streams mirror the pointer
+   * stream, so while a press is owned they stop at this capture as well - the
+   * SDK never observes a partial sequence. touchstart/mousedown can precede (or
+   * arrive without) a tracked pointerdown, so they also probe prospective
+   * eligibility directly. Plain hover input (#pointerOwned false, no session)
+   * always passes through untouched.
+   */
+  #wireCompatStreamSuppression() {
+    const { signal } = this.#scope;
+    const zone = this.#zone;
+    const options = { capture: true, passive: true, signal };
     const swallowOwned = (event) => {
       if (this.#pointerOwned) {
         event.stopImmediatePropagation();
@@ -348,6 +370,15 @@ export class InputForge {
         this.#cancelTrackedPointer(id);
       }
     }, options);
+  }
+
+  /**
+   * The safety net: pointer releases and key releases are listened for on
+   * window/document because a press can start in the zone and end anywhere.
+   */
+  #wireInterruptSafety() {
+    const { signal } = this.#scope;
+    const options = { capture: true, passive: true, signal };
     window.addEventListener("pointerup", (event) => this.#handlePointerUp(event), options);
     window.addEventListener("pointercancel", (event) => this.#handlePointerCancel(event), options);
     document.addEventListener("keydown", (event) => this.#handleKeydown(event), { capture: true, signal });
@@ -363,15 +394,16 @@ export class InputForge {
       }
     }, { signal });
     document.addEventListener("freeze", interrupt, { signal });
+  }
 
+  /** Trackpad pinch is fullscreen-only, so its wheel listener follows the mode. */
+  #wireTrackpadPinch() {
     subscribeFullscreen(() => {
       this.setTrackpadPinchEnabled(fs);
     }, this.#scope.signal);
     // Reconcile now, not just on the next change: a shell that spawns while
     // already fullscreen must get the wheel listener from frame one.
     this.setTrackpadPinchEnabled(fs);
-
-    activeForges.add(this);
   }
 
   /** Engine lifetime signal - action wiring shares it and dies with it. */
