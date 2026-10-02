@@ -113,6 +113,27 @@ test("registry: register replaces previous shell", () => {
   assert.deepEqual(slot.getAll(), [b]);
 });
 
+test("registry: register destroys the displaced live shell", () => {
+  const slot = new ShellSlot();
+  let destroyed = 0;
+  const a = makeShell({ destroy: () => { destroyed++; } });
+  const b = makeShell();
+  slot.register(a);
+  slot.register(b);
+  assert.equal(destroyed, 1, "the displaced shell is torn down, not orphaned");
+  assert.deepEqual(slot.getAll(), [b]);
+});
+
+test("registry: re-registering the same shell does not destroy it", () => {
+  const slot = new ShellSlot();
+  let destroyed = 0;
+  const shell = makeShell({ destroy: () => { destroyed++; } });
+  slot.register(shell);
+  slot.register(shell);
+  assert.equal(destroyed, 0);
+  assert.deepEqual(slot.getAll(), [shell]);
+});
+
 test("registry: getByVideo matches current shell", () => {
   const slot = new ShellSlot();
   const video = { videoWidth: 0, videoHeight: 0, duration: 0, isConnected: true };

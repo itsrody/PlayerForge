@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import {
   findSdkForVideo,
-  resolveContainer,
   videoFromEvent,
   meetsMinSize,
   createLayoutGate,
@@ -182,31 +181,37 @@ test("videoFromEvent yields null without any video in the path", () => {
   assert.equal(videoFromEvent({ target: host }), null);
 });
 
-test("resolveContainer defaults to the matched element without a host override", () => {
-  const doc = dom('<div class="plyr__video-wrapper"><video></video></div>');
-  const el = doc.querySelector(".plyr__video-wrapper");
-  assert.equal(resolveContainer({ record: { name: "Plyr" }, el }), el);
+test("findSdkForVideo defaults the container to the matched element", () => {
+  const doc = dom('<div class="plyr"><video></video></div>');
+  const registry = [{ name: "Plyr", anchors: [".plyr"] }];
+  assert.equal(findSdkForVideo(doc.querySelector("video"), registry).container, doc.querySelector(".plyr"));
 });
 
-test("resolveContainer honors a host override targeting an ancestor", () => {
+test("findSdkForVideo honors a host override targeting an ancestor", () => {
   const doc = dom('<div class="site-player"><div class="plyr"><video></video></div></div>');
-  const el = doc.querySelector(".plyr");
-  const host = doc.querySelector(".site-player");
-  assert.equal(resolveContainer({ record: { name: "Plyr", host: ".site-player" }, el }), host);
+  const registry = [{ name: "Plyr", anchors: [".plyr"], host: ".site-player" }];
+  assert.equal(
+    findSdkForVideo(doc.querySelector("video"), registry).container,
+    doc.querySelector(".site-player")
+  );
 });
 
-test("resolveContainer falls back to the matched element when host is absent", () => {
+test("findSdkForVideo falls back to the matched element when the host selector matches nothing", () => {
   const doc = dom('<div class="plyr"><div class="site-player"><video></video></div></div>');
-  const el = doc.querySelector(".plyr");
-  assert.equal(resolveContainer({ record: { name: "Plyr", host: ".missing" }, el }), el);
+  const registry = [{ name: "Plyr", anchors: [".plyr"], host: ".missing" }];
+  assert.equal(findSdkForVideo(doc.querySelector("video"), registry).container, doc.querySelector(".plyr"));
 });
 
-test("resolveContainer crosses open shadow boundaries for a host override", () => {
+test("findSdkForVideo crosses open shadow boundaries for a host override", () => {
   const doc = dom("<site-player></site-player>");
   const host = doc.querySelector("site-player");
+  const wrap = doc.createElement("div");
+  wrap.className = "plyr";
   const video = doc.createElement("video");
-  host.attachShadow({ mode: "open" }).append(video);
-  assert.equal(resolveContainer({ record: { name: "Plyr", host: "site-player" }, el: video }), host);
+  wrap.appendChild(video);
+  host.attachShadow({ mode: "open" }).append(wrap);
+  const registry = [{ name: "Plyr", anchors: [".plyr"], host: "site-player" }];
+  assert.equal(findSdkForVideo(video, registry).container, host);
 });
 
 test("findSdkForVideo returns a cached descriptor with anchor and hops", () => {

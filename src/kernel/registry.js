@@ -15,8 +15,21 @@ export class ShellSlot {
     this.#onEmpty = onEmpty;
   }
 
+  /**
+   * Install the session's shell. PlayerForge is one-shell-per-session, so a
+   * shell already live is destroyed here rather than silently dropped:
+   * otherwise adopting a second player orphans the first (still in the DOM and
+   * removal-watched, but unreachable from the registry and so never torn down).
+   * The slot is filled before destroying the displaced shell so its own
+   * onDestroy -> unregister() sees a different current and neither nulls the
+   * slot nor reports an empty registry.
+   */
   register(shell) {
+    const previous = this.#current;
     this.#current = shell;
+    if (previous && previous !== shell) {
+      previous.destroy();
+    }
     logger.log("registry", `Shell registered: ${shell.sdk.name}`);
   }
 

@@ -101,9 +101,9 @@ function fillComposedChain(start) {
   return len;
 }
 
-function matchSdk(video) {
+function matchSdk(video, registry) {
   const cached = matchCache.get(video);
-  if (cached && cached.parent === video.parentNode) {
+  if (cached && cached.parent === video.parentNode && cached.registry === registry) {
     return cached.value;
   }
   // Single composed walk (uBO's one-pass-over-tokens shape): the old code
@@ -113,8 +113,8 @@ function matchSdk(video) {
   // ties keep registry order then anchor order (strict < keeps the first).
   const len = fillComposedChain(video);
   let best = null;
-  for (let r = 0; r < REGISTRY.length; r++) {
-    const record = REGISTRY[r];
+  for (let r = 0; r < registry.length; r++) {
+    const record = registry[r];
     const anchors = record.anchors;
     for (let a = 0; a < anchors.length; a++) {
       const anchor = anchors[a];
@@ -134,7 +134,7 @@ function matchSdk(video) {
       }
     }
   }
-  matchCache.set(video, { value: best, parent: video.parentNode });
+  matchCache.set(video, { value: best, parent: video.parentNode, registry });
   return best;
 }
 
@@ -163,15 +163,20 @@ const descriptorCache = new WeakMap();
  * ancestry, but not across a re-parent: the entry is parent-stamped and
  * re-scanned the moment the video moves, so a bare <video> that a player SDK
  * later wraps is re-evaluated instead of staying cached as unrecognised.
+ *
+ * `registry` defaults to the production REGISTRY and is injectable so records
+ * it does not exercise (currently `host`) stay testable without exporting
+ * resolveContainer. The cache stamp carries the registry reference, so a
+ * custom registry can never serve a production hit.
  */
-export function findSdkForVideo(video) {
+export function findSdkForVideo(video, registry = REGISTRY) {
   const cached = descriptorCache.get(video);
-  if (cached !== undefined && cached.parent === video.parentNode) {
+  if (cached !== undefined && cached.parent === video.parentNode && cached.registry === registry) {
     return cached.descriptor;
   }
-  const match = matchSdk(video);
+  const match = matchSdk(video, registry);
   if (!match) {
-    descriptorCache.set(video, { descriptor: null, parent: video.parentNode });
+    descriptorCache.set(video, { descriptor: null, parent: video.parentNode, registry });
     return null;
   }
   const descriptor = {
@@ -181,17 +186,17 @@ export function findSdkForVideo(video) {
     anchor: match.el,
     hops: match.hops
   };
-  descriptorCache.set(video, { descriptor, parent: video.parentNode });
+  descriptorCache.set(video, { descriptor, parent: video.parentNode, registry });
   return descriptor;
 }
 
 /**
  * Resolve the element that hosts the shell DOM: the matched record's `host`
- * override, else the matched element itself. Exported solely so the
- * host-resolution branch (unexercised by the current registry) can be driven
- * by a synthetic match in the sdk-engine test.
+ * override, else the matched element itself. Private to the engine; the
+ * host branch (unexercised by the current registry) is driven in tests by
+ * passing a synthetic registry to findSdkForVideo.
  */
-export function resolveContainer({ record, el }) {
+function resolveContainer({ record, el }) {
   if (!record.host) {
     return el;
   }
