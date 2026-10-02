@@ -58,6 +58,13 @@ export const MIN_VIDEO_HEIGHT = 60;
  * Repeat-query memo: discovery calls findSdkForVideo + findContainer on the
  * same element back to back, and SPA frameworks re-ask about surviving
  * videos. WeakMap keys die with their videos - session-only, never persisted.
+ *
+ * Each entry is stamped with the parent the scan saw, because the cache is
+ * only valid while that ancestry holds: SDKs routinely take a bare <video>
+ * already in the DOM and later wrap it in their own container (Video.js,
+ * MediaElement, Plyr). Without a stamp, a video first seen before its wrap
+ * would stay cached (including a negative null) forever. A re-parent is the
+ * common, cheaply observable moment the ancestry changed, so it invalidates.
  */
 const matchCache = new WeakMap();
 
@@ -86,13 +93,17 @@ function fillComposedChain(start) {
     }
     node = node.parentNode ?? node.host ?? null;
   }
+  // Truncate to the filled length: the buffer is module-level and reused, so
+  // without this a prior deep walk leaves the tail pointing at nodes that may
+  // since have been detached - a strong reference held until the next scan.
+  chain.length = len;
   return len;
 }
 
 function matchSdk(video) {
   const cached = matchCache.get(video);
-  if (cached) {
-    return cached;
+  if (cached && cached.parent === video.parentNode) {
+    return cached.value;
   }
   // Single composed walk (uBO's one-pass-over-tokens shape): the old code
   // re-walked ancestry once per anchor via composedClosest, then walked
@@ -122,9 +133,7 @@ function matchSdk(video) {
       }
     }
   }
-  if (best) {
-    matchCache.set(video, best);
-  }
+  matchCache.set(video, { value: best, parent: video.parentNode });
   return best;
 }
 
@@ -134,6 +143,12 @@ function matchSdk(video) {
  * the SAME object instead of re-wrapping + re-allocating every call.
  * "Fewer APIs, same facts": the scan already computes `el` and `hops`, so they
  * are surfaced at zero extra cost rather than recomputed downstream.
+ *
+ * Parent-stamped like matchCache: a descriptor names a specific container, so
+ * it is only valid for the ancestry it resolved against. A re-parent (SDK
+ * wrap, SPA re-render reusing the video node) invalidates it; the next query
+ * re-scans and the container/anchor follow the new tree instead of pointing at
+ * a detached node.
  */
 const descriptorCache = new WeakMap();
 
@@ -143,19 +158,19 @@ const descriptorCache = new WeakMap();
  * Caches BOTH the positive descriptor and the negative null, so a page of
  * many non-SDK videos (ad grids, untracked embeds) never re-runs the full
  * ancestry scan per discovery pass. The WeakMap key dies with the video, so
- * entries are session-only. Negative caching is safe here because detection
- * is deterministic for a given composed ancestry, and a video that changes
- * its ancestry enough to gain an SDK is a different adoption cycle - the
- * media-event tap re-adopts it then.
+ * entries are session-only. Detection is deterministic for a given composed
+ * ancestry, but not across a re-parent: the entry is parent-stamped and
+ * re-scanned the moment the video moves, so a bare <video> that a player SDK
+ * later wraps is re-evaluated instead of staying cached as unrecognised.
  */
 export function findSdkForVideo(video) {
   const cached = descriptorCache.get(video);
-  if (cached !== undefined) {
-    return cached;
+  if (cached !== undefined && cached.parent === video.parentNode) {
+    return cached.descriptor;
   }
   const match = matchSdk(video);
   if (!match) {
-    descriptorCache.set(video, null);
+    descriptorCache.set(video, { descriptor: null, parent: video.parentNode });
     return null;
   }
   const descriptor = {
@@ -165,7 +180,7 @@ export function findSdkForVideo(video) {
     anchor: match.el,
     hops: match.hops
   };
-  descriptorCache.set(video, descriptor);
+  descriptorCache.set(video, { descriptor, parent: video.parentNode });
   return descriptor;
 }
 
@@ -246,15 +261,28 @@ export function forEachVideoInMutations(mutations, visit) {
   }
 }
 
-/** Shared adoption gate: the rendered box must reach minimum player size. */
+/**
+ * CSS-presence pre-gate, shared by the synchronous and observer-driven size
+ * gates: false when the element (or a content-visibility:auto subtree it sits
+ * in) is not currently generating a painted box. `contentVisibilityAuto`
+ * covers the case the old two-option call missed - a `content-visibility:
+ * auto` player scrolled out of view keeps a layout placeholder (non-zero box)
+ * but is skipped from rendering, so a stale size would wrongly admit it.
+ * Feature-detected: jsdom without checkVisibility stays on the rect-only path,
+ * and the gate is admission-negative only, so discovery can never regress.
+ */
+function hasPresentBox(el) {
+  return typeof el.checkVisibility !== "function"
+    || el.checkVisibility({
+      contentVisibilityAuto: true,
+      opacityProperty: true,
+      visibilityProperty: true
+    });
+}
+
+/** Shared synchronous adoption gate: the measured box must reach min size. */
 export function meetsMinSize(video, minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_VIDEO_HEIGHT) {
-  // Layout-free visibility pre-gate: hidden-but-sized players (carousels,
-  // display:none / visibility:hidden / opacity:0 trees) are rejected without
-  // forcing a layout flush via getBoundingClientRect. Feature-detect keeps
-  // jsdom (no checkVisibility) and any stragglers on the rect-only path - and
-  // the gate is admission-negative only, so discovery can never regress.
-  if (typeof video.checkVisibility === "function" &&
-      !video.checkVisibility({ opacityProperty: true, visibilityProperty: true })) {
+  if (!hasPresentBox(video)) {
     return false;
   }
   try {
@@ -266,18 +294,44 @@ export function meetsMinSize(video, minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_
 }
 
 /**
- * Growth-aware companion to meetsMinSize: watches candidates that failed the
- * gate and calls back the first time their box actually qualifies. The
- * ResizeObserver's initial + resize callbacks fire off the mutation batch
- * (layout already computed, no forced flush) and keep re-checking a video
- * that was inserted small and only later sized by CSS - the case a one-shot
- * rect read at insert time can never adopt. jsdom has no ResizeObserver, so
- * the fallback reuses today's synchronous gate.
+ * Size reported by a ResizeObserver entry, read straight from the delivered
+ * observation instead of calling getBoundingClientRect() - the browser already
+ * computed and handed us the box, so reading it here never forces a style +
+ * layout flush. Prefers the border box (the same quantity the synchronous gate
+ * reads) and falls back through contentBoxSize to the legacy contentRect for
+ * hosts that omit it. `inlineSize`/`blockSize` are logical axes; in the
+ * horizontal writing mode every video player uses they are width/height.
+ */
+function entryBoxSize(entry) {
+  const border = entry.borderBoxSize?.[0];
+  if (border) {
+    return { width: border.inlineSize, height: border.blockSize };
+  }
+  const content = entry.contentBoxSize?.[0];
+  if (content) {
+    return { width: content.inlineSize, height: content.blockSize };
+  }
+  const rect = entry.contentRect;
+  return { width: rect.width, height: rect.height };
+}
+
+/**
+ * Observer-driven layout-presence gate. Watches candidates that are not yet
+ * player-sized and calls back the first time their delivered ResizeObserver
+ * box both reaches minimum size AND passes the CSS-presence check. Because
+ * the measurement comes from the queued observation - taken after layout, off
+ * the mutation/media task - the callback path never forces a synchronous
+ * reflow, unlike a one-shot getBoundingClientRect() at insert time. It also
+ * keeps re-checking a video that was inserted small and only later sized by
+ * CSS (the case a rect read at insert time can never adopt) and one whose
+ * `content-visibility: auto` subtree only becomes rendered when scrolled in.
  *
  * One gate instance per watcher (probe/kernel): `watch` dedupes repeated
  * signals for the same element, `stop` tears everything down with the owner.
+ * jsdom has no real ResizeObserver, so the fallback reuses the synchronous
+ * gate and still qualifies immediately.
  */
-export function createSizeGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_VIDEO_HEIGHT } = {}) {
+export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_VIDEO_HEIGHT } = {}) {
   if (typeof ResizeObserver !== "function") {
     return {
       watch(video, onQualify) {
@@ -290,13 +344,19 @@ export function createSizeGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_VID
   }
   const waiting = new Map();
   const observer = new ResizeObserver((entries, ro) => {
-    for (const { target } of entries) {
-      if (meetsMinSize(target, minWidth, minHeight)) {
-        ro.unobserve(target);
-        const onQualify = waiting.get(target);
-        waiting.delete(target);
-        onQualify?.();
+    for (const entry of entries) {
+      const target = entry.target;
+      if (!waiting.has(target)) {
+        continue;
       }
+      const { width, height } = entryBoxSize(entry);
+      if (width < minWidth || height < minHeight || !hasPresentBox(target)) {
+        continue;
+      }
+      ro.unobserve(target);
+      const onQualify = waiting.get(target);
+      waiting.delete(target);
+      onQualify?.();
     }
   });
   return {
@@ -331,9 +391,16 @@ export function watchMediaEvents(onVideo, { signal } = {}) {
       onVideo(video);
     }
   };
+  // loadedmetadata is the earliest reliable "a real media resource loaded"
+  // signal: a preload="none" or autoplay-blocked player fires it well before
+  // loadeddata (which needs frame data) and can otherwise stay invisible to
+  // discovery until the user presses play. loadeddata still matters for
+  // players that surface metadata only on data; play catches late starts.
+  document.addEventListener("loadedmetadata", onMediaEvent, { capture: true, signal });
   document.addEventListener("loadeddata", onMediaEvent, { capture: true, signal });
   document.addEventListener("play", onMediaEvent, { capture: true, signal });
   return () => {
+    document.removeEventListener("loadedmetadata", onMediaEvent, true);
     document.removeEventListener("loadeddata", onMediaEvent, true);
     document.removeEventListener("play", onMediaEvent, true);
   };

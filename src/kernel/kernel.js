@@ -5,7 +5,7 @@ import { postTask } from "../shared/scheduler.js";
 import { Scope } from "../shared/scope.js";
 import { ShellSlot } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
-import { findSdkForVideo, meetsMinSize, createSizeGate, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
+import { findSdkForVideo, meetsMinSize, createLayoutGate, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
 
 /**
@@ -34,8 +34,8 @@ export class Kernel {
   #stopDiscoveryTap = null;
   /** True once the full-document discovery tap has been downgraded. */
   #discoveryDowngraded = false;
-  /** Lazily built growth gate for videos that failed meetsMinSize (see
-   *  #adoptVideo); stopped with the kernel scope. */
+  /** Lazily built observer-driven layout-presence gate for videos that failed
+   *  meetsMinSize (see #adoptVideo); stopped with the kernel scope. */
   #sizeGate = null;
   /** Kernel lifecycle scope: removal observers disconnect via onDispose,
    *  grace timers cancel via the signal. */
@@ -168,11 +168,12 @@ export class Kernel {
     }
     if (!meetsMinSize(video)) {
       // Not player-sized yet: a one-shot rect here would strand the video
-      // forever unless an unrelated media event re-ran adoption. The size
-      // gate re-enters this method the moment the box qualifies (RO
-      // callbacks run off the mutation batch, with layout already fresh).
+      // forever unless an unrelated media event re-ran adoption. The layout
+      // gate re-enters this method the moment the delivered box qualifies
+      // (RO callbacks run off the mutation batch, with layout already fresh,
+      // and the size is read from the observation rather than a fresh reflow).
       if (!this.#sizeGate && !this.#scope.disposed) {
-        this.#sizeGate = createSizeGate();
+        this.#sizeGate = createLayoutGate();
         this.#scope.onDispose(() => {
           this.#sizeGate?.stop();
           this.#sizeGate = null;

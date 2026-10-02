@@ -7,6 +7,8 @@ import {
   resolveContainer,
   videoFromEvent,
   meetsMinSize,
+  createLayoutGate,
+  watchMediaEvents,
   MIN_VIDEO_WIDTH,
   MIN_VIDEO_HEIGHT
 } from "../src/kernel/sdk.js";
@@ -117,6 +119,18 @@ test("meetsMinSize rejects hidden players before paying for layout", () => {
   assert.equal(meetsMinSize(video), false, "hidden player rejected despite size");
 });
 
+test("meetsMinSize rejects content-visibility:auto skipped players", () => {
+  const doc = dom("");
+  const video = sizedVideo(doc, { width: 800, height: 450 });
+  let seen = null;
+  video.checkVisibility = (options) => {
+    seen = options;
+    return false;
+  };
+  assert.equal(meetsMinSize(video), false);
+  assert.equal(seen.contentVisibilityAuto, true, "contentVisibilityAuto is consulted");
+});
+
 test("meetsMinSize still size-gates after a visibility pass", () => {
   const doc = dom("");
   const big = sizedVideo(doc, { width: 800, height: 450 });
@@ -126,6 +140,27 @@ test("meetsMinSize still size-gates after a visibility pass", () => {
   const small = sizedVideo(doc, { width: 40, height: 40 });
   small.checkVisibility = () => true;
   assert.equal(meetsMinSize(small), false, "visible undersized player still rejected");
+});
+
+test("watchMediaEvents taps loadedmetadata, loadeddata and play", () => {
+  const doc = dom('<video id="v"></video>');
+  const RealDoc = globalThis.document;
+  globalThis.document = doc;
+  try {
+    const seen = [];
+    const off = watchMediaEvents((el) => seen.push(el));
+    const video = doc.querySelector("video");
+    for (const type of ["loadedmetadata", "loadeddata", "play"]) {
+      video.dispatchEvent(new (doc.defaultView.Event)(type));
+    }
+    assert.equal(seen.length, 3, "all three media signals reach the tap");
+    assert.equal(seen.every((entry) => entry === video), true);
+    off();
+    video.dispatchEvent(new (doc.defaultView.Event)("play"));
+    assert.equal(seen.length, 3, "teardown silences the tap");
+  } finally {
+    globalThis.document = RealDoc;
+  }
 });
 
 test("videoFromEvent prefers an explicit video target", () => {
@@ -187,4 +222,183 @@ test("findSdkForVideo returns a cached descriptor with anchor and hops", () => {
   assert.equal(sdk.hops >= 1, true);
   // Every re-query returns the identical cached object - no per-call churn.
   assert.equal(findSdkForVideo(video), sdk);
+});
+
+test("findSdkForVideo re-scans a bare video once an SDK wraps it", () => {
+  const doc = dom('<div id="host"></div>');
+  const video = doc.createElement("video");
+  doc.querySelector("#host").appendChild(video);
+  // Seen before the SDK builds: remembered as unrecognised for this ancestry.
+  assert.equal(findSdkForVideo(video), null);
+
+  // Video.js/MediaElement-style progressive enhancement: the existing <video>
+  // node is moved into a newly built SDK container.
+  const wrapper = doc.createElement("div");
+  wrapper.className = "plyr";
+  doc.querySelector("#host").appendChild(wrapper);
+  wrapper.appendChild(video);
+
+  assert.equal(findSdkForVideo(video)?.name, "Plyr", "re-parented video is re-detected");
+});
+
+test("findSdkForVideo follows a re-parent to the new container", () => {
+  const doc = dom('<div class="plyr"><video></video></div>');
+  const video = doc.querySelector("video");
+  assert.equal(findSdkForVideo(video).container, doc.querySelector(".plyr"));
+
+  // SPA re-render: a fresh wrapper adopts the same video element.
+  const next = doc.createElement("div");
+  next.className = "plyr";
+  doc.body.appendChild(next);
+  next.appendChild(video);
+
+  assert.equal(
+    findSdkForVideo(video).container,
+    next,
+    "container tracks the live ancestry instead of a detached node"
+  );
+});
+
+/** Controllable ResizeObserver so the gate can be driven without a real
+ *  layout engine; mirrors the browser by delivering entries with the observer
+ *  instance as the second callback argument. */
+function fakeResizeObserver() {
+  const Real = globalThis.ResizeObserver;
+  const state = { cb: null, instance: null, observed: new Set(), observedPeak: 0 };
+  class FakeRO {
+    constructor(cb) {
+      state.cb = cb;
+      state.instance = this;
+    }
+    observe(el) {
+      state.observed.add(el);
+      state.observedPeak = Math.max(state.observedPeak, state.observed.size);
+    }
+    unobserve(el) {
+      state.observed.delete(el);
+    }
+    disconnect() {
+      state.observed.clear();
+    }
+  }
+  globalThis.ResizeObserver = FakeRO;
+  return {
+    state,
+    emit(entries) {
+      state.cb(entries, state.instance);
+    },
+    restore() {
+      globalThis.ResizeObserver = Real;
+    }
+  };
+}
+
+test("createLayoutGate qualifies from the delivered observer box, not a rect read", () => {
+  const doc = dom("");
+  // The synchronous rect stays tiny; only the observer's box is player-sized,
+  // proving the gate reads the observation instead of forcing layout.
+  const video = sizedVideo(doc, { width: 10, height: 10 });
+  const fake = fakeResizeObserver();
+  try {
+    let qualified = 0;
+    const gate = createLayoutGate({ minWidth: 100, minHeight: 60 });
+    gate.watch(video, () => qualified++);
+    assert.equal(qualified, 0, "unqualified until an observation arrives");
+
+    fake.emit([{ target: video, contentRect: { width: 200, height: 100 } }]);
+    assert.equal(qualified, 1, "qualified from the delivered box");
+    assert.equal(fake.state.observed.has(video), false, "qualified target unobserved");
+
+    fake.emit([{ target: video, contentRect: { width: 200, height: 100 } }]);
+    assert.equal(qualified, 1, "a qualified element is not re-armed");
+    gate.stop();
+  } finally {
+    fake.restore();
+  }
+});
+
+test("createLayoutGate ignores a box that fails the CSS-presence check", () => {
+  const doc = dom("");
+  const video = doc.createElement("video");
+  video.checkVisibility = () => false;
+  const fake = fakeResizeObserver();
+  try {
+    let qualified = 0;
+    const gate = createLayoutGate({ minWidth: 100, minHeight: 60 });
+    gate.watch(video, () => qualified++);
+    fake.emit([{ target: video, contentRect: { width: 200, height: 100 } }]);
+    assert.equal(qualified, 0, "a hidden box never qualifies");
+    assert.equal(fake.state.observed.has(video), true, "still watched for a later reveal");
+    gate.stop();
+  } finally {
+    fake.restore();
+  }
+});
+
+test("createLayoutGate waits for the delivered box to reach player size", () => {
+  const doc = dom("");
+  const video = doc.createElement("video");
+  const fake = fakeResizeObserver();
+  try {
+    let qualified = 0;
+    const gate = createLayoutGate({ minWidth: 100, minHeight: 60 });
+    gate.watch(video, () => qualified++);
+    fake.emit([{ target: video, contentRect: { width: 50, height: 30 } }]);
+    assert.equal(qualified, 0, "undersized delivered box rejected");
+    fake.emit([{ target: video, contentRect: { width: 100, height: 60 } }]);
+    assert.equal(qualified, 1, "exactly-at-threshold box qualifies");
+    gate.stop();
+  } finally {
+    fake.restore();
+  }
+});
+
+test("createLayoutGate dedupes repeat watches per element", () => {
+  const doc = dom("");
+  const video = doc.createElement("video");
+  const fake = fakeResizeObserver();
+  try {
+    const gate = createLayoutGate();
+    gate.watch(video, () => {});
+    gate.watch(video, () => {});
+    assert.equal(fake.state.observedPeak, 1, "one observe per element");
+    gate.stop();
+  } finally {
+    fake.restore();
+  }
+});
+
+test("createLayoutGate stop disconnects the observer", () => {
+  const doc = dom("");
+  const video = doc.createElement("video");
+  const fake = fakeResizeObserver();
+  try {
+    const gate = createLayoutGate();
+    gate.watch(video, () => {});
+    gate.stop();
+    assert.equal(fake.state.observed.size, 0, "stop drops every observed target");
+  } finally {
+    fake.restore();
+  }
+});
+
+test("createLayoutGate falls back to the synchronous rect gate without ResizeObserver", () => {
+  const Real = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = undefined;
+  try {
+    const doc = dom("");
+    let qualified = 0;
+    createLayoutGate({ minWidth: 100, minHeight: 60 }).watch(
+      sizedVideo(doc, { width: 200, height: 100 }),
+      () => qualified++
+    );
+    assert.equal(qualified, 1, "sized video qualifies immediately");
+    createLayoutGate({ minWidth: 100, minHeight: 60 }).watch(
+      sizedVideo(doc, { width: 50, height: 50 }),
+      () => qualified++
+    );
+    assert.equal(qualified, 1, "undersized video never qualifies");
+  } finally {
+    globalThis.ResizeObserver = Real;
+  }
 });
