@@ -181,6 +181,18 @@ export function measureGlass(path) {
   // Specular rim: a bright hairline on the top edge, darkening just inside it.
   const rim = [0, 1, 2, 3, 4, 5].map((dy) => luma(img, midX, box.y0 + dy));
 
+  // Measured as a lift over the surface just below it, not as an absolute
+  // luminance. An absolute threshold silently encodes one tint choice: the
+  // original was luma >= 110, which matched a 0.42-alpha rim over a 74% tint and
+  // false-failed a 0.3-alpha rim over a 58% tint even though the highlight was
+  // plainly visible. A relative test asks the design-independent question - is
+  // the edge brighter than the surface under it - so it survives future tint
+  // changes. Deleting the rim entirely still fails it, because the edge then
+  // measures flat (verified: 75,75,74,74,73,73 -> 0% lift).
+  const rimPeak = Math.max(...rim);
+  const rimInterior = Math.max(...rim.slice(2));
+  const rimLift = rimInterior > 0 ? (rimPeak - rimInterior) / rimInterior : 0;
+
   // Corner geometry: count dark pixels per row across the top-left corner. A
   // square corner starts at full width; a rounded one ramps up.
   const corner = [];
@@ -199,7 +211,9 @@ export function measureGlass(path) {
     legibilityDelta: deltas,
     minLegibilityDelta: Math.min(...deltas),
     rimLuma: rim,
-    rimPeak: Math.max(...rim),
+    rimPeak,
+    rimInterior,
+    rimLift,
     cornerRun: corner,
     // A rounded corner leaves the first row mostly empty; a square one fills it.
     cornerRounded: corner[0] < corner[Math.floor(corner.length / 2)],
@@ -328,8 +342,8 @@ function checkInvariants(m) {
   if (m.minLegibilityDelta <= 0) {
     problems.push(`panel is not darker than its backdrop (min delta ${m.minLegibilityDelta})`);
   }
-  if (m.rimPeak < 110) {
-    problems.push(`specular rim too weak (peak luma ${m.rimPeak}, want >= 110)`);
+  if (m.rimLift < 0.2) {
+    problems.push(`specular rim too weak (edge is ${(m.rimLift * 100).toFixed(0)}% brighter than the surface below it, want >= 20%)`);
   }
   if (!m.cornerRounded) {
     problems.push("top-left corner is square, not rounded");
@@ -358,7 +372,7 @@ async function main() {
   console.log(`\n  panel           : ${m.box.w}x${m.box.h}px`);
   console.log(`  interior luma   : ${m.interiorLuma.join(", ")}  (backdrop beside it is ~125)`);
   console.log(`  legibility delta: ${m.legibilityDelta.join(", ")}  (positive = sheet is darker)`);
-  console.log(`  rim luma        : ${m.rimLuma.join(", ")}`);
+  console.log(`  rim luma        : ${m.rimLuma.join(", ")}  (edge ${(m.rimLift * 100).toFixed(0)}% brighter than surface below)`);
   console.log(`  corner rounded  : ${m.cornerRounded}`);
 
   const problems = checkInvariants(m);
@@ -410,7 +424,7 @@ async function main() {
     const TOLERANCE = 0.3;
     const ranged = [
       ["min legibility delta", base.panelOpen.minLegibilityDelta, m.minLegibilityDelta],
-      ["rim peak luma", base.panelOpen.rimPeak, m.rimPeak],
+      ["rim lift", base.panelOpen.rimLift, m.rimLift],
     ];
 
     console.log(`\n  comparison vs baseline`);

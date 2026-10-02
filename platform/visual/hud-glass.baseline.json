@@ -1,55 +1,57 @@
 {
   "note": "Recorded by platform/visual/hud-glass.mjs --record. Legibility/radius are the values to watch when retuning the glass tokens.",
   "tokens": {
-    "backdropFilter": "blur(36px) saturate(1.8) brightness(0.72)",
-    "backgroundColor": "color(srgb 0 0 0 / 0.74)",
-    "blurLg": "blur(36px)saturate(1.8)brightness(0.72)",
+    "backdropFilter": "blur(30px) saturate(1.8) brightness(1)",
+    "backgroundColor": "color(srgb 0 0 0 / 0.58)",
+    "blurLg": "blur(30px)saturate(1.8)brightness(1)",
     "borderRadius": "18px",
-    "boxShadow": "rgba(255, 255, 255, 0.42) 0px 1px 0px 0px inset, rgba(255, 255, 255, 0.1) 0px -1px 0px 0px inset, rgba(255, 255, 255, 0.06) 0px 0px 0px 1px inset, rgba(0, 0, 0, 0.34) 0px 2px 6px 0px, rgba(0, 0, 0, 0.55) 0px 22px 60px 0px",
-    "glassTint": "color-mix(in srgb,#000/**/74%,transparent)",
+    "boxShadow": "rgba(255, 255, 255, 0.3) 0px 1px 0px 0px inset, rgba(255, 255, 255, 0.06) 0px 0px 0px 1px inset, rgba(0, 0, 0, 0.45) 0px 10px 30px 0px",
+    "glassTint": "color-mix(in srgb,#000/**/58%,transparent)",
     "radiusLg": "18px"
   },
   "panelOpen": {
     "found": true,
     "box": {
-      "w": 390,
-      "h": 255
+      "w": 382,
+      "h": 239
     },
     "interiorLuma": [
+      74,
+      75,
+      75,
       61,
-      49,
-      40,
-      33,
-      31
+      50
     ],
     "legibilityDelta": [
-      69,
-      78,
-      85,
-      90,
-      91
+      59,
+      56,
+      54,
+      67,
+      77
     ],
-    "minLegibilityDelta": 69,
+    "minLegibilityDelta": 54,
     "rimLuma": [
-      76,
-      157,
-      75,
-      75,
-      74,
-      74
+      82,
+      64,
+      38,
+      38,
+      38,
+      40
     ],
-    "rimPeak": 157,
+    "rimPeak": 82,
+    "rimInterior": 40,
+    "rimLift": 1.05,
     "cornerRun": [
       3,
-      1,
-      6,
-      9,
+      8,
       11,
-      10,
-      12,
-      13,
+      14,
       15,
-      14
+      17,
+      18,
+      18,
+      19,
+      19
     ],
     "cornerRounded": true
   }
