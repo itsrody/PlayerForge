@@ -19,7 +19,11 @@
  *   Read a value from persistent storage. Returns fallback if key is absent.
  *
  * GM_setValue(key, value) -> void
- *   Write a value to persistent storage.
+ *   Write a value to persistent storage (sync API).
+ *
+ * GM.setValue(key, value) -> Promise<void>
+ *   Promise-style write (GM.* v4 API). Mirrors into the same backing store and
+ *   resolves immediately, modelling ScriptCat's async commit.
  *
  * GM_deleteValue(key) -> void
  *   Remove a key from persistent storage.

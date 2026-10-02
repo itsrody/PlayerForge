@@ -11,8 +11,49 @@ export function gmGetValue(key, fallback) {
   return GM_getValue(key, fallback);
 }
 
+/** The most recent promise-style storage write, so a caller that stays alive
+ *  can await its commit (see flushStorageWrites). Null when none is pending. */
+let lastWrite = null;
+
+/**
+ * Persist one root key.
+ *
+ * Prefers the promise-style `GM.setValue` (Greasemonkey/Tampermonkey v4 API,
+ * ScriptCat 1.4+): manager storage is written off-thread, so a synchronous
+ * return cannot tell us whether the write was committed, and a rejected write
+ * used to be silent. The returned promise surfaces write failures in the log
+ * and lets a still-live context await the commit (flushStorageWrites). Falls
+ * back to the always-available sync `GM_setValue` - the only value API
+ * guaranteed under `@early-start` - and returns null there, since a sync write
+ * has nothing to observe. A `GM.setValue` that throws (e.g. installed but not
+ * yet functional during early-start) also falls back, so the value still lands.
+ */
 export function gmSetValue(key, value) {
+  if (typeof GM === "object" && GM !== null && typeof GM.setValue === "function") {
+    try {
+      const write = Promise.resolve(GM.setValue(key, value)).catch((err) => {
+        logger.error("storage", `Failed to persist "${key}":`, err);
+      });
+      lastWrite = write;
+      return write;
+    } catch (err) {
+      logger.error("storage", `GM.setValue threw for "${key}", falling back to sync:`, err);
+    }
+  }
   GM_setValue(key, value);
+  return null;
+}
+
+/**
+ * Resolves once the most recent promise-style write has settled, or at once
+ * when the sync fallback is in use. Never rejects - gmSetValue already logs the
+ * reason - so it is a pure "the manager is done with our last write" gate for
+ * teardown paths that keep their realm alive (shell destroy, SPA exits).
+ */
+export function flushStorageWrites() {
+  const done = lastWrite;
+  lastWrite = null;
+  return done ?? Promise.resolve();
 }
 
 /**

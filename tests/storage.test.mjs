@@ -5,7 +5,7 @@ let stored = {};
 globalThis.GM_getValue = (key, fallback) => (key in stored ? stored[key] : fallback);
 globalThis.GM_setValue = (key, value) => { stored[key] = value; };
 
-const { KEYS, getConfigValue, setConfigValue, setConfigFields, deleteConfigField, invalidateConfigCache, whenManagerReady } = await import("../src/shared/storage.js");
+const { KEYS, getConfigValue, setConfigValue, setConfigFields, deleteConfigField, invalidateConfigCache, whenManagerReady, flushStorageWrites } = await import("../src/shared/storage.js");
 
 beforeEach(() => invalidateConfigCache());
 
@@ -124,6 +124,51 @@ test("setConfigFields commits the cache in sync with storage", () => {
   assert.equal(getConfigValue("filter.brightness"), 150);
   assert.equal(getConfigValue("filter.contrast"), 110);
   assert.equal(stored[KEYS.configs].filter.brightness, 150);
+});
+
+test("gmSetValue prefers promise-style GM.setValue and flushStorageWrites awaits the commit", async () => {
+  let release;
+  globalThis.GM = {
+    setValue: (key, value) => new Promise((resolve) => {
+      release = () => { stored[key] = value; resolve(); };
+    })
+  };
+  try {
+    stored = {};
+    setConfigValue("ui.volume", 0.7);
+    assert.equal(stored[KEYS.configs], undefined, "not committed until GM.setValue resolves");
+    release();
+    await flushStorageWrites();
+    assert.equal(stored[KEYS.configs].ui.volume, 0.7);
+  } finally {
+    delete globalThis.GM;
+  }
+});
+
+test("gmSetValue falls back to sync GM_setValue when GM.setValue throws", () => {
+  globalThis.GM = { setValue: () => { throw new Error("not ready"); } };
+  try {
+    stored = {};
+    setConfigValue("ui.volume", 0.4);
+    assert.equal(stored[KEYS.configs].ui.volume, 0.4, "sync fallback still persisted the value");
+  } finally {
+    delete globalThis.GM;
+  }
+});
+
+test("flushStorageWrites never rejects when GM.setValue rejects", async () => {
+  globalThis.GM = { setValue: () => Promise.reject(new Error("nope")) };
+  try {
+    stored = {};
+    setConfigValue("ui.volume", 0.3);
+    await flushStorageWrites();
+  } finally {
+    delete globalThis.GM;
+  }
+});
+
+test("flushStorageWrites resolves at once with the sync fallback", async () => {
+  await flushStorageWrites();
 });
 
 test("whenManagerReady resolves immediately without CAT_scriptLoaded", async () => {

@@ -518,6 +518,12 @@ export class ChromiumDriver {
       window.GM_setValue = function(key, value) {
         window.__pfGMStorage[key] = value;
       };
+      window.GM = {
+        setValue: function(key, value) {
+          window.__pfGMStorage[key] = value;
+          return Promise.resolve();
+        }
+      };
       window.GM_deleteValue = function(key) {
         delete window.__pfGMStorage[key];
       };

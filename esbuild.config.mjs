@@ -23,6 +23,9 @@ import process from "node:process";
 // early-start ScriptCat has not yet installed all granted GM APIs, so
 // manager-dependent boot (GM_info, GM_registerMenuCommand) is gated on
 // CAT_scriptLoaded() and degrades gracefully instead of assuming availability.
+// Storage writes prefer the promise-style GM.setValue (GM.* v4 API) so a
+// rejected async write is logged rather than silent; the sync GM_setValue is
+// the always-available fallback under early-start and in the test harness.
 const banner = `// ==UserScript==
 // @name         PlayerForge
 // @namespace    https://github.com/PlayerForge
@@ -70,6 +73,7 @@ const banner = `// ==UserScript==
 // @exclude      *://reddit.com/*
 // @exclude      *://*.tumblr.com/*
 // @grant        GM_setValue
+// @grant        GM.setValue
 // @grant        GM_getValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_unregisterMenuCommand

@@ -8,6 +8,7 @@ export default [
       sourceType: "module",
       globals: {
         // ScriptCat manager APIs
+        GM: "readonly",
         GM_getValue: "readonly",
         GM_setValue: "readonly",
         GM_addValueChangeListener: "readonly",
