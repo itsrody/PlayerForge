@@ -51,11 +51,27 @@ function separator() {
 async function runTests() {
   log("Running Node.js unit tests...");
   separator();
+  // Scoped to tests/*.test.mjs explicitly, matching the `test` npm script.
+  // Bare `node --test` recursively discovers the WHOLE repo, which sweeps in
+  // platform/integration/*.test.mjs too: 408 tests here against 352 for
+  // `npm test`. That puts 56 ChromiumDriver tests inside the "unit tests" step,
+  // where they run under node --test's default FILE parallelism - many browsers
+  // at once, the exact starvation documented in runIntegration below. It is
+  // also why `ci` paid for the browser suite twice: once here in parallel, then
+  // again serially in runIntegration.
+  const unitDir = join(HERE, "..", "tests");
+  const unitFiles = readdirSync(unitDir)
+    .filter((f) => f.endsWith(".test.mjs"))
+    .sort();
+  if (unitFiles.length === 0) {
+    log("No unit test files found.");
+    return;
+  }
   try {
-    execSync("node --import ./tests/loader.mjs --test", {
-      cwd: PROJECT_ROOT,
-      stdio: "inherit",
-    });
+    execSync(
+      `node --import ./tests/loader.mjs --test ${unitFiles.map((f) => join(unitDir, f)).join(" ")}`,
+      { cwd: PROJECT_ROOT, stdio: "inherit" }
+    );
     log("Unit tests passed.");
   } catch {
     log("Unit tests FAILED.");
