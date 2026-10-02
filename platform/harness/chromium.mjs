@@ -345,6 +345,10 @@ export class ChromiumDriver {
     // is caller-owned, so never delete it - only ever remove our own temp one.
     const ownsProfile = suppliedProfileDir === null;
     const profileDir = ownsProfile ? mkdtempSync(join(tmpdir(), "pf-driver-")) : suppliedProfileDir;
+    // A supplied directory may not exist yet, and wrapBrowser() writes the
+    // chromedriver shim straight into it - so an absent directory fails with a
+    // bare ENOENT on the shim rather than anything mentioning the profile.
+    if (!ownsProfile) mkdirSync(profileDir, { recursive: true });
     if (prefs !== null) {
       const defaultDir = join(profileDir, "Default");
       mkdirSync(defaultDir, { recursive: true });
