@@ -130,6 +130,36 @@ test("late finite duration also resolves through durationchange", async () => {
   assert.equal(writes["pf:resume"].entries[0].duration, 90);
 });
 
+test("destroy persists the final position", async () => {
+  // The class docstring promises every boundary - including destroy - flushes
+  // immediately, and destroy is the only one of those boundaries that has no
+  // event of its own: it runs on SPA video swaps (registry re-entry) where
+  // pause/ended/visibilitychange never fire and pagehide never happens at all.
+  // The other destroy tests here cover the observer and the metadata wait;
+  // none covered this save, so removing it would have read as pure cleanup and
+  // silently cost the last position of every SPA-navigated video.
+  delete writes["pf:resume"];
+  const { shell } = makeEnv(600);
+  const tracker = new ResumeTracker(shell);
+  await flush();
+  await flush();
+  assert.ok(writes["pf:resume"]?.entries.length, "precondition: entry exists");
+
+  // Play forward, then tear down with no intervening pause/seek/ended.
+  // No frame has been presented, so #flushPosition falls back to currentTime.
+  shell.currentTime = 240;
+  tracker.destroy();
+  await flush();
+  await flush();
+
+  const entry = writes["pf:resume"].entries[0];
+  assert.equal(
+    entry.resume,
+    240,
+    `destroy wrote resume=${entry.resume}, expected the live position 240`
+  );
+});
+
 test("destroy during the metadata wait cancels it without creating the entry", async () => {
   delete writes["pf:resume"];
   const { shell } = makeEnv(null);
