@@ -67,8 +67,14 @@ export const TUNING = {
     velocityFilterMs: 60
   },
   resume: {
-    /** Minimum wall-clock time between incremental persists (timeupdate-driven). */
-    saveIntervalMs: 60000,
+    /** Dynamic checkpoint span: an incremental persist lands once the playhead
+     *  has advanced this fraction of the resource duration, clamped so short
+     *  clips do not churn GM storage and long films still checkpoint within a
+     *  bounded media gap. Content-relative, so playbackRate and buffering never
+     *  distort the cadence (no wall clock). */
+    checkpointRatio: 0.01,
+    minCheckpointSeconds: 10,
+    maxCheckpointSeconds: 60,
     /** Progress at/after which the entry resets so the video restarts next time. */
     completionRatio: 0.95,
     /** Ignore tiny drifts between saves. */

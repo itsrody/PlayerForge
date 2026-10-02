@@ -23,6 +23,14 @@ function makeEnv(duration) {
   globalThis.window = dom.window;
   globalThis.location = dom.window.location;
   globalThis.document = dom.window.document;
+  // jsdom defaults to visibilityState "prerender" (hidden), which would gate
+  // every incremental checkpoint; model an active, visible page instead.
+  Object.defineProperty(dom.window.document, "visibilityState", {
+    value: "visible", configurable: true
+  });
+  Object.defineProperty(dom.window.document, "hidden", {
+    value: false, configurable: true
+  });
   const video = dom.window.document.createElement("video");
   dom.window.document.body.appendChild(video);
   if (duration != null) {
@@ -245,8 +253,9 @@ test("qualifying timeupdate persists progress; sub-epsilon moves do not", async 
     entries: [{ id: "aaa", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 42, createdAt: 0, updatedAt: Date.now() }]
   };
   const { dom, video, shell } = makeEnv(600);
-  // Floor passes immediately so the test isolates the epsilon gate.
-  TUNING.resume.saveIntervalMs = 0;
+  // Span collapses to zero so the test isolates the epsilon gate.
+  TUNING.resume.minCheckpointSeconds = 0;
+  TUNING.resume.maxCheckpointSeconds = 0;
   shell.paused = false;
   shell.currentTime = 42;
   const tracker = new ResumeTracker(shell);
@@ -265,14 +274,15 @@ test("qualifying timeupdate persists progress; sub-epsilon moves do not", async 
   tracker.destroy();
 });
 
-test("wall floor gates incremental timeupdate saves but never the pause flush", async () => {
+test("content span gates incremental timeupdate saves but never the pause flush", async () => {
   writes["pf:resume"] = {
     version: 1,
     entries: [{ id: "bbb", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
   };
   const { dom, video, shell } = makeEnv(600);
-  // The real 60s floor: elapsed wall time in a test never reaches it.
-  TUNING.resume.saveIntervalMs = 60000;
+  // Pin the span wide: a 10s advance is far past epsilon but inside the span.
+  TUNING.resume.minCheckpointSeconds = 60;
+  TUNING.resume.maxCheckpointSeconds = 60;
   shell.paused = false;
   shell.currentTime = 0;
   const tracker = new ResumeTracker(shell);
@@ -281,13 +291,13 @@ test("wall floor gates incremental timeupdate saves but never the pause flush", 
   await flush();
   const stored = () => writes["pf:resume"].entries[0].resume;
 
-  shell.currentTime = 10; // far past epsilon, but inside the wall floor
+  shell.currentTime = 10; // far past epsilon, but inside the content span
   video.dispatchEvent(new dom.window.Event("timeupdate"));
-  assert.equal(stored(), 0, "incremental save blocked by the wall floor");
+  assert.equal(stored(), 0, "incremental save blocked by the content span");
 
   shell.paused = true;
   video.dispatchEvent(new dom.window.Event("pause"));
-  assert.equal(stored(), 10, "pause flush bypasses the wall floor");
+  assert.equal(stored(), 10, "pause flush bypasses the content span");
   tracker.destroy();
 });
 
@@ -297,7 +307,8 @@ test("already-playing video persists on its first qualifying timeupdate - no int
     entries: [{ id: "ccc", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
   };
   const { dom, video, shell } = makeEnv(600);
-  TUNING.resume.saveIntervalMs = 0;
+  TUNING.resume.minCheckpointSeconds = 0;
+  TUNING.resume.maxCheckpointSeconds = 0;
   shell.paused = false;
   shell.currentTime = 0;
   const tracker = new ResumeTracker(shell);
@@ -331,7 +342,8 @@ test("off-screen IntersectionObserver observation gates incremental resume saves
   };
   try {
     const { dom, video, shell } = makeEnv(600);
-    TUNING.resume.saveIntervalMs = 0;
+    TUNING.resume.minCheckpointSeconds = 0;
+    TUNING.resume.maxCheckpointSeconds = 0;
     shell.paused = false;
     shell.currentTime = 0;
     const tracker = new ResumeTracker(shell);
@@ -369,7 +381,8 @@ test("off-screen IntersectionObserver observation gates incremental resume saves
 test("SPA route change flushes the leaving entry and adopts the new route's media", async () => {
   delete writes["pf:resume"];
   const { dom, video, shell } = makeEnv(600);
-  TUNING.resume.saveIntervalMs = 0;
+  TUNING.resume.minCheckpointSeconds = 0;
+  TUNING.resume.maxCheckpointSeconds = 0;
   shell.paused = false;
   shell.currentTime = 100;
   const tracker = new ResumeTracker(shell);
@@ -432,4 +445,180 @@ test("a hash-only navigation does not re-adopt - same path, same entry", async (
   assert.equal(writes["pf:resume"].entries.length, 1, "no re-adoption for a same-path navigation");
 
   tracker.destroy();
+});
+
+/* --- Dynamic content cadence + playback-status flushes ---------------- */
+
+test("the checkpoint span scales with duration rather than wall time", async (t) => {
+  writes["pf:resume"] = {
+    version: 1,
+    entries: [{ id: "span1", domain: "youtube", path: "/watch", title: "", duration: 6000, resume: 0, createdAt: 0, updatedAt: Date.now() }]
+  };
+  const { dom, video, shell } = makeEnv(6000);
+  // Defaults: 0.01 * 6000 = 60s span.
+  TUNING.resume.checkpointRatio = 0.01;
+  TUNING.resume.minCheckpointSeconds = 10;
+  TUNING.resume.maxCheckpointSeconds = 60;
+  shell.paused = false;
+  shell.currentTime = 0;
+  const tracker = new ResumeTracker(shell);
+  t.after(() => tracker.destroy());
+  await flush();
+  await flush();
+  await flush();
+  const stored = () => writes["pf:resume"].entries[0].resume;
+
+  shell.currentTime = 30; // under the duration-derived 60s span
+  video.dispatchEvent(new dom.window.Event("timeupdate"));
+  assert.equal(stored(), 0, "no checkpoint under the duration-scaled span");
+
+  shell.currentTime = 61;
+  video.dispatchEvent(new dom.window.Event("timeupdate"));
+  assert.equal(stored(), 61, "checkpoint at the duration-scaled span");
+});
+
+test("a seeked flush persists the landed position, bypassing the span", async (t) => {
+  writes["pf:resume"] = {
+    version: 1,
+    entries: [{ id: "seek1", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
+  };
+  const { dom, video, shell } = makeEnv(600);
+  // Wide span: only the explicit seek flush can write.
+  TUNING.resume.minCheckpointSeconds = 60;
+  TUNING.resume.maxCheckpointSeconds = 60;
+  shell.paused = false;
+  shell.currentTime = 0;
+  const tracker = new ResumeTracker(shell);
+  t.after(() => tracker.destroy());
+  await flush();
+  await flush();
+  await flush();
+  const stored = () => writes["pf:resume"].entries[0].resume;
+
+  shell.currentTime = 300;
+  video.dispatchEvent(new dom.window.Event("seeked"));
+  assert.equal(stored(), 300, "the seek target persists immediately");
+});
+
+test("ended resets the entry so the next visit restarts", async (t) => {
+  writes["pf:resume"] = {
+    version: 1,
+    entries: [{ id: "end1", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
+  };
+  const { dom, video, shell } = makeEnv(600);
+  TUNING.resume.minCheckpointSeconds = 0;
+  TUNING.resume.maxCheckpointSeconds = 0;
+  shell.paused = false;
+  shell.currentTime = 0;
+  const tracker = new ResumeTracker(shell);
+  t.after(() => tracker.destroy());
+  await flush();
+  await flush();
+  await flush();
+  const stored = () => writes["pf:resume"].entries[0].resume;
+
+  shell.currentTime = 300;
+  video.dispatchEvent(new dom.window.Event("timeupdate"));
+  assert.equal(stored(), 300);
+
+  shell.currentTime = 600;
+  video.dispatchEvent(new dom.window.Event("ended"));
+  assert.equal(stored(), 0, "completion resets the entry");
+});
+
+test("a hidden tab flushes and suspends checkpoints until visible again", async (t) => {
+  writes["pf:resume"] = {
+    version: 1,
+    entries: [{ id: "vis1", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
+  };
+  const { dom, video, shell } = makeEnv(600);
+  TUNING.resume.minCheckpointSeconds = 0;
+  TUNING.resume.maxCheckpointSeconds = 0;
+  shell.paused = false;
+  shell.currentTime = 0;
+  const tracker = new ResumeTracker(shell);
+  t.after(() => tracker.destroy());
+  await flush();
+  await flush();
+  await flush();
+  const stored = () => writes["pf:resume"].entries[0].resume;
+  const doc = dom.window.document;
+
+  shell.currentTime = 25;
+  Object.defineProperty(doc, "visibilityState", { value: "hidden", configurable: true });
+  Object.defineProperty(doc, "hidden", { value: true, configurable: true });
+  doc.dispatchEvent(new dom.window.Event("visibilitychange"));
+  assert.equal(stored(), 25, "hiding flushes the position immediately");
+
+  shell.currentTime = 40;
+  video.dispatchEvent(new dom.window.Event("timeupdate"));
+  assert.equal(stored(), 25, "checkpoints are suspended while hidden");
+
+  Object.defineProperty(doc, "visibilityState", { value: "visible", configurable: true });
+  Object.defineProperty(doc, "hidden", { value: false, configurable: true });
+  doc.dispatchEvent(new dom.window.Event("visibilitychange"));
+  shell.currentTime = 45;
+  video.dispatchEvent(new dom.window.Event("timeupdate"));
+  assert.equal(stored(), 45, "checkpoints resume once visible again");
+});
+
+test("pagehide and freeze flush the final position", async (t) => {
+  writes["pf:resume"] = {
+    version: 1,
+    entries: [{ id: "life1", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
+  };
+  const { dom, video, shell } = makeEnv(600);
+  // Wide span: only the lifecycle flushes can write.
+  TUNING.resume.minCheckpointSeconds = 60;
+  TUNING.resume.maxCheckpointSeconds = 60;
+  shell.paused = false;
+  shell.currentTime = 0;
+  const tracker = new ResumeTracker(shell);
+  t.after(() => tracker.destroy());
+  await flush();
+  await flush();
+  await flush();
+  const stored = () => writes["pf:resume"].entries[0].resume;
+
+  shell.currentTime = 25;
+  dom.window.dispatchEvent(new dom.window.Event("pagehide"));
+  assert.equal(stored(), 25, "pagehide flushes the final position");
+
+  shell.currentTime = 50;
+  dom.window.document.dispatchEvent(new dom.window.Event("freeze"));
+  assert.equal(stored(), 50, "freeze flushes the final position");
+});
+
+test("the rVFC crank checkpoints on presented frames within the dynamic span", async (t) => {
+  writes["pf:resume"] = {
+    version: 1,
+    entries: [{ id: "rvfc1", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
+  };
+  const { dom, video, shell } = makeEnv(600);
+  TUNING.resume.minCheckpointSeconds = 10;
+  TUNING.resume.maxCheckpointSeconds = 10;
+  shell.paused = false;
+  shell.currentTime = 0;
+  let frameCb = null;
+  video.requestVideoFrameCallback = (cb) => {
+    frameCb = cb;
+    return 1;
+  };
+  video.cancelVideoFrameCallback = () => {
+    frameCb = null;
+  };
+  const tracker = new ResumeTracker(shell);
+  t.after(() => tracker.destroy());
+  await flush();
+  await flush();
+  await flush();
+  const stored = () => writes["pf:resume"].entries[0].resume;
+
+  assert.equal(typeof frameCb, "function", "the crank armed a frame callback");
+  frameCb(0, { mediaTime: 4 });
+  assert.equal(stored(), 0, "a frame under the span does not checkpoint");
+  assert.equal(typeof frameCb, "function", "the crank re-armed itself");
+
+  frameCb(0, { mediaTime: 12 });
+  assert.equal(stored(), 12, "a presented frame past the span checkpoints");
 });

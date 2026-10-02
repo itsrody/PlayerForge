@@ -24,9 +24,9 @@ const RESUME_DURATION_FUZZ = TUNING.resume.durationFuzz;
 const RESUME_MIN_POSITION = TUNING.resume.minPosition;
 const RESUME_SAVE_EPSILON_S = TUNING.resume.saveEpsilonSeconds;
 const RESUME_COMPLETION_RATIO = TUNING.resume.completionRatio;
-// NOTE: saveIntervalMs is deliberately NOT hoisted - tests mutate
-// TUNING.resume.saveIntervalMs at runtime to set the wall floor, so it must
-// stay a live object read on the save-decision path.
+// NOTE: checkpointRatio/min/max are deliberately NOT hoisted - tests mutate
+// TUNING.resume.* at runtime to pin the checkpoint span, so they must stay
+// live object reads on the save-decision path.
 
 /**
  * LWW merge of foreign entries into memory. Unknown ids join the store;
@@ -400,8 +400,10 @@ export class ResumeStore {
 /**
  * Shell-owned playback tracker: persists progress per (domain, path, duration)
  * and resumes where the user left off, with a "Start over" toast action.
- * Saves are media-clock driven: a passive `timeupdate` listener (which only
- * fires while playback advances) plus an immediate flush on pause and destroy.
+ * Saves are playback-status driven: an rVFC crank (frames are presented only
+ * while playing) checkpoints every duration-scaled span of content, and every
+ * boundary - pause, seeked, ended, hidden, freeze, pagehide, destroy - flushes
+ * immediately. No wall-clock interval.
  */
 export class ResumeTracker {
   #shell;
@@ -413,10 +415,13 @@ export class ResumeTracker {
   /** Eagerly resolved context promise — kicked off in the constructor. */
   #contextPromise;
   #lastSavedPosition = 0;
-  /** Wall-clock floor for persists - keeps the write cadence bounded. */
-  #lastSavedWall = 0;
-  /** Pending rVFC id from the pause flush; cancelled in destroy() so a
-   *  queued final-save callback can never fire into a dead shell. */
+  /** Exact mediaTime of the most recently presented frame, refreshed by the
+   *  rVFC crank and by every seek; the flush paths prefer it over currentTime
+   *  (which is the decoder position and may lead/lag the display). NaN until
+   *  the first frame/seek. */
+  #lastFrameMediaTime = NaN;
+  /** Pending rVFC id for the frame crank; cancelled in destroy() so a queued
+   *  callback can never fire into a dead shell. */
   #rvfcHandle = null;
   /** One-shot swap listener armed per route change; null when not armed. */
   #readoptScope = null;
@@ -528,8 +533,11 @@ export class ResumeTracker {
       }
     }
 
-    const savedPosition = Number(this.#entry.resume) || NaN;
-    if (savedPosition > RESUME_MIN_POSITION) {
+    // A resource swap reuses the element, so the previous resource's last
+    // presented frame is meaningless here; wait for this one's first frame/seek.
+    this.#lastFrameMediaTime = NaN;
+    const savedPosition = Number(this.#entry.resume);
+    if (Number.isFinite(savedPosition) && savedPosition > RESUME_MIN_POSITION) {
       // Seek immediately — the browser buffers from the target position in the
       // background. No need to wait for `canplay` (which requires buffered
       // data) since seeking is safe at metadata time and the user sees the
@@ -545,7 +553,9 @@ export class ResumeTracker {
       }]);
     }
 
-    this.#lastSavedPosition = Number.isFinite(savedPosition) ? savedPosition : (shell.currentTime || NaN);
+    // A fresh entry has resume 0; anchor the span baseline at a finite
+    // playhead so the first checkpoint can compare instead of going NaN.
+    this.#lastSavedPosition = Number.isFinite(savedPosition) ? savedPosition : (shell.currentTime || 0);
     return true;
   }
 
@@ -649,9 +659,6 @@ export class ResumeTracker {
       return;
     }
     this.#lastSavedPosition = currentTime;
-    // Every persist resets the cadence floor so the timeupdate path's
-    // wall gate starts counting from real writes (including flushes).
-    this.#lastSavedWall = Date.now();
     if (entry.duration > 0 && currentTime / entry.duration >= RESUME_COMPLETION_RATIO) {
       entry.resume = 0;
       this.#store.updateResume(entry.id, 0);
@@ -663,35 +670,16 @@ export class ResumeTracker {
   #startProgressWatch(shell) {
     const video = shell.video;
     const { signal } = this.#scope;
-    // Seed the floor at watch start so the first qualifying persist lands where
-    // the old interval's first tick used to - byte-identical cadence. The
-    // position gate is seeded from the saved position earlier in #init.
-    this.#lastSavedWall = Date.now();
 
-    // `timeupdate` fires while the playhead advances (~4 Hz continuous), so the
-    // media clock itself is the save crank: no interval to keep alive, and a
-    // video that is "playing" but stalled simply stops writing. Position alone
-    // does not bound write frequency - a fast-forward or scrub trips the
-    // epsilon every ~3 s of content - so the wall floor keeps the incremental
-    // cadence where the old interval put it (≤1 write per saveIntervalMs). The
-    // `pause` flush below is fully immediate, so the "pause to pause" contract
-    // still lands the final position regardless of the floor.
-    const saveIfDue = () => {
-      if (shell.paused || Date.now() - this.#lastSavedWall < TUNING.resume.saveIntervalMs) {
-        return;
-      }
-      this.#saveProgress(shell.currentTime);
-    };
     // Gate persistent saves while the player scrolls out of the viewport
     // (carousel / off-screen embeds): an IntersectionObserver drives a
-    // layout-free "is this player on screen" boolean, so the media-clock saves
-    // stop churning GM storage writes for a video the user cannot see. The
-    // pause flush above still runs whenever playback actually pauses, so the
-    // final position is never lost by this gate. IntersectionObserverInit has
+    // layout-free "is this player on screen" boolean, so saves stop churning
+    // GM storage for a video the user cannot see. IntersectionObserverInit has
     // no `signal` member, so the observer registers its disconnect with the
     // scope - otherwise a shell torn down while the element stays in the page
     // (SPA video swaps) would leak the observer + target for the rest of the
-    // page lifetime.
+    // page lifetime. The status flushes below still run, so the final position
+    // is never lost by this gate.
     let onScreen = true;
     if (typeof IntersectionObserver === "function") {
       const io = new IntersectionObserver(([entry]) => {
@@ -700,32 +688,84 @@ export class ResumeTracker {
       io.observe(video);
       this.#scope.onDispose(() => io.disconnect());
     }
-    const gatedSaveIfDue = () => {
-      if (onScreen) {
-        saveIfDue();
-      }
+
+    // Dynamic content-relative cadence: due once the playhead has advanced a
+    // duration-scaled span since the last persist. No wall clock, so a paused
+    // video, buffering, and playbackRate never distort the cadence.
+    const positionDue = (position) => {
+      const duration = this.#entry.duration;
+      const span = Math.min(
+        TUNING.resume.maxCheckpointSeconds,
+        Math.max(TUNING.resume.minCheckpointSeconds, duration * TUNING.resume.checkpointRatio)
+      );
+      return Math.abs(position - this.#lastSavedPosition) >= span;
     };
-    video.addEventListener("timeupdate", gatedSaveIfDue, { signal, passive: true });
-    video.addEventListener("pause", () => {
-      // requestVideoFrameCallback gives the exact mediaTime of the last rendered
-      // frame — the position the user actually saw — whereas currentTime is the
-      // decoder position which may lead or lag the display. Falls back to
-      // currentTime when the API is unavailable (non-Chromium, test harness).
-      if (typeof video.requestVideoFrameCallback === "function") {
-        // rVFC ids aren't AbortSignal-cancellable: keep the pending id on a
-        // field so destroy() can cancel it, and a re-pause supersedes the
-        // previous flush instead of stacking redundant saves.
-        if (this.#rvfcHandle != null) {
-          video.cancelVideoFrameCallback?.(this.#rvfcHandle);
-        }
-        this.#rvfcHandle = video.requestVideoFrameCallback((_now, metadata) => {
-          this.#rvfcHandle = null;
-          this.#saveProgress(metadata.mediaTime);
-        });
-      } else {
-        this.#saveProgress(shell.currentTime);
+    const checkpointDue = (position) => {
+      if (this.#adopting || !this.#entry || !onScreen || document.hidden || shell.paused) {
+        return false;
       }
+      return positionDue(position);
+    };
+
+    // Playback-status crank: requestVideoFrameCallback fires only while frames
+    // are actually presented - it IS the "is playing" signal - and reports the
+    // exact mediaTime of the frame on screen. The callback re-arms itself and
+    // idles for free whenever the element is paused, stalled, or off-screen.
+    if (typeof video.requestVideoFrameCallback === "function") {
+      const onFrame = (_now, metadata) => {
+        this.#rvfcHandle = null;
+        if (this.#scope.disposed) {
+          return;
+        }
+        this.#lastFrameMediaTime = metadata.mediaTime;
+        if (checkpointDue(metadata.mediaTime)) {
+          this.#saveProgress(metadata.mediaTime);
+        }
+        this.#rvfcHandle = video.requestVideoFrameCallback(onFrame);
+      };
+      this.#rvfcHandle = video.requestVideoFrameCallback(onFrame);
+    } else {
+      // Fallback crank for engines without rVFC (test harness): the media clock
+      // (~4 Hz while the playhead advances) drives the same dynamic gate.
+      const saveIfDue = () => {
+        if (checkpointDue(shell.currentTime)) {
+          this.#saveProgress(shell.currentTime);
+        }
+      };
+      video.addEventListener("timeupdate", saveIfDue, { signal, passive: true });
+    }
+
+    const flush = () => this.#saveProgress(this.#flushPosition());
+
+    // Status flushes: persist the position at every playback boundary, so the
+    // incremental crank only has to cover steady playback gaps.
+    video.addEventListener("pause", flush, { signal, passive: true });
+    video.addEventListener("seeked", () => {
+      // A seek is an explicit position choice: record the landed target as the
+      // exact frame time and persist it now, regardless of the checkpoint span.
+      this.#lastFrameMediaTime = shell.currentTime;
+      this.#saveProgress(shell.currentTime);
     }, { signal, passive: true });
+    video.addEventListener("ended", flush, { signal, passive: true });
+    // A hidden tab throttles (or discards) media events; flush before it can.
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") {
+        flush();
+      }
+    }, { signal });
+    // Page Lifecycle: freeze and pagehide cover OS freeze / tab close / bfcache,
+    // where destroy() may never run.
+    document.addEventListener("freeze", flush, { signal });
+    window.addEventListener("pagehide", flush, { signal });
+  }
+
+  /** Position for a boundary flush: the last presented frame when known (the
+   *  pixels the user actually saw), else the decoder's currentTime. */
+  #flushPosition() {
+    if (Number.isFinite(this.#lastFrameMediaTime)) {
+      return this.#lastFrameMediaTime;
+    }
+    return this.#shell?.currentTime ?? NaN;
   }
 
   /** Clipboard bridge passthroughs (see ResumeStore exportData/importData). */
@@ -767,7 +807,7 @@ export class ResumeTracker {
     // Final save while disposed is still false (#saveProgress guards on it),
     // then the scope takes down the media listeners + off-screen observer.
     if (this.#entry) {
-      this.#saveProgress(this.#shell?.currentTime || NaN);
+      this.#saveProgress(this.#flushPosition());
     }
     this.#scope.dispose();
     this.#store.destroy();
