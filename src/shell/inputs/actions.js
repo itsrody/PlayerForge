@@ -475,17 +475,14 @@ function volumePercent(volume) {
  * events dispatched by the engine run these handlers. All listeners share
  * the engine's AbortSignal, so destroying the engine tears the actions down.
  */
-export function attachInputActions(shell, host, signal) {
-  /** Fullscreen exit also collapses fill mode - the one cross-feature rule. */
-  subscribeFullscreen((active) => {
-    if (!active) {
-      const state = stateFor(shell);
-      if (state.fillActive) {
-        clearFillMode(shell, state, false);
-      }
-    }
-  }, signal);
-
+/**
+ * Speed ramp: holding anywhere boosts playback until the LAST holder lets go.
+ *
+ * Sources are tracked per method (pointer vs. keyboard) because both can be
+ * held at once and either one ending must not drop the ramp the other is still
+ * sustaining.
+ */
+function wireSpeedRamp(shell, host, signal) {
   host.addEventListener(GESTURE_EVENTS.hold, ({ detail }) => {
     if (!shell.video || !shell.media.ready) {
       return;
@@ -493,9 +490,7 @@ export function attachInputActions(shell, host, signal) {
     const state = stateFor(shell);
     const source = detail.method || "pointer";
     // Only the FIRST hold source ramps speed, and only until every source has
-    // let go. Sources are tracked per method (pointer vs. keyboard) because
-    // both can be held at once and either one ending must not drop the ramp
-    // the other is still sustaining.
+    // let go.
     if (!state.activeHolds.has(source)) {
       state.activeHolds.add(source);
       if (state.activeHolds.size > 1) {
@@ -523,7 +518,13 @@ export function attachInputActions(shell, host, signal) {
     }
     shell.hideToast("hold");
   }, { signal });
+}
 
+/**
+ * Scrub-to-seek. The heaviest single interaction in the shell, so it owns its
+ * own wiring rather than sharing a function with the eleven other bindings.
+ */
+function wireScrubbing(shell, host, signal) {
   host.addEventListener(GESTURE_EVENTS.scrub, ({ detail }) => {
     if (!shell.video) {
       return;
@@ -647,7 +648,12 @@ export function attachInputActions(shell, host, signal) {
   // with the same scope signal these listeners die on (shell teardown can
   // land mid-scrub, and the re-arming callback would otherwise outlive us).
   signal.addEventListener("abort", () => cancelScrubFrameLoop(stateFor(shell)), { once: true });
+}
 
+/**
+ * Fullscreen as a gesture: swipe down to exit, double-tap to toggle or skip.
+ */
+function wireFullscreen(shell, host, signal) {
   host.addEventListener(GESTURE_EVENTS.swipeStart, ({ detail }) => {
     if (detail.direction === "down") {
       shell.toast({
@@ -690,11 +696,15 @@ export function attachInputActions(shell, host, signal) {
       shell.media.togglePlay();
     }
   }, { signal });
+}
 
+function wireSkip(shell, host, signal) {
   host.addEventListener(GESTURE_EVENTS.skip, ({ detail }) => {
     performSkip(shell, stateFor(shell), detail.direction);
   }, { signal });
+}
 
+function wireVolume(shell, host, signal) {
   host.addEventListener(GESTURE_EVENTS.volume, ({ detail }) => {
     if (!shell.video || !shell.media.ready) {
       return;
@@ -710,10 +720,14 @@ export function attachInputActions(shell, host, signal) {
     shell.media.toggleMute();
     shell.toastFlash(volumeIcon(shell.volume, shell.muted), shell.muted ? "Muted" : volumePercent(shell.volume), "volume");
   }, { signal });
+}
 
-  // Picture-in-Picture: native always-on-top surface. The browser owns the
-  // window lifecycle; we only flip the toggle. Unsupported hosts get a hint
-  // instead of a silent no-op, mirroring the fs-block pattern.
+/**
+ * Picture-in-Picture: native always-on-top surface. The browser owns the
+ * window lifecycle; we only flip the toggle. Unsupported hosts get a hint
+ * instead of a silent no-op, mirroring the fs-block pattern.
+ */
+function wirePictureInPicture(shell, host, signal) {
   host.addEventListener(GESTURE_EVENTS.pip, () => {
     if (!shell.video || !shell.media.ready) {
       return;
@@ -728,6 +742,24 @@ export function attachInputActions(shell, host, signal) {
       shell.toastInfo("pip", "Picture-in-Picture unavailable", "pip");
     });
   }, { signal });
+}
+
+/**
+ * Fill mode: pinch out to cover the box, pinch in to release.
+ *
+ * Also owns the one cross-feature rule in this file — leaving fullscreen
+ * collapses fill, because a cover-scale derived from the inline reference box
+ * would be wrong once the box changes.
+ */
+function wireFillMode(shell, host, signal) {
+  subscribeFullscreen((active) => {
+    if (!active) {
+      const state = stateFor(shell);
+      if (state.fillActive) {
+        clearFillMode(shell, state, false);
+      }
+    }
+  }, signal);
 
   host.addEventListener(GESTURE_EVENTS.pinch, ({ detail }) => {
     if (!shell.video) {
@@ -784,4 +816,23 @@ export function attachInputActions(shell, host, signal) {
   };
   shell.video?.addEventListener("resize", refill, { signal });
   shell.video?.addEventListener("loadedmetadata", refill, { signal });
+}
+
+/**
+ * Wire the shell-facing side of the bindings onto the shell host: semantic
+ * events dispatched by the engine run these handlers. All listeners share the
+ * engine's AbortSignal, so destroying the engine tears the actions down.
+ *
+ * One function per interaction rather than one per file: each binding is
+ * self-contained here, and keeping them inline buried six unrelated rules in a
+ * single 300-line body.
+ */
+export function attachInputActions(shell, host, signal) {
+  wireSpeedRamp(shell, host, signal);
+  wireScrubbing(shell, host, signal);
+  wireFullscreen(shell, host, signal);
+  wireSkip(shell, host, signal);
+  wireVolume(shell, host, signal);
+  wirePictureInPicture(shell, host, signal);
+  wireFillMode(shell, host, signal);
 }
