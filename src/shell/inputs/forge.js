@@ -28,11 +28,9 @@ const SCROLL_START_PX = TUNING.gestures.scrollStartPx;
 const AXIS_DOMINANCE_RATIO = TUNING.gestures.axisDominanceRatio;
 const PINCH_MIN_DISTANCE_PX = TUNING.gestures.pinchMinDistancePx;
 const PINCH_SCALE_THRESHOLD = TUNING.gestures.pinchScaleThreshold;
-const PINCH_BASELINE_DELAY_MS = TUNING.gestures.pinchBaselineDelayMs;
 const TRACKPAD_COOLDOWN_MS = TUNING.gestures.trackpadCooldownMs;
 const SUPPRESS_WINDOW_MS = TUNING.gestures.suppressWindowMs;
 const DOUBLE_TAP_WINDOW_MS = TUNING.gestures.doubleTapWindowMs;
-const CLICK_SETTLE_MS = TUNING.gestures.clickSettleMs;
 const SCRUB_VELOCITY_TAU_S = TUNING.scrub.velocityFilterMs / 1000;
 
 /** Synthetic single-tap replays this engine dispatched - lets the capture
@@ -204,12 +202,12 @@ export class InputForge {
 
   // SDK-domination state. #pointerOwned: the current press was gesture-
   // eligible, so zone-capture stops its pointer/mouse/touch stream. #awaitClick:
-  // short post-pointerup window still swallowing the compat mouseup before the
-  // click decision. #tapReplay*: a first tap held back (a dbltap may still
-  // form) that expires into a synthetic click for the SDK.
+  // latched at pointerup to swallow the compat mouseup before the click
+  // decision; it clears on the arriving click, on cancel, or on the next
+  // pointerdown - no timer needed. #tapReplay*: a first tap held back (a
+  // dbltap may still form) that expires into a synthetic click for the SDK.
   #pointerOwned = false;
   #awaitClick = false;
-  #awaitTimer = null;
   #tapReplayTarget = null;
   #tapReplayTimer = null;
   #tapReplayX = 0;
@@ -237,12 +235,18 @@ export class InputForge {
    */
   #gestureFsActive = false;
 
-  // Pinch state.
+  // Pinch state. #pinchStartDistance is captured from the two pointerdown
+  // coords the moment the second pointer lands - no settle delay needed, and
+  // #pinchZone non-null is the tracking flag.
   #pointers = new Map();
   #pinchStartDistance = 0;
   #pinchFired = false;
   #pinchZone = null;
-  #pinchInitTimer = null;
+  // Pointer ids whose capture we released on purpose (the pinch transition
+  // drops capture so both fingers stream freely); a matching
+  // lostpointercapture must not be mistaken for the browser stealing the
+  // pointer. Cleared per fresh press so recycled ids stay honest.
+  #releasedCapture = new Set();
 
   // Keyboard hold state.
   #keyboardHoldTimer = null;
@@ -293,6 +297,9 @@ export class InputForge {
     zone.addEventListener("pointermove", (event) => this.#handlePointerMove(event), options);
     zone.addEventListener("pointerup", (event) => this.#handlePointerUp(event), options);
     zone.addEventListener("pointercancel", (event) => this.#handlePointerCancel(event), options);
+    // Capture loss without a pointerup/cancel pair (element removed, hit-test
+    // takeover) would strand an owned session; treat it as cancellation.
+    zone.addEventListener("lostpointercapture", (event) => this.#handleLostCapture(event), options);
     zone.addEventListener("click", (event) => this.#handleClickCapture(event), { capture: true, signal });
     zone.addEventListener("dblclick", (event) => this.#handleDblClickCapture(event), { capture: true, signal });
     // SDK stream dominance: the compat mouse/touch streams mirror the pointer
@@ -345,9 +352,17 @@ export class InputForge {
     window.addEventListener("pointercancel", (event) => this.#handlePointerCancel(event), options);
     document.addEventListener("keydown", (event) => this.#handleKeydown(event), { capture: true, signal });
     document.addEventListener("keyup", (event) => this.#handleKeyup(event), { capture: true, signal });
-    // A window blur can swallow the matching Space keyup; finish the hold
-    // through the normal release path so playback rate never stays boosted.
-    window.addEventListener("blur", () => this.#finishKeyboardHold(false), { signal });
+    // A window blur, a hidden tab, or a Page Lifecycle freeze can each swallow
+    // the matching Space keyup and/or pointerup; end every live session through
+    // the normal release paths so no rate/scrub/hold stays latched.
+    const interrupt = () => this.#releaseSessions();
+    window.addEventListener("blur", interrupt, { signal });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") {
+        interrupt();
+      }
+    }, { signal });
+    document.addEventListener("freeze", interrupt, { signal });
 
     subscribeFullscreen(() => {
       this.setTrackpadPinchEnabled(fs);
@@ -414,10 +429,9 @@ export class InputForge {
     this.#holdTimer = null;
     clearTimeout(this.#keyboardHoldTimer);
     this.#keyboardHoldTimer = null;
-    clearTimeout(this.#pinchInitTimer);
-    this.#pinchInitTimer = null;
     this.#videoRect = null;
     this.#pointers.clear();
+    this.#releasedCapture.clear();
     cancelEase(this.#video);
     // DOM lifecycle: disconnect observers, restore styles, remove elements.
     this.#dom.destroy();
@@ -532,24 +546,31 @@ export class InputForge {
     this.#endPointerSession();
     this.#primaryPointerId = null;
     for (const pointerId of this.#pointers.keys()) {
+      // hasPointerCapture is absent in some embedders; without it, assume the
+      // release may fire so the id is never misread as a stolen pointer.
+      if (typeof this.#zone.hasPointerCapture !== "function" || this.#zone.hasPointerCapture(pointerId)) {
+        this.#releasedCapture.add(pointerId);
+      }
       this.#pointerOp("releasePointerCapture", pointerId);
     }
+    // Capture the baseline from the pointerdown lattice itself - both
+    // pointers' latest coords are already in #pointers, so no settle timer is
+    // needed. #pinchZone non-null is the tracking flag.
     this.#pinchStartDistance = 0;
     this.#pinchFired = false;
     this.#pinchZone = this.#gestureZone || "screen";
-    clearTimeout(this.#pinchInitTimer);
-    this.#pinchInitTimer = setTimeout(() => {
-      this.#pinchInitTimer = null;
-      if (this.#scope.disposed || this.#pointers.size < 2) {
-        return;
-      }
-      captureFirstTwo(this.#pointers, firstTwoPointers);
-      // sqrt(dx*dx+dy*dy) over hypot: measured ~1.25x faster and the two
-      // agree to ~2e-16 relative, far below pinch's pixel resolution.
-      const dx = firstTwoPointers.x1 - firstTwoPointers.x0;
-      const dy = firstTwoPointers.y1 - firstTwoPointers.y0;
-      this.#pinchStartDistance = Math.sqrt(dx * dx + dy * dy);
-    }, PINCH_BASELINE_DELAY_MS);
+    this.#capturePinchBaseline();
+  }
+
+  #capturePinchBaseline() {
+    if (!captureFirstTwo(this.#pointers, firstTwoPointers)) {
+      return;
+    }
+    // sqrt(dx*dx+dy*dy) over hypot: measured ~1.25x faster and the two
+    // agree to ~2e-16 relative, far below pinch's pixel resolution.
+    const dx = firstTwoPointers.x1 - firstTwoPointers.x0;
+    const dy = firstTwoPointers.y1 - firstTwoPointers.y0;
+    this.#pinchStartDistance = Math.sqrt(dx * dx + dy * dy);
   }
 
   #checkPinch() {
@@ -678,6 +699,11 @@ export class InputForge {
     // listener nulled it, but only ever mattered at this read and ran on
     // every page scroll for the whole shell lifetime).
     this.#videoRect = null;
+    // Any new press invalidates a stale await latch from a drag that never
+    // produced a click (no settle timer to expire it), and clears any stale
+    // intentional-capture-release marker for a recycled pointer id.
+    this.#clearAwaitClick();
+    this.#releasedCapture.delete(event.pointerId);
     if (
       event.button !== 0 ||
       this.#eventTarget && isInsideShell(this.#eventTarget, event.target) ||
@@ -755,7 +781,7 @@ export class InputForge {
         event.stopImmediatePropagation();
       }
     }
-    if (this.#pointers.size === 2 && this.#pinchStartDistance > 0) {
+    if (this.#pointers.size === 2 && this.#pinchZone !== null) {
       this.#checkPinch();
       return;
     }
@@ -933,7 +959,7 @@ export class InputForge {
       this.#pointerOwned = false;
       this.#armAwaitClick();
     }
-    if (this.#pinchStartDistance > 0 && this.#pointers.size < 2) {
+    if (this.#pinchZone !== null && this.#pointers.size < 2) {
       this.#pinchStartDistance = 0;
       this.#pinchFired = false;
       this.#pinchZone = null;
@@ -1011,15 +1037,45 @@ export class InputForge {
     this.#cancelTrackedPointer(event.pointerId);
   }
 
+  /**
+   * The browser reclaimed a captured pointer with no pointerup/pointercancel
+   * (capture target removed, hit-test takeover). That press is over and no
+   * click will follow, so reclaim it through the same cancellation path -
+   * unless the release was our own pinch transition.
+   */
+  #handleLostCapture(event) {
+    if (this.#releasedCapture.delete(event.pointerId)) {
+      return;
+    }
+    if (this.#pointers.has(event.pointerId)) {
+      this.#cancelTrackedPointer(event.pointerId);
+    }
+  }
+
+  /**
+   * End every live input session through the normal teardown paths. Used when
+   * focus/visibility is lost: the UA may never deliver the closing keyup or
+   * pointerup, so a keyboard rate or an owned pointer stream could otherwise
+   * stay latched.
+   */
+  #releaseSessions() {
+    this.#finishKeyboardHold(false);
+    for (const id of [...this.#pointers.keys()]) {
+      this.#cancelTrackedPointer(id);
+    }
+  }
+
   /** Reclaim one tracked pointer: shared by pointercancel and the touchcancel
    *  sweep below, so both paths run identical idempotent teardown. */
   #cancelTrackedPointer(pointerId) {
     this.#pointers.delete(pointerId);
     if (this.#pointers.size === 0) {
-      // A cancelled press ends the stream; no click is coming, so no await.
+      // A cancelled press ends the stream; no click is coming, so drop any
+      // await latch a prior pointerup left armed.
       this.#pointerOwned = false;
+      this.#clearAwaitClick();
     }
-    if (this.#pinchStartDistance > 0 && this.#pointers.size < 2) {
+    if (this.#pinchZone !== null && this.#pointers.size < 2) {
       this.#pinchStartDistance = 0;
       this.#pinchFired = false;
       this.#pinchZone = null;
@@ -1063,14 +1119,10 @@ export class InputForge {
 
   #armAwaitClick() {
     this.#awaitClick = true;
-    clearTimeout(this.#awaitTimer);
-    this.#awaitTimer = setTimeout(() => this.#clearAwaitClick(), CLICK_SETTLE_MS);
   }
 
   #clearAwaitClick() {
     this.#awaitClick = false;
-    clearTimeout(this.#awaitTimer);
-    this.#awaitTimer = null;
   }
 
   /** Hold a first tap's click back for the dbltap window; on expiry (no

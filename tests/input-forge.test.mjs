@@ -868,3 +868,109 @@ test("fill pinch owns object-fit: contain and restores it on clear", () => {
   dom.window.close();
 });
 
+/* --- Event-driven session lifecycles ---------------------------------- *
+ * The await-click latch and the pinch baseline used to be short timers.
+ * They are now driven by real events (click, next pointerdown, second
+ * pointerdown) plus native session-interruption signals (blur,
+ * visibilitychange, lostpointercapture). */
+
+test("a two-finger pointer pinch captures its baseline at pointerdown", (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  stubFullscreen(dom, true);
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+  const seen = collect(host, dom.window);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { id: 1, x: 100, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { id: 2, x: 200, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { id: 2, x: 300, y: 200 }));
+
+  const pinches = seen.filter((e) => e.type === GESTURE_EVENTS.pinch);
+  assert.equal(pinches.length, 1, "pinch fires from the pointerdown baseline");
+  assert.equal(pinches[0].detail.direction, "out");
+  assert.equal(pinches[0].detail.method, "pointer");
+});
+
+test("a new press clears the stale await latch from a clickless drag", (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  stubFullscreen(dom, true);
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+  const sdk = sdkObserver(zone, dom.window);
+
+  // An owned tap whose click the UA swallowed: pointerup latches #awaitClick
+  // with no timer to expire it.
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 400, y: 200 }));
+
+  // A later press outside the video rect must not have its compat mouseup
+  // eaten by the stale latch: the pointerdown clears it.
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 900, y: 500 }));
+  zone.dispatchEvent(mouse(dom.window, "mouseup", { x: 900, y: 500 }));
+  assert.ok(sdk.includes("mouseup"), "the new press cleared the stale latch");
+});
+
+test("a window blur ends a live space hold without double-releasing", async (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+  const seen = collect(host, dom.window);
+
+  space(dom.window, "keydown");
+  await sleep(350);
+  assert.equal(seen.filter((e) => e.type === GESTURE_EVENTS.hold).length, 1);
+
+  dom.window.dispatchEvent(new dom.window.Event("blur"));
+  assert.equal(seen.filter((e) => e.type === GESTURE_EVENTS.release).length, 1,
+    "blur releases the boosted hold");
+
+  space(dom.window, "keyup");
+  assert.equal(seen.filter((e) => e.type === GESTURE_EVENTS.release).length, 1,
+    "the late keyup does not double-release");
+});
+
+test("hiding the tab ends a live pointer hold without double-releasing", async (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+  const seen = collect(host, dom.window);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  await sleep(350);
+  assert.equal(seen.filter((e) => e.type === GESTURE_EVENTS.hold).length, 1);
+
+  Object.defineProperty(dom.window.document, "visibilityState", {
+    value: "hidden", configurable: true
+  });
+  dom.window.document.dispatchEvent(new dom.window.Event("visibilitychange"));
+  assert.equal(seen.filter((e) => e.type === GESTURE_EVENTS.release).length, 1,
+    "a hidden tab releases the boosted hold");
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 400, y: 200 }));
+  assert.equal(seen.filter((e) => e.type === GESTURE_EVENTS.release).length, 1,
+    "the swallowed pointerup does not double-release");
+});
+
+test("a lost pointer capture reclaims an owned press", async (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+  const seen = collect(host, dom.window);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  await sleep(350);
+  assert.equal(seen.filter((e) => e.type === GESTURE_EVENTS.hold).length, 1,
+    "capture is set while the hold boosts");
+
+  zone.dispatchEvent(pointerEvent(dom.window, "lostpointercapture", { x: 400, y: 200 }));
+  assert.equal(seen.filter((e) => e.type === GESTURE_EVENTS.release).length, 1,
+    "lost capture ends the press through the cancellation path");
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 400, y: 200 }));
+  assert.equal(seen.filter((e) => e.type === GESTURE_EVENTS.release).length, 1,
+    "the press is already reclaimed, so no double-release");
+});
+
