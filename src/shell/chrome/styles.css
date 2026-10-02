@@ -1214,14 +1214,17 @@
     /* Portrait phones (touch): anchor the panel as a bottom sheet - it sits
        within thumb reach and never covers the whole video. safe-area-max-inset-
        bottom (Chrome 135+) lifts the sheet above the Android gesture bar when
-       viewport-fit=cover is active; the env() falls back to 0 when unset. */
+       viewport-fit=cover is active; the env() falls back to 0 when unset.
+       --pf-vv-height/--pf-vv-inset-bottom (set on the host by shell.js from
+       window.visualViewport) keep the sheet inside the on-screen keyboard's
+       shrunken viewport; both fall back to layout-viewport values. */
     @media (max-width: 520px) and (pointer: coarse) {
       .pf-panel {
         top: auto;
-        bottom: var(--pf-space-md);
+        bottom: calc(var(--pf-space-md) + var(--pf-vv-inset-bottom, 0px));
         left: var(--pf-space-md);
         right: var(--pf-space-md);
-        max-height: 62vh;
+        max-height: min(62vh, calc(var(--pf-vv-height, 100vh) - 2 * var(--pf-space-md)));
         margin: 0;
         padding-bottom: env(safe-area-max-inset-bottom, 0px);
         border-radius: 16px 16px 0 0;

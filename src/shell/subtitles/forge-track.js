@@ -48,6 +48,11 @@ export class ForgeTrack {
   #positionOverride = null;
   /** Records the bound cuechange so destroy can unregister it. */
   #onCueChange = null;
+  /** Whether the player is currently on screen. Defaults true so a host
+   *  without IntersectionObserver (or before the first observation lands)
+   *  renders unconditionally; the observer only ever suppresses off-screen
+   *  churn and re-renders on re-entry. */
+  #onScreen = true;
   /** Disposal flag; cuechange itself has no signal form (spec-forced). */
   #scope = new Scope();
 
@@ -85,6 +90,24 @@ export class ForgeTrack {
       this.#render();
     };
     this.#track.addEventListener("cuechange", this.#onCueChange);
+    // Off-screen players still fire cuechange; suppress the slot churn until
+    // the player is visibly on screen and re-render once when it scrolls back.
+    // getBoundingClientRect is the element guard: a non-element videoLike
+    // (test double, detached stub) never gets observed.
+    if (video && typeof IntersectionObserver === "function" && typeof video.getBoundingClientRect === "function") {
+      const observer = new IntersectionObserver(([entry]) => {
+        if (this.#scope.disposed) {
+          return;
+        }
+        const was = this.#onScreen;
+        this.#onScreen = entry.isIntersecting;
+        if (this.#onScreen && !was) {
+          this.#render();
+        }
+      });
+      observer.observe(video);
+      this.#scope.onDispose(() => observer.disconnect());
+    }
   }
 
   /**
@@ -170,7 +193,7 @@ export class ForgeTrack {
   }
 
   #render() {
-    if (this.#scope.disposed || !this.#cueLayer) {
+    if (this.#scope.disposed || !this.#cueLayer || !this.#onScreen) {
       return;
     }
     const active = this.#track.activeCues;

@@ -410,21 +410,30 @@ export function parseSubtitles(text, offset = 0) {
  * ~50ms time budget between blocks and, when spent, hands control back via
  * the shared yield_() facade (scheduler.yield on Chromium 154+, rAF/noop
  * elsewhere) so a huge VTT/SRT parse never blocks video playback or paint.
- * Intentionally separate from parseSubtitles so the hot, on-the-fly sync
- * reparse (sync-offset stepper) keeps its zero-await fast path.
+ * When available it also yields as soon as navigator.scheduling.isInputPending
+ * reports queued input, so a large load never delays a tap/scroll even inside
+ * the time budget. Intentionally separate from parseSubtitles so the hot,
+ * on-the-fly sync reparse (sync-offset stepper) keeps its zero-await fast path.
  */
 const YIELD_BUDGET_MS = 50;
 export async function parseSubtitlesAsync(text, offset = 0) {
   const cueText = normalizeText(text);
   const blocks = cueText.split(/\n[ \t]*\n/);
   const cues = [];
+  // Detected per call, not hoisted, so a host that lacks the API (or a harness
+  // that injects it) is honored at runtime; the closure keeps `scheduling` as
+  // the receiver.
+  const scheduling = typeof navigator !== "undefined" ? navigator.scheduling : null;
+  const inputPending = typeof scheduling?.isInputPending === "function"
+    ? () => scheduling.isInputPending()
+    : null;
   let last = performance.now();
   for (let i = 0; i < blocks.length; i++) {
     const cue = parseCueBlock(blocks[i], offset);
     if (cue) {
       cues.push(cue);
     }
-    if ((i & 127) === 0 && performance.now() - last > YIELD_BUDGET_MS) {
+    if ((i & 127) === 0 && (inputPending?.() || performance.now() - last > YIELD_BUDGET_MS)) {
       await yield_();
       last = performance.now();
     }

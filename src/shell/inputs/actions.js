@@ -180,6 +180,8 @@ const SCRUB_DEAD_ZONE_PX = TUNING.scrub.deadZonePx;
 const SCRUB_SLOW_FULL_WIDTH_SECONDS = TUNING.scrub.velocity.slowFullWidthSeconds;
 const SCRUB_FAST_FULL_WIDTH_FRACTION = TUNING.scrub.velocity.fastFullWidthFraction;
 const SCRUB_SENSITIVITY = TUNING.controller.scrubSensitivity / 150;
+/** Ignore cover-scale changes below this fraction of a scale step (sub-pixel). */
+const FILL_SCALE_EPSILON = 0.001;
 
 /* - Per-shell action state - */
 
@@ -218,6 +220,9 @@ const stateFor = (() => {
         lastSkipDirection: null,
         streakResetAt: 0,
         fillActive: false,
+        // Cover scale currently applied to the video (1 = none). Re-derives
+        // the fill transform when the video's intrinsic size changes mid-fill.
+        fillScale: 1,
         // Declared here because fillFrame writes it: same key order from the
         // start means the state object never morphs to a second hidden class.
         priorObjectFit: ""
@@ -401,6 +406,7 @@ function clearFillMode(shell, state, animate = true) {
   state.fillActive = false;
   const video = shell.video;
   if (video) {
+    state.fillScale = 1;
     if (animate) {
       easeTransformTo(video, "");
     } else {
@@ -725,9 +731,40 @@ export function attachInputActions(shell, host, signal) {
       video.style.objectFit = "contain";
       easeTransformTo(video, `scale(${scale})`);
       state.fillActive = true;
+      state.fillScale = scale;
       shell.toastFlash("fill-aspect", "Fill Mode", "pinch");
     } else if (detail.direction === "in" && state.fillActive) {
       clearFillMode(shell, state);
     }
   }, { signal });
+
+  // Fill mode's scale is pure aspect math frozen at the moment of the pinch.
+  // If the intrinsic size arrives later (preload="none") or changes (adaptive
+  // stream switch), re-derive it; when the new ratio no longer needs cover,
+  // release fill entirely. `resize` on a <video> is the native signal for an
+  // intrinsic-size change; loadedmetadata catches the ratio becoming known.
+  const refill = () => {
+    const video = shell.video;
+    if (!video) {
+      return;
+    }
+    const state = stateFor(shell);
+    if (!state.fillActive) {
+      return;
+    }
+    const scale = computeCoverScale(video, shell.referenceBox);
+    if (!scale) {
+      return;
+    }
+    if (scale <= 1) {
+      clearFillMode(shell, state);
+      return;
+    }
+    if (Math.abs(scale - state.fillScale) > FILL_SCALE_EPSILON) {
+      state.fillScale = scale;
+      easeTransformTo(video, `scale(${scale})`);
+    }
+  };
+  shell.video?.addEventListener("resize", refill, { signal });
+  shell.video?.addEventListener("loadedmetadata", refill, { signal });
 }

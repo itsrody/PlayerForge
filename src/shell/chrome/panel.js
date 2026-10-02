@@ -6,19 +6,13 @@ import { clamp } from "../../shared/clamp.js";
 import { Scope } from "../../shared/scope.js";
 import { el } from "./elements.js";
 import { getSetting } from "./config.js";
+import { REDUCED_MOTION } from "../../shared/timing.js";
 
 const HOLD_DELAY_MS = 400;
 const HOLD_REPEAT_MS = 75;
 const TAB_NAV_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End"]);
 /** Auto-detect compact: narrow touch viewport. matchMedia change re-applies live. */
 const COMPACT_MEDIA_QUERY = "(max-width: 480px) and (pointer: coarse)";
-
-// Live query: the open/close view transition is decoration, so a visitor who
-// asked the OS for reduced motion gets the plain update with no animation.
-// .matches is re-read per call, so a mid-session preference change applies.
-const REDUCED_MOTION_QUERY = typeof matchMedia === "function"
-  ? matchMedia("(prefers-reduced-motion: reduce)")
-  : null;
 
 function decimalsOf(step) {
   const str = String(step);
@@ -877,7 +871,7 @@ export class SettingsPanel {
   }
 
   #runWithViewTransition(type, update) {
-    if (typeof document.startViewTransition === "function" && !REDUCED_MOTION_QUERY?.matches) {
+    if (typeof document.startViewTransition === "function" && !REDUCED_MOTION?.matches) {
       document.startViewTransition({ types: [type], update });
     } else {
       update();

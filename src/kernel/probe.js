@@ -21,7 +21,7 @@
  * documents without a usable player never boot a kernel.
  */
 import { logger } from "../shared/logger.js";
-import { watchMediaEvents, meetsMinSize, createLayoutGate, hasPresentBox, forEachVideoInMutations } from "./sdk.js";
+import { watchMediaEvents, meetsMinSize, createLayoutGate, createOnScreenGate, isOnScreen, hasPresentBox, forEachVideoInMutations } from "./sdk.js";
 import { onDomMutations } from "../shared/dom-watch.js";
 
 /**
@@ -40,6 +40,10 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
   // reflow) and lands off the mutation batch, so a candidate that only reaches
   // player size later would otherwise never fire onCandidate.
   const layoutGate = createLayoutGate({ minWidth, minHeight });
+  // Defers a player-sized-but-off-screen candidate (a carousel of embeds) so a
+  // full kernel boot is not paid for a video the user cannot see. The lookahead
+  // margin readies the shell just before it scrolls in.
+  const onScreenGate = createOnScreenGate();
 
   const detach = () => {
     stopEvents?.();
@@ -47,6 +51,7 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
     offMutations?.();
     offMutations = null;
     layoutGate.stop();
+    onScreenGate.stop();
   };
 
   const finish = () => {
@@ -72,12 +77,27 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
     });
   };
 
+  // A player-sized candidate that is not yet on screen (a carousel slide, a
+  // below-the-fold embed) is deferred rather than booted: the lookahead margin
+  // readies the shell just before it scrolls in. isOnScreen reports true when
+  // the viewport is unknown, so this can only delay, never strand.
+  const tryFinish = (video) => {
+    if (done) {
+      return;
+    }
+    if (isOnScreen(video)) {
+      finish();
+      return;
+    }
+    onScreenGate.watch(video, () => tryFinish(video));
+  };
+
   const consider = (video) => {
     if (done) {
       return;
     }
     if (meetsMinSize(video, minWidth, minHeight)) {
-      finish();
+      tryFinish(video);
       return;
     }
     // Commit to the full-document observer only when the video is actually
@@ -92,11 +112,7 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
     if (hasPresentBox(video)) {
       escalate();
     }
-    layoutGate.watch(video, () => {
-      if (!done) {
-        finish();
-      }
-    });
+    layoutGate.watch(video, () => tryFinish(video));
   };
 
   stopEvents = watchMediaEvents(consider);

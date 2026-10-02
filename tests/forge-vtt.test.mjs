@@ -94,6 +94,38 @@ test("parseSubtitlesAsync applies the offset like the sync path", async () => {
   assert.equal(cues[0].text, "shifted");
 });
 
+test("parseSubtitlesAsync yields on pending input and still matches the sync parse", async () => {
+  const mmss = (n) => {
+    const m = String(Math.floor(n / 60)).padStart(2, "0");
+    const s = String(n % 60).padStart(2, "0");
+    return `${m}:${s}`;
+  };
+  const blocks = ["WEBVTT", ""];
+  for (let i = 0; i < 300; i++) {
+    blocks.push(`${mmss(i)}.000 --> ${mmss(i + 1)}.000`, `cue ${i}`, "");
+  }
+  const vtt = blocks.join("\n");
+
+  let calls = 0;
+  const had = Object.prototype.hasOwnProperty.call(globalThis.navigator, "scheduling");
+  const prior = globalThis.navigator.scheduling;
+  Object.defineProperty(globalThis.navigator, "scheduling", {
+    configurable: true,
+    value: { isInputPending: () => { calls++; return true; } }
+  });
+  try {
+    const cues = await parseSubtitlesAsync(vtt, 0);
+    assert.equal(calls > 0, true, "navigator.scheduling.isInputPending was consulted");
+    assert.deepEqual(cues, parseSubtitles(vtt), "input-pending yields do not change the result");
+  } finally {
+    if (had) {
+      Object.defineProperty(globalThis.navigator, "scheduling", { configurable: true, value: prior });
+    } else {
+      delete globalThis.navigator.scheduling;
+    }
+  }
+});
+
 test("timing-looking payload lines stay cue text (one timing per block)", () => {
   const vtt = [
     "WEBVTT",

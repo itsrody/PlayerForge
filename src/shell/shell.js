@@ -27,6 +27,14 @@ import { yield_ } from "../shared/scheduler.js";
 const EDITABLE_SELECTOR =
   "input, textarea, [contenteditable]:not([contenteditable='false'])";
 
+/** Human labels for MediaError.code; an unknown code falls back at the call. */
+const MEDIA_ERROR_LABELS = {
+  1: "Playback was aborted",
+  2: "Network error while loading video",
+  3: "Video could not be decoded",
+  4: "Video format is not supported"
+};
+
 /**
  * Per-video facade: wraps the media element with a stable API, injects the
  * HUD, hosts the input layer, playback tracking, subtitles, and settings
@@ -104,6 +112,7 @@ export class Shell {
     this.#setupFocusManagement();
     this.#suppressContextMenu();
     this.#forwardMediaEvents();
+    this.#watchMediaErrors();
     this.#mediaSession = claimMediaSession({
       controls: this.#media,
       video: this.video,
@@ -113,6 +122,7 @@ export class Shell {
     this.#watchWakeLock();
     this.#watchOrientation();
     this.#watchReferenceBoxSize();
+    this.#watchVisualViewport();
     this.#markManaged();
     logger.log("shell", `Shell "${this.sdk.name}" constructed`);
   }
@@ -348,6 +358,23 @@ export class Shell {
     cssSync?.();
   }
 
+  /**
+   * Surface a terminal media failure. The `error` event on <video> means the
+   * current resource cannot play (network/decode/format), a status the native
+   * UI may or may not show; a toast makes the reason visible inside the shell.
+   * `video.error` is read at event time (it can be cleared on a source reset)
+   * and an unknown code still reports a generic failure.
+   */
+  #watchMediaErrors() {
+    this.#dom.listen(this.video, "error", () => {
+      if (this.#scope.disposed) {
+        return;
+      }
+      const code = this.video.error?.code;
+      this.toastInfo("alert", MEDIA_ERROR_LABELS[code] ?? "Video playback error", "media-error");
+    });
+  }
+
   /** Surface a hint + re-provision when a fullscreen entry is rejected. */
   #watchFullscreen() {
     // An attempt to enter fullscreen was rejected (typically because an
@@ -445,6 +472,40 @@ export class Shell {
     } else {
       this.#dom.listen(window, "resize", invalidate, { passive: true });
     }
+    // Orientation flip changes the screen.* dims read in fullscreen, which the
+    // container ResizeObserver cannot see (the iframe box may not change).
+    const orientation = typeof screen !== "undefined" ? screen.orientation : null;
+    if (orientation) {
+      this.#dom.listen(orientation, "change", invalidate, { passive: true });
+    } else {
+      this.#dom.listen(window, "orientationchange", invalidate, { passive: true });
+    }
+  }
+
+  /**
+   * Mirror the visual viewport onto the shell host as CSS custom properties.
+   * The mobile on-screen keyboard and collapsing URL bar shrink/offset the
+   * visual viewport without changing the layout viewport, so the panel's
+   * portrait bottom sheet reads these to stay above the keyboard and inside
+   * the actually-visible area.
+   */
+  #watchVisualViewport() {
+    const vv = window.visualViewport;
+    const host = this.shellHost;
+    if (!vv || !host) {
+      return;
+    }
+    const sync = () => {
+      if (this.#scope.disposed) {
+        return;
+      }
+      host.style.setProperty("--pf-vv-height", `${vv.height}px`);
+      const inset = window.innerHeight - vv.height - vv.offsetTop;
+      host.style.setProperty("--pf-vv-inset-bottom", `${inset > 0 ? inset : 0}px`);
+    };
+    this.#dom.listen(vv, "resize", sync, { passive: true });
+    this.#dom.listen(vv, "scroll", sync, { passive: true });
+    sync();
   }
 
   #markManaged() {

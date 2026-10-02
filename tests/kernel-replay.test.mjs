@@ -185,3 +185,39 @@ test("kernel re-arms full discovery after the last shell is destroyed", async ()
   await waitFor(() => created.some((shell) => shell.video === video2), 3000);
   assert.ok(created.some((shell) => shell.video === video2), "the second player was discovered after re-arm");
 });
+
+test("resume (Page Lifecycle) reconciles a shell whose video was detached", async () => {
+  document.body.innerHTML = "";
+  const { kernel, video, created } = makeHarness();
+  kernel.init();
+  await waitFor(() => created.some((shell) => shell.video === video));
+  const shell = created.find((entry) => entry.video === video);
+  let destroyed = false;
+  shell.destroy = () => { destroyed = true; };
+
+  // Freeze->resume fires no pageshow, yet the player tree may have been
+  // mutated while frozen; detach without a removal mutation and drive the
+  // native resume signal.
+  video.remove();
+  document.dispatchEvent(new dom.window.Event("resume"));
+  assert.equal(destroyed, true, "resume swept the orphaned shell");
+});
+
+test("pageshow on a discarded page (persisted false, wasDiscarded true) reconciles", async () => {
+  document.body.innerHTML = "";
+  const { kernel, video, created } = makeHarness();
+  kernel.init();
+  await waitFor(() => created.some((shell) => shell.video === video));
+  const shell = created.find((entry) => entry.video === video);
+  let destroyed = false;
+  shell.destroy = () => { destroyed = true; };
+
+  video.remove();
+  document.wasDiscarded = true;
+  try {
+    document.dispatchEvent(new dom.window.Event("pageshow"));
+    assert.equal(destroyed, true, "discarded page reconciled on restore");
+  } finally {
+    delete document.wasDiscarded;
+  }
+});

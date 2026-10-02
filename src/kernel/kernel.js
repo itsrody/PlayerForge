@@ -5,7 +5,7 @@ import { postTask } from "../shared/scheduler.js";
 import { Scope } from "../shared/scope.js";
 import { ShellSlot } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
-import { findSdkForVideo, meetsMinSize, createLayoutGate, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
+import { findSdkForVideo, meetsMinSize, createLayoutGate, createOnScreenGate, isOnScreen, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
 
 /**
@@ -37,6 +37,9 @@ export class Kernel {
   /** Lazily built observer-driven layout-presence gate for videos that failed
    *  meetsMinSize (see #adoptVideo); stopped with the kernel scope. */
   #layoutGate = null;
+  /** Lazily built on-screen gate for player-sized-but-off-screen videos (see
+   *  #adoptVideo); stopped with the kernel scope. */
+  #onScreenGate = null;
   /** Kernel lifecycle scope: removal observers disconnect via onDispose,
    *  grace timers cancel via the signal. */
   #scope = new Scope();
@@ -44,10 +47,30 @@ export class Kernel {
   #shellProvider = null;
 
   #onPageShow = (event) => {
-    if (!event.persisted) {
+    // bfcache restores report persisted; a discarded page comes back with
+    // persisted false but wasDiscarded true. Both hand back a document whose
+    // shells may reference detached videos, so both reconcile.
+    if (!event.persisted && !document.wasDiscarded) {
       return;
     }
     logger.log("kernel", "Restored from bfcache - reconciling");
+    this.#reconcileOrphans();
+  };
+
+  /**
+   * Page Lifecycle freeze -> resume fires no pageshow, yet the player tree may
+   * have been mutated while frozen (or a shell orphaned by a swap), so run the
+   * same orphan sweep on the native resume event.
+   */
+  #onResume = () => {
+    if (this.#scope.disposed) {
+      return;
+    }
+    logger.log("kernel", "Page resumed - reconciling");
+    this.#reconcileOrphans();
+  };
+
+  #reconcileOrphans() {
     for (const shell of this.#registry.getAll()) {
       if (!shell.video.isConnected) {
         this.#seenVideos.delete(shell.video);
@@ -55,7 +78,7 @@ export class Kernel {
         logger.log("kernel", `Reconciled orphaned shell: ${shell.sdk.name}`);
       }
     }
-  };
+  }
 
   #onPageHide = (event) => {
     if (!event.persisted) {
@@ -125,6 +148,7 @@ export class Kernel {
     }
     const { signal } = this.#scope;
     document.addEventListener("pageshow", this.#onPageShow, { signal });
+    document.addEventListener("resume", this.#onResume, { signal });
     window.addEventListener("pagehide", this.#onPageHide, { signal });
     this.#armDiscoveryTap();
     logger.log("kernel", "Kernel ready - discovery tap active");
@@ -198,6 +222,21 @@ export class Kernel {
     return this.#layoutGate;
   }
 
+  /**
+   * Companion gate for player-sized videos that are not yet on screen: built on
+   * first need, torn down with the kernel scope. Returns null once disposed.
+   */
+  #ensureOnScreenGate() {
+    if (!this.#onScreenGate && !this.#scope.disposed) {
+      this.#onScreenGate = createOnScreenGate();
+      this.#scope.onDispose(() => {
+        this.#onScreenGate?.stop();
+        this.#onScreenGate = null;
+      });
+    }
+    return this.#onScreenGate;
+  }
+
   /** Adopt the video, emit discovery and start removal watching. */
   #adoptVideo(video) {
     if (this.#seenVideos.has(video) || video.hasAttribute(SHELL_MARKER)) {
@@ -214,6 +253,14 @@ export class Kernel {
       // (RO callbacks run off the mutation batch, with layout already fresh,
       // and the size is read from the observation rather than a fresh reflow).
       this.#ensureLayoutGate()?.watch(video, () => this.#adoptVideo(video));
+      return;
+    }
+    // Player-sized but off-screen (a carousel slide, a below-the-fold embed):
+    // defer the shell until the lookahead intersection, so a page of embeds
+    // does not boot a full shell for a video the user cannot see. isOnScreen
+    // reports true when the viewport is unknown, so this can only delay.
+    if (!isOnScreen(video)) {
+      this.#ensureOnScreenGate()?.watch(video, () => this.#adoptVideo(video));
       return;
     }
     const container = sdk.container;

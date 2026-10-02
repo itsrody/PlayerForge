@@ -55,6 +55,13 @@ export const MIN_VIDEO_WIDTH = 100;
 export const MIN_VIDEO_HEIGHT = 60;
 
 /**
+ * Lookahead, in CSS pixels, for the on-screen deferral gates: a player is
+ * considered on-screen once it is within this distance of the viewport, so a
+ * shell is ready just before it is actually scrolled into view.
+ */
+const ON_SCREEN_MARGIN_PX = 256;
+
+/**
  * Repeat-query memo: findSdkForVideo resolves both SDK identity and container
  * in one scan, is often asked about the same element back to back, and SPA
  * frameworks re-ask about surviving videos. WeakMap keys die with their videos
@@ -353,7 +360,7 @@ export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_V
   // gate on an SPA that recycles players. Only has/get/set/delete are used, so
   // a WeakMap is a drop-in; stop() swaps in a fresh one instead of clear().
   let waiting = new WeakMap();
-  const observer = new ResizeObserver((entries, ro) => {
+  const observer = new ResizeObserver((entries) => {
     for (const entry of entries) {
       const target = entry.target;
       if (!waiting.has(target)) {
@@ -363,12 +370,33 @@ export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_V
       if (width < minWidth || height < minHeight || !hasPresentBox(target)) {
         continue;
       }
-      ro.unobserve(target);
-      const onQualify = waiting.get(target);
-      waiting.delete(target);
-      onQualify?.();
+      qualify(target);
     }
   });
+  const qualify = (target) => {
+    if (!waiting.has(target)) {
+      return;
+    }
+    observer.unobserve(target);
+    const onQualify = waiting.get(target);
+    waiting.delete(target);
+    onQualify?.();
+  };
+  // content-visibility: auto subtrees report an unchanged placeholder box to
+  // ResizeObserver when they flip back into rendering, so the delivered size
+  // alone can never re-qualify one. The native autostatechange event is the
+  // exact reveal signal; a document-level capture listener catches its
+  // non-bubbling dispatch without a per-target listener that would otherwise
+  // pin a detached, never-sized video. Guarded so a host without a global
+  // document (the unit harness before it installs one) still constructs.
+  const onReveal = (event) => {
+    const target = event.target;
+    if (target && waiting.has(target) && meetsMinSize(target, minWidth, minHeight)) {
+      qualify(target);
+    }
+  };
+  const doc = typeof document !== "undefined" ? document : null;
+  doc?.addEventListener("contentvisibilityautostatechange", onReveal, true);
   return {
     watch(video, onQualify) {
       if (waiting.has(video)) {
@@ -379,7 +407,85 @@ export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_V
     },
     stop() {
       observer.disconnect();
+      doc?.removeEventListener("contentvisibilityautostatechange", onReveal, true);
       waiting = new WeakMap();
+    }
+  };
+}
+
+/**
+ * Synchronous viewport-presence check. Uses the element's client rect - the
+ * caller has usually just measured it, so a second read with no intervening
+ * write is served from the same layout - against the layout viewport with a
+ * lookahead margin. When viewport size is unknown (no window, or a harness
+ * reporting zero inner sizes) it reports present, so missing viewport
+ * information can only make adoption more permissive, never strand a player.
+ */
+export function isOnScreen(el, margin = ON_SCREEN_MARGIN_PX) {
+  if (!el || typeof el.getBoundingClientRect !== "function") {
+    return true;
+  }
+  const win = typeof window !== "undefined" ? window : null;
+  const vw = win?.innerWidth || win?.document?.documentElement?.clientWidth || 0;
+  const vh = win?.innerHeight || win?.document?.documentElement?.clientHeight || 0;
+  if (!vw || !vh) {
+    return true;
+  }
+  let rect;
+  try {
+    rect = el.getBoundingClientRect();
+  } catch {
+    return true;
+  }
+  return rect.bottom + margin >= 0
+    && rect.right + margin >= 0
+    && rect.top - margin <= vh
+    && rect.left - margin <= vw;
+}
+
+/**
+ * IntersectionObserver-backed on-screen gate for deferring adoption/render of
+ * off-screen players. One observer per owner; `watch` dedupes per element,
+ * fires `onEnter` once when the element first intersects (lookahead margin, so
+ * the shell is ready just before it scrolls into view), then unobserves.
+ * Without an IntersectionObserver the gate is a pass-through that fires
+ * immediately, so a host lacking the API keeps the previous eager behavior.
+ */
+export function createOnScreenGate({ rootMargin = `${ON_SCREEN_MARGIN_PX}px` } = {}) {
+  if (typeof IntersectionObserver !== "function") {
+    return {
+      watch(_el, onEnter) {
+        onEnter();
+      },
+      stop() {}
+    };
+  }
+  let callbacks = new WeakMap();
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) {
+        continue;
+      }
+      const onEnter = callbacks.get(entry.target);
+      if (!onEnter) {
+        continue;
+      }
+      observer.unobserve(entry.target);
+      callbacks.delete(entry.target);
+      onEnter();
+    }
+  }, { rootMargin });
+  return {
+    watch(el, onEnter) {
+      if (callbacks.has(el)) {
+        return;
+      }
+      callbacks.set(el, onEnter);
+      observer.observe(el);
+    },
+    stop() {
+      observer.disconnect();
+      callbacks = new WeakMap();
     }
   };
 }

@@ -868,6 +868,40 @@ test("fill pinch owns object-fit: contain and restores it on clear", () => {
   dom.window.close();
 });
 
+test("fill re-derives the cover scale when the video's intrinsic size changes", () => {
+  const { dom, video, zone, host } = makeEnv();
+  stubFullscreen(dom, true);
+  Object.defineProperty(video, "videoWidth", { value: 1920, configurable: true, writable: true });
+  Object.defineProperty(video, "videoHeight", { value: 1080, configurable: true, writable: true });
+  const shell = {
+    video,
+    sdk: { name: "test" },
+    referenceBox: { width: 1080, height: 2400 },
+    toast() {},
+    toastFlash() {}
+  };
+  const ac = new AbortController();
+  attachInputActions(shell, host, ac.signal);
+
+  host.dispatchEvent(new dom.window.CustomEvent(GESTURE_EVENTS.pinch, {
+    detail: { direction: "out" }
+  }));
+  const first = video.style.transform;
+  assert.match(first, /scale\(3\.9/, "landscape source scaled to cover the portrait screen");
+
+  // Adaptive stream switch: the intrinsic ratio flips to portrait while fill
+  // is active. The native `resize` event on the element signals the change;
+  // the frozen cover scale must be re-derived instead of letterboxing.
+  video.videoWidth = 1080;
+  video.videoHeight = 1920;
+  video.dispatchEvent(new dom.window.Event("resize"));
+  assert.notEqual(video.style.transform, first, "cover scale re-derived on intrinsic-size change");
+  assert.match(video.style.transform, /scale\(1\.25/, "portrait source no longer overflows");
+
+  ac.abort();
+  dom.window.close();
+});
+
 /* --- Event-driven session lifecycles ---------------------------------- *
  * The await-click latch and the pinch baseline used to be short timers.
  * They are now driven by real events (click, next pointerdown, second

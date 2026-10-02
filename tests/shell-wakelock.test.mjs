@@ -7,7 +7,7 @@ globalThis.GM_setValue = () => {};
 
 const { Shell } = await import("../src/shell/shell.js");
 
-async function makeWakeLockShell() {
+async function makeWakeLockShell({ visualViewportHeight = null } = {}) {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", {
     url: "https://www.youtube.com/watch?v=1",
   });
@@ -23,6 +23,17 @@ async function makeWakeLockShell() {
     writable: true,
     configurable: true,
   });
+
+  let visualViewport = null;
+  if (visualViewportHeight != null) {
+    visualViewport = new dom.window.EventTarget();
+    visualViewport.height = visualViewportHeight;
+    visualViewport.offsetTop = 50;
+    Object.defineProperty(dom.window, "visualViewport", {
+      value: visualViewport,
+      configurable: true,
+    });
+  }
 
   // Native wake-lock contract: request("screen", { signal }) - the browser
   // owns release. Aborting a held lock releases it; aborting an in-flight
@@ -83,7 +94,7 @@ async function makeWakeLockShell() {
   const play = () => video.dispatchEvent(new dom.window.Event("play"));
   const pause = () => video.dispatchEvent(new dom.window.Event("pause"));
   const tick = () => new Promise((r) => setTimeout(r, 0));
-  return { dom, shell, video, wakeLock, play, pause, tick };
+  return { dom, shell, video, wakeLock, play, pause, tick, visualViewport };
 }
 
 test("pause aborts an in-flight request; no lock is ever created", async () => {
@@ -138,5 +149,42 @@ test("pause when no lock is held is a no-op", async () => {
   pause();
   assert.equal(wakeLock.requests, 0, "no acquire ever happened");
   assert.equal(wakeLock.released.length, 0);
+  shell.destroy();
+});
+
+test("a media error surfaces a labelled toast", async () => {
+  const { dom, shell, video } = await makeWakeLockShell();
+  const seen = [];
+  shell.toastInfo = (icon, text, group) => seen.push({ icon, text, group });
+
+  Object.defineProperty(video, "error", { configurable: true, value: { code: 3 } });
+  video.dispatchEvent(new dom.window.Event("error"));
+  assert.deepEqual(seen[0], { icon: "alert", text: "Video could not be decoded", group: "media-error" });
+
+  Object.defineProperty(video, "error", { configurable: true, value: { code: 99 } });
+  video.dispatchEvent(new dom.window.Event("error"));
+  assert.equal(seen[1].text, "Video playback error", "unknown code falls back to a generic label");
+
+  shell.destroy();
+});
+
+test("visualViewport mirrors onto the host as CSS custom properties", async () => {
+  const { dom, shell, visualViewport } = await makeWakeLockShell({ visualViewportHeight: 400 });
+  const host = shell.shellHost;
+  assert.equal(host.style.getPropertyValue("--pf-vv-height"), "400px");
+  assert.equal(
+    host.style.getPropertyValue("--pf-vv-inset-bottom"),
+    `${dom.window.innerHeight - 400 - 50}px`
+  );
+
+  visualViewport.height = 300;
+  visualViewport.offsetTop = 120;
+  visualViewport.dispatchEvent(new dom.window.Event("resize"));
+  assert.equal(host.style.getPropertyValue("--pf-vv-height"), "300px");
+  assert.equal(
+    host.style.getPropertyValue("--pf-vv-inset-bottom"),
+    `${dom.window.innerHeight - 300 - 120}px`
+  );
+
   shell.destroy();
 });

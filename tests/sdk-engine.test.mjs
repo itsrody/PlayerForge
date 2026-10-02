@@ -6,6 +6,8 @@ import {
   videoFromEvent,
   meetsMinSize,
   createLayoutGate,
+  createOnScreenGate,
+  isOnScreen,
   watchMediaEvents,
   MIN_VIDEO_WIDTH,
   MIN_VIDEO_HEIGHT
@@ -404,5 +406,155 @@ test("createLayoutGate falls back to the synchronous rect gate without ResizeObs
     assert.equal(qualified, 1, "undersized video never qualifies");
   } finally {
     globalThis.ResizeObserver = Real;
+  }
+});
+
+test("createLayoutGate re-qualifies a content-visibility reveal", () => {
+  const doc = dom("");
+  const win = doc.defaultView;
+  const video = doc.createElement("video");
+  doc.body.appendChild(video);
+  let rect = { width: 10, height: 10 };
+  video.getBoundingClientRect = () => rect;
+  const fake = fakeResizeObserver();
+  const RealDoc = globalThis.document;
+  const realWindow = globalThis.window;
+  globalThis.document = doc;
+  globalThis.window = win;
+  try {
+    let qualified = 0;
+    const gate = createLayoutGate({ minWidth: 100, minHeight: 60 });
+    gate.watch(video, () => qualified++);
+    assert.equal(qualified, 0, "unqualified until a signal arrives");
+    // The reveal changes layout but delivers no ResizeObserver entry (the
+    // placeholder box was already non-zero); the native event is the signal.
+    rect = { width: 200, height: 100 };
+    video.dispatchEvent(new win.Event("contentvisibilityautostatechange"));
+    assert.equal(qualified, 1, "reveal event re-qualifies");
+    assert.equal(fake.state.observed.has(video), false, "qualified target unobserved");
+    gate.stop();
+  } finally {
+    fake.restore();
+    globalThis.document = RealDoc;
+    globalThis.window = realWindow;
+  }
+});
+
+test("createLayoutGate ignores a reveal that is still undersized", () => {
+  const doc = dom("");
+  const win = doc.defaultView;
+  const video = doc.createElement("video");
+  doc.body.appendChild(video);
+  video.getBoundingClientRect = () => ({ width: 10, height: 10 });
+  const fake = fakeResizeObserver();
+  const RealDoc = globalThis.document;
+  const realWindow = globalThis.window;
+  globalThis.document = doc;
+  globalThis.window = win;
+  try {
+    let qualified = 0;
+    const gate = createLayoutGate({ minWidth: 100, minHeight: 60 });
+    gate.watch(video, () => qualified++);
+    video.dispatchEvent(new win.Event("contentvisibilityautostatechange"));
+    assert.equal(qualified, 0, "an undersized reveal never qualifies");
+    assert.equal(fake.state.observed.has(video), true, "still watched for a later reveal");
+    gate.stop();
+  } finally {
+    fake.restore();
+    globalThis.document = RealDoc;
+    globalThis.window = realWindow;
+  }
+});
+
+test("isOnScreen is permissive when no viewport size is resolvable", () => {
+  const doc = dom("");
+  const video = sizedVideo(doc, { top: 9000, bottom: 9020, left: 0, right: 300 });
+  const realWindow = globalThis.window;
+  globalThis.window = undefined;
+  try {
+    assert.equal(isOnScreen(video), true, "unknown viewport defers to present");
+  } finally {
+    globalThis.window = realWindow;
+  }
+});
+
+test("isOnScreen defers below-the-fold but honors the lookahead margin", () => {
+  const doc = dom("");
+  const realWindow = globalThis.window;
+  globalThis.window = { innerWidth: 1000, innerHeight: 800 };
+  try {
+    const below = sizedVideo(doc, { top: 2000, bottom: 2020, left: 0, right: 300 });
+    assert.equal(isOnScreen(below), false, "far below the viewport");
+    const near = sizedVideo(doc, { top: 1000, bottom: 1020, left: 0, right: 300 });
+    assert.equal(isOnScreen(near), true, "within the lookahead margin");
+    const onscreen = sizedVideo(doc, { top: 100, bottom: 400, left: 0, right: 300 });
+    assert.equal(isOnScreen(onscreen), true, "inside the viewport");
+  } finally {
+    globalThis.window = realWindow;
+  }
+});
+
+/** Controllable IntersectionObserver mirroring the browser's entry callback. */
+function fakeIntersectionObserver() {
+  const Real = globalThis.IntersectionObserver;
+  const state = { cb: null, observed: new Set() };
+  class FakeIO {
+    constructor(cb) {
+      state.cb = cb;
+    }
+    observe(el) {
+      state.observed.add(el);
+    }
+    unobserve(el) {
+      state.observed.delete(el);
+    }
+    disconnect() {
+      state.observed.clear();
+    }
+  }
+  globalThis.IntersectionObserver = FakeIO;
+  return {
+    state,
+    emit(entries) {
+      state.cb(entries);
+    },
+    restore() {
+      globalThis.IntersectionObserver = Real;
+    }
+  };
+}
+
+test("createOnScreenGate defers until the first intersection, once per element", () => {
+  const doc = dom("");
+  const video = doc.createElement("video");
+  const fake = fakeIntersectionObserver();
+  try {
+    let entered = 0;
+    const gate = createOnScreenGate();
+    gate.watch(video, () => entered++);
+    gate.watch(video, () => entered++);
+    assert.equal(entered, 0, "off-screen defers");
+    assert.equal(fake.state.observed.has(video), true, "watched for entry");
+
+    fake.emit([{ target: video, isIntersecting: false }]);
+    assert.equal(entered, 0, "a non-intersecting entry never fires");
+    fake.emit([{ target: video, isIntersecting: true }]);
+    assert.equal(entered, 1, "fires once on entry");
+    assert.equal(fake.state.observed.has(video), false, "unobserved after entry");
+    gate.stop();
+  } finally {
+    fake.restore();
+  }
+});
+
+test("createOnScreenGate passes straight through without IntersectionObserver", () => {
+  const Real = globalThis.IntersectionObserver;
+  globalThis.IntersectionObserver = undefined;
+  try {
+    let entered = 0;
+    createOnScreenGate().watch({}, () => entered++);
+    assert.equal(entered, 1, "no observer - eager behavior preserved");
+  } finally {
+    globalThis.IntersectionObserver = Real;
   }
 });
