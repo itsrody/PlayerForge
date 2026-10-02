@@ -288,3 +288,32 @@ test("URL.canParse gates MediaSession poster artwork", () => {
     delete globalThis.location;
   }
 });
+
+test("endBoost restores the rate even after readiness is lost mid-hold", () => {
+  const { video, controls } = makeEnv(4);
+  Object.defineProperty(video, "duration", { value: 120, configurable: true });
+  controls.beginBoost(2);
+  assert.equal(video.playbackRate, 2, "boost engages while ready");
+
+  // A source swap resets the element to HAVE_NOTHING while the hold is live.
+  Object.defineProperty(video, "readyState", { value: 0, configurable: true });
+  controls.endBoost(1.25);
+  assert.equal(video.playbackRate, 1.25, "release always restores the saved rate");
+});
+
+test("skip and stop ride the MSE window like seekTo when duration is known", () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+    url: "https://example.com/watch"
+  });
+  const video = dom.window.document.createElement("video");
+  Object.defineProperty(video, "readyState", { value: 0, configurable: true });
+  Object.defineProperty(video, "duration", { value: 600, configurable: true });
+  Object.defineProperty(video, "currentTime", { value: 100, configurable: true, writable: true });
+  const controls = createMediaControls({ video });
+
+  controls.skip(15);
+  assert.equal(video.currentTime, 115, "a known duration is a skippable timeline at readyState 0");
+
+  controls.stop();
+  assert.equal(video.currentTime, 0, "stop resets the known timeline at readyState 0");
+});

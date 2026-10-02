@@ -44,9 +44,15 @@ export function postTask(fn, { priority = "user-visible", delay: ms = 0, signal 
   if (!HAS_POST_TASK) {
     // setTimeout fallback - dead code on the Chromium 154 floor, kept for the
     // jsdom test harness. It honors the owner signal too, so the abort
-    // contract is identical on both backends.
-    const id = setTimeout(fn, ms);
+    // contract is identical on both backends. Natural completion must also
+    // drop the owner-signal listener: an owner signal outlives its tasks, so
+    // leaving it attached would accumulate one listener per postTask call.
+    let id = 0;
     const onAbort = () => clearTimeout(id);
+    id = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      fn();
+    }, ms);
     signal?.addEventListener("abort", onAbort, { once: true });
     return {
       abort: () => {

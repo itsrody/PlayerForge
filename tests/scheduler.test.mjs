@@ -34,3 +34,19 @@ test("postTask cancels a pending task when the owner signal aborts later", async
   await settle(30);
   assert.equal(ran, 0, "aborting the owner tears the pending task down");
 });
+
+test("postTask detaches its owner-signal listener once the task runs", async () => {
+  let added = 0;
+  let removed = 0;
+  const signal = {
+    aborted: false,
+    addEventListener: (type) => { if (type === "abort") added++; },
+    removeEventListener: (type) => { if (type === "abort") removed++; }
+  };
+  let ran = false;
+  postTask(() => { ran = true; }, { signal });
+  await settle();
+  assert.equal(ran, true, "the task ran");
+  assert.equal(added, 1, "the abort listener was attached");
+  assert.equal(removed, 1, "natural completion drops the abort listener");
+});

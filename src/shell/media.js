@@ -95,7 +95,7 @@ export function createMediaControls({ video }) {
     },
 
     stop() {
-      if (!isReady()) {
+      if (!canSeek()) {
         return;
       }
       video.pause();
@@ -128,7 +128,10 @@ export function createMediaControls({ video }) {
     },
 
     skip(delta) {
-      if (!isReady()) {
+      // Skip is a seek: gate on the same canSeek() as seekTo so a known
+      // duration is a usable timeline even in the MSE window (readyState 0),
+      // matching the seekto MediaSession action instead of dropping it.
+      if (!canSeek()) {
         return;
       }
       this.seekTo(video.currentTime + delta);
@@ -197,9 +200,9 @@ export function createMediaControls({ video }) {
     },
 
     endBoost(speed) {
-      if (!isReady()) {
-        return;
-      }
+      // Never gated: releasing a hold must always restore the saved rate. If a
+      // source swap drops readiness mid-hold, an isReady() gate here would
+      // leave the element stuck at the boosted playbackRate forever.
       video.playbackRate = speed;
     }
   };

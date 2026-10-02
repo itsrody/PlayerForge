@@ -102,7 +102,7 @@ function buildFilterString(values) {
   const tempSat = Math.abs(temperature) * 0.15;
   const tintHue = (Number(values.tint) || 0) * 0.2;
   const totalHue = (Number(values.hue) || 0) + tempHue + tintHue;
-  const totalSat = (values.saturate || DEFAULTS.saturate) + tempSat;
+  const totalSat = Number(values.saturate) + tempSat;
 
   if (values.brightness !== DEFAULTS.brightness) {
     parts.push(`brightness(${values.brightness}%)`);
@@ -199,7 +199,16 @@ export class VideoFilter {
     for (const key of ALL_KEYS) {
       const def = DEFAULTS[key];
       const raw = getConfigValue(`${CONFIG_PREFIX}.${key}`, def);
-      this.#values[key] = typeof def === "number" ? (Number(raw) || def) : (raw ?? def);
+      if (typeof def === "number") {
+        const num = Number(raw);
+        // A saved 0 is a real value (brightness/contrast/saturate allow it):
+        // the old `Number(raw) || def` treated it as absent and silently
+        // reset those to their default on the next load. Only a missing or
+        // non-finite value falls back now.
+        this.#values[key] = raw == null || raw === "" || !Number.isFinite(num) ? def : num;
+      } else {
+        this.#values[key] = raw ?? def;
+      }
     }
     for (const key of ALL_KEYS) {
       this.#steppers[key]?.setValue(this.#values[key]);

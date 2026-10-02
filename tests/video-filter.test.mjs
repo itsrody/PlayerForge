@@ -312,3 +312,20 @@ test("preset apply persists all fields in a single write", async () => {
   assert.equal(Object.keys(writes["pf:configs"]?.filter ?? {}).length, 9, "all color fields persisted in one doc");
   filter.destroy();
 });
+
+test("a saved zero is a real value, not a missing one", () => {
+  cleanWrites();
+  // Seed the configs doc directly: brightness/contrast/saturate all allow 0,
+  // and the old `Number(raw) || def` silently reset each to its default.
+  writes["pf:configs"] = {
+    version: 1,
+    filter: { brightness: 0, contrast: 0, saturate: 0 }
+  };
+  invalidateConfigCache();
+  const video = makeFakeVideo();
+  const panel = makeFakePanel();
+  new VideoFilter(makeFakeShell(video), panel);
+  assert.ok(video.style.filter.includes("brightness(0%)"), "saved brightness 0 survives");
+  assert.ok(video.style.filter.includes("contrast(0%)"), "saved contrast 0 survives");
+  assert.ok(video.style.filter.includes("saturate(0%)"), "saved saturate 0 survives");
+});

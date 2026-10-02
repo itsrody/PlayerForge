@@ -408,6 +408,12 @@ export class Shell {
       if (this.#scope.disposed || video.paused || video.ended) {
         return;
       }
+      // Screen Wake Lock is optional and can be policed away by an embed; a
+      // missing API must not throw straight out of the play/visibility
+      // listener (and keep the already-armed listeners alive).
+      if (typeof navigator.wakeLock?.request !== "function") {
+        return;
+      }
       // A newer acquire supersedes an in-flight one: last signal wins.
       this.#wakeLockAbort?.abort();
       const ac = new AbortController();
@@ -427,6 +433,9 @@ export class Shell {
         acquire();
       }
     });
+    // A resource already playing before this shell adopted it never fires
+    // `play` again; acquire once here so the screen is still kept awake.
+    acquire();
   }
 
   /** Lock to landscape on fullscreen entry (Android); unlock on exit. */
