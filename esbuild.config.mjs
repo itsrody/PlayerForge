@@ -5,15 +5,44 @@ import { createHash } from "node:crypto";
 import process from "node:process";
 import { POWER_GROUP, POWER_SCHEMA } from "./src/shared/power-schema.js";
 
-// Minified is the only output. Minification is
-// V8/TurboFan-aware by construction: esbuild only does the safe transforms
-// (whitespace, local-identifier mangling, syntax compression) that keep
-// functions Maglev/TurboFan-compilable - it never introduces eval/with, never
-// mangles property names, and its bytecode cost per op is unchanged, so V8's
-// hidden-class/IC-driven optimization is untouched. The embedded stylesheet is
-// minified separately (esbuild's JS minifier would not shrink a text-loaded
-// string); the CSS pass below is deliberately conservative so calc()/content
-// and selector whitespace survive intact.
+// The shipped bundle is minified, and that is a deliberate trade of auditability
+// for parse cost - not a default.
+//
+// Why it is load-bearing: ScriptCat never minifies userscripts. `unstableminify`
+// exists only as an INFORMATIONAL_TAG (`src/pkg/utils/script_compat.ts:70` in
+// the ScriptCat tree); the install path stores code verbatim and the run path
+// wraps it as `with(arguments[0]||this.$){ return(async function(){ ... }) }`
+// before `new Function(code)` (`src/app/service/content/utils.ts:135-166`).
+// So whatever lands here is exactly what gets recompiled - on every matched page,
+// not once per install. Unminified, this bundle measured 31,426 ns of V8
+// parse+compile against 10,956 ns minified: 2.9x, recurring, on every page load.
+// That is the whole reason minification stays on.
+//
+// Why it is safe to mangle: minification's usual hazards are all absent here,
+// and each was checked rather than assumed. esbuild never emits eval/with and
+// never mangles property names, so hidden classes and IC-driven optimization are
+// untouched. PlayerForge additionally reads no `Function.prototype.name` - every
+// `.name` in src/ is an object property, a DOMException, or an SDK record - and
+// performs no `.toString()` source inspection or stack parsing, so identifier
+// mangling cannot cost us behaviour. `verifyBundle` re-checks this at build time.
+//
+// The one transform ScriptCat gets that we do not: its own build runs SWC with
+// `compress: { passes: 2 }` (`rspack.config.ts:259-301`), i.e. two compression
+// passes. esbuild's `minify: true` is a single pass, so there is likely a little
+// size still on the table. Closing that would mean adding terser as a post-pass -
+// not done here, and deliberately left out of a config that has to stay
+// verifiable by one deterministic build.
+//
+// `charset: "utf8"` stays for the same reason minification is on: the default
+// would escape every non-ASCII codepoint to six bytes each.
+//
+// The metadata banner must survive this transform byte-for-byte - ScriptCat
+// regex-parses it out of the header comment (`src/pkg/utils/script.ts:22-23`) -
+// so `verifyBundle` fails the build rather than ship an uninstallable script.
+//
+// The embedded stylesheet is minified separately (esbuild's JS minifier would
+// not shrink a text-loaded string); the CSS pass below is deliberately
+// conservative so calc()/content and selector whitespace survive intact.
 
 const REPO = "https://github.com/itsrody/PlayerForge";
 const RAW = "https://raw.githubusercontent.com/itsrody/PlayerForge/chromium/dist";
@@ -263,21 +292,21 @@ const shared = {
 const watch = process.argv.includes("--watch");
 
 /**
- * Release-time verification for the minified bundle. Minification is
- * V8/TurboFan-safe by construction (esbuild never emits eval/with, never
- * mangles property names), but a broken minifier would violate exactly
- * those promises - or silently corrupt the metadata block ScriptCat reads
- * to install the script. This gate fails the build rather than ship a bundle
- * that is unsafe to interpret or won't install.
+ * Release-time verification for the shipped bundle. Tree shaking and syntax
+ * lowering are reachability- and target-driven, so they cannot introduce
+ * dynamic code on their own - but a broken transform would, and would also
+ * silently corrupt the metadata block ScriptCat reads to install the script.
+ * This gate fails the build rather than ship a bundle that is unsafe to
+ * interpret or won't install.
  */
-function verifyMinified(text) {
+function verifyBundle(text) {
   const body = text.slice(text.indexOf("==/UserScript==") + 16);
   if (!text.startsWith("// ==UserScript==")) {
-    throw new Error("min build: metadata banner displaced from file head");
+    throw new Error("bundle: metadata banner displaced from file head");
   }
   for (const needle of ["@name         PlayerForge", "@version", "@grant        GM_setValue", "@resource     pfStyle https://raw.githubusercontent.com/itsrody/PlayerForge/chromium/dist/playerforge.css#sha384-", "@inject-into  content", "==UserConfig=="]) {
     if (!text.includes(needle)) {
-      throw new Error(`min build: metadata line missing: ${needle.trim().split(/\s+/)[0]}`);
+      throw new Error(`bundle: metadata line missing: ${needle.trim().split(/\s+/)[0]}`);
     }
   }
   const forbidden = [
@@ -287,7 +316,7 @@ function verifyMinified(text) {
   ];
   for (const [re, label] of forbidden) {
     if (re.test(body)) {
-      throw new Error(`min build: forbidden construct '${label}' in body`);
+      throw new Error(`bundle: forbidden construct '${label}' in body`);
     }
   }
 }
@@ -297,6 +326,8 @@ if (watch) {
   await ctx.watch();
   console.log("[PlayerForge] watching (minified)...");
 } else {
+  // One options object, used for BOTH the write and the verification rebuild, so
+  // the determinism gate cannot silently compare two different transforms.
   const minifiedOpts = { ...shared, minify: true };
 
   // Minified bundle (what ScriptCat installs).
@@ -308,8 +339,8 @@ if (watch) {
   const onDisk = readFileSync(shared.outfile, "utf8");
   const inMemory = second.outputFiles[0].text;
   if (onDisk !== inMemory) {
-    throw new Error("min build: non-deterministic output (disk vs rebuild mismatch)");
+    throw new Error("bundle: non-deterministic output (disk vs rebuild mismatch)");
   }
-  verifyMinified(inMemory);
+  verifyBundle(inMemory);
   console.log("[PlayerForge] min build verified: metadata header intact, no eval/with/new Function, deterministic");
 }
