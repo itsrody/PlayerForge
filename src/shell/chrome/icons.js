@@ -67,14 +67,14 @@ function canonicalName(name) {
 }
 
 /**
- * One cached entry per canonical icon: the SVG markup string AND a template
- * element parsed from it once, in the caller's document. iconMarkup and
- * createIconElement both read from this single store, so a repeated icon
- * never re-parses whether it is shipped as a string (toast) or a DOM element
- * (panel/history); the only cost for the element path after the first use is
- * a cheap cloneNode. The template is parsed in the document it is first
- * requested in, which is correct whether that is the top document or a shell
- * shadow-root document.
+ * One cached template element per canonical icon, parsed once in the caller's
+ * document, so a repeated icon never re-parses its markup; after the first use
+ * the only cost is a cheap cloneNode. The template is parsed in the document it
+ * is first requested in, which is correct whether that is the top document or a
+ * shell shadow-root document.
+ *
+ * Only the element path caches: iconMarkup returns the raw string straight from
+ * ICONS, which is what a template-based caller wants and needs no parse.
  */
 const cache = new Map();
 
@@ -99,7 +99,7 @@ function entryFor(canonical, doc) {
         }
       }
     } catch {}
-    entry = { markup, el, doc };
+    entry = { el, doc };
     cache.set(canonical, entry);
   }
   return entry;
@@ -127,5 +127,8 @@ export function createIconElement(name, doc = document) {
   if (!canonical) {
     return null;
   }
-  return entryFor(canonical, doc).el.cloneNode(true);
+  // Null when the target document exposes no DOMParser (headless harnesses,
+  // unusual embedders) or parsing threw. Returning null keeps this consistent
+  // with the unknown-name exit rather than throwing a TypeError on .el.
+  return entryFor(canonical, doc).el?.cloneNode(true) ?? null;
 }

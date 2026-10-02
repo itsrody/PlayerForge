@@ -158,6 +158,7 @@ const banner = `// ==UserScript==
 // @supportURL   ${REPO}/issues
 // @license      MIT
 // ==/UserScript==
+
 /* ==UserConfig==
 ${userConfigYaml()}
 ==/UserConfig== */

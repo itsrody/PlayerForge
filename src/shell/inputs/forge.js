@@ -594,16 +594,13 @@ export class InputForge {
   }
 
     /**
-     * Decide whether keyboard shortcuts should apply: yes when focus sits
-     * on a target that cannot consume the keystroke itself - inside the
-     * container, or at page level (SPA roots park focus on app wrappers,
-     * not body) while this engine owns playback.
-     */
+   * Decide whether keyboard shortcuts should apply: yes when focus sits on a
+   * target that cannot consume the keystroke itself - inside the container, or
+   * at page level (SPA roots park focus on app wrappers, not body) while this
+   * engine owns playback.
+   */
   #shouldHandleKeys(allowControlFocus = false) {
     const activeElement = deepestActiveElement(this.#eventTarget);
-    if (!this.#zone) {
-      return false;
-    }
     if (!this.#keysAllowedForTarget(activeElement, allowControlFocus)) {
       return false;
     }
@@ -738,7 +735,9 @@ export class InputForge {
       }
       return;
     }
-    if (!(this.#pointers.size > 2)) {
+    // The 2-pointer case already returned above, so reaching here with fewer
+    // than 2 down is the single-pointer (or none) primary-gesture path.
+    if (this.#pointers.size < 2) {
       this.#primaryPointerId = event.pointerId;
       this.#startX = event.clientX;
       this.#startY = event.clientY;
@@ -1224,8 +1223,11 @@ export class InputForge {
     if (fs && event.ctrlKey && !event.momentum && allowsIntent("pinch")) {
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (performance.now() >= this.#trackpadPinchCooldownUntil) {
-        this.#trackpadPinchCooldownUntil = performance.now() + TRACKPAD_COOLDOWN_MS;
+      // One clock read on a non-passive wheel handler; the same pattern as the tap
+      // path above.
+      const now = performance.now();
+      if (now >= this.#trackpadPinchCooldownUntil) {
+        this.#trackpadPinchCooldownUntil = now + TRACKPAD_COOLDOWN_MS;
         this.#suppressNextActivations();
         pinchDetail.zone = "screen";
         pinchDetail.method = "trackpad";

@@ -41,7 +41,6 @@ const MEDIA_ERROR_LABELS = {
  * panel, tracks fullscreen state, and wires MediaSession.
  */
 export class Shell {
-  id;
   video;
   container;
   sdk;

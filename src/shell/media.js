@@ -4,7 +4,7 @@ import { isBenignMediaPolicyError } from "../shared/errors.js";
 import { Scope } from "../shared/scope.js";
 
 /** Volume delta applied by nudgeVolume, shared with UI feedback layers. */
-export const VOLUME_STEP = 0.1;
+const VOLUME_STEP = 0.1;
 
 /**
  * Media command plane. Every way of controlling playback - gestures, hotkeys,

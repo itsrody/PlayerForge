@@ -39,7 +39,9 @@ function createStepper({
   const lo = Number(min);
   const hi = Number(max);
   const by = Math.abs(Number(step)) || 1;
-  const decimals = Math.max(decimalsOf(by), 0);
+  // decimalsOf never returns a negative count (a missing dot yields 0, and
+  // str.length - dot - 1 is >= 0 for any valid index), so no clamping here.
+  const decimals = decimalsOf(by);
   // decimals is fixed per stepper, so the 10**decimals factor is computed once
   // here instead of on every nudge/commit (hold-repeat fires it ~13x/s).
   const roundFactor = 10 ** decimals;
@@ -126,22 +128,41 @@ function createStepper({
     input.value = format ? format(committed) : numText(committed);
   };
 
+  /**
+   * The one state transition for this stepper: clamp/round, adopt if it moved,
+   * then sync aria and notify. Every writer (commit, the live `input` path,
+   * setValue) goes through here, so no path can drift on the order of those
+   * steps or on when onChange fires.
+   *
+   * `render` controls whether the field repaints. Callers that already display
+   * what the user typed (live input) pass false; commit/setValue pass true, and
+   * the paint must come AFTER the mutation or blur/Enter/nudge would flash the
+   * previous number while state advanced.
+   */
+  const apply = (value, render) => {
+    const next = roundTo(clamp(value, lo, hi));
+    if (next === committed) {
+      if (render) {
+        showCommitted();
+      }
+      return committed;
+    }
+    committed = next;
+    if (render) {
+      showCommitted();
+    }
+    syncAria();
+    onChange?.(committed);
+    return committed;
+  };
+
   const commit = (rawText) => {
     const parsed = Number.parseFloat(rawText);
     if (!Number.isFinite(parsed)) {
       showCommitted();
       return committed;
     }
-    const next = roundTo(clamp(parsed, lo, hi));
-    if (next !== committed) {
-      committed = next;
-      syncAria();
-      onChange?.(committed);
-    }
-    // Render after the mutation: the old order painted the pre-commit value,
-    // so blur/Enter/nudge flashed the previous number while state advanced.
-    showCommitted();
-    return committed;
+    return apply(parsed, true);
   };
 
   function nudge(dir) {
@@ -163,12 +184,8 @@ function createStepper({
     if (!Number.isFinite(parsed)) {
       return;
     }
-    const next = roundTo(clamp(parsed, lo, hi));
-    if (next !== committed) {
-      committed = next;
-      syncAria();
-      onChange?.(committed);
-    }
+    // No render: the user is mid-keystroke and the field already shows this.
+    apply(parsed, false);
   });
 
   input.addEventListener("keydown", (event) => {
@@ -215,16 +232,7 @@ function createStepper({
     input,
     getValue: () => committed,
     setValue(next) {
-      const nextValue = roundTo(clamp(Number(next), lo, hi));
-      if (nextValue === committed) {
-        showCommitted();
-        return committed;
-      }
-      committed = nextValue;
-      showCommitted();
-      syncAria();
-      onChange?.(committed);
-      return committed;
+      return apply(Number(next), true);
     },
     setDisabled(disabled) {
       input.disabled = disabled;
@@ -308,15 +316,26 @@ export class SettingsPanel {
     this.#sectionBuilder = fn;
   }
 
+  /**
+   * Run the lazy section builder once, if it is still pending. Both entry paths
+   * (open and openSection) must await the same one-shot, so the take-and-clear
+   * lives here rather than being copied into each - two copies of a one-shot
+   * is two chances to leave a builder armed forever.
+   */
+  async #buildSectionsOnce() {
+    const build = this.#sectionBuilder;
+    if (!build) {
+      return;
+    }
+    this.#sectionBuilder = null;
+    await build();
+  }
+
   async open() {
     if (!this.#root || this.#scope.disposed || this.isOpen) {
       return;
     }
-    if (this.#sectionBuilder) {
-      const build = this.#sectionBuilder;
-      this.#sectionBuilder = null;
-      await build();
-    }
+    await this.#buildSectionsOnce();
     if (!this.#body.childElementCount) {
       return;
     }
@@ -451,14 +470,10 @@ export class SettingsPanel {
     if (!this.#root || this.#scope.disposed) {
       return false;
     }
-    if (this.#sectionBuilder) {
-      const build = this.#sectionBuilder;
-      this.#sectionBuilder = null;
-      await build();
-    }
-    for (const [section, tab] of this.#sections) {
+    await this.#buildSectionsOnce();
+    for (const section of this.#sections.keys()) {
       if (section.dataset.title === title) {
-        this.#activateSection(section, tab);
+        this.#activateSection(section);
         await this.open();
         return true;
       }
@@ -502,11 +517,11 @@ export class SettingsPanel {
     label.textContent = title;
     tab.appendChild(label);
 
-    tab.addEventListener("click", () => this.#activateSection(section, tab), { signal: this.#scope.signal });
+    tab.addEventListener("click", () => this.#activateSection(section), { signal: this.#scope.signal });
     this.#tabList.appendChild(tab);
     this.#sections.set(section, tab);
     if (!this.#activeSection) {
-      this.#activateSection(section, tab);
+      this.#activateSection(section);
     }
     return section;
   }
@@ -841,12 +856,12 @@ export class SettingsPanel {
       }
       nextTab.focus();
       if (targetSection) {
-        this.#activateSection(targetSection, nextTab);
+        this.#activateSection(targetSection);
       }
     }, { signal });
   }
 
-  #activateSection(targetSection, _targetTab) {
+  #activateSection(targetSection) {
     const prev = this.#activeSection;
     if (prev === targetSection) {
       return;

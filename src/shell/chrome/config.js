@@ -193,9 +193,17 @@ gmAddValueChangeListener(KEYS.configs, (_name, _old, _value, remote) => {
 
 /**
  * Render SETTINGS_SCHEMA into the settings panel: one labeled section per
- * group, toggles for bools, steppers for numbers. Pure function over the
- * panel API - aside from the reactivity subscription below, no lifecycle of
- * its own (`signal` ties that subscription to the caller, e.g. the shell).
+ * group, toggles for bools, a radio row for options, and a stepper for numbers.
+ * Pure function over the panel API - aside from the reactivity subscription
+ * below, no lifecycle of its own (`signal` ties that subscription to the
+ * caller, e.g. the shell).
+ *
+ * The stepper branch is the schema's numeric control even though no entry uses
+ * it today (all ten are bools plus controller.stepSeek's options). It stays
+ * because SETTINGS_SCHEMA is this renderer's extension point: a bounded number
+ * belongs in the panel like any other setting, and re-deriving the control on
+ * demand - including its deferred-text-input and reactive-sync wiring - is a
+ * worse trade than a branch with no current caller.
  */
 export function addSettingsSection(panel, signal) {
   if (!panel?.body) {
@@ -219,8 +227,7 @@ export function addSettingsSection(panel, signal) {
       groupGrid = panel.el("div", { class: "pf-panel-grid" }, groupSection);
     }
     if (definition.type === "bool") {
-      const cellAttrs = { class: "pf-panel-cell" };
-      const cell = panel.el("div", cellAttrs, groupGrid);
+      const cell = panel.el("div", { class: "pf-panel-cell" }, groupGrid);
       const toggleLabel = panel.el("label", { class: "pf-settings-toggle" }, cell);
       const checkbox = panel.addControl(toggleLabel, {
         type: "checkbox",

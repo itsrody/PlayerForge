@@ -28,7 +28,7 @@ export { GESTURE_EVENTS };
  *   even when a control element holds focus.
  */
 
-export const INPUT_BINDINGS = [
+const INPUT_BINDINGS = [
   // - Pointer intents -
   { id: "hold-speed", gesture: "hold", setting: "gestures.hold", fs: false },
   { id: "drag-scrub", gesture: "scrub", setting: "gestures.scrub", fs: true },
@@ -107,7 +107,7 @@ let intentsArmedFs = false;
  * input the shell deliberately passes through (single click/tap, hover,
  * presses outside the gesture zone).
  */
-export const POINTER_GESTURE_INTENTS = ["scrub", "swipe", "hold", "dbltap", "pinch"];
+const POINTER_GESTURE_INTENTS = ["scrub", "swipe", "hold", "dbltap", "pinch"];
 /** Precomputed OR of POINTER_GESTURE_INTENTS over intentsArmed: pointerdown
  *  ownership checked it via a 5-iteration `.some(allowsIntent)` scan per
  *  press (and again from #dominatesPress); one boolean read replaces both. */
@@ -288,9 +288,6 @@ function performSkip(shell, state, direction) {
  * scale/translate instead of re-rasterizing the media surface every frame;
  * the layer is released once the snap settles (or is cancelled).
  */
-const EASE_STYLE = EASE_SNAPPY_CURVE;
-const EASE_MS = EASE_SNAPPY_MS;
-
 /**
  * One eased snap per video is the invariant; the in-flight cancel handle lives
  * in a WeakMap keyed by the video element rather than as an expando property so
@@ -341,7 +338,7 @@ export function easeTransformTo(video, transform) {
         { transform: getComputedStyle(video).transform || "none" },
         { transform: transform || "none" }
       ],
-      { duration: EASE_MS, easing: EASE_STYLE, fill: "both" }
+      { duration: EASE_SNAPPY_MS, easing: EASE_SNAPPY_CURVE, fill: "both" }
     );
     const stop = () => {
       if (pendingEase.get(video) !== stop) {
@@ -393,7 +390,7 @@ export function easeTransformTo(video, transform) {
   // Listeners first, styles second: no completion event can slip past us.
   video.addEventListener("transitionend", onEnd);
   video.addEventListener("transitioncancel", onCancel);
-  video.style.transition = `transform ${EASE_MS}ms ${EASE_STYLE}`;
+  video.style.transition = `transform ${EASE_SNAPPY_MS}ms ${EASE_SNAPPY_CURVE}`;
   video.style.transform = transform;
 }
 
@@ -495,7 +492,17 @@ export function attachInputActions(shell, host, signal) {
     }
     const state = stateFor(shell);
     const source = detail.method || "pointer";
-    if (state.activeHolds.has(source) || (state.activeHolds.add(source), state.activeHolds.size > 1)) {
+    // Only the FIRST hold source ramps speed, and only until every source has
+    // let go. Sources are tracked per method (pointer vs. keyboard) because
+    // both can be held at once and either one ending must not drop the ramp
+    // the other is still sustaining.
+    if (!state.activeHolds.has(source)) {
+      state.activeHolds.add(source);
+      if (state.activeHolds.size > 1) {
+        return;
+      }
+    } else {
+      // Re-entrant hold from a source already ramping is a duplicate.
       return;
     }
     const speed = TUNING.controller.holdSpeed;
