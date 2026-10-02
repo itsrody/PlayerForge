@@ -24,6 +24,20 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(HERE, "..", "..");
 
 /**
+ * Version the GM stubs report as GM_info.script.version.
+ *
+ * Read from package.json rather than hardcoded: the stubs previously carried a
+ * literal "0.7.1-test" in three places while the project sat at 0.7.2, so a
+ * version assertion could pass or fail purely on which injection path the test
+ * took. Deriving it keeps the stubs honest across releases.
+ */
+const STUB_SCRIPT_VERSION = JSON.parse(
+  readFileSync(join(PROJECT_ROOT, "package.json"), "utf8")
+).version;
+
+export { STUB_SCRIPT_VERSION };
+
+/**
  * Resolve the Chromium-based binary path on macOS.
  * Order: HELIUM_PATH/VIVALDI_PATH/BRAVE_PATH env → known locations (Helium
  * first - the supported desktop target; Titanium shares its Chromium base)
@@ -271,6 +285,10 @@ export class ChromiumDriver {
   #profileDir;
   /** @type {boolean} */
   #destroyed = false;
+  /** CDP execution context of the armed isolated world, or null. @type {number|null} */
+  #isolatedWorldId = null;
+  /** @type {boolean} */
+  #isolatedWorldArmed = false;
 
   constructor(driver, profileDir = null) {
     this.#driver = driver;
@@ -341,6 +359,10 @@ export class ChromiumDriver {
    */
   async navigate(url) {
     await this.#driver.get(url);
+    // A fresh document invalidates the old world's execution context, so any
+    // armed isolated world must be re-armed for the page it will run on.
+    this.#isolatedWorldId = null;
+    this.#isolatedWorldArmed = false;
   }
 
   /**
@@ -475,6 +497,12 @@ export class ChromiumDriver {
    * Inject the userscript bundle into the page. Must be called after navigate()
    * and before the video element is added (to simulate document-start timing).
    *
+   * Runs in the PAGE world via Selenium's executeScript, which is the historical
+   * default this harness was built around. It cannot model `@inject-into
+   * content`: there, globals and `window` are per-world, so a page-world
+   * injection silently passes everything content mode cares about. Use
+   * injectScriptInIsolatedWorld() to exercise that.
+   *
    * @param {string} [script] - Script source. Reads from dist/ if omitted.
    */
   async injectScript(script) {
@@ -493,6 +521,166 @@ export class ChromiumDriver {
   }
 
   /**
+   * Inject GM_* stubs and the userscript into a CDP isolated world, the way
+   * `@inject-into content` does.
+   *
+   * Why CDP rather than more Selenium calls: an isolated world is a separate
+   * JS realm with its own `window` and globals but a SHARED DOM — precisely
+   * the property that makes `@inject-into content` neither page-injectable nor
+   * page-observable. `Page.createIsolatedWorld` + `Runtime.evaluate` with an
+   * explicit `contextId` is the only WebDriver-exposed route to that realm;
+   * executeScript always lands in the page world.
+   *
+   * Call this AFTER navigate(), matching injectScript(): the world is created
+   * for the current document, so arming before navigating would bind the
+   * bundle to a context that navigation then discards. As with injectScript,
+   * the probe's discovery tap is woken by dispatching a media event on each
+   * <video> (done by wakeProbe(), which the tests call).
+   *
+   * @param {object} [options]
+   * @param {string} [options.script] - Script source. Reads from dist/ if omitted.
+   * @param {Record<string, any>} [options.storage] - Initial storage backing.
+   * @returns {Promise<void>}
+   */
+  async injectScriptInIsolatedWorld(options = {}) {
+    const { script, storage = {} } = options;
+    if (this.#isolatedWorldArmed) {
+      throw new Error("injectScriptInIsolatedWorld() called twice; navigate() to get a fresh world");
+    }
+    const source = script || readBundle();
+    const body = source.slice(source.indexOf("==/UserScript==") + 16);
+
+    const { frameTree } = await this.#driver.sendAndGetDevToolsCommand("Page.getFrameTree", {});
+    const { executionContextId } = await this.#driver.sendAndGetDevToolsCommand("Page.createIsolatedWorld", {
+      frameId: frameTree.frame.id,
+      worldName: "pf-content",
+      grantUniveralAccess: true
+    });
+
+    // Stubs first, then the bundle, in the same world and one eval each: the
+    // bundle feature-detects GM.* at eval time and must not run before them.
+    await this.#cdpEval(executionContextId, ChromiumDriver.gmStubScript(storage, 6));
+    await this.#cdpEval(executionContextId, body);
+    this.#isolatedWorldId = executionContextId;
+    this.#isolatedWorldArmed = true;
+  }
+
+  /**
+   * Wake the kernel's discovery tap the way injectScript() does. Needed after
+   * isolated-world injection for the same reason: post-load injection misses
+   * DOM that already existed.
+   */
+  async wakeProbe() {
+    await this.#driver.executeScript(`
+      for (const v of document.querySelectorAll("video")) {
+        v.dispatchEvent(new Event("loadeddata", { bubbles: true }));
+      }
+    `);
+  }
+
+  /**
+   * Evaluate an expression inside the armed isolated world. Requires
+   * injectScriptInIsolatedWorld() on the current document.
+   *
+   * @param {string} expression
+   * @returns {Promise<any>} The result value, or undefined for a statement.
+   */
+  async evalInIsolatedWorld(expression) {
+    if (!this.#isolatedWorldArmed) {
+      throw new Error("evalInIsolatedWorld() before injectScriptInIsolatedWorld()");
+    }
+    const { result, exceptionDetails } = await this.#cdpEval(this.#isolatedWorldId, expression);
+    if (exceptionDetails) {
+      throw new Error(`isolated-world eval threw: ${exceptionDetails.text ?? exceptionDetails}`);
+    }
+    // CDP answers with a RemoteObject even under returnByValue; callers want
+    // the value, so unwrap here rather than making every caller remember.
+    return result?.value;
+  }
+
+  /** True while an isolated world is armed for the current document. */
+  get hasIsolatedWorld() {
+    return this.#isolatedWorldArmed;
+  }
+
+  /** CDP Runtime.evaluate with an explicit world, returning the raw payload. */
+  async #cdpEval(executionContextId, expression) {
+    return this.#driver.sendAndGetDevToolsCommand("Runtime.evaluate", {
+      expression,
+      contextId: executionContextId,
+      returnByValue: true,
+      awaitPromise: true
+    });
+  }
+
+  /**
+   * Build the GM_* stub initializer.
+   *
+   * One definition, three consumers: the page world (injectGMStubs), each
+   * subframe (injectScriptInFrame), and the isolated content world
+   * (injectScriptInIsolatedWorld). They differ only in where the script is
+   * evaluated, so keeping three hand-copied blocks guaranteed drift - and it
+   * had: two copies still advertised GM_info.script.version 0.7.1-test after
+   * the project moved to 0.7.2, so a version assertion would have depended on
+   * which injection path the test happened to take.
+   *
+   * @param {Record<string, any>} [storage]
+   * @param {number} [indent] - Leading spaces, to keep inline frame scripts readable.
+   * @returns {string}
+   */
+  static gmStubScript(storage = {}, indent = 0) {
+    const stubSource = readFileSync(join(HERE, "gm-stubs.mjs"), "utf8");
+    const pad = " ".repeat(indent);
+    const lines = [
+      `${stubSource}`,
+      `window.__pfGMStorage = ${JSON.stringify(storage)};`,
+      `window.__pfGMListeners = {};`,
+      `window.GM_getValue = function(key, fallback) {`,
+      `  const s = window.__pfGMStorage;`,
+      `  return key in s ? s[key] : fallback;`,
+      `};`,
+      `window.GM_setValue = function(key, value) {`,
+      `  window.__pfGMStorage[key] = value;`,
+      `};`,
+      `window.GM = {`,
+      `  setValue: function(key, value) {`,
+      `    window.__pfGMStorage[key] = value;`,
+      `    return Promise.resolve();`,
+      `  }`,
+      `};`,
+      `window.GM_deleteValue = function(key) {`,
+      `  delete window.__pfGMStorage[key];`,
+      `};`,
+      `window.GM_registerMenuCommand = function(title, fn) {`,
+      `  const id = 'menu_' + title;`,
+      `  window.__pfGMListeners[id] = fn;`,
+      `  return id;`,
+      `};`,
+      `window.GM_unregisterMenuCommand = function(id) {`,
+      `  delete window.__pfGMListeners[id];`,
+      `};`,
+      `window.GM_addValueChangeListener = function(key, cb) {`,
+      `  const id = ' listener_' + key + '_' + Date.now();`,
+      `  window.__pfGMListeners[id] = { key, cb };`,
+      `  return id;`,
+      `};`,
+      `window.GM_removeValueChangeListener = function(id) {`,
+      `  delete window.__pfGMListeners[id];`,
+      `};`,
+      `window.GM_getResourceText = function(name) {`,
+      `  return Promise.resolve('');`,
+      `};`,
+      `window.GM_info = {`,
+      `  script: { version: '${STUB_SCRIPT_VERSION}-test' },`,
+      `  scriptHandler: 'ScriptCat',`,
+      `  version: '1.4.0'`,
+      `};`,
+      `window.GM_xmlhttpRequest = function() {};`
+    ];
+    return lines.map((l) => (l ? pad + l : l)).join("\n");
+  }
+
+  /**
    * Inject GM_* API stubs into the page context. Must be called before
    * injectScript() so the userscript finds the globals it expects.
    *
@@ -501,58 +689,9 @@ export class ChromiumDriver {
    */
   async injectGMStubs(options = {}) {
     const { storage = {} } = options;
-    const stubSource = readFileSync(
-      join(HERE, "gm-stubs.mjs"),
-      "utf8"
-    );
     // Evaluate the stub module as a self-contained script that populates
     // globalThis with all GM_* APIs.
-    const initScript = `
-      ${stubSource}
-      window.__pfGMStorage = ${JSON.stringify(storage)};
-      window.__pfGMListeners = {};
-      window.GM_getValue = function(key, fallback) {
-        const s = window.__pfGMStorage;
-        return key in s ? s[key] : fallback;
-      };
-      window.GM_setValue = function(key, value) {
-        window.__pfGMStorage[key] = value;
-      };
-      window.GM = {
-        setValue: function(key, value) {
-          window.__pfGMStorage[key] = value;
-          return Promise.resolve();
-        }
-      };
-      window.GM_deleteValue = function(key) {
-        delete window.__pfGMStorage[key];
-      };
-      window.GM_registerMenuCommand = function(title, fn) {
-        const id = 'menu_' + title;
-        window.__pfGMListeners[id] = fn;
-        return id;
-      };
-      window.GM_unregisterMenuCommand = function(id) {
-        delete window.__pfGMListeners[id];
-      };
-      window.GM_addValueChangeListener = function(key, cb) {
-        const id = ' listener_' + key + '_' + Date.now();
-        window.__pfGMListeners[id] = { key, cb };
-        return id;
-      };
-      window.GM_removeValueChangeListener = function(id) {
-        delete window.__pfGMListeners[id];
-      };
-      window.GM_getResourceText = function(name) {
-        return Promise.resolve('');
-      };
-      window.GM_info = {
-        script: { version: '0.7.1-test' },
-        scriptHandler: 'ScriptCat',
-        version: '1.4.0'
-      };
-      window.GM_xmlhttpRequest = function() {};
-    `;
+    const initScript = ChromiumDriver.gmStubScript(storage);
     await this.#driver.executeScript(initScript);
   }
 
@@ -684,47 +823,7 @@ export class ChromiumDriver {
     await this.#driver.switchTo().frame(frameId);
     try {
       // GM stubs first.
-      const stubSource = readFileSync(join(HERE, "gm-stubs.mjs"), "utf8");
-      const initScript = `
-        ${stubSource}
-        window.__pfGMStorage = ${JSON.stringify(gmOptions.storage || {})};
-        window.__pfGMListeners = {};
-        window.GM_getValue = function(key, fallback) {
-          const s = window.__pfGMStorage;
-          return key in s ? s[key] : fallback;
-        };
-        window.GM_setValue = function(key, value) {
-          window.__pfGMStorage[key] = value;
-        };
-        window.GM_deleteValue = function(key) {
-          delete window.__pfGMStorage[key];
-        };
-        window.GM_registerMenuCommand = function(title, fn) {
-          const id = 'menu_' + title;
-          window.__pfGMListeners[id] = fn;
-          return id;
-        };
-        window.GM_unregisterMenuCommand = function(id) {
-          delete window.__pfGMListeners[id];
-        };
-        window.GM_addValueChangeListener = function(key, cb) {
-          const id = ' listener_' + key + '_' + Date.now();
-          window.__pfGMListeners[id] = { key, cb };
-          return id;
-        };
-        window.GM_removeValueChangeListener = function(id) {
-          delete window.__pfGMListeners[id];
-        };
-        window.GM_getResourceText = function(name) {
-          return Promise.resolve('');
-        };
-        window.GM_info = {
-          script: { version: '0.7.1-test' },
-          scriptHandler: 'ScriptCat',
-          version: '1.4.0'
-        };
-        window.GM_xmlhttpRequest = function() {};
-      `;
+      const initScript = ChromiumDriver.gmStubScript(gmOptions.storage || {}, 6);
       await this.#driver.executeScript(initScript);
 
       // Userscript bundle.
