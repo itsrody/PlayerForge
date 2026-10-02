@@ -6,7 +6,7 @@ import { installVideoProbe } from "./kernel/probe.js";
 import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/sdk.js";
 import { logger } from "./shared/logger.js";
 import { shouldSkipUrl } from "./kernel/guard.js";
-import { KEYS, getConfigValue, setConfigValue, deleteConfigField } from "./shared/storage.js";
+import { KEYS, getConfigValue, setConfigValue, deleteConfigField, whenManagerReady } from "./shared/storage.js";
 import { initFullscreenGate } from "./shared/shadow.js";
 
 // The version lives in the banner and is read from the installed script at
@@ -33,9 +33,12 @@ function bootstrap() {
 
   // GM menu commands exist from script eval - not from first video
   // discovery. Registration used to live inside kernel.init(), so pages
-  // without a supported player showed NO menu entries at all.
+  // without a supported player showed NO menu entries at all. Registration
+  // calls GM_registerMenuCommand, which ScriptCat only installs after the
+  // manager finishes loading under @early-start; gating on readiness is a
+  // single microtask on every other manager, so the from-eval guarantee holds.
   if (window.top === window) {
-    installMenuCommands();
+    whenManagerReady().then(() => installMenuCommands());
   }
   const boot = () => {
     if (window.PlayerForge) {
@@ -102,6 +105,12 @@ function bootstrap() {
       document.addEventListener("wheel", cancelHint, { capture: true, passive: true, once: true, signal: hintSignal });
     });
 
+    // GM_info is populated on every manager once loaded, but ScriptCat's
+    // @early-start can surface a player before that; read it defensively so
+    // the public debug surface degrades to a placeholder instead of throwing.
+    const mgrInfo = typeof GM_info === "object" && GM_info !== null ? GM_info : {};
+    const scriptVersion = mgrInfo.script?.version ?? "unknown";
+
     // Minimal public surface: pages get the version string only. The kernel
     // (and through it the shell registry) stays private - handing it to page
     // scripts would let them forge discovery events or poke shells. #pf-debug
@@ -110,8 +119,8 @@ function bootstrap() {
     const debugMode = location.hash.includes("pf-debug");
     Object.defineProperty(window, "PlayerForge", {
       value: Object.freeze(debugMode
-        ? { kernel, version: GM_info.script.version }
-        : { version: GM_info.script.version }),
+        ? { kernel, version: scriptVersion }
+        : { version: scriptVersion }),
       writable: false,
       configurable: false
     });
@@ -119,7 +128,7 @@ function bootstrap() {
     logger.log(
       "entry",
       `Kernel booted (${window.top === window ? "top" : "frame"}) - ` +
-        `${GM_info.scriptHandler} ${GM_info.version}, script ${GM_info.script.version}`
+        `${mgrInfo.scriptHandler ?? "manager"} ${mgrInfo.version ?? "?"}, script ${scriptVersion}`
     );
   };
 

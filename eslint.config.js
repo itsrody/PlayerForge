@@ -7,7 +7,7 @@ export default [
       ecmaVersion: 2025,
       sourceType: "module",
       globals: {
-        // Tampermonkey API
+        // ScriptCat manager APIs
         GM_getValue: "readonly",
         GM_setValue: "readonly",
         GM_addValueChangeListener: "readonly",
@@ -130,7 +130,10 @@ export default [
         Worker: "readonly",
         self: "readonly",
         __VTT_WORKER_SOURCE__: "readonly",
-        GM_getResourceText: "readonly"
+        GM_getResourceText: "readonly",
+        // ScriptCat-only: resolves once the manager has fully loaded (used to
+        // gate manager-dependent boot under @early-start).
+        CAT_scriptLoaded: "readonly"
       }
     },
     rules: {

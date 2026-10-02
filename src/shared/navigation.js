@@ -6,7 +6,7 @@
  *
  *   1. Navigation API (`navigation.currententrychange`) - native Chromium 102+,
  *      covers pushState, replaceState, hash changes and history traversal, and
- *      needs no Tampermonkey grant. Resolved per subscription (not at module
+ *      needs no manager grant. Resolved per subscription (not at module
  *      load) so the first subscriber decides, after document-start has had its
  *      say about what this realm exposes.
  *   2. `popstate` + `hashchange` - what the Navigation API-less harness (and
@@ -14,7 +14,7 @@
  *      are invisible on this path, which is why the Navigation API is the
  *      preferred backend.
  *
- * `window.onurlchange` (Tampermonkey `@grant window.onurlchange`) would be a
+ * `window.onurlchange` (manager `@grant window.onurlchange`) would be a
  * third backend, but it costs a grant line for coverage the native Navigation
  * API already provides on the Chromium 154 floor - the grant policy in
  * shared/storage.js reserves manager APIs for capabilities the page cannot

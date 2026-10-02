@@ -15,6 +15,29 @@ export function gmSetValue(key, value) {
   GM_setValue(key, value);
 }
 
+/**
+ * Resolves once the userscript manager has installed its full GM API surface.
+ *
+ * Under ScriptCat `@early-start` this script evaluates before the manager is
+ * ready, so `CAT_scriptLoaded()` is the only reliable "all APIs are now
+ * installed" signal; every other manager (and the test harness) has no early
+ * phase, so this resolves on the next microtask. Manager-dependent boot
+ * (GM_registerMenuCommand, GM_info, value-change listeners, XHR) awaits this,
+ * while the always-available sync value APIs (GM_getValue/GM_setValue) may run
+ * before it. Never rejects and never blocks: a throwing or rejecting
+ * CAT_scriptLoaded() still resolves, so a broken manager cannot wedge boot.
+ */
+export function whenManagerReady() {
+  if (typeof CAT_scriptLoaded !== "function") {
+    return Promise.resolve();
+  }
+  try {
+    return Promise.resolve(CAT_scriptLoaded()).catch(() => {});
+  } catch {
+    return Promise.resolve();
+  }
+}
+
 /** Returns a handle for gmUnregisterMenu, or null when unavailable. */
 export function gmRegisterMenu(title, onClick, options) {
   if (typeof GM_registerMenuCommand !== "function") {
@@ -53,10 +76,10 @@ export function gmGetResourceText(name) {
 }
 
 /**
- * TM-API policy: a manager API is used only where it uniquely supplies a
+ * Manager-API policy: a manager API is used only where it uniquely supplies a
  * capability the page cannot - multi-tab manager storage + change
  * notification (configs/resume), CORS-bypassing XHR (@connect * subtitle
- * fetch), manager-cached resource warm-load, TM menu, GM_info. Everything
+ * fetch), manager-cached resource warm-load, GM menu, GM_info. Everything
  * DOM/media/styling-side (MutationObserver, TextTrack/VTTCue,
  * adoptedStyleSheets, fullscreen) stays native; the efficient,
  * reliable implementation wins, and for those domains the native one always

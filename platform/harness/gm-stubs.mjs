@@ -1,8 +1,8 @@
 /**
- * Tampermonkey GM_* API stubs for browser integration tests.
+ * ScriptCat GM_* API stubs for browser integration tests.
  *
  * These are injected into the page context via addScriptToEvaluateOnNewDocument
- * or executeScript before the userscript runs. They simulate the Tampermonkey
+ * or executeScript before the userscript runs. They simulate the ScriptCat
  * runtime environment using localStorage as the backing store.
  *
  * This file is a no-op by itself — the actual stubs are wired in
@@ -25,7 +25,7 @@
  *   Remove a key from persistent storage.
  *
  * GM_registerMenuCommand(title, fn) -> id
- *   Register a command in the Tampermonkey menu. Returns a handle.
+ *   Register a command in the ScriptCat menu. Returns a handle.
  *
  * GM_unregisterMenuCommand(id) -> void
  *   Remove a previously registered menu command.

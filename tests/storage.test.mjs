@@ -5,7 +5,7 @@ let stored = {};
 globalThis.GM_getValue = (key, fallback) => (key in stored ? stored[key] : fallback);
 globalThis.GM_setValue = (key, value) => { stored[key] = value; };
 
-const { KEYS, getConfigValue, setConfigValue, setConfigFields, deleteConfigField, invalidateConfigCache } = await import("../src/shared/storage.js");
+const { KEYS, getConfigValue, setConfigValue, setConfigFields, deleteConfigField, invalidateConfigCache, whenManagerReady } = await import("../src/shared/storage.js");
 
 beforeEach(() => invalidateConfigCache());
 
@@ -124,4 +124,33 @@ test("setConfigFields commits the cache in sync with storage", () => {
   assert.equal(getConfigValue("filter.brightness"), 150);
   assert.equal(getConfigValue("filter.contrast"), 110);
   assert.equal(stored[KEYS.configs].filter.brightness, 150);
+});
+
+test("whenManagerReady resolves immediately without CAT_scriptLoaded", async () => {
+  assert.equal(typeof globalThis.CAT_scriptLoaded, "undefined");
+  await whenManagerReady();
+});
+
+test("whenManagerReady settles only when CAT_scriptLoaded settles", async () => {
+  let release;
+  globalThis.CAT_scriptLoaded = () => new Promise((resolve) => { release = resolve; });
+  try {
+    let settled = false;
+    const pending = whenManagerReady().then(() => { settled = true; });
+    await Promise.resolve();
+    assert.equal(settled, false, "does not resolve before the manager reports ready");
+    release();
+    await pending;
+    assert.equal(settled, true);
+  } finally {
+    delete globalThis.CAT_scriptLoaded;
+  }
+});
+
+test("whenManagerReady never rejects when CAT_scriptLoaded throws or rejects", async () => {
+  globalThis.CAT_scriptLoaded = () => { throw new Error("boom"); };
+  await whenManagerReady();
+  globalThis.CAT_scriptLoaded = () => Promise.reject(new Error("boom"));
+  await whenManagerReady();
+  delete globalThis.CAT_scriptLoaded;
 });

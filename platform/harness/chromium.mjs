@@ -542,8 +542,8 @@ export class ChromiumDriver {
       };
       window.GM_info = {
         script: { version: '0.7.1-test' },
-        scriptHandler: 'Tampermonkey',
-        version: '5.5.0'
+        scriptHandler: 'ScriptCat',
+        version: '1.4.0'
       };
       window.GM_xmlhttpRequest = function() {};
     `;
@@ -670,7 +670,7 @@ export class ChromiumDriver {
 
   /**
    * Inject GM stubs + userscript into a specific frame.
-   * Simulates Tampermonkey's per-frame injection.
+   * Simulates ScriptCat's per-frame injection.
    * @param {number|string} frameId - Frame index or name.
    * @param {object} [gmOptions] - Passed to injectGMStubs.
    */
@@ -714,8 +714,8 @@ export class ChromiumDriver {
         };
         window.GM_info = {
           script: { version: '0.7.1-test' },
-          scriptHandler: 'Tampermonkey',
-          version: '5.5.0'
+          scriptHandler: 'ScriptCat',
+          version: '1.4.0'
         };
         window.GM_xmlhttpRequest = function() {};
       `;
