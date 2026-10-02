@@ -26,11 +26,6 @@ function decimalsOf(step) {
   return dot === -1 ? 0 : str.length - dot - 1;
 }
 
-function roundTo(value, decimals) {
-  const factor = 10 ** decimals;
-  return Math.round(value * factor) / factor;
-}
-
 /**
  * Numeric spinbutton widget used by panel fields: text input with
  * hold-to-repeat chevron buttons and keyboard support. Programmatic
@@ -51,8 +46,12 @@ function createStepper({
   const hi = Number(max);
   const by = Math.abs(Number(step)) || 1;
   const decimals = Math.max(decimalsOf(by), 0);
+  // decimals is fixed per stepper, so the 10**decimals factor is computed once
+  // here instead of on every nudge/commit (hold-repeat fires it ~13x/s).
+  const roundFactor = 10 ** decimals;
+  const roundTo = (value) => Math.round(value * roundFactor) / roundFactor;
 
-  let committed = roundTo(clamp(Number(value ?? min), lo, hi), decimals);
+  let committed = roundTo(clamp(Number(value ?? min), lo, hi));
 
   const root = document.createElement("span");
   root.className = "pf-stepper";
@@ -120,7 +119,7 @@ function createStepper({
 
   // Round-trip text for commit()/nudge() - always numeric so parseFloat
   // parses it back. `format` (caller-provided) is display-only.
-  const numText = (v) => String(roundTo(v, decimals));
+  const numText = (v) => String(roundTo(v));
 
   const syncAria = () => {
     input.setAttribute("aria-valuenow", String(committed));
@@ -139,7 +138,7 @@ function createStepper({
       showCommitted();
       return committed;
     }
-    const next = roundTo(clamp(parsed, lo, hi), decimals);
+    const next = roundTo(clamp(parsed, lo, hi));
     if (next !== committed) {
       committed = next;
       syncAria();
@@ -170,7 +169,7 @@ function createStepper({
     if (!Number.isFinite(parsed)) {
       return;
     }
-    const next = roundTo(clamp(parsed, lo, hi), decimals);
+    const next = roundTo(clamp(parsed, lo, hi));
     if (next !== committed) {
       committed = next;
       syncAria();
@@ -222,7 +221,7 @@ function createStepper({
     input,
     getValue: () => committed,
     setValue(next) {
-      const nextValue = roundTo(clamp(Number(next), lo, hi), decimals);
+      const nextValue = roundTo(clamp(Number(next), lo, hi));
       if (nextValue === committed) {
         showCommitted();
         return committed;

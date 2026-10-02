@@ -85,8 +85,11 @@ function matchPreset(values) {
 
 function buildFilterString(values) {
   const parts = [];
-  const tempHue = (Number(values.temperature) || 0) * 0.3;
-  const tempSat = Math.abs(Number(values.temperature) || 0) * 0.15;
+  // temperature feeds both terms; parse it once (runs per stepper input during
+  // a slider drag) instead of coercing the same field twice.
+  const temperature = Number(values.temperature) || 0;
+  const tempHue = temperature * 0.3;
+  const tempSat = Math.abs(temperature) * 0.15;
   const tintHue = (Number(values.tint) || 0) * 0.2;
   const totalHue = (Number(values.hue) || 0) + tempHue + tintHue;
   const totalSat = (values.saturate || DEFAULTS.saturate) + tempSat;
