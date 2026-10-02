@@ -15,7 +15,9 @@
     "browser-bench": "node platform/run.mjs browser-bench",
     "browser-bench:record": "node platform/run.mjs browser-bench --record",
     "ci": "node platform/run.mjs ci",
-    "platform": "node platform/run.mjs all"
+    "platform": "node platform/run.mjs all",
+    "verify": "node platform/session.mjs",
+    "drive": "node platform/drive.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

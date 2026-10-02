@@ -253,6 +253,12 @@ test("a strict worker-src CSP is NOT lifted for the isolated world", async () =>
   // Practical consequence if ScriptCat does exempt it: none, since
   // vtt-worker-loader degrades to an equivalent in-band parse either way. The
   // worker is an optimization, so being wrong in either direction is safe.
+  //
+  // Control 1 below is what keeps this test honest: the same probe must spawn
+  // where no CSP applies. That control is what licenses reading the refusal
+  // below as CSP enforcement rather than a broken probe - and it is the reason
+  // the harness-wide --disable-web-security switch is not treated as
+  // invalidating CSP results (measured: spawning here is unaffected by it).
   const probe = `(async () => {
      let url = null;
      try {

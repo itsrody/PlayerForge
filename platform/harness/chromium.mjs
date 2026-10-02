@@ -368,9 +368,10 @@ export class ChromiumDriver {
       "--no-first-run",
       "--disable-web-security",
     ];
-    // --disable-extensions would defeat the point of loading one; and
+    // --disable-extensions would defeat the point of loading an extension, and
     // --disable-component-extensions-with-background-pages is NOT set because
-    // an MV3 service worker (how ScriptCat injects) needs to start.
+    // an MV3 service worker (how ScriptCat injects) needs to start. With no
+    // extension loaded there is nothing to keep alive, so the flag goes on.
     if (extensions.length > 0) {
       args.push(`--load-extension=${extensions.join(",")}`);
       args.push("--disable-component-extensions-with-background-pages=false");
