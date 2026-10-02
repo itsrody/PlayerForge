@@ -368,7 +368,12 @@ export class ResumeStore {
     }
   }
 
-  /** Whole-store JSON snapshot for the clipboard bridge and backups. */
+  /**
+   * Whole-store JSON snapshot. Currently unreferenced outside tests - the
+   * clipboard bridge it was written for was never built, and no clipboard grant
+   * is requested (see storage.js), so this is dormant import/export plumbing
+   * rather than a shipped path.
+   */
   exportData() {
     this.ensureLoaded();
     return JSON.stringify(this.#state);
@@ -768,7 +773,11 @@ export class ResumeTracker {
     return this.#shell?.currentTime ?? NaN;
   }
 
-  /** Clipboard bridge passthroughs (see ResumeStore exportData/importData). */
+  /**
+ * Clipboard bridge passthroughs (see ResumeStore exportData/importData). Also
+ * currently unwired: no caller in src/, and the clipboard grant is deliberately
+ * not requested. Kept as the coherent pair they are meant to be used as.
+ */
   exportResume() {
     return this.#store.exportData();
   }
@@ -804,8 +813,10 @@ export class ResumeTracker {
       this.#shell?.video?.cancelVideoFrameCallback?.(this.#rvfcHandle);
       this.#rvfcHandle = null;
     }
-    // Final save while disposed is still false (#saveProgress guards on it),
-    // then the scope takes down the media listeners + off-screen observer.
+    // Final save while the scope is still undisposed - #saveProgress has no
+    // disposed guard of its own (it only skips while adopting or with no entry),
+    // so this ordering is what keeps a torn-down shell from writing. Then the
+    // scope takes down the media listeners + off-screen observer.
     if (this.#entry) {
       this.#saveProgress(this.#flushPosition());
     }

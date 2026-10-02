@@ -78,7 +78,12 @@ export class Shell {
     this.ready = this.#boot();
   }
 
-  /** Resolves when the shell DOM and HUD are live. Styles load is awaited. */
+  /**
+   * Resolves when the shell DOM and HUD are live. Styles are NOT awaited:
+   * warmStyles() applies the embedded sheet synchronously and upgrades it in
+   * place when the @resource fetch lands, so boot resolves on DOM rather than
+   * on a network round trip.
+   */
   async #boot() {
     await this.#injectDom();
     if (!this.#shellDom) {
@@ -379,9 +384,16 @@ export class Shell {
   #watchFullscreen() {
     // An attempt to enter fullscreen was rejected (typically because an
     // ancestor embed lacks allowfullscreen - Chromium requires it on every
-    // frame edge). Surface a hint and re-provision the chain
-    // (idempotent) so a retry succeeds if the attributes were just granted,
-    // e.g. an SDK iframe created after our boot-time provisioning.
+    // frame edge). Surface a hint, and re-issue the provisioning request so an
+    // embed that was granted the attributes late can still answer.
+    //
+    // NOTE: this is a no-op whenever a shell was created in a nested frame, and
+    // that is the only case it guards. requestFullscreenProvision is latched
+    // one-shot (context.js), and entry.js already calls it from onShellCreated,
+    // so by the time a fullscreenerror can arrive the latch is long set. The
+    // call is kept as defence in depth - if the latch is ever relaxed, or a
+    // boot-time provision is skipped, this still tries - but it does not
+    // currently enable the retry the code above describes.
     this.#dom.listen(document, "fullscreenerror", () => {
       if (this.#scope.disposed || fs) {
         return;

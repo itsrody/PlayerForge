@@ -24,6 +24,21 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(HERE, "..", "..");
 
 /**
+ * Version the GM stubs report as GM_info.script.version.
+ *
+ * Derived from package.json rather than hardcoded. Both injection paths used to
+ * carry a literal '0.7.1-test' while the project was already on 0.7.2, so the
+ * stubs advertised a version the shipped banner did not - and because the
+ * assertions compare against a string built from this same value, the drift was
+ * invisible to the suite either way. Deriving it removes the class of bug.
+ */
+const STUB_SCRIPT_VERSION = JSON.parse(
+  readFileSync(join(PROJECT_ROOT, "package.json"), "utf8")
+).version;
+
+export { STUB_SCRIPT_VERSION };
+
+/**
  * Resolve the Chromium-based binary path on macOS.
  * Order: HELIUM_PATH/VIVALDI_PATH/BRAVE_PATH env → known locations (Helium
  * first - the supported desktop target; Titanium shares its Chromium base)
@@ -541,7 +556,7 @@ export class ChromiumDriver {
         return Promise.resolve('');
       };
       window.GM_info = {
-        script: { version: '0.7.1-test' },
+        script: { version: '${STUB_SCRIPT_VERSION}' },
         scriptHandler: 'Tampermonkey',
         version: '5.5.0'
       };
@@ -713,7 +728,7 @@ export class ChromiumDriver {
           return Promise.resolve('');
         };
         window.GM_info = {
-          script: { version: '0.7.1-test' },
+          script: { version: '${STUB_SCRIPT_VERSION}' },
           scriptHandler: 'Tampermonkey',
           version: '5.5.0'
         };
