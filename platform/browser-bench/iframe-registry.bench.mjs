@@ -26,35 +26,39 @@ const FRAME_COUNT = 8;
 const CHURN_NODES = 120;
 
 /** One churn burst: append + remove a subtree of `churn` unrelated nodes and
- *  return the wall time through the microtask checkpoint that flushes the
- *  observer. The double continuation guarantees the MutationObserver callback
- *  queued by this burst has run before the clock stops (the second chain runs
- *  after the observer's microtask). */
-const burstTiming = (driver, churn) => driver.eval(
-  (n) => new Promise((resolve) => {
-    const t0 = performance.now();
-    const host = document.createElement("div");
-    host.className = "pf-bench-churn";
-    for (let i = 0; i < n; i++) {
-      host.appendChild(document.createElement("div"));
-    }
-    document.body.appendChild(host);
-    Promise.resolve().then(() => Promise.resolve()).then(() => {
-      host.remove();
-      resolve(performance.now() - t0);
-    });
-  }),
-  churn
-);
+ *  resolve after the microtask checkpoint that flushes the observer. The
+ *  double continuation guarantees the MutationObserver callback queued by this
+ *  burst has run before the promise settles (the second chain runs after the
+ *  observer's microtask). The burst is idempotent - it removes exactly what it
+ *  appended - so it can be repeated inside one amplified timed region. */
+const burstOp = (churn) => new Promise((resolve) => {
+  const host = document.createElement("div");
+  host.className = "pf-bench-churn";
+  for (let i = 0; i < churn; i++) {
+    host.appendChild(document.createElement("div"));
+  }
+  document.body.appendChild(host);
+  Promise.resolve().then(() => Promise.resolve()).then(() => {
+    host.remove();
+    resolve();
+  });
+});
 
 /** Batch/iteration loop mirroring the other browser benches: per-batch median
- *  burst time, then median + spread across batches. */
+ *  burst time, then median + spread across batches.
+ *
+ *  Amplified: the bare burst is ~0.1ms, i.e. at the 100us Chromium
+ *  performance.now() tick, so isolated samples quantise to 0 and the row
+ *  collapsed to 0.00. The op is async (it must yield for the observer's
+ *  microtask), so it runs through amplifiedEvalAsync: the op is awaited tens
+ *  of times per 25ms sample and the elapsed time divided back down. */
 async function measureBurst(driver, churn) {
   const samples = [];
   for (let b = 0; b < BATCHES; b++) {
     const timings = [];
     for (let i = 0; i < ITERATIONS; i++) {
-      timings.push(await burstTiming(driver, churn));
+      const { perOp } = await driver.amplifiedEvalAsync(null, burstOp, { args: [churn] });
+      timings.push(perOp);
     }
     timings.sort((a, b) => a - b);
     samples.push(timings[Math.floor(timings.length / 2)]);

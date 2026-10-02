@@ -66,6 +66,48 @@ test("shell CSS includes pf-hud-layer styles", async () => {
   assert.equal(position, "absolute", "HUD layer should have position: absolute");
 });
 
+test("@property nested in @scope is registered (media typing survives)", async () => {
+  await driver.navigate(createTestPage(server));
+  await driver.injectGMStubs();
+  await driver.injectScript();
+
+  await waitForShell(driver, 8000);
+
+  // styles.css types --pf-media-paused/--pf-media-muted with @property written
+  // inside `@layer pf-hud { @scope (.pf-hud-layer) { ... } }`. A browser that
+  // accepts @property at the top level but drops it when nested inside @scope
+  // would leave the calc() at line ~320 untyped and the media fade without its
+  // registered initial/inherits contract. Walk the nested rule graph (layer,
+  // scope, media and supports blocks all expose cssRules) and require both a
+  // registered rule and that it was found beneath a CSSScopeRule.
+  const probe = await driver.eval(() => {
+    const host = document.querySelector(".pf-shell");
+    const sheets = [
+      ...document.adoptedStyleSheets,
+      ...(host?.shadowRoot?.adoptedStyleSheets ?? []),
+    ];
+    let registered = false;
+    let insideScope = false;
+    const walk = (rules, inScope) => {
+      for (const rule of rules) {
+        if (typeof CSSPropertyRule !== "undefined" &&
+            rule instanceof CSSPropertyRule &&
+            rule.name === "--pf-media-paused") {
+          registered = true;
+          if (inScope) insideScope = true;
+        }
+        const isScope = typeof CSSScopeRule !== "undefined" && rule instanceof CSSScopeRule;
+        if (rule.cssRules) walk(rule.cssRules, inScope || isScope);
+      }
+    };
+    for (const sheet of sheets) walk(sheet.cssRules, false);
+    return { registered, insideScope };
+  });
+
+  assert.equal(probe.registered, true, "--pf-media-paused @property should be registered");
+  assert.equal(probe.insideScope, true, "--pf-media-paused @property should survive nesting inside @scope");
+});
+
 test("stylesheet survives page DOM mutations", async () => {
   await driver.navigate(createTestPage(server));
   await driver.injectGMStubs();

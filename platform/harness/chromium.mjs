@@ -125,13 +125,23 @@ function vivaldiChromiumVersion(binary) {
   }
 }
 
-function wrapBrowser(binary, dir) {
-  if (!/(vivaldi|helium)/i.test(binary)) return binary;
+/**
+ * The embedded Chromium version for a fork-branded binary, memoized. Returns
+ * null for binaries that report an honest Chromium version (Chrome/Chromium/
+ * Brave), which need no shim and no version-matched driver lookup.
+ */
+function embeddedChromiumVersion(binary) {
   let version = versionCache.get(binary);
   if (version === undefined) {
     version = heliumChromiumVersion(binary) ?? vivaldiChromiumVersion(binary);
     versionCache.set(binary, version);
   }
+  return version;
+}
+
+function wrapBrowser(binary, dir) {
+  if (!/(vivaldi|helium)/i.test(binary)) return binary;
+  const version = embeddedChromiumVersion(binary);
   if (version === null) return binary;
   const wrapper = join(dir, "browser-driver-shim");
   writeFileSync(
@@ -150,14 +160,95 @@ function wrapBrowser(binary, dir) {
   return wrapper;
 }
 
-function buildService(chrome) {
+/**
+ * Selenium Manager's cache platform tag, matching the layout it writes under
+ * ~/.cache/selenium/chromedriver/<tag>/<version>/chromedriver.
+ */
+function seleniumPlatform() {
+  if (process.platform === "darwin") return process.arch === "arm64" ? "mac-arm64" : "mac-x64";
+  if (process.platform === "linux") return process.arch === "arm64" ? "linux-arm64" : "linux64";
+  if (process.platform === "win32") return "win64";
+  return null;
+}
+
+/**
+ * Locate a chromedriver in Selenium Manager's cache that matches the browser's
+ * embedded Chromium version. A chromedriver only drives the exact major it was
+ * built for, and the Homebrew one routinely lags (152 against a 154 Helium),
+ * so a version-matched cached download beats the fixed Homebrew path.
+ */
+function findCachedChromedriver(version) {
+  const platform = seleniumPlatform();
+  if (!version || platform === null) return null;
+  const platformDir = join(homedir(), ".cache", "selenium", "chromedriver", platform);
+  if (!existsSync(platformDir)) return null;
+  const exact = join(platformDir, version, "chromedriver");
+  if (existsSync(exact)) return exact;
+  // Fall back to any cached driver sharing the browser's major version.
+  const major = version.split(".")[0];
+  let match = null;
+  try {
+    for (const dir of readdirSync(platformDir)) {
+      if (dir.split(".")[0] !== major) continue;
+      if (match === null || dir > match) match = dir;
+    }
+  } catch {
+    return null;
+  }
+  if (match === null) return null;
+  const p = join(platformDir, match, "chromedriver");
+  return existsSync(p) ? p : null;
+}
+
+function buildService(chrome, version) {
   const candidates = [
     process.env.CHROMEDRIVER_PATH,
+    findCachedChromedriver(version),
     "/opt/homebrew/bin/chromedriver",
     "/usr/local/bin/chromedriver",
   ];
   const local = candidates.find((p) => p && existsSync(p));
   return new chrome.ServiceBuilder(local || undefined);
+}
+
+/**
+ * Absorb Chromium's pending startup navigation. A fresh ChromeDriver session
+ * begins navigating to about:blank, and that navigation can still be in flight
+ * when the caller issues its first get(). The race has two faces, both seen on
+ * this harness: the caller's page is replaced by about:blank (the get looks
+ * like a no-op), or the page loads and is reloaded ~0.7s in (navigation type
+ * "reload", a changed performance.timeOrigin). Either way it wipes injected
+ * globals mid-test - the css-layout bench's repeated `.pf-shell` lookup hit
+ * null after a successful waitForShell. Both reproduce without the userscript,
+ * so this is a driver/browser race, not script behavior.
+ *
+ * A time-based poll is not enough: the startup page is itself a settled
+ * about:blank, so origin stability cannot distinguish "race over" from
+ * "startup nav still queued". Instead plant a sentinel on the document and
+ * check that it survives a window longer than the observed race; a late
+ * navigation replaces the document and erases it. Repeat until a window passes
+ * intact, leaving the caller's first real get() to land on a quiescent session.
+ */
+async function settleStartupNavigation(driver) {
+  await driver.get("about:blank");
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    try {
+      await driver.executeScript(() => {
+        window.__pfNavSentinel = true;
+      });
+    } catch {
+      // Mid-navigation: the context was torn down; retry on the fresh document.
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+    let survived = false;
+    try {
+      survived = await driver.executeScript(() => window.__pfNavSentinel === true);
+    } catch {
+      survived = false;
+    }
+    if (survived) return;
+  }
 }
 
 /**
@@ -200,7 +291,9 @@ export class ChromiumDriver {
     // forwards the launch to an already-running session (whose DevTools port
     // never binds) and the driver waits forever.
     const profileDir = mkdtempSync(join(tmpdir(), "pf-driver-"));
-    const binary = wrapBrowser(resolveBinary(), profileDir);
+    const originalBinary = resolveBinary();
+    const embeddedVersion = embeddedChromiumVersion(originalBinary);
+    const binary = wrapBrowser(originalBinary, profileDir);
     const args = [
       `--user-data-dir=${profileDir}`,
       "--no-sandbox",
@@ -229,8 +322,10 @@ export class ChromiumDriver {
     const driver = await new Builder()
       .forBrowser("chrome")
       .setChromeOptions(chromeOptions)
-      .setChromeService(buildService(chrome))
+      .setChromeService(buildService(chrome, embeddedVersion))
       .build();
+
+    await settleStartupNavigation(driver);
 
     return new ChromiumDriver(driver, profileDir);
   }
@@ -260,6 +355,108 @@ export class ChromiumDriver {
    */
   async eval(fn, ...args) {
     return this.#driver.executeScript(fn, ...args);
+  }
+
+  /**
+   * Measure a sub-clock-tick op by running it until a wall-clock budget is
+   * spent, then dividing.
+   *
+   * Chromium clamps performance.now() to 100us by default (5us only under
+   * cross-origin isolation), and there is no WebDriver-exposed preference to
+   * relax it the way Firefox has privacy.reduceTimerPrecision. Under that
+   * clamp an op costing less than the tick (a classList toggle plus a forced
+   * layout flush is ~0.5us) reads as a flat 0 no matter how many samples are
+   * taken - the samples are not noisy, they are all identically zero.
+   * Running the op N times inside ONE timed region and dividing by N buys
+   * back resolution: 25ms of budget at 0.5us/op is ~50k iterations, so the
+   * per-op figure lands orders of magnitude above the tick.
+   *
+   * `op` MUST be idempotent - it runs tens of thousands of times, so it has
+   * to leave the page in the state it found (toggling a property twice, adding
+   * and removing the same sheet). Anything with a one-shot side effect does
+   * not belong here; measure it per-op and accept the tick, or restructure the
+   * bench so the unit is large enough to see.
+   *
+   * `setup` runs once, untimed, before the loop. Use it for anything the op
+   * would otherwise re-do per iteration (element lookups and node construction
+   * in particular - both cost more than the op being measured and would
+   * dominate the result). It communicates with `op` through page state, since
+   * a DOM node cannot cross the WebDriver boundary. `args` are JSON-
+   * serializable and forwarded to both `setup` and `op`.
+   *
+   * @param {((...args: any[]) => void)|null} setup - Untimed, once per call.
+   * @param {(...args: any[]) => void} op - Idempotent; serialized into the page.
+   * @param {object} [options]
+   * @param {number} [options.budgetMs=25] - Wall-clock target for one sample.
+   * @param {any[]} [options.args=[]] - Serializable args for setup and op.
+   * @returns {Promise<{perOp: number, ops: number, elapsed: number}>}
+   */
+  async amplifiedEval(setup, op, { budgetMs = 25, args = [] } = {}) {
+    const source = `
+      const __args = ${JSON.stringify(args)};
+      ${setup ? `(${setup.toString()})(...__args);` : ""}
+      const budget = ${budgetMs};
+      const op = ${op.toString()};
+      const t0 = performance.now();
+      let ops = 0;
+      let elapsed = 0;
+      do {
+        op(...__args);
+        ops += 1;
+        elapsed = performance.now() - t0;
+      } while (elapsed < budget);
+      return { perOp: elapsed / ops, ops, elapsed };
+    `;
+    return this.eval(source);
+  }
+
+  /**
+   * Async sibling of amplifiedEval for ops that must yield before they are
+   * complete - a MutationObserver flush lands on the microtask queue, so a
+   * burst of DOM churn cannot be timed synchronously.
+   *
+   * `op` returns a promise and is awaited once per loop iteration, so the
+   * budget loop spends its time on real op+lull work rather than on the
+   * WebDriver round-trip (which is outside the timed region). Same idempotency
+   * and `setup` contract as amplifiedEval.
+   *
+   * @param {((...args: any[]) => void)|null} setup - Untimed, once per call.
+   * @param {(...args: any[]) => Promise<void>} op - Idempotent async op.
+   * @param {object} [options]
+   * @param {number} [options.budgetMs=25] - Wall-clock target for one sample.
+   * @param {any[]} [options.args=[]] - Serializable args for setup and op.
+   * @returns {Promise<{perOp: number, ops: number, elapsed: number}>}
+   */
+  async amplifiedEvalAsync(setup, op, { budgetMs = 25, args = [] } = {}) {
+    const script = function (setupStr, opStr, argsJson, budget, done) {
+      const __args = JSON.parse(argsJson);
+      if (setupStr) {
+        new Function("return (" + setupStr + ")")()(...__args);
+      }
+      const run = new Function("return (" + opStr + ")")();
+      const t0 = performance.now();
+      let ops = 0;
+      let elapsed = 0;
+      (async () => {
+        try {
+          do {
+            await run(...__args);
+            ops += 1;
+            elapsed = performance.now() - t0;
+          } while (elapsed < budget);
+          done({ perOp: elapsed / ops, ops, elapsed });
+        } catch (err) {
+          done({ error: String(err) });
+        }
+      })();
+    };
+    return this.#driver.executeAsyncScript(
+      script,
+      setup ? setup.toString() : "",
+      op.toString(),
+      JSON.stringify(args),
+      budgetMs
+    );
   }
 
   /**
