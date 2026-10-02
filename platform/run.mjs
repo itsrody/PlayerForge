@@ -281,6 +281,36 @@ async function runBrowserBench(bundlePath) {
   return allResults;
 }
 
+// ── HUD glass visual capture ────────────────────────────────────────
+async function runVisual() {
+  log("Running HUD glass visual capture...");
+  separator();
+
+  // Spawned as a child process rather than imported, so the tool keeps its
+  // own exit-code contract (0 pass, 1 material invariant failed, 2 no
+  // baseline) and this runner inherits it instead of re-deriving it. An
+  // exception thrown across an import boundary would collapse those three
+  // distinct outcomes into one non-zero code.
+  try {
+    execSync("node platform/visual/hud-glass.mjs --compare", {
+      cwd: PROJECT_ROOT,
+      stdio: "inherit",
+      timeout: 300_000,
+    });
+    log("Visual capture passed.");
+  } catch (err) {
+    // execSync throws on non-zero exit. 2 means the baseline is missing, which
+    // is a setup problem rather than a regression, so it is called out
+    // separately instead of reading as a failed design check.
+    if (err.status === 2) {
+      log("Visual capture has no baseline — run `npm run visual:record` first.");
+      process.exit(2);
+    }
+    log("Visual capture FAILED — the HUD glass changed materially.");
+    process.exit(1);
+  }
+}
+
 // ── Main ────────────────────────────────────────────────────────────
 log(`PlayerForge platform runner — mode: ${mode}`);
 
@@ -297,20 +327,27 @@ switch (mode) {
   case "browser-bench":
     await runBrowserBench();
     break;
+  case "visual":
+    await runVisual();
+    break;
   case "all":
     await runTests();
     await runBench();
     await runIntegration();
     await runBrowserBench();
+    await runVisual();
     break;
   case "ci":
     await runTests();
     await runBench();
     await runIntegration();
+    log("Skipping browser-bench (timing gate is not meaningful on a shared runner).");
+    log("Skipping visual (needs a real browser and a stable renderer).");
+    log("Run `npm run visual` locally before shipping a HUD change.");
     break;
   default:
     console.error(`\n  Unknown mode: ${mode}`);
-    console.error("  Usage: node platform/run.mjs [test|bench|integration|browser-bench|all|ci]");
+    console.error("  Usage: node platform/run.mjs [test|bench|integration|browser-bench|visual|all|ci]");
     process.exit(1);
 }
 
