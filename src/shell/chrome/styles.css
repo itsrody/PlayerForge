@@ -31,10 +31,25 @@
   --pf-bg: #000;                    /* base ink                */
   --pf-accent: #4a9eff;             /* interaction accent      */
 
-  --pf-hud-glass: color-mix(in srgb, var(--pf-bg) 82%, transparent);
-  /* Dark tinted glass: backdrop-blur + saturate applied at element level. */
+  /* Liquid-glass surface system: one translucent dark tint, a specular
+     top-of-sheet sheen, a rim-lit hairline edge, and a soft drop shadow - all
+     static paint, so each visible surface costs exactly one composited blur
+     layer. The backdrop-filter blurs + saturates what is behind the glass,
+     which keeps the tint see-through while light text stays legible over
+     arbitrary video. */
+  --pf-glass-tint: color-mix(in srgb, var(--pf-bg) 60%, transparent);
+  --pf-glass-sheen: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.18) 0%,
+    rgba(255, 255, 255, 0.06) 30%,
+    rgba(255, 255, 255, 0) 62%
+  );
+  --pf-glass-inner: inset 0 1px 0 rgba(255, 255, 255, 0.34),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  --pf-glass-shadow: var(--pf-glass-inner), 0 18px 48px rgba(0, 0, 0, 0.52);
+  --pf-glass-border: 1px solid rgba(255, 255, 255, 0.18);
 
-  --pf-surface: rgba(0, 0, 0, 0.8);              /* toast + panel sheets        */
+  --pf-surface: rgba(0, 0, 0, 0.8);              /* opaque fallback for glass  */
   --pf-surface-soft: rgba(255, 255, 255, 0.04);  /* cells, stepper, toggle bg   */
   --pf-surface-mid: rgba(255, 255, 255, 0.09);   /* ghost btn, hover cells      */
   --pf-surface-strong: rgba(255, 255, 255, 0.16);/* toast actions, ghost hover  */
@@ -63,18 +78,17 @@
   --pf-ease-bounce: 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
   --pf-ease-out: 0.2s cubic-bezier(0.4, 0, 1, 1);
 
-  --pf-blur-sm: blur(12px) saturate(1.3);
-  --pf-blur-lg: blur(16px) saturate(1.4);
+  --pf-blur-sm: blur(18px) saturate(1.8);
+  --pf-blur-lg: blur(26px) saturate(1.9);
 
   --pf-space-xs: 4px;
   --pf-space-sm: 6px;
   --pf-space-md: 8px;
   --pf-space-lg: 10px;
 
-  /* Flat dark surfaces - simple, predictable, GPU-free. No backdrop blur or
-     gradients, so a video color filter never interferes with the HUD. */
-  --pf-panel-bg: var(--pf-hud-glass);   /* panel glass (inherits --pf-hud-glass) */
-  --pf-toast-bg: var(--pf-hud-glass);   /* toast glass (inherits --pf-hud-glass) */
+  /* In-panel controls (cells, steppers, ghost buttons) stay flat tinted
+     surfaces - cheap to paint and never doubled against the sheet's own
+     backdrop. Only the two floating sheets compose the glass system. */
 
   --pf-z-hud: 2;
   --pf-z-toast: 3;
@@ -111,12 +125,28 @@
    everything at the default. High-tier is untouched (the default already
    favors the rich look). */
 .pf-shell[data-pf-cpu-tier="low"] {
-  /* Flat, opaque surfaces: no transparent layers to composite, no blur. */
-  --pf-hud-glass: var(--pf-surface);
+  /* Flat, opaque surfaces: no translucent layers to composite, no blur, and
+     none of the sheen/edge/shadow paint. */
+  --pf-glass-tint: var(--pf-surface);
+  --pf-glass-sheen: none;
+  --pf-glass-shadow: none;
+  --pf-glass-border: none;
   --pf-blur-sm: none;
   --pf-blur-lg: none;
-  --pf-panel-bg: var(--pf-surface);
-  --pf-toast-bg: var(--pf-surface);
+}
+
+/* OS-level accessibility preference (Chromium 118+): honor "reduce
+   transparency" by collapsing the same glass tokens to a flat opaque sheet.
+   Declared at the same level as the token block so source order lets it win. */
+@media (prefers-reduced-transparency: reduce) {
+  .pf-shell {
+    --pf-glass-tint: var(--pf-surface);
+    --pf-glass-sheen: none;
+    --pf-glass-shadow: none;
+    --pf-glass-border: none;
+    --pf-blur-sm: none;
+    --pf-blur-lg: none;
+  }
 }
 
 /* Neutralize the inline 'position: relative' we set on the container
@@ -277,7 +307,6 @@
        Rides the HUD layer under the host's z-index doctrine - above captions,
        below the panel. */
     pf-toast {
-      --pf-toast-bg: var(--pf-surface);
       --pf-toast-color: var(--pf-fg);
       --pf-toast-radius: var(--pf-radius-pill);
 
@@ -293,8 +322,12 @@
          the transform property, so transform-based animations on the toast
          never clobber it. */
       translate: -50%;
-      /* Dark tinted glass - color-mix backdrop + blur. */
-      background: var(--pf-toast-bg);
+      /* Liquid glass: translucent tint + specular sheen over a blurred,
+         darkened backdrop, rim-lit edge and soft drop shadow. */
+      background-color: var(--pf-glass-tint);
+      background-image: var(--pf-glass-sheen);
+      border: var(--pf-glass-border);
+      box-shadow: var(--pf-glass-shadow);
       backdrop-filter: var(--pf-blur-sm);
       color: var(--pf-toast-color);
       padding: 6px 16px;
@@ -439,8 +472,12 @@
       scrollbar-width: thin;
       scrollbar-color: var(--pf-text-mid) transparent;
 
-      /* Flat dark glass - color-mix backdrop + blur for depth. */
-      background: var(--pf-panel-bg);
+      /* Liquid glass: same tint/sheen/edge/shadow system as the toast, at the
+         larger blur radius suited to the sheet's size. */
+      background-color: var(--pf-glass-tint);
+      background-image: var(--pf-glass-sheen);
+      border: var(--pf-glass-border);
+      box-shadow: var(--pf-glass-shadow);
       backdrop-filter: var(--pf-blur-lg);
       color: var(--pf-fg);
       border-radius: var(--pf-radius-lg);
