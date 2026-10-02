@@ -1,4 +1,5 @@
 import { build, context } from "esbuild";
+import { minify } from "terser";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
@@ -291,6 +292,43 @@ const shared = {
 
 const watch = process.argv.includes("--watch");
 
+// Two compression passes, adopting the one transform ScriptCat's build has that
+// esbuild does not. SWC runs `compress: { passes: 2 }` for the usual reason: a
+// single pass cannot act on rewrites it has not made yet, so re-running the
+// compressor lets it see the optimizations the first pass created. esbuild has
+// no multi-pass mode, so this copies that architecture rather than those
+// settings - esbuild keeps the work only it does well (module resolution,
+// bundling, tree shaking, target lowering, UTF-8 output) and terser does the
+// compressing. `drop_console` stays false so PlayerForge's diagnostics survive;
+// `drop_debugger` is true, matching ScriptCat's production behaviour.
+const COMPRESS_OPTS = {
+  compress: { passes: 2, drop_console: false, drop_debugger: true, ecma: 2020 },
+  // toplevel mangling is safe here: the IIFE is the program root, and PlayerForge
+  // reads no Function.prototype.name (see the header note) and no .toString().
+  mangle: { toplevel: true, keep_classnames: false, keep_fnames: false },
+  format: { comments: false, beautify: false, ecma: 2020 },
+};
+
+// The banner is compressed OUT of, not through. ScriptCat regex-parses the
+// metadata block out of the leading comment, so terser is never allowed to see
+// it: we split the bundle on the exact banner text, compress only the body, and
+// re-prepend the banner verbatim. If esbuild ever stops emitting the banner
+// verbatim we fail loudly rather than ship a script that will not install.
+async function compressBundle(esbuildOutput) {
+  if (!esbuildOutput.startsWith(banner)) {
+    throw new Error("bundle: banner missing from file head, cannot split safely for compression");
+  }
+  const body = esbuildOutput.slice(banner.length);
+  const compressed = await minify(body, COMPRESS_OPTS);
+  if (typeof compressed.code !== "string" || compressed.code.length === 0) {
+    throw new Error("bundle: compression produced empty output");
+  }
+  if (compressed.code.includes("==UserScript==")) {
+    throw new Error("bundle: metadata leaked into the compressed body");
+  }
+  return `${banner}${compressed.code}\n`;
+}
+
 /**
  * Release-time verification for the shipped bundle. Tree shaking and syntax
  * lowering are reachability- and target-driven, so they cannot introduce
@@ -322,25 +360,41 @@ function verifyBundle(text) {
 }
 
 if (watch) {
-  const ctx = await context({ ...shared, minify: true });
+  // esbuild only bundles in watch mode; the terser pass runs in onEnd so every
+  // rebuild ships the same compressed artifact the release build produces.
+  const ctx = await context({
+    ...shared,
+    write: false,
+    plugins: [
+      ...shared.plugins,
+      {
+        name: "compress-output",
+        setup(b) {
+          b.onEnd(async (result) => {
+            if (result.errors.length || !result.outputFiles.length) return;
+            writeFileSync(shared.outfile, await compressBundle(result.outputFiles[0].text));
+            console.log("[PlayerForge] rebuilt (2-pass compressed)");
+          });
+        },
+      },
+    ],
+  });
   await ctx.watch();
-  console.log("[PlayerForge] watching (minified)...");
+  console.log("[PlayerForge] watching (bundled + 2-pass compressed)...");
 } else {
-  // One options object, used for BOTH the write and the verification rebuild, so
-  // the determinism gate cannot silently compare two different transforms.
-  const minifiedOpts = { ...shared, minify: true };
+  // Bundling stays with esbuild (write:false); compression happens in terser.
+  const bundleOpts = { ...shared, write: false };
 
-  // Minified bundle (what ScriptCat installs).
-  await build(minifiedOpts);
-  console.log("[PlayerForge] built minified bundle");
+  const out = await compressBundle((await build(bundleOpts)).outputFiles[0].text);
+  writeFileSync(shared.outfile, out);
+  console.log("[PlayerForge] built minified bundle (esbuild bundle + terser passes: 2)");
 
-  // Verify reproducibility + safety.
-  const second = await build({ ...minifiedOpts, write: false });
-  const onDisk = readFileSync(shared.outfile, "utf8");
-  const inMemory = second.outputFiles[0].text;
-  if (onDisk !== inMemory) {
+  // Verify reproducibility + safety. Both sides go through compressBundle, so
+  // this catches drift in either stage rather than just the bundler.
+  const second = await compressBundle((await build(bundleOpts)).outputFiles[0].text);
+  if (out !== second) {
     throw new Error("bundle: non-deterministic output (disk vs rebuild mismatch)");
   }
-  verifyBundle(inMemory);
+  verifyBundle(out);
   console.log("[PlayerForge] min build verified: metadata header intact, no eval/with/new Function, deterministic");
 }
