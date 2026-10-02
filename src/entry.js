@@ -7,6 +7,8 @@ import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/sdk.js";
 import { logger } from "./shared/logger.js";
 import { shouldSkipUrl } from "./kernel/guard.js";
 import { KEYS, getConfigValue, setConfigValue, deleteConfigField, whenManagerReady } from "./shared/storage.js";
+import { importManagerConfig } from "./shared/power-config.js";
+import { VERSION_MARKER } from "./kernel/contract.js";
 import { initFullscreenGate } from "./shared/shadow.js";
 
 // The version lives in the banner and is read from the installed script at
@@ -41,12 +43,23 @@ function bootstrap() {
     whenManagerReady().then(() => installMenuCommands());
   }
   const boot = () => {
-    if (window.PlayerForge) {
+    // Re-entry guard keyed on the DOM marker rather than a global. The marker
+    // is the one surface both JS worlds can see, so it is authoritative for
+    // "PF already booted here" - and, under @inject-into content, a page that
+    // sets window.PlayerForge can no longer talk PF out of booting.
+    if (document.documentElement?.hasAttribute(VERSION_MARKER)) {
       logger.warn("entry", "Kernel already initialized");
       return;
     }
     const kernel = new Kernel();
     registerShell(kernel);
+    // Fold manager-side power-config edits into pf:configs before anything
+    // reads those fields - the kernel reads debug.logs during init() and the
+    // subtitle section reads its styling keys on shell creation.
+    const adopted = importManagerConfig();
+    if (adopted) {
+      logger.log("entry", `Imported ${adopted} manager power-config field(s)`);
+    }
     kernel.init();
 
     // One subscription serves both duties: readiness log always, first-run
@@ -111,19 +124,34 @@ function bootstrap() {
     const mgrInfo = typeof GM_info === "object" && GM_info !== null ? GM_info : {};
     const scriptVersion = mgrInfo.script?.version ?? "unknown";
 
-    // Minimal public surface: pages get the version string only. The kernel
-    // (and through it the shell registry) stays private - handing it to page
-    // scripts would let them forge discovery events or poke shells. #pf-debug
-    // in the hash re-exposes it for console debugging sessions; debug log
-    // state itself lives in the module-level logger (hash or menu setting).
+    // Version surface: a DOM attribute, not a JS global. Under
+    // @inject-into content a window property would live in the
+    // content-script world, where a page can neither read it nor spoof it -
+    // which is the point, but it also drops the read path pages had. The
+    // attribute lives on the shared DOM, so
+    // document.documentElement.dataset.pfVersion is the same value from a page
+    // script, from an isolated script, and from the manager.
+    // (data-pf-shell, the shell's own claim on its host, is its sibling.)
+    document.documentElement?.setAttribute(VERSION_MARKER, scriptVersion);
+
+    // #pf-debug in the hash re-exposes the kernel for console debugging
+    // sessions; the rest of the time it stays private - handing the kernel to
+    // page scripts would let them forge discovery events or poke shells. The
+    // define is guarded because a name already taken in this world would
+    // otherwise throw out of the try-less boot path and take the kernel with
+    // it, which is a worse outcome than a missing debug handle.
     const debugMode = location.hash.includes("pf-debug");
-    Object.defineProperty(window, "PlayerForge", {
-      value: Object.freeze(debugMode
-        ? { kernel, version: scriptVersion }
-        : { version: scriptVersion }),
-      writable: false,
-      configurable: false
-    });
+    if (debugMode) {
+      try {
+        Object.defineProperty(window, "PlayerForge", {
+          value: Object.freeze({ kernel, version: scriptVersion }),
+          writable: false,
+          configurable: false
+        });
+      } catch (error) {
+        logger.warn("entry", "Debug handle unavailable (name already taken)", error);
+      }
+    }
 
     logger.log(
       "entry",

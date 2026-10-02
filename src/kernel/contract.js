@@ -9,6 +9,8 @@
  * Owned here:
  *   - SHELL_MARKER       - the DOM attribute both layers use to recognize
  *                          video/container/host the shell manages.
+ *   - VERSION_MARKER     - the DOM attribute carrying the running script
+ *                          version, the page-visible version surface.
  *   - GESTURE_EVENTS     - the semantic event contract: the shell dispatches
  *                          these onto its host; the framework may emit the
  *                          panel one to toggle a shell's panel from outside
@@ -19,6 +21,15 @@
  *                          (not shell UI), e.g. the removal grace window.
  */
 export const SHELL_MARKER = "data-pf-shell";
+
+/**
+ * Version surface, as a DOM attribute rather than a JS global: under
+ * `@inject-into content` the script runs in the content-script world, so a
+ * window property would be invisible to the page - and equally unfalsifiable
+ * by it. The DOM is shared between worlds, so the attribute reads the same
+ * from a page script and from the manager.
+ */
+export const VERSION_MARKER = "data-pf-version";
 
 export const DEBUG_LOGS_KEY = "debug.logs";
 

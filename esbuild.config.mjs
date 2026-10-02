@@ -1,7 +1,9 @@
 import { build, context } from "esbuild";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import process from "node:process";
+import { POWER_GROUP, POWER_SCHEMA } from "./src/shared/power-schema.js";
 
 // Minified is the only output. Minification is
 // V8/TurboFan-aware by construction: esbuild only does the safe transforms
@@ -12,6 +14,58 @@ import process from "node:process";
 // minified separately (esbuild's JS minifier would not shrink a text-loaded
 // string); the CSS pass below is deliberately conservative so calc()/content
 // and selector whitespace survive intact.
+
+const REPO = "https://github.com/itsrody/PlayerForge";
+const RAW = "https://raw.githubusercontent.com/itsrody/PlayerForge/chromium/dist";
+
+/**
+ * sha384 of the exact bytes the build writes to dist/playerforge.css, pinned
+ * into the @resource line as `#sha384-<hex>`.
+ *
+ * minifyCss() is pure and both this call and the minifyCssPlugin load below
+ * run it over the same source file, so the pinned digest and the published
+ * bytes cannot drift. SHA-384 is the hash the W3C SRI guidance recommends and
+ * the one ScriptCat documents.
+ *
+ * This deliberately reverses an earlier decision to leave @resource unpinned
+ * so that CSS hot-fixes reached installed scripts without a script update.
+ * That convenience is exactly the hole: the URL is a mutable branch, so
+ * anything that can write to it could restyle every page PF runs on. The cost
+ * of closing it is real but bounded - an installed script whose pinned hash no
+ * longer matches the published CSS simply keeps the stylesheet embedded in its
+ * own bundle (see shell/chrome/inject.js), which is the correct, working CSS.
+ */
+const CSS_SOURCE = fileURLToPath(new URL("./src/shell/chrome/styles.css", import.meta.url));
+const cssSha384 = createHash("sha384")
+  .update(minifyCss(readFileSync(CSS_SOURCE, "utf8")))
+  .digest("hex");
+
+/**
+ * Render the `==UserConfig==` block from the shared schema so the manager's
+ * settings UI and the runtime importer read one definition. Strings are JSON
+ * -quoted: YAML plain scalars would break on a ": " or " #" inside a
+ * description, and JSON string syntax is valid YAML double-quoted style.
+ */
+function userConfigYaml() {
+  const lines = [`${POWER_GROUP}:`];
+  for (const field of POWER_SCHEMA) {
+    lines.push(`  ${field.id}:`);
+    lines.push(`    title: ${JSON.stringify(field.title)}`);
+    lines.push(`    description: ${JSON.stringify(field.description)}`);
+    lines.push(`    type: ${field.type}`);
+    lines.push(`    default: ${JSON.stringify(field.default)}`);
+    if (field.min !== undefined) {
+      lines.push(`    min: ${field.min}`);
+    }
+    if (field.max !== undefined) {
+      lines.push(`    max: ${field.max}`);
+    }
+    if (field.unit) {
+      lines.push(`    unit: ${JSON.stringify(field.unit)}`);
+    }
+  }
+  return lines.join("\n");
+}
 
 // The banner below is the single version source. Runtime reads the installed
 // script's real version through GM_info.script.version, so bumping @version
@@ -26,6 +80,16 @@ import process from "node:process";
 // Storage writes prefer the promise-style GM.setValue (GM.* v4 API) so a
 // rejected async write is logged rather than silent; the sync GM_setValue is
 // the always-available fallback under early-start and in the test harness.
+//
+// @inject-into content runs the script in the content-script world rather than
+// the page's. Three things fall out of that: the page cannot shadow the globals
+// PF reads (scheduler, screen, crypto, ...), the page cannot squat on the PF
+// global or make it non-configurable to abort boot, and PF is no longer bound
+// by the page's CSP - which is what latches the subtitle parse worker onto its
+// in-band fallback on the strict-CSP sites PF exists to enhance. PF touches
+// only shared DOM, never the page's `window`, so it loses nothing by it. The
+// cost is that a JS-global version surface would be invisible to the page, so
+// the version is published as a DOM attribute instead (entry.js).
 const banner = `// ==UserScript==
 // @name         PlayerForge
 // @namespace    https://github.com/PlayerForge
@@ -84,11 +148,19 @@ const banner = `// ==UserScript==
 // @grant        CAT_scriptLoaded
 // @connect      *
 // @connect      https://www.subtitlecat.com
-// @resource     pfStyle https://raw.githubusercontent.com/itsrody/PlayerForge/chromium/dist/playerforge.css
+// @resource     pfStyle ${RAW}/playerforge.css#sha384-${cssSha384}
 // @run-at       document-start
 // @early-start
+// @inject-into  content
+// @updateURL    ${RAW}/playerforge.user.js.meta.js
+// @downloadURL  ${RAW}/playerforge.user.js
+// @homepage     ${REPO}
+// @supportURL   ${REPO}/issues
 // @license      MIT
 // ==/UserScript==
+/* ==UserConfig==
+${userConfigYaml()}
+==/UserConfig== */
 `;
 
 /**
@@ -125,9 +197,9 @@ function minifyCssPlugin() {
       });
       // Report a SHA-256 fingerprint of each shipped stylesheet after the
       // build. This is a release-time paranoia check (an accidental dirty or
-      // regenerated stylesheet is caught before it ships), NOT runtime SRI -
-      // the live @resource stays un-pinned so CSS hot-fixes never invalidate
-      // an installed script's hash.
+      // regenerated stylesheet is caught before it ships). The @resource line
+      // carries its own sha384 pin, computed above from the same pure minify
+      // pass - this fingerprint exists so a reviewer can see the CSS changed.
       build.onEnd(() => {
         for (const [path, css] of cache) {
           const digest = createHash("sha256").update(css).digest("hex");
@@ -202,7 +274,7 @@ function verifyMinified(text) {
   if (!text.startsWith("// ==UserScript==")) {
     throw new Error("min build: metadata banner displaced from file head");
   }
-  for (const needle of ["@name         PlayerForge", "@version", "@grant        GM_setValue", "@resource     pfStyle https://raw.githubusercontent.com/itsrody/PlayerForge/chromium/dist/playerforge.css"]) {
+  for (const needle of ["@name         PlayerForge", "@version", "@grant        GM_setValue", "@resource     pfStyle https://raw.githubusercontent.com/itsrody/PlayerForge/chromium/dist/playerforge.css#sha384-", "@inject-into  content", "==UserConfig=="]) {
     if (!text.includes(needle)) {
       throw new Error(`min build: metadata line missing: ${needle.trim().split(/\s+/)[0]}`);
     }
