@@ -11,15 +11,17 @@
  * observer cost.
  *
  * Escalation (commits to the full-document observer) happens only once there
- * is evidence of a player: a static <video> in the parsed DOM, or a media
- * event for a <video> that has not yet reached player size. Documents without
- * video therefore never open the subtree observer at all.
+ * is evidence of a player: a rendered static <video> in the parsed DOM, or a
+ * media event for a rendered <video> that has not yet reached player size. A
+ * hidden <video> (no painted box) is not evidence and stays on the cheap tap,
+ * so documents that only carry non-player videos never open the subtree
+ * observer either.
  *
  * The first size-qualified candidate fires onCandidate exactly once;
  * documents without a usable player never boot a kernel.
  */
 import { logger } from "../shared/logger.js";
-import { watchMediaEvents, meetsMinSize, createLayoutGate, forEachVideoInMutations } from "./sdk.js";
+import { watchMediaEvents, meetsMinSize, createLayoutGate, hasPresentBox, forEachVideoInMutations } from "./sdk.js";
 import { onDomMutations } from "../shared/dom-watch.js";
 
 export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
@@ -72,10 +74,18 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
       finish();
       return;
     }
-    // A real <video> exists but isn't player-sized yet - commit to the
-    // observer so SDK-inserted siblings that may qualify are caught, and
-    // keep this one under a size gate so its own late growth also boots us.
-    escalate();
+    // Commit to the full-document observer only when the video is actually
+    // rendered. A hidden <video> is common and not a player: a decoder/canvas
+    // texture source (display:none), a pre-rendered off-screen embed, or a
+    // content-visibility:auto subtree that is skipped. Escalating for one of
+    // those keeps a document-wide observer (and its per-batch JS scan) alive
+    // for the whole page on a site that will never boot a kernel. A hidden
+    // candidate still goes under the layout gate, so a later reveal that
+    // changes its box can qualify it, and a hidden-but-real player is caught
+    // when it starts loading/playing (media events route back here).
+    if (hasPresentBox(video)) {
+      escalate();
+    }
     layoutGate.watch(video, () => {
       if (!done) {
         finish();
@@ -93,12 +103,10 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
     }
     const present = document.querySelectorAll("video");
     for (const video of present) {
+      // consider() owns the escalation decision per video (present-and-small
+      // escalates; hidden does not), so there is no blanket escalate() here -
+      // that would arm the observer for a page whose only videos are hidden.
       consider(video);
-    }
-    if (!done && present.length) {
-      // Static video(s) exist but none qualified yet - keep the observer armed
-      // so SDK-inserted successors that may reach player size are caught.
-      escalate();
     }
   };
   if (document.readyState === "loading") {

@@ -79,6 +79,31 @@ test("registry: unregister wrong shell is a no-op", () => {
   assert.deepEqual(slot.getAll(), [shell]);
 });
 
+test("registry: onEmpty fires when the last shell leaves", () => {
+  let empties = 0;
+  const slot = new ShellSlot(() => empties++);
+  const shell = makeShell();
+  slot.register(shell);
+  slot.unregister(shell);
+  assert.equal(empties, 1, "the empty edge is reported once");
+
+  // A second unregister of the same (already gone) shell must not re-report.
+  slot.unregister(shell);
+  assert.equal(empties, 1);
+});
+
+test("registry: onEmpty does not fire while a shell remains", () => {
+  let empties = 0;
+  const slot = new ShellSlot(() => empties++);
+  const shell = makeShell();
+  const other = makeShell();
+  slot.register(shell);
+  // Unregistering a different object is a no-op and must not claim empty.
+  slot.unregister(other);
+  assert.equal(empties, 0);
+  assert.deepEqual(slot.getAll(), [shell]);
+});
+
 test("registry: register replaces previous shell", () => {
   const slot = new ShellSlot();
   const a = makeShell();

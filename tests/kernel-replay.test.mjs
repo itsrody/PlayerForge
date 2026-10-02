@@ -138,3 +138,50 @@ test("reconnect cancels the pending grace - a fresh one measures from the curren
     FRAMEWORK_TUNING.removalGraceMs = graceMs;
   }
 });
+
+test("kernel re-arms full discovery after the last shell is destroyed", async () => {
+  // A clean page: prior tests left kernels sharing this document, but each
+  // adopted its own player and is therefore already downgraded to the cheap
+  // media-event tap - none of them will see a mutation-only insertion.
+  document.body.innerHTML = "";
+
+  const created = [];
+  const kernel = new Kernel();
+  kernel.onShellCreated((shell) => created.push(shell));
+  kernel.registerShellProvider({
+    create({ video, container, sdk, onDestroy }) {
+      return { video, container, sdk, ready: Promise.resolve(), destroy: () => onDestroy?.() };
+    }
+  });
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "jwplayer";
+  const video = document.createElement("video");
+  wrapper.appendChild(video);
+  document.body.appendChild(wrapper);
+  video.getBoundingClientRect = () => ({ width: 640, height: 360, top: 0, left: 0, right: 640, bottom: 360 });
+  video.checkVisibility = () => true;
+
+  kernel.init();
+  await waitFor(() => created.some((shell) => shell.video === video));
+  const first = created.find((shell) => shell.video === video);
+
+  // Removal path tears the shell down -> registry empties -> kernel re-arms.
+  // (Calling destroy() directly mirrors lifecycle.onVideoRemoved minus grace.)
+  video.remove();
+  first.destroy();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  // A second player inserted with no media event: only a live document tap can
+  // discover it, which is exactly what the re-arm restored.
+  const wrapper2 = document.createElement("div");
+  wrapper2.className = "jwplayer";
+  const video2 = document.createElement("video");
+  wrapper2.appendChild(video2);
+  video2.getBoundingClientRect = () => ({ width: 640, height: 360, top: 0, left: 0, right: 640, bottom: 360 });
+  video2.checkVisibility = () => true;
+  document.body.appendChild(wrapper2);
+
+  await waitFor(() => created.some((shell) => shell.video === video2), 3000);
+  assert.ok(created.some((shell) => shell.video === video2), "the second player was discovered after re-arm");
+});

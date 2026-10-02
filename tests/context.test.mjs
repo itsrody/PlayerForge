@@ -908,6 +908,36 @@ test("a present-but-small video commits the probe to the observer", async () => 
   assert.ok(constructions >= 1, "present video escalated the probe to the observer");
 });
 
+test("a hidden video never commits the probe to the observer", async () => {
+  const { window: win } = dom("<video></video>", "https://example.com/article");
+  globalThis.window = win;
+  globalThis.document = win.document;
+
+  // A decoder/canvas texture source or off-screen embed: present in the DOM but
+  // not rendered, so it is not evidence of a player and must not arm the
+  // document-wide observer.
+  const video = win.document.querySelector("video");
+  video.checkVisibility = () => false;
+
+  const RealMO = win.MutationObserver;
+  let constructions = 0;
+  class CountingMO extends RealMO {
+    constructor(cb) {
+      super(cb);
+      constructions++;
+    }
+  }
+  globalThis.MutationObserver = CountingMO;
+  win.MutationObserver = CountingMO;
+
+  let fires = 0;
+  installVideoProbe({ minWidth: 100, minHeight: 60, onCandidate: () => fires++ });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  assert.equal(fires, 0, "a hidden video is not a candidate");
+  assert.equal(constructions, 0, "non-rendered video stays on the cheap media-event tap");
+});
+
 test("context timeout constant stays sane", () => {
   assert.ok(CTX_REQUEST_TIMEOUT_MS >= 1000 && CTX_REQUEST_TIMEOUT_MS <= 10000);
 });

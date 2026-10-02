@@ -271,7 +271,7 @@ export function forEachVideoInMutations(mutations, visit) {
  * Feature-detected: jsdom without checkVisibility stays on the rect-only path,
  * and the gate is admission-negative only, so discovery can never regress.
  */
-function hasPresentBox(el) {
+export function hasPresentBox(el) {
   return typeof el.checkVisibility !== "function"
     || el.checkVisibility({
       contentVisibilityAuto: true,
@@ -342,7 +342,13 @@ export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_V
       stop() {}
     };
   }
-  const waiting = new Map();
+  // WeakMap, not Map: ResizeObserver never notifies when an observed target is
+  // removed from the DOM, so a detached candidate that never reached player
+  // size would otherwise be pinned by this table (and the observer's own
+  // target list) until stop() - a leak that matters for the long-lived kernel
+  // gate on an SPA that recycles players. Only has/get/set/delete are used, so
+  // a WeakMap is a drop-in; stop() swaps in a fresh one instead of clear().
+  let waiting = new WeakMap();
   const observer = new ResizeObserver((entries, ro) => {
     for (const entry of entries) {
       const target = entry.target;
@@ -369,7 +375,7 @@ export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_V
     },
     stop() {
       observer.disconnect();
-      waiting.clear();
+      waiting = new WeakMap();
     }
   };
 }

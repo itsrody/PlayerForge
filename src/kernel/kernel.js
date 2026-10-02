@@ -76,7 +76,7 @@ export class Kernel {
   };
 
   constructor() {
-    this.#registry = new ShellSlot();
+    this.#registry = new ShellSlot(() => this.#onRegistryEmpty());
     this.#lifecycle = new LifecycleManager(this.#registry, (shell) => this.#notifyShellCreated(shell));
     this.#lifecycle.setShellFactory((discovery) => this.#createShell(discovery));
   }
@@ -126,17 +126,41 @@ export class Kernel {
     const { signal } = this.#scope;
     document.addEventListener("pageshow", this.#onPageShow, { signal });
     window.addEventListener("pagehide", this.#onPageHide, { signal });
-    // Permanent rider on the shared discovery tap: every video the probe
-    // would have seen, the kernel now adopts through the same wiring.
+    this.#armDiscoveryTap();
+    logger.log("kernel", "Kernel ready - discovery tap active");
+  }
+
+  /**
+   * (Re)establish the full-document discovery tap and replay the videos already
+   * in the parsed DOM. The probe boots us precisely so a video already present
+   * gets its shell without waiting for the next media event; the media-event
+   * tap still catches script-lazy SDK players that surface after boot. Called
+   * at init and again whenever the last shell leaves (see #onRegistryEmpty).
+   */
+  #armDiscoveryTap() {
+    this.#stopDiscoveryTap?.();
     this.#stopDiscoveryTap = watchDocumentVideos((video) => this.#adoptVideo(video));
-    // The probe boots us precisely so a video already in the parsed DOM gets
-    // its shell without waiting for the next media event. Replay once: the
-    // media-event tap (and the downgrade path) still catches script-lazy SDK
-    // players that surface after boot.
+    this.#discoveryDowngraded = false;
+    // Mutations only report future changes: a rebuild (SPA route swap) can
+    // leave a new player sitting in the tree with no pending record for us.
     for (const video of document.querySelectorAll("video")) {
       this.#adoptVideo(video);
     }
-    logger.log("kernel", "Kernel ready - discovery tap active");
+  }
+
+  /**
+   * The last shell left the live page. A router swap can destroy the shell and
+   * insert a fresh player that never fires a media event, and the first
+   * adoption had downgraded us to the media-event tap - so re-arm the full
+   * document tap to hunt again. Skipped during pagehide (scope already
+   * disposed) and when nothing was ever downgraded (no shell has existed).
+   */
+  #onRegistryEmpty() {
+    if (this.#scope.disposed || !this.#discoveryDowngraded) {
+      return;
+    }
+    logger.log("kernel", "Last shell gone - re-arming full discovery tap");
+    this.#armDiscoveryTap();
   }
 
   /**
