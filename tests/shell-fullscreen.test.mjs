@@ -118,6 +118,33 @@ test("a fullscreen subscription is torn down on its signal", async () => {
   teardown();
 });
 
+test("an already-aborted fullscreen subscription never attaches", async () => {
+  const { dom, container, teardown } = await makeShell();
+
+  const seen = [];
+  const scope = new dom.window.AbortController();
+  scope.abort();
+  subscribeFullscreen((active) => seen.push(active), scope.signal);
+  setFullscreen(dom, container);
+
+  assert.equal(seen.length, 0, "aborted subscription never attaches");
+  teardown();
+});
+
+test("initFullscreenGate binds at most one listener per document", async () => {
+  const { initFullscreenGate } = await import("../src/shared/shadow.js");
+  let bound = 0;
+  const doc = {
+    fullscreenElement: null,
+    addEventListener(type) {
+      if (type === "fullscreenchange") bound++;
+    }
+  };
+  initFullscreenGate(doc);
+  initFullscreenGate(doc);
+  assert.equal(bound, 1, "a repeated init re-seeds fs but does not stack listeners");
+});
+
 test("rejected fullscreen request surfaces a blocked hint", async () => {
   const { dom, shell, teardown } = await makeShell();
 

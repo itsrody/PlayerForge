@@ -35,11 +35,25 @@ const HAS_YIELD =
  * @returns {{ abort(): void }}
  */
 export function postTask(fn, { priority = "user-visible", delay: ms = 0, signal } = {}) {
+  // An owner signal that is already aborted means the caller is torn down. A
+  // listener attached to an aborted signal never fires, so without this the
+  // task would still schedule (and run post-teardown); hand back a dead handle.
+  if (signal?.aborted) {
+    return { abort() {} };
+  }
   if (!HAS_POST_TASK) {
     // setTimeout fallback - dead code on the Chromium 154 floor, kept for the
-    // jsdom test harness.
+    // jsdom test harness. It honors the owner signal too, so the abort
+    // contract is identical on both backends.
     const id = setTimeout(fn, ms);
-    return { abort: () => clearTimeout(id) };
+    const onAbort = () => clearTimeout(id);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    return {
+      abort: () => {
+        clearTimeout(id);
+        signal?.removeEventListener("abort", onAbort);
+      }
+    };
   }
   const ac = new AbortController();
   const dropOwnerSignal = () => signal?.removeEventListener("abort", onOwnerAbort);

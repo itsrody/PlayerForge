@@ -231,6 +231,12 @@ function stopIfIdle() {
 }
 
 export function onDomMutations(handler, { signal } = {}) {
+  // An already-aborted signal never fires the teardown listener, so
+  // subscribing would pin this slot (and keep the document observer alive)
+  // forever. Treat it as a no-op subscription.
+  if (signal?.aborted) {
+    return () => {};
+  }
   ensureObserver();
   const slot = [handler];
   slots.push(slot);

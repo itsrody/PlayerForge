@@ -135,6 +135,12 @@ function emitSettingsChanged() {
  * `signal` detaches it with the caller's lifecycle.
  */
 export function onSettingsChanged(listener, { signal } = {}) {
+  // Reading a setting is safe with an aborted signal, but subscribing is not:
+  // the platform never fires the teardown listener on an already-aborted
+  // signal, which would leak the handler. Treat it as a no-op subscription.
+  if (signal?.aborted) {
+    return () => {};
+  }
   const handler = () => listener();
   settingsBus.addEventListener("settings", handler, { signal });
   return () => settingsBus.removeEventListener("settings", handler);

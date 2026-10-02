@@ -47,6 +47,10 @@ export let fs = false;
  *  single underlying native listener; see initFullscreenGate). */
 const fsSubscribers = new Set();
 
+/** Document the gate is currently bound to, so a repeated init (e.g. double
+ *  script eval) re-seeds `fs` without stacking duplicate native listeners. */
+let fsGateDoc = null;
+
 /**
  * Build the `fs` gate off the native fullscreen event and fan out transitions.
  * Call once at startup. `doc` is injectable for jsdom tests so they drive the
@@ -59,6 +63,12 @@ const fsSubscribers = new Set();
  */
 export function initFullscreenGate(doc = document) {
   fs = !!doc.fullscreenElement;
+  // Re-seed `fs` above, but bind the transition listener once per document -
+  // a second init on the same doc would otherwise double-fire every flip.
+  if (fsGateDoc === doc) {
+    return;
+  }
+  fsGateDoc = doc;
   const update = () => {
     const next = !!doc.fullscreenElement;
     if (next === fs) {
@@ -78,6 +88,11 @@ export function initFullscreenGate(doc = document) {
  * function; pass `signal` to have it torn down automatically.
  */
 export function subscribeFullscreen(cb, signal) {
+  // An aborted signal's teardown listener never fires - adding `cb` now would
+  // pin it in fsSubscribers forever (and keep firing post-teardown).
+  if (signal?.aborted) {
+    return () => {};
+  }
   fsSubscribers.add(cb);
   if (signal) {
     signal.addEventListener("abort", () => fsSubscribers.delete(cb), { once: true });

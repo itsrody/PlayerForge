@@ -134,3 +134,14 @@ test("unsubscribe still works after slot compaction (identity-stable handles)", 
   assert.equal(counts.s4, 1, "zombie never resurrects");
   offFresh();
 });
+
+test("an already-aborted signal is a no-op subscription", async () => {
+  const ac = new AbortController();
+  ac.abort();
+  let calls = 0;
+  const off = onDomMutations(() => { calls++; }, { signal: ac.signal });
+  document.body.appendChild(document.createElement("div"));
+  await tick();
+  assert.equal(calls, 0, "aborted subscription never observes");
+  off(); // inert handle
+});

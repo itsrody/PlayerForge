@@ -166,6 +166,18 @@ test("settings changes notify subscribers exactly once (echo is a no-op)", () =>
   assert.equal(notifications, 1, "unsubscribed listener is detached");
 });
 
+test("onSettingsChanged with an already-aborted signal never subscribes", () => {
+  setSetting("gestures.hotkeys", true); // precondition, before subscribing
+  const ac = new AbortController();
+  ac.abort();
+  let notifications = 0;
+  const off = onSettingsChanged(() => { notifications++; }, { signal: ac.signal });
+  setSetting("gestures.hotkeys", false);
+  assert.equal(notifications, 0, "aborted subscription is never attached");
+  off(); // inert handle
+  setSetting("gestures.hotkeys", true); // restore
+});
+
 test("a cross-tab settings change re-syncs open controls without echoing back", () => {
   setSetting("controller.stepSeek", 5); // precondition: 5s is the active option
   setSetting("gestures.hotkeys", true);
