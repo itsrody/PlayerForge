@@ -50,6 +50,18 @@ export function createMediaControls({ video }) {
   };
 
   return {
+    /** True once the media has an established timeline (HAVE_METADATA+).
+     *  Interaction layers consult this before emitting command feedback, so a
+     *  gesture the command plane would no-op never shows a misleading toast. */
+    get ready() {
+      return isReady();
+    },
+
+    /** True when a seek is legal (metadata, or an MSE-known duration). */
+    get canSeek() {
+      return canSeek();
+    },
+
     async play() {
       if (!isReady()) {
         return;

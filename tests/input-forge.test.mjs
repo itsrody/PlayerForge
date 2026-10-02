@@ -7,6 +7,7 @@ globalThis.GM_setValue = () => {};
 
 const { InputForge } = await import("../src/shell/inputs/forge.js");
 const { GESTURE_EVENTS, computeCoverScale, attachInputActions } = await import("../src/shell/inputs/actions.js");
+const { createMediaControls } = await import("../src/shell/media.js");
 const { initFsGate, setFullscreen } = await import("./fs-gate.mjs");
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -897,6 +898,51 @@ test("fill re-derives the cover scale when the video's intrinsic size changes", 
   video.dispatchEvent(new dom.window.Event("resize"));
   assert.notEqual(video.style.transform, first, "cover scale re-derived on intrinsic-size change");
   assert.match(video.style.transform, /scale\(1\.25/, "portrait source no longer overflows");
+
+  ac.abort();
+  dom.window.close();
+});
+
+test("transport gestures stay inert until the media timeline is ready", () => {
+  const { dom, video, host } = makeEnv();
+  // Strip the metadata the shared harness normally preloads: readyState 0 is
+  // HAVE_NOTHING, so the command plane has no timeline to seek or adjust.
+  Object.defineProperty(video, "readyState", { value: 0, configurable: true });
+  const toasts = [];
+  const flashes = [];
+  const shell = {
+    video,
+    media: createMediaControls({ video }),
+    referenceBox: { width: 800, height: 450 },
+    toast: (entry) => toasts.push(entry),
+    toastFlash: (...args) => flashes.push(args),
+    duration: NaN,
+    currentTime: 0,
+    volume: 1,
+    muted: false,
+    playbackRate: 1
+  };
+  const ac = new AbortController();
+  attachInputActions(shell, host, ac.signal);
+
+  const fire = (type, detail = {}) =>
+    host.dispatchEvent(new dom.window.CustomEvent(type, { detail }));
+
+  fire(GESTURE_EVENTS.skip, { direction: "right" });
+  fire(GESTURE_EVENTS.volume, { direction: "up" });
+  fire(GESTURE_EVENTS.mute);
+  fire(GESTURE_EVENTS.hold, { method: "pointer" });
+
+  assert.deepEqual(toasts, [], "no skip/hold feedback before metadata");
+  assert.deepEqual(flashes, [], "no volume/mute feedback before metadata");
+  assert.equal(video.volume, 1, "volume untouched before metadata");
+  assert.equal(video.muted, false, "mute untouched before metadata");
+
+  // Metadata loads: the exact same gestures now act and report.
+  Object.defineProperty(video, "readyState", { value: 1, configurable: true });
+  fire(GESTURE_EVENTS.volume, { direction: "up" });
+  assert.equal(flashes.length, 1, "volume reports once the timeline is ready");
+  assert.equal(video.volume, 1, "gain clamped at the ceiling");
 
   ac.abort();
   dom.window.close();

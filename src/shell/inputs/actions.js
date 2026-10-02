@@ -244,6 +244,11 @@ function cancelScrubFrameLoop(state) {
 }
 
 function performSkip(shell, state, direction) {
+  // The command plane no-ops a skip before the timeline exists; bail here too
+  // so the streak state and the "Ns" readout don't advance for a dead command.
+  if (!shell.media.ready) {
+    return;
+  }
   const now = performance.now();
   const streakMax = TUNING.controller.streakMax;
   // A streak decays lazily by its reset window instead of a wake-up timer.
@@ -485,7 +490,7 @@ export function attachInputActions(shell, host, signal) {
   }, signal);
 
   host.addEventListener(GESTURE_EVENTS.hold, ({ detail }) => {
-    if (!shell.video) {
+    if (!shell.video || !shell.media.ready) {
       return;
     }
     const state = stateFor(shell);
@@ -666,6 +671,11 @@ export function attachInputActions(shell, host, signal) {
    * playback. Inline double-taps belong to the browser/player natively.
    */
   host.addEventListener(GESTURE_EVENTS.dbltap, ({ detail }) => {
+    // Both edge-skip and center-play are inert before the timeline exists; gate
+    // the shared haptic too so an unready double-tap is fully silent.
+    if (!shell.media.ready) {
+      return;
+    }
     gestureHaptic("dbltap");
     if (detail.zone === "left-edge" || detail.zone === "right-edge") {
       performSkip(shell, stateFor(shell), detail.zone === "left-edge" ? "left" : "right");
@@ -679,7 +689,7 @@ export function attachInputActions(shell, host, signal) {
   }, { signal });
 
   host.addEventListener(GESTURE_EVENTS.volume, ({ detail }) => {
-    if (!shell.video) {
+    if (!shell.video || !shell.media.ready) {
       return;
     }
     shell.media.nudgeVolume(detail.direction);
@@ -687,7 +697,7 @@ export function attachInputActions(shell, host, signal) {
   }, { signal });
 
   host.addEventListener(GESTURE_EVENTS.mute, () => {
-    if (!shell.video) {
+    if (!shell.video || !shell.media.ready) {
       return;
     }
     shell.media.toggleMute();
@@ -698,7 +708,7 @@ export function attachInputActions(shell, host, signal) {
   // window lifecycle; we only flip the toggle. Unsupported hosts get a hint
   // instead of a silent no-op, mirroring the fs-block pattern.
   host.addEventListener(GESTURE_EVENTS.pip, () => {
-    if (!shell.video) {
+    if (!shell.video || !shell.media.ready) {
       return;
     }
     if (!shell.media.pictureInPictureSupported()) {
