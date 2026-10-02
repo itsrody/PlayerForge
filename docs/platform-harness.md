@@ -122,6 +122,18 @@ surface is irrelevant. PF's logger is `console.*` only, so without this its
 
 ## Known harness constraints
 
+- **The chromedriver on `PATH` must match the browser build.** Selenium Manager
+  resolves the right driver on its own (it caches `154.0.8037.92` for Helium), but
+  it falls back to `PATH` when it cannot download — and that fallback was
+  `152.0.7977.64`, two majors behind Helium 154. A green suite would have hidden
+  this, because nothing on a warm cache ever consults `PATH`. Homebrew cannot fix
+  it: its `chromedriver` cask is pinned at 152 and was **disabled on 2026-09-01**
+  for failing Gatekeeper, so `brew upgrade` is not an upgrade path here. `PATH`
+  now carries `154.0.8037.92` from Chrome for Testing, matching Helium exactly.
+  Both binaries fail `spctl -a` ("rejected") and both still execute — Chrome for
+  Testing ships these unsigned, so a Gatekeeper complaint is expected and is not a
+  working-install signal. Compare versions with `chromedriver --version` against
+  `Helium --version`, not against `brew`.
 - **A CSP claim needs a control, not a flag audit.** Every launch passes
   `--disable-web-security`, which looks like it should invalidate CSP results. It
   does not: with the flag present, a blob worker spawns on an unrestricted page
@@ -155,11 +167,31 @@ surface is irrelevant. PF's logger is `console.*` only, so without this its
 
 ## Differences from ScriptCat's harness
 
-- **Substrate.** ScriptCat uses Playwright's `launchPersistentContext`, which
-  gives `serviceWorkers()` and `addInitScript` directly. PF uses
-  selenium-webdriver + chromedriver because ~4k lines of integration tests are
-  written against `ChromiumDriver`. The session layer sits above that rather than
-  replacing it; the swap is staged behind the existing API, not done in one pass.
+- **Substrate — settled, do not re-propose.** ScriptCat uses Playwright's
+  `launchPersistentContext`. PF stays on selenium-webdriver + chromedriver. The
+  swap was scoped and rejected on evidence, not deferred for lack of time:
+
+  - The surface is genuinely small — 12 `ChromiumDriver` methods, and no test
+    imports selenium directly, so a port looked mechanical.
+  - `playwright-core` launches Helium 154 cleanly and `context.serviceWorkers()`
+    does return the extension ID natively, so the usual objections do not apply.
+  - **The blocker is world isolation.** Under Playwright + raw CDP
+    `Page.createIsolatedWorld`, window expandos leak in *both* directions (a
+    `window.x = 1` in either world is visible in the other); only lexical `const`
+    bindings stay world-private. Under the chromedriver path the same experiment
+    reports `undefined` both ways. `grantUniveralAccess` is not the variable — true
+    and false leak identically (the CDP parameter is misspelled upstream, so it is
+    easy to misread as the cause).
+  - `content-injection.test.mjs` asserts exactly that property in both
+    directions. A naive port would have kept it **green while testing nothing**,
+    because writes would land in the main world and the assertions would read a
+    world that was never isolated. That failure mode is worse than a broken port.
+
+  Before revisiting: someone has to explain how the chromedriver path achieves
+  expando isolation where a raw `createIsolatedWorld` does not. Until then, any
+  ported isolation test is a coin flip between real coverage and a green lie. The
+  durable fix is to make the content world isolated by construction (lexical
+  bindings, never window assignment), which would make the substrates agree.
 - **Port split.** Selenium's `port` option is the ChromeDriver *control* port,
   while raw CDP clients need Chrome's DevTools port. The session allocates both
   and writes both to `.session.json`. Conflating them fails with `ECONNREFUSED`
