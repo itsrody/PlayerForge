@@ -13,7 +13,7 @@
  *   await driver.destroy();
  */
 import { Builder } from "selenium-webdriver";
-import { readFileSync, existsSync, mkdtempSync, rmSync, writeFileSync, chmodSync, readdirSync } from "node:fs";
+import { readFileSync, existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -285,14 +285,21 @@ export class ChromiumDriver {
   #profileDir;
   /** @type {boolean} */
   #destroyed = false;
+  /** @type {boolean} */
+  #keepProfile = false;
+  /** Exposed so a test can inspect what Chrome wrote back to the profile. */
+  get profileDir() {
+    return this.#profileDir;
+  }
   /** CDP execution context of the armed isolated world, or null. @type {number|null} */
   #isolatedWorldId = null;
   /** @type {boolean} */
   #isolatedWorldArmed = false;
 
-  constructor(driver, profileDir = null) {
+  constructor(driver, profileDir = null, keepProfile = false) {
     this.#driver = driver;
     this.#profileDir = profileDir;
+    this.#keepProfile = keepProfile;
   }
 
   /**
@@ -300,15 +307,49 @@ export class ChromiumDriver {
    * @param {object} [options]
    * @param {boolean} [options.headless=true] - Run headless.
    * @param {number} [options.port=0] - ChromeDriver port (0 = auto).
+   * @param {string[]} [options.extensions] - Unpacked extension directories to
+   *   load. Loading one implies the real user-script manager instead of the GM
+   *   stubs, which is the only way to exercise the manager's own content-script
+   *   world, @early-start ordering, and UserConfig synthesis.
+   * @param {object} [options.prefs] - Written to the profile's Preferences
+   *   file before launch, replacing it wholesale. Note that Chrome may ignore
+   *   or overwrite seeded values: on Helium 154 a seeded
+   *   extensions.ui.developer_mode of true did not stick, and the
+   *   chrome://extensions toggle still read checked=false. Read the toggle
+   *   back rather than trusting what was written.
+   * @param {string[]} [options.extraArgs] - Additional browser switches.
+   * @param {string} [options.profileDir] - Use this profile directory instead
+   *   of a fresh temp one, so state persists across launches (an installed
+   *   script) or can be inspected afterwards (what Chrome wrote back). Only
+   *   safe when no other instance is using it - Chrome's singleton forwards a
+   *   launch on an in-use profile to the running instance and the driver then
+   *   hangs. A caller-owned directory is never deleted on destroy.
+   * @param {boolean} [options.keepProfile=false] - Skip cleanup of the temp
+   *   profile on destroy, so it can be inspected.
    * @returns {Promise<ChromiumDriver>}
    */
   static async launch(options = {}) {
-    const { headless = true, port = 0 } = options;
+    const {
+      headless = true,
+      port = 0,
+      extensions = [],
+      prefs = null,
+      extraArgs = [],
+      profileDir: suppliedProfileDir = null,
+      keepProfile = false
+    } = options;
 
     // An isolated profile is mandatory: without it the browser's singleton
     // forwards the launch to an already-running session (whose DevTools port
-    // never binds) and the driver waits forever.
-    const profileDir = mkdtempSync(join(tmpdir(), "pf-driver-"));
+    // never binds) and the driver waits forever. A caller-supplied directory
+    // is caller-owned, so never delete it - only ever remove our own temp one.
+    const ownsProfile = suppliedProfileDir === null;
+    const profileDir = ownsProfile ? mkdtempSync(join(tmpdir(), "pf-driver-")) : suppliedProfileDir;
+    if (prefs !== null) {
+      const defaultDir = join(profileDir, "Default");
+      mkdirSync(defaultDir, { recursive: true });
+      writeFileSync(join(defaultDir, "Preferences"), JSON.stringify(prefs));
+    }
     const originalBinary = resolveBinary();
     const embeddedVersion = embeddedChromiumVersion(originalBinary);
     const binary = wrapBrowser(originalBinary, profileDir);
@@ -317,16 +358,25 @@ export class ChromiumDriver {
       "--no-sandbox",
       "--disable-gpu",
       "--disable-dev-shm-usage",
-      "--disable-extensions",
       "--disable-background-networking",
       "--disable-default-apps",
       "--disable-sync",
       "--no-first-run",
       "--disable-web-security",
     ];
+    // --disable-extensions would defeat the point of loading one; and
+    // --disable-component-extensions-with-background-pages is NOT set because
+    // an MV3 service worker (how ScriptCat injects) needs to start.
+    if (extensions.length > 0) {
+      args.push(`--load-extension=${extensions.join(",")}`);
+      args.push("--disable-component-extensions-with-background-pages=false");
+    } else {
+      args.push("--disable-extensions");
+    }
     if (headless) {
       args.push("--headless=new");
     }
+    args.push(...extraArgs);
 
     // A real Options instance is required: setChromeOptions ignores plain
     // objects (the binary/args silently never reach chromedriver). TLS
@@ -345,7 +395,7 @@ export class ChromiumDriver {
 
     await settleStartupNavigation(driver);
 
-    return new ChromiumDriver(driver, profileDir);
+    return new ChromiumDriver(driver, profileDir, keepProfile || !ownsProfile);
   }
 
   /** Raw Selenium WebDriver access (for advanced use). */
@@ -603,6 +653,18 @@ export class ChromiumDriver {
     return this.#isolatedWorldArmed;
   }
 
+  /**
+   * Raw DevTools command passthrough, for things the wrapper has no opinion
+   * about (enumerating extension targets, reading a service worker's world).
+   *
+   * @param {string} command
+   * @param {object} [params]
+   * @returns {Promise<any>}
+   */
+  async cdp(command, params = {}) {
+    return this.#driver.sendAndGetDevToolsCommand(command, params);
+  }
+
   /** CDP Runtime.evaluate with an explicit world, returning the raw payload. */
   async #cdpEval(executionContextId, expression) {
     return this.#driver.sendAndGetDevToolsCommand("Runtime.evaluate", {
@@ -727,6 +789,50 @@ export class ChromiumDriver {
         .release({ button })
         .perform();
     }
+  }
+
+  /**
+   * Trusted mouse click at viewport coordinates.
+   *
+   * Use this rather than element.click() inside executeScript for any React UI:
+   * a synthetic click is untrusted, and ScriptCat's install button ignores it -
+   * the click appears to land but the install never commits. Actions.click()
+   * produces the trusted down/up pair the framework actually listens for.
+   *
+   * @param {number} x
+   * @param {number} y
+   */
+  async clickAt(x, y) {
+    const { Actions } = await import("selenium-webdriver/lib/input.js");
+    const actions = this.#driver.actions({ async: true });
+    await actions.move({ origin: "viewport", x, y }).click().perform();
+  }
+
+  /**
+   * Click the first element matching a CSS selector, by trusted mouse click.
+   * Falls back to nothing when absent - callers poll for the selector first.
+   *
+   * @param {string} selector
+   * @returns {Promise<boolean>} Whether an element was found and clicked.
+   */
+  async clickSelector(selector) {
+    // Selector travels as an argument, not spliced into a template literal:
+    // JSON.stringify's \" escapes get consumed by the enclosing literal and
+    // emit a syntactically broken selector.
+    const rect = await this.eval(
+      (sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return null;
+        el.scrollIntoView({ block: "center" });
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) return null;
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      },
+      selector
+    );
+    if (!rect) return false;
+    await this.clickAt(rect.x, rect.y);
+    return true;
   }
 
   /**
@@ -867,6 +973,10 @@ export class ChromiumDriver {
       // Already dead.
     }
     if (this.#profileDir !== null) {
+      if (this.#keepProfile) {
+        console.log(`[harness] profile kept at ${this.#profileDir}`);
+        return;
+      }
       try {
         rmSync(this.#profileDir, { recursive: true, force: true });
       } catch {
