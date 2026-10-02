@@ -133,10 +133,19 @@ function bootstrap() {
   } catch (error) {
     logger.error("entry", "Frame bridge install failed", error);
   }
-  installVideoProbe({
+  const stopProbe = installVideoProbe({
     minWidth: MIN_VIDEO_WIDTH,
     minHeight: MIN_VIDEO_HEIGHT,
     onCandidate: boot
+  });
+  // The probe owns discovery until it boots the kernel (which detaches it). If
+  // the document is torn down before any candidate appears, release its capture
+  // listeners; a bfcache hide (persisted) keeps them so a player that appears
+  // after restore is still caught - mirroring the kernel's pagehide handling.
+  window.addEventListener("pagehide", (event) => {
+    if (!event.persisted) {
+      stopProbe();
+    }
   });
 }
 

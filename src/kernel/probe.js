@@ -24,6 +24,12 @@ import { logger } from "../shared/logger.js";
 import { watchMediaEvents, meetsMinSize, createLayoutGate, hasPresentBox, forEachVideoInMutations } from "./sdk.js";
 import { onDomMutations } from "../shared/dom-watch.js";
 
+/**
+ * Returns an idempotent stop() that cancels discovery when the kernel never
+ * boots. It is a no-op after onCandidate fires (finish() already detached), so
+ * the caller owns the pagehide decision: keep discovery across a bfcache hide
+ * and release it on a real unload.
+ */
 export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
   let done = false;
   let escalated = false;
