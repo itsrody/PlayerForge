@@ -188,3 +188,62 @@ test("findSdkForVideo returns a cached descriptor with anchor and hops", () => {
   // Every re-query returns the identical cached object - no per-call churn.
   assert.equal(findSdkForVideo(video), sdk);
 });
+
+test("the memo survives a re-query that changes nothing", () => {
+  const doc = dom('<div class="dplayer"><video></video></div>');
+  const video = doc.querySelector("video");
+  const first = findSdkForVideo(video);
+  // Warm the positive memo, then re-query: freshness must not re-wrap, or the
+  // "same object per video" contract above silently regressed into a re-scan.
+  assert.equal(findSdkForVideo(video), first);
+  assert.equal(findSdkForVideo(video), first);
+});
+
+test("re-parenting out of an SDK invalidates the positive memo", () => {
+  const doc = dom(
+    '<div class="dplayer"><div id="slot"><video></video></div></div>' +
+    '<div class="plain"><div id="target"></div></div>'
+  );
+  const video = doc.querySelector("video");
+  assert.equal(findSdkForVideo(video).name, "DPlayer");
+
+  // Same element, new ancestry: the WeakMap key survives, so an unvalidated
+  // memo would keep reporting the wrapper the video just left.
+  doc.querySelector("#target").append(video);
+  assert.equal(findSdkForVideo(video), null, "stale descriptor survived re-parenting");
+});
+
+test("re-parenting into an SDK invalidates the negative memo", () => {
+  const doc = dom(
+    '<div class="plain"><div id="slot"><video></video></div></div>' +
+    '<div data-vjs-player id="target"></div>'
+  );
+  const video = doc.querySelector("video");
+  assert.equal(findSdkForVideo(video), null, "precondition: unregistered to start");
+
+  doc.querySelector("#target").append(video);
+  assert.equal(findSdkForVideo(video).name, "Video.js", "stale null survived re-parenting");
+});
+
+test("a positive memo is invalidated when the matched wrapper is replaced in place", () => {
+  // The parent check alone cannot see this one: the video's own parent is
+  // untouched, so only re-verifying the anchor at its recorded hop catches it.
+  const doc = dom('<div id="slot"><div class="dplayer"><video></video></div></div>');
+  const video = doc.querySelector("video");
+  assert.equal(findSdkForVideo(video).name, "DPlayer");
+
+  const slot = doc.querySelector("#slot");
+  slot.textContent = "";
+  slot.append(video);
+
+  assert.equal(findSdkForVideo(video), null, "stale descriptor survived wrapper replacement");
+});
+
+test("a negative memo is re-checked after the video is detached entirely", () => {
+  const doc = dom('<div class="plain"><video></video></div>');
+  const video = doc.querySelector("video");
+  assert.equal(findSdkForVideo(video), null);
+
+  video.remove();
+  assert.equal(findSdkForVideo(video), null, "detachment must not throw or resurrect a match");
+});

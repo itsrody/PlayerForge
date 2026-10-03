@@ -7,7 +7,8 @@ globalThis.GM_setValue = () => {};
 
 const { Shell } = await import("../src/shell/shell.js");
 const { initFsGate, setFullscreen } = await import("./fs-gate.mjs");
-const { subscribeFullscreen } = await import("../src/shared/shadow.js");
+const shadow = await import("../src/shared/shadow.js");
+const { subscribeFullscreen } = shadow;
 const { requestFullscreenProvision, FS_REQUEST_TYPE } = await import("../src/shared/context.js");
 async function makeShell({ embedded = false } = {}) {
   const outer = new JSDOM("<!doctype html><html><body></body></html>", {
@@ -200,5 +201,71 @@ test("destroy is idempotent - calling twice does not throw or double-cleanup", a
   shell.destroy();
   // Verify shell is cleaned up
   assert.ok(!shell.shellDom, "shellDom cleared after destroy");
+  teardown();
+});
+
+test("a throwing fullscreen subscriber does not strand the ones after it", async () => {
+  const { dom, container, teardown } = await makeShell();
+  const seen = [];
+  subscribeFullscreen(() => {
+    throw new Error("subscriber blew up");
+  });
+  subscribeFullscreen((active) => seen.push(active));
+  subscribeFullscreen((active) => seen.push(active * 10));
+
+  // The dispatch runs from a native fullscreenchange listener, so an escaping
+  // throw would surface in the page's error channel and strand the HUD close
+  // and the gesture unbind that subscribe later in the fan-out.
+  setFullscreen(dom, container);
+
+  assert.deepEqual(seen, [true, 10], "a throwing subscriber skipped its peers");
+  teardown();
+});
+
+test("the gate boolean still flips when a subscriber throws", async () => {
+  const { dom, container, teardown } = await makeShell();
+  subscribeFullscreen(() => {
+    throw new Error("subscriber blew up");
+  });
+
+  setFullscreen(dom, container);
+  assert.equal(shadow.fs, true, "fs gate must latch before dispatching");
+  setFullscreen(dom, null);
+  assert.equal(shadow.fs, false);
+  teardown();
+});
+
+test("unsubscribing mid-dispatch still notifies the remaining subscribers", async () => {
+  // Without a snapshot, deleting from the live Set during iteration skips the
+  // subscriber that shifted into the removed slot.
+  const { dom, container, teardown } = await makeShell();
+  const seen = [];
+  let offSecond;
+  subscribeFullscreen((active) => seen.push(active));
+  offSecond = subscribeFullscreen((active) => {
+    seen.push(active);
+    offSecond();
+  });
+  subscribeFullscreen((active) => seen.push(active * 10));
+
+  setFullscreen(dom, container);
+
+  assert.deepEqual(seen, [true, true, 10]);
+  teardown();
+});
+
+test("initFullscreenGate returns a disposable handle and does not stack gates", async () => {
+  const { dom, container, teardown } = await makeShell();
+  const seen = [];
+
+  // A second init must not leave the first native listener behind, or every
+  // transition fans out twice.
+  initFsGate(dom);
+  subscribeFullscreen((active) => seen.push(active));
+
+  setFullscreen(dom, container);
+  setFullscreen(dom, null);
+
+  assert.deepEqual(seen, [true, false], "a re-init stacked a second gate");
   teardown();
 });

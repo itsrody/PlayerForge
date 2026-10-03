@@ -307,3 +307,132 @@ test("seekto without a seekTime is inert", () => {
   seekto(undefined);
   assert.equal(video.currentTime, 0, "no target means no seek");
 });
+
+/**
+ * navigator.mediaSession is one global per window, so the bridge registry is
+ * module-level state. These cases each need a pristine one: a bridge left
+ * alive by an earlier test in this file would otherwise be promoted instead of
+ * the shell under test. A cache-busting specifier gets a fresh module instance.
+ */
+let mediaModuleSeq = 0;
+function freshMedia() {
+  return import(`../src/shell/media.js?fresh=${mediaModuleSeq++}`);
+}
+
+/** A session fake that records handlers and the two writable fields. */
+function makeRichSession() {
+  const handlers = new Map();
+  return {
+    handlers,
+    playbackState: "none",
+    metadata: null,
+    setActionHandler(action, fn) {
+      if (fn === null) {
+        handlers.delete(action);
+      } else {
+        handlers.set(action, fn);
+      }
+    },
+    setPositionState() {}
+  };
+}
+
+function readyEnv(dom, paused) {
+  const video = dom.window.document.createElement("video");
+  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
+  Object.defineProperty(video, "paused", { value: paused, configurable: true });
+  Object.defineProperty(video, "duration", { value: 100, configurable: true });
+  Object.defineProperty(video, "playbackRate", { value: 1, configurable: true });
+  Object.defineProperty(video, "currentTime", { value: 10, configurable: true });
+  return { video, controls: createMediaControls({ video }) };
+}
+
+test("destroying the session owner hands it to a surviving shell", async () => {
+  const claim = (await freshMedia()).claimMediaSession;
+  const dom = new JSDOM("<!doctype html><html><body></body></html>");
+  globalThis.AbortController = dom.window.AbortController;
+  const session = makeRichSession();
+  const a = readyEnv(dom, true);
+  const b = readyEnv(dom, false);
+  const scopeA = new AbortController();
+  const scopeB = new AbortController();
+
+  claim({ controls: a.controls, video: a.video, signal: scopeA.signal, session });
+  claim({ controls: b.controls, video: b.video, signal: scopeB.signal, session });
+  assert.equal(session.playbackState, "playing", "the newest claim owns the session");
+
+  scopeB.abort();
+
+  // B was the owner and left; A's shell is still alive and must get the OS
+  // surface back rather than leaving the window with no controls at all.
+  assert.equal(session.handlers.has("play"), true, "the survivor got no action handlers");
+  assert.equal(session.playbackState, "paused", "the survivor's state was not pushed");
+});
+
+test("a displaced bridge stops writing the shared session", async () => {
+  const claim = (await freshMedia()).claimMediaSession;
+  const dom = new JSDOM("<!doctype html><html><body></body></html>");
+  globalThis.AbortController = dom.window.AbortController;
+  const session = makeRichSession();
+  const a = readyEnv(dom, true);
+  const b = readyEnv(dom, false);
+  const scopeA = new AbortController();
+  const scopeB = new AbortController();
+
+  const bridgeA = claim({ controls: a.controls, video: a.video, signal: scopeA.signal, session });
+  claim({ controls: b.controls, video: b.video, signal: scopeB.signal, session });
+  assert.equal(session.playbackState, "playing");
+
+  // A's shell is still listening to its own media events. navigator.mediaSession
+  // is one global, so A syncing anyway would make two players overwrite each
+  // other's state on every tick.
+  bridgeA.sync();
+  assert.equal(session.playbackState, "playing", "the displaced bridge overwrote the owner");
+
+  scopeA.abort();
+  scopeB.abort();
+});
+
+test("displacing an owner does not blank the session mid-handoff", async () => {
+  const claim = (await freshMedia()).claimMediaSession;
+  const dom = new JSDOM("<!doctype html><html><body></body></html>");
+  globalThis.AbortController = dom.window.AbortController;
+  const session = makeRichSession();
+  const a = readyEnv(dom, true);
+  const b = readyEnv(dom, false);
+  const scopeA = new AbortController();
+  const scopeB = new AbortController();
+
+  claim({ controls: a.controls, video: a.video, signal: scopeA.signal, session });
+  const seen = [];
+  Object.defineProperty(session, "playbackState", {
+    get: () => seen.at(-1) ?? "none",
+    set: (v) => seen.push(v),
+    configurable: true
+  });
+
+  claim({ controls: b.controls, video: b.video, signal: scopeB.signal, session });
+
+  // The old owner was destroyed rather than displaced, so it cleared the
+  // global session on its way out and the new owner had to rewrite it.
+  assert.equal(seen.includes("none"), false, "the session was blanked during handoff");
+
+  scopeA.abort();
+  scopeB.abort();
+});
+
+test("the last bridge leaving clears the session outright", async () => {
+  const claim = (await freshMedia()).claimMediaSession;
+  const dom = new JSDOM("<!doctype html><html><body></body></html>");
+  globalThis.AbortController = dom.window.AbortController;
+  const session = makeRichSession();
+  const a = readyEnv(dom, true);
+  const scopeA = new AbortController();
+
+  claim({ controls: a.controls, video: a.video, signal: scopeA.signal, session });
+  scopeA.abort();
+
+  assert.equal(session.handlers.size, 0, "handlers outlived the last shell");
+  assert.equal(session.playbackState, "none");
+  assert.equal(session.metadata, null);
+});

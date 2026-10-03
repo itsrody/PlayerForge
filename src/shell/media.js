@@ -189,6 +189,16 @@ const CLEAR_ACTIONS = [...SESSION_ACTIONS, "previoustrack", "nexttrack"];
 
 /** The bridge whose media currently owns navigator.mediaSession. */
 let sessionOwner = null;
+/**
+ * Every bridge whose shell is still alive, in claim order.
+ *
+ * navigator.mediaSession is a single per-window global, so only one shell can
+ * drive it at a time - but a displaced bridge is NOT dead. Its shell lives on,
+ * its media keeps playing, and it can take the session back if the owner goes
+ * away. This set is what makes that possible; `sessionOwner` alone would strand
+ * every earlier shell with no way to reclaim.
+ */
+const liveBridges = new Set();
 
 /**
  * Rich metadata for OS media surfaces: page title, host as artist, poster as
@@ -221,14 +231,25 @@ export function claimMediaSession({ controls, video, signal, session = navigator
   if (!session) {
     return null;
   }
-  sessionOwner?.destroy();
-  const bridge = new MediaSessionBridge(session, controls, video);
-  sessionOwner = bridge;
-  bridge.attach(signal);
-  return bridge;
+  return MediaSessionBridge.claim({ session, controls, video, signal });
 }
 
 class MediaSessionBridge {
+  /**
+   * Install a new owner. Displaces rather than destroys the previous one: that
+   * shell lives on and can reclaim the session if this owner goes away, and
+   * clearing the global session on displacement would strip playbackState and
+   * metadata for a frame before the successor rewrites them.
+   */
+  static claim({ session, controls, video, signal }) {
+    sessionOwner?.#yieldHandlers();
+    const bridge = new MediaSessionBridge(session, controls, video);
+    sessionOwner = bridge;
+    liveBridges.add(bridge);
+    bridge.attach(signal);
+    return bridge;
+  }
+
   #session;
   #controls;
   #video;
@@ -248,8 +269,12 @@ class MediaSessionBridge {
     this.#canSetPositionState = typeof session?.setPositionState === "function";
   }
 
-  /** Wire handlers, metadata refresh, and signal teardown. Called once by claim. */
-  attach(signal) {
+  /**
+   * Register this shell's OS action handlers. Split out of attach() because a
+   * displaced bridge re-runs it when it is promoted back to owner - the
+   * handlers are what get handed over, not the bridge's lifecycle.
+   */
+  #registerHandlers() {
     const session = this.#session;
     const controls = this.#controls;
     const video = this.#video;
@@ -274,6 +299,11 @@ class MediaSessionBridge {
         }
       }
     });
+  }
+
+  /** Wire handlers, metadata refresh, and signal teardown. Called once by claim. */
+  attach(signal) {
+    this.#registerHandlers();
     // Initial state (playbackState + position) lands through sync(), which
     // also seeds the dedup cache - writing playbackState here would only
     // duplicate that first IPC.
@@ -283,6 +313,42 @@ class MediaSessionBridge {
     this.#refreshMetadata();
     signal.addEventListener("abort", () => this.destroy(), { once: true });
     logger.log("media", "MediaSession claimed - handlers registered");
+  }
+
+  /**
+   * Hand the session to a newer claim without ending this bridge: drop the OS
+   * action handlers and stop self-promoting, but keep the scope, the media
+   * listeners, and this shell's eligibility to take the session back.
+   */
+  #yieldHandlers() {
+    if (this.#scope.disposed || sessionOwner !== this) {
+      return;
+    }
+    for (const action of CLEAR_ACTIONS) {
+      try {
+        this.#session.setActionHandler(action, null);
+      } catch {}
+    }
+  }
+
+  /**
+   * Reclaim the session after the previous owner went away. Forces a full
+   * state push rather than trusting the dedup cache: the last thing this
+   * bridge sent was before it was displaced, so every cached field is stale
+   * against the live surface.
+   */
+  #takeOver() {
+    if (this.#scope.disposed) {
+      return;
+    }
+    sessionOwner = this;
+    this.#registerHandlers();
+    this.#sentPlaybackState = null;
+    this.#sentDuration = NaN;
+    this.#sentPlaybackRate = NaN;
+    this.#refreshMetadata();
+    this.sync();
+    logger.log("media", "MediaSession handed to a surviving shell");
   }
 
   /** Reused scratch for setPositionState - the API copies the values, so a
@@ -305,7 +371,11 @@ class MediaSessionBridge {
 
   /** playbackState plus guarded position state; safe to call per event batch. */
   sync() {
-    if (this.#scope.disposed) {
+    // Ownership gate, not just a disposal check: a displaced bridge keeps its
+    // media listeners (its shell lives on), and navigator.mediaSession is one
+    // global - two bridges writing it would have each player's state overwrite
+    // the other's on every tick.
+    if (this.#scope.disposed || sessionOwner !== this) {
       return;
     }
     const session = this.#session;
@@ -345,8 +415,26 @@ class MediaSessionBridge {
       return;
     }
     this.#scope.dispose();
-    if (sessionOwner === this) {
-      sessionOwner = null;
+    liveBridges.delete(this);
+    if (sessionOwner !== this) {
+      // Already displaced. The global session belongs to the current owner and
+      // this bridge has no handlers on it, so clearing playbackState/metadata
+      // here would strip MediaSession from a shell that is still playing - and
+      // from the page's point of view, silently.
+      return;
+    }
+    sessionOwner = null;
+    // Hand the session to the most recently claimed surviving shell. Only when
+    // this was the last live bridge is the global genuinely finished with.
+    let successor = null;
+    for (const bridge of liveBridges) {
+      if (!bridge.#scope.disposed) {
+        successor = bridge;
+      }
+    }
+    if (successor) {
+      successor.#takeOver();
+      return;
     }
     for (const action of CLEAR_ACTIONS) {
       try {
@@ -359,7 +447,7 @@ class MediaSessionBridge {
   }
 
   #refreshMetadata() {
-    if (this.#scope.disposed) {
+    if (this.#scope.disposed || sessionOwner !== this) {
       return;
     }
     try {

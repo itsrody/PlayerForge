@@ -6,6 +6,7 @@
  */
 
 import { createActivity } from "./activity.js";
+import { logger } from "./diagnostics.js";
 
 /**
  * The deepest active element, piercing open shadow boundaries.
@@ -50,6 +51,33 @@ export let fs = false;
 const fsSubscribers = new Set();
 
 /**
+ * The gate activity itself. Held so a re-init can retire the previous one
+ * instead of stacking a second native listener behind it - two live gates
+ * meant two fullscreenchange listeners and every transition fanned out twice.
+ */
+let fsGate = null;
+
+/**
+ * Fan out a transition to every subscriber.
+ *
+ * Snapshot first: subscribers are free to unsubscribe (or subscribe) from
+ * inside the callback, which would otherwise mutate the Set mid-iteration and
+ * skip the next subscriber. Isolate each one too - the dispatch runs from a
+ * native event listener, so a throw would land in the page's error channel and
+ * take out every later subscriber, including the HUD close and the gesture
+ * unbind, rather than just the one that misbehaved.
+ */
+function notifyFullscreen(active) {
+  for (const cb of [...fsSubscribers]) {
+    try {
+      cb(active);
+    } catch (err) {
+      logger.error("shadow", "Fullscreen subscriber threw during dispatch", err);
+    }
+  }
+}
+
+/**
  * Build the `fs` gate off the native fullscreen event and fan out transitions.
  * Call once at startup. `doc` is injectable for jsdom tests so they drive the
  * real mechanism.
@@ -64,29 +92,30 @@ const fsSubscribers = new Set();
  * the fan-out is the enter/exit effect. During the window the gate changes
  * nothing else - there is no per-frame work to scope - which is why it reads
  * no work scope.
+ *
+ * Returns the activity handle so the caller owns its lifetime; a later init
+ * retires the previous gate.
  */
 export function initFullscreenGate(doc = document) {
   // Seed the derived value explicitly: the activity only runs effects on a
   // transition, so it will not re-assert an already-false `fs` on a later
   // document. This is the one place that reads `fs`'s initial value.
   fs = !!doc.fullscreenElement;
-  createActivity({
+  fsGate?.dispose();
+  fsGate = createActivity({
     target: doc,
     events: ["fullscreenchange"],
     isActive: () => !!doc.fullscreenElement,
     onEnter: () => {
       fs = true;
-      for (const cb of fsSubscribers) {
-        cb(true);
-      }
+      notifyFullscreen(true);
     },
     onExit: () => {
       fs = false;
-      for (const cb of fsSubscribers) {
-        cb(false);
-      }
+      notifyFullscreen(false);
     }
   });
+  return fsGate;
 }
 
 /**

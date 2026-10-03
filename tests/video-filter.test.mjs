@@ -348,3 +348,49 @@ test("garbage stored values still fall back to the default", () => {
   assert.equal(video.style.filter, "none", "unusable input falls back, not NaN leaking into the string");
   filter.destroy();
 });
+
+test("destroy restores the embed's own inline filter", () => {
+  cleanWrites();
+  configStore.adopt({ version: 1 });
+
+  const video = makeFakeVideo();
+  // The host page is already filtering this video (e.g. a dimmed background
+  // slot). `filter` is inherited CSS, so clearing to "" would silently drop
+  // the page's styling on teardown.
+  video.style.filter = "grayscale(1)";
+
+  const filter = new VideoFilter(makeFakeShell(video), makeFakePanel());
+  assert.notEqual(video.style.filter, "grayscale(1)", "precondition: PF overwrote the page value");
+
+  filter.destroy();
+  assert.equal(video.style.filter, "grayscale(1)", "destroy discarded the page's filter");
+});
+
+test("destroy still clears a video that had no prior filter", () => {
+  cleanWrites();
+  configStore.adopt({ version: 1 });
+
+  const video = makeFakeVideo();
+  const filter = new VideoFilter(makeFakeShell(video), makeFakePanel());
+  filter.destroy();
+
+  assert.equal(video.style.filter, "", "PF's own filter string was left behind");
+});
+
+test("the prior filter is captured once and survives repeated applies", () => {
+  cleanWrites();
+  configStore.adopt({ version: 1 });
+
+  const video = makeFakeVideo();
+  video.style.filter = "sepia(0.5)";
+  const panel = makeFakePanel();
+  const filter = new VideoFilter(makeFakeShell(video), panel);
+
+  // Two more applies: a capture that re-reads on every apply would store PF's
+  // own previous string on the second one and restore that instead.
+  panel.calls.steppers.find((s) => s.label === "Brightness").onChange(150);
+  panel.calls.steppers.find((s) => s.label === "Contrast").onChange(120);
+
+  filter.destroy();
+  assert.equal(video.style.filter, "sepia(0.5)");
+});

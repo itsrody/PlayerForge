@@ -1,7 +1,7 @@
 import { logger } from "../shared/diagnostics.js";
 import { deepestActiveElement, isInsideShell, fs } from "../shared/shadow.js";
 import { InputForge } from "./inputs/forge.js";
-import { attachInputActions } from "./inputs/actions.js";
+import { attachInputActions, releaseShellActions } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
 import { SubtitlesSection } from "./subtitles/section.js";
 import { VideoFilter } from "./filter.js";
@@ -387,6 +387,12 @@ export class Shell {
     // Scope first: flips disposed (re-entrancy guard), aborts the shared
     // signal (MediaSession/settings/fullscreen listeners die natively).
     this.#scope.dispose();
+    // Undo host-page style writes the aborted signal cannot: fill mode owns
+    // inline transform/object-fit on an element PF does not own, so a shell
+    // destroyed mid-fill would otherwise leave the embed's video scaled and
+    // letterboxed for good. Must run before #inputs.destroy(), which cancels the
+    // in-flight ease that would otherwise re-apply the scale.
+    releaseShellActions(this);
     // Destroy sub-components (each manages its own internal state).
     this.#resume?.destroy();
     this.#resume = null;

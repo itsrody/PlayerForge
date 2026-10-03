@@ -149,41 +149,53 @@ const SCRUB_SENSITIVITY = TUNING.controller.scrubSensitivity / 150;
 
 /* - Per-shell action state - */
 
-const stateFor = (() => {
+/* get() is stateFor(shell); release() is its teardown half, so the pool is
+ * only ever touched from inside this closure. */
+const { get: stateFor, release: releaseStateFor } = (() => {
   const states = new WeakMap();
-  return (shell) => {
-    let state = states.get(shell);
-    if (!state) {
-      state = {
-        savedRate: 1,
-        activeHolds: new Set(),
-        scrubbing: false,
-        scrubDuration: 0,
-        scrubSlowGain: 0,
-        scrubFastGain: 0,
-        scrubSensitivity: 0,
-        scrubDirectionMomentum: 0,
-        lastScrubToastAt: 0,
-        scrubToastText: null,
-        scrubToastSecDuration: NaN,
-        scrubToastSecCurrent: NaN,
-        // Pooled payload for the 100ms scrub tick: the toast manager
-        // destructures it synchronously (it never retains the object), so the
-        // same 3-field object is refilled in place instead of re-allocated
-        // every tick of a drag - same mutate-in-place discipline as the
-        // gesture detail objects.
-        scrubToast: { icon: "left-arrows", text: "", group: "scrub" },
-        streakCount: 0,
-        lastSkipDirection: null,
-        streakResetAt: 0,
-        fillActive: false,
-        // Declared here because fillFrame writes it: same key order from the
-        // start means the state object never morphs to a second hidden class.
-        priorObjectFit: ""
-      };
-      states.set(shell, state);
-    }
-    return state;
+  return {
+    get(shell) {
+      let state = states.get(shell);
+      if (!state) {
+        state = {
+          savedRate: 1,
+          activeHolds: new Set(),
+          scrubbing: false,
+          scrubDuration: 0,
+          scrubSlowGain: 0,
+          scrubFastGain: 0,
+          scrubSensitivity: 0,
+          scrubDirectionMomentum: 0,
+          lastScrubToastAt: 0,
+          scrubToastText: null,
+          scrubToastSecDuration: NaN,
+          scrubToastSecCurrent: NaN,
+          // Pooled payload for the 100ms scrub tick: the toast manager
+          // destructures it synchronously (it never retains the object), so the
+          // same 3-field object is refilled in place instead of re-allocated
+          // every tick of a drag - same mutate-in-place discipline as the
+          // gesture detail objects.
+          scrubToast: { icon: "left-arrows", text: "", group: "scrub" },
+          streakCount: 0,
+          lastSkipDirection: null,
+          streakResetAt: 0,
+          fillActive: false,
+          // Declared here because fillFrame writes it: same key order from the
+          // start means the state object never morphs to a second hidden class.
+          priorObjectFit: "",
+          // Likewise priorTransform: the embed may own an inline transform of
+          // its own, and fill mode must hand it back on release AND on destroy.
+          priorTransform: ""
+        };
+        states.set(shell, state);
+      }
+      return state;
+    },
+    release(shell) {
+      const state = states.get(shell);
+      states.delete(shell);
+      return state;
+    },
   };
 })();
 
@@ -333,8 +345,12 @@ export function easeTransformTo(video, transform) {
  * Release pinch/fill scale on a shell's video: flips the fill state off,
  * eases the transform back to none (or snaps it, when `animate` is false -
  * the instant path also cancels any in-flight WAAPI ease and clears
- * will-change), then hands object-fit back to what the embed had before
- * fill mode claimed it. No-op when fill was never active.
+ * will-change), then hands object-fit and transform back to what the embed
+ * had before fill mode claimed them. No-op when fill was never active.
+ *
+ * This is also the teardown path: `releaseShellActions` runs it
+ * unconditionally on shell destroy, so a shell destroyed mid-fill cannot leave
+ * the host page's own <video> permanently scaled and letterboxed.
  */
 function clearFillMode(shell, state, animate = true) {
   if (!state.fillActive) {
@@ -344,7 +360,7 @@ function clearFillMode(shell, state, animate = true) {
   const video = shell.video;
   if (video) {
     if (animate) {
-      easeTransformTo(video, "");
+      easeTransformTo(video, state.priorTransform);
     } else {
       // Cancel any in-flight WAAPI ease first: its fill:'both' would otherwise
       // keep re-applying a scale after the inline style is cleared below.
@@ -353,7 +369,7 @@ function clearFillMode(shell, state, animate = true) {
         prior();
       }
       video.style.transition = "none";
-      video.style.transform = "";
+      video.style.transform = state.priorTransform;
       video.style.willChange = "";
       video.style.transition = "";
     }
@@ -361,7 +377,31 @@ function clearFillMode(shell, state, animate = true) {
     // the embed's original object-fit once the transform is released.
     video.style.objectFit = state.priorObjectFit || "";
     state.priorObjectFit = "";
+    state.priorTransform = "";
   }
+}
+
+/**
+ * Shell teardown: release anything fill mode still owns on the host page's
+ * <video>, then drop the pooled gesture state.
+ *
+ * The gesture bindings themselves die with the engine's AbortSignal, but a
+ * signal cannot undo a style it already wrote. Fill mode writes inline
+ * `transform` and `object-fit` on an element PF does not own, so without this
+ * a shell destroyed mid-fill (pagehide, host evicted, SPA swap) leaves the
+ * embed's video permanently scaled and letterboxed with no way back short of a
+ * reload.
+ */
+export function releaseShellActions(shell) {
+  // Detach rather than get: a shell that never dispatched a gesture has no
+  // state, and teardown must not allocate one just to drop it again.
+  const state = shell ? releaseStateFor(shell) : undefined;
+  if (!state) {
+    return;
+  }
+  // Snap, never ease: this runs inside teardown, where an animation would be
+  // cancelled a line later anyway and would allocate for no visible result.
+  clearFillMode(shell, state, false);
 }
 
 /**
@@ -602,6 +642,9 @@ export function attachInputActions(shell, host, signal) {
       // by its own ratio (contain). The embed may use the UA default 'fill', so
       // normalize to 'contain' here; clearFillMode restores the prior value.
       state.priorObjectFit = video.style.objectFit;
+      // Same for transform: the embed may own one, and releaseShellActions has
+      // to hand it back on shell destroy just as clearFillMode does on pinch-in.
+      state.priorTransform = video.style.transform;
       video.style.objectFit = "contain";
       easeTransformTo(video, `scale(${scale})`);
       state.fillActive = true;

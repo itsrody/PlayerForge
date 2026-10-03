@@ -425,8 +425,18 @@ export class ConfigStore {
   }
 
   #emit(paths, remote) {
+    // Same dispatch-isolation rule the mutation feed applies: one throwing
+    // listener must not strand its peers, and must not escape into the caller.
+    // This matters more here than elsewhere because #emit runs *after* the
+    // value is durably stored - a listener that throws would otherwise make
+    // set() throw for a write that already succeeded, and report a failure
+    // that did not happen.
     for (const listener of [...this.#listeners]) {
-      listener({ paths, remote, doc: this.#doc });
+      try {
+        listener({ paths, remote, doc: this.#doc });
+      } catch (err) {
+        logger.error("storage", "Config change listener threw during dispatch", err);
+      }
     }
   }
 

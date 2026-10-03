@@ -58,6 +58,9 @@ export const MIN_VIDEO_HEIGHT = 60;
  * Repeat-query memo: discovery calls findSdkForVideo + findContainer on the
  * same element back to back, and SPA frameworks re-ask about surviving
  * videos. WeakMap keys die with their videos - session-only, never persisted.
+ *
+ * Entries are stamped with the video's parent at fill time and re-validated on
+ * read; see isMatchFresh.
  */
 const matchCache = new WeakMap();
 
@@ -89,10 +92,57 @@ function fillComposedChain(start) {
   return len;
 }
 
+/**
+ * True when `anchor` is still exactly `hops` composed element-hops above
+ * `video`, mirroring fillComposedChain's element-only hop counting. Costs one
+ * bounded re-walk of the depth the scan already paid for, and turns a positive
+ * memo into a checkable fact instead of an assumption.
+ */
+function anchorStillMatches(video, anchor, hops) {
+  let node = video;
+  let seen = 0;
+  while (node) {
+    if (node.nodeType === 1) {
+      if (seen === hops) {
+        return node === anchor;
+      }
+      seen++;
+    }
+    node = node.parentNode ?? node.host ?? null;
+  }
+  return false;
+}
+
+/**
+ * Is a memo entry still true of the video's current ancestry?
+ *
+ * A memo that is never re-validated is wrong the moment a page moves the
+ * element: SPA route changes, player re-init, and ad-slot recycling all
+ * re-parent the SAME <video>, which keeps the same WeakMap key, so the old
+ * answer survived forever - a video adopted by an SDK that later replaced its
+ * wrapper kept resolving to the dead one, and a video that an SDK inserted
+ * itself around stayed permanently "unregistered".
+ *
+ * Positive entries are checked exactly (is the recorded anchor still at the
+ * recorded hop). Negative entries are checked on the direct composed parent,
+ * which is the case that actually moves; an SDK wrapper appearing strictly
+ * BETWEEN an unchanged video and its parent is not detected here, and is not
+ * claimed to be.
+ */
+function isMatchFresh(video, entry) {
+  if (entry.parent !== (video.parentNode ?? null)) {
+    return false;
+  }
+  if (!entry.best) {
+    return true;
+  }
+  return anchorStillMatches(video, entry.best.el, entry.best.hops);
+}
+
 function matchSdk(video) {
   const cached = matchCache.get(video);
-  if (cached) {
-    return cached;
+  if (cached && isMatchFresh(video, cached)) {
+    return cached.best;
   }
   // Single composed walk (uBO's one-pass-over-tokens shape): the old code
   // re-walked ancestry once per anchor via composedClosest, then walked
@@ -123,7 +173,7 @@ function matchSdk(video) {
     }
   }
   if (best) {
-    matchCache.set(video, best);
+    matchCache.set(video, { best, parent: video.parentNode ?? null });
   }
   return best;
 }
@@ -134,39 +184,44 @@ function matchSdk(video) {
  * the SAME object instead of re-wrapping + re-allocating every call.
  * "Fewer APIs, same facts": the scan already computes `el` and `hops`, so they
  * are surfaced at zero extra cost rather than recomputed downstream.
+ *
+ * The negative null is memoized too, which is what makes the entry wrapper
+ * necessary: a cached `null` and an absent entry are now different things, so
+ * freshness has to live on the wrapper rather than on the payload.
  */
 const descriptorCache = new WeakMap();
 
 /**
  * Identify the SDK owning a video, or null when unregistered.
  *
- * Caches BOTH the positive descriptor and the negative null, so a page of
- * many non-SDK videos (ad grids, untracked embeds) never re-runs the full
+ * Both the positive descriptor and the negative null are memoized, so a page of
+ * many non-SDK videos (ad grids, untracked embeds) does not re-run the full
  * ancestry scan per discovery pass. The WeakMap key dies with the video, so
- * entries are session-only. Negative caching is safe here because detection
- * is deterministic for a given composed ancestry, and a video that changes
- * its ancestry enough to gain an SDK is a different adoption cycle - the
- * media-event tap re-adopts it then.
+ * entries are session-only - but the key surviving is exactly why each entry
+ * is re-validated against the video's current ancestry on read (see
+ * isMatchFresh): a memo that outlives the fact it recorded would make
+ * detection permanently wrong after any re-parenting.
  */
 export function findSdkForVideo(video) {
   const cached = descriptorCache.get(video);
-  if (cached !== undefined) {
-    return cached;
+  if (cached && isMatchFresh(video, cached)) {
+    return cached.best ? cached.descriptor : null;
   }
   const match = matchSdk(video);
+  const entry = { best: match, parent: video.parentNode ?? null, descriptor: null };
   if (!match) {
-    descriptorCache.set(video, null);
+    descriptorCache.set(video, entry);
     return null;
   }
-  const descriptor = {
+  entry.descriptor = {
     name: match.record.name,
     host: match.record.host ?? null,
     container: resolveContainer(match),
     anchor: match.el,
     hops: match.hops
   };
-  descriptorCache.set(video, descriptor);
-  return descriptor;
+  descriptorCache.set(video, entry);
+  return entry.descriptor;
 }
 
 /**

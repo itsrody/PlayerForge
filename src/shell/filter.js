@@ -140,6 +140,13 @@ export class VideoFilter {
   #presetSelect = null;
   #resetBtn = null;
   #steppers = {};
+  /**
+   * The embed's own inline `filter`, captured before PF's first write.
+   * `filter` is an inherited CSS property, so a host page may legitimately be
+   * using it; clearing to "" on destroy would silently drop the page's value.
+   * Null until first apply, which keeps the capture lazy and one-shot.
+   */
+  #priorFilter = null;
   /** Disposal flag: guards #apply after teardown, home of future disposers. */
   #scope = new Scope();
   /** Trailing persist: preview applies instantly, storage lands once the drag
@@ -216,6 +223,9 @@ export class VideoFilter {
     if (this.#scope.disposed || !this.#video) {
       return;
     }
+    if (this.#priorFilter === null) {
+      this.#priorFilter = this.#video.style.filter;
+    }
     this.#video.style.filter = buildFilterString(this.#values);
   }
 
@@ -281,7 +291,8 @@ export class VideoFilter {
     // value must not be the one that never got written.
     this.#schedulePersist.flush();
     if (this.#video) {
-      this.#video.style.filter = "";
+      this.#video.style.filter = this.#priorFilter ?? "";
+      this.#priorFilter = null;
     }
   }
 }

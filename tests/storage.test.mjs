@@ -446,3 +446,58 @@ test("a same-shape write into a branch that also changed shape reports both", ()
   const paths = configStore.adopt({ settings: { gestures: { hold: false, scrub: true } } });
   assert.deepEqual([...paths].sort(), ["settings.gestures.hold", "settings.ui", "settings.ui.compact"]);
 });
+
+test("one throwing change listener does not strand the others", () => {
+  const seen = [];
+  const ac = new AbortController();
+  configStore.onChange(() => {
+    throw new Error("listener blew up");
+  }, { signal: ac.signal });
+  configStore.onChange(() => seen.push("second"), { signal: ac.signal });
+  configStore.onChange(() => seen.push("third"), { signal: ac.signal });
+
+  // Must not throw out of the write: the value is already durably stored by
+  // this point, so an escaping listener error would report a failed write that
+  // actually succeeded.
+  setConfigValue("ui.volume", 0.4);
+
+  assert.deepEqual(seen, ["second", "third"], "a throwing listener skipped its peers");
+  assert.equal(getConfigValue("ui.volume", 0), 0.4, "the write itself still landed");
+  ac.abort();
+});
+
+test("a throwing listener cannot break adoption or roll back the document", () => {
+  seed({ version: 1 });
+  const ac = new AbortController();
+  configStore.onChange(() => {
+    throw new Error("listener blew up");
+  }, { signal: ac.signal });
+
+  configStore.adopt({ version: 1, ui: { volume: 0.9 } });
+
+  assert.equal(getConfigValue("ui.volume", 0), 0.9, "adopted document was rolled back");
+  assert.equal(configStore.doc().ui.volume, 0.9, "the store stopped serving the adopted doc");
+  ac.abort();
+});
+
+test("unsubscribing from inside a change listener still notifies the peers", () => {
+  // #emit snapshots the listener set, so a listener that tears down a peer
+  // (or itself) mid-dispatch must not silently cancel that peer's delivery.
+  const seen = [];
+  const ac = new AbortController();
+  let offSecond;
+  configStore.onChange(() => seen.push("first"), { signal: ac.signal });
+  offSecond = configStore.onChange(() => {
+    seen.push("second");
+    offSecond();
+  }, { signal: ac.signal });
+  configStore.onChange(() => seen.push("third"), { signal: ac.signal });
+
+  setConfigValue("ui.volume", 0.6);
+
+  assert.deepEqual(seen, ["first", "second", "third"]);
+  seen.length = 0;
+  setConfigValue("ui.volume", 0.65);
+  assert.deepEqual(seen, ["first", "third"], "the self-unsubscribed listener kept firing");
+  ac.abort();
+});
