@@ -171,11 +171,92 @@ export default [
     }
   },
   {
+    // Node-side harness and test tooling.
+    //
+    // Linted at all only recently, and the first pass found two things worth
+    // having: genuine dead code in the Firefox driver, and no-void / unused
+    // bindings that lint alone cannot judge. The exceptions below are
+    // deliberate, not a backlog.
+    files: ["platform/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        console: "readonly",
+        Buffer: "readonly",
+        URL: "readonly",
+        TextDecoder: "readonly",
+        TextEncoder: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
+        setInterval: "readonly",
+        clearInterval: "readonly",
+        queueMicrotask: "readonly",
+        structuredClone: "readonly",
+        performance: "readonly",
+        fetch: "readonly",
+        AbortController: "readonly",
+        AbortSignal: "readonly",
+        // Constructed inside driver.eval(), i.e. in the page, not here. They
+        // exist at runtime; eslint cannot see across the WebDriver boundary.
+        KeyboardEvent: "readonly",
+        PointerEvent: "readonly",
+        DataTransfer: "readonly",
+        DOMException: "readonly"
+      }
+    },
+    rules: {
+      // `new Promise(resolve => setTimeout(resolve, ms))` returns the timer id.
+      // That is the house idiom for a delay in this tree and reads better than
+      // a braced block that discards it; src/ has no occurrences, so this only
+      // ever fires on the Node side.
+      "no-promise-executor-return": "off",
+      // `void somePromise()` is how this tree marks a deliberately un-awaited
+      // call at a call site, which is more legible than an empty .catch() and
+      // is not the same statement as ignoring a rejected promise by accident.
+      "no-void": "off",
+      // Unused `catch (e)` is the shape of a deliberately ignored rejection.
+      "no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrors: "none" }]
+    }
+  },
+  {
+    // The add-on under platform/harness/native-extension/ is classic WebExtension
+    // script, not ESM: the pages load it as a plain <script> and it uses `var`
+    // and bare `catch (e)` throughout. Holding it to the module rules would be
+    // holding it to the wrong language.
+    files: ["platform/harness/native-extension/**/*.js"],
+    languageOptions: {
+      sourceType: "script",
+      globals: {
+        browser: "readonly",
+        chrome: "readonly",
+        console: "readonly",
+        fetch: "readonly",
+        setTimeout: "readonly",
+        clearTimeout: "readonly",
+        TextDecoder: "readonly",
+        TextEncoder: "readonly",
+        URL: "readonly",
+        // Supplied at runtime, not by this file: __PF_CONTROL_PORT__ is
+        // substituted into the archive by buildExtension() in native.mjs, and
+        // the PF_* bridge is defined by content/api.js in the same realm.
+        __PF_CONTROL_PORT__: "readonly",
+        PF_storage: "readonly",
+        PF_setValue: "readonly",
+        PF_deleteValue: "readonly",
+        PF_report: "readonly"
+      }
+    },
+    rules: {
+      "no-var": "off",
+      "no-promise-executor-return": "off",
+      "no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrors: "none" }]
+    }
+  },
+  {
     ignores: [
       "dist/**",
       "node_modules/**",
-      "bench/**",
-      "platform/**"
+      "bench/**"
     ]
   }
 ];

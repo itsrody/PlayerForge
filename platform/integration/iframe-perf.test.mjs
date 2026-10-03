@@ -125,7 +125,7 @@ async function measureNested(driver, servers) {
 
 // ── Tests ────────────────────────────────────────────────────────────
 
-let results = {};
+const results = {};
 
 test("measure: direct video", async () => {
   const server = new TestServer();

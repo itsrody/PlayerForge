@@ -171,10 +171,6 @@ export class FirefoxDriver {
   /** Native userScripts control channel; see native.mjs. */
   #control = null;
   #nativeAddon = null;
-  /** Bundle currently registered with the add-on. */
-  #registeredBody = null;
-  /** Store contents the next page load should start from. */
-  #pendingSeed = null;
   /** Diagnostic count at the last navigate(), see injectScript(). */
   #realmMark = 0;
   /** Store contents the startup registration is built with. */
@@ -268,7 +264,6 @@ export class FirefoxDriver {
     // Published before the add-on is installed, so the extension's startup
     // fetch always finds both the body and the store to inline into it.
     this.#control.setBundle(bundle, this.#initialStorage);
-    this.#registeredBody = bundle;
     // launch() must not hand back a browser that cannot run the script yet:
     // the add-on registers on startup, and a page loaded before that lands
     // gets nothing, which surfaces as an unexplained missing shell.
@@ -407,7 +402,7 @@ export class FirefoxDriver {
    *
    * @param {string} [script] - Script source. Reads from dist/ if omitted.
    */
-  async injectScript(script, options = {}) {
+  async injectScript(script) {
     if (script) {
       // A caller-supplied bundle cannot be registered after startup (see
       // native-extension/content/background.js), so say so plainly instead of
@@ -1054,7 +1049,9 @@ export function createNestedIframePages(parentServer, iframeServer, options = {}
   const innerIframeUrl = `${iframeServer.url}${innerPath}`;
 
   let embedUrl = innerIframeUrl;
-  let embedId = relayFrameId;
+  // Both depths embed the same parent frame id, so this is not a per-depth
+  // choice; only the URL differs.
+  const embedId = parentFrameId;
 
   if (depth === 3) {
     // Relay: cross-origin relative to the parent, embeds the video frame.
@@ -1068,9 +1065,6 @@ export function createNestedIframePages(parentServer, iframeServer, options = {}
     const outerPath = uniq("/nested-outer") + ".html";
     iframeServer.addPage(outerPath, outerHtml);
     embedUrl = `${iframeServer.url}${outerPath}`;
-    embedId = parentFrameId;
-  } else {
-    embedId = parentFrameId;
   }
 
   const parentHtml = `<!DOCTYPE html>

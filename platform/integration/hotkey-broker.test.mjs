@@ -64,11 +64,9 @@ async function openPlayers(players) {
 
   // The hotkey handler reads readyState through the native accessor from the
   // userscript realm, so the media has to be real and loaded.
-  const ready = await driver.eval((n) => {
+  const ready = await driver.eval((_n) => {
     window.__vids = [...document.querySelectorAll(".plyr")].map((p) => p.querySelector("video"));
-    for (const video of window.__vids) {
-      window.__log = window.__log || [];
-    }
+    window.__log = window.__log || [];
     window.__vids.forEach((video, i) => {
       const host = video.closest(".plyr").querySelector(".pf-shell") || video.closest(".plyr");
       host.addEventListener("pf:gesture-mute", () => window.__log.push(i));
