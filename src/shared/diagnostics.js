@@ -1,8 +1,12 @@
 /**
- * Debug runtime: the console logger and the debug-only jank diagnostics, kept
- * together because they share one toggle. `setDebugRuntime` flips both so no
- * observer can ever outlive (or miss) the log flag.
+ * Debug runtime: the console logger and the debug-only diagnostics, kept
+ * together because they share one toggle. `setDebugRuntime` flips all of them
+ * so no observer can ever outlive (or miss) the log flag. The diagnostics are
+ * the frame-clock jank watchdog, the Event Timing supplement, and dropped-frame
+ * reporting.
  */
+
+import { engineHost } from "./engine-host.js";
 
 /* - Logger - */
 
@@ -223,6 +227,9 @@ function onFrame(now) {
     // Same window, different clock: a minute can be all long frames and no
     // slow interactions, so the rAF flush is not guaranteed to run.
     flushSlowInteractions();
+    // And neither diagnostic is guaranteed to have anything to say: a window
+    // of dropped frames reports here even when no frame was long.
+    flushFrameQuality();
   }
 }
 
@@ -283,10 +290,204 @@ function teardownEventTiming() {
   flushSlowInteractions();
 }
 
+/* - Frame quality (dropped-frame reporting) - */
+
+/**
+ * The other half of "is this playing well", and the half the frame clock
+ * structurally cannot see: a long frame is page jank, a dropped video frame is
+ * the pipeline letting one go while the page itself may be perfectly idle.
+ *
+ * Every number comes from the quality APIs (§2.5, §7), never from rVFC's
+ * metadata:
+ *
+ * - `getVideoPlaybackQuality().droppedVideoFrames` is the decoder's own count.
+ * - Gecko's `mozPresentedFrames` minus `mozPaintedFrames` is how many frames
+ *   were submitted and never reached the screen - the pair §4 reaches for by
+ *   name. The standard `presentedFrames` cannot stand in for it: Gecko reports
+ *   that one as null.
+ *
+ * rVFC contributes only its OCCURRENCE - one callback means "a frame was
+ * presented", which is the edge a sample is taken on. Its `presentedFrames`
+ * metadata is never read, because §2.5's cadence question (bug 1935256) is
+ * exactly what makes it untrustworthy for anything frame-accurate. Without rVFC
+ * the sample falls back to the flush instead; either way the counters are
+ * cumulative, so the delta between any two samples is the true count for the
+ * interval between them.
+ *
+ * Lifecycle is §4 L1's Frame row: armed only while unpaused, cancelled on
+ * pause/seek/end, so a stopped player costs one outstanding handle and nothing
+ * else. The cost contract matches the rest of this module - nothing is armed
+ * until debug is on, and teardown reports whatever was buffered before dropping
+ * it.
+ *
+ * Without `EngineHost.canMozQuality` there is nothing to read and registration
+ * is a no-op, which is the degradation `platform/capabilities.json` records.
+ */
+
+/** Videos registered for reporting. Entries arm only while debug is on. */
+const qualityVideos = new Set();
+/** Counter deltas accumulated since the last flush. */
+let qDropped = 0;
+let qPresented = 0;
+let qPainted = 0;
+
+/** Media edges that arm and cancel the presentation edge. */
+const EDGE_ARM = ["play", "playing"];
+const EDGE_CANCEL = ["pause", "seeking", "ended", "emptied"];
+
+/**
+ * Cumulative counters: a value below the last one means the element reset (a
+ * new resource, `emptied`), so everything it currently holds is what landed
+ * since. The reset is rebased rather than clamped to zero so the frames the
+ * new resource has already presented are still counted.
+ */
+function countedSince(now, before) {
+  if (before == null || !Number.isFinite(now)) {
+    return 0;
+  }
+  return now >= before ? now - before : now;
+}
+
+/** Read the three counters and fold the delta since the previous sample in. */
+function sampleQuality(entry) {
+  const quality = entry.video.getVideoPlaybackQuality();
+  const presented = entry.video.mozPresentedFrames;
+  const painted = entry.video.mozPaintedFrames;
+  if (entry.prev !== null) {
+    qDropped += countedSince(quality.droppedVideoFrames, entry.prev.dropped);
+    qPresented += countedSince(presented, entry.prev.presented);
+    qPainted += countedSince(painted, entry.prev.painted);
+  }
+  entry.prev = {
+    dropped: quality.droppedVideoFrames,
+    presented,
+    painted
+  };
+}
+
+function armEdge(entry) {
+  const { video } = entry;
+  if (!entry.usesEdge || entry.rvfc !== null) {
+    return;
+  }
+  entry.rvfc = video.requestVideoFrameCallback(() => {
+    entry.rvfc = null;
+    sampleQuality(entry);
+    // Re-armed only while unpaused: the cancel edges above already ran by the
+    // time a pause lands, so this is what stops a stopped player re-arming.
+    if (!video.paused && !video.ended && !video.seeking) {
+      armEdge(entry);
+    }
+  });
+}
+
+function cancelEdge(entry) {
+  if (entry.rvfc === null) {
+    return;
+  }
+  entry.video.cancelVideoFrameCallback?.(entry.rvfc);
+  entry.rvfc = null;
+}
+
+function armQuality(entry) {
+  if (entry.detach !== null) {
+    return;
+  }
+  const { video, signal } = entry;
+  entry.usesEdge =
+    engineHost.canRvfc && typeof video.requestVideoFrameCallback === "function";
+  const arm = () => armEdge(entry);
+  const cancel = () => cancelEdge(entry);
+  for (const type of EDGE_ARM) {
+    video.addEventListener(type, arm, { signal, passive: true });
+  }
+  for (const type of EDGE_CANCEL) {
+    video.addEventListener(type, cancel, { signal, passive: true });
+  }
+  // Baseline. Without a first reading, the opening delta would be the
+  // element's entire lifetime reported as though all of it happened here.
+  sampleQuality(entry);
+  if (!video.paused && !video.ended && !video.seeking) {
+    armEdge(entry);
+  }
+  entry.detach = () => {
+    cancelEdge(entry);
+    for (const type of EDGE_ARM) {
+      video.removeEventListener(type, arm);
+    }
+    for (const type of EDGE_CANCEL) {
+      video.removeEventListener(type, cancel);
+    }
+    entry.detach = null;
+  };
+}
+
+function flushFrameQuality() {
+  // Every armed entry, edge or not. An entry riding the presentation edge will
+  // already have sampled on its own callbacks, so for that one this is usually
+  // a zero-delta read - it is the guarantee that the interval since the last
+  // sample is never lost, whatever cancelled the callbacks first.
+  for (const entry of qualityVideos) {
+    if (entry.detach !== null) {
+      sampleQuality(entry);
+    }
+  }
+  const neverPainted = Math.max(0, qPresented - qPainted);
+  if (qDropped > 0 || neverPainted > 0) {
+    logger.warn(
+      "perf",
+      `dropped frames: ${qDropped} dropped, ${qPresented} presented, ${neverPainted} never painted`
+    );
+  }
+  qDropped = 0;
+  qPresented = 0;
+  qPainted = 0;
+}
+
+/**
+ * Register a video for dropped-frame reporting, and return its disposer.
+ *
+ * Registration is deliberately independent of the debug toggle: a shell that
+ * boots while debug is off is still reported on the moment it is switched on,
+ * and the caller never has to know whether the toggle is currently set. It
+ * costs one Set entry, and arms nothing.
+ */
+export function watchFrameQuality(video, signal) {
+  if (!engineHost.canMozQuality || !video) {
+    return () => {};
+  }
+  const entry = { video, signal, prev: null, rvfc: null, usesEdge: false, detach: null };
+  qualityVideos.add(entry);
+  if (perfEnabled) {
+    armQuality(entry);
+  }
+  return () => {
+    if (!qualityVideos.has(entry)) {
+      return;
+    }
+    // Sampled while it is still registered: flushFrameQuality only walks the
+    // entries it can still see, and this one is about to stop being one.
+    if (entry.detach !== null) {
+      sampleQuality(entry);
+    }
+    qualityVideos.delete(entry);
+    entry.detach?.();
+    // Whatever was buffered is exactly what the user was watching - the same
+    // reasoning as the frame-loop teardown flush.
+    flushFrameQuality();
+  };
+}
+
 function install() {
   // Independent of the rAF guard below: Event Timing does not need a frame
   // clock, so a jank-free page still reports slow interactions.
   installEventTiming();
+  // Likewise: the presentation edge does not need a frame clock either. Only
+  // the flush window does, so a host with no rAF still samples on pause/seek/end
+  // and reports when the runtime is switched off.
+  for (const entry of qualityVideos) {
+    armQuality(entry);
+  }
   if (rafId !== null || typeof requestAnimationFrame !== "function") {
     return;
   }
@@ -312,6 +513,13 @@ function teardown() {
   // context with no requestAnimationFrame still gets interaction timings, and
   // an early return here would strand the observer past the debug toggle.
   teardownEventTiming();
+  // Sampled and reported before its own listeners go, and on the same
+  // independent guard as Event Timing: a host with no frame clock still owns
+  // buffered drops, and releasing the listeners first is what would strand them.
+  flushFrameQuality();
+  for (const entry of qualityVideos) {
+    entry.detach?.();
+  }
   // Released before the rAF early return, so the listener can never outlive
   // the loop it exists to protect.
   visDoc?.removeEventListener("visibilitychange", onVisibilityChange);

@@ -546,13 +546,24 @@ feature-detecting. Note what is deliberately *absent*: there is no "can await
 paint" flag, because no such API exists to detect (§2.6). Also absent is any
 `canRaf`: `yield_()` re-reads `requestAnimationFrame` on every call because the
 harness installs and removes it per test, so a construction-time snapshot would
-freeze a branch that callers re-read live. `canRvfc` and `canMozQuality` are
-sketched here but do not exist yet — they land with phase 6.
+freeze a branch that callers re-read live.
 
-One field beyond the sketch is implemented: `canMessageChannel`.
-`scheduler.js`'s `nextTask()` and `context.js`'s reply pipe both feature-detected
-MessageChannel independently, which is the repetition L0 exists to end, and its
-presence does not vary at runtime.
+`canRvfc` and `canMozQuality` exist as of phase 6 and are the one place the
+engine-level distinction matters: both are read from
+`HTMLVideoElement.prototype`, not from an element, because the caller is asking
+what this engine ships rather than whether a particular element has been
+upgraded yet. `canMozQuality` is all-or-nothing — the standard
+`getVideoPlaybackQuality()` *and* Gecko's `mozPresentedFrames` /
+`mozPaintedFrames` — because Gecko reports the standard `presentedFrames` as
+null, so the half set cannot produce the submitted-versus-painted number the
+report is built on. Both answer only what the engine offers; whether one
+particular element has the method is still probed on that element where it is
+read (`resume.js`, `diagnostics.js`).
+
+Two fields beyond the sketch are implemented: `canMessageChannel` and the frame
+pair above. `scheduler.js`'s `nextTask()` and `context.js`'s reply pipe both
+feature-detected MessageChannel independently, which is the repetition L0 exists
+to end, and its presence does not vary at runtime.
 
 ### L1 — Signals
 
@@ -564,7 +575,7 @@ L1 composes it rather than replacing it. Sources:
 | Media | `<video>` events via `createActivity` | Gecko media state machine fires these; no polling |
 | Visibility | `IntersectionObserver` + `visibilityState` + PiP events | callbacks are post-task, which is correct here |
 | Layout | `ResizeObserver` | handler must stay trivial; it can trigger further layout |
-| Frame | `requestVideoFrameCallback` | coarse only (§2.5); re-armed only while unpaused, cancelled on pause/seek/end |
+| Frame | `requestVideoFrameCallback` | coarse only (§2.5); re-armed only while unpaused, cancelled on pause/seek/end. Landed with phase 6 as the edge `watchFrameQuality()` samples on, with the flush window as the fallback when an element has no rVFC |
 | Lifecycle | `pagehide` / `pageshow` / scope abort | teardown trigger |
 
 Every listener registers with `{ passive: true, signal }` so teardown is native.
@@ -692,7 +703,8 @@ one-shot `requestAnimationFrame`, which fires at the *start* of that tick
 rather than after paint, and is therefore only an "after the next frame was
 scheduled" marker. Diagnostics that genuinely need presentation evidence use
 `PerformanceObserver` on `paint` entries, or compare `mozPresentedFrames`
-against `mozPaintedFrames` to see how many frames never reached the screen.
+against `mozPaintedFrames` to see how many frames never reached the screen —
+which is what `watchFrameQuality()` does (phase 6).
 Both are treated as coarse measurements, never as correctness gates.
 
 Chunked non-urgent work splits with the existing `yield_()`, never
@@ -1019,6 +1031,75 @@ two worlds are one.
 
 Lint clean; unit 515 pass (504 before; +4 presence, +7 shell occlusion);
 integration 87 pass, 1 skipped (85 and 1 before).
+
+*Phase 6 — Frame quality.* The dropped-frame report is the third debug-only
+diagnostic in `src/shared/diagnostics.js`, beside the frame-clock watchdog and
+the Event Timing observer: `watchFrameQuality(video, signal)` registers one
+entry, arms nothing until `setDebugRuntime` is on, and reports through
+`logger.warn("perf", …)` at §5's flush window, at teardown, and on dispose.
+Registration is deliberately independent of the toggle — a shell that boots
+while debug is off is still reported on the moment it is switched on, and the
+caller never has to know the state — while arming is not: no listener is added
+and no handle requested before then. `src/shell/shell.js` registers its own
+video against the shell scope, so the disposer runs with the shell.
+
+Every number comes from the quality APIs (§2.5, §7), and only those:
+
+- `getVideoPlaybackQuality().droppedVideoFrames` is the decoder's own count.
+- `mozPresentedFrames` minus `mozPaintedFrames` is §4's own diagnostic pair —
+  how many frames were submitted and never reached the screen. The standard
+  `presentedFrames` cannot stand in for it, because Gecko reports it as null.
+
+Four decisions are worth recording:
+
+- **rVFC contributes its occurrence, never its metadata.** One callback means
+  "a frame was presented", which is the edge the sample is taken on — §4 L1's
+  Frame row, landing here. Its `presentedFrames` is never read, because §2.5's
+  cadence question (bug 1935256) is precisely what makes it untrustworthy for
+  anything frame-accurate. An element without rVFC samples at the flush
+  instead, and the flush samples every armed entry whatever cancelled the
+  callbacks first, so no interval is lost either way.
+- **The counters are rebased, never subtracted.** A value below the previous one
+  means the element reset (a new resource, `emptied`), so the whole current
+  value counts as what landed since; a plain subtraction would walk `presented`
+  backwards by hundreds and fabricate the drops the report exists to measure.
+- **The baseline read at arm time is not an interval.** Without it the opening
+  delta would be the element's entire lifetime, reported as though all of it
+  happened inside this window.
+- **The engine flags live in L0; the element probe stays at the read site.**
+  `canRvfc` / `canMozQuality` are read once from `HTMLVideoElement.prototype`,
+  as engine facts, while `resume.js` and `diagnostics.js` still ask the element
+  itself for `requestVideoFrameCallback` — whether *this* element has been
+  upgraded is a different question, and the harness installs it per video.
+
+`platform/capabilities.json` grew one entry and one claim: the existing
+`requestVideoFrameCallback` capability now carries the prototype chain and names
+`engine-host.js` and `diagnostics.js` beside `resume.js`, and the new
+`video-playback-quality` host probe records what is lost without the set — the
+report and nothing else, which is why it is a host probe rather than a
+capability with a version floor.
+
+Verification:
+
+- `tests/frame-quality.test.mjs` (12) drives a hand-built video against a fake
+  frame clock: the arm/cancel lifecycle, the flush-window report, the no-rVFC
+  fallback, the rebase across a new resource, the silent zero-drop window,
+  dispose flushing and cancelling, and registration while debug is already on.
+  Its fake `HTMLVideoElement` has to exist *before* `engine-host.js` is first
+  evaluated — `engineHost` is a frozen singleton — which is why that file's
+  imports are dynamic.
+- `tests/engine-host.test.mjs` grew the all-or-nothing case: the quality set as
+  one unit, the mozilla half missing, rVFC missing, and the prototype deleted
+  outright rather than undefined, which is where a bare `in` would have thrown.
+- No integration coverage, for the reason `render-gate.test.mjs` records: the
+  diagnostic is debug-only, console-bound, and its inputs are counters the page
+  cannot move on demand, so there is nothing for WebDriver to observe that the
+  unit suite does not already drive. Integration ran unchanged (87 pass,
+  1 skipped) as the check that this phase added no observable behaviour outside
+  debug mode.
+
+Lint clean; unit 528 pass (515 before; +12 frame quality, +1 engine-host);
+integration 87 pass, 1 skipped — unchanged.
 
 1. **L0 EngineHost.** Centralise engine version, realm, and scheduler
    availability. No behaviour change.

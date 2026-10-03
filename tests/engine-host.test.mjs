@@ -91,6 +91,63 @@ test("MessageChannel availability is one shared answer", () => {
   );
 });
 
+/**
+ * A member factory for the frame flags. Everything the probe asks for is on
+ * the prototype - the whole point of reading them from here rather than from an
+ * element, which may not have been upgraded yet when the question is asked.
+ */
+function videoElement({ rvfc = true, quality = true, mozPair = true } = {}) {
+  class FakeVideoElement {}
+  if (rvfc) {
+    FakeVideoElement.prototype.requestVideoFrameCallback = () => 0;
+  }
+  if (quality) {
+    FakeVideoElement.prototype.getVideoPlaybackQuality = () => ({ droppedVideoFrames: 0 });
+  }
+  if (mozPair) {
+    FakeVideoElement.prototype.mozPresentedFrames = 0;
+    FakeVideoElement.prototype.mozPaintedFrames = 0;
+  }
+  return FakeVideoElement;
+}
+
+test("the frame facts are read from the prototype and are all-or-nothing", () => {
+  const original = globalThis.HTMLVideoElement;
+  try {
+    // This host has no HTMLVideoElement at all, and the singleton was built
+    // from it: absent means false, not a throw from the `in` guards.
+    assert.equal(engineHost.canRvfc, false);
+    assert.equal(engineHost.canMozQuality, false);
+
+    globalThis.HTMLVideoElement = videoElement();
+    assert.equal(new EngineHost().canRvfc, true);
+    assert.equal(new EngineHost().canMozQuality, true);
+
+    // The standard half without the mozilla pair cannot produce the
+    // submitted-versus-painted number, so it is not recorded as available.
+    globalThis.HTMLVideoElement = videoElement({ mozPair: false });
+    assert.equal(new EngineHost().canRvfc, true, "the two flags answer separately");
+    assert.equal(new EngineHost().canMozQuality, false, "all three or none");
+
+    // And rVFC being absent says nothing about the quality set.
+    globalThis.HTMLVideoElement = videoElement({ rvfc: false });
+    assert.equal(new EngineHost().canRvfc, false);
+    assert.equal(new EngineHost().canMozQuality, true);
+
+    // Deleted rather than undefined: this is the shape where a bare `in`
+    // against a missing prototype would have thrown.
+    delete globalThis.HTMLVideoElement;
+    assert.equal(new EngineHost().canRvfc, false);
+    assert.equal(new EngineHost().canMozQuality, false);
+  } finally {
+    if (original === undefined) {
+      delete globalThis.HTMLVideoElement;
+    } else {
+      globalThis.HTMLVideoElement = original;
+    }
+  }
+});
+
 test("the host is read-only after construction", () => {
   assert.equal(Object.isFrozen(engineHost), true, "the singleton is frozen");
   // ESM is strict, so a getter-only assignment raises rather than silently
@@ -114,4 +171,6 @@ test("two instances constructed from one host agree", () => {
   assert.equal(a.canPostTask, b.canPostTask);
   assert.equal(a.canYield, b.canYield);
   assert.equal(a.canMessageChannel, b.canMessageChannel);
+  assert.equal(a.canRvfc, b.canRvfc);
+  assert.equal(a.canMozQuality, b.canMozQuality);
 });

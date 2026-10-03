@@ -1,4 +1,4 @@
-import { logger } from "../shared/diagnostics.js";
+import { logger, watchFrameQuality } from "../shared/diagnostics.js";
 import { deepestActiveElement, isInsideShell, fs } from "../shared/shadow.js";
 import { InputForge } from "./inputs/forge.js";
 import { attachInputActions, releaseShellActions } from "./inputs/actions.js";
@@ -119,6 +119,7 @@ export class Shell {
     this.#forwardMediaEvents();
     // Needs #status, so it has to follow #forwardMediaEvents.
     this.#watchOcclusion();
+    this.#scope.onDispose(watchFrameQuality(this.video, this.#scope.signal));
     this.#mediaSession = claimMediaSession({
       controls: this.#media,
       video: this.video,
