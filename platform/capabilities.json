@@ -329,10 +329,11 @@
     {
       "id": "IntersectionObserver",
       "api": "IntersectionObserver",
-      "summary": "Off-screen gate that stops media-clock writes for players the user cannot see",
-      "why": "Without it the gate stays open, which is the safe direction: saves continue, nothing is lost.",
+      "summary": "Off-screen gates: media-clock saves for players the user cannot see, and Presence.OCCLUDED for HUD detach",
+      "why": "Without it both gates stay open, which is the safe direction: saves keep running and the HUD stays attached - only the idle-cost win is lost.",
       "usedBy": [
-        "src/shell/resume.js"
+        "src/shell/resume.js",
+        "src/shared/player-status.js"
       ],
       "probes": [
         "IntersectionObserver"

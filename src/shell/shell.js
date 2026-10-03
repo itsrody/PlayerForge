@@ -16,7 +16,7 @@ import { replayFullscreenProvision } from "../shared/context.js";
 import { DOMManager } from "../shared/dom-manager.js";
 import { Scope } from "../shared/scope.js";
 import { createActivity } from "../shared/activity.js";
-import { PlayerStatus } from "../shared/player-status.js";
+import { PlayerStatus, Playback, Presence } from "../shared/player-status.js";
 import { HudReconciler } from "../shared/hud-reconciler.js";
 import { RenderGate } from "../shared/render-gate.js";
 import { yield_ } from "../shared/scheduler.js";
@@ -117,6 +117,8 @@ export class Shell {
     this.#setupFocusManagement();
     this.#suppressContextMenu();
     this.#forwardMediaEvents();
+    // Needs #status, so it has to follow #forwardMediaEvents.
+    this.#watchOcclusion();
     this.#mediaSession = claimMediaSession({
       controls: this.#media,
       video: this.video,
@@ -384,6 +386,85 @@ export class Shell {
         this.#dom.listen(video, evt, requestCommit, { passive: true });
       }
     }
+  }
+
+  /**
+   * L5's occlusion rule: a paused player the user cannot see, with no focus
+   * inside the HUD, drops out of layout entirely so it contributes zero style,
+   * layout and paint cost (§4 L5, rule 4). One class on the host and one
+   * document-realm CSS rule - a class swap rather than an inline style, so
+   * Gecko batches the invalidation across the subtree instead of recolouring
+   * it per property.
+   *
+   * Two of the rule's four conjuncts are not observed here at all, each for a
+   * different reason:
+   *
+   *   - "not hovered" is *implied* by "occluded". `isIntersecting === false`
+   *     means no part of the target is inside the viewport, and the pointer is
+   *     always inside the viewport, so an occluded player cannot be hovered.
+   *     Two listeners that could only ever agree with the geometric answer
+   *     would be bookkeeping, not a guard.
+   *   - "not focus-within" is read at resolve time, from wherever focus has
+   *     landed *inside* the HUD - not from `host.contains(activeElement)`.
+   *     The shell parks focus on the host itself as a keyboard sink and puts
+   *     it back there after every outside click (`#setupFocusManagement`), so
+   *     the anchor is focused at boot and at rest; counting that parked sink
+   *     as interaction would make the conjunct unsatisfiable and the rule
+   *     dead on arrival. `deepestActiveElement` pierces the shadow root that
+   *     `document.activeElement` retargets to, and `isInsideShell` keeps a
+   *     page-level focus from being mistaken for ours, so what blocks the
+   *     detach is focus on a control of ours - exactly the case where
+   *     `display: none` would drop it mid-interaction. Focus events only
+   *     *trigger* a re-resolve; they never carry the value. They are attached
+   *     in both places because the layer is always an ancestor of a focused
+   *     descendant while the host is not - and a duplicate trigger costs
+   *     nothing, because the reconciler diffs.
+   *     `focusout` fires before the element loses focus, hence the microtask.
+   *     Hiding the anchor does drop its focus to the page, which is why that
+   *     case is allowed to detach at all: the key gate already accepts
+   *     `document.body` as a target, so shortcuts survive the round trip.
+   *
+   * "idle" is the playhead not advancing: PAUSED, ENDED, READY or IDLE.
+   * LOADING is excluded so a `play()` in flight never detaches the HUD it is
+   * about to paint. Read from status rather than from `video.paused` so the
+   * rule answers the same question §4 asks - "when status is ...".
+   *
+   * Deliberately synchronous rather than routed through L4: both sources are
+   * already deferred (IntersectionObserver is posted as a task, focus settles
+   * in a microtask), and retiring the remaining direct writes is phase 7.
+   */
+  #watchOcclusion() {
+    const host = this.#shellDom?.host;
+    const hudLayer = this.#shellDom?.hudLayer;
+    const status = this.#status;
+    if (!host || !hudLayer || !status) {
+      return;
+    }
+    const hud = new HudReconciler({
+      bindings: {
+        detached: (value) => host.classList.toggle("pf-detached", value)
+      }
+    });
+    const resolve = () => {
+      if (this.#scope.disposed) {
+        return;
+      }
+      const { playback, presence } = status;
+      const idle = playback !== Playback.PLAYING && playback !== Playback.LOADING;
+      const occluded = presence === Presence.OCCLUDED || presence === Presence.BACKGROUND;
+      const focusTarget = deepestActiveElement(host);
+      const focusWithin = focusTarget !== host && isInsideShell(host, focusTarget);
+      hud.apply({ detached: idle && occluded && !focusWithin });
+    };
+    const onFocus = () => queueMicrotask(resolve);
+    const listen = (node) => {
+      node.addEventListener("focusin", onFocus, { signal: this.#scope.signal, passive: true });
+      node.addEventListener("focusout", onFocus, { signal: this.#scope.signal, passive: true });
+    };
+    listen(hudLayer);
+    listen(host);
+    status.subscribe(resolve, this.#scope.signal);
+    resolve();
   }
 
   /** Surface a hint + re-provision when a fullscreen entry is rejected. */

@@ -63,9 +63,14 @@ export const Buffer = Object.freeze({
 });
 
 /**
- * `OCCLUDED`, `DETACHED` and `PIP` are named here but not yet driven: they need
- * the occlusion resolver and the visibility observer, which migration phase 5
- * owns. Everything the element announces today is driven here.
+ * `BACKGROUND` and `VISIBLE` are driven by `visibilitychange`; `OCCLUDED` by
+ * the IntersectionObserver in `#wire()`, which is the only way to learn "the
+ * player scrolled out of the viewport" without polling a rect. `DETACHED` and
+ * `PIP` are named but still not driven: detach has no event to observe
+ * (`isConnected` would need a MutationObserver to notice a change, and
+ * inject.js's watchdog owns re-attachment), and this fork ships no
+ * picture-in-picture surface at all. Both stay in the enum so the axis is
+ * complete rather than growing a value per phase.
  */
 export const Presence = Object.freeze({
   DETACHED: "detached",
@@ -148,6 +153,14 @@ export class PlayerStatus {
    *  a private field cannot be named dynamically the way a getter can. */
   #axis;
   #scalar;
+  /**
+   * Last report from the IntersectionObserver. Starts true because the seed
+   * cannot know better: a rect is not readable without a layout, and reading
+   * one during construction would be a forced synchronous layout on the boot
+   * path. The observer's first callback - posted as a task, after this
+   * constructor has returned - corrects it if the player really was off-screen.
+   */
+  #intersecting = true;
 
   /**
    * @param {{target: HTMLMediaElement, doc?: Document, signal?: AbortSignal}} options
@@ -162,7 +175,7 @@ export class PlayerStatus {
       // Buffer has no readable "what is happening" property beyond `seeking`,
       // so seed from the one that exists and let the edges correct the rest.
       buffer: target.seeking ? Buffer.SEEKING : Buffer.NONE,
-      presence: doc.visibilityState === "hidden" ? Presence.BACKGROUND : Presence.VISIBLE,
+      presence: this.#presence(),
       // `fs` is shadow.js's fullscreen SOL: read the value the gate already
       // observed instead of adding a second fullscreenchange listener, which is
       // the bug that module exists to prevent.
@@ -242,6 +255,23 @@ export class PlayerStatus {
     if (Number.isFinite(value)) {
       this.#scalar.currentTime = value;
     }
+  }
+
+  /**
+   * Fold the two presence inputs into one axis value.
+   *
+   * `BACKGROUND` is checked first and deliberately wins: a hidden tab shows
+   * nothing whatever the geometry says, and the `visibilitychange` edge has to
+   * be able to move the axis in both directions without depending on whether a
+   * rect has been read since. Treating background as visible would instead
+   * re-attach the HUD on tab-hide only for IntersectionObserver to detach it
+   * again on return - the same answer reached by two writes.
+   */
+  #presence() {
+    if (this.#doc.visibilityState === "hidden") {
+      return Presence.BACKGROUND;
+    }
+    return this.#intersecting ? Presence.VISIBLE : Presence.OCCLUDED;
   }
 
   #queue(change) {
@@ -391,13 +421,32 @@ export class PlayerStatus {
     }
 
     on(doc, "visibilitychange", () => {
-      this.#set(
-        "axis",
-        "presence",
-        doc.visibilityState === "hidden" ? Presence.BACKGROUND : Presence.VISIBLE,
-        "visibilitychange"
-      );
+      this.#set("axis", "presence", this.#presence(), "visibilitychange");
     });
+
+    // L1's visibility signal, and the only source `OCCLUDED` ever has. There
+    // is no event for "the player scrolled out of the viewport", and polling a
+    // rect would be precisely the periodic work this design rules out (§1), so
+    // the observation is the platform's: one IntersectionObserver on the
+    // target. Its callbacks are posted as a task after layout, which is
+    // correct here - HUD occlusion is not frame-critical (§7).
+    //
+    // Absent on a host without it, the gate simply never opens and presence
+    // stays VISIBLE or BACKGROUND. That is the safe direction: nothing is
+    // lost except the idle-cost win. The probe is guarded so a missing API
+    // degrades instead of throwing during construction, the same shape
+    // `resume.js` uses for its own off-screen save gate.
+    if (typeof IntersectionObserver === "function") {
+      const io = new IntersectionObserver(([entry]) => {
+        this.#intersecting = !!entry?.isIntersecting;
+        this.#set("axis", "presence", this.#presence(), "intersection");
+      });
+      io.observe(target);
+      // Explicit rather than signal-backed: IntersectionObserverInit has no
+      // `signal` member, so the disconnect cannot ride the options object the
+      // way a listener can.
+      this.#teardown.push(() => io.disconnect());
+    }
 
     // Screen comes from shadow.js's single gate, not a second listener. Its
     // edge is still fullscreenchange, so the transition reports that cause.

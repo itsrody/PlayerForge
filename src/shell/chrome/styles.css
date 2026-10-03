@@ -97,6 +97,16 @@
   }
 }
 
+/* Occlusion gating: a paused player the user cannot see, with no focus inside
+   the HUD, drops out of layout entirely so it costs nothing to style, lay out
+   or paint. A class rather than an inline style, because the rule sits with
+   the other document-realm .pf-shell rules and one toggle is a single
+   invalidation instead of a property write. The condition lives in
+   shell.js #watchOcclusion(); this is only the cost of being detached. */
+.pf-shell.pf-detached {
+  display: none;
+}
+
 /* Neutralize the inline 'position: relative' we set on the container
    while it is the native fullscreen element. The UA's ':fullscreen'
    rule uses 'position: fixed' (non-important), which an inline style

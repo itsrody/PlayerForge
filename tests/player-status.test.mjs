@@ -36,6 +36,16 @@ const tick = () => new Promise((resolve) => queueMicrotask(resolve));
 
 const fire = (node, type) => node.dispatchEvent(new globalThis.Event(type));
 
+/** Flip the document's visibility, which jsdom only exposes as a prototype getter. */
+function setVisibility(doc, hidden) {
+  Object.defineProperty(doc, "visibilityState", {
+    value: hidden ? "hidden" : "visible",
+    configurable: true
+  });
+  Object.defineProperty(doc, "hidden", { value: hidden, configurable: true });
+  fire(doc, "visibilitychange");
+}
+
 function harness(t) {
   const realm = makeRealm();
   const changes = [];
@@ -45,6 +55,55 @@ function harness(t) {
   t.after(() => status.dispose());
   return { ...realm, status, changes, owner };
 }
+
+/**
+ * A controllable IntersectionObserver, installed before any PlayerStatus is
+ * constructed so `#wire()`'s probe sees this rather than the loader's no-op
+ * shim. The shim pins the seed path (never reports, so presence stays what
+ * construction guessed); this pins the path that corrects the guess.
+ *
+ * Instances are shared rather than per-status: `resume.js` observes the same
+ * video for its save gate, and a shell test registers both. Driving every live
+ * observer is what a real scroll does anyway.
+ */
+const observers = new Set();
+
+globalThis.IntersectionObserver = class {
+  constructor(cb) {
+    this.cb = cb;
+    this.targets = [];
+    observers.add(this);
+  }
+
+  observe(target) {
+    this.targets.push(target);
+  }
+
+  unobserve(target) {
+    this.targets = this.targets.filter((t) => t !== target);
+  }
+
+  disconnect() {
+    observers.delete(this);
+  }
+
+  /** Report one entry to every observer that has a target. */
+  fire(isIntersecting) {
+    if (!this.targets.length) {
+      return;
+    }
+    this.cb(
+      [{ isIntersecting, intersectionRatio: isIntersecting ? 1 : 0, target: this.targets[0] }],
+      this
+    );
+  }
+};
+
+const setIntersecting = (isIntersecting) => {
+  for (const io of [...observers]) {
+    io.fire(isIntersecting);
+  }
+};
 
 test("construction seeds from the element and emits nothing", async (t) => {
   const { status, changes, video } = harness(t);
@@ -342,4 +401,66 @@ test("unsubscribing stops delivery; a second unsubscribe is a no-op", async (t) 
 
   assert.deepEqual(seen, ["buffer"]);
   assert.equal(changes.length, 2, "the earlier subscriber still saw both");
+});
+
+test("the presence axis reports OCCLUDED when the player leaves the viewport", async (t) => {
+  const { status, changes } = harness(t);
+
+  setIntersecting(false);
+  await tick();
+
+  assert.equal(status.presence, Presence.OCCLUDED);
+  const last = changes.at(-1);
+  assert.equal(last.kind, "axis");
+  assert.equal(last.name, "presence");
+  assert.equal(last.from, Presence.VISIBLE);
+  assert.equal(last.to, Presence.OCCLUDED);
+  assert.equal(last.cause, "intersection", "the cause names the observation, not a guessed event");
+});
+
+test("the observer's first report corrects a seed that guessed visible", async (t) => {
+  const { status, changes } = harness(t);
+  // A rect is not readable without a layout, and reading one here would be a
+  // forced synchronous layout on the boot path - so construction guesses and
+  // the observer, which runs after it, corrects.
+  assert.equal(status.presence, Presence.VISIBLE);
+
+  setIntersecting(false);
+  await tick();
+  assert.equal(status.presence, Presence.OCCLUDED);
+  assert.equal(changes.length, 1, "one correction");
+
+  setIntersecting(false);
+  await tick();
+  assert.equal(changes.length, 1, "a repeat report of the same geometry is not a transition");
+});
+
+test("a hidden document wins over an off-screen player", async (t) => {
+  const { status, doc } = harness(t);
+
+  setIntersecting(false);
+  await tick();
+  assert.equal(status.presence, Presence.OCCLUDED);
+
+  setVisibility(doc, true);
+  await tick();
+  assert.equal(status.presence, Presence.BACKGROUND);
+
+  setIntersecting(true);
+  await tick();
+  assert.equal(status.presence, Presence.BACKGROUND, "geometry cannot outrank a hidden tab");
+
+  setVisibility(doc, false);
+  await tick();
+  assert.equal(status.presence, Presence.VISIBLE, "and the edge that returns re-reads the geometry too");
+});
+
+test("disposing the status stops the observer", async (t) => {
+  const { status } = harness(t);
+
+  status.dispose();
+  setIntersecting(false);
+  await tick();
+
+  assert.equal(status.presence, Presence.VISIBLE, "a torn-down status observes nothing");
 });

@@ -760,10 +760,27 @@ with its test:
   "instrument reconciler writes" row is measured. `RenderGate.commits` answers
   how many commits ran; `writes` answers how many of them had anything to do.
 
-The occlusion rule in the list above is deliberately **not** part of this layer
-as landed: dropping the HUD out of layout is phase 5's IntersectionObserver
-gate, and folding it into `apply()` would make a write-discipline primitive
-depend on a visibility signal it does not otherwise need.
+The occlusion rule in the list above was deliberately **not** part of phase 4:
+dropping the HUD out of layout needs a visibility signal that `apply()` has no
+reason to hold. Phase 5 lands it in `#watchOcclusion()` in `src/shell/shell.js`,
+which owns a HudReconciler with exactly one binding — `detached` — and feeds it
+the resolved rule, so the write discipline is shared while the signal stays
+local. Two of the rule's four conjuncts needed pinning down there:
+
+- **"not focus-within" does not count the shell's own focus anchor.**
+  `#setupFocusManagement()` parks focus on the host and puts it back after every
+  outside click, so `host.contains(document.activeElement)` is true at boot and
+  at rest — a reading that would make the conjunct unsatisfiable and the whole
+  rule dead on arrival. What blocks the detach is `deepestActiveElement()`
+  landing *past* the anchor, inside a control of ours, which is exactly the case
+  where `display: none` would drop focus mid-interaction. Losing the anchor's
+  focus instead is harmless: the key gate already accepts `document.body` as a
+  target, so shortcuts survive the round trip.
+- **"not hovered" is implied by "occluded",** so it is not observed at all.
+  `isIntersecting === false` means no part of the target is inside the viewport,
+  and the pointer is always inside the viewport, so an occluded player cannot be
+  hovered. Two listeners that could only ever agree with the geometric answer
+  would be bookkeeping rather than a guard.
 
 ## 5. Performance invariants
 
@@ -939,6 +956,69 @@ reconciler when it trips.
 Lint clean; unit 504 pass (481 before; +11 toast, +12 reconciler); integration
 85 pass, 1 skipped — unchanged, which is the byte-identical claim checked rather
 than asserted.
+
+*Phase 5 — Occlusion gating.* `src/shared/player-status.js` gained the
+IntersectionObserver behind `Presence.OCCLUDED`: one observer on the status
+target, one `#set("axis", "presence", …, "intersection")` per crossing, and
+disconnect through `#teardown` because `IntersectionObserverInit` has no
+`signal` member to ride. `#presence()` folds the two inputs with `BACKGROUND`
+checked first, so a hidden tab cannot be talked back into `VISIBLE` by geometry.
+`DETACHED` and `PIP` stay named but undriven — detach has no event to observe
+and this fork ships no picture-in-picture surface. A probe that gains a second
+caller still has to be classified: `platform/capabilities.json` now lists
+`src/shared/player-status.js` beside `resume.js` under `IntersectionObserver`.
+
+The rule itself is `#watchOcclusion()` in `src/shell/shell.js`, resolving
+`idle && occluded && !focusWithin` and applying it as one `detached` field
+through a HudReconciler, which is what turns §4 L5's last rule into §5's
+"Hidden HUD costs no layout or paint". The write is a class —
+`.pf-shell.pf-detached { display: none; }` in `src/shell/chrome/styles.css` —
+rather than an inline style, so Gecko batches the invalidation across the
+subtree. Four decisions are worth recording:
+
+- **`idle` comes from status, not `video.paused`,** and excludes `LOADING` as
+  well as `PLAYING`, so a `play()` in flight never detaches the HUD it is about
+  to paint. Reading status is what makes the rule answer the same question §4
+  asks — "when status is …" rather than "when the element happens to be …".
+- **The observer's first report corrects a seed rather than triggering a forced
+  layout.** A rect is not readable without a layout, and reading one on the boot
+  path is precisely the synchronous work §1 rules out, so `#intersecting` seeds
+  `true` and the observer — which runs after construction — settles it. The
+  correction is one transition with `cause: "intersection"`; a repeat report of
+  the same geometry is not a second one.
+- **The resolve is synchronous, not routed through L4.** Both inputs are already
+  deferred (an IntersectionObserver callback is posted as a task, focus settles
+  in a microtask), and retiring the remaining direct writes is phase 7's job.
+- **Focus listeners sit on both the hud layer and the host.** The layer is
+  always an ancestor of a focused descendant and the host is not, and a
+  duplicate trigger is free because the reconciler diffs.
+
+Verification, and one thing it could not cover:
+
+- `tests/player-status.test.mjs` grew four presence cases against a
+  controllable observer, including the hidden-tab-wins-over-geometry precedence
+  and the disconnect on dispose.
+- `tests/hud-occlusion.test.mjs` runs a full shell against the same fake:
+  paused-and-off-screen detaches and takes it back, playing never detaches, a
+  focused control inside the HUD blocks the detach while the host's own focus
+  anchor does not, a hidden tab detaches, and teardown leaves no observer
+  behind.
+- `platform/integration/hud-occlusion.test.mjs` proves the real observer fires:
+  a spacer plus a scroll takes the player out of the viewport, `pf:status`
+  reports `presence` crossing with `cause: "intersection"`, the host picks up
+  `pf-detached`, and scrolling back drops it — and a muted player at `playing`
+  keeps its HUD at the same scroll position.
+
+The `BACKGROUND` arm is deliberately **not** driven from integration. The page
+cannot make its own document read as hidden to the userscript: an expando the
+page defines on `document` is invisible across the sandbox boundary, which a
+patched build confirmed by showing the listener fire while only the
+`visibilityState` read disagreed, and WebDriver cannot leave a window hidden
+while still executing in it. Both unit suites cover that arm instead, where the
+two worlds are one.
+
+Lint clean; unit 515 pass (504 before; +4 presence, +7 shell occlusion);
+integration 87 pass, 1 skipped (85 and 1 before).
 
 1. **L0 EngineHost.** Centralise engine version, realm, and scheduler
    availability. No behaviour change.
