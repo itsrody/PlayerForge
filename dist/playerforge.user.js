@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PlayerForge
 // @namespace    https://github.com/itsrody/PlayerForge
-// @version      0.7.2
+// @version      1.1.0
 // @description  Native-feel player enhancements for HTML5 video on Firefox 157+: resume, subtitles, keyboard shortcuts, picture-in-picture, speed and history. Requires Violentmonkey.
 // @author       PlayerForge
 // @homepageURL  https://github.com/itsrody/PlayerForge
