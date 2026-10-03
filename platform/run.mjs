@@ -93,7 +93,12 @@ async function runTests() {
   log("Running Node.js unit tests...");
   separator();
   try {
-    execSync("node --import ./tests/loader.mjs --test", {
+    // The file list is explicit: a bare `--test` makes Node discover every
+    // test file under the project, and `platform/integration/*.test.mjs`
+    // matches. Those belong to runIntegration(), which builds the bundle they
+    // need and schedules them as their own step - pulled in here they run
+    // twice, in parallel with the unit suite, and lose to the contention.
+    execSync("node --import ./tests/loader.mjs --test tests/*.test.mjs", {
       cwd: PROJECT_ROOT,
       stdio: "inherit",
     });
