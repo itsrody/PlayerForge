@@ -48,7 +48,15 @@ function buildService(firefox) {
 }
 
 /**
- * Read the built userscript bundle. Builds it on-the-fly if missing.
+ * Read the built userscript bundle.
+ *
+ * Throws when absent rather than building here. This comment used to claim it
+ * built on the fly, which it never did, and the honesty matters more than the
+ * convenience: a missing bundle is obvious, whereas a stale one is loaded
+ * silently. Freshness is enforced upstream by ensureBundle() in platform/run.mjs
+ * for every mode that launches a browser, which is the only place that knows
+ * the mode. A direct library caller gets a named error instead of a quiet
+ * rebuild that races whatever else they are doing to dist/.
  */
 function readBundle() {
   const bundle = join(PROJECT_ROOT, "dist", "playerforge.user.js");

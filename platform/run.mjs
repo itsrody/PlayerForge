@@ -71,6 +71,23 @@ function printTarget() {
   return target;
 }
 
+/**
+ * Rebuild the bundle before any browser gate runs.
+ *
+ * dist/ is tracked, so it can be present, load-bearing, and arbitrarily old:
+ * six src/ commits landed after the last dist/ commit, and nothing rebuilt it.
+ * Every browser gate loads that file, so a green run was evidence about code
+ * that had since been rewritten under it - the worst failure mode a regression
+ * gate can have, because it looks exactly like success. Rebuilding here costs
+ * milliseconds and removes the possibility rather than documenting it.
+ *
+ * A stale-but-present bundle is strictly worse than a missing one, which is why
+ * this is not a presence check.
+ */
+function ensureBundle() {
+  execSync("node esbuild.config.mjs", { cwd: PROJECT_ROOT, stdio: "inherit" });
+}
+
 // ── Node.js unit tests ──────────────────────────────────────────────
 async function runTests() {
   log("Running Node.js unit tests...");
@@ -290,6 +307,8 @@ log(`PlayerForge platform runner — mode: ${mode}`);
 // those need the engine named out loud.
 if (mode === "integration" || mode === "browser-bench" || mode === "all" || mode === "ci") {
   printTarget();
+  separator();
+  ensureBundle();
   separator();
 }
 
