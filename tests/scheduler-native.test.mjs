@@ -60,7 +60,7 @@ globalThis.scheduler = {
   }
 };
 
-const { postTask } = await import("../src/shared/scheduler.js");
+const { postTask, delay, debounce } = await import("../src/shared/scheduler.js");
 
 /** Release the given recorded tasks (default: all of them) and drain the log. */
 function release(...targets) {
@@ -99,6 +99,29 @@ test("priority and delay reach the host verbatim, with sensible defaults", () =>
   postTask(() => {}, { priority: "background", delay: 250 });
   assert.equal(scheduled[0].options.priority, "background");
   assert.equal(scheduled[0].options.delay, 250, "a removal grace's delay is not swallowed");
+  release();
+});
+
+test("delay and debounce forward priority to the host task", () => {
+  release(); // drain anything an earlier test left queued
+
+  delay(() => {}, 100);
+  assert.equal(scheduled.at(-1).options.priority, "user-visible",
+    "an unqualified delay keeps postTask's documented default");
+  assert.equal(scheduled.at(-1).options.delay, 100);
+  release();
+
+  delay(() => {}, 100, { priority: "background" });
+  assert.equal(scheduled.at(-1).options.priority, "background",
+    "an explicitly backgrounded delay reaches the host verbatim");
+  release();
+
+  const debounced = debounce(() => {}, 300, { priority: "background" });
+  debounced();
+  assert.equal(scheduled.at(-1).options.priority, "background",
+    "a persistence debounce declares background - §5, history never blocks input");
+  assert.equal(scheduled.at(-1).options.delay, 300, "the debounce window survives");
+  debounced.cancel();
   release();
 });
 

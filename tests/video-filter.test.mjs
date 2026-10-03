@@ -219,6 +219,36 @@ test("persist writes to pf:configs after the trailing debounce", async () => {
   filter.destroy();
 });
 
+test("the trailing persist is issued at background priority", async () => {
+  // §5: "History and diagnostics never block input - assert every such write
+  // issues at background". Before phase 3 the persist was a plain debounce,
+  // which defaults to postTask's user-visible, so a settings write sat in the
+  // same queue as the HUD commit it has no business competing with.
+  cleanWrites();
+  const video = makeFakeVideo();
+  const panel = makeFakePanel();
+  const filter = new VideoFilter(makeFakeShell(video), panel);
+
+  const priorities = [];
+  const originalPostTask = globalThis.scheduler.postTask;
+  globalThis.scheduler.postTask = (fn, opts = {}) => {
+    priorities.push(opts.priority);
+    return originalPostTask(fn, opts);
+  };
+  try {
+    const contrastStepper = panel.calls.steppers.find((s) => s.label === "Contrast");
+    contrastStepper.onChange(145);
+    await sleep(380);
+  } finally {
+    globalThis.scheduler.postTask = originalPostTask;
+  }
+
+  assert.deepEqual(priorities, ["background"],
+    `the one deferred task in this window is the persist, and it must be background; saw ${JSON.stringify(priorities)}`);
+  assert.equal(writes["pf:configs"]?.filter?.contrast, 145, "and it still lands");
+  filter.destroy();
+});
+
 test("rapid stepper changes coalesce into a single storage write", async () => {
   cleanWrites();
   const video = makeFakeVideo();

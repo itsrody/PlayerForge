@@ -112,12 +112,19 @@ export function postTask(fn, { priority = "user-visible", delay: ms = 0, signal 
  * Routes through postTask so the scheduler facade owns the timer (a host task
  * scheduler natively, the harness polyfill in tests; same cancel contract).
  *
+ * `priority` defaults to postTask's own (`user-visible`), so existing callers
+ * keep their priority exactly as it was. It exists so a *persistence* delay can
+ * declare `background`: §5 says history and diagnostics never block input, and
+ * a settings write deferred at `user-visible` still sits in the same queue as
+ * the HUD commit it has no business competing with.
+ *
  * @param {Function} fn
  * @param {number} ms
+ * @param {{ priority?: string }} [opts]
  * @returns {() => void} cancel
  */
-export function delay(fn, ms) {
-  const handle = postTask(fn, { delay: ms });
+export function delay(fn, ms, { priority } = {}) {
+  const handle = postTask(fn, { delay: ms, priority });
   return () => handle.abort();
 }
 
@@ -127,10 +134,16 @@ export function delay(fn, ms) {
  * `.cancel()` (drop a pending call) for teardown paths - a trailing write
  * must land before e.g. a filter section dies.
  *
+ * `priority` is forwarded to the scheduled task (see `delay`). Note that
+ * `.flush()` bypasses scheduling entirely and runs inline - a flush happens on
+ * the teardown path, where deferring would drop the write, so it has no
+ * priority to declare.
+ *
  * @param {Function} fn
  * @param {number} ms
+ * @param {{ priority?: string }} [opts]
  */
-export function debounce(fn, ms) {
+export function debounce(fn, ms, { priority } = {}) {
   let cancel = null;
   let pendingArgs = null;
   const debounced = (...args) => {
@@ -140,7 +153,7 @@ export function debounce(fn, ms) {
       cancel = null;
       fn(...pendingArgs);
       pendingArgs = null;
-    }, ms);
+    }, ms, { priority });
   };
   debounced.flush = () => {
     if (!cancel) {

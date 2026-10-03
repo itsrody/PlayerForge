@@ -17,6 +17,7 @@ import { DOMManager } from "../shared/dom-manager.js";
 import { Scope } from "../shared/scope.js";
 import { createActivity } from "../shared/activity.js";
 import { PlayerStatus } from "../shared/player-status.js";
+import { RenderGate } from "../shared/render-gate.js";
 import { yield_ } from "../shared/scheduler.js";
 
 /**
@@ -53,6 +54,13 @@ export class Shell {
    *  the activity below rather than replacing it - the activity still decides
    *  when the media clock is attached, status only records what happened. */
   #status = null;
+  /** L4 render gate. Commits it issues outlive the event that caused them, so
+   *  N edges in one tick are one write and the priority is declared by the
+   *  work rather than inherited from whichever handler ran first. Today it
+   *  carries the media-state custom properties (see #forwardMediaEvents);
+   *  L5's reconciler registers here rather than inventing a second gate. It is
+   *  null until boot has reached that point. */
+  #gate = null;
 
   constructor({ video, container, sdk, onDestroy }) {
     this.video = video;
@@ -343,9 +351,15 @@ export class Shell {
       // volumechange fires continuously while volume/panner is dragged, and a
       // setProperty on a hot style recolors the host subtree for nothing when
       // neither flag changed.
+      //
+      // The commit reads `video` at commit time rather than at event time, so
+      // `play` + `pause` inside one tick coalesces to the state that actually
+      // survived the tick - which is the whole point of the gate. The seed runs
+      // inline: construction is not a state transition, and the first frame
+      // must not paint with the properties undefined.
       let pausedVar = null;
       let mutedVar = null;
-      const sync = () => {
+      const commit = () => {
         const paused = video.paused ? "1" : "0";
         if (paused !== pausedVar) {
           pausedVar = paused;
@@ -357,9 +371,16 @@ export class Shell {
           host.style.setProperty("--pf-media-muted", muted);
         }
       };
-      sync();
+      commit();
+      this.#gate = new RenderGate({ commit, signal: this.#scope.signal });
+      // A HUD commit after a media edge is `user-visible` (§4 priority
+      // table): it needs to land before the next frame, not before the input
+      // that follows it, and it must never be starved behind a background
+      // write. Nothing reads these properties synchronously, so deferring to
+      // the next task is behaviourally invisible.
+      const requestCommit = () => this.#gate?.request("user-visible");
       for (const evt of ["play", "pause", "volumechange"]) {
-        this.#dom.listen(video, evt, sync, { passive: true });
+        this.#dom.listen(video, evt, requestCommit, { passive: true });
       }
     }
   }
@@ -427,6 +448,11 @@ export class Shell {
     // the signal and a subscriber list that should not outlive the shell.
     this.#status?.dispose();
     this.#status = null;
+    // The scope signal already took the gate down at the top of destroy();
+    // disposing again is idempotent and makes it explicit that no commit can
+    // land after this point, before the DOM goes away.
+    this.#gate?.dispose();
+    this.#gate = null;
     // DOM lifecycle: remove elements, disconnect observers, remove
     // listeners, restore attributes/styles — all in one call.
     this.#dom.destroy();

@@ -151,8 +151,10 @@ export class VideoFilter {
   #scope = new Scope();
   /** Trailing persist: preview applies instantly, storage lands once the drag
    *  settles (a slider drag otherwise fires a full config write + cross-tab
-   *  live-reload echo per step). Flushed on destroy. */
-  #schedulePersist = debounce(() => this.#writePersist(), TUNING.filter.persistDebounceMs);
+   *  live-reload echo per step). Flushed on destroy. Issued at `background`:
+   *  a settings write is not worth a place in the queue ahead of the HUD
+   *  commit or an input response (§5, "history ... never block input"). */
+  #schedulePersist = debounce(() => this.#writePersist(), TUNING.filter.persistDebounceMs, { priority: "background" });
 
   constructor(shell, panel) {
     this.#video = shell.video;

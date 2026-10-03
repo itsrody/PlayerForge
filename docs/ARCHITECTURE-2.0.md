@@ -660,6 +660,23 @@ The `#pending` guard is what keeps this compliant with Trap 1: the task is
 one-shot, never self-rearming. Any retry must be re-armed from an observer
 callback or a timer, per `scheduler.js`.
 
+Implementing it (phase 3) forced two refinements of the sketch, both pinned by
+`tests/render-gate.test.mjs`:
+
+- `postTask` returns a `{ abort() }` handle, not a promise, so `.finally()`
+  becomes a `try/finally` around the commit - and `#pending` is therefore held
+  for the *whole* commit rather than released just before it. A `request()`
+  raised from inside the commit is dropped, which is exactly what makes the
+  one-shot property hold; a separate `#running` flag guards the case a
+  *higher*-priority request would otherwise open, since it would take the
+  re-raise branch below and abort the handle it was standing on.
+- The sketch's bare `if (this.#pending) return;` is not enough once priorities
+  differ: a `background` write already in flight would delay the
+  `user-blocking` response it outranks, which is the opposite of what the table
+  below is for. A higher-priority request therefore aborts the pending task and
+  reschedules at its own priority; a same-or-lower one is absorbed. Either way
+  there is still exactly one commit this tick.
+
 Priority routing:
 
 | Work | Priority |
@@ -786,6 +803,61 @@ the `detail` object have to be built in the *element's* realm. A page can hold a
 reference to an object created over here and still be denied reading its
 properties, so a detail passed through as-is arrives and then fails on the first
 field access.
+
+*Phase 3 — L4 RenderGate.* `src/shared/render-gate.js` is the primitive from §4:
+`request(priority)` coalesces to one commit per tick, the commit runs in a
+one-shot `postTask`, and the gate's controller is a child of the session scope so
+teardown cancels a commit that has not fired yet. `commits` is the §5 counter.
+
+Two writes were routed, chosen because nothing reads them synchronously and
+because each demonstrates one end of the priority table:
+
+- The shell's `--pf-media-paused` / `--pf-media-muted` edges now request
+  `user-visible` instead of writing from inside the event handler. The commit
+  reads `video` at commit time, so `play` + `pause` in one tick resolves to the
+  state that actually survived the tick. The construction seed still runs
+  inline — that is initialisation, not a commit, and the first frame must not
+  paint with the properties undefined.
+- `filter.js`'s trailing persist now debounces at `background`. It was
+  `user-visible` by default, which put a settings write in the same queue as the
+  HUD commit it has no business competing with. `delay()` and `debounce()` grew
+  an optional `priority` for it, and `tests/video-filter.test.mjs` asserts that
+  the persist is the one task in its window and that it is `background` — which
+  is §5's "assert every such write issues at `background`", made checkable.
+
+What was **not** routed, each checked rather than assumed:
+
+- Toasts and the panel's `pf-compact` toggle are asserted synchronously in
+  `tests/shell-fullscreen.test.mjs` and `tests/panel-compact.test.mjs` —
+  dispatch, then assert, no await between them. Deferring them changes observed
+  behaviour, which is phase 7's job, not a priority tweak.
+- Resume's pause flush is asserted the same way (`tests/resume-tracker.test.mjs`
+  writes on `pause` and reads the store in the same turn), and `destroy()` has
+  to save before the scope it saves against is gone. Splitting "scheduled save"
+  from "unload flush" is what would let the periodic path go `background`.
+- Diagnostics has no `postTask` write to re-prioritise: the frame-gap probe is
+  rAF by §2.6, and `logger` is console I/O gated off by default.
+
+Two things about verification are worth recording:
+
+- **The integration test cannot instrument the userscript.** The bundle runs in
+  the add-on's isolated userScript realm and `WebDriver`'s `executeScript` only
+  ever sees the page world, so a spy on `scheduler.postTask` or on
+  `style.setProperty` installed from the page records nothing at all. That cost
+  a debugging round before it was recognised, so
+  `platform/integration/render-gate.test.mjs` states it in the header rather
+  than letting a future test assert a vacuous zero. What the page *can* see is
+  the value on the host and when it moves, and that is enough to separate the
+  two architectures: seven synthetic edges inside one synchronous block leave
+  the seeded value in place when the handler returns *and* at the microtask
+  checkpoint, then land as the surviving state. Commit counts and priorities
+  stay in the unit suite, where the realm is ours.
+- `ResizeObserver` does not appear anywhere in `src/` yet, so that row of the
+  §4 priority table has no production site, and neither does `user-blocking`.
+  Both are exercised by the gate's own tests and wait for a caller.
+
+Lint clean; unit 481 pass (468 before); integration 85 pass, 1 skipped (82 and
+1 before).
 
 1. **L0 EngineHost.** Centralise engine version, realm, and scheduler
    availability. No behaviour change.
