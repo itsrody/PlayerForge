@@ -19,6 +19,7 @@
 /* - Window message types - */
 
 import { postTask } from "./scheduler.js";
+import { engineHost } from "./engine-host.js";
 
 /**
  * The postMessage types the frame bridge sends and receives across iframe
@@ -534,7 +535,9 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
       }, true);
     }
   };
-  if (!legacyChain && typeof MessageChannel === "function") {
+  // Same L0 fact scheduler.js defers to, so the two pipes agree on whether the
+  // host offers one at all.
+  if (!legacyChain && engineHost.canMessageChannel) {
     try {
       const mc = new MessageChannel();
       replyPort = mc.port1;

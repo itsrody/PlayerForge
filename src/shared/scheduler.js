@@ -44,6 +44,7 @@
  */
 
 import { logger } from "./diagnostics.js";
+import { engineHost } from "./engine-host.js";
 
 /**
  * Hard cap on the rAF wait. A visible document should produce a frame within
@@ -168,7 +169,9 @@ export function debounce(fn, ms) {
  * @param {Function} resolve
  */
 function nextTask(resolve) {
-  if (typeof MessageChannel === "function") {
+  // Availability is an L0 fact, not a per-call detect: the host answers once so
+  // this and context.js cannot drift into two different answers for one API.
+  if (engineHost.canMessageChannel) {
     const { port1, port2 } = new MessageChannel();
     port1.onmessage = () => {
       port1.close();

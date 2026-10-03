@@ -543,7 +543,16 @@ class EngineHost {
 
 Read-only after construction. Every other layer asks this instead of
 feature-detecting. Note what is deliberately *absent*: there is no "can await
-paint" flag, because no such API exists to detect (§2.6).
+paint" flag, because no such API exists to detect (§2.6). Also absent is any
+`canRaf`: `yield_()` re-reads `requestAnimationFrame` on every call because the
+harness installs and removes it per test, so a construction-time snapshot would
+freeze a branch that callers re-read live. `canRvfc` and `canMozQuality` are
+sketched here but do not exist yet — they land with phase 6.
+
+One field beyond the sketch is implemented: `canMessageChannel`.
+`scheduler.js`'s `nextTask()` and `context.js`'s reply pipe both feature-detected
+MessageChannel independently, which is the repetition L0 exists to end, and its
+presence does not vary at runtime.
 
 ### L1 — Signals
 
@@ -725,6 +734,16 @@ Each is testable, not aspirational.
 ## 6. Migration phases
 
 Each phase is independently shippable and testable.
+
+Phase 1 is landed: `src/shared/engine-host.js` states engine, prerelease-aware
+version, granted realm, and scheduler availability once at construction, and
+`scheduler.js` / `context.js` now ask it for MessageChannel instead of probing
+the same API twice. It is exercised by `tests/engine-host.test.mjs`, and
+`platform/capabilities.json` was updated to match — a probe that moves between
+modules still has to be classified, and the classification follows the file that
+now holds it. Integration coverage reported the same result before and after
+(79 pass, 1 skipped), which is what "no behaviour change" is verified against
+here rather than assumed.
 
 1. **L0 EngineHost.** Centralise engine version, realm, and scheduler
    availability. No behaviour change.
