@@ -13,7 +13,8 @@
     "<all_urls>",
     "storage",
     "user_scripts",
-    "menus"
+    "menus",
+    "geckoProfiler"
   ],
   "background": {
     "scripts": [

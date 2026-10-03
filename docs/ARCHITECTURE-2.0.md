@@ -809,23 +809,34 @@ Each is testable, not aspirational.
 | At most one DOM commit per state transition | Count `RenderGate.#commit` |
 | Zero writes for unchanged values | Instrument reconciler writes, diff against applied snapshot |
 | Compare-before-write pays for itself | `platform/browser-bench/write-cost.bench.mjs` runs the same five-field pill update to an identical final state twice — written unconditionally (what the HUD did before L5) and diffed first (what it does now) — in interleaved batches, reported as a non-gated pair. The win is the ratio: ≈3.4× per unchanged apply, which is §2.2's open question answered rather than assumed |
-| Hidden HUD costs no layout or paint | `pf-detached` is `display: none` and contributes zero client rects after a forced document flush, and gets them back on return (`platform/integration/hud-occlusion.test.mjs`) — a display:none subtree is never laid out or painted. Measured as well as argued: `platform/browser-bench/css-layout.bench.mjs` runs the same amplified forced-recalc op attached and occluded and reports the pair as a non-gated row, with the occluded figure an order of magnitude below the attached one |
+| Hidden HUD costs no layout or paint | `pf-detached` is `display: none` and contributes zero client rects after a forced document flush, and gets them back on return (`platform/integration/hud-occlusion.test.mjs`) — a display:none subtree is never laid out or painted. Measured as well as argued: `platform/browser-bench/css-layout.bench.mjs` runs the same amplified forced-recalc op attached and occluded and reports the pair as a non-gated row, with the occluded figure an order of magnitude below the attached one. The profiler reading the row started as is taken too, by `platform/integration/profiler-occlusion.test.mjs`: the same media-neutral drive sampled idle and driving, on screen and detached, where `SetDisplayList` is at least 4× lower detached and the drive moves it by nothing at all |
 | No self-rearming `postTask` | No `postTask` callback re-arms itself |
 | History and diagnostics never block input | Assert every such write issues at `background` |
 | No forced synchronous layout | `pf/no-forced-layout` (`platform/eslint-rules.mjs`, wired over `src/` by `eslint.config.js`): a layout-property read in the same task as a layout write fails `npm run lint`. Pinned by `tests/lint-rule.test.mjs`, which drives the rule block read back out of the real config |
 
 Two rows used to be phrased as a Gecko Profiler reading — `Styles` / `Reflow` /
-`Rasterize` flat while occluded, and "no markers between transitions". Those
-readings stay manual, and the table no longer implies otherwise: Firefox
-exposes no layout, paint or longtask counters to content (157 lists neither
-`longtask` nor `long-animation-frame` in `supportedEntryTypes`, which is why
-the frame-gap watchdog exists at all), and the userscript runs in the add-on's
-isolated realm, which nothing page-side can instrument — the harness control
-channel speaks storage and nothing else. What is held instead is the mechanism
-that reading would confirm: an idle shell writes nothing to the shared DOM,
-and a detached shell has no box for layout or paint to visit — the second of
-those measured directly, since `css-layout.bench.mjs` runs the same
-forced-recalc op attached and occluded and reports the pair.
+`Rasterize` flat while occluded, and "no markers between transitions". The first
+is taken automatically now; the second still is manual. Firefox exposes no
+layout, paint or longtask counters to content (157 lists neither `longtask` nor
+`long-animation-frame` in `supportedEntryTypes`, which is why the frame-gap
+watchdog exists at all), and the userscript runs in the add-on's isolated realm,
+which nothing page-side can instrument — so the harness asks from where it can.
+Its own add-on holds `geckoProfiler`: Firefox grants that permission to
+extension ids listed in `extensions.geckoProfiler.acceptedExtensionIds`, a pref
+the harness sets in the profile before it installs the add-on, and
+`platform/integration/profiler-occlusion.test.mjs` counts markers out of a live
+profile through it, running the same media-neutral drive on screen and detached
+so the differential belongs to the HUD and not to the page. What gets asserted
+is what moves: `SetDisplayList` and `CompositeToTarget`, which rise with the
+drive on screen and sit still while the HUD is detached. `Reflow`,
+`LayerBuilding` and `Rasterize` counted zero in every window measured, including
+forty deliberate forced reflows, and `Styles` / `DisplayList` /
+`RefreshDriverTick` never tracked the drive — so "no markers between transitions"
+stays a manual reading until a build emits markers that follow it. The
+automated half still rests on the mechanism underneath: an idle shell writes
+nothing to the shared DOM, and a detached shell has no box for layout or paint
+to visit — the second of those measured directly, since `css-layout.bench.mjs`
+runs the same forced-recalc op attached and occluded and reports the pair.
 
 ## 6. Migration phases
 
@@ -1216,7 +1227,7 @@ Lint clean; unit 530 pass (528 before; +2 toast); integration 87 pass,
 
 All seven are landed, each with its own commit and its own verification at
 the end of §6. Taken together, as of the last phase: lint clean (including
-`pf/no-forced-layout`), unit 546 pass, integration 89 pass / 1 skipped,
+`pf/no-forced-layout`), unit 546 pass, integration 90 pass / 1 skipped,
 14 browser-benchmark rows green, node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.

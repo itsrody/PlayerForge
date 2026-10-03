@@ -16,6 +16,9 @@
 //   {op:"storage.delete", key}       cross-context delete, same distinction
 //   {op:"storage.get"}               read the store as it stands now
 //   {op:"register", body, allFrames} replace the registration (custom bundle)
+//   {op:"profiler.permission"}       is the geckoProfiler permission usable here
+//   {op:"profiler.start"|"profiler.stop"|"profiler.summarize", names}
+//                                    drive the Gecko Profiler and count markers
 //
 // Results come back on /result as {id, ok, error?, ...}; anything the
 // userScript realm wants to report goes to /diagnostic.
@@ -114,6 +117,72 @@ async function handle(command) {
   if (command.op === "storage.delete") {
     await browser.storage.local.remove(command.key);
     return { storage: await browser.storage.local.get(null) };
+  }
+
+  // The Gecko Profiler is the only route to §5's profiler readings: it is the
+  // one source of refresh-tick markers, and nothing page-side can see them.
+  // Firefox grants `geckoProfiler` only to ids listed in
+  // `extensions.geckoProfiler.acceptedExtensionIds`; the harness sets that pref
+  // in the profile before installing this add-on, so the permission arrives at
+  // install time with no gesture to synthesize.
+  if (command.op === "profiler.permission") {
+    const requested = { permissions: ["geckoProfiler"] };
+    return { contains: await browser.permissions.contains(requested) };
+  }
+
+  if (command.op === "profiler.start") {
+    await browser.geckoProfiler.start({
+      bufferSize: command.bufferSize ?? 32 * 1024 * 1024,
+      interval: command.interval ?? 1,
+      features: command.features ?? [],
+      windowLength: command.windowLength ?? 0,
+      threads: command.threads ?? [],
+    });
+    return { started: true };
+  }
+
+  if (command.op === "profiler.stop") {
+    await browser.geckoProfiler.stop();
+    return { stopped: true };
+  }
+
+  // Counts markers in the profile collected so far and throws the profile
+  // away. Counting here rather than shipping the profile over the control
+  // channel keeps a window's result a few hundred bytes instead of megabytes.
+  if (command.op === "profiler.summarize") {
+    const profile = await browser.geckoProfiler.getProfile();
+    const wanted = command.names || [];
+    const counts = {};
+    for (const name of wanted) counts[name] = 0;
+    const totals = {};
+    const threads = (profile && profile.threads) || [];
+    for (const thread of threads) {
+      const markers = thread.markers;
+      if (!markers || !Array.isArray(markers.data)) continue;
+      // Markers are arrays whose field positions come from markers.schema;
+      // `name` is an index into the thread's stringTable in the current
+      // schema and into markers.stringArray in older ones.
+      const nameAt = markers.schema && typeof markers.schema.name === "number"
+        ? markers.schema.name
+        : 0;
+      const stringTable = thread.stringTable || [];
+      const stringArray = markers.stringArray;
+      for (const marker of markers.data) {
+        const raw = Array.isArray(marker) ? marker[nameAt] : marker && marker.name;
+        let name = raw;
+        if (typeof raw === "number") {
+          name = stringTable[raw];
+          if (typeof name !== "string" && stringArray) name = stringArray[raw];
+        }
+        if (typeof name !== "string" || name === "") continue;
+        totals[name] = (totals[name] || 0) + 1;
+        if (name in counts) counts[name] += 1;
+      }
+    }
+    const top = Object.entries(totals)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 25);
+    return { counts, top, threads: threads.length };
   }
 
   throw new Error(`unknown op: ${command.op}`);

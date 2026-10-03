@@ -32,6 +32,16 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(HERE, "..", "..");
 
 /**
+ * The harness add-on's id, read from its manifest rather than repeated here.
+ *
+ * Firefox gates the `geckoProfiler` permission on a pref listing exactly these
+ * ids, so the two definitions have to agree or the install fails as invalid.
+ */
+const HARNESS_ID = JSON.parse(
+  readFileSync(join(HERE, "native-extension", "manifest.json"), "utf8")
+).browser_specific_settings.gecko.id;
+
+/**
  * Build the geckodriver service. A geckodriver already on disk is preferred:
  * Selenium Manager's resolve-and-download runs synchronously on the main
  * thread and can stall on restricted networks. GECKODRIVER_PATH overrides
@@ -231,6 +241,13 @@ export class FirefoxDriver {
       // register() resolves but never injects - the failure looks exactly like
       // a broken harness rather than a disabled feature.
       .setPreference("extensions.userScripts.enabled", true)
+      // Firefox admits `geckoProfiler` only for extension ids on this
+      // allowlist ("Only specific extensions are allowed to access the
+      // geckoProfiler."), and a manifest error fails the install outright, so
+      // without the pref the add-on arrives as "Extension is invalid". The
+      // harness needs it because the add-on realm is the only place the §5
+      // profiler readings can be taken: nothing page-side sees a refresh tick.
+      .setPreference("extensions.geckoProfiler.acceptedExtensionIds", HARNESS_ID)
       .addArguments(...args);
     for (const [key, value] of Object.entries(preferences)) {
       ffOptions.setPreference(key, value);
@@ -522,6 +539,47 @@ export class FirefoxDriver {
    */
   onNativeDiagnostic(listener) {
     return this.#control.onDiagnostic(listener);
+  }
+
+  /**
+   * Is the harness add-on's geckoProfiler permission usable?
+   *
+   * @returns {Promise<boolean>}
+   */
+  async profilerUsable() {
+    const { contains } = await this.#control.send({ op: "profiler.permission" });
+    return contains;
+  }
+
+  /**
+   * Start the Gecko Profiler for one measurement window.
+   *
+   * `start()` opens a fresh buffer, so a window's markers are exactly that
+   * window's: summarize before stopping, then stop to release it.
+   *
+   * @param {{interval?: number, features?: string[], bufferSize?: number}} [options]
+   * @returns {Promise<{started: boolean}>}
+   */
+  profilerStart(options = {}) {
+    return this.#control.send({ op: "profiler.start", ...options });
+  }
+
+  /** @returns {Promise<{stopped: boolean}>} */
+  profilerStop() {
+    return this.#control.send({ op: "profiler.stop" });
+  }
+
+  /**
+   * Count markers by name in the profile collected so far.
+   *
+   * Counting inside the add-on keeps a window's result small: the profile
+   * itself is megabytes, the tally is a few hundred bytes.
+   *
+   * @param {string[]} names
+   * @returns {Promise<{counts: Record<string, number>, top: [string, number][], threads: number}>}
+   */
+  profilerSummarize(names) {
+    return this.#control.send({ op: "profiler.summarize", names });
   }
 
   /**
