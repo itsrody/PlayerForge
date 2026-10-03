@@ -17,6 +17,7 @@ import { DOMManager } from "../shared/dom-manager.js";
 import { Scope } from "../shared/scope.js";
 import { createActivity } from "../shared/activity.js";
 import { PlayerStatus } from "../shared/player-status.js";
+import { HudReconciler } from "../shared/hud-reconciler.js";
 import { RenderGate } from "../shared/render-gate.js";
 import { yield_ } from "../shared/scheduler.js";
 
@@ -57,9 +58,9 @@ export class Shell {
   /** L4 render gate. Commits it issues outlive the event that caused them, so
    *  N edges in one tick are one write and the priority is declared by the
    *  work rather than inherited from whichever handler ran first. Today it
-   *  carries the media-state custom properties (see #forwardMediaEvents);
-   *  L5's reconciler registers here rather than inventing a second gate. It is
-   *  null until boot has reached that point. */
+   *  drives the media-state custom properties (see #forwardMediaEvents),
+   *  whose writes are diffed by L5's reconciler inside the commit rather than
+   *  behind a second gate. It is null until boot has reached that point. */
   #gate = null;
 
   constructor({ video, container, sdk, onDestroy }) {
@@ -347,30 +348,30 @@ export class Shell {
     // does not ship, and which cannot reach into shadow roots anywhere)
     // are not relied on; custom properties bridge the gap.
     if (host) {
-      // Write the custom properties only when their value actually flips.
-      // volumechange fires continuously while volume/panner is dragged, and a
-      // setProperty on a hot style recolors the host subtree for nothing when
-      // neither flag changed.
+      // One bindings table for both properties (§3.2: derived from one table,
+      // not hand-maintained twice). The reconciler owns the "has this value
+      // already been written" half — `#applied` starts null, so the inline
+      // seed below writes both — and the gate owns *when* the commit runs.
       //
       // The commit reads `video` at commit time rather than at event time, so
       // `play` + `pause` inside one tick coalesces to the state that actually
       // survived the tick - which is the whole point of the gate. The seed runs
       // inline: construction is not a state transition, and the first frame
       // must not paint with the properties undefined.
-      let pausedVar = null;
-      let mutedVar = null;
-      const commit = () => {
-        const paused = video.paused ? "1" : "0";
-        if (paused !== pausedVar) {
-          pausedVar = paused;
-          host.style.setProperty("--pf-media-paused", paused);
+      //
+      // volumechange fires continuously while volume/panner is dragged, and a
+      // setProperty on a hot style recolors the host subtree for nothing when
+      // neither flag changed - the diff is what keeps that a no-op.
+      const hud = new HudReconciler({
+        bindings: {
+          paused: (value) => host.style.setProperty("--pf-media-paused", value),
+          muted: (value) => host.style.setProperty("--pf-media-muted", value)
         }
-        const muted = video.muted ? "1" : "0";
-        if (muted !== mutedVar) {
-          mutedVar = muted;
-          host.style.setProperty("--pf-media-muted", muted);
-        }
-      };
+      });
+      const commit = () => hud.apply({
+        paused: video.paused ? "1" : "0",
+        muted: video.muted ? "1" : "0"
+      });
       commit();
       this.#gate = new RenderGate({ commit, signal: this.#scope.signal });
       // A HUD commit after a media edge is `user-visible` (§4 priority

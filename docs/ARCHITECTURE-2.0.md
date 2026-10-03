@@ -739,6 +739,32 @@ PlayerForge's HUD is frozen hand-written markup, so the compare-before-write
 discipline has to be hand-written — there is no framework underneath to absorb
 the mistake.
 
+Implementing it (phase 4) pinned three things the sketch leaves implicit, each
+with its test:
+
+- **The identity fast path is a contract, not a courtesy.**
+  `if (this.#applied === status)` only holds if a snapshot is immutable once
+  handed over: a producer that mutates its object in place and re-applies the
+  same reference is skipped forever. The scrub hint does exactly that — one
+  object, two fields, rewritten every ~100ms — so `show()` normalises its
+  arguments into a fresh snapshot, and `tests/toast.test.mjs` mutates a payload
+  and re-shows it to prove the repaint still lands. Without that test the defect
+  is invisible in every other case.
+- **A nullish snapshot is dropped rather than rejected.** §3.2 notes that Media
+  Chrome gets its "not ready yet" gate from `lit-html` plus a readiness-checked
+  `MutationObserver`; a hand-rolled reconciler needs its own, so `apply(null)`
+  returns `false` while a non-object still throws. Call sites already reach the
+  surface through `?.`.
+- **`writes` counts binding invocations, not DOM mutations.** The decision to
+  write is made in `apply()`, before the binding runs, so that is where §5's
+  "instrument reconciler writes" row is measured. `RenderGate.commits` answers
+  how many commits ran; `writes` answers how many of them had anything to do.
+
+The occlusion rule in the list above is deliberately **not** part of this layer
+as landed: dropping the HUD out of layout is phase 5's IntersectionObserver
+gate, and folding it into `apply()` would make a write-discipline primitive
+depend on a visibility signal it does not otherwise need.
+
 ## 5. Performance invariants
 
 Each is testable, not aspirational.
@@ -858,6 +884,61 @@ Two things about verification are worth recording:
 
 Lint clean; unit 481 pass (468 before); integration 85 pass, 1 skipped (82 and
 1 before).
+
+*Phase 4 — L5 HudReconciler.* `src/shared/hud-reconciler.js` is the §4 primitive:
+one `bindings` table per surface is both the field list and the sole writer for
+each field, `apply()` diffs `Object.is` against `#applied` and invokes a binding
+only when its value moved, and `writes` is §5's "instrument reconciler writes"
+row. The table is read once at construction, so a snapshot key with no binding
+is inert rather than half-applied — §3.2's "derived, not hand-maintained", and
+the reason there is no second field list to drift.
+
+Two surfaces were routed:
+
+- The shell's `--pf-media-paused` / `--pf-media-muted` flip guards moved out of
+  the commit closure and into a two-field reconciler. The commit, its inline
+  seed and its gate are unchanged; only the "has this already been written"
+  half moved, and write order is still paused-then-muted because that is the
+  table's key order.
+- The toast replaced its `#lastIcon` / `#lastText` / `#lastColor` /
+  `#lastHadActions` fingerprint with a five-field snapshot (`visible`, `icon`,
+  `text`, `color`, `actions`). Output is byte-identical — `tests/toast.test.mjs`
+  asserts `outerHTML` equality across a repeated show and holds references to
+  the icon and text nodes to prove `textContent` was never reassigned — but the
+  old fingerprint compared the payload as a whole, so it could not gate a
+  *partial* change: a new colour with the same text still re-cloned the icon and
+  rewrote the text node.
+
+One finding that constrains later phases: **visibility has to be a diffed field
+too.** `hide()` and the auto-hide timer previously reached for
+`classList.remove` directly; with `visible` in the snapshot they must apply
+`{ ...applied, visible: false }`, because a direct removal leaves
+`#applied.visible` stale and the next `show()` skips the write that makes the
+pill appear again. `tests/toast.test.mjs` re-shows after a hide for exactly that
+reason — it is the one regression the diff makes possible.
+
+Two non-adoptions, each for the opposite reason:
+
+- `forge-track.js`'s `#render()` already runs a per-slot two-level dirty check
+  on an allocation-free fast path. Routing it through a generic table would
+  replace a specialised diff with a general one and add a snapshot object per
+  `cuechange`, which is worse on the one path that is genuinely hot.
+- The panel's `classList.toggle(cls, force)` has nothing to gate: the DOM
+  already no-ops a no-op toggle. `markStyle` / `markAttribute` are one-shot
+  construction writes across five call sites, not on any path this layer needs.
+
+One harness note, because it cost a debugging round: `fixtures.test.mjs` asserts
+on `pf:resume` as soon as `until(...)` returns, while the previous test's
+ResumeTracker can still have a write in flight — `freshStore()` deletes the key
+but does not cancel the write that lands afterwards. Two runs of this phase
+tripped it (once on an empty entry list, once on a sibling fixture's path); four
+runs after, plus one against the stashed Phase 3 tree, were clean. The mechanism
+touches nothing this phase changed, but that test is what to suspect before the
+reconciler when it trips.
+
+Lint clean; unit 504 pass (481 before; +11 toast, +12 reconciler); integration
+85 pass, 1 skipped — unchanged, which is the byte-identical claim checked rather
+than asserted.
 
 1. **L0 EngineHost.** Centralise engine version, realm, and scheduler
    availability. No behaviour change.

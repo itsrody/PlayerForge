@@ -1,4 +1,5 @@
 import { delay } from "../../shared/scheduler.js";
+import { HudReconciler } from "../../shared/hud-reconciler.js";
 import { flashElement } from "./animate.js";
 import { button } from "./elements.js";
 import { createIconElement } from "./icons.js";
@@ -17,36 +18,43 @@ import { createIconElement } from "./icons.js";
  * ran exactly once, the node was never released, and pool.destroy() could
  * not remove a node that had left the pool's free list.
  *
+ * Rendering is L5's problem: every DOM write for the pill hangs off one
+ * HudReconciler bindings table (visibility, icon, text, colour, buttons),
+ * so a repeated show() of an unchanged payload issues zero writes instead of
+ * the previous hand-rolled `#lastIcon` / `#lastText` / `#lastColor` /
+ * `#lastHadActions` fingerprint. The output is byte-identical either way;
+ * only the write count moves. The old fingerprint also could not gate a
+ * *partial* change (a new colour with the same text re-cloned the icon and
+ * rewrote textContent) because it compared the payload as a whole — the
+ * field-by-field diff does, which is the point of routing it.
+ *
  * Producer convention: durations come from TUNING.toast (flash for
  * completed actions, info for status, action for toasts with buttons,
  * hint for onboarding); sticky gesture toasts pass 0 explicitly and are
  * hidden by their gesture's end. Every producer tags its family via
  * `group` (skip, hold, scrub, fs, volume, pinch, resume, data).
+ *
+ * Producers must pass a *fresh* payload per call. The scrub hint re-uses and
+ * mutates one object between ticks, so show() normalises its arguments into a
+ * new snapshot rather than handing the reconciler the caller's object — the
+ * identity fast path would otherwise skip every repaint.
  */
 export class ToastManager {
   #toast;
   #icon;
   #text;
   #actions;
+  /** One bindings table: the only writer for each of the pill's five fields. */
+  #reconciler;
   /** Cancel handle for the pending auto-hide, null when none is scheduled. */
   #cancelAutoHide = null;
   /** Stable auto-hide callback, cached so show() never re-creates a closure. */
   #autoHide = () => {
     this.#cancelAutoHide = null;
-    this.#isVisible = false;
-    this.#toast.classList.remove("pf-visible");
+    this.#setVisible(false);
   };
+  /** Routing metadata only — the group writes nothing, so it is not a field. */
   #activeGroup = null;
-  /**
-   * Whether the toast is currently showing - the "already visible" half of
-   * the repeated-show skip below. #autoHide and hide() reset it.
-   */
-  #isVisible = false;
-  /** Render fingerprint of the last show(), for the alloc-free skip. */
-  #lastIcon = undefined;
-  #lastText = "";
-  #lastColor = "";
-  #lastHadActions = false;
 
   constructor(hudLayer, dom) {
     const doc = hudLayer.ownerDocument;
@@ -70,47 +78,67 @@ export class ToastManager {
     this.#icon = icon;
     this.#text = text;
     this.#actions = actions;
+    this.#reconciler = new HudReconciler({
+      bindings: {
+        visible: (value) => {
+          this.#toast.classList.toggle("pf-visible", !!value);
+        },
+        // Clone from the cached icon template: a repeated icon is a cheap
+        // cloneNode, not an HTML re-parse. aria-hidden lives on the template.
+        icon: (value) => {
+          this.#icon.textContent = "";
+          const iconEl = value ? createIconElement(value, this.#icon.ownerDocument) : null;
+          if (iconEl) {
+            this.#icon.appendChild(iconEl);
+          }
+          this.#icon.hidden = !iconEl;
+        },
+        text: (value) => {
+          this.#text.textContent = value;
+          this.#text.hidden = !value;
+        },
+        color: (value) => {
+          this.#toast.style.color = value;
+        },
+        actions: (value) => {
+          this.#renderActions(value);
+        }
+      }
+    });
   }
 
   show({ icon, text, duration = 0, color, group, actions } = {}) {
-    const prevGroup = this.#activeGroup;
     this.#activeGroup = group ?? null;
-    const hadActions = !!(actions?.length);
-    // Repeated-show skip: the scrub hint re-calls show() every ~100ms tick with
-    // an unchanged icon/text. Resolving a cloned SVG icon, rewriting text, and
-    // re-rendering buttons each tick is pure churn when the toast is already
-    // showing that exact payload for the same group - so skip the DOM work and
-    // just re-assert visibility + reset the auto-hide timer. Button-bearing
-    // toasts and cross-group replays always re-render (their payloads are
-    // cheap and genuinely vary).
-    if (
-      this.#isVisible &&
-      this.#activeGroup === prevGroup &&
-      !hadActions && !this.#lastHadActions &&
-      icon === this.#lastIcon &&
-      (text || "") === this.#lastText &&
-      (color || "") === this.#lastColor
-    ) {
-      this.#toast.classList.add("pf-visible");
+    // A fresh snapshot per call, normalised so Object.is has a stable shape.
+    this.#reconciler.apply({
+      visible: true,
+      icon: icon || null,
+      text: text || "",
+      color: color || "",
+      actions: actions?.length ? actions : null
+    });
+    // Re-arming the timer is unconditional: a repeated show() re-arms even
+    // when it wrote nothing, exactly as the old skip path did.
+    this.#cancelAutoHide?.();
+    this.#cancelAutoHide = duration > 0 ? delay(this.#autoHide, duration) : null;
+  }
+
+  hide(group) {
+    if (group === undefined || group === this.#activeGroup) {
       this.#cancelAutoHide?.();
-      this.#cancelAutoHide = duration > 0 ? delay(this.#autoHide, duration) : null;
-      return;
+      this.#cancelAutoHide = null;
+      this.#setVisible(false);
     }
-    this.#isVisible = true;
-    this.#lastIcon = icon;
-    this.#lastText = text || "";
-    this.#lastColor = color || "";
-    this.#lastHadActions = hadActions;
-    // Clone from the cached icon template: a repeated icon is a cheap
-    // cloneNode, not an HTML re-parse. aria-hidden lives on the template.
-    this.#icon.textContent = "";
-    const iconEl = icon ? createIconElement(icon, this.#icon.ownerDocument) : null;
-    if (iconEl) {
-      this.#icon.appendChild(iconEl);
-    }
-    this.#icon.hidden = !iconEl;
-    this.#text.textContent = text || "";
-    this.#text.hidden = !text;
+  }
+
+  /** Flip visibility through the reconciler so it stays the single source. */
+  #setVisible(value) {
+    const applied = this.#reconciler.applied;
+    this.#reconciler.apply({ ...(applied ?? {}), visible: value });
+  }
+
+  /** Sole writer for the `actions` field. Buttons are rebuilt wholesale. */
+  #renderActions(actions) {
     if (actions && actions.length) {
       this.#actions.textContent = "";
       const doc = this.#actions.ownerDocument;
@@ -135,19 +163,6 @@ export class ToastManager {
       this.#actions.textContent = "";
       this.#actions.hidden = true;
       this.#toast.style.pointerEvents = "";
-    }
-    this.#toast.style.color = color || "";
-    this.#toast.classList.add("pf-visible");
-    this.#cancelAutoHide?.();
-    this.#cancelAutoHide = duration > 0 ? delay(this.#autoHide, duration) : null;
-  }
-
-  hide(group) {
-    if (group === undefined || group === this.#activeGroup) {
-      this.#cancelAutoHide?.();
-      this.#cancelAutoHide = null;
-      this.#isVisible = false;
-      this.#toast.classList.remove("pf-visible");
     }
   }
 
