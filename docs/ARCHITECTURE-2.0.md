@@ -582,9 +582,14 @@ multiplies states:
 ```js
 const Playback = { IDLE, LOADING, READY, PLAYING, PAUSED, ENDED };
 const Buffer   = { NONE, WAITING, SEEKING };
-const Scope    = { DETACHED, VISIBLE, OCCLUDED, BACKGROUND, PIP };
+const Presence = { DETACHED, VISIBLE, OCCLUDED, BACKGROUND, PIP };
 const Screen   = { NONE, FULLSCREEN };
 ```
+
+`Presence` is what these notes originally called `Scope`. The name moved
+because `Scope` is already this codebase's disposal primitive
+(`src/shared/scope.js`, the thing an activity mints on entry), and every file
+needing both would otherwise import two different meanings of one word.
 
 Scalars alongside: `duration`, `currentTime`, `rate`, `volume`, `muted`,
 `hasTextTrack`, `error`.
@@ -735,15 +740,52 @@ Each is testable, not aspirational.
 
 Each phase is independently shippable and testable.
 
-Phase 1 is landed: `src/shared/engine-host.js` states engine, prerelease-aware
-version, granted realm, and scheduler availability once at construction, and
-`scheduler.js` / `context.js` now ask it for MessageChannel instead of probing
-the same API twice. It is exercised by `tests/engine-host.test.mjs`, and
-`platform/capabilities.json` was updated to match — a probe that moves between
-modules still has to be classified, and the classification follows the file that
-now holds it. Integration coverage reported the same result before and after
-(79 pass, 1 skipped), which is what "no behaviour change" is verified against
-here rather than assumed.
+**Landed so far**
+
+*Phase 1 — L0 EngineHost.* `src/shared/engine-host.js` states engine,
+prerelease-aware version, granted realm, and scheduler availability once at
+construction, and `scheduler.js` / `context.js` now ask it for MessageChannel
+instead of probing the same API twice. It is exercised by
+`tests/engine-host.test.mjs`, and `platform/capabilities.json` was updated to
+match — a probe that moves between modules still has to be classified, and the
+classification follows the file that now holds it. Integration coverage reported
+the same result before and after (79 pass, 1 skipped), which is what "no
+behaviour change" is verified against here rather than assumed.
+
+*Phase 2 — L2 PlayerStatus.* `src/shared/player-status.js` introduces the four
+axes and the scalars beside the existing `createActivity` closures, which were
+left exactly as they were: the playback activity still decides when the media
+clock attaches, and status only records what happened. Nothing consumes it yet,
+so the closures remain the compatibility shim.
+
+Three things are worth recording because they constrain later phases:
+
+- The class has no public setter and no way to express intent. That is the
+  structural half of "observed, never optimistic" — a handler physically cannot
+  write `Playback.PLAYING` on the element's behalf, which is what would render a
+  pause icon for a video whose `play()` was rejected by autoplay policy.
+- `Screen` is fed by shadow.js's single fullscreen gate rather than by its own
+  `fullscreenchange` listener. Adding one would reintroduce the double-listener
+  fan-out that module exists to prevent, so the axis reads the existing SOL.
+- Transitions are applied synchronously but delivered in one microtask, so an
+  edge producing two changes (a `volumechange` moving both `volume` and `muted`)
+  is one commit. A change raised *during* that commit lands in the next one,
+  which `tests/player-status.test.mjs` asserts by parking a flag on the microtask
+  queue rather than by counting await turns.
+
+Every transition carries `cause`, the event that produced it.
+`platform/integration/status-transitions.test.mjs` arms a `pf:status` listener
+and a recorder for every legal cause in the same page-side call, then drives
+play/pause/seek against real media and asserts that no logged change names a
+cause this run never saw fire. That is the "event-sourced rather than
+discovered" proof, measured rather than asserted.
+
+One cross-realm detail is fixed here because it will bite any other module that
+ships an event out of the script's realm: both the `CustomEvent` constructor and
+the `detail` object have to be built in the *element's* realm. A page can hold a
+reference to an object created over here and still be denied reading its
+properties, so a detail passed through as-is arrives and then fails on the first
+field access.
 
 1. **L0 EngineHost.** Centralise engine version, realm, and scheduler
    availability. No behaviour change.

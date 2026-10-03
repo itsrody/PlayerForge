@@ -16,6 +16,7 @@ import { replayFullscreenProvision } from "../shared/context.js";
 import { DOMManager } from "../shared/dom-manager.js";
 import { Scope } from "../shared/scope.js";
 import { createActivity } from "../shared/activity.js";
+import { PlayerStatus } from "../shared/player-status.js";
 import { yield_ } from "../shared/scheduler.js";
 
 /**
@@ -48,6 +49,10 @@ export class Shell {
   #media;
   /** OS media-key facet, null without MediaSession support. */
   #mediaSession = null;
+  /** L2 status: what this player is, observed from its media element. Beside
+   *  the activity below rather than replacing it - the activity still decides
+   *  when the media clock is attached, status only records what happened. */
+  #status = null;
 
   constructor({ video, container, sdk, onDestroy }) {
     this.video = video;
@@ -316,6 +321,18 @@ export class Shell {
       },
       onExit: handler
     });
+    // L2 status, sitting beside that activity rather than replacing it. The
+    // activity above still answers "should the media clock be attached"; this
+    // answers "what is the player", as one queryable value, from the element's
+    // own events only. It writes nothing back: status is observed, never
+    // optimistic, so a rejected play() cannot leave us rendering a pause icon
+    // for a video that never started. Fullscreen comes from shadow.js's single
+    // gate through PlayerStatus's own subscription, not a second listener.
+    this.#status = new PlayerStatus({
+      target: video,
+      doc: document,
+      signal: this.#scope.signal
+    });
     // Expose media state as CSS custom properties on the host so the shadow
     // DOM can style based on playing/paused/muted without crossing the realm
     // boundary. The :playing/:paused/:muted pseudo-classes (which Firefox
@@ -406,6 +423,10 @@ export class Shell {
     this.#panel = null;
     this.#toasts?.destroy();
     this.#toasts = null;
+    // Status has no DOM to tear down, but it holds listeners with or without
+    // the signal and a subscriber list that should not outlive the shell.
+    this.#status?.dispose();
+    this.#status = null;
     // DOM lifecycle: remove elements, disconnect observers, remove
     // listeners, restore attributes/styles — all in one call.
     this.#dom.destroy();

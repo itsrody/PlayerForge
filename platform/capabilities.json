@@ -302,6 +302,18 @@
       ]
     },
     {
+      "id": "custom-event",
+      "api": "CustomEvent",
+      "summary": "Constructs the pf:status event that crosses the realm boundary",
+      "why": "PlayerStatus still serves every importer through subscribe() without it, so only the outer-realm channel is lost - status becomes reachable to module consumers but not to a page holding the same element. Every shipping browser has it, so it is a host probe that degrades rather than a capability with a floor.",
+      "usedBy": [
+        "src/shared/player-status.js"
+      ],
+      "probes": [
+        "globalThis.CustomEvent"
+      ]
+    },
+    {
       "id": "requestAnimationFrame",
       "api": "requestAnimationFrame",
       "summary": "Frame boundary for yield_() and the jank watchdog",
