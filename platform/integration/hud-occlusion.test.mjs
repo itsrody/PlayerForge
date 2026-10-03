@@ -123,6 +123,59 @@ test("a paused player scrolled out of the viewport drops the HUD, and takes it b
   await driver.waitFor(attached, 8000, 50);
 });
 
+/**
+ * §5 invariant 4, page-side half: "Hidden HUD costs no layout or paint".
+ *
+ * The row's stated evidence is a Gecko Profiler reading (`Styles` / `Reflow` /
+ * `Rasterize` flat), and that half stays manual: Firefox exposes no layout or
+ * paint counters to content, so no test in this tree can count them. What a
+ * test can prove is the property that makes them flat - `pf-detached` is
+ * `display: none`, and a display:none subtree is by definition neither laid
+ * out nor painted. A zero-length client rect after a forced document flush is
+ * the observable form of that: the host contributes no box to the layout the
+ * browser just performed.
+ */
+const boxes = () => {
+  document.body.offsetHeight;
+  const host = document.querySelector(".pf-shell");
+  if (!host) return null;
+  const rect = host.getBoundingClientRect();
+  return {
+    display: getComputedStyle(host).display,
+    rects: host.getClientRects().length,
+    width: rect.width,
+    height: rect.height
+  };
+};
+
+test("a detached HUD contributes no layout box, and takes its box back on return", async () => {
+  await boot();
+
+  const shown = await driver.eval(boxes);
+  assert.notEqual(shown.display, "none", "on screen: the HUD is rendered");
+  assert.ok(shown.rects > 0 && shown.width > 0, `attached host is laid out: ${JSON.stringify(shown)}`);
+
+  await scrollPlayerOutOfView();
+  await waitAxis("presence", "occluded");
+  await driver.waitFor(detached, 8000, 50);
+
+  // The flush matters: without it a stale box could still be readable, and
+  // "flat while occluded" is a claim about the layout the browser actually ran.
+  const hidden = await driver.eval(boxes);
+  assert.equal(hidden.display, "none", "pf-detached is a display: none, not an opacity trick");
+  assert.equal(hidden.rects, 0, `no client rects: ${JSON.stringify(hidden)}`);
+  assert.equal(hidden.width, 0, "no width");
+  assert.equal(hidden.height, 0, "no height");
+
+  await driver.eval(() => window.scrollTo(0, 0));
+  await waitAxis("presence", "visible");
+  await driver.waitFor(attached, 8000, 50);
+
+  const back = await driver.eval(boxes);
+  assert.ok(back.rects > 0 && back.width > 0, `the box comes back: ${JSON.stringify(back)}`);
+  assert.notEqual(back.display, "none");
+});
+
 test("a playing player keeps its HUD however far it leaves the viewport", async () => {
   await boot();
 
