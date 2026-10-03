@@ -141,6 +141,90 @@ export default async function runCssLayoutBench(bundle = DEFAULT_BUNDLE) {
       medianMsPerOp: swapTimes[Math.floor(swapTimes.length / 2)],
       spread: (swapTimes[swapTimes.length - 1] - swapTimes[0]) / swapTimes[Math.floor(swapTimes.length / 2)],
     });
+
+    // Benchmark: the identical forced recalc while the HUD is occluded.
+    //
+    // §5 row 4 says a hidden HUD costs no layout or paint. The row above is
+    // the attached cost of that exact op — write a registered custom property
+    // the shipped sheet depends on, then flush — and this is the same op with
+    // the host under `pf-detached`, which the shipped sheet resolves to
+    // `display: none`. A display:none subtree is never laid out or painted, so
+    // what is left of the op is the document's own flush plus a style write
+    // with nothing behind it, and the gap between the two rows is the layout
+    // the HUD was costing.
+    //
+    // The Gecko Profiler's `Styles` / `Reflow` / `Rasterize` markers would say
+    // the same thing directly, and remain the manual reading: Firefox exposes
+    // no layout, paint or longtask counters to content, so the pair of numbers
+    // is what can honestly be measured from this side.
+    //
+    // Reported, not gated. The rows only mean something read together, the
+    // absolute figure is a whole-document flush with a small subtree behind
+    // it, and a gate on the difference would be a gate on machine noise.
+    await driver.eval(() => {
+      // The panel rows above leave focus on a control inside the shell, and
+      // the occlusion rule deliberately keeps a focused HUD up - so without
+      // ending that focus here the wait below would never come back, because
+      // the page would be correctly refusing to detach. Blurring is bench
+      // setup, not a product behaviour being worked around.
+      const host = document.querySelector(".pf-shell");
+      host?.shadowRoot?.activeElement?.blur?.();
+      if (document.activeElement && document.activeElement !== document.body) {
+        document.activeElement.blur();
+      }
+      if (!document.getElementById("pf-bench-spacer")) {
+        const spacer = document.createElement("div");
+        spacer.id = "pf-bench-spacer";
+        spacer.style.height = "4000px";
+        document.body.appendChild(spacer);
+      }
+      window.scrollTo(0, document.documentElement.scrollHeight);
+      return { scrollY: window.scrollY, active: document.activeElement?.tagName };
+    });
+    await driver.waitFor(
+      () => !!document.querySelector(".pf-shell")?.classList.contains("pf-detached"),
+      8000,
+      50
+    );
+
+    const occludedTimes = [];
+    for (let b = 0; b < BATCHES; b++) {
+      const timings = [];
+      for (let i = 0; i < ITERATIONS; i++) {
+        const { perOp } = await driver.amplifiedEval(
+          () => {
+            document.__pfBenchShell = document.querySelector(".pf-shell");
+          },
+          () => {
+            const host = document.__pfBenchShell;
+            host.style.setProperty("--pf-media-paused", "1");
+            void host.offsetHeight;
+            host.style.setProperty("--pf-media-paused", "0");
+            void host.offsetHeight;
+          }
+        );
+        timings.push(perOp);
+      }
+      const batchMedian = timings.sort((a, b) => a - b)[Math.floor(timings.length / 2)];
+      occludedTimes.push(batchMedian);
+    }
+
+    await driver.eval(() => window.scrollTo(0, 0));
+    await driver.waitFor(
+      () => !document.querySelector(".pf-shell")?.classList.contains("pf-detached"),
+      8000,
+      50
+    );
+
+    occludedTimes.sort((a, b) => a - b);
+    results.push({
+      name: "forced style recalc + layout, HUD occluded (amplified)",
+      medianMsPerOp: occludedTimes[Math.floor(occludedTimes.length / 2)],
+      spread:
+        (occludedTimes[occludedTimes.length - 1] - occludedTimes[0]) /
+        occludedTimes[Math.floor(occludedTimes.length / 2)],
+      gateable: false,
+    });
   } finally {
     await driver.destroy();
     await server.stop();

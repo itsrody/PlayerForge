@@ -804,7 +804,7 @@ Each is testable, not aspirational.
 | Zero steady-state main-thread cost when idle | No rAF handle retained while idle: `tests/idle-guard.test.mjs` pins the rAF inventory (two call sites, one re-arming and debug-gated, `yield_()` one-shot) and `platform/integration/idle-cost.test.mjs` asserts an idle shell mutates nothing and raises no `pf:status` |
 | At most one DOM commit per state transition | Count `RenderGate.#commit` |
 | Zero writes for unchanged values | Instrument reconciler writes, diff against applied snapshot |
-| Hidden HUD costs no layout or paint | `pf-detached` is `display: none` and contributes zero client rects after a forced document flush, and gets them back on return (`platform/integration/hud-occlusion.test.mjs`) — a display:none subtree is never laid out or painted |
+| Hidden HUD costs no layout or paint | `pf-detached` is `display: none` and contributes zero client rects after a forced document flush, and gets them back on return (`platform/integration/hud-occlusion.test.mjs`) — a display:none subtree is never laid out or painted. Measured as well as argued: `platform/browser-bench/css-layout.bench.mjs` runs the same amplified forced-recalc op attached and occluded and reports the pair as a non-gated row, with the occluded figure an order of magnitude below the attached one |
 | No self-rearming `postTask` | No `postTask` callback re-arms itself |
 | History and diagnostics never block input | Assert every such write issues at `background` |
 | No forced synchronous layout | `pf/no-forced-layout` (`platform/eslint-rules.mjs`, wired over `src/` by `eslint.config.js`): a layout-property read in the same task as a layout write fails `npm run lint`. Pinned by `tests/lint-rule.test.mjs`, which drives the rule block read back out of the real config |
@@ -816,9 +816,11 @@ exposes no layout, paint or longtask counters to content (157 lists neither
 `longtask` nor `long-animation-frame` in `supportedEntryTypes`, which is why
 the frame-gap watchdog exists at all), and the userscript runs in the add-on's
 isolated realm, which nothing page-side can instrument — the harness control
-channel speaks storage and nothing else. What the tests hold is the mechanism
+channel speaks storage and nothing else. What is held instead is the mechanism
 that reading would confirm: an idle shell writes nothing to the shared DOM,
-and a detached shell has no box for layout or paint to visit.
+and a detached shell has no box for layout or paint to visit — the second of
+those measured directly, since `css-layout.bench.mjs` runs the same
+forced-recalc op attached and occluded and reports the pair.
 
 ## 6. Migration phases
 
