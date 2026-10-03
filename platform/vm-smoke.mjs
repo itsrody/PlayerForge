@@ -39,6 +39,8 @@
  *
  * Usage: node platform/vm-smoke.mjs [path/to/violentmonkey.xpi]
  *        VIOLENTMONKEY_XPI=/path/to/vm.xpi node platform/vm-smoke.mjs
+ * The fixture is fetched, not vendored; AMO serves the current signed release:
+ *        curl -sLO https://addons.mozilla.org/firefox/downloads/latest/violentmonkey/latest.xpi
  * Exits 0 when every check passes, 1 otherwise, and 0 with a SKIP notice when
  * no xpi is supplied (the file is not vendored - it is a large third-party
  * build that does not belong in this repository).

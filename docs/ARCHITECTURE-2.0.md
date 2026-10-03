@@ -1231,6 +1231,12 @@ Lint clean; unit 530 pass (528 before; +2 toast); integration 87 pass,
   intentional.
 - `@resource pfStyle` remains unpinned to the `firefox` branch for CSS hot-fixes.
   Do not pin it without revisiting `esbuild.config.mjs:173-177`.
+- `npm run vm-smoke` is the only check that exercises the shipping target
+  rather than the harness: a real Violentmonkey parsing the banner, resolving
+  the grants, honouring `@run-at`, and injecting into all five embed
+  topologies in the content realm. It runs 19/19 against VM 2.49.0. The xpi is
+  fetched from AMO and never vendored, so it is a release-time command rather
+  than a gate one.
 
 Open item discharged: `@version` in the banner and `package.json` are still
 separately maintained — deliberately, since the runtime reports
