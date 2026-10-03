@@ -1,5 +1,6 @@
 import { delay } from "../../shared/scheduler.js";
 import { HudReconciler } from "../../shared/hud-reconciler.js";
+import { RenderGate } from "../../shared/render-gate.js";
 import { flashElement } from "./animate.js";
 import { button } from "./elements.js";
 import { createIconElement } from "./icons.js";
@@ -28,6 +29,14 @@ import { createIconElement } from "./icons.js";
  * rewrote textContent) because it compared the payload as a whole — the
  * field-by-field diff does, which is the point of routing it.
  *
+ * L4 decides *when*. show() and hide() store the desired snapshot and ask for
+ * one commit at `user-visible`, so N show() calls inside one tick — the scrub
+ * hint repainting on every gesture event — are one apply() rather than N, and
+ * a show() immediately followed by a hide() resolves to whichever state
+ * survived the tick. The desired state is held here rather than read back off
+ * the reconciler, because a request that has not committed yet is not in
+ * `applied`.
+ *
  * Producer convention: durations come from TUNING.toast (flash for
  * completed actions, info for status, action for toasts with buttons,
  * hint for onboarding); sticky gesture toasts pass 0 explicitly and are
@@ -46,6 +55,10 @@ export class ToastManager {
   #actions;
   /** One bindings table: the only writer for each of the pill's five fields. */
   #reconciler;
+  /** Desired snapshot, applied on the next commit; null until the first show. */
+  #snapshot = null;
+  /** L4's coalescer: one commit per tick for every show()/hide() in it. */
+  #gate;
   /** Cancel handle for the pending auto-hide, null when none is scheduled. */
   #cancelAutoHide = null;
   /** Stable auto-hide callback, cached so show() never re-creates a closure. */
@@ -56,7 +69,7 @@ export class ToastManager {
   /** Routing metadata only — the group writes nothing, so it is not a field. */
   #activeGroup = null;
 
-  constructor(hudLayer, dom) {
+  constructor(hudLayer, dom, signal) {
     const doc = hudLayer.ownerDocument;
     const toast = doc.createElement("pf-toast");
     const icon = doc.createElement("span");
@@ -105,18 +118,33 @@ export class ToastManager {
         }
       }
     });
+    // The commit reads the snapshot, never the arguments of the show() that
+    // scheduled it: coalescing is only correct if the last request wins, and
+    // the reconciler's diff is what keeps an identical final state at zero
+    // writes. The shell hands its scope signal in, so a commit cannot land
+    // after the toast's DOM has gone.
+    this.#gate = new RenderGate({
+      commit: () => {
+        if (this.#snapshot) {
+          this.#reconciler.apply(this.#snapshot);
+        }
+      },
+      signal
+    });
   }
 
   show({ icon, text, duration = 0, color, group, actions } = {}) {
     this.#activeGroup = group ?? null;
     // A fresh snapshot per call, normalised so Object.is has a stable shape.
-    this.#reconciler.apply({
+    // Stored rather than applied: the gate decides when the pill is repainted.
+    this.#snapshot = {
       visible: true,
       icon: icon || null,
       text: text || "",
       color: color || "",
       actions: actions?.length ? actions : null
-    });
+    };
+    this.#gate.request("user-visible");
     // Re-arming the timer is unconditional: a repeated show() re-arms even
     // when it wrote nothing, exactly as the old skip path did.
     this.#cancelAutoHide?.();
@@ -131,10 +159,16 @@ export class ToastManager {
     }
   }
 
-  /** Flip visibility through the reconciler so it stays the single source. */
+  /**
+   * Flip visibility through the reconciler so it stays the single source.
+   * Spreads the *desired* snapshot rather than the applied one: a show() still
+   * pending its commit has fields the reconciler has not seen, and folding
+   * them in is what keeps a coalesced show-then-hide from dropping content.
+   */
   #setVisible(value) {
-    const applied = this.#reconciler.applied;
-    this.#reconciler.apply({ ...(applied ?? {}), visible: value });
+    const desired = this.#snapshot ?? this.#reconciler.applied;
+    this.#snapshot = { ...(desired ?? {}), visible: value };
+    this.#gate.request("user-visible");
   }
 
   /** Sole writer for the `actions` field. Buttons are rebuilt wholesale. */
@@ -168,7 +202,10 @@ export class ToastManager {
 
   destroy() {
     // The toast node is the shell manager's to remove (own() at
-    // construction); only the pending auto-hide is ours to cancel.
+    // construction); the auto-hide is ours to cancel, and so is any commit
+    // the gate still owes — the shell's signal has usually taken it already,
+    // but a manager destroyed without one must not write into a dead tree.
+    this.#gate.dispose();
     this.#cancelAutoHide?.();
     this.#cancelAutoHide = null;
   }

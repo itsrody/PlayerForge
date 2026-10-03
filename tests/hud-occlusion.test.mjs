@@ -63,6 +63,19 @@ const setIntersecting = (isIntersecting) => {
 /** One microtask turn - the batch PlayerStatus delivers its commit on. */
 const tick = () => new Promise((resolve) => queueMicrotask(resolve));
 
+/**
+ * One timer turn: the occlusion resolve is *requested* rather than run, so the
+ * class write lands on the gate's task. Every assertion below reads `pf-detached`,
+ * which is why the microtask alone stopped being enough in phase 7.
+ */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** PlayerStatus's commit, then the RenderGate commit it requests. */
+const flush = async () => {
+  await tick();
+  await settle();
+};
+
 /** jsdom exposes visibilityState only as a prototype getter. */
 function setVisibility(doc, hidden) {
   Object.defineProperty(doc, "visibilityState", {
@@ -126,11 +139,11 @@ test("a paused player the viewport cannot see drops the HUD, and takes it back",
   assert.ok(!host.classList.contains("pf-detached"), "on screen: attached");
 
   setIntersecting(false);
-  await tick();
+  await flush();
   assert.ok(host.classList.contains("pf-detached"), "paused + off screen -> out of layout");
 
   setIntersecting(true);
-  await tick();
+  await flush();
   assert.ok(!host.classList.contains("pf-detached"), "back on screen -> attached again");
 
   teardown();
@@ -140,10 +153,10 @@ test("a playing player keeps its HUD even off screen", async () => {
   const { host, video, teardown } = await makeShell();
 
   video.dispatchEvent(new globalThis.Event("playing"));
-  await tick();
+  await flush();
 
   setIntersecting(false);
-  await tick();
+  await flush();
 
   assert.ok(!host.classList.contains("pf-detached"), "the playhead is advancing, so the HUD matters");
   teardown();
@@ -158,7 +171,7 @@ test("focus on a control inside the HUD blocks the detach until it leaves", asyn
   control.focus();
 
   setIntersecting(false);
-  await tick();
+  await flush();
   assert.ok(
     !host.classList.contains("pf-detached"),
     "hiding it now would drop this focus mid-interaction"
@@ -169,7 +182,7 @@ test("focus on a control inside the HUD blocks the detach until it leaves", asyn
   // trigger is dispatched directly: what is under test is that the listener
   // schedules a re-resolve with no geometry change at all.
   control.dispatchEvent(new doc.defaultView.Event("focusout"));
-  await tick();
+  await flush();
   assert.ok(host.classList.contains("pf-detached"), "the focusout trigger re-resolves on its own");
 
   teardown();
@@ -181,7 +194,7 @@ test("the shell's own focus anchor is not focus-within", async () => {
   assert.equal(doc.activeElement, host, "boot parks focus on the host as a keyboard sink");
 
   setIntersecting(false);
-  await tick();
+  await flush();
 
   assert.ok(
     host.classList.contains("pf-detached"),
@@ -195,14 +208,14 @@ test("a hidden tab is an occlusion, not a visibility", async () => {
   const { host, doc, teardown } = await makeShell();
 
   setVisibility(doc, true);
-  await tick();
+  await flush();
   assert.ok(
     host.classList.contains("pf-detached"),
     "on screen but the tab is hidden - not visible to the user either"
   );
 
   setVisibility(doc, false);
-  await tick();
+  await flush();
   assert.ok(!host.classList.contains("pf-detached"), "tab back -> attached");
 
   teardown();
@@ -214,7 +227,7 @@ test("an on-screen player never detaches, whatever else changes", async () => {
   video.dispatchEvent(new globalThis.Event("pause"));
   setVisibility(doc, true);
   setVisibility(doc, false);
-  await tick();
+  await flush();
 
   assert.ok(!host.classList.contains("pf-detached"), "geometry is the conjunct that cannot be skipped");
   teardown();

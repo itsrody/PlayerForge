@@ -8,6 +8,9 @@ globalThis.GM_setValue = () => {};
 const { Shell } = await import("../src/shell/shell.js");
 const { setSetting } = await import("../src/shell/chrome/config.js");
 
+/** One timer turn: the compact rewrite is requested, so it lands on a task. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
 /**
  * Controllable matchMedia fake: records compact-query change notifications
  * and holds a single listener slot so tests can drive a viewport
@@ -151,9 +154,15 @@ test("compact class tracks a live viewport crossing while open", async () => {
   assert.ok(shell.panel.element.classList.contains("pf-compact") === media.matches,
     "build mirrors auto-detect at open");
   media.dispatch(true);
+  assert.ok(
+    shell.panel.element.classList.contains("pf-compact") !== media.matches,
+    "same turn: the crossing is requested, not written - L4 owns the class"
+  );
+  await settle();
   assert.ok(shell.panel.element.classList.contains("pf-compact"),
     "change event applies the class");
   media.dispatch(false);
+  await settle();
   assert.ok(!shell.panel.element.classList.contains("pf-compact"),
     "change event removes the class");
   teardown();
@@ -167,6 +176,7 @@ test("explicit ui.compact setting wins and the listener never flips it", async (
   assert.ok(shell.panel.element.classList.contains("pf-compact"),
     "explicit compact applies at open");
   media.dispatch(false);
+  await settle();
   assert.ok(shell.panel.element.classList.contains("pf-compact"),
     "viewport exit cannot override the explicit setting");
   teardown();

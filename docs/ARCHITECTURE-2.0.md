@@ -694,6 +694,7 @@ Priority routing:
 | --- | --- |
 | Response to a keypress or click | `user-blocking` |
 | HUD commit after a media edge | `user-visible` (default) |
+| Toast pill repaint, HUD occlusion resolve, panel compact crossing | `user-visible` |
 | Commit after a ResizeObserver change | `user-visible` |
 | Resume and history persistence, diagnostics | `background` |
 
@@ -1100,6 +1101,77 @@ Verification:
 
 Lint clean; unit 528 pass (515 before; +12 frame quality, +1 engine-host);
 integration 87 pass, 1 skipped — unchanged.
+
+*Phase 7 — Retire ad-hoc writes.* The three direct-write paths §4 and the
+earlier phases had flagged are now routed through L4, and everything else that
+writes DOM in `src/` is accounted for. They went the same way: one writer
+function, reached inline from the construction seed and from a gate commit for
+every live trigger.
+
+- **Toast.** `show()` and `hide()` store the desired snapshot and request one
+  `user-visible` commit; the commit is the only thing that calls
+  `reconciler.apply()`. The scrub hint repainting on every gesture event was
+  N applies per tick and is now one, and a `show()` immediately followed by a
+  `hide()` resolves to whichever survived the tick. The desired state is held
+  beside the reconciler rather than read off it, because a request that has not
+  committed yet is not in `applied` — and folding it in is what keeps a
+  coalesced show-then-hide from dropping the content it never got to paint.
+- **Panel compact.** `#applyCompact()` is the sole writer for `pf-compact`,
+  reached three ways: the construction seed (inline — initialisation is not a
+  commit), the gate for a live viewport crossing, and `open()`'s ViewTransition
+  update callback, which still writes synchronously because an update callback
+  has to land in the frame the transition snapshots. Before this the class had
+  three ad-hoc writers, each re-reading `#isCompactMode()` for itself; the read
+  now lives inside the one writer.
+- **Occlusion.** `#watchOcclusion()`'s resolve became the gate's commit. Both
+  sources were already deferred, so the gain is in the *read*: a focus move
+  resolved twice, once per edge, each walking focus again, and any status axis
+  change landing in the same tick resolved a third time. All of them are now
+  one commit reading where focus actually ended up. The inline seed stayed, and
+  the `queueMicrotask` the focus edges used to ride is gone — the commit is a
+  task, which is strictly later, so focus has settled by the time it is read.
+
+What was deliberately **not** routed, named rather than left implicit:
+
+- **Construction seeds.** The toast's `pointerEvents`, the panel's roles and
+  aria attributes, `context.js`'s iframe `allow`, history's first render,
+  `filter.js`'s section head layout. Initialisation writes the first frame of
+  state; there is nothing for it to coalesce with.
+- **ViewTransition update callbacks.** `pf-open`, and `pf-compact` inside
+  `open()`. One task later and the opening snapshot paints the wrong state.
+- **Reconciler bindings.** Shell media state, the toast's five fields, the
+  occlusion class — already diffed by L5, and since this phase all three are
+  gated by L4 as well.
+- **Hot paths.** `forge.js` / `actions.js`'s transform, `willChange` and
+  `transition` writes on every pointer move, `forge-track.js`'s per-`cuechange`
+  slot writes, `filter.js`'s per-input `style.filter`. Phase 4 recorded the
+  first two as the case where a generic reconciler would replace a specialised
+  diff with a general one on the one path that is genuinely hot; the filter is
+  the drag's own visual feedback, and the events it would merge are each the
+  latest state rather than a sequence worth collapsing.
+- **Input affordances.** Tab activation, stepper disabled state, `pf-drop-active`
+  over a drag. One class per user action, with no second write in the tick to
+  merge into it.
+
+And "any remaining unconditional rAF": verified against the finished tree
+rather than asserted. `requestAnimationFrame` appears twice in `src/` —
+`scheduler.js`'s `yield_()`, a one-shot with a 50ms backstop that hidden
+documents never take, and `diagnostics.js`'s frame loop, which exists only
+while debug is on. `setInterval` appears once, as the panel's key-hold
+auto-repeat. §1's "no unconditional rAF loop in the shipping path" still holds.
+
+Verification: three test files gained a settle between a mutation and the
+assertion that reads it back — `tests/toast.test.mjs` (which now also asserts
+that `show()` does *not* write in the same turn, so the routing cannot be
+quietly undone), `tests/panel-compact.test.mjs` (the same assertion for a
+viewport crossing), and `tests/hud-occlusion.test.mjs`, whose microtask `tick`
+stopped being enough once the class write moved to a task and now settles too.
+`tests/render-gate.test.mjs` is unchanged: one-commit-per-tick is the gate's
+property and this phase only added producers to it. Integration is unchanged,
+which is the point — the routing is invisible to anything that polls.
+
+Lint clean; unit 530 pass (528 before; +2 toast); integration 87 pass,
+1 skipped — unchanged.
 
 1. **L0 EngineHost.** Centralise engine version, realm, and scheduler
    availability. No behaviour change.

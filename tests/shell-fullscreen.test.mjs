@@ -10,6 +10,9 @@ const { initFsGate, setFullscreen } = await import("./fs-gate.mjs");
 const shadow = await import("../src/shared/shadow.js");
 const { subscribeFullscreen } = shadow;
 const { requestFullscreenProvision, FS_REQUEST_TYPE } = await import("../src/shared/context.js");
+
+/** One timer turn: the toast's writes go through L4, so they land on a task. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 async function makeShell({ embedded = false } = {}) {
   const outer = new JSDOM("<!doctype html><html><body></body></html>", {
     url: "https://www.youtube.com/watch?v=1"
@@ -134,6 +137,7 @@ test("rejected fullscreen request surfaces a blocked hint", async () => {
   const { dom, shell, teardown } = await makeShell();
 
   dom.window.document.dispatchEvent(new dom.window.Event("fullscreenerror"));
+  await settle();
 
   const toast = shell.shellDom.hudLayer.querySelector("pf-toast");
   assert.ok(toast, "toast surface exists");
@@ -147,6 +151,7 @@ test("rejected fullscreen while already fullscreen shows no hint", async () => {
 
   setFullscreen(dom, container);
   dom.window.document.dispatchEvent(new dom.window.Event("fullscreenerror"));
+  await settle();
 
   const toasts = shell.shellDom.hudLayer.querySelectorAll("pf-toast.pf-visible");
   assert.equal(toasts.length, 0, "no blocked hint while already fullscreen");

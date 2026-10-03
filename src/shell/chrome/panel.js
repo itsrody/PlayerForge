@@ -4,6 +4,7 @@ import { GESTURE_EVENTS } from "../inputs/actions.js";
 import { deepestActiveElement, subscribeFullscreen } from "../../shared/shadow.js";
 import { clamp } from "../../shared/primitives.js";
 import { Scope } from "../../shared/scope.js";
+import { RenderGate } from "../../shared/render-gate.js";
 import { el } from "./elements.js";
 import { getSetting } from "./config.js";
 
@@ -251,6 +252,8 @@ export class SettingsPanel {
   #sectionCounter = 0;
   /** All panel subscriptions die with this signal; disposal flag lives here. */
   #scope = new Scope();
+  /** Coalesces the live `pf-compact` rewrite; the transition and seed bypass it. */
+  #compactGate = null;
   /** Live only while the panel is open: Esc + outside-click dismissal. */
   #dismissScope = null;
   /** UA-owned Escape watcher (CloseWatcher), live with #dismissScope. */
@@ -265,9 +268,29 @@ export class SettingsPanel {
       logger.error("panel", "Missing shell DOM - panel not available");
       return;
     }
+    // Created before the DOM so #applyCompact() has somewhere to commit to
+    // from either path, and bound to the panel's own scope so a pending
+    // rewrite cannot fire into a tree destroy() has already emptied.
+    this.#compactGate = new RenderGate({
+      commit: () => this.#applyCompact(),
+      signal: this.#scope.signal
+    });
     this.#buildDom();
     this.#wireEvents();
     logger.log("panel", "Panel ready");
+  }
+
+  /**
+   * Sole writer for the `pf-compact` class, reached three ways:
+   *
+   *   - the construction seed, inline, because initialisation is not a commit;
+   *   - the gate's commit, for a live viewport crossing (§4 L4);
+   *   - `open()`'s ViewTransition update callback, synchronously, because an
+   *     update callback has to write in the frame the transition snapshots —
+   *     one task later and the opening state would paint at the wrong size.
+   */
+  #applyCompact() {
+    this.#root?.classList.toggle("pf-compact", this.#isCompactMode());
   }
 
   /**
@@ -314,7 +337,7 @@ export class SettingsPanel {
     }
     this.#armDismissal();
     this.#runWithViewTransition("pf-panel-open", () => {
-      this.#root.classList.toggle("pf-compact", this.#isCompactMode());
+      this.#applyCompact();
       this.#root.classList.add("pf-open");
       const activeTab = this.#root.querySelector(".pf-panel-tab-active") || this.#closeButton;
       if (activeTab && deepestActiveElement(this.#shellHost) !== activeTab) {
@@ -671,11 +694,6 @@ export class SettingsPanel {
     root.setAttribute("aria-modal", "false");
     root.setAttribute("aria-label", "PlayerForge controls");
 
-    // Compact mode: apply class based on setting or auto-detect mobile viewport.
-    if (this.#isCompactMode()) {
-      root.classList.add("pf-compact");
-    }
-
     const header = document.createElement("div");
     header.className = "pf-panel-header";
 
@@ -701,6 +719,10 @@ export class SettingsPanel {
     root.appendChild(body);
     this.#hudLayer.appendChild(root);
     this.#root = root;
+    // Compact seed, after #root exists because #applyCompact reads it. Still
+    // inline: the tree has not been handed to the panel yet, so there is no
+    // frame to coalesce with.
+    this.#applyCompact();
     this.#body = body;
     this.#closeButton = closeButton;
 
@@ -716,7 +738,9 @@ export class SettingsPanel {
     // consults the query. Listener dies with the panel's scope signal.
     matchMedia(COMPACT_MEDIA_QUERY).addEventListener("change", () => {
       if (this.isOpen) {
-        this.#root.classList.toggle("pf-compact", this.#isCompactMode());
+        // Requested rather than written: two crossings inside one tick are one
+        // toggle to the state that survived it, not two flips the user sees.
+        this.#compactGate?.request("user-visible");
       }
     }, { signal });
     this.#shellHost.addEventListener(GESTURE_EVENTS.panel, (event) => {

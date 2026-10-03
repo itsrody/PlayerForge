@@ -95,7 +95,7 @@ export class Shell {
     await yield_();
 
     this.#panel = new SettingsPanel(this);
-    this.#toasts = new ToastManager(this.#shellDom.hudLayer, this.#dom);
+    this.#toasts = new ToastManager(this.#shellDom.hudLayer, this.#dom, this.#scope.signal);
     this.#inputs = new InputForge(this.video, this.container, this.shellHost);
     attachInputActions(this, this.shellHost, this.#inputs.signal);
     this.#resume = new ResumeTracker(this);
@@ -420,7 +420,9 @@ export class Shell {
    *     in both places because the layer is always an ancestor of a focused
    *     descendant while the host is not - and a duplicate trigger costs
    *     nothing, because the reconciler diffs.
-   *     `focusout` fires before the element loses focus, hence the microtask.
+   *     `focusout` fires before the element loses focus, so the resolve cannot
+   *     run in the handler - it runs on the gate's task, after focus has
+   *     settled for that turn.
    *     Hiding the anchor does drop its focus to the page, which is why that
    *     case is allowed to detach at all: the key gate already accepts
    *     `document.body` as a target, so shortcuts survive the round trip.
@@ -430,9 +432,13 @@ export class Shell {
    * about to paint. Read from status rather than from `video.paused` so the
    * rule answers the same question §4 asks - "when status is ...".
    *
-   * Deliberately synchronous rather than routed through L4: both sources are
-   * already deferred (IntersectionObserver is posted as a task, focus settles
-   * in a microtask), and retiring the remaining direct writes is phase 7.
+   * Routed through L4 as of phase 7. Both sources were already deferred
+   * (IntersectionObserver is posted as a task, focus arrives in its own turn),
+   * so deferring the write costs nothing observable - and the gain is in the
+   * *read*: a focus move used to resolve twice, once per edge, each walking
+   * focus again, and any status axis change landing in the same tick resolved
+   * a third time. All of them are one commit reading where focus actually
+   * ended up. The seed still runs inline: construction is not a transition.
    */
   #watchOcclusion() {
     const host = this.#shellDom?.host;
@@ -457,14 +463,15 @@ export class Shell {
       const focusWithin = focusTarget !== host && isInsideShell(host, focusTarget);
       hud.apply({ detached: idle && occluded && !focusWithin });
     };
-    const onFocus = () => queueMicrotask(resolve);
+    const gate = new RenderGate({ commit: resolve, signal: this.#scope.signal });
+    const onFocus = () => gate.request("user-visible");
     const listen = (node) => {
       node.addEventListener("focusin", onFocus, { signal: this.#scope.signal, passive: true });
       node.addEventListener("focusout", onFocus, { signal: this.#scope.signal, passive: true });
     };
     listen(hudLayer);
     listen(host);
-    status.subscribe(resolve, this.#scope.signal);
+    status.subscribe(() => gate.request("user-visible"), this.#scope.signal);
     resolve();
   }
 
