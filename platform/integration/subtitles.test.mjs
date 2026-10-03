@@ -1,7 +1,7 @@
 /**
  * Subtitles integration tests.
  *
- * Tests the subtitle track lifecycle in a real Firefox 157 instance:
+ * Tests the subtitle track lifecycle in a real Firefox instance on the 157+ floor:
  * native blob <track> parsing, the rebuild-based sync offset, and the
  * custom renderer driven by native cuechange events.
  */

@@ -16,11 +16,12 @@
 import { Builder } from "selenium-webdriver";
 import { readFileSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createServer as createHttpServer } from "node:http";
 import { ControlServer, buildExtension } from "./native.mjs";
+import { resolveFirefoxTarget } from "./target.mjs";
 
 /** Promise-based sleep. */
 function delay(ms) {
@@ -29,37 +30,6 @@ function delay(ms) {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(HERE, "..", "..");
-
-/**
- * Resolve the Firefox binary path.
- * Order: FIREFOX_PATH env - known macOS locations - `firefox` on PATH -
- * null (geckodriver's own default resolution).
- */
-function resolveFirefoxBinary() {
-  const envPath = process.env.FIREFOX_PATH;
-  if (envPath && existsSync(envPath)) {
-    return envPath;
-  }
-  const candidates = [
-    "/Applications/Firefox.app/Contents/MacOS/firefox",
-    join(homedir(), "Applications", "Firefox.app", "Contents", "MacOS", "firefox"),
-    "/Applications/Firefox Developer Edition.app/Contents/MacOS/firefox",
-    "/Applications/Firefox Nightly.app/Contents/MacOS/firefox",
-  ];
-  for (const p of candidates) {
-    if (existsSync(p)) return p;
-  }
-  try {
-    const onPath = execFileSync("which", ["firefox"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"]
-    }).trim();
-    if (onPath && existsSync(onPath)) return onPath;
-  } catch {
-    // Not on PATH either - fall through to geckodriver's default.
-  }
-  return null;
-}
 
 /**
  * Build the geckodriver service. A geckodriver already on disk is preferred:
@@ -261,9 +231,9 @@ export class FirefoxDriver {
     for (const [key, value] of Object.entries(preferences)) {
       ffOptions.setPreference(key, value);
     }
-    const binary = resolveFirefoxBinary();
-    if (binary !== null) {
-      ffOptions.setBinary(binary);
+    const target = resolveFirefoxTarget();
+    if (target.binary !== null) {
+      ffOptions.setBinary(target.binary);
     }
 
     const driver = await new Builder()

@@ -26,6 +26,31 @@
     "minFirefox": 157,
     "manager": "Violentmonkey MV2 2.49+"
   },
+  "testTarget": {
+    "_comment": [
+      "What the harness launches, which is NOT target.minFirefox. The floor above",
+      "is the oldest release every capability in this file may assume and is a",
+      "promise to users; it only moves when a capability genuinely requires it,",
+      "and tests/capabilities.test.mjs fails the moment one does. The test",
+      "target is a property of the machine, so it lives here as a declaration of",
+      "intent and is resolved for real by platform/harness/target.mjs, which",
+      "prints the channel, version and binary it actually got on every run.",
+      "",
+      "Bleeding-edge-first on purpose: a dev or nightly build surfaces a Gecko",
+      "regression months before release, so a harness that quietly fell back to",
+      "an older release channel would report green for a build nobody ships on.",
+      "The floor is still enforced at launch - a resolved browser below 157",
+      "fails the run rather than passing on a promise it cannot keep."
+    ],
+    "preferredChannel": "dev",
+    "channelOrder": ["dev", "nightly", "release"],
+    "supportedChannels": ["dev", "nightly", "release", "custom", "path", "geckodriver"],
+    "overrideEnv": "FIREFOX_PATH",
+    "pinEnv": "FIREFOX_CHANNEL",
+    "resolver": "platform/harness/target.mjs",
+    "verifiedOn": "Firefox Developer Edition 158.0b3",
+    "why": "Developer Edition is the fastest channel that still runs a real, signed-profile install with userScripts and a temporary add-on, which is what the native harness needs to register the bundle in the isolated content realm. Nightly is accepted for the same reason; a plain release build is the fallback, not the target."
+  },
   "managerContract": {
     "injectionContext": {
       "value": "content",

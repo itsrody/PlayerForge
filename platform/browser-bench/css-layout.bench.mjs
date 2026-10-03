@@ -1,7 +1,7 @@
 /**
  * CSS layout browser benchmark.
  *
- * Measures panel toggle and style recalculation cost in Firefox 157.
+ * Measures panel toggle and style recalculation cost in a real Firefox on the 157+ floor.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

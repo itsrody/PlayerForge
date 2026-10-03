@@ -1,7 +1,7 @@
 /**
  * Shell boot browser benchmark.
  *
- * Measures the time from navigation to HUD ready in a real Firefox 157 instance.
+ * Measures the time from navigation to HUD ready in a real Firefox instance on the 157+ floor.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

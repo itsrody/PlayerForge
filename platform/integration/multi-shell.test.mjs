@@ -1,5 +1,5 @@
 /**
- * Two players in ONE document, in a real Firefox 157 instance.
+ * Two players in ONE document, in a real Firefox instance on the 157+ floor.
  *
  * The registry used to be a single slot that the newest shell overwrote, and a
  * page really can hold more than one player: the kernel adopts every

@@ -46,7 +46,6 @@
 import { Builder } from "selenium-webdriver";
 import firefox from "selenium-webdriver/firefox.js";
 import { readFileSync, existsSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -59,6 +58,7 @@ import {
   createSwitchboardChildPage,
   createSwitchboardPage,
 } from "./harness/firefox.mjs";
+import { resolveFirefoxTarget } from "./harness/target.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -67,19 +67,6 @@ const BUNDLE = join(ROOT, "dist", "playerforge.user.js");
 const BANNER_VERSION = /^\/\/\s*@version\s+(\S+)/m;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function resolveFirefoxBinary() {
-  if (process.env.FIREFOX_PATH && existsSync(process.env.FIREFOX_PATH)) {
-    return process.env.FIREFOX_PATH;
-  }
-  for (const p of [
-    "/Applications/Firefox.app/Contents/MacOS/firefox",
-    join(homedir(), "Applications", "Firefox.app", "Contents", "MacOS", "firefox"),
-  ]) {
-    if (existsSync(p)) return p;
-  }
-  return null;
-}
 
 const xpi = process.argv[2] || process.env.VIOLENTMONKEY_XPI;
 if (!xpi || !existsSync(xpi)) {
@@ -107,7 +94,7 @@ const ffOptions = new firefox.Options()
   .setPreference("browser.shell.checkDefaultBrowser", false)
   .setPreference("datareporting.policy.dataSubmissionEnabled", false)
   .setPreference("toolkit.telemetry.reportingpolicy.firstRun", false);
-const bin = resolveFirefoxBinary();
+const bin = resolveFirefoxTarget().binary;
 if (bin) ffOptions.setBinary(bin);
 
 const driver = await new Builder()

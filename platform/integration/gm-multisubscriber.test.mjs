@@ -1,5 +1,5 @@
 /**
- * The GM value-change listener table, in a real Firefox 157 instance.
+ * The GM value-change listener table, in a real Firefox instance on the 157+ floor.
  *
  * This exists because a whole class of bug was invisible here. Every
  * two-shell test in the suite put its players in SEPARATE frames, and each frame

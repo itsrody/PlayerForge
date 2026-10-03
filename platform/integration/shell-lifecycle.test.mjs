@@ -1,7 +1,7 @@
 /**
  * Shell lifecycle integration tests.
  *
- * Verifies the full userscript lifecycle in a real Firefox 157 instance:
+ * Verifies the full userscript lifecycle in a real Firefox instance on the 157+ floor:
  * video detection → shell construction → HUD layer → settings panel.
  */
 import test from "node:test";

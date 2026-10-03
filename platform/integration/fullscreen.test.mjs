@@ -1,7 +1,7 @@
 /**
  * Fullscreen integration tests.
  *
- * Tests the real Fullscreen API behavior in Firefox 157.
+ * Tests the real Fullscreen API behavior in a real Firefox on the 157+ floor.
  */
 import test from "node:test";
 import assert from "node:assert/strict";

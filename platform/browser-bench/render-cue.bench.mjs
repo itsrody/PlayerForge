@@ -1,7 +1,7 @@
 /**
  * Render cue browser benchmark.
  *
- * Measures subtitle cue DOM operation cost in Firefox 157.
+ * Measures subtitle cue DOM operation cost in a real Firefox on the 157+ floor.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

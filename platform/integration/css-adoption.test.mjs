@@ -1,7 +1,7 @@
 /**
  * CSS adoption integration tests.
  *
- * Verifies the constructable stylesheet injection pipeline in Firefox 157.
+ * Verifies the constructable stylesheet injection pipeline in a real Firefox on the 157+ floor.
  */
 import test from "node:test";
 import assert from "node:assert/strict";

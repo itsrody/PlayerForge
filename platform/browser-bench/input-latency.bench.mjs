@@ -1,7 +1,7 @@
 /**
  * Input latency browser benchmark.
  *
- * Measures pointer event → gesture CustomEvent dispatch latency in Firefox 157.
+ * Measures pointer event → gesture CustomEvent dispatch latency in a real Firefox on the 157+ floor.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

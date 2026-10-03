@@ -13,6 +13,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
+import { assertMeetsFloor, formatTarget, resolveFirefoxTarget } from "./harness/target.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(HERE, "..");
@@ -45,6 +46,29 @@ function formatMs(ms) {
 
 function separator() {
   console.log("  " + "─".repeat(60));
+}
+
+// ── Browser target ──────────────────────────────────────────────────
+
+/**
+ * Announce the browser this run will drive.
+ *
+ * Printed once, before anything launches, because an integration or benchmark
+ * result is only evidence about the engine that produced it. A green run that
+ * never said whether it was on a 157 release or a 158 beta cannot be told apart
+ * from one that silently fell back to whatever geckodriver found.
+ */
+function printTarget() {
+  let target;
+  try {
+    target = resolveFirefoxTarget();
+    assertMeetsFloor(target);
+  } catch (err) {
+    console.error(`\n  ${err.message}`);
+    process.exit(1);
+  }
+  log(`Browser target: ${formatTarget(target)}`);
+  return target;
 }
 
 // ── Node.js unit tests ──────────────────────────────────────────────
@@ -261,6 +285,13 @@ async function runBrowserBench(bundlePath) {
 
 // ── Main ────────────────────────────────────────────────────────────
 log(`PlayerForge platform runner — mode: ${mode}`);
+
+// Only the modes that actually launch a browser pay for the probe, and only
+// those need the engine named out loud.
+if (mode === "integration" || mode === "browser-bench" || mode === "all" || mode === "ci") {
+  printTarget();
+  separator();
+}
 
 switch (mode) {
   case "test":

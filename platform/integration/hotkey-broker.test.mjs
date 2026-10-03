@@ -1,5 +1,5 @@
 /**
- * One page-wide keyboard broker for N players, in a real Firefox 157 instance.
+ * One page-wide keyboard broker for N players, in a real Firefox instance on the 157+ floor.
  *
  * The keyboard used to be per-player: every InputForge attached its own
  * document-capture keydown/keyup pair and re-ran the same arbitration, which

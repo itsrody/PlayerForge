@@ -1,7 +1,7 @@
 /**
  * Input gestures integration tests.
  *
- * Tests real pointer event dispatch and gesture recognition in Firefox 157.
+ * Tests real pointer event dispatch and gesture recognition in a real Firefox on the 157+ floor.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
