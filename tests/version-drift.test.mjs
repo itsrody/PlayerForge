@@ -9,7 +9,9 @@ import { fileURLToPath } from "node:url";
  * `package.json` are separately maintained, and nothing derived one from the
  * other. The runtime reports `GM_info.script.version`, so the banner is what
  * an installed copy claims to be; package.json is what the release notes and
- * the version bump itself act on. Two hand-written numbers.
+ * the version bump itself act on. Two hand-written numbers, plus the copy of
+ * the package version package-lock.json keeps for itself - which drifted to
+ * 0.7.0 and stayed there until the 2.0 release looked.
  *
  * The banner is read from its source in esbuild.config.mjs (the single version
  * source, per that file's own comment) and from the committed artifact in
@@ -44,4 +46,14 @@ test("the banner declares @version exactly once", () => {
   const source = readFileSync(join(ROOT, "esbuild.config.mjs"), "utf8");
   const lines = source.match(/^\s*\/\/\s*@version\s.*$/gm) ?? [];
   assert.equal(lines.length, 1, `expected one // @version line, found ${lines.length}`);
+});
+
+test("package-lock.json carries the same version as the package it locks", () => {
+  const version = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version;
+  const lock = JSON.parse(readFileSync(join(ROOT, "package-lock.json"), "utf8"));
+  // The lock keeps its own copy of the package version in two places, and
+  // neither is derived from package.json - which is how the 2.0 release found
+  // it still saying 0.7.0 from an older bump.
+  assert.equal(lock.version, version, "the lockfile's top-level version");
+  assert.equal(lock.packages[""].version, version, "the lockfile's root package version");
 });

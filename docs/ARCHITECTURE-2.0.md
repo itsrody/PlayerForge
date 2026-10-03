@@ -1226,8 +1226,8 @@ Lint clean; unit 530 pass (528 before; +2 toast); integration 87 pass,
    remaining unconditional rAF.
 
 All seven are landed, each with its own commit and its own verification at
-the end of §6. Taken together, as of the last phase: lint clean (including
-`pf/no-forced-layout`), unit 546 pass, integration 90 pass / 1 skipped,
+the end of §6. Taken together, as of 2.0.0: lint clean (including
+`pf/no-forced-layout`), unit 547 pass, integration 90 pass / 1 skipped,
 14 browser-benchmark rows green, node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
