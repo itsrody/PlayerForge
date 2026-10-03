@@ -886,7 +886,9 @@ What was **not** routed, each checked rather than assumed:
 - Toasts and the panel's `pf-compact` toggle are asserted synchronously in
   `tests/shell-fullscreen.test.mjs` and `tests/panel-compact.test.mjs` —
   dispatch, then assert, no await between them. Deferring them changes observed
-  behaviour, which is phase 7's job, not a priority tweak.
+  behaviour, which is phase 7's job, not a priority tweak. Phase 7 did exactly
+  that and nothing more: each file now settles between the dispatch and the
+  assertion, and no assertion itself changed.
 - Resume's pause flush is asserted the same way (`tests/resume-tracker.test.mjs`
   writes on `pause` and reads the store in the same turn), and `destroy()` has
   to save before the scope it saves against is gone. Splitting "scheduled save"
@@ -999,9 +1001,12 @@ subtree. Four decisions are worth recording:
   `true` and the observer — which runs after construction — settles it. The
   correction is one transition with `cause: "intersection"`; a repeat report of
   the same geometry is not a second one.
-- **The resolve is synchronous, not routed through L4.** Both inputs are already
-  deferred (an IntersectionObserver callback is posted as a task, focus settles
-  in a microtask), and retiring the remaining direct writes is phase 7's job.
+- **The resolve was synchronous, not routed through L4.** Both inputs are
+  already deferred (an IntersectionObserver callback is posted as a task, focus
+  settles in a microtask), and retiring the remaining direct writes was phase
+  7's job. Phase 7 routed it: both live sources request one `user-visible`
+  commit now, and the construction seed still resolves inline — the shape the
+  shell takes today.
 - **Focus listeners sit on both the hud layer and the host.** The layer is
   always an ancestor of a focused descendant and the host is not, and a
   duplicate trigger is free because the reconciler diffs.
@@ -1227,8 +1232,13 @@ Lint clean; unit 530 pass (528 before; +2 toast); integration 87 pass,
 - `@resource pfStyle` remains unpinned to the `firefox` branch for CSS hot-fixes.
   Do not pin it without revisiting `esbuild.config.mjs:173-177`.
 
-Open item carried forward: `@version` in the banner and `package.json` are still
-separately maintained. A drift guard test is worth adding during phase 1.
+Open item discharged: `@version` in the banner and `package.json` are still
+separately maintained — deliberately, since the runtime reports
+`GM_info.script.version` and package.json is what a version bump acts on — so
+`tests/version-drift.test.mjs` pins the two together, and pins the committed
+`dist/` bundle against the banner both are built from. A bump without a
+rebuild now fails the unit run instead of shipping a bundle that reports the
+old number.
 
 ## 9. Source references
 
