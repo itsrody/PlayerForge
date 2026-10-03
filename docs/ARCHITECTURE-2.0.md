@@ -1,6 +1,9 @@
 # PlayerForge 2.0 — Gecko-native engine architecture
 
-Status: design proposal. No implementation yet.
+Status: implemented. §4's layer model and all seven migration phases in §6
+have landed, and every invariant in §5 is pinned by a test. The design text
+below is written as it was reasoned out; where an implementation forced a
+change, the section says so at the point it happened.
 Target: Gecko 157+ (floor), tested on Firefox Developer Edition 158.0b3.
 Manager contract: Violentmonkey MV2 2.49+.
 
@@ -136,7 +139,8 @@ honestly and verified rather than assumed:
 2. Gecko genuinely batches notifications tree-wise, so *coalescing* writes has a
    real, documented payoff, independent of whether any single write is a no-op.
 3. The magnitude of the win is **an open question this project should measure**,
-   not a settled fact. See the `playerforge 2.0 write-cost` measurement in §5.
+   not a settled fact. Measured, and reported as the `write-cost` pair in §5:
+   `platform/browser-bench/write-cost.bench.mjs`.
 
 ### 2.3 Observer delivery timing
 
@@ -804,6 +808,7 @@ Each is testable, not aspirational.
 | Zero steady-state main-thread cost when idle | No rAF handle retained while idle: `tests/idle-guard.test.mjs` pins the rAF inventory (two call sites, one re-arming and debug-gated, `yield_()` one-shot) and `platform/integration/idle-cost.test.mjs` asserts an idle shell mutates nothing and raises no `pf:status` |
 | At most one DOM commit per state transition | Count `RenderGate.#commit` |
 | Zero writes for unchanged values | Instrument reconciler writes, diff against applied snapshot |
+| Compare-before-write pays for itself | `platform/browser-bench/write-cost.bench.mjs` runs the same five-field pill update to an identical final state twice — written unconditionally (what the HUD did before L5) and diffed first (what it does now) — in interleaved batches, reported as a non-gated pair. The win is the ratio: ≈3.4× per unchanged apply, which is §2.2's open question answered rather than assumed |
 | Hidden HUD costs no layout or paint | `pf-detached` is `display: none` and contributes zero client rects after a forced document flush, and gets them back on return (`platform/integration/hud-occlusion.test.mjs`) — a display:none subtree is never laid out or painted. Measured as well as argued: `platform/browser-bench/css-layout.bench.mjs` runs the same amplified forced-recalc op attached and occluded and reports the pair as a non-gated row, with the occluded figure an order of magnitude below the attached one |
 | No self-rearming `postTask` | No `postTask` callback re-arms itself |
 | History and diagnostics never block input | Assert every such write issues at `background` |
@@ -1208,6 +1213,13 @@ Lint clean; unit 530 pass (528 before; +2 toast); integration 87 pass,
    presentation edges.
 7. **Retire ad-hoc writes.** Delete leftover direct-write paths and any
    remaining unconditional rAF.
+
+All seven are landed, each with its own commit and its own verification at
+the end of §6. Taken together, as of the last phase: lint clean (including
+`pf/no-forced-layout`), unit 546 pass, integration 89 pass / 1 skipped,
+12 browser-benchmark rows green, node bench green, and `vm-smoke` 19/19
+against Violentmonkey 2.49.0 — the one check that exercises the shipping
+bundle in the manager it ships for.
 
 ## 7. Gecko-specific decisions, and what they rule out
 
