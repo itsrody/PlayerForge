@@ -1,4 +1,5 @@
 import js from "@eslint/js";
+import { pfRules } from "./platform/eslint-rules.mjs";
 
 export default [
   js.configs.recommended,
@@ -169,6 +170,14 @@ export default [
       "no-shadow-restricted-names": "error",
       "no-useless-assignment": "error"
     }
+  },
+  {
+    // §5's "No forced synchronous layout" is stated as a lint rule in the
+    // invariant table, so it is one. src/ only: the platform side has no DOM
+    // writes to read back from, and the rule's whole premise is the pair.
+    files: ["src/**/*.js"],
+    plugins: { pf: { rules: pfRules } },
+    rules: { "pf/no-forced-layout": "error" }
   },
   {
     // Node-side harness and test tooling.

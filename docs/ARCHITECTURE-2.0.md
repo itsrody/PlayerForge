@@ -807,7 +807,7 @@ Each is testable, not aspirational.
 | Hidden HUD costs no layout or paint | Profiler `Styles` / `Reflow` / `Rasterize` flat while occluded |
 | No self-rearming `postTask` | No `postTask` callback re-arms itself |
 | History and diagnostics never block input | Assert every such write issues at `background` |
-| No forced synchronous layout | Lint rule banning a layout-property read in the same task as its write |
+| No forced synchronous layout | `pf/no-forced-layout` (`platform/eslint-rules.mjs`, wired over `src/` by `eslint.config.js`): a layout-property read in the same task as a layout write fails `npm run lint`. Pinned by `tests/lint-rule.test.mjs`, which drives the rule block read back out of the real config |
 
 ## 6. Migration phases
 
