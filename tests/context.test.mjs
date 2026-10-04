@@ -906,6 +906,64 @@ test("a present-but-small video commits the probe to the observer", async () => 
   assert.ok(constructions >= 1, "present video escalated the probe to the observer");
 });
 
+test("a size-gate failure is re-checked when the box changes", async () => {
+  const { window: win } = dom("<video></video>", "https://example.com/player");
+  globalThis.window = win;
+  globalThis.document = win.document;
+  globalThis.MutationObserver = win.MutationObserver;
+
+  // jsdom has no layout: pin the rect the probe reads, then flip it the way a
+  // style/class write would - a change that produces no childList record, so
+  // the mutation feed can never re-run the gate on its own.
+  const video = win.document.querySelector("video");
+  let box = { width: 60, height: 40 };
+  video.getBoundingClientRect = () => box;
+
+  // Capture the probe's ResizeObserver instead of the inert loader shim, so
+  // the observation callback can be driven by hand the way Gecko delivers it.
+  const RealRO = globalThis.ResizeObserver;
+  const observed = new Set();
+  let roCallback = null;
+  class CapturingRO {
+    constructor(cb) {
+      roCallback = cb;
+    }
+    observe(target) {
+      observed.add(target);
+    }
+    unobserve(target) {
+      observed.delete(target);
+    }
+    disconnect() {
+      observed.clear();
+    }
+  }
+
+  let fires = 0;
+  try {
+    globalThis.ResizeObserver = CapturingRO;
+    installVideoProbe({ minWidth: 100, minHeight: 60, onCandidate: () => fires++ });
+    // The static DOM-ready check runs asynchronously under jsdom.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(observed.size, 1, "the failed candidate is watched");
+    assert.equal(fires, 0, "small box does not qualify");
+
+    // A resize that leaves it below the gate: still watched, still no fire.
+    roCallback([{ target: video }]);
+    assert.equal(fires, 0, "still-small box does not qualify");
+    assert.ok(observed.has(video), "a still-failing candidate stays watched");
+
+    // The reveal: only the box changed, nothing about the DOM tree did.
+    box = { width: 640, height: 360 };
+    roCallback([{ target: video }]);
+    assert.equal(fires, 1, "qualification on a box change fires the probe");
+    assert.equal(observed.size, 0, "the watch is dropped once qualified");
+  } finally {
+    globalThis.ResizeObserver = RealRO;
+  }
+});
+
 test("context timeout constant stays sane", () => {
   assert.ok(CTX_REQUEST_TIMEOUT_MS >= 1000 && CTX_REQUEST_TIMEOUT_MS <= 10000);
 });

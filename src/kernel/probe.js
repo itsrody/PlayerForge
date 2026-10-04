@@ -27,12 +27,15 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
   let escalated = false;
   let offMutations = null;
   let stopEvents = null;
+  let sizeWatcher = null;
 
   const detach = () => {
     stopEvents?.();
     stopEvents = null;
     offMutations?.();
     offMutations = null;
+    sizeWatcher?.disconnect();
+    sizeWatcher = null;
   };
 
   const finish = () => {
@@ -58,6 +61,46 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
     });
   };
 
+  /**
+   * Watch a candidate that failed the size gate, so the gate can re-run when
+   * the box actually changes.
+   *
+   * Without this the failure is final unless something else happens to fire:
+   * the shared mutation feed observes childList only, so a style or class
+   * change that grows or reveals an existing video produces no record - and
+   * the media tap cannot re-fire an event that is already spent (a video that
+   * ran loadeddata while hidden, or has no src at all, will never fire again).
+   * Verified on the live bundle: a Plyr video that fails the gate and is then
+   * grown by a style-only write is never re-checked, while a fresh qualifying
+   * insertion on the same page boots immediately - the candidate was missed
+   * for the life of the document.
+   *
+   * ResizeObserver observes the box itself, which is exactly the signal the
+   * gate is about; Gecko holds observed targets weakly per the spec (unobserve
+   * happens on qualification, and a detached candidate simply drops out when
+   * GC collects it), so watching failures cannot pin elements. The re-check
+   * runs at observation delivery - after layout, never inside the page's
+   * mutation checkpoint (the shared feed dispatches past it via yield_ in
+   * scheduleFlush), so this adds no forced-layout work to page script.
+   */
+  const watchGateFailure = (video) => {
+    if (!sizeWatcher) {
+      sizeWatcher = new ResizeObserver((entries) => {
+        if (done) {
+          return;
+        }
+        for (const { target } of entries) {
+          if (!meetsMinSize(target, minWidth, minHeight)) {
+            continue;
+          }
+          sizeWatcher.unobserve(target);
+          consider(target);
+        }
+      });
+    }
+    sizeWatcher.observe(video);
+  };
+
   const consider = (video) => {
     if (done) {
       return;
@@ -67,7 +110,9 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
       return;
     }
     // A real <video> exists but isn't player-sized yet - commit to the
-    // observer so SDK-inserted siblings that may qualify are caught.
+    // observer so SDK-inserted siblings that may qualify are caught, and
+    // watch this one's box so a later in-place grow/reveal re-runs the gate.
+    watchGateFailure(video);
     escalate();
   };
 
