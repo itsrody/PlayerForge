@@ -83,7 +83,7 @@ const FORMAT_MAP = {
 
 // Monomorphic literal comparison. A keyed inner loop (values[key]/preset[key]
 // over ALL_KEYS) hands both load sites nine different property names, which is
-// the shape Gecko cannot fold into one cache. Measured in Gecko 157
+// the shape Gecko cannot fold into one cache. Measured in Gecko 158
 // (platform/browser-bench/jit-shape.bench.mjs), per call over two passes: 1.69us
 // against 0.49us on the deepest scan the function can be driven into, and
 // 0.76us against 0.47us on the mid-drag early exit - 3.4x and 1.6x.

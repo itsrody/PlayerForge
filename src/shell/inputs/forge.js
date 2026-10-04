@@ -213,7 +213,7 @@ function unregisterKeyboardEngine(adapter) {
  * iterator per call, and Warp is not willing to scalar-replace that the way it
  * will an array iterator.
  *
- * Measured in Gecko 157 (platform/browser-bench/jit-shape.bench.mjs), removing
+ * Measured in Gecko 158 (platform/browser-bench/jit-shape.bench.mjs), removing
  * it is worth 729-737 ns -> 107 ns per call, 6.8-6.9x - the Map arm being by
  * far the noisiest row in that file (±21% across batches against ~1% for the
  * array side), so treat the ratio as "large" and not as 6.9x exactly. Even so
@@ -713,7 +713,7 @@ export class InputForge {
       // Math.hypot, deliberately. The obvious sqrt(dx*dx + dy*dy) rewrite -
       // which this same file already uses at the pointer-distance check below,
       // and which the chromium branch measured at 1.6x on V8 - was measured on
-      // Gecko 157 (platform/browser-bench/jit-shape.bench.mjs) at 1.03-1.04x:
+      // Gecko 158 (platform/browser-bench/jit-shape.bench.mjs) at 1.03-1.04x:
       // 112 ns against 108 ns per call. SpiderMonkey compiles hypot straight
       // through; the loop is bound by the pointer reads around it, not the
       // distance. Kept as hypot because it is overflow-safe and the difference
@@ -945,7 +945,7 @@ export class InputForge {
           // The per-move transform is this base joined to a translateY of the
           // live drag. Neither half can change once the stroke has latched, so
           // the joined prefix is built here rather than re-derived behind a
-          // ternary on every pointermove. Measured in Gecko 157
+          // ternary on every pointermove. Measured in Gecko 158
           // (platform/browser-bench/jit-shape.bench.mjs): 35 ns/move against 16
           // for the cached prefix, 2.2x - small, but it keeps two of the three
           // string concats out of the gesture loop.

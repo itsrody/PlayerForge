@@ -19,7 +19,7 @@
  * content realm the bytecode came from.
  *
  * So the honest claim these rows license is narrow and specific: **the shape
- * costs X in Gecko 157**. Not "PF's filter is X times faster". A row earns the
+ * costs X in Gecko 158**. Not "PF's filter is X times faster". A row earns the
  * right to change `src/` because the fixture is a faithful copy of the shape
  * that code already has, and the win is applied there on that basis.
  *

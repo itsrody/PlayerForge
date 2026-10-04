@@ -396,11 +396,11 @@ any future performance work in this tree may be justified.
 **A number from another engine is not evidence for a change here.** The sibling
 `chromium` branch ran five waves of micro-optimisation against Node 26.9 / V8
 14.6. Its figures are V8 figures: SpiderMonkey has its own inline caches and
-its own Warp tiering. Re-pricing the same candidate shapes on Gecko 157 through
+its own Warp tiering. Re-pricing the same candidate shapes on Gecko 158 through
 `platform/browser-bench/jit-shape.bench.mjs` moved every one of them — and moved
 two of them to nothing:
 
-| candidate shape | V8 said | Gecko 157 says | taken |
+| candidate shape | V8 said | Gecko 158 says | taken |
 | --- | --- | --- | --- |
 | unroll `matchPreset`'s keyed load | 8.6× | 3.4× deep scan / 1.6× mid-drag | yes |
 | `x ** 1.5` → `x * sqrt(x)` | 1.6× | 1.4× | yes |

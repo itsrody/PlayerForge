@@ -150,7 +150,7 @@ const SCRUB_SENSITIVITY = TUNING.controller.scrubSensitivity / 150;
 /*
  * `x ** 1.5` is a Math.pow call, and this line runs once per coalesced pointer
  * move - the hottest single expression in the tree. Since 1.5 is a half, the
- * curve is x*sqrt(x): a multiply and a sqrt. Measured in Gecko 157
+ * curve is x*sqrt(x): a multiply and a sqrt. Measured in Gecko 158
  * (platform/browser-bench/jit-shape.bench.mjs): 47 ns/eval through pow against
  * 34 ns for the sqrt form, 1.4x across two passes. That is a small absolute
  * number - about 13ns per move, or ~0.8us per second of dragging - and it is
