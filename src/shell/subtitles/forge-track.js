@@ -277,9 +277,12 @@ export class ForgeTrack {
     if (!active) {
       return;
     }
+    const slots = this.#slots;
+    const lastRender = this.#lastRender;
+    const lastActive = this.#lastActive;
     const count = Math.min(active.length, MAX_SLOTS);
     for (let i = 0; i < count; i++) {
-      const slot = this.#slots[i];
+      const slot = slots[i];
       if (!slot) {
         continue;
       }
@@ -289,7 +292,7 @@ export class ForgeTrack {
       const position = typeof cue.position === "number" ? cue.position : 50;
       const align = cue.align || "center";
       const vert = cue.vertical || "";
-      const prev = this.#lastRender[i];
+      const prev = lastRender[i];
       // Numeric/string dirty checks: skip string construction when values
       // match the previous render - avoids template-literal allocation per
       // slot per cuechange on the hot subtitle path.
@@ -342,13 +345,13 @@ export class ForgeTrack {
       if (slot.hidden) {
         slot.hidden = false;
       }
-      this.#lastActive[i] = true;
+      lastActive[i] = true;
     }
-    for (let i = count; i < this.#slots.length; i++) {
-      const slot = this.#slots[i];
+    for (let i = count; i < slots.length; i++) {
+      const slot = slots[i];
       if (!slot.hidden) {
         slot.hidden = true;
-        this.#lastActive[i] = false;
+        lastActive[i] = false;
       }
     }
   }

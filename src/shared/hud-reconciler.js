@@ -118,8 +118,11 @@ export class HudReconciler {
       return false;
     }
     const prev = this.#applied;
+    const fields = this.#fields;
+    const bindings = this.#bindings;
     let wrote = false;
-    for (const field of this.#fields) {
+    for (let i = 0; i < fields.length; i++) {
+      const field = fields[i];
       const next = snapshot[field];
       // The first apply diffs against undefined, so a field whose first value
       // is itself undefined is skipped: nothing was ever rendered, so there is
@@ -129,7 +132,7 @@ export class HudReconciler {
       if (Object.is(next, before)) {
         continue;
       }
-      this.#bindings[field](next, before, snapshot);
+      bindings[field](next, before, snapshot);
       this.#writes += 1;
       wrote = true;
     }

@@ -63,6 +63,7 @@ function canonical(priority) {
 
 export class RenderGate {
   #commit;
+  #task = () => this.#run();
   #controller = new AbortController();
   #pending = false;
   #priority = DEFAULT_PRIORITY;
@@ -138,7 +139,7 @@ export class RenderGate {
     }
     this.#pending = true;
     this.#priority = next;
-    this.#handle = postTask(() => this.#run(), {
+    this.#handle = postTask(this.#task, {
       priority: next,
       signal: this.#controller.signal
     });

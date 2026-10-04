@@ -296,9 +296,10 @@ export class PlayerStatus {
     if (this.#disposed) {
       return;
     }
+    const listeners = this.#listeners;
     for (const change of batch) {
       this.#dispatch(change);
-      for (const cb of [...this.#listeners]) {
+      for (const cb of [...listeners]) {
         try {
           cb(change);
         } catch (err) {
