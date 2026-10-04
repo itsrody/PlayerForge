@@ -27,6 +27,21 @@ function decimalsOf(step) {
   return dot === -1 ? 0 : str.length - dot - 1;
 }
 
+/**
+ * `10 ** decimals` is recomputed on every call rather than hoisted per widget.
+ * That reads like an oversight and is not one: measured in Gecko 157
+ * (platform/browser-bench/jit-shape.bench.mjs) the hoisted-factor form is
+ * 16.7 ns against 16.7 ns per call - a wash, across two passes. `decimals` is
+ * an integer exponent, so SpiderMonkey turns the power into a scale rather than
+ * a Math.pow call. The chromium branch hoisted it on V8 evidence and gained
+ * nothing here.
+ *
+ * The sibling question in this file is the `numText` round trip below, which
+ * pushes a number through String() and back through parseFloat() to give
+ * commit() one code path. That is a real string allocation per nudge, but it is
+ * 13/s while a chevron is held and it buys a single commit path; it was not
+ * measured separately because it is not a shape the JIT can fold.
+ */
 function roundTo(value, decimals) {
   const factor = 10 ** decimals;
   return Math.round(value * factor) / factor;

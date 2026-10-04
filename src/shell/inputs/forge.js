@@ -204,8 +204,26 @@ function unregisterKeyboardEngine(adapter) {
  * Reusable scratch for the first two live pointers. The pinch path runs on
  * every two-finger move, so reading the pair into this single object (instead
  * of [...values()].slice(0,2) - two array allocations per move) keeps the hot
- * loop allocation-free for the JIT. Mutated in place; callers must read it
+ * loop free of result allocation. Mutated in place; callers must read it
  * immediately.
+ *
+ * "Free of result allocation" is the honest claim, and an earlier version of
+ * this comment said the loop was allocation-free outright. It never was: the
+ * `for (const point of pointers.values())` head still allocates one Map
+ * iterator per call, and Warp is not willing to scalar-replace that the way it
+ * will an array iterator.
+ *
+ * Measured in Gecko 157 (platform/browser-bench/jit-shape.bench.mjs), removing
+ * it is worth 729-737 ns -> 107 ns per call, 6.8-6.9x - the Map arm being by
+ * far the noisiest row in that file (±21% across batches against ~1% for the
+ * array side), so treat the ratio as "large" and not as 6.9x exactly. Even so
+ * it is still the wrong trade. #pointers is a Map at ~20 call sites, one of
+ * which (#cancelPointers) walks `.keys()` in insertion order to emit
+ * per-pointer cancels; backing it with an array instead means reimplementing
+ * ordered add/remove/size across all of them to save well under a microsecond,
+ * on a path that only runs during a two-finger drag. The chromium branch never
+ * took this one either. The ratio is large and the cost is negligible:
+ * recorded here so it does not get re-proposed as an oversight.
  */
 const firstTwoPointers = { x0: 0, y0: 0, x1: 0, y1: 0 };
 
@@ -383,6 +401,7 @@ export class InputForge {
   #swiping = false;
   #swipeDirection = null;
   #swipeBaseTransform = "";
+  #swipeTransformPrefix = "";
   #lastSwipeDrag = NaN;
   #lastSwipeTransform = "";
 
@@ -691,6 +710,14 @@ export class InputForge {
       return;
     }
     const scaleDelta =
+      // Math.hypot, deliberately. The obvious sqrt(dx*dx + dy*dy) rewrite -
+      // which this same file already uses at the pointer-distance check below,
+      // and which the chromium branch measured at 1.6x on V8 - was measured on
+      // Gecko 157 (platform/browser-bench/jit-shape.bench.mjs) at 1.03-1.04x:
+      // 112 ns against 108 ns per call. SpiderMonkey compiles hypot straight
+      // through; the loop is bound by the pointer reads around it, not the
+      // distance. Kept as hypot because it is overflow-safe and the difference
+      // is noise.
       (Math.hypot(firstTwoPointers.x1 - firstTwoPointers.x0, firstTwoPointers.y1 - firstTwoPointers.y0) -
         this.#pinchStartDistance) /
       this.#pinchStartDistance;
@@ -915,6 +942,16 @@ export class InputForge {
           this.#gestureFsActive = true;
           this.#swipeDirection = y > this.#startY ? "down" : "up";
           this.#swipeBaseTransform = this.#video.style.transform || "";
+          // The per-move transform is this base joined to a translateY of the
+          // live drag. Neither half can change once the stroke has latched, so
+          // the joined prefix is built here rather than re-derived behind a
+          // ternary on every pointermove. Measured in Gecko 157
+          // (platform/browser-bench/jit-shape.bench.mjs): 35 ns/move against 16
+          // for the cached prefix, 2.2x - small, but it keeps two of the three
+          // string concats out of the gesture loop.
+          this.#swipeTransformPrefix = this.#swipeBaseTransform
+            ? this.#swipeBaseTransform + " translateY("
+            : "translateY(";
           // Promote the video to a compositor layer the moment a down-drag
           // latches so the per-move translateY below tracks on the compositor
           // (pointer rate) instead of forcing a re-rasterizing style recalc
@@ -940,9 +977,7 @@ export class InputForge {
         event.stopImmediatePropagation();
         const drag = y - this.#startY;
         if (drag !== this.#lastSwipeDrag) {
-          const t = this.#swipeBaseTransform
-            ? this.#swipeBaseTransform + " translateY(" + drag + "px)"
-            : "translateY(" + drag + "px)";
+          const t = this.#swipeTransformPrefix + drag + "px)";
           if (t !== this.#lastSwipeTransform) {
             this.#video.style.transform = t;
             this.#lastSwipeTransform = t;

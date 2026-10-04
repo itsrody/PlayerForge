@@ -147,6 +147,23 @@ const SCRUB_SLOW_FULL_WIDTH_SECONDS = TUNING.scrub.velocity.slowFullWidthSeconds
 const SCRUB_FAST_FULL_WIDTH_FRACTION = TUNING.scrub.velocity.fastFullWidthFraction;
 const SCRUB_SENSITIVITY = TUNING.controller.scrubSensitivity / 150;
 
+/*
+ * `x ** 1.5` is a Math.pow call, and this line runs once per coalesced pointer
+ * move - the hottest single expression in the tree. Since 1.5 is a half, the
+ * curve is x*sqrt(x): a multiply and a sqrt. Measured in Gecko 157
+ * (platform/browser-bench/jit-shape.bench.mjs): 47 ns/eval through pow against
+ * 34 ns for the sqrt form, 1.4x across two passes. That is a small absolute
+ * number - about 13ns per move, or ~0.8us per second of dragging - and it is
+ * kept for the shape, not the latency: it keeps a foreign call out of the
+ * innermost gesture loop.
+ *
+ * Gated on the exact configured exponent, and TUNING is never written to (it is
+ * read-only config, so the branch folds at tier-up), but the pow form stays as
+ * the fallback so retuning the curve cannot silently change the shape of the
+ * hot path.
+ */
+const SCRUB_CURVE_IS_SQRT = SCRUB_EXPONENT === 1.5;
+
 /* - Per-shell action state - */
 
 /* get() is stateFor(shell); release() is its teardown half, so the pool is
@@ -525,7 +542,8 @@ export function attachInputActions(shell, host, signal) {
     // Sampled live each move, the seek amount tracks the hand's current
     // velocity in real time and scales with content length.
     const v = Math.abs(detail.velocity);
-    const t = Math.min(1, (v / SCRUB_KNEE_PX_PER_S) ** SCRUB_EXPONENT);
+    const x = v / SCRUB_KNEE_PX_PER_S;
+    const t = Math.min(1, SCRUB_CURVE_IS_SQRT ? x * Math.sqrt(x) : x ** SCRUB_EXPONENT);
     const gain = state.scrubSlowGain + (state.scrubFastGain - state.scrubSlowGain) * t;
     const deltaSeconds = detail.dx * gain * state.scrubSensitivity;
     // The stroke latched above, so duration is stable - use the latched-seek

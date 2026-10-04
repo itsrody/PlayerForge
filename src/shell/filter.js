@@ -81,20 +81,45 @@ const FORMAT_MAP = {
   tint: (v) => `${v > 0 ? "+" : ""}${v}`
 };
 
+// Monomorphic literal comparison. A keyed inner loop (values[key]/preset[key]
+// over ALL_KEYS) hands both load sites nine different property names, which is
+// the shape Gecko cannot fold into one cache. Measured in Gecko 157
+// (platform/browser-bench/jit-shape.bench.mjs), per call over two passes: 1.69us
+// against 0.49us on the deepest scan the function can be driven into, and
+// 0.76us against 0.47us on the mid-drag early exit - 3.4x and 1.6x.
+//
+// The early exit is priced separately because it is the common case and it is
+// much cheaper than the deep scan: a mid-drag brightness still mismatches at
+// ALL_KEYS[0] for nearly every preset, so the keyed sites are rarely reached
+// more than once. Anyone quoting the 3.4x as the cost of this path is quoting
+// the preset-select path.
+//
+// The sibling chromium branch reported 8.6x for this same rewrite, but that was
+// Node 26.9 / V8 14.6. Gecko's number is smaller, and Gecko's number is the
+// one this branch can quote.
+//
+// Field order mirrors ALL_KEYS. If a filter key is added, this and ALL_KEYS
+// have to move together - the filter-key tests cover the behaviour, and the
+// benchmark row is what says whether the rewrite is still worth having.
+function presetMatches(values, preset) {
+  return (
+    values.brightness === preset.brightness &&
+    values.contrast === preset.contrast &&
+    values.saturate === preset.saturate &&
+    values.hue === preset.hue &&
+    values.grayscale === preset.grayscale &&
+    values.sepia === preset.sepia &&
+    values.invert === preset.invert &&
+    values.temperature === preset.temperature &&
+    values.tint === preset.tint
+  );
+}
+
 function matchPreset(values) {
-  // Index loops, no closure: matchPreset runs on every stepper change and
+  // Index loop, no closure: matchPreset runs on every stepper change and
   // preset select, so neither Object.entries() nor .every() may allocate.
   for (let i = 0; i < PRESET_ENTRIES.length; i++) {
-    const preset = PRESET_ENTRIES[i][1];
-    let hit = true;
-    for (let j = 0; j < ALL_KEYS.length; j++) {
-      const key = ALL_KEYS[j];
-      if (values[key] !== preset[key]) {
-        hit = false;
-        break;
-      }
-    }
-    if (hit) {
+    if (presetMatches(values, PRESET_ENTRIES[i][1])) {
       return PRESET_ENTRIES[i][0];
     }
   }

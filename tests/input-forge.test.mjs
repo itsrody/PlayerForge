@@ -963,6 +963,89 @@ test("swipe-down drag promotes a compositor layer, released on restore", () => {
   dom.window.close();
 });
 
+test("swipe-down drag builds its transform from a prefix cached at latch", () => {
+  // The per-move transform is the latched base joined to a translateY of the
+  // live drag. The base cannot change mid-stroke, so it is joined once at the
+  // latch rather than re-derived per move; these pin the resulting string, and
+  // pin that it does not accumulate across moves (a per-move re-derivation
+  // that appended to itself would stack translateY() terms).
+  const { dom, video, zone, host } = makeEnv();
+  stubFullscreen(dom, true);
+  const controller = new InputForge(video, zone, host);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 405, y: 260 }));
+  assert.equal(video.style.transform, "translateY(60px)", "no base transform to prepend");
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 405, y: 280 }));
+  assert.equal(video.style.transform, "translateY(80px)", "drag advances by the live delta");
+  assert.equal(
+    video.style.transform.match(/translateY\(/g).length,
+    1,
+    "the cached prefix is reused, not appended to"
+  );
+
+  controller.destroy();
+  dom.window.close();
+});
+
+test("swipe-down drag prepends the latched base transform exactly once", () => {
+  const { dom, video, zone, host } = makeEnv();
+  stubFullscreen(dom, true);
+  // A prior inline transform is the prefix the drag composes onto, and it is
+  // what easeTransformTo restores on release.
+  video.style.transform = "rotate(3deg)";
+  const controller = new InputForge(video, zone, host);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 405, y: 260 }));
+  assert.equal(
+    video.style.transform,
+    "rotate(3deg) translateY(60px)",
+    "the latched base leads the drag transform"
+  );
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 405, y: 280 }));
+  assert.equal(
+    video.style.transform.match(/rotate\(3deg\)/g).length,
+    1,
+    "the base appears once however many moves have run"
+  );
+
+  controller.destroy();
+  dom.window.close();
+});
+
+test("a second swipe stroke rebuilds its prefix instead of reusing the last", () => {
+  // The prefix is a cached-at-latch value, so the invariant that matters is
+  // that it is rebuilt every stroke and not carried over. A first stroke
+  // against a rotated base would otherwise leave that base glued onto the
+  // second stroke's transform.
+  const { dom, video, zone, host } = makeEnv();
+  stubFullscreen(dom, true);
+  video.style.transform = "rotate(3deg)";
+  const controller = new InputForge(video, zone, host);
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 405, y: 260 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 405, y: 300 }));
+  assert.match(video.style.transform, /rotate\(3deg\)/, "first stroke carries the base");
+
+  // The restore eases back to the base, so the second stroke latches against
+  // whatever the element actually holds now.
+  video.style.transform = "";
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 405, y: 260 }));
+  assert.equal(
+    video.style.transform,
+    "translateY(60px)",
+    "the previous stroke's prefix was rebuilt, not carried over"
+  );
+
+  controller.destroy();
+  dom.window.close();
+});
+
 test("fill pinch owns object-fit: contain and restores it on clear", () => {
   const { dom, video, host } = makeEnv();
   stubFullscreen(dom, true);
