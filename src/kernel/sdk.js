@@ -55,16 +55,6 @@ export const MIN_VIDEO_WIDTH = 100;
 export const MIN_VIDEO_HEIGHT = 60;
 
 /**
- * Repeat-query memo: discovery calls findSdkForVideo + findContainer on the
- * same element back to back, and SPA frameworks re-ask about surviving
- * videos. WeakMap keys die with their videos - session-only, never persisted.
- *
- * Entries are stamped with the video's parent at fill time and re-validated on
- * read; see isMatchFresh.
- */
-const matchCache = new WeakMap();
-
-/**
  * Reusable composed-ancestry scratch: the match loop is fully synchronous and
  * never lets the array escape (callers keep only `el`/`record`/`hops`, never
  * the chain itself), so one array serves every full-scan instead of allocating
@@ -139,11 +129,20 @@ function isMatchFresh(video, entry) {
   return anchorStillMatches(video, entry.best.el, entry.best.hops);
 }
 
+/**
+ * Full ancestry scan for the owning SDK's record, or null when unregistered.
+ *
+ * Deliberately uncached. This used to keep a second WeakMap of its own, and it
+ * was dead weight: `matchSdk` had exactly one caller, and that caller consults
+ * its own descriptor memo first, so this function only ever ran on a
+ * descriptor-miss - which is precisely the case where the second memo was
+ * guaranteed stale by the identical parent check. Every read was a miss and
+ * every write was unreachable, so the map cost an entry and an object per
+ * adopted video and a second freshness check (potentially a bounded re-walk of
+ * the ancestry) on every re-query after a re-parenting, and saved no scans.
+ * The descriptor memo below is the only cache this path needs.
+ */
 function matchSdk(video) {
-  const cached = matchCache.get(video);
-  if (cached && isMatchFresh(video, cached)) {
-    return cached.best;
-  }
   // Single composed walk (uBO's one-pass-over-tokens shape): the old code
   // re-walked ancestry once per anchor via composedClosest, then walked
   // again per hit to count hops. Chain index IS the hop count, so one pass
@@ -171,9 +170,6 @@ function matchSdk(video) {
         }
       }
     }
-  }
-  if (best) {
-    matchCache.set(video, { best, parent: video.parentNode ?? null });
   }
   return best;
 }
