@@ -69,7 +69,7 @@ npm run vm-smoke -- <xpi>    # real Violentmonkey; xpi fetched from AMO into a
 ```
 
 Sanity numbers (they drift; a run reporting very different totals is suspect):
-unit `547`, integration `91 / 90 pass / 1 skipped`, browser-bench `14` rows,
+unit `552`, integration `91 / 90 pass / 1 skipped`, browser-bench `14` rows,
 vm-smoke `19/19`.
 
 `node --test` with **no file list is wrong in this repo**: Node then discovers
@@ -84,7 +84,9 @@ src/entry.js            bundle entry — NOT where the version lives
 src/kernel/             contract, lifecycle, sdk, menus, guard, probe, registry
 src/shared/             the layers: engine-host (L0), player-status (L2),
                         render-gate (L4), hud-reconciler (L5), plus scheduler,
-                        diagnostics, storage, dom-manager, scope, timing, tuning
+                        diagnostics, storage, dom-manager, scope, timing, tuning,
+                        context.js (the ancestor/iframe bridge — second-most-
+                        touched file in the tree, and easy to miss)
 src/shell/              UI: shell.js, chrome/ (panel, toast, history, icons),
                         inputs/, subtitles/ (forge-track, forgevtt, section),
                         media.js, resume.js, register.js
@@ -101,6 +103,10 @@ bench/                  pure-CPU node benchmarks
 docs/ARCHITECTURE-2.0.md  the contract (§0–§9)
 ```
 
+`src/shared/activity.js` holds `createActivity()` — the "passive until an edge
+fires" unit L1 composes — and `src/shared/scope.js` the disposal primitive. Both
+are load-bearing and neither is a layer of its own.
+
 Find things with `fd`, not by browsing:
 
 ```sh
@@ -116,9 +122,12 @@ fd -t d -d1 platform
    A bump is: edit the banner → `npm run build`. Done without the rebuild, the
    unit run fails rather than shipping a stale number.
 2. **`dist/` is tracked on purpose** (§8). Browser gates call `ensureBundle()`,
-   so a gate run leaves the tree dirty — expected, not a failure. Regenerated
-   artifacts are committed at release time, never on incidental rebuilds, and
-   `@resource pfStyle` stays unpinned (see `esbuild.config.mjs:173-177`).
+   so a gate run leaves the tree dirty — expected, not a failure. Commit a
+   regenerated bundle **with the source change that produced it**, once the
+   gates have run, so the committed artifact is the one the last green gate
+   measured. Don't leave it behind a src edit, and don't commit a rebuild
+   nobody looked at either. `@resource pfStyle` stays unpinned (see
+   `esbuild.config.mjs:173-177`).
 3. **Two worlds.** WebDriver `executeScript` and devtools see the page world;
    PF runs in its realm-isolated userscript world. Probing `window.PlayerForge`
    or `window.GM_*` page-side legitimately reports nothing — the honest boot

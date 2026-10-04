@@ -38,7 +38,7 @@ not a rewrite.
 Evidence that the idle-cost goal is already largely met:
 
 - `setInterval` appears exactly once in the whole tree, at
-  `src/shell/chrome/panel.js:101`, as a key-hold auto-repeat. That is a
+  `src/shell/chrome/panel.js:102`, as a key-hold auto-repeat. That is a
   user-driven input affordance, not polling.
 - `requestAnimationFrame` appears only in `src/shared/diagnostics.js` (a
   diagnostic frame-gap probe, debug-gated) and in `scheduler.js`'s `yield_()`.
@@ -577,18 +577,41 @@ L1 composes it rather than replacing it. Sources:
 | Source | Mechanism | Note |
 | --- | --- | --- |
 | Media | `<video>` events via `createActivity` | Gecko media state machine fires these; no polling |
-| Visibility | `IntersectionObserver` + `visibilityState` + PiP events | callbacks are post-task, which is correct here |
-| Layout | `ResizeObserver` | handler must stay trivial; it can trigger further layout |
+| Visibility | `IntersectionObserver` + `visibilityState` | callbacks are post-task, which is correct here |
+| Layout | `ResizeObserver` | **no production site** — see below |
 | Frame | `requestVideoFrameCallback` | coarse only (§2.5); re-armed only while unpaused, cancelled on pause/seek/end. Landed with phase 6 as the edge `watchFrameQuality()` samples on, with the flush window as the fallback when an element has no rVFC |
 | Lifecycle | `pagehide` / `pageshow` / scope abort | teardown trigger |
 
 Every listener registers with `{ passive: true, signal }` so teardown is native.
 
+Two rows are aspirational rather than shipped, and both are load-bearing to
+record rather than quietly delete:
+
+- **`ResizeObserver` has no caller.** The priority table it belongs to is
+  exercised by `render-gate.test.mjs`, but nothing in `src/` observes element
+  size, because every layout question this fork asks is answered by status
+  (`Playback`, `Presence`) or by CSS (`pf-detached`'s `display: none`). The one
+  mention in `src/` is a comment (`src/shell/inputs/forge.js:798`).
+- **PiP is gone, not pending.** Picture-in-picture was removed outright
+  (`a5bc9fb`, "remove picture-in-picture entirely"), so the earlier draft's "+
+  PiP events" has no event to name. `Presence.PIP` survives as an enum member
+  with no writer, alongside `Presence.DETACHED` — `player-status.js:69` records
+  why both are named but undriven.
+
+One structural caveat: L1 has no single owner. Visibility is instantiated
+twice — `player-status.js:440` for the `Presence` axis, and an independent
+observer at `resume.js:686` gating off-screen saves. The two answer different
+questions (what is the player's status versus should we churn storage for a
+video the user cannot see) and their lifetimes differ, so folding them would
+couple the resume cadence to the status graph. The single-source discipline L0
+and L5 apply is deliberately not applied here, and that is a choice rather than
+an oversight.
+
 ### L2 — PlayerStatus
 
 Today `isActive()` closures are authored independently at each `createActivity`
-call site (`src/shell/shell.js:309`, `src/shell/resume.js:702`,
-`src/shared/shadow.js:73`). Nothing answers "what is this player's status right
+call site (`src/shell/shell.js:326`, `src/shell/resume.js:702`,
+`src/shared/shadow.js:105`). Nothing answers "what is this player's status right
 now" as a single queryable value.
 
 L2 introduces orthogonal axes rather than one large enum, so adding an axis never
@@ -611,6 +634,16 @@ Scalars alongside: `duration`, `currentTime`, `rate`, `volume`, `muted`,
 
 Each transition emits exactly one typed event carrying `from` and `to`.
 Subscribers receive the change; nobody re-diffs the whole status.
+
+That event has *two* deliveries, not one, and the second is the reason most of
+the axis surface exists. `subscribe()` callbacks fire in-realm, and the same
+change is dispatched as a `pf:status` CustomEvent on the `<video>`
+(`player-status.js:325`) so the **page world** can read status across the
+sandbox boundary — which is the only consumer of `Buffer`, `Screen`, `duration`,
+`rate`, `volume`, `muted`, `hasTextTrack` and `error`. In-tree exactly one
+subscriber exists (`shell.js:474`, feeding the occlusion resolve), and it reads
+two of the ten fields. The other eight are carried for the page, so "no in-tree
+consumer" is the expected shape rather than dead code.
 
 Invariant: one transition produces at most one scheduled commit.
 
@@ -651,6 +684,34 @@ One per adopted `<video>`. Owns a `Scope`, the status graph, the signal
 subscriptions, and the render gate registration. Disposal is the existing
 `Scope`, so `pagehide`, kernel teardown, and SPA re-injection all collapse into
 one `dispose()`.
+
+**Not landed as a class, and not needed as one.** `Shell` (`src/shell/shell.js`)
+already *is* the per-`<video>` owner: it holds `#scope`, `#status`, two
+`RenderGate`s, and every sub-component, and `destroy()` (`shell.js:510`) fans out
+to exactly the single `dispose()` this section describes. Extracting a
+`PlayerSession` would have been a rename with no second implementation behind
+it, so §6's seven phases never opened one — the one layer in the §4 diagram with
+no module of its own.
+
+Three consequences worth recording, because each is a limit on what the rest of
+the layers can assume:
+
+- **Status is private to the shell.** `Shell` exposes no `get status()`, so
+  "owns the status graph" does not mean "publishes it". The input layer,
+  subtitles, panel and resume each hold their own references to the `<video>`
+  rather than a status handle. Widening this is the one change that would make
+  L2 generally useful in-tree, and it is deliberately not done: only the
+  occlusion resolve needs status today, and it is inside the shell.
+- **The gate is not one-per-session.** `Shell` registers two — media-state
+  (`shell.js:379`) and occlusion (`shell.js:466`) — because they have different
+  priorities' worth of coalescing and different snapshot shapes. `ToastManager`
+  (`toast.js:126`) and `SettingsPanel` (`panel.js:274`) each own a further gate
+  on their own scope, so the tree has four `RenderGate` constructions in total.
+  "The render gate registration" (singular) is the sketch's simplification.
+- **`Scope.child()` has no production caller.** The optional child scope §2's
+  layout describes is implemented and covered by `tests/scope.test.mjs:76`, but
+  nothing in `src/` uses it; disposal nesting is done by passing one `signal`
+  down instead.
 
 ### L4 — RenderGate
 
@@ -805,19 +866,45 @@ Each is testable, not aspirational.
 
 | Invariant | Verification |
 | --- | --- |
-| Zero steady-state main-thread cost when idle | No rAF handle retained while idle: `tests/idle-guard.test.mjs` pins the rAF inventory (two call sites, one re-arming and debug-gated, `yield_()` one-shot) and `platform/integration/idle-cost.test.mjs` asserts an idle shell mutates nothing and raises no `pf:status` |
+| Zero steady-state main-thread cost when idle | No rAF handle retained while idle: `tests/idle-guard.test.mjs` pins the rAF inventory (exactly two files hold a call, one re-arming and debug-gated, `yield_()` one-shot) and `platform/integration/idle-cost.test.mjs` asserts an idle shell mutates nothing and raises no `pf:status` |
 | At most one DOM commit per state transition | Count `RenderGate.#commit` |
 | Zero writes for unchanged values | Instrument reconciler writes, diff against applied snapshot |
 | Compare-before-write pays for itself | `platform/browser-bench/write-cost.bench.mjs` runs the same five-field pill update to an identical final state twice — written unconditionally (what the HUD did before L5) and diffed first (what it does now) — in interleaved batches, reported as a non-gated pair. The win is the ratio: ≈3.4× per unchanged apply, which is §2.2's open question answered rather than assumed |
 | Hidden HUD costs no layout or paint | `pf-detached` is `display: none` and contributes zero client rects after a forced document flush, and gets them back on return (`platform/integration/hud-occlusion.test.mjs`) — a display:none subtree is never laid out or painted. Measured as well as argued: `platform/browser-bench/css-layout.bench.mjs` runs the same amplified forced-recalc op attached and occluded and reports the pair as a non-gated row, with the occluded figure an order of magnitude below the attached one. The profiler reading the row started as is taken too, by `platform/integration/profiler-occlusion.test.mjs`: the same media-neutral drive sampled idle and driving, on screen and detached, where `SetDisplayList` is at least 4× lower detached and the drive moves it by nothing at all |
-| No self-rearming `postTask` | No `postTask` callback re-arms itself |
-| History and diagnostics never block input | Assert every such write issues at `background` |
+| No self-rearming `postTask` | `tests/posttask-guard.test.mjs`: the tree's `postTask` call-site inventory is pinned by file, and every self-arm is required to carry a `delay` — the line Trap 1 turns on, since a delayed self-arm is a timer that interleaves and an undelayed one is the measured starvation chain. The one self-arm in the tree is `context.js`'s ancestor handshake, floored at 60ms. The gate's private-field callback is the shape a static scan cannot resolve, so `RenderGate`'s `#running` latch is asserted separately in the same file and dynamically in `tests/render-gate.test.mjs` |
+| Persist writes never block input | `tests/video-filter.test.mjs` asserts the filter's trailing persist is the one task in its window and that it issues at `background`. The two writers §5 used to name here do not have a deferred write at all and are covered by their own tests rather than by this row: `chrome/history.js` persists nothing (it reads the store the resume tracker owns), and `diagnostics.js` is console I/O behind the debug toggle with no GM write. Resume's persist is deliberately synchronous — see below |
 | No forced synchronous layout | `pf/no-forced-layout` (`platform/eslint-rules.mjs`, wired over `src/` by `eslint.config.js`): a layout-property read in the same task as a layout write fails `npm run lint`. Pinned by `tests/lint-rule.test.mjs`, which drives the rule block read back out of the real config |
 
-Two rows used to be phrased as a Gecko Profiler reading — `Styles` / `Reflow` /
-`Rasterize` flat while occluded, and "no markers between transitions". The first
-is taken automatically now; the second still is manual. Firefox exposes no
-layout, paint or longtask counters to content (157 lists neither `longtask` nor
+One row was narrowed rather than satisfied, and the reason is worth keeping
+visible. "History and diagnostics never block input" named two writers that have
+no deferred write to prioritise. `chrome/history.js` persists nothing at all — it
+renders the store `ResumeTracker` owns — and `diagnostics.js` is console I/O
+behind the debug toggle, which §6's phase 3 already recorded. The row now names
+the writer that does defer (the filter's trailing persist) and says plainly that
+the other two are covered elsewhere rather than implying a guarantee they were
+never subject to.
+
+That leaves **resume's persist, which is synchronous by decision, not by
+omission.** `gmSetValue` runs inline from `#persist()` (`resume.js:269`), on the
+incremental `timeupdate` path, on the pause flush and from `destroy()`. §6's
+phase 3 identified the fix — splitting the scheduled save from the unload flush
+so only the former can go `background` — and did not do it, because the flush
+half has to save before the scope it saves against is gone, and the pause flush
+is asserted in the same turn as the dispatch that triggers it
+(`tests/resume-tracker.test.mjs:268`, which pins that the wall floor gates the
+incremental path and never the pause flush). Deferring the periodic half alone
+buys a cadence that `TUNING.resume.saveIntervalMs` already bounds, in exchange
+for a second code path through the store whose failure mode is a lost position.
+That trade is not worth making for a scheduling-priority win, so the row was
+corrected rather than the code. **If resume is ever moved to `background`, the
+split has to land whole** — pause flush, `destroy()`, and the cross-tab re-assert
+in `#persist` all assume the write has already happened when they return.
+
+Two other rows used to be phrased as a Gecko Profiler reading — `Styles` /
+`Reflow` / `Rasterize` flat while occluded, and "no markers between
+transitions". The first is taken automatically now; the second still is manual.
+Firefox exposes no layout, paint or longtask counters to content (157 lists
+neither `longtask` nor
 `long-animation-frame` in `supportedEntryTypes`, which is why the frame-gap
 watchdog exists at all), and the userscript runs in the add-on's isolated realm,
 which nothing page-side can instrument — so the harness asks from where it can.
@@ -1188,11 +1275,14 @@ What was deliberately **not** routed, named rather than left implicit:
   merge into it.
 
 And "any remaining unconditional rAF": verified against the finished tree
-rather than asserted. `requestAnimationFrame` appears twice in `src/` —
+rather than asserted. `requestAnimationFrame` is called from two files —
 `scheduler.js`'s `yield_()`, a one-shot with a 50ms backstop that hidden
 documents never take, and `diagnostics.js`'s frame loop, which exists only
-while debug is on. `setInterval` appears once, as the panel's key-hold
-auto-repeat. §1's "no unconditional rAF loop in the shipping path" still holds.
+while debug is on. (`diagnostics.js` holds three of the call sites, two of them
+inside the loop; the inventory is pinned per file, which is the granularity that
+matters here.) `setInterval` appears once, as the panel's key-hold auto-repeat.
+§1's "no unconditional rAF loop in the shipping path" still holds, and
+`tests/idle-guard.test.mjs` is what keeps it true.
 
 Verification: three test files gained a settle between a mutation and the
 assertion that reads it back — `tests/toast.test.mjs` (which now also asserts
@@ -1227,10 +1317,18 @@ Lint clean; unit 530 pass (528 before; +2 toast); integration 87 pass,
 
 All seven are landed, each with its own commit and its own verification at
 the end of §6. Taken together, as of 2.0.0: lint clean (including
-`pf/no-forced-layout`), unit 547 pass, integration 90 pass / 1 skipped,
+`pf/no-forced-layout`), unit 552 pass, integration 90 pass / 1 skipped,
 14 browser-benchmark rows green, node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
+
+The unit count has moved once since that cut, and the movement is the point:
+`tests/posttask-guard.test.mjs` (5) was added to make §5's "No self-rearming
+`postTask`" row verifiable rather than self-evident. Its verification column
+used to restate the invariant, which is the one form of "verification" that
+cannot fail; the row is now pinned by a test that has been checked to fail on
+both a tight self-arm and a new call site, and to *pass* on a delayed one — the
+discrimination Trap 1 actually turns on.
 
 ## 7. Gecko-specific decisions, and what they rule out
 
@@ -1260,8 +1358,17 @@ bundle in the manager it ships for.
 
 - Browser gates rebuild via `ensureBundle()` in `platform/run.mjs`, so a gate
   run leaves `dist/` dirty. That is expected, not a failure.
-- Regenerated artifacts are committed at release time, alongside the version
-  bump, not on incidental rebuilds.
+- Regenerated artifacts are committed with the change that produced them, once
+  the gates have run — **not** only at release time, and not on a rebuild nobody
+  looked at. The rule is that the committed bundle is the one the last green
+  gate run measured. A browser gate rebuilds `dist/` on its way in, so
+  committing that rebuild alongside the source change is what keeps the
+  committed artifact honest; leaving it behind is what let `a9c975b` (a perf
+  pass over four `src/shared` and `src/shell` modules, merged after `v2.0.0`)
+  ship with `dist/` still built from the sources before it. The version bump
+  still rides along at release time, because that is a different kind of edit
+  (`tests/version-drift.test.mjs` pins banner, `package.json`, `package-lock`
+  and `dist/` together, so a bump that skips the rebuild fails the unit run).
 - `dist/` is intentionally **not** in `.gitignore`. If a build produces no
   change, the tree stays clean; if it does, the diff is reviewable and
   intentional.
@@ -1327,11 +1434,20 @@ In-tree:
 - `src/shared/scheduler.js` — traps in §2.4, `postTask`, `yield_()`
 - `src/shared/scope.js` — teardown primitive
 - `src/shared/activity.js` — passive activity windows
-- `src/shell/shell.js:309`, `src/shell/resume.js:702`, `src/shared/shadow.js:73` — `createActivity` call sites
+- `src/shell/shell.js:326`, `src/shell/resume.js:702`, `src/shared/shadow.js:105` — `createActivity` call sites
+- `src/shared/context.js:606` — the tree's only self-rearming `postTask`, delayed
 - `src/shared/dom-manager.js` — mutation coalescing
-- `src/shell/chrome/panel.js:101` — the only `setInterval` in the tree
+- `src/shell/chrome/panel.js:102` — the only `setInterval` in the tree
 - `src/shared/diagnostics.js` — debug-gated rAF frame-gap probe
 - `src/kernel/contract.js:21` — `SHELL_MARKER`
 - `platform/capabilities.json` — Gecko floor and manager contract
 - `platform/run.mjs` — `ensureBundle()`
 - `esbuild.config.mjs:173-177` — unpinned `@resource`
+
+Source-scan guards, both of which exist to make "the next change" fail rather
+than the current one:
+
+- `tests/idle-guard.test.mjs` — the rAF and `setInterval` inventories behind §1
+  and §5's first row
+- `tests/posttask-guard.test.mjs` — the `postTask` inventory and self-arm scan
+  behind §5's `postTask` row
