@@ -43,7 +43,7 @@ const PROJECT_ROOT = join(HERE, "..", "..");
 const MANIFEST_PATH = join(PROJECT_ROOT, "platform", "capabilities.json");
 
 /** @returns {{minFirefox: number, engine: string, manager: string}} */
-export function readManifestTarget() {
+function readManifestTarget() {
   return JSON.parse(readFileSync(MANIFEST_PATH, "utf8")).target;
 }
 
@@ -62,7 +62,7 @@ function appBinary(appName) {
  * auto order above and is reported, so a run can be told apart from one that
  * quietly fell back to release without reading this file.
  */
-export const FIREFOX_CHANNELS = [
+const FIREFOX_CHANNELS = [
   {
     id: "dev",
     label: "Firefox Developer Edition",
@@ -95,7 +95,7 @@ export const FIREFOX_CHANNELS = [
  * @param {string} stdout
  * @returns {{version: string, major: number, prerelease: string|null}|null}
  */
-export function parseVersion(stdout) {
+function parseVersion(stdout) {
   const m = /(\d+)\.(\d+)([ab]\d+)?/.exec(String(stdout));
   if (!m) return null;
   return {

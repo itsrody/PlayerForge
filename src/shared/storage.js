@@ -7,7 +7,7 @@ export const KEYS = {
   firstRun: "pf:first-run"
 };
 
-export function gmGetValue(key, fallback) {
+function gmGetValue(key, fallback) {
   return GM_getValue(key, fallback);
 }
 

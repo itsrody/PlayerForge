@@ -960,19 +960,6 @@ export function createPlyrPage(server) {
 }
 
 /**
- * Create a blank page URL (for dynamic video insertion tests).
- *
- * @param {TestServer} server
- * @returns {string} HTTP URL to a blank page.
- */
-export function createBlankPage(server) {
-  const html = `<!DOCTYPE html><html><body></body></html>`;
-  const path = `/blank-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`;
-  server.addPage(path, html);
-  return `${server.url}${path}`;
-}
-
-/**
  * Build an iframe child page with a Plyr-style video.
  * @param {TestServer} server
  * @param {object} [options]
