@@ -10,8 +10,5 @@
   "findSdkForVideo full scan (Plyr tree)": 874.7278769001106,
   "findSdkForVideo repeat query (memo hit)": 13.994805142985802,
   "findSdkForVideo miss (generic markup)": 5.499891844363326,
-  "timecodeToSeconds cue lines": 17519.62536358348,
-  "formatTime scrub ticks": 6701.657594438615,
-  "parseSubtitles 500-cue VTT": 167291.07836990597,
-  "offsetCues 500-cue sync re-offset": 540.8877810626814
+  "formatTime scrub ticks": 6701.657594438615
 }
