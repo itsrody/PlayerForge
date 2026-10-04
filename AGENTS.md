@@ -69,8 +69,8 @@ npm run vm-smoke -- <xpi>    # real Violentmonkey; xpi fetched from AMO into a
 ```
 
 Sanity numbers (they drift; a run reporting very different totals is suspect):
-unit `552`, integration `91 / 90 pass / 1 skipped`, browser-bench `14` rows,
-vm-smoke `19/19`.
+unit `555`, integration `91 / 90 pass / 1 skipped`, browser-bench `28` rows
+(14 gateable, 14 of them report-only shape pairs), vm-smoke `19/19`.
 
 `node --test` with **no file list is wrong in this repo**: Node then discovers
 `platform/integration/*.test.mjs` too, running the integration suite a second
@@ -152,6 +152,17 @@ fd -t d -d1 platform
    them alone. Scratch probes belong in
    `/var/folders/…/T/opencode/` or `platform/scratch/` (gitignored), never in
    `src/`.
+9. **Price JS shapes on Gecko, and discount a ratio on a negligible cost.**
+   `npm run bench` is Node/V8 and cannot justify a change to `src/` — the
+   sibling `chromium` branch's V8 numbers came back wrong here twice, once at
+   8.6× that is 3.4× and once at 1.6× that is 1.04×, i.e. nothing. Use
+   `platform/browser-bench/jit-shape.bench.mjs` (report-only shape pairs) or a
+   DOM row, and quote the shape's cost, never PF's speed. Then decide on the
+   absolute number: the taken rows there are all sub-microsecond on
+   pointer-rate paths, the largest being 13 ns per move, so they are kept for
+   shape and readability and must not be written up as latency wins. A large
+   ratio on a small cost is not a win — that is why `forge.js`'s `#pointers`
+   stayed a Map. §2.9 of the architecture doc has the table and the reasoning.
 
 ## 4. Before you say "done"
 

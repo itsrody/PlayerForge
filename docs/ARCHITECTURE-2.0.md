@@ -388,6 +388,61 @@ empty; add-on side it adds `runtime.getVersion()` and changes
 `publicSuffix.isKnownSuffix()` to throw on an invalid hostname instead of
 returning `false`.
 
+### 2.9 Priced on Gecko, or not at all
+
+Two rules that came out of measuring, not out of theory, and that constrain how
+any future performance work in this tree may be justified.
+
+**A number from another engine is not evidence for a change here.** The sibling
+`chromium` branch ran five waves of micro-optimisation against Node 26.9 / V8
+14.6. Its figures are V8 figures: SpiderMonkey has its own inline caches and
+its own Warp tiering. Re-pricing the same candidate shapes on Gecko 157 through
+`platform/browser-bench/jit-shape.bench.mjs` moved every one of them — and moved
+two of them to nothing:
+
+| candidate shape | V8 said | Gecko 157 says | taken |
+| --- | --- | --- | --- |
+| unroll `matchPreset`'s keyed load | 8.6× | 3.4× deep scan / 1.6× mid-drag | yes |
+| `x ** 1.5` → `x * sqrt(x)` | 1.6× | 1.4× | yes |
+| cache the swipe transform prefix | — | 2.2× | yes |
+| `Math.hypot` → `sqrt(dx*dx + dy*dy)` | 1.6× | **1.04×** | no |
+| hoist `10 ** decimals` per stepper | — | **1.00×** | no |
+| array-back the pinch pointer list | — | 6.8× | no, see below |
+
+The two washes are the point. Both read as obvious wins, both are recorded in
+the source as deliberate non-changes (`forge.js`'s `#checkPinch`, `panel.js`'s
+`roundTo`) with their numbers, so they cannot be re-proposed as oversights. The
+third rejection is the one that looks most like a win and is not: re-backing
+`#pointers` as an array removes a per-move Map iterator for **6.8×**, and costs
+an ordered add/remove/size reimplementation across ~20 call sites — one of which
+walks `.keys()` in insertion order to emit per-pointer cancels — to save 729 ns
+on a path that only runs during a two-finger drag.
+
+**A ratio is not a win; the absolute cost decides.** Every taken row above is a
+sub-microsecond effect on a path that runs at pointer rate. The largest single
+saving in the set — the scrub velocity curve, on the hottest line in the tree —
+is **13 ns per pointermove**, about 0.8 µs per second of continuous dragging.
+None of these are latency wins, and none of them are claimed to be. What they
+buy is shape: fewer megamorphic load sites, no foreign call in the innermost
+gesture loop, fewer concats per move, and code that reads more plainly. §2.2's
+argument that these paths are DOM- and task-bound rather than JS-bound holds
+sharply after measurement, and the correct conclusion from a 13 ns result is to
+record it and move on, not to go looking for more leaves to trim.
+
+The instrument itself has a stated limit, which is why its rows license a
+narrower claim than they might appear to. PF runs in the manager's isolated
+userscript realm and no page-side timing reaches into it, so — exactly as
+`write-cost.bench.mjs` argues for itself — these rows are driven page-side. For
+a DOM measurement that would be fatal, because realm isolation changes what the
+CSS engine costs. It is not fatal here: every row is pure JS, compiled by the
+same SpiderMonkey in the same process, and IC shape and tier-up do not depend on
+which content realm the bytecode came from. So the claim is *"this shape costs X
+on Gecko"*, never *"PF's filter is X times faster"*, and a row earns the right
+to change `src/` because the fixture is a faithful copy of a shape that code
+already has. All rows are report-only and need no `baseline.json` entry: the
+meaningful quantity is the ratio between two arms, which is why they are not
+gated on either absolute.
+
 ## 3. Reference-architecture cross-check
 
 Two mature codebases were read at source level to challenge this design rather
@@ -874,6 +929,7 @@ Each is testable, not aspirational.
 | No self-rearming `postTask` | `tests/posttask-guard.test.mjs`: the tree's `postTask` call-site inventory is pinned by file, and every self-arm is required to carry a `delay` — the line Trap 1 turns on, since a delayed self-arm is a timer that interleaves and an undelayed one is the measured starvation chain. The one self-arm in the tree is `context.js`'s ancestor handshake, floored at 60ms. The gate's private-field callback is the shape a static scan cannot resolve, so `RenderGate`'s `#running` latch is asserted separately in the same file and dynamically in `tests/render-gate.test.mjs` |
 | Persist writes never block input | `tests/video-filter.test.mjs` asserts the filter's trailing persist is the one task in its window and that it issues at `background`. The two writers §5 used to name here do not have a deferred write at all and are covered by their own tests rather than by this row: `chrome/history.js` persists nothing (it reads the store the resume tracker owns), and `diagnostics.js` is console I/O behind the debug toggle with no GM write. Resume's persist is deliberately synchronous — see below |
 | No forced synchronous layout | `pf/no-forced-layout` (`platform/eslint-rules.mjs`, wired over `src/` by `eslint.config.js`): a layout-property read in the same task as a layout write fails `npm run lint`. Pinned by `tests/lint-rule.test.mjs`, which drives the rule block read back out of the real config |
+| Hot-path JS shapes are priced on Gecko, and a ratio on a negligible cost is not a win | `platform/browser-bench/jit-shape.bench.mjs` prices seven candidate shapes as report-only non-gated pairs, two arms per shape in interleaved batches, and §2.9 records what survived: three taken (the `matchPreset` unroll, the gated `x * sqrt(x)` scrub curve, the latch-cached swipe prefix), three recorded in-tree as deliberate non-changes (`Math.hypot` at 1.04×, the stepper's `10 ** decimals` at 1.00×, and the array-backed pointer list, which is 6.8× and still the wrong trade). The bound the rows keep is behavioural, not numeric: `tests/input-forge.test.mjs` pins the swipe prefix's output string and that it is rebuilt per stroke rather than carried over, mutation-checked in both directions |
 
 One row was narrowed rather than satisfied, and the reason is worth keeping
 visible. "History and diagnostics never block input" named two writers that have
@@ -1317,18 +1373,25 @@ Lint clean; unit 530 pass (528 before; +2 toast); integration 87 pass,
 
 All seven are landed, each with its own commit and its own verification at
 the end of §6. Taken together, as of 2.0.0: lint clean (including
-`pf/no-forced-layout`), unit 552 pass, integration 90 pass / 1 skipped,
-14 browser-benchmark rows green, node bench green, and `vm-smoke` 19/19
+`pf/no-forced-layout`), unit 555 pass, integration 90 pass / 1 skipped,
+28 browser-benchmark rows (14 gated and green, 14 report-only shape pairs),
+node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved once since that cut, and the movement is the point:
-`tests/posttask-guard.test.mjs` (5) was added to make §5's "No self-rearming
-`postTask`" row verifiable rather than self-evident. Its verification column
-used to restate the invariant, which is the one form of "verification" that
-cannot fail; the row is now pinned by a test that has been checked to fail on
-both a tight self-arm and a new call site, and to *pass* on a delayed one — the
-discrimination Trap 1 actually turns on.
+The unit count has moved twice since that cut, and both movements are the
+point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
+self-rearming `postTask`" row verifiable rather than self-evident. Its
+verification column used to restate the invariant, which is the one form of
+"verification" that cannot fail; the row is now pinned by a test that has been
+checked to fail on both a tight self-arm and a new call site, and to *pass* on a
+delayed one — the discrimination Trap 1 actually turns on.
+`tests/input-forge.test.mjs` gained 3 for the swipe transform prefix §2.9 caches
+at the latch, covering the string it produces, that it does not stack across
+moves, and that a second stroke rebuilds it rather than inheriting the last.
+Those are mutation-checked in both directions, because a cached value that is
+never re-derived is precisely the failure this change could plausibly introduce
+and the row would otherwise be asserting only that the code agrees with itself.
 
 ## 7. Gecko-specific decisions, and what they rule out
 
@@ -1347,6 +1410,10 @@ discrimination Trap 1 actually turns on.
 - Quality metrics prefer `getVideoPlaybackQuality()`, `mozPresentedFrames`, and
   `mozPaintedFrames` over rVFC metadata, because those bypass the cadence
   question entirely.
+- Performance claims are priced on Gecko or not at all, and a ratio on a
+  negligible cost is not a win. This rules out justifying a `src/` change with a
+  node benchmark, and it rules out presenting a shape-level speedup as a latency
+  improvement. §2.9 has the measurements; `jit-shape.bench.mjs` is the instrument.
 - The engine is realm-agnostic, because VM 2.49's default `auto` inject mode is
   CSP-dependent per site.
 - No Chromium compositor assumptions anywhere. All timing reasoning is anchored
