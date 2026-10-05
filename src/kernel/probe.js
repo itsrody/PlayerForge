@@ -19,7 +19,7 @@
  * documents without a usable player never boot a kernel.
  */
 import { logger } from "../shared/diagnostics.js";
-import { watchMediaEvents, meetsMinSize, forEachVideoInMutations } from "./sdk.js";
+import { watchMediaEvents, meetsMinSize, forEachVideoInMutations, forEachShadowVideos } from "./sdk.js";
 import { onDomMutations } from "../shared/dom-manager.js";
 
 export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
@@ -119,7 +119,11 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
   stopEvents = watchMediaEvents(consider);
 
   // Cheap deferred check (atomic, no observer): videos already in the parsed
-  // DOM surface without any media event or mutation subscription.
+  // DOM surface without any media event or mutation subscription. The shadow
+  // pass is the same reach the mutation feed has after escalation - qSA never
+  // crosses a shadow boundary, so a shadow player in the parsed DOM would
+  // otherwise be found by nothing until it fired a media event (see
+  // forEachShadowVideos for the live repro).
   const checkStatic = () => {
     if (done) {
       return;
@@ -130,8 +134,15 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
     for (let i = 0; i < present.length; i++) {
       consider(present[i]);
     }
-    if (!done && present.length) {
-      // Static video(s) exist but none qualified yet - keep the observer armed
+    let sawVideo = present.length > 0;
+    if (!done) {
+      forEachShadowVideos(document, (video) => {
+        sawVideo = true;
+        consider(video);
+      });
+    }
+    if (!done && sawVideo) {
+      // Video(s) exist but none qualified yet - keep the observer armed
       // so SDK-inserted successors that may reach player size are caught.
       escalate();
     }

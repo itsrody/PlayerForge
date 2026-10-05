@@ -5,7 +5,7 @@ import { postTask } from "../shared/scheduler.js";
 import { Scope } from "../shared/scope.js";
 import { ShellRegistry } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
-import { findSdkForVideo, meetsMinSize, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
+import { findSdkForVideo, meetsMinSize, watchDocumentVideos, watchMediaEvents, forEachShadowVideos } from "./sdk.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
 
 /**
@@ -157,10 +157,13 @@ export class Kernel {
     // The probe boots us precisely so a video already in the parsed DOM gets
     // its shell without waiting for the next media event. Replay once: the
     // media-event tap (and the downgrade path) still catches script-lazy SDK
-    // players that surface after boot.
+    // players that surface after boot. The shadow pass replays what qSA
+    // cannot see - a shadow player in the parsed DOM was otherwise adopted
+    // only via a media event (forEachShadowVideos has the live repro).
     for (const video of document.querySelectorAll("video")) {
       this.#adoptVideo(video);
     }
+    forEachShadowVideos(document, (video) => this.#adoptVideo(video));
     logger.log("kernel", "Kernel ready - discovery tap active");
   }
 

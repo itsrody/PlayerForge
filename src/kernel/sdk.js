@@ -266,6 +266,76 @@ export function videoFromEvent(event) {
 }
 
 /**
+ * Invoke `visit` for every <video> inside an open shadow root under
+ * `treeRoot`.
+ *
+ * querySelectorAll never crosses a shadow boundary, and the document-level
+ * mutation feed cannot observe shadow trees at all (an observer on `document`
+ * only sees the document tree), so the light walks are structurally blind to
+ * shadow content: a video built inside a custom element's shadow root was
+ * reachable only through the media-event tap's composed path
+ * (videoFromEvent), i.e. only once it loaded or played. Verified on the live
+ * bundle: a Plyr player whose <video> lives in an open shadow root is never
+ * adopted when it sits in the parsed DOM (the static probe check and the
+ * kernel boot replay both run document.querySelectorAll("video")), nor when
+ * its wrapper is appended after boot (the added-node walk) - a permanent miss
+ * for the life of the document for any shadow video that fires no media
+ * event.
+ *
+ * Split shape (keep the light qSA("video") walk, add this shadow pass)
+ * instead of one unified qSA("*") walk: measured on Gecko 158, split costs
+ * +31us per 120-node added subtree and +0.83ms for a 6300-element document
+ * sweep, against +37us / +1.11ms unified - the per-element work here is one
+ * .shadowRoot read, not a localName compare plus the read. Two rejected
+ * shapes, recorded so they are not re-tried: TreeWalker was slower than both
+ * everywhere (per-node nextNode() crossings beat qSA's single C++ walk +
+ * NodeList alloc), and the tempting localName allowlist filter is both wrong
+ * and slower - Gecko 158 empirically allows attachShadow on div and span,
+ * which a spec-memory list misses (measured F-find counts 7 vs 8), and
+ * Set.has(string) over 6300 names measured 3.5ms, 5x the 0.72ms of just
+ * reading .shadowRoot everywhere.
+ *
+ * Residual boundary (deliberate): a video appended into a shadow root that
+ * already existed still produces no document-level record, and stays covered
+ * only by the media-event tap. Closing it needs one MutationObserver per
+ * discovered shadow root - unbounded observers on any custom-element-heavy
+ * page - not worth the case. Closed roots remain invisible by design, as
+ * with videoFromEvent.
+ */
+function walkShadowRoot(root, visit) {
+  const videos = root.querySelectorAll("video");
+  for (let i = 0; i < videos.length; i++) {
+    visit(videos[i]);
+  }
+  const els = root.querySelectorAll("*");
+  for (let i = 0; i < els.length; i++) {
+    const shadow = els[i].shadowRoot;
+    if (shadow) {
+      walkShadowRoot(shadow, visit);
+    }
+  }
+}
+
+export function forEachShadowVideos(treeRoot, visit) {
+  // Inline .shadowRoot check here; walkShadowRoot is only entered for real
+  // hosts - calling a per-element helper instead measured 3.9ms on the doc
+  // sweep, all of it call overhead. The root's own shadow first: a mutation
+  // record can carry the host itself, and querySelectorAll on that host only
+  // returns its light descendants.
+  const own = treeRoot.shadowRoot;
+  if (own) {
+    walkShadowRoot(own, visit);
+  }
+  const els = treeRoot.querySelectorAll("*");
+  for (let i = 0; i < els.length; i++) {
+    const shadow = els[i].shadowRoot;
+    if (shadow) {
+      walkShadowRoot(shadow, visit);
+    }
+  }
+}
+
+/**
  * Invoke `visit` for every <video> entering the DOM in a MutationObserver
  * batch's added nodes.
  *
@@ -273,15 +343,15 @@ export function videoFromEvent(event) {
  * form allocated a generator object (and a NodeList iterator) per batch per
  * subscriber, and the added-node walk is on the kernel's hot discovery path.
  * The NodeList is walked by index here, which is also the cheapest way to
- * drain it.
+ * drain it. Shadow content under the added subtree is picked up by
+ * forEachShadowVideos (see its comment for the gap this closes).
  */
 export function forEachVideoInMutations(mutations, visit) {
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
-      // Cheap element guard: text/comment nodes and the subtree we already
-      // know is empty of videos can't yield a <video>, so skip the
-      // querySelectorAll scan (which would otherwise run per added node on
-      // every mutation batch of an SPA page).
+      // Cheap element guard: text/comment nodes have no subtree and cannot
+      // host a shadow root, so skip both scans (which would otherwise run
+      // per added node on every mutation batch of an SPA page).
       if (node.nodeType !== 1) {
         continue;
       }
@@ -292,6 +362,7 @@ export function forEachVideoInMutations(mutations, visit) {
         for (let i = 0; i < videos.length; i++) {
           visit(videos[i]);
         }
+        forEachShadowVideos(node, visit);
       }
     }
   }

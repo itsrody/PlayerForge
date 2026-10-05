@@ -1132,3 +1132,61 @@ test("granting is idempotent and merges into an existing allow list", () => {
   assert.ok(tokens.includes("autoplay"));
   assert.equal(tokens.filter((t) => t === "fullscreen").length, 1);
 });
+
+test("the static check reaches a shadow player in the parsed DOM", async () => {
+  const { window: win } = dom(
+    '<div data-plyr><div class="plyr__video-wrapper"><x-holder></x-holder></div></div>',
+    "https://example.com/player"
+  );
+  globalThis.window = win;
+  globalThis.document = win.document;
+  globalThis.MutationObserver = win.MutationObserver;
+
+  const host = win.document.querySelector("x-holder");
+  const shadow = host.attachShadow({ mode: "open" });
+  const video = win.document.createElement("video");
+  shadow.appendChild(video);
+  // jsdom has no layout: give the shadow video a player-sized box. qSA never
+  // crosses the boundary, so before forEachShadowVideos this candidate was
+  // found by nothing until a media event - and it never fires one.
+  video.getBoundingClientRect = () => ({ width: 640, height: 360 });
+
+  let fires = 0;
+  installVideoProbe({ minWidth: 100, minHeight: 60, onCandidate: () => fires++ });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  assert.equal(fires, 1, "the shadow-hosted video booted the probe");
+});
+
+test("a shadow-only video too small still commits the probe to the observer", async () => {
+  const { window: win } = dom(
+    '<div data-plyr><div class="plyr__video-wrapper"><x-holder></x-holder></div></div>',
+    "https://example.com/player"
+  );
+  globalThis.window = win;
+  globalThis.document = win.document;
+
+  const host = win.document.querySelector("x-holder");
+  const shadow = host.attachShadow({ mode: "open" });
+  const video = win.document.createElement("video");
+  shadow.appendChild(video);
+  video.getBoundingClientRect = () => ({ width: 60, height: 40 });
+
+  const RealMO = win.MutationObserver;
+  let constructions = 0;
+  class CountingMO extends RealMO {
+    constructor(cb) {
+      super(cb);
+      constructions++;
+    }
+  }
+  globalThis.MutationObserver = CountingMO;
+  win.MutationObserver = CountingMO;
+
+  let fires = 0;
+  installVideoProbe({ minWidth: 100, minHeight: 60, onCandidate: () => fires++ });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  assert.equal(fires, 0, "no candidate - shadow video never reaches player size");
+  assert.ok(constructions >= 1, "the shadow video alone still escalated the probe");
+});

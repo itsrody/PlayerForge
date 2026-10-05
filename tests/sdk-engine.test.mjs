@@ -7,6 +7,8 @@ import {
   resolveContainer,
   videoFromEvent,
   meetsMinSize,
+  forEachVideoInMutations,
+  forEachShadowVideos,
   MIN_VIDEO_WIDTH,
   MIN_VIDEO_HEIGHT
 } from "../src/kernel/sdk.js";
@@ -246,4 +248,104 @@ test("a negative memo is re-checked after the video is detached entirely", () =>
 
   video.remove();
   assert.equal(findSdkForVideo(video), null, "detachment must not throw or resurrect a match");
+});
+
+test("forEachVideoInMutations reaches a video inside an added host's open shadow root", () => {
+  const doc = dom("");
+  const host = doc.createElement("div");
+  const shadow = host.attachShadow({ mode: "open" });
+  const video = doc.createElement("video");
+  shadow.appendChild(video);
+
+  const found = [];
+  forEachVideoInMutations([{ addedNodes: [host] }], (v) => found.push(v));
+  assert.deepEqual(found, [video], "the shadow-hosted video was discovered");
+});
+
+test("forEachVideoInMutations reaches a shadow video when only the light wrapper is added", () => {
+  // The live repro shape: the mutation record carries the light wrapper the
+  // page appended; the host and its shadow video hang somewhere below it.
+  const doc = dom("");
+  const wrap = doc.createElement("div");
+  wrap.className = "plyr";
+  wrap.setAttribute("data-plyr", "");
+  const host = doc.createElement("x-holder");
+  wrap.appendChild(host);
+  const shadow = host.attachShadow({ mode: "open" });
+  const video = doc.createElement("video");
+  shadow.appendChild(video);
+
+  const found = [];
+  forEachVideoInMutations([{ addedNodes: [wrap] }], (v) => found.push(v));
+  assert.deepEqual(found, [video], "the deep shadow video was discovered");
+});
+
+test("forEachVideoInMutations descends into nested shadow roots", () => {
+  const doc = dom("");
+  const outer = doc.createElement("x-outer");
+  const outerShadow = outer.attachShadow({ mode: "open" });
+  const inner = doc.createElement("x-inner");
+  outerShadow.appendChild(inner);
+  const innerShadow = inner.attachShadow({ mode: "open" });
+  const video = doc.createElement("video");
+  innerShadow.appendChild(video);
+
+  const found = [];
+  forEachVideoInMutations([{ addedNodes: [outer] }], (v) => found.push(v));
+  assert.deepEqual(found, [video], "the depth-2 shadow video was discovered");
+});
+
+test("closed shadow roots stay out of the walk", () => {
+  const doc = dom("");
+  const host = doc.createElement("x-closed");
+  const shadow = host.attachShadow({ mode: "closed" });
+  const video = doc.createElement("video");
+  shadow.appendChild(video);
+
+  const found = [];
+  forEachVideoInMutations([{ addedNodes: [host] }], (v) => found.push(v));
+  assert.deepEqual(found, [], "closed roots are unreachable by design");
+});
+
+test("forEachVideoInMutations keeps its light-DOM behavior and element guard", () => {
+  const doc = dom("");
+  const direct = doc.createElement("video");
+  const wrap = doc.createElement("div");
+  const inner = doc.createElement("video");
+  wrap.appendChild(inner);
+
+  const found = [];
+  forEachVideoInMutations(
+    [{ addedNodes: [doc.createTextNode("x"), direct, wrap] }],
+    (v) => found.push(v)
+  );
+  assert.deepEqual(found, [direct, inner], "direct and light-descendant videos still visit; text skipped");
+});
+
+test("forEachShadowVideos sweeps shadow trees and leaves light videos to the caller", () => {
+  // Split contract: the light qSA("video") pass belongs to the call site
+  // (present in all three shipped callers), so this helper must return only
+  // what that pass cannot see.
+  const doc = dom('<video></video>');
+  const host = doc.createElement("div");
+  doc.body.appendChild(host);
+  const shadow = host.attachShadow({ mode: "open" });
+  const shadowVideo = doc.createElement("video");
+  shadow.appendChild(shadowVideo);
+
+  const found = [];
+  forEachShadowVideos(doc, (v) => found.push(v));
+  assert.deepEqual(found, [shadowVideo], "only the shadow video, not the light one");
+});
+
+test("findSdkForVideo matches an SDK anchor across a shadow boundary", () => {
+  const doc = dom('<div data-plyr><div class="plyr__video-wrapper"><x-holder></x-holder></div></div>');
+  const host = doc.querySelector("x-holder");
+  const shadow = host.attachShadow({ mode: "open" });
+  const video = doc.createElement("video");
+  shadow.appendChild(video);
+
+  const match = findSdkForVideo(video);
+  assert.equal(match?.name, "Plyr", "composed chain crossed the boundary via .host");
+  assert.equal(match?.container, doc.querySelector(".plyr__video-wrapper"), "container resolves in the light tree");
 });
