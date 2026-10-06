@@ -463,18 +463,34 @@ function requestPageContextOverPipe(timeoutMs, deadline) {
  *
  * Reuses an established private MessageChannel pipe when one exists: repeat
  * resolves ride the dedicated, unforgeable link straight to the ancestor
- * responder - no broadcast, no transfer, no retry. Otherwise a first contact
- * creates a channel and transfers a port upward; the answer identifies whether
- * the chain supports the pipe (port answer: establishment) or only the legacy
- * broadcast (fallback, and the chain is remembered as legacy so later resolves
- * stop wasting channels on it).
+ * responder - no broadcast, no transfer, no retry. A pipe the responder swept
+ * while this frame sat idle (CTX_PIPE_IDLE_MS, evicted by another client's
+ * touch) cannot tell that difference on its own, so a pipe that misses
+ * CTX_PIPE_PROBE_MS is dropped and the resolve re-handshakes over the window
+ * channel below. Otherwise a first contact creates a channel and transfers a
+ * port upward; the answer identifies whether the chain supports the pipe
+ * (port answer: establishment) or only the legacy broadcast (fallback, and
+ * the chain is remembered as legacy so later resolves stop wasting channels
+ * on it).
  *
  * The legacy nonce broadcast remains the fallback for parents (or test hosts
  * such as jsdom) that drop transferred ports.
  */
-function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
+async function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
+  const started = Date.now();
   if (contextPipe) {
-    return requestPageContextOverPipe(timeoutMs, Date.now() + timeoutMs);
+    const viaPipe = await requestPageContextOverPipe(CTX_PIPE_PROBE_MS, Date.now() + CTX_PIPE_PROBE_MS);
+    if (viaPipe) {
+      return viaPipe;
+    }
+    // A silent pipe is a swept pipe, not a dead chain: the responder evicts
+    // ports idle past CTX_PIPE_IDLE_MS whenever ANOTHER client touches, so
+    // this frame's next resolve re-handshakes over the window channel with
+    // whatever budget of timeoutMs remains. Going straight to the caller's
+    // own-context fallback keyed resume to the embed's own URL for the rest
+    // of the document (proved live: a swept frame's entry landed 3191ms
+    // late under localhost/ instead of the top page's path).
+    timeoutMs = Math.max(timeoutMs - (Date.now() - started), CTX_PIPE_PROBE_MS);
   }
 
   const { promise, resolve } = Promise.withResolvers();
@@ -639,6 +655,16 @@ export function stopContextPipe() {
 
 const NONCE_TTL_MS = 5000;
 export const CTX_REQUEST_TIMEOUT_MS = 3000;
+/**
+ * How long an established pipe gets to answer before its resolve falls back
+ * to a fresh window handshake. A live pipe answers in single-digit
+ * milliseconds (live Gecko: append to persisted entry ~65ms including shell
+ * boot), so this cap only ever fires on a pipe the responder already swept -
+ * and spending three quarters of a second to learn that, then re-handshaking
+ * with the remaining budget, is cheaper than burning CTX_REQUEST_TIMEOUT_MS
+ * on a silent port and then adopting the frame's own context anyway.
+ */
+export const CTX_PIPE_PROBE_MS = 750;
 /** How long a context pipe stays registered without a request before it is dropped. */
 const CTX_PIPE_IDLE_MS = 60_000;
 

@@ -1373,13 +1373,13 @@ Lint clean; unit 530 pass (528 before; +2 toast); integration 87 pass,
 
 All seven are landed, each with its own commit and its own verification at
 the end of §6. Taken together, as of 2.0.0: lint clean (including
-`pf/no-forced-layout`), unit 566 pass, integration 90 pass / 1 skipped,
+`pf/no-forced-layout`), unit 567 pass, integration 90 pass / 1 skipped,
 28 browser-benchmark rows (14 gated and green, 14 report-only shape pairs),
 node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved five times since that cut. The first two movements
+The unit count has moved six times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1393,12 +1393,14 @@ Those are mutation-checked in both directions, because a cached value that is
 never re-derived is precisely the failure this change could plausibly introduce
 and the row would otherwise be asserting only that the code agrees with itself.
 
-The three movements since then each pinned a gap that had been proven on the
+The four movements since then each pinned a gap that had been proven on the
 live bundle before the fix existed: the probe's failed size gate never being
 re-watched, a video inside an open shadow root being invisible to every
-discovery path but the media events, and a settle completed against a
-detached video leaving the reconnect with no re-entry into adoption
-(`tests/context.test.mjs`, `tests/sdk-engine.test.mjs`,
+discovery path but the media events, a settle completed against a detached
+video leaving the reconnect with no re-entry into adoption, and a frame whose
+context pipe had been swept by another client's touch burning its whole
+deadline on the silent port and adopting its own URL instead of the top
+page's (`tests/context.test.mjs`, `tests/sdk-engine.test.mjs`,
 `tests/kernel-replay.test.mjs`).
 
 ## 7. Gecko-specific decisions, and what they rule out

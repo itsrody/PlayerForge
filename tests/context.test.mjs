@@ -18,6 +18,7 @@ import {
   CTX_REQUEST_TYPE,
   CTX_RESPONSE_TYPE,
   CTX_REQUEST_TIMEOUT_MS,
+  CTX_PIPE_PROBE_MS,
   stopContextPipe
 } from "../src/shared/context.js";
 import { installVideoProbe } from "../src/kernel/probe.js";
@@ -773,6 +774,53 @@ test("top-frame responder answers repeat requests over an established pipe", asy
   } finally {
     mc.port1.close();
     mc.port2.close();
+  }
+});
+
+test("a swept pipe re-handshakes over the window channel instead of adopting the frame's own context", async () => {
+  // Live Gecko P4: the responder evicts pipes idle past CTX_PIPE_IDLE_MS
+  // whenever ANOTHER client touches, and the evicted frame's next resolve
+  // used to burn the full CTX_REQUEST_TIMEOUT_MS on the silent port and then
+  // fall back to ownPageContext() - keying resume to the embed's own URL for
+  // the rest of the document. The fix probes the pipe for CTX_PIPE_PROBE_MS,
+  // drops it, and re-handshakes over the window channel with the remainder.
+  stopContextPipe();
+  const { window: win } = dom();
+  globalThis.window = crossOriginFrame(win);
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  let farEnd = null;
+  let posts = 0;
+  const originalPost = win.parent.postMessage.bind(win.parent);
+  win.parent.postMessage = (msg, target, ports) => {
+    posts++;
+    if (ports && ports[0]) {
+      // First call: establishment (pipe). Second call: the re-handshake after
+      // the sweep - answer on whatever port it transferred, exactly like the
+      // established-pipe tests above.
+      farEnd = ports[0];
+      farEnd.postMessage({ type: CTX_RESPONSE_TYPE, domain: "hub", path: "/legal", title: "Legal Co" });
+    }
+  };
+  try {
+    const first = await getPageContext();
+    assert.equal(posts, 1, "first resolve posts once");
+    assert.deepEqual(first, { domain: "hub", path: "/legal", title: "Legal Co" }, "pipe established");
+    assert.ok(farEnd, "first hop transferred a reply port");
+
+    // The responder's sweep: its end of the channel is gone, so the pipe
+    // request is answered by silence - the same silent drop live Gecko gives
+    // a message to a port the far side closed.
+    farEnd.close();
+
+    const second = await getPageContext();
+    assert.equal(posts, 2, "a dead pipe re-handshakes over the window channel");
+    assert.deepEqual(second, { domain: "hub", path: "/legal", title: "Legal Co" }, "top context rides the re-handshake");
+    assert.notDeepEqual(second, ownPageContext(win), "the frame's own context is no longer the fallback here");
+  } finally {
+    win.parent.postMessage = originalPost;
+    stopContextPipe();
   }
 });
 
