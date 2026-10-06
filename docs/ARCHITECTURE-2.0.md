@@ -1373,13 +1373,13 @@ Lint clean; unit 530 pass (528 before; +2 toast); integration 87 pass,
 
 All seven are landed, each with its own commit and its own verification at
 the end of §6. Taken together, as of 2.0.0: lint clean (including
-`pf/no-forced-layout`), unit 569 pass, integration 90 pass / 1 skipped,
+`pf/no-forced-layout`), unit 570 pass, integration 90 pass / 1 skipped,
 28 browser-benchmark rows (14 gated and green, 14 report-only shape pairs),
 node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved seven times since that cut. The first two movements
+The unit count has moved eight times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1393,7 +1393,7 @@ Those are mutation-checked in both directions, because a cached value that is
 never re-derived is precisely the failure this change could plausibly introduce
 and the row would otherwise be asserting only that the code agrees with itself.
 
-The five movements since then each pinned a gap that had been proven on the
+The six movements since then each pinned a gap that had been proven on the
 live bundle before the fix existed: the probe's failed size gate never being
 re-watched, a video inside an open shadow root being invisible to every
 discovery path but the media events, a settle completed against a detached
@@ -1407,7 +1407,14 @@ the seen-set claimed it for the life of the document, or the whole subtree
 moved leaving the removal watch's roots and sentinel on the old chain so the
 new chain's teardown never destroyed the shell (measured live: stranded at
 +799ms with zero hosts in the new location, orphaned at +903ms against a
-+708ms control destroy; `tests/kernel-replay.test.mjs`).
++708ms control destroy; `tests/kernel-replay.test.mjs`), and a status
+transition the element announced that never reached the channel: the rate
+scalar read `target.rate`, a property HTMLMediaElement does not have, so the
+value was pinned to the fallback, every `ratechange` compared equal and
+skipped, and the whole rate axis stayed invisible on `pf:status` for the
+element's life (measured live: `playbackRate = 2` produced zero rate
+transitions against a volume control that did; fixed to `playbackRate`;
+`tests/player-status.test.mjs`).
 
 ## 7. Gecko-specific decisions, and what they rule out
 

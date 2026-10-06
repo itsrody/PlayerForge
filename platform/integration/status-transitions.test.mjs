@@ -91,6 +91,18 @@ test("every transition in a live run names an event that really fired", async ()
     8000
   );
 
+  // A real rate change: the setter fires ratechange itself, and the axis is
+  // only honest if the transition arrives with that cause. This is the edge
+  // that used to vanish - the handler read a property HTMLMediaElement does
+  // not have, so no rate transition ever reached pf:status.
+  await driver.eval(() => {
+    document.getElementById("test-video").playbackRate = 1.5;
+  });
+  await driver.waitFor(
+    () => window.__pfStatusLog.some((c) => c.name === "rate"),
+    8000
+  );
+
   await driver.eval(() => {
     document.getElementById("test-video").currentTime = 15;
   });
@@ -125,6 +137,7 @@ test("every transition in a live run names an event that really fired", async ()
   assert.ok(causes.has("playing"), "playback reached PLAYING through the element's own edge");
   assert.ok(causes.has("pause"), "and left it the same way");
   assert.ok(causes.has("seeked"), "the buffer axis settled on a real seek edge");
+  assert.ok(causes.has("ratechange"), "the rate axis moved on the element's own edge");
 });
 
 test("status matches the element after each edge, rather than leading it", async () => {

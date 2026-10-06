@@ -184,7 +184,11 @@ export class PlayerStatus {
     this.#scalar = {
       duration: Number.isFinite(target.duration) ? target.duration : NaN,
       currentTime: Number.isFinite(target.currentTime) ? target.currentTime : 0,
-      rate: Number.isFinite(target.rate) ? target.rate : 1,
+      // `playbackRate`, not `rate` - HTMLMediaElement has no `rate` property,
+      // so the old read was always undefined, the fallback pinned this axis to
+      // 1, and the ratechange handler (same wrong read) never moved it: the
+      // whole rate axis was invisible on pf:status for the element's life.
+      rate: Number.isFinite(target.playbackRate) ? target.playbackRate : 1,
       volume: Number.isFinite(target.volume) ? target.volume : 1,
       muted: !!target.muted,
       hasTextTrack: countTextTracks(target) > 0,
@@ -400,7 +404,7 @@ export class PlayerStatus {
       this.#set("scalar", "duration", Number.isFinite(target.duration) ? target.duration : NaN, "durationchange");
     });
     on(target, "ratechange", () => {
-      this.#set("scalar", "rate", Number.isFinite(target.rate) ? target.rate : 1, "ratechange");
+      this.#set("scalar", "rate", Number.isFinite(target.playbackRate) ? target.playbackRate : 1, "ratechange");
     });
     on(target, "volumechange", () => {
       this.#set("scalar", "volume", Number.isFinite(target.volume) ? target.volume : 1, "volumechange");

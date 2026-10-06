@@ -119,6 +119,36 @@ test("construction seeds from the element and emits nothing", async (t) => {
   assert.equal(video.readyState, 0, "the harness really is pre-metadata");
 });
 
+test("the rate axis reads the element's playbackRate at seed and on ratechange", async (t) => {
+  const { video, doc } = makeRealm();
+  video.playbackRate = 1.5;
+  const status = new PlayerStatus({ target: video, doc });
+  const changes = [];
+  const dispatched = [];
+  status.subscribe((change) => changes.push(change));
+  video.addEventListener(STATUS_EVENT, (event) => dispatched.push(event.detail));
+  t.after(() => status.dispose());
+
+  assert.equal(status.rate, 1.5, "seeded from playbackRate - HTMLMediaElement has no `rate` property");
+  await tick();
+  assert.deepEqual(changes, [], "construction is not a transition");
+
+  video.playbackRate = 2;
+  fire(video, "ratechange");
+  await tick();
+
+  assert.equal(status.rate, 2);
+  assert.deepEqual(
+    changes.map((c) => [c.name, c.from, c.to, c.cause]),
+    [["rate", 1.5, 2, "ratechange"]]
+  );
+  assert.deepEqual(
+    dispatched.map((c) => [c.name, c.from, c.to]),
+    [["rate", 1.5, 2]],
+    "the transition rides pf:status, the channel the realm actually reads"
+  );
+});
+
 test("an announced edge is the only writer: 'playing' moves playback with its cause", async (t) => {
   const { status, changes, video } = harness(t);
 
