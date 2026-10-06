@@ -353,3 +353,30 @@ test("two players in one document: removing either tears down only that shell", 
     "the survivor tears down on its own removal"
   );
 });
+
+test("a video detached during settle and reattached inside the grace is re-adopted", async () => {
+  const { kernel, video, created } = makeHarness();
+  kernel.init();
+  // Adoption runs synchronously with init: the claim is placed, the settle
+  // quiet window starts, the removal watch arms - and the discovery tap
+  // downgrades on this first adoption.
+  await new Promise((r) => setTimeout(r, 20));
+  const wrapper = video.parentElement;
+  video.remove(); // inside the 50ms settle window; also re-arms it (direct child)
+  // The settle now completes against a detached video: shell creation is
+  // skipped but the claim stands. If the video is reattached AFTER the grace
+  // fires, the claim is released and re-discovery is a documented
+  // media-event path; reattached INSIDE the grace - the case below - the
+  // reconnect cancels the only re-check there is, and without the
+  // reconnect-re-adoption edge the video stays claimed with no shell for the
+  // life of the document (MO tap downgraded, media tap refuses a claim).
+  await new Promise((r) => setTimeout(r, 80));
+  // Prior tests' videos are still mounted in the shared body and every
+  // kernel in this file adopts all of them - count ours alone.
+  assert.ok(
+    !created.some((entry) => entry.video === video),
+    "the settle skipped: no shell while detached"
+  );
+  wrapper.appendChild(video);
+  await waitFor(() => created.some((entry) => entry.video === video), 3000);
+});

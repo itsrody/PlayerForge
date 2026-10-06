@@ -33,6 +33,21 @@ export class Kernel {
    *  only on the failure path - a boot that throws deterministically must not
    *  be re-attempted on every mutation record, so the second failure is final. */
   #bootRetried = new WeakSet();
+  /** Videos whose settle completed while they were detached: shell creation
+   *  was skipped, but #seenVideos still claims them and the discovery tap has
+   *  already downgraded, so no other path would ever offer them again. The
+   *  removal watch's reconnect edge consumes this entry one-shot and
+   *  re-adopts - without it a reattach inside the grace cancels the only
+   *  pending re-check and the video stays claimed with no shell for the life
+   *  of the document (live repro: settle-skip demo). Weak, and never
+   *  iterated. */
+  #settleSkipped = new WeakSet();
+  /** Videos with an armed removal watch: one watcher per video. A settle-skip
+   *  re-adoption re-enters #watchVideoRemoval while the original watcher is
+   *  still live; a second observer pair would leave each stopWatching
+   *  responsible for only its own observer, stranding anchors until pagehide.
+   *  Weak - same rationale as #removalTimers. */
+  #removalWatching = new WeakSet();
   /** Pending disconnect graces, keyed by the video that is going away. Weak,
    *  and only ever probed per-video (has/get/set/delete - never iterated):
    *  the entry is removed by the grace callback, but on pagehide the task is
@@ -94,7 +109,8 @@ export class Kernel {
     this.#lifecycle = new LifecycleManager(
       this.#registry,
       (shell) => this.#notifyShellCreated(shell),
-      (video) => this.#onShellBootFailed(video)
+      (video) => this.#onShellBootFailed(video),
+      (video) => this.#settleSkipped.add(video)
     );
     this.#lifecycle.setShellFactory((discovery) => this.#createShell(discovery));
   }
@@ -237,6 +253,13 @@ export class Kernel {
   }
 
   #watchVideoRemoval(video, container, hops) {
+    // Re-adoption after a settle-skip (connected branch of checkAnchors)
+    // lands here with the original watcher still armed; a second observer
+    // pair would never be torn down as a pair.
+    if (this.#removalWatching.has(video)) {
+      return;
+    }
+    this.#removalWatching.add(video);
     /** Adaptive watch depth: the matched anchor + a margin, never unbounded. */
     const watchDepth = Number.isInteger(hops) && hops > 0
       ? Math.min(hops + REMOVAL_DEPTH_MARGIN, MAX_REMOVAL_DEPTH)
@@ -288,6 +311,19 @@ export class Kernel {
       if (video.parentElement !== anchors[0]) {
         reanchorObservers();
       }
+      // A settle that completed while this video was detached skipped shell
+      // creation but left #seenVideos claiming it - and this very reconnect
+      // just cancelled the grace that would have released the claim. With the
+      // discovery tap already downgraded, this edge is the only re-discovery
+      // signal there is: release the claim and run adoption again (fresh
+      // findSdk/size validation; a video that no longer qualifies stays
+      // unclaimed and refusable). One-shot consume, so ordinary re-anchors
+      // with a live shell - and boot-failed videos waiting on their media
+      // event - never re-enter adoption.
+      if (this.#settleSkipped.delete(video)) {
+        this.#seenVideos.delete(video);
+        this.#adoptVideo(video);
+      }
     };
 
     /** Single-target consolidation: `MutationObserver.observe()`
@@ -329,6 +365,7 @@ export class Kernel {
 
     const stopWatching = () => {
       observer.disconnect();
+      this.#removalWatching.delete(video);
       this.#removalTimers.get(video)?.();
       this.#removalTimers.delete(video);
       this.#seenVideos.delete(video);

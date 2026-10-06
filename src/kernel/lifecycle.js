@@ -72,6 +72,11 @@ export class LifecycleManager {
   #onShellCreated;
   /** Told which video's shell failed to come up, so the kernel can re-arm. */
   #onShellFailed;
+  /** Told which video's settle completed while it was detached. The kernel
+   *  keeps that fact on its removal watch: the reconnect edge must re-enter
+   *  adoption, because #seenVideos still claims the video and the discovery
+   *  tap has already downgraded by then. */
+  #onSettleSkipped;
   #shellFactory = null;
   /** Videos with a settle wait in flight - dedups repeated discovery. */
   #pending = new Set();
@@ -85,11 +90,16 @@ export class LifecycleManager {
    *   threw after the shell rolled itself back. The shell has already undone
    *   its DOM by then, so the video is unmarked and adoptable again - the
    *   callback decides whether to re-arm it.
+   * @param {(video: HTMLVideoElement) => void} [onSettleSkipped] the settle
+   *   finished with the video (or container) detached. Nothing is created,
+   *   but the kernel has already claimed the video - it needs to know so the
+   *   removal watch can re-adopt on reconnect.
    */
-  constructor(registry, onShellCreated, onShellFailed) {
+  constructor(registry, onShellCreated, onShellFailed, onSettleSkipped) {
     this.#registry = registry;
     this.#onShellCreated = onShellCreated;
     this.#onShellFailed = onShellFailed;
+    this.#onSettleSkipped = onSettleSkipped;
   }
 
   setShellFactory(factory) {
@@ -114,6 +124,10 @@ export class LifecycleManager {
     this.#pending.delete(video);
     if (!video.isConnected || !container.isConnected) {
       logger.log("lifecycle", `${sdk.name} video left the document before settle - skipping`);
+      // The claim stands (#seenVideos) and the discovery tap is downgraded,
+      // so this video is unreachable unless the removal watch's reconnect
+      // edge re-offers it. Hand the kernel the fact it needs for that.
+      this.#onSettleSkipped?.(video);
       return;
     }
     if (this.#registry.getByVideo(video)) {
