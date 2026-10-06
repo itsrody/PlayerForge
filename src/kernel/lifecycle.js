@@ -122,8 +122,14 @@ export class LifecycleManager {
     this.#pending.add(video);
     await whenDomSettled(container, { signal: this.#scope.signal });
     this.#pending.delete(video);
-    if (!video.isConnected || !container.isConnected) {
-      logger.log("lifecycle", `${sdk.name} video left the document before settle - skipping`);
+    // container.contains(): the video can also be moved OUT of its container
+    // mid-settle (a re-parent lands inside the quiet window) while both nodes
+    // stay connected - booting there would strand the host in the abandoned
+    // container. Same one-shot offer as the detached case: the movedOut edge
+    // has already re-anchored the watch to the new chain, so the next nearby
+    // mutation re-enters adoption against the CURRENT container.
+    if (!video.isConnected || !container.isConnected || !container.contains(video)) {
+      logger.log("lifecycle", `${sdk.name} video left its container before settle - skipping`);
       // The claim stands (#seenVideos) and the discovery tap is downgraded,
       // so this video is unreachable unless the removal watch's reconnect
       // edge re-offers it. Hand the kernel the fact it needs for that.

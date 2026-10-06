@@ -43,8 +43,11 @@ function makeHarness() {
   const kernel = new Kernel();
   kernel.onShellCreated((shell) => created.push(shell));
   kernel.registerShellProvider({
-    create({ video: v, container, sdk }) {
-      return { video: v, container, sdk, ready: Promise.resolve(), destroy() {} };
+    create({ video: v, container, sdk, onDestroy }) {
+      // destroy() must unregister like the real shell does (shell.js:550):
+      // the container-move re-adopt path destroys the stale shell and then
+      // relies on the registry slot being free before adoption runs again.
+      return { video: v, container, sdk, ready: Promise.resolve(), destroy() { onDestroy?.(); } };
     }
   });
   return { kernel, video, created };
@@ -81,30 +84,43 @@ async function waitFor(cond, ms = 2000) {
   }
 }
 
-test("removal watch reanchors after a parent swap and still detects removal", async () => {
+test("a video moved to a new container gets a fresh shell in the new location", async () => {
   const { kernel, video, created } = makeHarness();
   kernel.init();
   // This kernel adopts every video in the document (the previous test's is
   // still mounted), so wait for OUR shell specifically.
   await waitFor(() => created.some((shell) => shell.video === video));
-  const shell = created.find((entry) => entry.video === video);
-  let destroyed = false;
-  shell.destroy = () => { destroyed = true; };
+  const oldShell = created.find((entry) => entry.video === video);
+  const oldDestroy = oldShell.destroy;
+  let oldDestroyed = false;
+  oldShell.destroy = () => { oldDestroyed = true; oldDestroy(); };
 
-  // Reparent the VIDEO itself: its anchor chain goes stale, so the removal
-  // observer must disconnect and re-observe from the new roots. (MutationObserver
-  // has no unobserve(): the old loop called a method that does not exist, threw
-  // inside the callback, and stranded the anchors on the original parents.)
+  // Reparent the VIDEO itself into a second player. The host was injected
+  // into the OLD container (inject.js:88), so the live shell is stranded
+  // over the emptied slot while marker + #seenVideos would refuse the new
+  // location for the life of the document - measured live: at +799ms the
+  // host was still in the old slot, zero hosts in the new location,
+  // data-pf-shell still set even after the old slot died. The movedOut edge
+  // must destroy the stale shell (destroy unregisters), release the claim
+  // and adopt against the CURRENT ancestry.
   const swap = document.createElement("div");
+  swap.className = "jwplayer";
   document.body.appendChild(swap);
   swap.appendChild(video);
-  await new Promise((resolve) => setTimeout(resolve, 20)); // MutationObserver delivery
+  await waitFor(() => created.filter((entry) => entry.video === video).length === 2, 3000);
+  assert.ok(oldDestroyed, "the shell stranded in the old container was destroyed");
+  const replacements = created.filter((entry) => entry.video === video);
+  assert.equal(replacements[1].container, swap, "the replacement shell targets the container the video now lives in");
 
-  // Removal from the NEW location is only noticed if reanchor re-observed it;
-  // a stranded watcher would silently miss this childList record.
+  // The watch re-anchored to the new chain, so removal from the NEW location
+  // still reaches the grace and tears the replacement down.
+  const newShell = replacements[1];
+  const newDestroy = newShell.destroy;
+  let newDestroyed = false;
+  newShell.destroy = () => { newDestroyed = true; newDestroy(); };
   video.remove();
-  await waitFor(() => destroyed, 3000);
-  assert.ok(destroyed, "the shell was torn down after removal from the swapped parent");
+  await waitFor(() => newDestroyed, 3000);
+  assert.ok(newDestroyed, "the replacement shell is torn down when the video leaves the new container too");
 });
 
 test("reconnect cancels the pending grace - a fresh one measures from the current disconnect", async () => {
@@ -379,4 +395,77 @@ test("a video detached during settle and reattached inside the grace is re-adopt
   );
   wrapper.appendChild(video);
   await waitFor(() => created.some((entry) => entry.video === video), 3000);
+});
+
+test("moving the whole player subtree re-roots the removal watch", async () => {
+  // The video's own parent never changes here - the page moves the PLAYER,
+  // one level above the watched anchors. The move itself still delivers a
+  // record (it is a mutation of an observed old node), but parent looks
+  // unchanged; only the full-chain + sentinel compare notices that the upper
+  // range shifted. Without the re-root, the teardown below is a mutation on
+  // the NEW chain, outside every old root: no record, no grace, an orphaned
+  // shell pinned in the registry with its listeners alive (measured live:
+  // host still in the detached tree at +903ms; a control mutation on an
+  // observed old root destroyed it at +708ms).
+  const body = document.body;
+  const l1 = document.createElement("div");
+  const l2 = document.createElement("div");
+  const wrapper = document.createElement("div");
+  wrapper.className = "jwplayer";
+  const video = document.createElement("video");
+  wrapper.appendChild(video);
+  l2.appendChild(wrapper);
+  l1.appendChild(l2);
+  body.appendChild(l1);
+  video.getBoundingClientRect = () => ({ width: 640, height: 360, top: 0, left: 0, right: 640, bottom: 360 });
+  video.checkVisibility = () => true;
+
+  const created = [];
+  let destroyed = false;
+  const kernel = new Kernel();
+  kernel.onShellCreated((shell) => created.push(shell));
+  kernel.registerShellProvider({
+    create({ video: v, container, sdk, onDestroy }) {
+      const shell = { video: v, container, sdk, ready: Promise.resolve(), destroy() { onDestroy?.(); } };
+      if (v === video) {
+        shell.destroy = () => { destroyed = true; onDestroy?.(); };
+      }
+      return shell;
+    }
+  });
+  kernel.init();
+  await waitFor(() => created.some((shell) => shell.video === video));
+  assert.equal(destroyed, false, "shell up before the move");
+
+  const swap = document.createElement("div");
+  body.appendChild(swap);
+  swap.appendChild(wrapper); // video.parentElement (wrapper) unchanged
+  await new Promise((r) => setTimeout(r, 20)); // MO delivery of the move record
+  swap.remove(); // teardown on the NEW chain - only a re-rooted watch sees it
+  await waitFor(() => destroyed, 3000);
+  assert.ok(destroyed, "the shell was torn down after the new chain's removal");
+});
+
+test("a video moved to another container during settle boots against the new container", async () => {
+  const { kernel, video, created } = makeHarness();
+  kernel.init();
+  await new Promise((r) => setTimeout(r, 20)); // inside the settle quiet window
+  const swap = document.createElement("div");
+  swap.className = "jwplayer";
+  document.body.appendChild(swap);
+  swap.appendChild(video); // movedOut edge runs first: no shell yet, watch re-roots
+  // The ORIGINAL settle now completes with container = the old wrapper while
+  // the video lives in `swap`. Without the contains() guard it boots a shell
+  // against the abandoned container, and registry.getByVideo then refuses
+  // the correct location forever; with it, the one-shot offer re-enters
+  // adoption on the next observed edge (the nudge below).
+  await new Promise((r) => setTimeout(r, 120)); // original settle quiet completes
+  assert.ok(
+    !created.some((entry) => entry.video === video),
+    "no shell boots against the abandoned container"
+  );
+  swap.appendChild(document.createElement("i")); // next observed edge
+  await waitFor(() => created.some((entry) => entry.video === video), 3000);
+  const shell = created.find((entry) => entry.video === video);
+  assert.equal(shell.container, swap, "the shell boots against the container the video lives in");
 });

@@ -253,9 +253,12 @@ export class Kernel {
   }
 
   #watchVideoRemoval(video, container, hops) {
-    // Re-adoption after a settle-skip (connected branch of checkAnchors)
-    // lands here with the original watcher still armed; a second observer
-    // pair would never be torn down as a pair.
+    // Re-adoption after a settle-skip (connected branch of checkAnchors) or a
+    // container move (the movedOut branch) lands here with the original
+    // watcher still armed; a second observer pair would never be torn down as
+    // a pair. The closure keeps the FIRST adopt's container/hops: reanchor
+    // only reads container as the parentless fallback and the depth as a cap,
+    // both fine for the same video under a new parent.
     if (this.#removalWatching.has(video)) {
       return;
     }
@@ -266,6 +269,11 @@ export class Kernel {
       : MAX_REMOVAL_DEPTH;
 
     const anchors = [];
+    /** The observed node ABOVE the watched range; null when the chain ends at
+     * the document. Tracked (not just observed) so isChainFresh can detect a
+     * subtree move that leaves anchors[] itself intact but shifts the upper
+     * range off its old node - the shape the live swap probe hit. */
+    let sentinel = null;
 
     /**
      * Removal-grace tick: a scheduler.postTask handle on the kernel scope. It
@@ -280,6 +288,30 @@ export class Kernel {
         signal: this.#scope.signal
       });
       return () => handle.abort();
+    };
+
+    /**
+     * Is the observed chain still exactly the chain that was recorded? Walks
+     * anchors[] then the hop beyond them against the sentinel: moving the
+     * whole player subtree keeps video.parentElement - and even anchors[] -
+     * intact while the upper range sits on a node that is no longer an
+     * ancestor, so the new chain's removal never reaches checkAnchors
+     * (measured live: host still inside the detached tree at +903ms; a
+     * control mutation on an observed old root destroyed it at +708ms).
+     * Bounded by anchors.length + 1 (<= MAX_REMOVAL_DEPTH + 1 parentElement
+     * reads): 154ns at depth 2 (the plyr/JW shape) / 244ns worst-case per
+     * batch on Gecko against a 48.9ns baseline - priced only to bound a
+     * correctness walk, not sold as a win.
+     */
+    const isChainFresh = () => {
+      let node = video.parentElement;
+      for (let i = 0; i < anchors.length; i++) {
+        if (node !== anchors[i]) {
+          return false;
+        }
+        node = node.parentElement;
+      }
+      return node === sentinel;
     };
 
     // Arrow fn keeps the enclosing class-level `this` for timer/lifecycle access.
@@ -308,7 +340,20 @@ export class Kernel {
       // CURRENT disconnect. Between settled events nothing is pending.
       this.#removalTimers.get(video)?.();
       this.#removalTimers.delete(video);
-      if (video.parentElement !== anchors[0]) {
+      // The video leaving its parent means it moved OUT of the shell's
+      // container (the host is injected INTO container - inject.js:88), so
+      // the live HUD is stranded over the emptied slot while marker + seen
+      // refuse the new location for the life of the document. Measured live:
+      // video moved alone -> at +799ms the host was still in the old slot,
+      // zero hosts in the new location, data-pf-shell still set even after
+      // the old slot died. Re-adopt: destroy the stale shell (its destroy
+      // unmarks and unregisters), release the claim, run adoption against
+      // the CURRENT ancestry - which legitimately refuses an unrecognisable
+      // new location (sdk null) and succeeds once the page wraps the video
+      // in a player again. One shell rebuild per re-parent is the accepted
+      // cost; resume re-adopts its saved entry by design.
+      const movedOut = video.parentElement !== anchors[0];
+      if (movedOut || !isChainFresh()) {
         reanchorObservers();
       }
       // A settle that completed while this video was detached skipped shell
@@ -319,8 +364,15 @@ export class Kernel {
       // findSdk/size validation; a video that no longer qualifies stays
       // unclaimed and refusable). One-shot consume, so ordinary re-anchors
       // with a live shell - and boot-failed videos waiting on their media
-      // event - never re-enter adoption.
-      if (this.#settleSkipped.delete(video)) {
+      // event - never re-enter adoption. The movedOut branch re-adopts too,
+      // so the flag is consumed on that path as well instead of staying
+      // armed for a later, now redundant, offer.
+      const skipEdge = this.#settleSkipped.delete(video);
+      if (movedOut) {
+        this.#lifecycle.onVideoRemoved({ video });
+        this.#seenVideos.delete(video);
+        this.#adoptVideo(video);
+      } else if (skipEdge) {
         this.#seenVideos.delete(video);
         this.#adoptVideo(video);
       }
@@ -328,11 +380,24 @@ export class Kernel {
 
     /** Single-target consolidation: `MutationObserver.observe()`
      *  supports multiple root targets natively (childList filtered in C++), so
-     *  up to `watchDepth` per-video C++ wrappers collapse to one instance.
+     *  up to the active depth (cap: MAX_REMOVAL_DEPTH) per-video C++ wrappers
+     *  collapse to one instance.
      *  The kernel scope disconnects it at pagehide - no per-video bookkeeping. */
     const observer = new MutationObserver(checkAnchors);
     this.#scope.onDispose(() => observer.disconnect());
 
+    /**
+     * The initial walk is tight (matched anchor + margin) so an untouched
+     * player never watches the chatty upper document. Once a re-anchor has
+     * run - a move, a reconnect-out-of-grace - the recorded locality is
+     * known wrong and the next walk uses the MAX_REMOVAL_DEPTH cap: a tight
+     * range after a move is demonstrably blind. The swap probe's drop record
+     * fired only on the new body, two levels past the hops+1 range, so the
+     * orphan survived (host in the detached tree at +905ms) even with a
+     * correct chain compare. Same observer, still bounded by the cap; the
+     * sentinel stays the documented boundary beyond it.
+     */
+    let anchorDepth = watchDepth;
     const reanchorObservers = () => {
       // MutationObserver has no per-target unobserve(): disconnect() is the
       // only way to drop the stale roots (the previous loop called a method
@@ -344,10 +409,11 @@ export class Kernel {
       observer.disconnect();
       anchors.length = 0;
       let anchor = video.parentElement || container;
-      for (let depth = 0; anchor && depth < watchDepth; depth++, anchor = anchor.parentElement) {
+      for (let depth = 0; anchor && depth < anchorDepth; depth++, anchor = anchor.parentElement) {
         observer.observe(anchor, { childList: true });
         anchors.push(anchor);
       }
+      anchorDepth = MAX_REMOVAL_DEPTH;
       /**
        * Sentinel: the first ancestor ABOVE the watched range. MutationObserver
        * only reports mutations of the nodes it observes, so removing the
@@ -357,9 +423,15 @@ export class Kernel {
        * ends at the document `anchor` is null and there is nothing to watch.
        * Kept out of `anchors` deliberately: that array is the watched RANGE,
        * and anchors[0] means "the video's parent" to checkAnchors.
+       * Tracked in `sentinel` too: a subtree move can leave the whole range
+       * intact while the node ABOVE it is no longer an ancestor, and only a
+       * recorded sentinel can notice (isChainFresh).
        */
       if (anchor && !anchors.includes(anchor)) {
         observer.observe(anchor, { childList: true });
+        sentinel = anchor;
+      } else {
+        sentinel = null;
       }
     };
 
