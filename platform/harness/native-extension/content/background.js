@@ -213,7 +213,17 @@ async function pump() {
       await new Promise((r) => setTimeout(r, 250));
       continue;
     }
-    const command = await response.json();
+    let command;
+    try {
+      command = await response.json();
+    } catch (e) {
+      // A 204 poll-timeout answers ok with an empty body - that is the
+      // heartbeat when no command arrives within POLL_TIMEOUT_MS, not an
+      // error. Throwing here used to reject the bare pump() promise and
+      // permanently stop the poll loop, so the first command after any
+      // 30s+ idle went unanswered until its 15s caller timeout fired.
+      continue;
+    }
     if (!command) continue;
     try {
       const result = await handle(command);
@@ -239,4 +249,6 @@ fetch(`${BASE}/bootstrap`)
   .then(({ seq }) => report({ ev: "startup-registered", regSeq: seq }))
   .catch((e) => report({ ev: "startup-failed", msg: String((e && e.message) || e) }));
 
-pump();
+// A rejected pump() means no command is ever answered again - report it on
+// the diagnostic channel rather than letting the rejection vanish unobserved.
+pump().catch((e) => report({ ev: "pump-died", msg: String((e && e.message) || e) }));
