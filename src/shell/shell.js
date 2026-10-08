@@ -18,6 +18,7 @@ import { Scope } from "../shared/scope.js";
 import { createActivity } from "../shared/activity.js";
 import { PlayerStatus, Playback, Presence } from "../shared/player-status.js";
 import { HudReconciler } from "../shared/hud-reconciler.js";
+import { writeReferenceBox } from "../shared/geometry.js";
 import { RenderGate } from "../shared/render-gate.js";
 import { yield_ } from "../shared/scheduler.js";
 
@@ -165,22 +166,14 @@ export class Shell {
   }
 
   /**
-   * Unified contextual reference box, per the PlayerForge geometry rule: the
-   * shell's own container inline, the physical screen in fullscreen (the
-   * :fullscreen rule stretches the container to the screen). Read directly at
-   * call time - no cache, no invalidation watchers; consumers read once per
-   * gesture (scrub start, pinch-out). Returns { width, height }.
+   * Unified contextual reference box, per the PlayerForge geometry rule
+   * (`src/shared/geometry.js` — the screen in fullscreen, the container
+   * inline). Read directly at call time - no cache, no invalidation watchers;
+   * consumers read once per gesture (scrub start, pinch-out).
+   * Returns { width, height }.
    */
   get referenceBox() {
-    const box = this.#refBox;
-    if (fs) {
-      box.width = screen.width;
-      box.height = screen.height;
-    } else {
-      box.width = this.container.clientWidth;
-      box.height = this.container.clientHeight;
-    }
-    return box;
+    return writeReferenceBox(this.container, this.#refBox);
   }
 
   get shellDom() {

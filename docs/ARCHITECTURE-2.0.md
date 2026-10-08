@@ -1379,7 +1379,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved eight times since that cut. The first two movements
+The unit count has moved nine times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1413,8 +1413,26 @@ scalar read `target.rate`, a property HTMLMediaElement does not have, so the
 value was pinned to the fallback, every `ratechange` compared equal and
 skipped, and the whole rate axis stayed invisible on `pf:status` for the
 element's life (measured live: `playbackRate = 2` produced zero rate
-transitions against a volume control that did; fixed to `playbackRate`;
-`tests/player-status.test.mjs`).
+ transitions against a volume control that did; fixed to `playbackRate`;
+ `tests/player-status.test.mjs`).
+
+ The ninth movement unified the one rule two modules owned separately: the
+ PlayerForge geometry reference (screen in fullscreen, container inline) lived
+ in `shell.referenceBox` and in forge's `#zoneForPoint`, and the copies had
+ already drifted — the shell read a bare `screen.width` that throws
+ ReferenceError on a host with no `screen` global at all, while forge guarded
+ the same read and fell back to `window.innerWidth`. `src/shared/geometry.js`
+ now owns the fs-vs-inline decision and the guarded screen read behind
+ `screenSize()` / `writeReferenceBox()` / `referenceWidth()`; both call sites
+ delegate with byte-identical values everywhere the old code did not throw,
+ and degrade to the container instead of throwing where it did
+ (`tests/geometry.test.mjs`, 7: the fs-with-screen, fs-without-screen,
+ zeroed-screen, raw-zero-inline, window-fallback, and pooled-rewrite cases).
+ The same change completed the manifest rows the rule touches:
+ `platform/capabilities.json` now names `src/entry.js` beside `panel.js`
+ under `matchMedia` and beside `context.js` under `AbortSignal`, and
+ `src/shared/geometry.js` beside `forge.js` under `screen` — bare calls the
+ `typeof`-chain scan cannot see, so the manifest is what keeps them honest.
 
 ## 7. Gecko-specific decisions, and what they rule out
 

@@ -5,6 +5,7 @@ import { DOMManager } from "../../shared/dom-manager.js";
 import { logger } from "../../shared/diagnostics.js";
 import { isBenignMediaPolicyError } from "../../shared/primitives.js";
 import { Scope } from "../../shared/scope.js";
+import { referenceWidth } from "../../shared/geometry.js";
 
 /**
  * Pointer handlers never preventDefault - native pan/scroll over the zone is
@@ -632,14 +633,12 @@ export class InputForge {
   }
 
   #zoneForPoint(pointerEvent) {
-    // Same geometry rule as shell.referenceBox: the physical display in
-    // fullscreen (zones only steer fs gestures), the shell host's box inline.
-    // screen also sidesteps innerWidth's scrollbar-inclusive quirk; fall back
-    // to the window when neither reports a size (headless/test environs).
-    const width =
-      fs && typeof screen !== "undefined" && screen.width > 0
-        ? screen.width
-        : this.#zone.clientWidth || window.innerWidth;
+    // The PlayerForge geometry rule lives in `src/shared/geometry.js` (the
+    // physical display in fullscreen, the shell host's box inline); screen
+    // also sidesteps innerWidth's scrollbar-inclusive quirk, and the helper
+    // falls back to the window when the zone reports no size
+    // (headless/test environs).
+    const width = referenceWidth(this.#zone.clientWidth);
     if (pointerEvent.clientX < width * EDGE_ZONE_RATIO) {
       return "left-edge";
     } else if (pointerEvent.clientX > width * EDGE_ZONE_START) {

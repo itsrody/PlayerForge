@@ -156,7 +156,8 @@
       "summary": "Lifecycle cancellation, including AbortSignal.any/timeout",
       "shipsInFirefox": 124,
       "usedBy": [
-        "src/shared/context.js"
+        "src/shared/context.js",
+        "src/entry.js"
       ]
     },
     {
@@ -348,10 +349,11 @@
     {
       "id": "matchMedia",
       "api": "matchMedia",
-      "summary": "Compact-mode auto-detect and the panel breakpoint listener",
-      "why": "jsdom has no viewport engine; matches is false, so the shell never auto-switches to compact and no listener fires.",
+      "summary": "Compact-mode auto-detect, the panel breakpoint listener, and the first-run hint pointer form",
+      "why": "jsdom has no viewport engine; matches is false, so the shell never auto-switches to compact and no listener fires. entry.js reads it bare for the hint text behind the same floor guarantee rather than a second probe.",
       "usedBy": [
-        "src/shell/chrome/panel.js"
+        "src/shell/chrome/panel.js",
+        "src/entry.js"
       ],
       "probes": [
         "matchMedia"
@@ -360,10 +362,11 @@
     {
       "id": "screen",
       "api": "screen",
-      "summary": "Fullscreen size sanity check",
-      "why": "Heads without a screen object skip the check rather than measuring against a bogus viewport.",
+      "summary": "Fullscreen size sanity check and the fullscreen arm of the geometry rule",
+      "why": "Heads without a screen object skip the check rather than measuring against a bogus viewport; the shared geometry rule degrades the same way, falling back to the container box instead of throwing on a bare screen read.",
       "usedBy": [
-        "src/shell/inputs/forge.js"
+        "src/shell/inputs/forge.js",
+        "src/shared/geometry.js"
       ],
       "probes": [
         "screen"
