@@ -33,32 +33,71 @@ export function isInsideShell(host, node) {
 
 /**
  * Generic interactive elements - the SDK's own controls, whatever player
- * they belong to. Buttons, links, form fields, editable text and anything
- * carrying an interactive ARIA role: no per-SDK selector list, because the
- * platform already labels these. The gesture engine consults this before
- * owning a press, and focus/contextmenu handling consults it before
- * stealing either: a press that lands on a control was meant for the SDK.
+ * they belong to. Buttons, links, labels, form fields, editable text and
+ * anything carrying an interactive ARIA role: no per-SDK selector list,
+ * because the platform already labels these. Div-skinned player chrome
+ * (Flowplayer 7's `.fp-timeline` progressbar is a bare div with delegated
+ * mousedown/touchstart; its buttons are href-less `<a>` icons) carries no
+ * such label, so a small class vocabulary covers it: timeline, seek, scrub,
+ * slider, progress. Deliberately heuristic and deliberately one-directional:
+ * a non-control that happens to match passes its presses natively (the
+ * pre-control behavior - gestures simply do not start there), while a missed
+ * control would lose its whole stream to the shell. The gesture engine
+ * consults this before owning a press, and focus/contextmenu handling
+ * consults it before stealing either: a press that lands on a control was
+ * meant for the SDK. Custom-element controls without a role stay invisible
+ * to this (there is no generic marker for them) - bare-surface rules apply.
  */
 const CONTROL_SELECTOR =
-  "button, a[href], input, select, option, textarea, summary, " +
+  "button, a, input, select, option, textarea, summary, label, " +
   "[contenteditable=\"\"], [contenteditable=\"true\"], " +
   "[role=\"button\"], [role=\"link\"], [role=\"menuitem\"], " +
   "[role=\"menuitemcheckbox\"], [role=\"menuitemradio\"], [role=\"tab\"], " +
   "[role=\"slider\"], [role=\"switch\"], [role=\"checkbox\"], [role=\"radio\"], " +
-  "[role=\"option\"], [role=\"spinbutton\"]";
+  "[role=\"option\"], [role=\"spinbutton\"], [role=\"combobox\"], " +
+  "[role=\"listbox\"], [role=\"menu\"], [role=\"treeitem\"]";
+
+/** Class-name fragments of div-skinned player chrome (see above). Matched
+ *  as substrings against the lowercased class attribute, so `fp-bar-slider`
+ *  and `ytp-progress-bar` both hit without enumerating anybody's classes. */
+const CHROME_CLASS_FRAGMENTS = ["timeline", "seek", "scrub", "slider", "progress"];
+
+/** True when the node itself is SDK chrome by either signal. */
+function isChromeNode(node) {
+  if (typeof node?.matches === "function" && node.matches(CONTROL_SELECTOR)) {
+    return true;
+  }
+  // getAttribute, not classList: SVG chrome exposes no string classList, and
+  // this runs at press frequency, so one lowered string beats per-fragment
+  // DOM reads.
+  const classes = typeof node?.getAttribute === "function" ? node.getAttribute("class") : null;
+  if (typeof classes === "string") {
+    const lower = classes.toLowerCase();
+    for (const fragment of CHROME_CLASS_FRAGMENTS) {
+      if (lower.includes(fragment)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
 
 /** True when any element on the event's path is an SDK control. */
 export function eventHitsControl(event) {
   if (typeof event?.composedPath === "function") {
     const path = event.composedPath();
     for (const node of path) {
-      if (typeof node?.matches === "function" && node.matches(CONTROL_SELECTOR)) {
+      if (isChromeNode(node)) {
         return true;
       }
     }
     return false;
   }
-  return !!event?.target?.closest?.(CONTROL_SELECTOR);
+  // No composed path (hosts without it): selector-only, so the vocabulary
+  // matches case-sensitively here against lowercase conventions - the
+  // composed path above stays the accurate one.
+  const fragmentSelector = CHROME_CLASS_FRAGMENTS.map((fragment) => `[class*="${fragment}"]`).join(",");
+  return !!event?.target?.closest?.(CONTROL_SELECTOR + "," + fragmentSelector);
 }
 
 /**

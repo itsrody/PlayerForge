@@ -1388,3 +1388,122 @@ test("two brokers on one document route only their own engines", (t) => {
   assert.equal(first.size, 1, "no engine leaked across brokers");
   assert.equal(second.size, 1);
 });
+
+test("a control tap inside the post-gesture window still passes", async (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  const controller = new InputForge(video, zone, host, new EngineBroker());
+  t.after(() => controller.destroy());
+  const seen = collect(host, dom.window);
+  const sdk = sdkObserver(zone, dom.window);
+
+  // An owned hold press arms the click-suppression window...
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  await sleep(350); // hold fires
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 400, y: 200 }));
+  await sleep(100); // compat-click window lapses; suppression (600ms) still armed
+  assert.equal(seen.filter((e) => e.type === GESTURE_EVENTS.hold).length, 1);
+
+  // ...but a fresh press on an SDK control is somebody else's tap, not the
+  // gesture's tail, so it passes natively and immediately.
+  const control = dom.window.document.createElement("button");
+  zone.appendChild(control);
+  control.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  control.dispatchEvent(mouse(dom.window, "mousedown", { x: 400, y: 200 }));
+  control.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 400, y: 200 }));
+  control.dispatchEvent(mouse(dom.window, "mouseup", { x: 400, y: 200 }));
+  control.dispatchEvent(mouse(dom.window, "click", { x: 400, y: 200 }));
+  assert.deepEqual(sdk, ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]);
+  control.dispatchEvent(mouse(dom.window, "dblclick", { x: 400, y: 200 }));
+  assert.ok(sdk.includes("dblclick"), "the window swallows our stream, never a control's");
+});
+
+test("a label tap stays native with every intent armed", async (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  stubFullscreen(dom, true);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
+  t.after(() => controller.destroy());
+  const sdk = sdkObserver(zone, dom.window);
+
+  const label = dom.window.document.createElement("label");
+  label.textContent = "Captions";
+  zone.appendChild(label);
+  label.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  label.dispatchEvent(mouse(dom.window, "mousedown", { x: 400, y: 200 }));
+  label.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 400, y: 200 }));
+  label.dispatchEvent(mouse(dom.window, "mouseup", { x: 400, y: 200 }));
+  label.dispatchEvent(mouse(dom.window, "click", { x: 400, y: 200 }));
+  assert.deepEqual(sdk, ["pointerdown", "mousedown", "pointerup", "mouseup", "click"],
+    "labels toggle their controls natively - no holdback, no replay seed");
+  await sleep(350);
+  assert.equal(sdk.length, 5, "nothing is replayed for a press the shell never owned");
+});
+
+test("a div-skinned SDK timeline stays fully native", (t) => {
+  // Flowplayer 7's progressbar is a bare div (delegated mousedown/touchstart,
+  // no role, no input) with href-less icon anchors - no platform label
+  // anywhere, so the chrome vocabulary is what keeps the shell off it.
+  const { dom, video, zone, host } = makeEnv();
+  const controller = new InputForge(video, zone, host, new EngineBroker());
+  t.after(() => controller.destroy());
+  const sdk = sdkObserver(zone, dom.window);
+  const doc = dom.window.document;
+
+  zone.classList.add("fp-player");
+  const controls = doc.createElement("div");
+  controls.className = "fp-controls";
+  const timeline = doc.createElement("div");
+  timeline.className = "fp-timeline fp-bar";
+  const fill = doc.createElement("div");
+  fill.className = "fp-progress fp-color";
+  timeline.appendChild(fill);
+  controls.appendChild(timeline);
+  zone.appendChild(controls);
+
+  // A scrub drag across the timeline: the SDK must see the whole stream,
+  // starting with the press the shell would otherwise own.
+  timeline.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  timeline.dispatchEvent(mouse(dom.window, "mousedown", { x: 400, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 450, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 500, y: 200 }));
+  timeline.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 500, y: 200 }));
+  timeline.dispatchEvent(mouse(dom.window, "mouseup", { x: 500, y: 200 }));
+  timeline.dispatchEvent(mouse(dom.window, "click", { x: 500, y: 200 }));
+  assert.deepEqual(sdk, ["pointerdown", "mousedown", "pointermove", "pointermove", "pointerup", "mouseup", "click"]);
+});
+
+test("an href-less SDK icon stays a native tap", (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  const controller = new InputForge(video, zone, host, new EngineBroker());
+  t.after(() => controller.destroy());
+  const sdk = sdkObserver(zone, dom.window);
+
+  const play = dom.window.document.createElement("a");
+  play.className = "fp-icon fp-playbtn";
+  zone.appendChild(play);
+  play.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  play.dispatchEvent(mouse(dom.window, "mousedown", { x: 400, y: 200 }));
+  play.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 400, y: 200 }));
+  play.dispatchEvent(mouse(dom.window, "mouseup", { x: 400, y: 200 }));
+  play.dispatchEvent(mouse(dom.window, "click", { x: 400, y: 200 }));
+  assert.deepEqual(sdk, ["pointerdown", "mousedown", "pointerup", "mouseup", "click"],
+    "an anchor without href is a button wearing a link's tag");
+});
+
+test("an oddly-classed surface still belongs to gestures", async (t) => {
+  // The vocabulary must not over-match: a div whose class carries no chrome
+  // fragment keeps full gesture ownership, hold included.
+  const { dom, video, zone, host } = makeEnv();
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  const controller = new InputForge(video, zone, host, new EngineBroker());
+  t.after(() => controller.destroy());
+  const seen = collect(host, dom.window);
+
+  const poster = dom.window.document.createElement("div");
+  poster.className = "poster-frame";
+  zone.appendChild(poster);
+  poster.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  await sleep(350);
+  poster.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 400, y: 200 }));
+  assert.equal(seen.filter((e) => e.type === GESTURE_EVENTS.hold).length, 1);
+});

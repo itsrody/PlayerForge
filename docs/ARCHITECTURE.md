@@ -712,7 +712,7 @@ record rather than quietly delete:
   exercised by `render-gate.test.mjs`, but nothing in `src/` observes element
   size, because every layout question this fork asks is answered by status
   (`Playback`, `Presence`) or by CSS (`pf-detached`'s `display: none`). The one
-  mention in `src/` is a comment (`src/shell/inputs/forge.js:861`).
+  mention in `src/` is a comment (`src/shell/inputs/forge.js:855`).
 - **PiP is gone, not pending.** Picture-in-picture was removed outright
   (`a5bc9fb`, "remove picture-in-picture entirely"), so the earlier draft's "+
   PiP events" has no event to name. `Presence.PIP` survives as an enum member
@@ -732,7 +732,7 @@ an oversight.
 
 Today `isActive()` closures are authored independently at each `createActivity`
 call site (`src/shell/shell.js:367`, `src/shell/resume.js:702`,
-`src/shared/shadow.js:135`). Nothing answers "what is this player's status right
+`src/shared/shadow.js:174`). Nothing answers "what is this player's status right
 now" as a single queryable value.
 
 L2 introduces orthogonal axes rather than one large enum, so adding an axis never
@@ -1447,7 +1447,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved thirty-six times since that cut. The first two movements
+The unit count has moved thirty-seven times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1812,6 +1812,15 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  went with it, and the §4 L0 sketch now shows the three flags that remain.
  Net seven tests lighter.
 
+ The thirty-seventh movement made control passthrough genuine: the
+ click/dblclick suppression window exempts fresh presses on SDK controls
+ (owned tails stay swallowed), the hit-test box is read fresh per press
+ instead of cached, and control detection covers href-less anchors plus a
+ one-directional chrome vocabulary (timeline, seek, scrub, slider,
+ progress) proven against Flowplayer 7's bare-div progressbar - verified
+ against its shipped dist, where the delegated mousedown never arrived.
+ `tests/input-forge.test.mjs` gained 5.
+
 ## 7. Gecko-specific decisions, and what they rule out
 
 - Scheduler priorities replace timer-based deferral. `postTask` is available
@@ -1943,7 +1952,7 @@ In-tree:
 - `src/shared/scheduler.js` — traps in §2.4, `postTask`, `yield_()`
 - `src/shared/scope.js` — teardown primitive
 - `src/shared/activity.js` — passive activity windows
-- `src/shell/shell.js:367`, `src/shell/resume.js:702`, `src/shared/shadow.js:135` — `createActivity` call sites
+- `src/shell/shell.js:367`, `src/shell/resume.js:702`, `src/shared/shadow.js:174` — `createActivity` call sites
 - `src/shared/context.js:637` — the tree's only self-rearming `postTask`, delayed
 - `src/shared/dom-manager.js` — mutation coalescing
 - `src/shell/chrome/panel.js:116` — the only `setInterval` in the tree

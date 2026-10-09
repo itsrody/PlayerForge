@@ -380,10 +380,6 @@ export class InputForge {
    *  disposed flag guards dispatch + destroy. */
   #scope = new Scope();
 
-  // Cached <video> box for hit-testing, invalidated on resize/fullscreen so
-  // pointerdown never forces a synchronous layout flush with getBoundingClientRect.
-  #videoRect = null;
-
   // Pointer session state.
   #primaryPointerId = null;
   #startX = 0;
@@ -615,7 +611,6 @@ export class InputForge {
     this.#keyboardHoldTimer = null;
     clearTimeout(this.#pinchInitTimer);
     this.#pinchInitTimer = null;
-    this.#videoRect = null;
     this.#pointers.clear();
     cancelEase(this.#video);
     // DOM lifecycle: disconnect observers, restore styles, remove elements.
@@ -657,14 +652,13 @@ export class InputForge {
   }
 
   #hitTestVideo(pointerEvent) {
-    // Cache the box within one interaction so taps outside the HUD don't
-    // force a sync layout flush (getBoundingClientRect). The cache
-    // is dropped at every pointerdown (see #handlePointerDown), so it can never
-    // be served stale by a scroll or ancestor-transform move.
-    if (!this.#videoRect) {
-      this.#videoRect = this.#video.getBoundingClientRect();
-    }
-    const rect = this.#videoRect;
+    // Read fresh on every press: hit-testing runs at press frequency, never
+    // at move frequency, so the one flush per tap is inaudible - and a cache
+    // would serve the previous interaction's box to a compat mouse/touch
+    // press that arrives without its own pointerdown, after any scroll or
+    // layout shift. The live-session short-circuit in #dominatesPress means
+    // the steady stream never reaches this read at all.
+    const rect = this.#video.getBoundingClientRect();
     return pointerEvent.clientX >= rect.left && pointerEvent.clientX <= rect.right &&
       pointerEvent.clientY >= rect.top && pointerEvent.clientY <= rect.bottom;
   }
@@ -857,12 +851,12 @@ export class InputForge {
   }
 
   #handlePointerDown(event) {
-    // Fresh box per interaction: scroll/ancestor-transform shifts that
-    // ResizeObserver and fullscreenchange never see are covered by dropping
-    // the cached hit-test box at every tap (the old document-scroll capture
-    // listener nulled it, but only ever mattered at this read and ran on
-    // every page scroll for the whole shell lifetime).
-    this.#videoRect = null;
+    // Hit-testing reads the box fresh (see #hitTestVideo): scroll and
+    // ancestor-transform shifts that ResizeObserver and fullscreenchange
+    // never see are covered because nothing is ever cached - the old
+    // document-scroll capture listener nulled a cache here, but only ever
+    // mattered at this read and ran on every page scroll for the whole
+    // shell lifetime.
     if (
       event.button !== 0 ||
       this.#eventTarget && isInsideShell(this.#eventTarget, event.target) ||
@@ -1327,8 +1321,12 @@ export class InputForge {
     this.#clearAwaitClick();
     // Gesture window: every activation the shell consumed stays invisible -
     // the window is a deadline, consumed by time, so a dblclick arriving
-    // after its clicks is swallowed too.
-    if (clickTime() < this.#suppressClickUntil) {
+    // after its clicks is swallowed too. But only the shell's OWN stream is
+    // suppressed: a press the shell never took, landing on an SDK control,
+    // is somebody else's tap that merely arrived within the window - an
+    // owned press ending on a control stays swallowed, since that tail
+    // belongs to the gesture, not to the control it happens to land on.
+    if (clickTime() < this.#suppressClickUntil && (ownedPress || !eventHitsControl(event))) {
       event.stopImmediatePropagation();
       event.preventDefault();
       return;
@@ -1352,7 +1350,10 @@ export class InputForge {
     if (replayedClicks.has(event)) {
       return;
     }
-    if (clickTime() < this.#suppressClickUntil) {
+    // Same ownership rule as clicks: the window swallows the shell's stream
+    // and stray bare-surface activations, never a fresh press on a control.
+    if (clickTime() < this.#suppressClickUntil &&
+        (this.#tapReplayTarget || !eventHitsControl(event))) {
       event.stopImmediatePropagation();
       event.preventDefault();
       return;
