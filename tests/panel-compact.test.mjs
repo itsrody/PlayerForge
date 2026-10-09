@@ -348,3 +348,28 @@ test("a CloseWatcher that cannot be constructed degrades to the keydown path", a
 
   teardown();
 });
+test("the compact query list is minted once per panel", async () => {
+  const media = installMatchMedia();
+  let constructions = 0;
+  const realMatchMedia = globalThis.matchMedia;
+  globalThis.matchMedia = (...args) => {
+    constructions += 1;
+    return realMatchMedia(...args);
+  };
+  try {
+    const { shell, teardown } = await makeShell(true);
+    await shell.panel.open();
+    const minted = constructions;
+    assert.ok(minted >= 1, "auto-detect minted its list");
+    // Crossings re-resolve through the gate commit, which re-reads .matches:
+    // without the cache each crossing mints a second list for one boolean.
+    media.dispatch(true);
+    await settle();
+    media.dispatch(false);
+    await settle();
+    assert.equal(constructions, minted, "crossings re-read the list instead of re-minting");
+    teardown();
+  } finally {
+    globalThis.matchMedia = realMatchMedia;
+  }
+});

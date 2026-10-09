@@ -57,7 +57,15 @@ function makeFakePanel() {
       let val = opts.value;
       return {
         getValue: () => val,
-        setValue: (v) => { val = v; },
+        // The production widget cascades setValue through onChange like a
+        // user edit (panel.js); the fake does the same so bulk paths pay
+        // their real re-entry cost here.
+        setValue: (v) => {
+          if (v !== val) {
+            val = v;
+            opts.onChange?.(v);
+          }
+        },
         setDisabled: () => {},
         get value() { return val; },
         set value(v) { val = v; }
@@ -423,4 +431,54 @@ test("the prior filter is captured once and survives repeated applies", () => {
 
   filter.destroy();
   assert.equal(video.style.filter, "sepia(0.5)");
+});
+
+/* - Bulk-path write coalescing - */
+
+/** A video whose style.filter writes are counted, not just last-valued. */
+function makeCountingVideo() {
+  let filterValue = "";
+  let filterWrites = 0;
+  const style = {};
+  Object.defineProperty(style, "filter", {
+    get: () => filterValue,
+    set: (v) => {
+      filterValue = v;
+      filterWrites += 1;
+    },
+    configurable: true
+  });
+  return {
+    video: { style, closest: () => null },
+    writes: () => filterWrites,
+    value: () => filterValue
+  };
+}
+
+test("a preset lands in one style write, not one per stepper", () => {
+  cleanWrites();
+  const { video, writes, value } = makeCountingVideo();
+  const panel = makeFakePanel();
+  const filter = new VideoFilter(makeFakeShell(video), panel);
+  const bootWrites = writes();
+
+  panel.calls.selects[0].onChange("Cinematic");
+  assert.equal(writes() - bootWrites, 1, "bulk set stages values, one apply paints");
+  assert.ok(value().length > 0, "the preset actually painted");
+
+  filter.destroy();
+});
+
+test("reset lands in one style write, not one per stepper", () => {
+  cleanWrites();
+  const { video, writes, value } = makeCountingVideo();
+  const panel = makeFakePanel();
+  const filter = new VideoFilter(makeFakeShell(video), panel);
+  panel.calls.selects[0].onChange("Cinematic");
+  const beforeReset = writes();
+
+  filter.reset();
+  assert.equal(writes() - beforeReset, 1, "bulk reset stages values, one apply paints");
+  assert.ok(value().includes("none") || value() === "", "defaults painted back");
+  filter.destroy();
 });

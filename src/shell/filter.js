@@ -165,6 +165,8 @@ export class VideoFilter {
   #presetSelect = null;
   #resetBtn = null;
   #steppers = {};
+  /** True while a bulk path stages stepper values; per-stepper commits wait. */
+  #suspended = false;
   /**
    * The embed's own inline `filter`, captured before PF's first write.
    * `filter` is an inherited CSS property, so a host page may legitimately be
@@ -235,13 +237,20 @@ export class VideoFilter {
   }
 
   #loadFromConfig() {
-    for (const key of ALL_KEYS) {
-      const def = DEFAULTS[key];
-      const raw = getConfigValue(`${CONFIG_PREFIX}.${key}`, def);
-      this.#values[key] = typeof def === "number" ? coerceNumber(raw, def) : (raw ?? def);
-    }
-    for (const key of ALL_KEYS) {
-      this.#steppers[key]?.setValue(this.#values[key]);
+    // Bulk-staged like preset/reset: the constructor's own apply below paints
+    // once, and no persist is scheduled for values that did not change.
+    this.#suspended = true;
+    try {
+      for (const key of ALL_KEYS) {
+        const def = DEFAULTS[key];
+        const raw = getConfigValue(`${CONFIG_PREFIX}.${key}`, def);
+        this.#values[key] = typeof def === "number" ? coerceNumber(raw, def) : (raw ?? def);
+      }
+      for (const key of ALL_KEYS) {
+        this.#steppers[key]?.setValue(this.#values[key]);
+      }
+    } finally {
+      this.#suspended = false;
     }
     this.#syncPresetMenu();
   }
@@ -264,6 +273,14 @@ export class VideoFilter {
 
   #onStepperChange(key, value) {
     this.#values[key] = value;
+    // Bulk paths (preset, reset, config load) drive every stepper through
+    // setValue, and the real widget cascades through onChange like a user
+    // edit - so without this guard one preset is N applies plus N persist
+    // re-arms, of which only the last state survives. Suspended, the loop
+    // only stages values and the single apply/persist/sync below lands them.
+    if (this.#suspended) {
+      return;
+    }
     this.#apply();
     this.#syncPresetMenu();
     this.#persist();
@@ -274,11 +291,17 @@ export class VideoFilter {
     if (!preset) {
       return;
     }
-    for (const key of ALL_KEYS) {
-      this.#values[key] = preset[key];
-      this.#steppers[key]?.setValue(preset[key]);
+    this.#suspended = true;
+    try {
+      for (const key of ALL_KEYS) {
+        this.#values[key] = preset[key];
+        this.#steppers[key]?.setValue(preset[key]);
+      }
+    } finally {
+      this.#suspended = false;
     }
     this.#apply();
+    this.#syncPresetMenu();
     this.#persist();
     this.#shell?.toastFlash("color", `Preset: ${name}`, "filter");
   }
@@ -296,9 +319,14 @@ export class VideoFilter {
   }
 
   reset() {
-    for (const key of ALL_KEYS) {
-      this.#values[key] = DEFAULTS[key];
-      this.#steppers[key]?.setValue(DEFAULTS[key]);
+    this.#suspended = true;
+    try {
+      for (const key of ALL_KEYS) {
+        this.#values[key] = DEFAULTS[key];
+        this.#steppers[key]?.setValue(DEFAULTS[key]);
+      }
+    } finally {
+      this.#suspended = false;
     }
     this.#apply();
     this.#persist();

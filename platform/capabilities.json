@@ -496,6 +496,15 @@
       "mustNotAppearIn": [
         "src/"
       ]
+    },
+    {
+      "id": "pointerrawupdate",
+      "summary": "pointerrawupdate high-frequency pointer events",
+      "why": "Chromium-only. The scrub path samples getCoalescedEvents on pointermove instead - same dense data, portable delivery.",
+      "matchPattern": "pointerrawupdate|onpointerrawupdate",
+      "mustNotAppearIn": [
+        "src/"
+      ]
     }
   ],
   "hostProbes": [

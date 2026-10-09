@@ -764,7 +764,7 @@ the layers can assume:
 - **The gate is not one-per-session.** `Shell` registers two — media-state
   (`shell.js:386`) and occlusion (`shell.js:473`) — because they have different
   priorities' worth of coalescing and different snapshot shapes. `ToastManager`
-  (`toast.js:123`) and `SettingsPanel` (`panel.js:288`) each own a further gate
+  (`toast.js:123`) and `SettingsPanel` (`panel.js:293`) each own a further gate
   on their own scope, so the tree has four `RenderGate` constructions in total.
   "The render gate registration" (singular) is the sketch's simplification.
 - **`Scope.child()` has no production caller.** The optional child scope §2's
@@ -1383,7 +1383,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved eighteen times since that cut. The first two movements
+The unit count has moved nineteen times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1563,6 +1563,19 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  tracks) needs product and frozen-markup decisions first and stays a design
  note. `tests/activity.test.mjs`, `tests/shadow-gate.test.mjs` (new) and
  `tests/context.test.mjs` gained 4, all failing pre-fix.
+
+ The nineteenth movement audited the input, shell-UI and store hot paths for
+ allocations and native-direct gaps, and found the tree mostly clean: the
+ forge move path carries one guarded string plus the UA's coalesced array,
+ the resume round trip is already wall-gated, and the toast/panel/history
+ paths are diffed, pooled or structural-only. Two real fixes landed: bulk
+ filter paths (preset, reset, config load) suspend per-stepper commits so one
+ preset is one style write instead of ~10, and the panel mints its compact
+ `MediaQueryList` once instead of per read (the reduced-motion query already
+ set that precedent). `pointerrawupdate` joined `retired` beside the
+ coalesced-events path it must never replace. `tests/video-filter.test.mjs`
+ gained 2 and `tests/panel-compact.test.mjs` 1, all failing pre-fix; the
+ shared stepper fake now cascades like the production widget.
 
 ## 7. Gecko-specific decisions, and what they rule out
 

@@ -46,7 +46,7 @@ const REFS = [
   { file: "src/shell/shell.js", line: 517, anchor: "destroy() {" },
   { file: "src/shell/shell.js", line: 386, anchor: "this.#gate = new RenderGate" },
   { file: "src/shell/shell.js", line: 473, anchor: "const gate = new RenderGate" },
-  { file: "src/shell/chrome/panel.js", line: 288, anchor: "#compactGate = new RenderGate" },
+  { file: "src/shell/chrome/panel.js", line: 293, anchor: "#compactGate = new RenderGate" },
   { file: "src/shell/chrome/toast.js", line: 123, anchor: "this.#gate = new RenderGate" },
   { file: "tests/scope.test.mjs", line: 76, anchor: "parent.child()" },
   { file: "src/shell/resume.js", line: 269, anchor: "gmSetValue(KEYS.resume" },

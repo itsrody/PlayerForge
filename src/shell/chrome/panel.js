@@ -268,6 +268,11 @@ export class SettingsPanel {
   #scope = new Scope();
   /** Coalesces the live `pf-compact` rewrite; the transition and seed bypass it. */
   #compactGate = null;
+  /** One MediaQueryList per panel: matchMedia() mints a fresh list per call,
+   *  and this path runs per open plus per compact-gate commit for a query
+   *  that never changes. `.matches` is still re-read per call (like
+   *  REDUCED_MOTION_QUERY above), so a mid-session crossing applies. */
+  #compactMql = null;
   /** Live only while the panel is open: Esc + outside-click dismissal. */
   #dismissScope = null;
   /** UA-owned Escape watcher (CloseWatcher), live with #dismissScope. */
@@ -308,6 +313,15 @@ export class SettingsPanel {
   }
 
   /**
+   * The single list behind compact auto-detect and its change listener.
+   * Minted once: both readers need the same live object, and re-minting per
+   * read only churns short-lived lists for an identical query.
+   */
+  #compactQuery() {
+    return (this.#compactMql ??= matchMedia(COMPACT_MEDIA_QUERY));
+  }
+
+  /**
    * Compact mode: explicit setting wins; otherwise auto-detect touch + narrow
    * viewport (< 480px). A matchMedia change listener in #wireEvents re-applies
    * the class live when the viewport crosses the breakpoint; the setting
@@ -317,7 +331,7 @@ export class SettingsPanel {
     const explicit = getSetting("ui.compact");
     if (explicit === true || explicit === false) return explicit;
     // Auto-detect: narrow touch viewport.
-    return matchMedia(COMPACT_MEDIA_QUERY).matches;
+    return this.#compactQuery().matches;
   }
 
   get element() {
@@ -750,7 +764,7 @@ export class SettingsPanel {
     // construction. The explicit ui.compact setting still wins - it
     // is consulted first inside #isCompactMode and only the auto-detect path
     // consults the query. Listener dies with the panel's scope signal.
-    matchMedia(COMPACT_MEDIA_QUERY).addEventListener("change", () => {
+    this.#compactQuery().addEventListener("change", () => {
       if (this.isOpen) {
         // Requested rather than written: two crossings inside one tick are one
         // toggle to the state that survived it, not two flips the user sees.
