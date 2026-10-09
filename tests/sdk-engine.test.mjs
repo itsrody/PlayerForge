@@ -529,3 +529,42 @@ test("full-bleed and off-viewport video refuse generic placement", () => {
     assert.equal(findGenericPlayer(video), null, "below-fold video waits for a viewport crossing");
   });
 });
+
+test("a zero-size wrapper is skipped, not adopted or blocking", () => {
+  // display:contents wrappers report a zero box while the video inside them
+  // renders. Adopting one hosts the shell in a box nobody can see - yet the
+  // climb must continue past it, because stopping there strands the real
+  // player box above it just the same.
+  const doc = dom('<div id="outer"><div id="mid"><video></video></div></div>');
+  const video = doc.querySelector("video");
+  const box = (w, h) => ({ width: w, height: h, top: 0, left: 0, right: w, bottom: h });
+  doc.querySelector("#outer").getBoundingClientRect = () => box(2000, 1200);
+  doc.querySelector("#mid").getBoundingClientRect = () => box(0, 0);
+  video.getBoundingClientRect = () => box(640, 360);
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  Object.defineProperty(video, "ended", { value: false, configurable: true });
+  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
+  withActivation(true, () => {
+    // The layout context above diverges, so there is no player-like box:
+    // refuse, instead of adopting the invisible middle one.
+    assert.equal(findGenericPlayer(video), null);
+  });
+});
+
+test("the climb continues past a zero-size wrapper to a real box", () => {
+  const doc = dom('<div id="outer"><div id="mid"><video></video></div></div>');
+  const outer = doc.querySelector("#outer");
+  const video = doc.querySelector("video");
+  const box = (w, h) => ({ width: w, height: h, top: 0, left: 0, right: w, bottom: h });
+  outer.getBoundingClientRect = () => box(640, 360);
+  doc.querySelector("#mid").getBoundingClientRect = () => box(0, 0);
+  video.getBoundingClientRect = () => box(640, 360);
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  Object.defineProperty(video, "ended", { value: false, configurable: true });
+  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
+  withActivation(true, () => {
+    const sdk = findGenericPlayer(video);
+    assert.equal(sdk?.container, outer, "the zero box is passed through, not adopted");
+    assert.equal(sdk?.hops, 2, "the depth cap still covers the true chain");
+  });
+});

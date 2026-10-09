@@ -334,17 +334,26 @@ export function resolveGenericContainer(video) {
       if (node === doc?.body || node === doc?.documentElement) {
         break;
       }
+      hops += 1;
       let box;
       try {
         box = node.getBoundingClientRect();
       } catch {
         break;
       }
+      // A zero-size ancestor contributes no box (display:contents wrappers
+      // report zeros while the video inside them renders): skip through it
+      // rather than adopting a host nobody can see - or stopping a climb
+      // that has a real player box above. Hops still count the step so the
+      // removal watch's depth cap covers the true chain.
+      if (!(box.width > 0) || !(box.height > 0)) {
+        node = node.parentNode ?? node.host ?? null;
+        continue;
+      }
       if (box.width > rect.width * 3 || box.height > rect.height * 3) {
         break;
       }
       container = node;
-      hops += 1;
     }
     node = node.parentNode ?? node.host ?? null;
   }

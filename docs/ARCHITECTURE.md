@@ -1409,7 +1409,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved twenty-two times since that cut. The first two movements
+The unit count has moved twenty-three times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1632,6 +1632,15 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  registry stays the only default path; `userActivation` is a host probe.
  `tests/sdk-engine.test.mjs` gained 7, `tests/kernel-replay.test.mjs` 2
  (adopt-when-enabled, ignore-when-off).
+
+ The twenty-third movement audited the slow path for speed and found one
+ real flaw: zero-size ancestors (`display:contents` wrappers) were adopted
+ as hosts nobody can see, or blocked the climb to a real box above. They are
+ skipped through now, still counting toward the removal-watch depth. Three
+ heavier redesigns were measured against their savings and rejected: a
+ placement memo (resize staleness vs ~30 µs saved per video lifetime),
+ async IO visibility (a two-phase kernel for a handful of flushes), and
+ offer gating (the free early exits already order first).
 
 ## 7. Gecko-specific decisions, and what they rule out
 
