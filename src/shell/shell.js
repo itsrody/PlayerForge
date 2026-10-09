@@ -94,6 +94,16 @@ export class Shell {
     // can process pending layout/paint work before the panel builds its tree.
     await yield_();
 
+    // The settle guard ran before the build, and the prep above plus the
+    // yields since span the exact window SDKs re-parent in: verify the video
+    // is still ours to mount before constructing anything on it. Deliberately
+    // connectivity only, not boxes - position:relative-without-offsets and
+    // isolation:isolate are layout-identical by construction, so prep cannot
+    // move boxes, but a mid-boot move strands the host in the abandoned
+    // container. A throw here rides the constructor's rollback and the
+    // kernel's one-retry re-arm, exactly like any other boot failure.
+    this.#verifyPlacement();
+
     this.#panel = new SettingsPanel(this);
     this.#toasts = new ToastManager(this.#shellDom.hudLayer, this.#dom, this.#scope.signal);
     this.#inputs = new InputForge(this.video, this.container, this.shellHost);
@@ -306,8 +316,10 @@ export class Shell {
     this.#dom.markStyle(this.container, "isolation", "isolate");
     // Parasite watchdog: re-attach host if evicted by SDK. The reconnect
     // subscription is manager-owned, so the watchdog's arm/disarm cycle stops
-    // at shell destroy without a paired cleanup handle here.
-    watchShellHost(this.container, this.#shellDom.host, this.#dom);
+    // at shell destroy without a paired cleanup handle here. The liveness
+    // predicate yields teardown to destruction: an eviction racing removal
+    // grace lets the destroy land instead of fighting it back.
+    watchShellHost(this.container, this.#shellDom.host, this.#dom, () => !this.#scope.disposed);
   }
 
   #forwardMediaEvents() {
@@ -511,6 +523,14 @@ export class Shell {
   #markManaged() {
     this.#dom.markAttribute(this.video, SHELL_MARKER, "");
     this.#dom.markAttribute(this.container, SHELL_MARKER, "");
+  }
+
+  /** Post-prep placement check: the mount point must still hold the video. */
+  #verifyPlacement() {
+    if (!this.video.isConnected || !this.container.isConnected ||
+        !this.container.contains(this.video)) {
+      throw new Error(`Shell "${this.sdk.name}": placement lost mid-boot`);
+    }
   }
 
   destroy() {

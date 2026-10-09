@@ -126,14 +126,24 @@ export function injectShell(container) {
  * Returns nothing: the watchdog's whole lifetime - the container observer,
  * the arm/disarm cycle and the reconnect subscription - is registered
  * against the shell's DOMManager, so it dies with the shell.
+ *
+ * `isAlive` yields teardown to destruction: when the session has entered
+ * removal grace, the eviction the watchdog sees is the teardown it should
+ * let land, not a fight to pick - re-appending a host the removal watch
+ * just decided to destroy is a race decided by microtask order. The shell
+ * passes its scope state; the default keeps the old fight-forever shape
+ * for callers without a lifetime.
  */
-export function watchShellHost(container, host, dom) {
+export function watchShellHost(container, host, dom, isAlive = () => true) {
   let scheduled = false;
   /** Armed only while the container is out of the document. */
   let detachWatch = null;
 
   const reconcile = () => {
     scheduled = false;
+    if (!isAlive()) {
+      return;
+    }
     if (!container.isConnected) {
       armReconnectWatch();
       return;

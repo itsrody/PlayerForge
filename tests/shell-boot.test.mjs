@@ -160,3 +160,51 @@ test("injection repairs a clobbered document stylesheet adoption", async () => {
     delete globalThis.CSSStyleSheet;
   }
 });
+
+// A video reparented between adoption and mount must abort placement instead
+// of stranding the host in the abandoned container: the settle guard ran
+// before the build, and the prep plus the yields since span the exact window
+// SDKs re-parent in. The throw rides the constructor rollback and the
+// kernel's re-arm, exactly like any other boot failure.
+test("a video moved mid-boot aborts placement without stranding the host", async () => {
+  const { dom, container, video } = makeRealm();
+  const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
+  // Synchronous with construction - long before the post-prep verify runs.
+  const elsewhere = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(elsewhere);
+  elsewhere.appendChild(video);
+  await assert.rejects(shell.ready, /placement lost mid-boot/);
+
+  assert.equal(container.querySelector(".pf-shell"), null,
+    "no host stranded in the abandoned container");
+  assert.equal(video.hasAttribute(SHELL_MARKER), false, "the video gave up its shell claim");
+  assert.equal(container.hasAttribute(SHELL_MARKER), false, "the container gave up its shell claim");
+  delete globalThis.CSSStyleSheet;
+});
+
+// The parasite watchdog fights SDK evictions back - unless the shell is dead,
+// in which case the eviction is the teardown landing, not a fight to pick.
+// Re-appending a host the removal watch just decided to destroy is a race
+// decided by microtask order; the liveness predicate decides it outright.
+test("the watchdog re-attaches while alive and yields once dead", async () => {
+  const { container } = makeRealm();
+  const { injectShell, watchShellHost } = await import("../src/shell/chrome/inject.js");
+  const { DOMManager } = await import("../src/shared/dom-manager.js");
+  const { host } = injectShell(container);
+  assert.ok(host, "the host mounted");
+  const mgr = new DOMManager();
+  let alive = true;
+  watchShellHost(container, host, mgr, () => alive);
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  host.remove();
+  await tick();
+  assert.equal(host.parentElement, container, "a live shell fights the eviction back");
+
+  alive = false;
+  host.remove();
+  await tick();
+  assert.equal(host.parentElement, null, "a dead shell lets the teardown land");
+  mgr.destroy();
+  delete globalThis.CSSStyleSheet;
+});

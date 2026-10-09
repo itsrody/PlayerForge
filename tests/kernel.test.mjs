@@ -197,3 +197,37 @@ test("contract event table is frozen against cross-layer mutation", async () => 
     GESTURE_EVENTS.panel = "pf:other";
   }, "writing a frozen event name throws instead of forking the contract");
 });
+
+// ── Lifecycle single-flight mount ────────────────────────────────────
+// #pending dedups offers inside the settle window, but it is deleted before
+// the factory runs while registration only lands after ready resolves - so
+// an offer arriving mid-build used to mount a twin shell.
+
+const lifecycleSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test("lifecycle: an offer arriving mid-build does not mount a twin", async () => {
+  const { LifecycleManager } = await import("../src/kernel/kernel.js");
+  const registry = new ShellRegistry();
+  let factoryCalls = 0;
+  let releaseBuild;
+  const buildGate = new Promise((resolve) => { releaseBuild = resolve; });
+  const video = { isConnected: true };
+  const container = { isConnected: true, contains: () => true };
+  const sdk = { name: "test" };
+  const lifecycle = new LifecycleManager(registry, () => {}, () => {}, null);
+  lifecycle.setShellFactory(() => {
+    factoryCalls++;
+    // The provider factory is synchronous (it returns the shell; readiness
+    // is the shell's own promise), so hold THAT open deterministically.
+    return { video, ready: buildGate };
+  });
+
+  const first = lifecycle.onVideoFound({ video, container, sdk });
+  await lifecycleSleep(250); // past settle: the first build is in flight
+  const second = lifecycle.onVideoFound({ video, container, sdk });
+  await lifecycleSleep(250); // past the second settle: it met the mount, not a build
+  releaseBuild();
+  await first;
+  await second;
+  assert.equal(factoryCalls, 1, "the second offer met the mount in flight, not a new build");
+});

@@ -816,6 +816,12 @@ export class LifecycleManager {
   #shellFactory = null;
   /** Videos with a settle wait in flight - dedups repeated discovery. */
   #pending = new Set();
+  /** Containers with a shell build in flight. #pending covers the settle
+   *  window, but it is deleted before the factory runs while registration
+   *  only lands after ready resolves - so a second offer arriving mid-build
+   *  would mount a twin. The build window is short and the factory is the
+   *  only writer, hence a set of containers rather than a second pending set. */
+  #mounting = new WeakSet();
   /** Abort scope for in-flight settle waits; disposed by destroy() (pagehide). */
   #scope = new Scope();
 
@@ -875,6 +881,10 @@ export class LifecycleManager {
     if (this.#registry.getByVideo(video)) {
       return;
     }
+    if (this.#mounting.has(container)) {
+      return;
+    }
+    this.#mounting.add(container);
     try {
       const shell = this.#shellFactory({ video, container, sdk });
       await shell?.ready;
@@ -890,6 +900,8 @@ export class LifecycleManager {
       // a shell that did come up is registered and claimed, so the seen-set
       // and the registry slot still refuse it a second shell.
       this.#onShellFailed?.(video);
+    } finally {
+      this.#mounting.delete(container);
     }
   }
 
