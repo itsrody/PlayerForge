@@ -77,7 +77,7 @@ function collect(host, _win) {
 test("double tap in the left-edge zone dispatches once in fullscreen", () => {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true);
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   const seen = collect(host, dom.window);
 
   zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 50, y: 200 }));
@@ -105,14 +105,14 @@ test("hit-test rect is not kept fresh by an always-on document scroll listener",
     }
     return realAdd(type, fn, opts);
   };
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   assert.equal(scrollAdds, 0, "no always-on document scroll listener is armed with the forge");
   controller.destroy();
 });
 
 test("inline double taps never dispatch outside fullscreen", () => {
   const { dom, video, zone, host } = makeEnv();
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   const seen = collect(host, dom.window);
 
   zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 50, y: 200 }));
@@ -126,7 +126,7 @@ test("inline double taps never dispatch outside fullscreen", () => {
 
 test("keydown arrows map through the action table with preventDefault", () => {
   const { dom, video, zone, host } = makeEnv();
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   const seen = collect(host, dom.window);
 
   const right = new dom.window.KeyboardEvent("keydown", {
@@ -143,7 +143,7 @@ test("keydown arrows map through the action table with preventDefault", () => {
 
 test("same-name gestures dispatch repeatedly on the pooled event", () => {
   const { dom, video, zone, host } = makeEnv();
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   const seen = collect(host, dom.window);
 
   // Two dispatches under ONE CustomEvent ctor exercise the pool's stale-hit
@@ -171,7 +171,7 @@ test("disabling the hotkeys toggle silences arrows but Space still toggles playb
       playCalls.push(true);
       return Promise.resolve();
     };
-    const controller = new InputForge(video, zone, host);
+    const controller = new InputForge(video, zone, host, new EngineBroker());
     const seen = collect(host, dom.window);
 
     dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
@@ -204,8 +204,9 @@ test("focus arbitration: a fresh multi-player page still has exactly one key own
   const host2 = dom.window.document.createElement("div");
   dom.window.document.body.appendChild(host2);
 
-  const controllerA = new InputForge(video, zone, host);
-  const controllerB = new InputForge(video2, zone2, host2);
+  const broker = new EngineBroker();
+  const controllerA = new InputForge(video, zone, host, broker);
+  const controllerB = new InputForge(video2, zone2, host2, broker);
   const seenA = collect(host, dom.window);
   const seenB = collect(host2, dom.window);
 
@@ -247,8 +248,9 @@ test("key arbitration: the playing player wins over an idle one when neither was
 
   // Boot the IDLE player first, so boot order alone would hand it the key and
   // only the playing rung can redirect ownership to the other one.
-  const controllerB = new InputForge(video2, zone2, host2);
-  const controllerA = new InputForge(video, zone, host);
+  const broker = new EngineBroker();
+  const controllerB = new InputForge(video2, zone2, host2, broker);
+  const controllerA = new InputForge(video, zone, host, broker);
   const seenA = collect(host, dom.window);
   const seenB = collect(host2, dom.window);
 
@@ -281,8 +283,9 @@ test("key arbitration: focus inside a player outranks a playing sibling", () => 
   focused.focus();
   assert.equal(dom.window.document.activeElement, focused);
 
-  const controllerA = new InputForge(video, zone, host);
-  const controllerB = new InputForge(video2, zone2, host2);
+  const broker = new EngineBroker();
+  const controllerA = new InputForge(video, zone, host, broker);
+  const controllerB = new InputForge(video2, zone2, host2, broker);
   const seenA = collect(host, dom.window);
   const seenB = collect(host2, dom.window);
 
@@ -306,8 +309,9 @@ test("key arbitration: destroying the owner hands keys to the survivor", () => {
   const host2 = dom.window.document.createElement("div");
   dom.window.document.body.appendChild(host2);
 
-  const controllerA = new InputForge(video, zone, host);
-  const controllerB = new InputForge(video2, zone2, host2);
+  const broker = new EngineBroker();
+  const controllerA = new InputForge(video, zone, host, broker);
+  const controllerB = new InputForge(video2, zone2, host2, broker);
   const seenA = collect(host, dom.window);
   const seenB = collect(host2, dom.window);
 
@@ -332,14 +336,15 @@ test("an engine left over from another realm cannot claim this one's keys", () =
   // arbitrate here - and it registered FIRST, so without the realm filter it
   // would win every keystroke on this page and starve the live player.
   const first = makeEnv();
-  const stale = new InputForge(first.video, first.zone, first.host);
+  const broker = new EngineBroker();
+  const stale = new InputForge(first.video, first.zone, first.host, broker);
   const staleSeen = collect(first.host, first.dom.window);
 
   const second = makeEnv();
   const video = second.video;
   const zone = second.zone;
   const host = second.host;
-  const fresh = new InputForge(video, zone, host);
+  const fresh = new InputForge(video, zone, host, broker);
   const freshSeen = collect(host, second.dom.window);
 
   second.dom.window.document.dispatchEvent(new second.dom.window.KeyboardEvent("keydown", {
@@ -362,7 +367,8 @@ test("N players share one document keydown/keyup listener pair", () => {
     }
     return realAdd(type, fn, opts);
   };
-  const engines = [new InputForge(video, zone, host)];
+  const broker = new EngineBroker();
+  const engines = [new InputForge(video, zone, host, broker)];
   for (let i = 0; i < 3; i++) {
     const v = dom.window.document.createElement("video");
     dom.window.document.body.appendChild(v);
@@ -372,7 +378,7 @@ test("N players share one document keydown/keyup listener pair", () => {
     dom.window.document.body.appendChild(z);
     const h = dom.window.document.createElement("div");
     dom.window.document.body.appendChild(h);
-    engines.push(new InputForge(v, z, h));
+    engines.push(new InputForge(v, z, h, broker));
   }
   assert.equal(added.length, 2, "four players must still install exactly one keydown + one keyup");
   assert.ok(added.every((a) => a.opts.capture === true), "shared keys stay capture-phase");
@@ -384,7 +390,7 @@ test("N players share one document keydown/keyup listener pair", () => {
 test("trackpad ctrl+wheel pinches in fullscreen with a cooldown window", () => {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true);
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   controller.setTrackpadPinchEnabled(true);
   const seen = collect(host, dom.window);
 
@@ -403,7 +409,7 @@ test("trackpad ctrl+wheel pinches in fullscreen with a cooldown window", () => {
 
 test("wheel pinch listener is inert until enabled and detaches on disable", () => {
   const { dom, video, zone, host } = makeEnv();
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   const seen = collect(host, dom.window);
 
   const blocked = wheelEvent(dom.window, { deltaY: -100, ctrlKey: true });
@@ -427,7 +433,7 @@ test("wheel pinch listener is inert until enabled and detaches on disable", () =
 test("pointer gestures never cancel defaults (passivity contract)", () => {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true);
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   collect(host, dom.window);
 
   const dispatched = [
@@ -447,7 +453,7 @@ test("pointer gestures never cancel defaults (passivity contract)", () => {
 test("pointercancel cancels a swipe without committing it or arming a dbltap", () => {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true);
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   const seen = collect(host, dom.window);
 
   zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
@@ -475,7 +481,7 @@ test("pointercancel mid-hold still releases playback rate", async () => {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true);
   Object.defineProperty(video, "paused", { value: false, configurable: true });
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   const seen = collect(host, dom.window);
 
   zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
@@ -491,7 +497,7 @@ test("pointercancel mid-hold still releases playback rate", async () => {
 test("swipe down starts from any zone in fullscreen, not just the center", () => {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true);
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   const seen = collect(host, dom.window);
 
   zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 50, y: 200 }));
@@ -511,7 +517,7 @@ test("swipe down starts from any zone in fullscreen, not just the center", () =>
 test("destroying mid-hold fires the pending release before teardown", async () => {
   const { dom, video, zone, host } = makeEnv();
   Object.defineProperty(video, "paused", { value: false, configurable: true });
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   const seen = collect(host, dom.window);
 
   zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
@@ -529,7 +535,7 @@ const space = (win, type) =>
 test("space hold boosts after the hold timeout and releases exactly once on keyup", async (t) => {
   const { dom, video, zone, host } = makeEnv();
   Object.defineProperty(video, "paused", { value: false, configurable: true });
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   // t.after: an assertion failure must not leak this forge into the shared
   // activeForges set and cascade into unrelated keyboard tests.
   t.after(() => controller.destroy());
@@ -551,7 +557,7 @@ test("space hold boosts after the hold timeout and releases exactly once on keyu
 test("an orphaned space hold (lost keyup) heals on the next space press", async (t) => {
   const { dom, video, zone, host } = makeEnv();
   Object.defineProperty(video, "paused", { value: false, configurable: true });
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   t.after(() => controller.destroy());
   const seen = collect(host, dom.window);
 
@@ -577,7 +583,7 @@ test("an orphaned space hold (lost keyup) heals on the next space press", async 
 test("destroying mid space-hold fires the release before teardown", async (t) => {
   const { dom, video, zone, host } = makeEnv();
   Object.defineProperty(video, "paused", { value: false, configurable: true });
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   t.after(() => controller.destroy());
   const seen = collect(host, dom.window);
 
@@ -592,7 +598,7 @@ test("destroying mid space-hold fires the release before teardown", async (t) =>
 
 test("an owned space press is invisible to page-level key handlers", (t) => {
   const { dom, video, zone, host } = makeEnv();
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   t.after(() => controller.destroy());
   let pageSaw = 0;
   // A page shortcut (the platform's own Space toggle) listening on the
@@ -619,7 +625,7 @@ test("a space press that started in a text field never toggles playback on keyup
   video.pause = () => {
     pauses++;
   };
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   t.after(() => controller.destroy());
   collect(host, dom.window);
 
@@ -667,7 +673,7 @@ const touch = (win, type, { x = 0, y = 0 } = {}) => {
 test("an owned hold press is completely invisible to the SDK", async (t) => {
   const { dom, video, zone, host } = makeEnv();
   Object.defineProperty(video, "paused", { value: false, configurable: true });
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   t.after(() => controller.destroy());
   const seen = collect(host, dom.window);
   const sdk = sdkObserver(zone, dom.window);
@@ -690,7 +696,7 @@ test("an owned hold press is completely invisible to the SDK", async (t) => {
 test("a plain single tap reaches the SDK as one click after the dbltap window", async (t) => {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true); // the dbltap intent is fullscreen-gated
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   t.after(() => controller.destroy());
   const seen = collect(host, dom.window);
   const sdk = sdkObserver(zone, dom.window);
@@ -711,7 +717,7 @@ test("a plain single tap reaches the SDK as one click after the dbltap window", 
 test("a double tap leaves the SDK with no click at all", async (t) => {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true); // the dbltap intent is fullscreen-gated
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   t.after(() => controller.destroy());
   const seen = collect(host, dom.window);
   const sdk = sdkObserver(zone, dom.window);
@@ -732,7 +738,7 @@ test("a double tap leaves the SDK with no click at all", async (t) => {
 
 test("hover passes through the forge untouched", (t) => {
   const { dom, video, zone, host } = makeEnv();
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   t.after(() => controller.destroy());
   const sdk = sdkObserver(zone, dom.window);
 
@@ -745,7 +751,7 @@ test("hover passes through the forge untouched", (t) => {
 
 test("a press outside the gesture zone passes natively, immediately", (t) => {
   const { dom, video, zone, host } = makeEnv();
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   t.after(() => controller.destroy());
   const sdk = sdkObserver(zone, dom.window);
 
@@ -767,7 +773,7 @@ test("with every pointer gesture disabled the shell stops dominating", async (t)
   });
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true); // all gestures would be armed here - settings win
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   t.after(() => controller.destroy());
   const sdk = sdkObserver(zone, dom.window);
 
@@ -786,7 +792,7 @@ test("a focused native player button does not silence hotkeys", () => {
   zone.appendChild(nativeButton);
   nativeButton.focus();
 
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   const seen = collect(host, dom.window);
   dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
     code: "ArrowRight", bubbles: true, cancelable: true
@@ -804,7 +810,7 @@ test("pf-owned buttons still keep exclusive key ownership", async () => {
   host.appendChild(stepperButton);
   stepperButton.focus();
 
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   const seen = collect(host, dom.window);
   dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
     code: "ArrowRight", bubbles: true, cancelable: true
@@ -822,7 +828,7 @@ test("an SPA app-root div holding page focus arms hotkeys", () => {
   appRoot.focus();
   assert.equal(dom.window.document.activeElement, appRoot);
 
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   const seen = collect(host, dom.window);
   dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
     code: "ArrowRight", bubbles: true, cancelable: true
@@ -839,7 +845,7 @@ test("typing targets outside the container never trigger hotkeys", () => {
   dom.window.document.body.appendChild(searchBox);
   searchBox.focus();
 
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   const seen = collect(host, dom.window);
   const keystroke = new dom.window.KeyboardEvent("keydown", {
     code: "ArrowRight", bubbles: true, cancelable: true
@@ -891,7 +897,7 @@ function runScrub(predicted) {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true);
   Object.defineProperty(video, "currentTime", { value: 0, writable: true, configurable: true });
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   const seen = collect(host, dom.window);
 
   // pointerdown at x=100 latches the start; then two scrub moves to the right.
@@ -936,7 +942,7 @@ test("scrub velocity comes from confirmed samples; a prediction hint changes not
 test("swipe-down drag promotes a compositor layer, released on restore", () => {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true);
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
 
   zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
   zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 405, y: 260 }));
@@ -973,7 +979,7 @@ test("swipe-down drag builds its transform from a prefix cached at latch", () =>
   // that appended to itself would stack translateY() terms).
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true);
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
 
   zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
   zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 405, y: 260 }));
@@ -997,7 +1003,7 @@ test("swipe-down drag prepends the latched base transform exactly once", () => {
   // A prior inline transform is the prefix the drag composes onto, and it is
   // what easeTransformTo restores on release.
   video.style.transform = "rotate(3deg)";
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
 
   zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
   zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 405, y: 260 }));
@@ -1026,7 +1032,7 @@ test("a second swipe stroke rebuilds its prefix instead of reusing the last", ()
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true);
   video.style.transform = "rotate(3deg)";
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
 
   zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
   zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 405, y: 260 }));
@@ -1161,7 +1167,7 @@ test("scrubEnd with no qualifying move settles nothing", () => {
 test("a tap on an SDK control stays native with the dbltap intent armed", async (t) => {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true); // a surface tap here would be held for replay
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   t.after(() => controller.destroy());
   const seen = collect(host, dom.window);
   const sdk = sdkObserver(zone, dom.window);
@@ -1185,7 +1191,7 @@ test("a tap on an SDK control stays native with the dbltap intent armed", async 
 
 test("a touchstart on a control is not dominated", (t) => {
   const { dom, video, zone, host } = makeEnv();
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   t.after(() => controller.destroy());
   const sdk = sdkObserver(zone, dom.window);
 
@@ -1198,7 +1204,7 @@ test("a touchstart on a control is not dominated", (t) => {
 
 test("touch-action escalates only for owned sessions", (t) => {
   const { dom, video, zone, host } = makeEnv();
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   t.after(() => controller.destroy());
 
   assert.equal(zone.style.touchAction, "pan-x pan-y",
@@ -1214,7 +1220,7 @@ test("touch-action escalates only for owned sessions", (t) => {
 test("contextmenu passes when idle and dies mid-gesture", async (t) => {
   const { dom, video, zone, host } = makeEnv();
   Object.defineProperty(video, "paused", { value: false, configurable: true });
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   t.after(() => controller.destroy());
   const sdk = sdkObserver(zone, dom.window);
   let menuSeen = 0;
@@ -1237,7 +1243,7 @@ test("contextmenu passes when idle and dies mid-gesture", async (t) => {
 test("tap replay re-resolves a control the SDK re-rendered mid-window", async (t) => {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true);
-  const controller = new InputForge(video, zone, host);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
   t.after(() => controller.destroy());
 
   // The SDK swaps its chrome while the first tap waits out the window.
@@ -1360,4 +1366,25 @@ test("engines from another document never arbitrate", (t) => {
   second.dom.window.document.dispatchEvent(brokerKey(second.dom.window, "keydown", "KeyM"));
   assert.deepEqual(stale.calls, [], "the stale engine is filtered, not visited");
   assert.deepEqual(local.calls, [["keydown", "KeyM"]], "the local engine still arbitrates");
+});
+
+test("two brokers on one document route only their own engines", (t) => {
+  // Sharing was ambient (one module-global registry); now it is explicit,
+  // so two brokers on the same page must each serve exactly their engines.
+  const { dom } = makeEnv();
+  const first = new EngineBroker();
+  const second = new EngineBroker();
+  const engineA = fakeEngine(dom.window.document.createElement("div"));
+  const engineB = fakeEngine(dom.window.document.createElement("div"));
+  first.register(engineA.adapter);
+  second.register(engineB.adapter);
+  t.after(() => {
+    first.unregister(engineA.adapter);
+    second.unregister(engineB.adapter);
+  });
+  dom.window.document.dispatchEvent(brokerKey(dom.window, "keydown", "KeyM"));
+  assert.deepEqual(engineA.calls, [["keydown", "KeyM"]], "broker one served its engine");
+  assert.deepEqual(engineB.calls, [["keydown", "KeyM"]], "broker two served its engine");
+  assert.equal(first.size, 1, "no engine leaked across brokers");
+  assert.equal(second.size, 1);
 });

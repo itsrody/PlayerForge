@@ -70,8 +70,9 @@ const replayedClicks = new WeakSet();
  * the Set, so arbitration carried a realm field and a re-attach dance. A
  * broker instance serves exactly the document it attached to, and an engine
  * arbitrates only in its own document - cross-document leftovers are
- * filtered, never consulted. Direct InputForge constructions (tests, legacy
- * callers) share one default broker via sharedBroker().
+ * filtered, never consulted. Every construction takes its broker explicitly;
+ * there is no ambient default, so sharing is always a deliberate test or
+ * plugin decision rather than an accident of import order.
  */
 export class EngineBroker {
   /** Live engines in boot order, each a private-access adapter (see below). */
@@ -219,17 +220,6 @@ export class EngineBroker {
     this.#owner = null;
     owner?.finishHold(false);
   }
-}
-
-/** The shared broker for direct InputForge constructions. Production shells
- *  always receive the plugin's per-document broker instead. */
-let defaultBroker = null;
-
-export function sharedBroker() {
-  if (!defaultBroker) {
-    defaultBroker = new EngineBroker();
-  }
-  return defaultBroker;
 }
 
 /**
@@ -465,8 +455,7 @@ export class InputForge {
   /** This engine's handle in the page-wide keyboard broker (set at the end of
    *  the constructor, cleared on teardown). */
   #keyboardEngine = null;
-  /** The broker this engine arbitrates through: the plugin's per-document
-   *  broker in production, the shared default for direct constructions. */
+  /** The broker this engine arbitrates through, always explicit. */
   #broker = null;
 
   // Trackpad ctrl+wheel pinch cooldown: a lazy deadline avoids per-gesture timers.
@@ -476,11 +465,11 @@ export class InputForge {
   /** Stable reference so the scoped wheel listener can be removed again. */
   #wheelHandler = null;
 
-  constructor(video, zone, eventTarget, broker = null) {
+  constructor(video, zone, eventTarget, broker) {
     this.#video = video;
     this.#zone = zone;
     this.#eventTarget = eventTarget;
-    this.#broker = broker ?? sharedBroker();
+    this.#broker = broker;
     const { signal } = this.#scope;
     // Idle touch behavior: panning and pinch-zoom stay available to the SDK
     // (scrollable playlists, settings sheets) until a gesture actually owns

@@ -57,7 +57,8 @@ export class Shell {
    *  when the media clock is attached, status only records what happened. */
   #status = null;
   /** The keyboard broker this shell's engine arbitrates through: the
-   *  plugin's per-document broker, or null for the shared default. */
+   *  plugin's per-document broker in production, a fresh owned one for
+   *  direct constructions (which empties itself on forge teardown). */
   #broker = null;
   /** L4 render gate. Commits it issues outlive the event that caused them, so
    *  N edges in one tick are one write and the priority is declared by
@@ -71,7 +72,7 @@ export class Shell {
     this.video = video;
     this.container = container;
     this.sdk = sdk;
-    this.#broker = broker;
+    this.#broker = broker ?? new EngineBroker();
     this.#onDestroy = onDestroy;
     this.#media = createMediaControls({ video });
     // A boot that throws AFTER #injectDom has marked the video would otherwise
