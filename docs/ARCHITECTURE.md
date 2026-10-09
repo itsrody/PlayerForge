@@ -1383,7 +1383,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved thirteen times since that cut. The first two movements
+The unit count has moved fourteen times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1502,6 +1502,19 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  settled before), pinned by `tests/target-resolver.test.mjs` against fake
  binaries; `testTarget.verifiedOn` now names the measured 158.0b5; and the
  full integration suite ran green on it (90 pass, 1 skipped).
+
+ The fourteenth movement hardened the settings store after a full audit of
+ `src/shared/` found the resume store's discipline missing beside it:
+ guarded GM reads/writes that report instead of throwing, rebase-on-write so
+ a cross-tab write landing mid-batch survives (same-path races stay
+ last-write-wins), strict plain-object documents with warned fallbacks, an
+ abortable subtitle fetch that rejects instead of pending forever, and
+ empty-batch/empty-segment guards — plus boolean write results plumbed
+ through to the config helpers. The same audit closed the merge question for
+ `src/shared/`: the config doc-diff and the resume entry-merge are different
+ algorithms over different models, and the remaining Chromium surface was
+ already absent. `tests/storage.test.mjs` gained 9, two of which (mid-batch
+ race, removal-on-truth) fail on the pre-fix store.
 
 ## 7. Gecko-specific decisions, and what they rule out
 

@@ -1,5 +1,18 @@
 import { logger } from "./diagnostics.js";
 
+/**
+ * Manager-API policy: a manager API is used only where it uniquely supplies a
+ * capability the page cannot - multi-tab manager storage + change
+ * notification (configs/resume), CORS-bypassing XHR (@connect * subtitle
+ * fetch), manager-cached resource warm-load, manager menu, GM_info. Everything
+ * DOM/media/styling-side (MutationObserver, TextTrack/VTTCue,
+ * adoptedStyleSheets, fullscreen) stays native; the efficient,
+ * reliable implementation wins, and for those domains the native one always
+ * does. GM_setClipboard is deliberately NOT granted/used: no feature calls
+ * it, so the grant is dead permission surface. Any future clipboard write
+ * should go through the native navigator.clipboard path, not the manager.
+ */
+
 /** The whole GM storage namespace: every root key lives here. */
 export const KEYS = {
   configs: "pf:configs",
@@ -7,12 +20,37 @@ export const KEYS = {
   firstRun: "pf:first-run"
 };
 
+/**
+ * Synchronous manager read with a fallback, never a throw: without the grant
+ * (or outside a userscript context) there is no stored value to return, so
+ * the fallback is the honest answer rather than a ReferenceError into boot.
+ */
 function gmGetValue(key, fallback) {
-  return GM_getValue(key, fallback);
+  if (typeof GM_getValue !== "function") {
+    return fallback;
+  }
+  try {
+    return GM_getValue(key, fallback);
+  } catch {
+    return fallback;
+  }
 }
 
+/**
+ * Synchronous manager write reporting success. False when the grant is
+ * missing or the manager rejects the write (quota) - callers that cannot
+ * proceed on a lost write check it; #persist rolls the cache back on it.
+ */
 export function gmSetValue(key, value) {
-  GM_setValue(key, value);
+  if (typeof GM_setValue !== "function") {
+    return false;
+  }
+  try {
+    GM_setValue(key, value);
+  } catch {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -71,51 +109,75 @@ export function gmGetResourceText(name) {
 }
 
 /**
- * Manager-API policy: a manager API is used only where it uniquely supplies a
- * capability the page cannot - multi-tab manager storage + change
- * notification (configs/resume), CORS-bypassing XHR (@connect * subtitle
- * fetch), manager-cached resource warm-load, manager menu, GM_info. Everything
- * DOM/media/styling-side (MutationObserver, TextTrack/VTTCue,
- * adoptedStyleSheets, fullscreen) stays native; the efficient,
- * reliable implementation wins, and for those domains the native one always
- * does. GM_setClipboard is deliberately NOT granted/used: no feature calls
- * it, so the grant is dead permission surface. Any future clipboard write
- * should go through the native navigator.clipboard path, not the manager.
- */
-/**
  * Cross-origin text fetch through the manager - CORS cannot block it.
  * The banner declares @connect * because subtitle URLs are user-supplied
  * from arbitrary hosts; a per-domain consent gate would be friction on the
  * hot subtitle-loading path. Request errors still surface normally, so a
  * dead link fails loudly rather than silently.
+ *
+ * Never throws synchronously: without the grant there is no fetch to run,
+ * so a rejection carries that instead. An aborted request (own `signal` or
+ * the manager's `onabort`) rejects rather than pending forever.
  */
-export function gmRequestText(url, { timeoutMs = 30000 } = {}) {
+export function gmRequestText(url, { timeoutMs = 30000, signal } = {}) {
+  if (typeof GM_xmlhttpRequest !== "function") {
+    return Promise.reject(new Error("GM_xmlhttpRequest unavailable"));
+  }
   const { promise, resolve, reject } = Promise.withResolvers();
-  GM_xmlhttpRequest({
+  if (signal?.aborted) {
+    reject(new Error("Aborted"));
+    return promise;
+  }
+  let req = null;
+  signal?.addEventListener("abort", () => {
+    try {
+      req?.abort?.();
+    } catch {}
+    reject(new Error("Aborted"));
+  }, { once: true });
+  req = GM_xmlhttpRequest({
     url,
     method: "GET",
     timeout: timeoutMs,
     onload: (res) => {
-      if (res.status >= 200 && res.status < 300) {
+      const status = res?.status ?? 0;
+      if (status >= 200 && status < 300) {
         resolve(res);
       } else {
-        reject(new Error(`HTTP ${res.status}`));
+        reject(new Error(`HTTP ${status}`));
       }
     },
     onerror: () => reject(new Error("Network error")),
-    ontimeout: () => reject(new Error(`Timed out after ${timeoutMs}ms`))
+    ontimeout: () => reject(new Error(`Timed out after ${timeoutMs}ms`)),
+    onabort: () => reject(new Error("Aborted"))
   });
   return promise;
 }
 
-/** Read a stored JSON object, or the fallback when missing/corrupt. */
+/**
+ * Read a stored JSON object, or the fallback when missing/corrupt. Plain
+ * objects only: a stored array (hand edit, cross-version write) is not a
+ * document and must not pass as one - `adopt()` already refuses it, so the
+ * read path refusing it too keeps both doors the same shape. Corruption is
+ * warned, not silent: a fallback served without a trace is how a wiped
+ * config reads as user intent.
+ */
 export function loadJsonObject(key, fallback) {
   const raw = gmGetValue(key, null);
-  return raw && typeof raw === "object" ? raw : fallback;
+  if (isPlainObject(raw)) {
+    return raw;
+  }
+  if (raw != null) {
+    logger.warn("storage", `Stored ${key} is not an object - falling back`);
+  }
+  return fallback;
 }
 
 function isSafeKeySegment(key) {
-  return key !== "__proto__" && key !== "constructor" && key !== "prototype";
+  // Empty segments are nonsense keys ("".split(".") is [""], "a..b" hides
+  // one in the middle): reject them with the prototype guards rather than
+  // persisting nodes no reader can address.
+  return key !== "" && key !== "__proto__" && key !== "constructor" && key !== "prototype";
 }
 
 function isPlainObject(value) {
@@ -275,10 +337,21 @@ export class ConfigStore {
    * cache - `doc` (and every node it uniquely owns) is simply discarded.
    */
   set(fields) {
+    const entries = Object.entries(fields);
+    // Vacuous success, not a write: no paths, no storage round trip, no emit.
+    if (entries.length === 0) {
+      return true;
+    }
+    // Base the write on truth, not the cache: a cross-tab write may have
+    // landed since the last adoption, and building on the stale cache would
+    // clobber its disjoint paths. The rebase publishes through adopt(), so
+    // remote subscribers hear about the racing write exactly as if its
+    // delivery had arrived first; same-path races stay last-write-wins.
+    this.#rebase();
     const previous = this.doc();
     const doc = { ...previous };
     const written = [];
-    for (const [path, value] of Object.entries(fields)) {
+    for (const [path, value] of entries) {
       const segments = path.split(".");
       let node = doc;
       for (let i = 0; i < segments.length - 1; i++) {
@@ -316,6 +389,10 @@ export class ConfigStore {
    * No-op when any intermediate segment or the leaf itself is missing.
    */
   remove(path) {
+    // Operate on truth for the same reason set() rebases: a removal computed
+    // against a stale cache can no-op on a path that exists in storage, or
+    // persist a document that drops a racing cross-tab write.
+    this.#rebase();
     const previous = this.doc();
     const doc = { ...previous };
     const segments = path.split(".");
@@ -339,6 +416,19 @@ export class ConfigStore {
     }
     delete node[last];
     return this.#persist(doc, previous, [path]);
+  }
+
+  /**
+   * Refresh the cache from storage without a write. Adoption publishes any
+   * cross-tab write that landed since the last delivery; an identical read
+   * diffs to nothing and stays quiet. Corrupt or absent storage is skipped,
+   * never installed - the cache keeps serving what it holds.
+   */
+  #rebase() {
+    const fresh = loadJsonObject(KEYS.configs, null);
+    if (isPlainObject(fresh)) {
+      this.adopt(fresh, { remote: true });
+    }
   }
 
   /**
@@ -448,10 +538,11 @@ export class ConfigStore {
    */
   #persist(doc, previous, written) {
     this.#doc = doc;
-    try {
-      gmSetValue(KEYS.configs, doc);
-    } catch (err) {
-      logger.error("storage", "Failed to persist config:", err);
+    // The guarded wrapper reports quota/grant failure as false rather than
+    // throwing, so check it: emitting success for a write that never landed
+    // would leave every tab converged on a document storage never saw.
+    if (!gmSetValue(KEYS.configs, doc)) {
+      logger.error("storage", "Failed to persist config");
       this.#doc = previous;
       return false;
     }
@@ -467,16 +558,21 @@ export function getConfigValue(path, fallback) {
   return configStore.get(path, fallback);
 }
 
+/**
+ * Write one dotted field, reporting success. The boolean is the failure
+ * surface quota/grant loss reports on - callers that cannot proceed on a
+ * lost write check it instead of assuming the cache write-through.
+ */
 export function setConfigValue(path, value) {
-  configStore.set({ [path]: value });
+  return configStore.set({ [path]: value });
 }
 
 /** Apply many dotted config fields in one read-modify-write. */
 export function setConfigFields(fields) {
-  configStore.set(fields);
+  return configStore.set(fields);
 }
 
 /** Remove one dotted config field (migration sweeps). */
 export function deleteConfigField(path) {
-  configStore.remove(path);
+  return configStore.remove(path);
 }

@@ -631,6 +631,42 @@
       ]
     },
     {
+      "id": "GM_getValue",
+      "api": "GM_getValue",
+      "summary": "Synchronous manager-scoped config read",
+      "why": "Without it every read serves its fallback; boot runs on defaults rather than stored settings.",
+      "usedBy": [
+        "src/shared/storage.js"
+      ],
+      "probes": [
+        "GM_getValue"
+      ]
+    },
+    {
+      "id": "GM_setValue",
+      "api": "GM_setValue",
+      "summary": "Synchronous manager-scoped config write",
+      "why": "Without it every write reports failure and rolls back; settings do not persist between loads.",
+      "usedBy": [
+        "src/shared/storage.js"
+      ],
+      "probes": [
+        "GM_setValue"
+      ]
+    },
+    {
+      "id": "GM_xmlhttpRequest",
+      "api": "GM_xmlhttpRequest",
+      "summary": "CORS-bypassing subtitle fetch",
+      "why": "Without it subtitle fetch rejects; there is no same-origin fallback for user-supplied hosts.",
+      "usedBy": [
+        "src/shared/storage.js"
+      ],
+      "probes": [
+        "GM_xmlhttpRequest"
+      ]
+    },
+    {
       "id": "GM_info",
       "api": "GM_info",
       "summary": "Manager and script identity for the about/diagnostics surface, plus the granted realm",

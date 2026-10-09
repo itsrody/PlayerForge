@@ -5,7 +5,7 @@ let stored = {};
 globalThis.GM_getValue = (key, fallback) => (key in stored ? stored[key] : fallback);
 globalThis.GM_setValue = (key, value) => { stored[key] = value; };
 
-const { KEYS, getConfigValue, setConfigValue, setConfigFields, deleteConfigField, configStore } = await import("../src/shared/storage.js");
+const { KEYS, getConfigValue, setConfigValue, setConfigFields, deleteConfigField, configStore, loadJsonObject, gmSetValue, gmRequestText } = await import("../src/shared/storage.js");
 
 // The store owns the configs document, so seeding `stored` is no longer enough
 // on its own: a store that already owns a document never re-reads storage.
@@ -227,7 +227,10 @@ test("a local write notifies once, and the manager echo stays a no-op", () => {
 
 test("a failed write rolls the cache back", () => {
   const realSet = globalThis.GM_setValue;
-  configStore.adopt({ ui: { volume: 0.5 } });
+  // Seed through storage, not adopt-alone: adopting a document storage does
+  // not hold creates the exact divergence the write-time rebase exists to
+  // heal, so the rollback would restore a document that was never the truth.
+  seed({ ui: { volume: 0.5 } });
   globalThis.GM_setValue = () => {
     throw new Error("quota");
   };
@@ -500,4 +503,132 @@ test("unsubscribing from inside a change listener still notifies the peers", () 
   setConfigValue("ui.volume", 0.65);
   assert.deepEqual(seen, ["first", "third"], "the self-unsubscribed listener kept firing");
   ac.abort();
+});
+
+/* - Grant-less and corrupt-host hardening - */
+
+function withoutGrants(fn) {
+  const saved = {
+    get: globalThis.GM_getValue,
+    set: globalThis.GM_setValue,
+    xhr: globalThis.GM_xmlhttpRequest
+  };
+  delete globalThis.GM_getValue;
+  delete globalThis.GM_setValue;
+  delete globalThis.GM_xmlhttpRequest;
+  try {
+    return fn();
+  } finally {
+    globalThis.GM_getValue = saved.get;
+    globalThis.GM_setValue = saved.set;
+    if (saved.xhr !== undefined) {
+      globalThis.GM_xmlhttpRequest = saved.xhr;
+    }
+  }
+}
+
+test("a missing GM grant degrades reads to fallbacks instead of throwing", () => {
+  withoutGrants(() => {
+    assert.equal(loadJsonObject(KEYS.configs, "fb"), "fb", "no grant means no stored value");
+    assert.equal(getConfigValue("ui.volume", 0.25), 0.25, "boot reads survive a grant-less host");
+  });
+});
+
+test("a missing GM grant reports writes as failed instead of throwing", () => {
+  withoutGrants(() => {
+    assert.equal(gmSetValue(KEYS.configs, { version: 1 }), false);
+    assert.equal(setConfigFields({ "ui.volume": 0.5 }), false, "the failure is reported, not thrown");
+  });
+});
+
+test("a stored array is not a document", () => {
+  stored[KEYS.configs] = [1, 2, 3];
+  assert.deepEqual(loadJsonObject(KEYS.configs, "fb"), "fb", "arrays fall back like any corrupt doc");
+  // And the store never installs one as its document either.
+  configStore.adopt([1, 2, 3]);
+  assert.deepEqual(configStore.doc(), { version: 1 });
+});
+
+test("a cross-tab write landing mid-batch survives the local write", () => {
+  // Two tabs, disjoint paths: the remote write lands in manager storage
+  // after our last adoption but before our persist. Without a rebase the
+  // whole-document write clobbers it.
+  seed({ version: 1, a: 1 });
+  stored[KEYS.configs] = { version: 1, a: 1, b: 2 };
+  setConfigValue("c", 3);
+  assert.deepEqual(
+    stored[KEYS.configs],
+    { version: 1, a: 1, b: 2, c: 3 },
+    "disjoint remote paths survive a local write"
+  );
+});
+
+test("a removal applies against storage truth, not a stale cache", () => {
+  seed({ version: 1, a: 1 });
+  stored[KEYS.configs] = { version: 1, a: 1, b: 2 };
+  deleteConfigField("a");
+  assert.deepEqual(stored[KEYS.configs], { version: 1, b: 2 });
+});
+
+test("an empty batch writes nothing and reports success", () => {
+  seed({ version: 1, a: 1 });
+  let writes = 0;
+  const realSet = globalThis.GM_setValue;
+  globalThis.GM_setValue = (key, value) => {
+    writes += 1;
+    stored[key] = value;
+  };
+  try {
+    assert.equal(setConfigFields({}), true, "vacuous success, not a failure");
+    assert.equal(writes, 0, "no storage round trip for no paths");
+    assert.deepEqual(stored[KEYS.configs], { version: 1, a: 1 });
+  } finally {
+    globalThis.GM_setValue = realSet;
+  }
+});
+
+test("empty path segments are rejected like prototype segments", () => {
+  seed({ version: 1, a: 1 });
+  const before = JSON.stringify(stored[KEYS.configs]);
+  assert.equal(setConfigFields({ "": 1 }), false);
+  assert.equal(setConfigFields({ "a..b": 1 }), false);
+  assert.equal(JSON.stringify(stored[KEYS.configs]), before, "no partial write escaped");
+});
+
+test("gmRequestText without the grant rejects instead of throwing", async () => {
+  await assert.rejects(
+    withoutGrants(() => gmRequestText("https://example.com/subs.vtt")),
+    /unavailable/,
+    "no grant means no fetch, carried as a rejection"
+  );
+});
+
+test("gmRequestText surfaces HTTP errors and honors abort", async () => {
+  const seen = [];
+  globalThis.GM_xmlhttpRequest = (opts) => {
+    seen.push(opts);
+    const handle = {
+      abort() {
+        opts.onabort?.();
+      }
+    };
+    if (opts.url.includes("ok.vtt")) {
+      opts.onload({ status: 200, responseText: "WEBVTT", finalUrl: opts.url });
+    } else if (opts.url.includes("missing.vtt")) {
+      opts.onload({ status: 404, responseText: "" });
+    }
+    return handle;
+  };
+  try {
+    const ok = await gmRequestText("https://example.com/ok.vtt");
+    assert.equal(ok.responseText, "WEBVTT");
+    await assert.rejects(gmRequestText("https://example.com/missing.vtt"), /HTTP 404/);
+
+    const ac = new AbortController();
+    const pending = gmRequestText("https://example.com/slow.vtt", { signal: ac.signal });
+    ac.abort();
+    await assert.rejects(pending, /bort/, "abort rejects instead of pending forever");
+  } finally {
+    delete globalThis.GM_xmlhttpRequest;
+  }
 });
