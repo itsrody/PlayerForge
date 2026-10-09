@@ -1379,7 +1379,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved ten times since that cut. The first two movements
+The unit count has moved eleven times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1455,8 +1455,23 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  the same cap; and every injection re-asserts the document stylesheet
  adoption a page script may have clobbered (F6). `tests/shell-boot.test.mjs`
  gained 3 (scroll-free focus, isolation, re-adoption), `tests/kernel-replay.
- test.mjs` 2 (cloned marker, subtree observe), `tests/sdk-engine.test.mjs` 2
- (the graft pair, one of which fails on any parent-only check).
+  test.mjs` 2 (cloned marker, subtree observe), `tests/sdk-engine.test.mjs` 2
+  (the graft pair, one of which fails on any parent-only check).
+
+ The eleventh movement took two Gecko-only APIs the tree had been leaving on
+ the table, and pinned nineteen Chromium-only ones in `retired` so the
+ manifest refuses them the way it already refused LoAF. Scrub drags rode
+ precise `currentTime` per move, so every move paid a full seek cycle;
+ per-move seeks now ride `fastSeek` (Gecko-only, keyframe-fast) with an exact
+ `currentTime` settle on release — the release previously never re-sought, so
+ without the settle a keyframe landing would have stood as the resting
+ position (`tests/media-controls.test.mjs` for the arms, `tests/input-forge.
+ test.mjs` for the settle-on-release). The screen stays awake while a video
+ plays via `navigator.wakeLock` (126 desktop, 156 Android — inside the floor),
+ held per bridge and released on pause, denial, revocation and teardown, all
+ silent (`tests/media-controls.test.mjs`). No latency numbers are claimed for
+ the scrub shape: the win is intent-matching (feedback vs settle, the class
+ of argument §2.9 already accepts for rVFC occurrence), not a priced row.
 
 ## 7. Gecko-specific decisions, and what they rule out
 
@@ -1475,6 +1490,15 @@ element's life (measured live: `playbackRate = 2` produced zero rate
 - Quality metrics prefer `getVideoPlaybackQuality()`, `mozPresentedFrames`, and
   `mozPaintedFrames` over rVFC metadata, because those bypass the cadence
   question entirely.
+- Scrub seeks ride `fastSeek` per move with an exact `currentTime` settle on
+  release: a Gecko-only keyframe seek (absent on Chromium) matched to drag
+  feedback, with precision restored where the stroke rests. No latency number
+  is claimed for it; §2.9's rule against presenting a shape as a latency win
+  holds, and the argument is intent-matching instead.
+- The screen stays awake while video plays via `navigator.wakeLock` (126
+  desktop, 156 Android — inside the floor), held per bridge and silent on
+  denial, revocation, and teardown. Playback survives its absence, so it is a
+  host probe rather than a floor claim.
 - Performance claims are priced on Gecko or not at all, and a ratio on a
   negligible cost is not a win. This rules out justifying a `src/` change with a
   node benchmark, and it rules out presenting a shape-level speedup as a latency

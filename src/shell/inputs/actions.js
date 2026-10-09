@@ -179,6 +179,12 @@ const { get: stateFor, release: releaseStateFor } = (() => {
           activeHolds: new Set(),
           scrubbing: false,
           scrubDuration: 0,
+          // Exact release target for a stroke whose moves rode fastSeek.
+          // NaN until the first qualifying move latches one, so a tap-only
+          // stroke settles nothing. Reset on every scrubEnd for the same
+          // reason the gains are: a pooled state object must never carry a
+          // previous stroke's target into the next one.
+          scrubLastTarget: NaN,
           scrubSlowGain: 0,
           scrubFastGain: 0,
           scrubSensitivity: 0,
@@ -548,7 +554,11 @@ export function attachInputActions(shell, host, signal) {
     const deltaSeconds = detail.dx * gain * state.scrubSensitivity;
     // The stroke latched above, so duration is stable - use the latched-seek
     // path so each move skips media's readiness gate + duration re-read.
-    shell.media.scrubToLatched(shell.currentTime + deltaSeconds, state.scrubDuration);
+    // The target is remembered for the release: per-move seeks may ride
+    // fastSeek (keyframe-imprecise), so scrubEnd settles this exact value.
+    const scrubTarget = shell.currentTime + deltaSeconds;
+    state.scrubLastTarget = scrubTarget;
+    shell.media.scrubToLatched(scrubTarget, state.scrubDuration);
     const instantDirection = detail.dx > 1 ? 1 : detail.dx < -1 ? -1 : 0;
     state.scrubDirectionMomentum = state.scrubDirectionMomentum * 0.6 + instantDirection * 0.4;
 
@@ -578,6 +588,14 @@ export function attachInputActions(shell, host, signal) {
       return;
     }
     state.scrubbing = false;
+    // Settle the exact latched target: per-move seeks may have ridden
+    // fastSeek, whose keyframe landing is feedback, not a resting position.
+    // A stroke with no qualifying move never latched a target, so there is
+    // nothing to settle.
+    if (Number.isFinite(state.scrubLastTarget)) {
+      shell.media.scrubSettle(state.scrubLastTarget);
+    }
+    state.scrubLastTarget = NaN;
     state.scrubDirectionMomentum = 0;
     state.scrubDuration = 0;
     state.scrubSlowGain = 0;

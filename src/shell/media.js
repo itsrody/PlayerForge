@@ -28,6 +28,16 @@ export function createMediaControls({ video }) {
   const isReady = () => video.readyState >= 1;
 
   /**
+   * Hoisted once: fastSeek is a Gecko extension, not Baseline - it ships the
+   * whole 157 floor but is absent on the jsdom host (and any host that drops
+   * it). The per-move scrub path must not pay a typeof per pointermove, and
+   * must never call it unguarded (the seekto handler records the TypeError
+   * that cost). A member probe on a local, so the manifest carries it by hand
+   * under the fastSeek token rather than the typeof-chain scan.
+   */
+  const canFastSeek = typeof video.fastSeek === "function";
+
+  /**
    * A seekable timeline exists when metadata loaded (readyState >= HAVE_METADATA)
    * OR a finite positive duration is already established. MSE/streaming players
    * set duration (firing `durationchange`) while readyState is still
@@ -103,15 +113,40 @@ export function createMediaControls({ video }) {
     },
 
     /**
-     * Latched scrub seek for an in-progress drag session. Readiness was
-     * already verified and `duration` captured when the stroke latched, so
-     * this skips the per-move isReady() gate and re-reading video.duration
-     * (native getter) - the single most frequent user-facing path.
-     */
+    * Latched scrub seek for an in-progress drag session. Readiness was
+    * already verified and `duration` captured when the stroke latched, so
+    * this skips the per-move isReady() gate and re-reading video.duration
+    * (native getter) - the single most frequent user-facing path.
+    *
+    * Per-move seeks ride fastSeek where the engine offers it: a Gecko-only
+    * keyframe seek that trades precision for speed, which is exactly the
+    * trade a 60 Hz drag stream wants - each move's feedback lands sooner,
+    * and the imprecision never survives the stroke because the release
+    * settles exact (see scrubSettle). Without fastSeek this is the precise
+    * write it always was.
+    */
     scrubToLatched(time, duration) {
-      video.currentTime = Number.isFinite(duration) && duration > 0
+      const target = Number.isFinite(duration) && duration > 0
         ? clamp(time, 0, duration)
         : Math.max(0, time);
+      if (canFastSeek) {
+        video.fastSeek(target);
+      } else {
+        video.currentTime = target;
+      }
+    },
+
+    /**
+    * Exact settle for a drag session that rode fastSeek per-move. fastSeek
+    * lands on a keyframe, so the stroke's resting position can sit seconds
+    * off the finger on sparse keyframes - the release writes the latched
+    * target precisely. Ungated like the latched path for the same reason:
+    * the session was live and ready throughout, and gating the settle could
+    * strand the fastSeek approximation when readiness drops mid-release
+    * (the stranded-boost class of bug endBoost documents).
+    */
+    scrubSettle(time) {
+      video.currentTime = Math.max(0, time);
     },
 
     skip(delta) {
@@ -261,12 +296,25 @@ class MediaSessionBridge {
    * keeps the hot path free of per-tick try/catch.
    */
   #canSetPositionState = false;
+  /**
+   * Pre-detected the same way: navigator.wakeLock ships the whole 157 floor
+   * (126 desktop, 156 Android) but is absent on the jsdom host - and the
+   * `globalThis.` root keeps the probe total rather than throwing on a host
+   * with no navigator at all. `request` (not the namespace) is probed, since
+   * that is the function actually called.
+   */
+  #canWakeLock = false;
+  /** Held screen-wake sentinel while this bridge's video plays, else null. */
+  #wakeSentinel = null;
+  /** A wake-lock request is in flight: sync() must not stack a second one. */
+  #wakePending = false;
 
   constructor(session, controls, video) {
     this.#session = session;
     this.#controls = controls;
     this.#video = video;
     this.#canSetPositionState = typeof session?.setPositionState === "function";
+    this.#canWakeLock = typeof globalThis.navigator?.wakeLock?.request === "function";
   }
 
   /**
@@ -371,6 +419,14 @@ class MediaSessionBridge {
 
   /** playbackState plus guarded position state; safe to call per event batch. */
   sync() {
+    // The screen lock is per-video, not per session owner: any playing video
+    // wants the screen on, and a displaced bridge's shell is still alive and
+    // still playing. It rides the same media-event drive, so no listener of
+    // its own is needed - and none is wanted, since timeupdate stops for no
+    // one. A hidden document's UA revokes the lock itself; the release
+    // listener below clears the field, and the next sync after returning
+    // visible re-acquires.
+    this.#syncWakeLock();
     // Ownership gate, not just a disposal check: a displaced bridge keeps its
     // media listeners (its shell lives on), and navigator.mediaSession is one
     // global - two bridges writing it would have each player's state overwrite
@@ -410,10 +466,78 @@ class MediaSessionBridge {
     session.setPositionState(state);
   }
 
+  /**
+   * Hold a screen wake lock while this video plays, release it when it does
+   * not. Best-effort and silent throughout: denial is ordinary (http origin,
+   * permissions policy, power save, hidden document), so a rejection never
+   * surfaces - and the next sync simply tries again, which is also what
+   * re-acquires after the UA revokes on hide. Each bridge holds its own
+   * sentinel; sentinels compose, so two playing videos keep the screen on
+   * until both release.
+   */
+  #syncWakeLock() {
+    if (!this.#canWakeLock) {
+      return;
+    }
+    if (this.#scope.disposed || this.#video.paused) {
+      this.#releaseWakeLock();
+      return;
+    }
+    if (this.#wakeSentinel || this.#wakePending) {
+      return;
+    }
+    let request;
+    try {
+      request = globalThis.navigator.wakeLock.request("screen");
+    } catch {
+      return;
+    }
+    this.#wakePending = true;
+    Promise.resolve(request).then(
+      (sentinel) => {
+        this.#wakePending = false;
+        // Resolved late: a pause or teardown in between must not bank a lock
+        // for a video that no longer plays.
+        if (this.#scope.disposed || this.#video.paused) {
+          try {
+            sentinel.release();
+          } catch {}
+          return;
+        }
+        this.#wakeSentinel = sentinel;
+        try {
+          sentinel.addEventListener("release", () => {
+            if (this.#wakeSentinel === sentinel) {
+              this.#wakeSentinel = null;
+            }
+          });
+        } catch {}
+      },
+      () => {
+        // Denial is ordinary; clear the flag so the next sync retries, which
+        // is also what re-acquires after a hide revocation.
+        this.#wakePending = false;
+      }
+    );
+  }
+
+  #releaseWakeLock() {
+    const sentinel = this.#wakeSentinel;
+    this.#wakeSentinel = null;
+    if (sentinel) {
+      try {
+        sentinel.release();
+      } catch {}
+    }
+  }
+
   destroy() {
     if (this.#scope.disposed) {
       return;
     }
+    // The lock belongs to the video, not the session handover below: release
+    // before the scope dies so a destroyed shell never banks screen-on.
+    this.#releaseWakeLock();
     this.#scope.dispose();
     liveBridges.delete(this);
     if (sessionOwner !== this) {

@@ -436,3 +436,231 @@ test("the last bridge leaving clears the session outright", async () => {
   assert.equal(session.playbackState, "none");
   assert.equal(session.metadata, null);
 });
+
+/* - Screen wake lock - */
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** WakeLock double: records requests, hands out controllable sentinels. */
+function makeWakeLock({ reject = false } = {}) {
+  const requests = [];
+  const sentinels = [];
+  return {
+    requests,
+    sentinels,
+    api: {
+      request(type) {
+        requests.push(type);
+        if (reject) {
+          return Promise.reject(new Error("denied"));
+        }
+        const sentinel = {
+          released: false,
+          listeners: new Map(),
+          release() {
+            this.released = true;
+          },
+          addEventListener(name, fn) {
+            this.listeners.set(name, fn);
+          }
+        };
+        sentinels.push(sentinel);
+        return Promise.resolve(sentinel);
+      }
+    }
+  };
+}
+
+function installNavigator(value) {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  Object.defineProperty(globalThis, "navigator", {
+    value, writable: true, configurable: true
+  });
+  return () => {
+    if (descriptor) {
+      Object.defineProperty(globalThis, "navigator", descriptor);
+    } else {
+      delete globalThis.navigator;
+    }
+  };
+}
+
+async function claimWakeBridge({ paused, wake } = {}) {
+  const claim = (await freshMedia()).claimMediaSession;
+  const dom = new JSDOM("<!doctype html><html><body></body></html>");
+  globalThis.AbortController = dom.window.AbortController;
+  const session = makeRichSession();
+  const { video, controls } = readyEnv(dom, paused);
+  const scope = new AbortController();
+  // The fake stays installed for the test's lifetime: sync() re-reads the
+  // host on every call, so restoring right after claim would test the
+  // TypeError catch instead of the design. Callers run cleanup last.
+  const cleanupNavigator = installNavigator(wake ? { wakeLock: wake.api } : undefined);
+  const bridge = claim({ controls, video, signal: scope.signal, session });
+  const cleanup = () => {
+    scope.abort();
+    cleanupNavigator();
+  };
+  return { bridge, video, cleanup };
+}
+
+function setPaused(video, paused) {
+  Object.defineProperty(video, "paused", { value: paused, configurable: true });
+}
+
+test("a playing bridge holds a screen wake lock and releases it on pause", async () => {
+  const wake = makeWakeLock();
+  const { bridge, video, cleanup } = await claimWakeBridge({ paused: false, wake });
+  try {
+    await tick();
+    assert.deepEqual(wake.requests, ["screen"], "one screen-lock request while playing");
+    bridge.sync();
+    bridge.sync();
+    await tick();
+    assert.equal(wake.requests.length, 1, "repeat syncs stack no second request");
+
+    setPaused(video, true);
+    bridge.sync();
+    assert.equal(wake.sentinels[0].released, true, "pause releases the held lock");
+    bridge.sync();
+    await tick();
+    assert.equal(wake.requests.length, 1, "paused syncs never request");
+  } finally {
+    cleanup();
+  }
+});
+
+test("a denied wake-lock request stays silent and retries on the next sync", async () => {
+  const wake = makeWakeLock({ reject: true });
+  const { bridge, cleanup } = await claimWakeBridge({ paused: false, wake });
+  try {
+    await tick();
+    assert.equal(wake.requests.length, 1, "first attempt issued");
+    bridge.sync();
+    await tick();
+    assert.equal(wake.requests.length, 2, "denial clears the flag so the next sync retries");
+  } finally {
+    cleanup();
+  }
+});
+
+test("a host without wakeLock degrades silently", async () => {
+  const { bridge, video, cleanup } = await claimWakeBridge({ paused: false });
+  try {
+    // No navigator.wakeLock at all: sync must neither throw nor record.
+    bridge.sync();
+    await tick();
+    setPaused(video, true);
+    bridge.sync();
+    assert.ok(true, "survived a lock-less host without throwing");
+  } finally {
+    cleanup();
+  }
+});
+
+test("destroying a shell releases its held wake lock", async () => {
+  const wake = makeWakeLock();
+  const { bridge, cleanup } = await claimWakeBridge({ paused: false, wake });
+  await tick();
+  assert.equal(wake.sentinels.length, 1, "precondition: the lock is held");
+  cleanup();
+  assert.equal(wake.sentinels[0].released, true, "teardown banks no screen-on");
+});
+
+test("a request resolving after pause banks no lock for the stopped video", async () => {
+  const requests = [];
+  let resolveRequest;
+  const api = {
+    request() {
+      requests.push(1);
+      return new Promise((resolve) => {
+        resolveRequest = resolve;
+      });
+    }
+  };
+  const wake = { api };
+  const { bridge, video, cleanup } = await claimWakeBridge({ paused: false, wake });
+  try {
+    await tick();
+    assert.equal(requests.length, 1, "precondition: one request in flight");
+    // Pause while the request is still pending.
+    setPaused(video, true);
+    bridge.sync();
+    const sentinel = { released: false, release() { this.released = true; }, addEventListener() {} };
+    resolveRequest(sentinel);
+    await tick();
+    assert.equal(sentinel.released, true, "the late lock is released, not banked");
+    assert.equal(requests.length, 1, "no second request issued while paused");
+
+    // Playing again self-heals on the next sync.
+    setPaused(video, false);
+    bridge.sync();
+    await tick();
+    assert.equal(requests.length, 2, "resume re-acquires");
+  } finally {
+    cleanup();
+  }
+});
+
+test("a UA revocation clears the field so the next sync re-acquires", async () => {
+  const wake = makeWakeLock();
+  const { bridge, cleanup } = await claimWakeBridge({ paused: false, wake });
+  try {
+    await tick();
+    assert.equal(wake.sentinels.length, 1, "precondition: the lock is held");
+    // The UA revokes on hide; the sentinel's release event is the signal.
+    wake.sentinels[0].listeners.get("release")();
+    bridge.sync();
+    await tick();
+    assert.equal(wake.requests.length, 2, "a revoked lock is re-acquired while still playing");
+  } finally {
+    cleanup();
+  }
+});
+
+/* - Scrub fastSeek - */
+
+function scrubEnv({ withFastSeek = false, duration = 120 } = {}) {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>");
+  const video = dom.window.document.createElement("video");
+  Object.defineProperty(video, "duration", { value: duration, configurable: true });
+  const fastSeekCalls = [];
+  if (withFastSeek) {
+    video.fastSeek = (t) => fastSeekCalls.push(t);
+  }
+  return { video, controls: createMediaControls({ video }), fastSeekCalls };
+}
+
+test("per-move scrub seeks ride fastSeek where the engine offers it", () => {
+  const { video, controls, fastSeekCalls } = scrubEnv({ withFastSeek: true });
+  controls.scrubToLatched(42.5, 120);
+  assert.deepEqual(fastSeekCalls, [42.5], "the move went through fastSeek");
+});
+
+test("per-move scrub falls back to precise currentTime without fastSeek", () => {
+  // jsdom has no fastSeek, which is exactly the host this guards.
+  const { video, controls, fastSeekCalls } = scrubEnv();
+  controls.scrubToLatched(42.5, 120);
+  assert.deepEqual(fastSeekCalls, [], "no fastSeek to call");
+  assert.equal(video.currentTime, 42.5, "the precise write it always was");
+});
+
+test("latched seeks clamp in both arms", () => {
+  const fast = scrubEnv({ withFastSeek: true });
+  fast.controls.scrubToLatched(500, 120);
+  assert.deepEqual(fast.fastSeekCalls, [120], "fastSeek clamps to duration");
+  fast.controls.scrubToLatched(-5, 120);
+  assert.deepEqual(fast.fastSeekCalls, [120, 0], "fastSeek clamps to zero");
+
+  const precise = scrubEnv();
+  precise.controls.scrubToLatched(500, 120);
+  assert.equal(precise.video.currentTime, 120);
+});
+
+test("the release settle writes the exact target even with fastSeek", () => {
+  const { video, controls, fastSeekCalls } = scrubEnv({ withFastSeek: true });
+  controls.scrubToLatched(42.5, 120);
+  controls.scrubSettle(42.5);
+  assert.deepEqual(fastSeekCalls, [42.5], "the settle is not another fastSeek");
+  assert.equal(video.currentTime, 42.5, "the release lands precisely");
+});

@@ -280,6 +280,168 @@
         "src/",
         "esbuild.config.mjs"
       ]
+    },
+    {
+      "id": "requestIdleCallback",
+      "summary": "requestIdleCallback/cancelIdleCallback",
+      "why": "Absent on Gecko. Deferral is scheduler.postTask and chunking is yield_(); an idle callback would be dead code on every supported target.",
+      "matchPattern": "requestIdleCallback|cancelIdleCallback",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "device-memory",
+      "summary": "navigator.deviceMemory hardware class",
+      "why": "Chromium-only. Nothing in the fork branches on device class; capability checks are feature probes, not hardware guesses.",
+      "matchPattern": "deviceMemory",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "network-information",
+      "summary": "navigator.connection (effectiveType/saveData)",
+      "why": "Chromium-only. No feature degrades on connection class; subtitle fetch goes through the manager grant unconditionally.",
+      "matchPattern": "navigator\\.connection|effectiveType|saveData",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "user-agent-client-hints",
+      "summary": "navigator.userAgentData",
+      "why": "Chromium-only. Engine identity comes from the UA string parsed once in L0, never from client hints.",
+      "matchPattern": "userAgentData",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "navigation-api",
+      "summary": "window.navigation (NavigateEvent, traverseTo)",
+      "why": "Chromium-only, and same-document navigation is out of scope regardless: nothing subscribes to route changes.",
+      "matchPattern": "window\\.navigation|NavigateEvent|navigation\\.navigate|navigation\\.traverseTo|navigation\\.back|navigation\\.forward",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "keyboard-api",
+      "summary": "navigator.keyboard (getLayoutMap) and Keyboard.lock()",
+      "why": "Chromium-only. Hotkeys are code-based (KeyM, Space), never layout-mapped, and no path locks the keyboard.",
+      "matchPattern": "navigator\\.keyboard|getLayoutMap|Keyboard\\.lock|keyboard\\.lock",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "virtual-keyboard",
+      "summary": "navigator.virtualKeyboard",
+      "why": "Chromium-only. Android soft-keyboard overlap is answered with visualViewport, which Gecko ships.",
+      "matchPattern": "virtualKeyboard|VirtualKeyboard",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "ink-api",
+      "summary": "navigator.ink (InkPresenter)",
+      "why": "Chromium-only. Stroke rendering is direct DOM writes on the gesture path, with no delegation layer.",
+      "matchPattern": "navigator\\.ink|\\bInk\\b",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "compute-pressure",
+      "summary": "PressureObserver (Compute Pressure API)",
+      "why": "Chromium-only. Load shedding is structural (occlusion detach, one-commit-per-tick), never pressure-polled.",
+      "matchPattern": "PressureObserver|computePressure",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "cookie-store",
+      "summary": "cookieStore (Cookie Store API)",
+      "why": "Chromium-only. Persistence is the manager value table, never cookies.",
+      "matchPattern": "cookieStore",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "file-system-access",
+      "summary": "File System Access pickers and handles",
+      "why": "Chromium-only. Export/import goes through the clipboard bridge, never file pickers.",
+      "matchPattern": "showOpenFilePicker|showSaveFilePicker|showDirectoryPicker|FileSystemWritable|createSyncAccessHandle",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "web-transport",
+      "summary": "WebTransport",
+      "why": "Chromium-only. The frame bridge is MessageChannel ports, and subtitles ride the manager fetch.",
+      "matchPattern": "WebTransport",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "device-apis",
+      "summary": "WebHID/WebUSB/WebSerial/WebBluetooth/WebOTP",
+      "why": "Absent on Gecko. No feature touches external devices or one-time codes.",
+      "matchPattern": "navigator\\.(hid|usb|serial|bluetooth)|OTPCredential",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "window-controls-overlay",
+      "summary": "navigator.windowControlsOverlay",
+      "why": "Chromium-only. The HUD is an in-player overlay, never a title-bar integration.",
+      "matchPattern": "WindowControlsOverlay|windowControlsOverlay",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "topics-attribution",
+      "summary": "Topics API and Attribution Reporting",
+      "why": "Chromium-only. No ads measurement exists to feed them.",
+      "matchPattern": "browsingTopics|attributionsrc|privateAggregation|sharedStorage|fencedframe|registerSource|registerTrigger",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "edit-context",
+      "summary": "EditContext",
+      "why": "Chromium-only. Text entry is native inputs the hotkey layer yields to, never a custom editor.",
+      "matchPattern": "EditContext",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "eyedropper",
+      "summary": "EyeDropper",
+      "why": "Chromium-only. The filter reads preset values, never samples the screen.",
+      "matchPattern": "EyeDropper",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "v8-stack",
+      "summary": "Error.captureStackTrace",
+      "why": "V8-only. Diagnostics log errors without engine-specific stack capture.",
+      "matchPattern": "captureStackTrace",
+      "mustNotAppearIn": [
+        "src/"
+      ]
     }
   ],
   "hostProbes": [
@@ -507,6 +669,29 @@
         "mozPaintedFrames"
       ],
       "note": "Read as one unit on purpose: Gecko reports the standard presentedFrames as null, so the mozilla counters are not an enhancement but the only painted-versus-submitted read there is. engine-host.js probes all three together rather than letting the report half-work."
+    },
+    {
+      "id": "wake-lock",
+      "api": "navigator.wakeLock",
+      "summary": "Screen wake lock while a video is playing",
+      "why": "Without it the screen may dim mid-playback on mobile; playback, the HUD and the session sync all carry on - only the stay-awake guarantee is lost.",
+      "usedBy": [
+        "src/shell/media.js"
+      ],
+      "token": "wakeLock",
+      "probes": [
+        "globalThis.navigator.wakeLock.request"
+      ]
+    },
+    {
+      "id": "fast-seek",
+      "api": "HTMLVideoElement.fastSeek",
+      "summary": "Keyframe-fast in-drag scrub seeks, settled exact on release",
+      "why": "Without it per-move seeks ride precise currentTime and the release settle lands where the last move already put the playhead - the gesture stays correct, just less snappy under fast drags.",
+      "usedBy": [
+        "src/shell/media.js"
+      ],
+      "token": "fastSeek"
     }
   ]
 }

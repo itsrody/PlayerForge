@@ -1080,3 +1080,72 @@ test("fill pinch owns object-fit: contain and restores it on clear", () => {
   dom.window.close();
 });
 
+test("scrubEnd settles the exact latched target of the stroke", () => {
+  // Per-move seeks may ride fastSeek (keyframe-imprecise feedback), so the
+  // release must write the stroke's exact target - otherwise the resting
+  // position sits wherever the nearest keyframe was.
+  const { dom, video, host } = makeEnv();
+  const latched = [];
+  const settled = [];
+  const shell = {
+    video,
+    duration: 120,
+    currentTime: 40,
+    referenceBox: { width: 800, height: 450 },
+    media: {
+      scrubToLatched: (t) => latched.push(t),
+      scrubSettle: (t) => settled.push(t)
+    },
+    toast() {},
+    hideToast() {}
+  };
+  const ac = new AbortController();
+  attachInputActions(shell, host, ac.signal);
+
+  host.dispatchEvent(new dom.window.CustomEvent(GESTURE_EVENTS.scrub, {
+    detail: { dx: 200, velocity: 2000 }
+  }));
+  host.dispatchEvent(new dom.window.CustomEvent(GESTURE_EVENTS.scrub, {
+    detail: { dx: 100, velocity: 1000 }
+  }));
+  assert.equal(latched.length, 2, "both moves rode the latched path");
+  assert.equal(settled.length, 0, "no settle before the release");
+
+  host.dispatchEvent(new dom.window.CustomEvent(GESTURE_EVENTS.scrubEnd, { detail: {} }));
+  assert.equal(settled.length, 1, "the release settles once");
+  assert.equal(settled[0], latched.at(-1), "the settle lands exactly where the last move aimed");
+
+  ac.abort();
+  dom.window.close();
+});
+
+test("scrubEnd with no qualifying move settles nothing", () => {
+  const { dom, video, host } = makeEnv();
+  const settled = [];
+  const shell = {
+    video,
+    duration: 0,
+    currentTime: 40,
+    referenceBox: { width: 800, height: 450 },
+    media: {
+      scrubToLatched: () => {},
+      scrubSettle: (t) => settled.push(t)
+    },
+    toast() {},
+    hideToast() {}
+  };
+  const ac = new AbortController();
+  attachInputActions(shell, host, ac.signal);
+
+  // No duration means the stroke never latches; a dead-zone-only stroke must
+  // not settle a target it never had.
+  host.dispatchEvent(new dom.window.CustomEvent(GESTURE_EVENTS.scrub, {
+    detail: { dx: 200, velocity: 2000 }
+  }));
+  host.dispatchEvent(new dom.window.CustomEvent(GESTURE_EVENTS.scrubEnd, { detail: {} }));
+  assert.deepEqual(settled, [], "nothing latched, nothing settled");
+
+  ac.abort();
+  dom.window.close();
+});
+
