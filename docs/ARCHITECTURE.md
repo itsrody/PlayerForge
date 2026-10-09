@@ -4,7 +4,7 @@ Status: implemented. §4's layer model and all seven migration phases in §6
 have landed, and every invariant in §5 is pinned by a test. The design text
 below is written as it was reasoned out; where an implementation forced a
 change, the section says so at the point it happened.
-Target: Gecko 157+ (floor), tested on Firefox Developer Edition 158.0b3.
+Target: Gecko 157+ (floor), tested on Firefox 158.0b5.
 Manager contract: Violentmonkey MV2 2.49+.
 
 ## 0. Scope
@@ -1383,7 +1383,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved twelve times since that cut. The first two movements
+The unit count has moved thirteen times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1490,6 +1490,18 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  session-scope child a bare signal parameter cannot express. The same change
  pinned `performance.memory`, layout-shift records, prerendering markers and
  `interactionCount` in `retired`.
+
+ The thirteenth movement declined a version-floor bump and proved the test
+ target instead. With 158 in beta on the test machine (158.0b5 riding in
+ `Firefox.app`), the temptation was `minFirefox` 158 — but the manifest's
+ highest floor need is 149 and no 158 API (Sanitizer scoping, corner-shape,
+ `random()`, deliveryType, streaming uploads) backs a feature, so the bump
+ would have dropped the 157 promise for nothing; the floor stays put. What
+ did change: the resolver derives bleeding-edge from the prerelease letter
+ rather than the app-bundle name (a beta in release clothing reported as
+ settled before), pinned by `tests/target-resolver.test.mjs` against fake
+ binaries; `testTarget.verifiedOn` now names the measured 158.0b5; and the
+ full integration suite ran green on it (90 pass, 1 skipped).
 
 ## 7. Gecko-specific decisions, and what they rule out
 

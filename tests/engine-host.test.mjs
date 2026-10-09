@@ -63,7 +63,7 @@ test("the recorded version is what the parser would say about this host", () => 
 });
 
 test("the realm is a mode the manager could report, or nothing at all", () => {
-  // Violentmonkey reports it through GM_info.injectInto (ARCHITECTURE-2.0 §2.7);
+  // Violentmonkey reports it through GM_info.injectInto (ARCHITECTURE §2.7);
   // the jsdom host provides no GM_info, so null is the honest answer here.
   assert.ok(
     engineHost.realm === null || ["page", "content", "auto"].includes(engineHost.realm),

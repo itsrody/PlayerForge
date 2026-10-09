@@ -1,7 +1,7 @@
 # AGENTS.md
 
 Instructions for coding agents working in this repo. The long form is
-`docs/ARCHITECTURE-2.0.md` — §4 layers, §5 invariants, §6 phases, §8 build and
+`docs/ARCHITECTURE.md` — §4 layers, §5 invariants, §6 phases, §8 build and
 release policy. **That file is the contract**: when code forces it to change,
 change it in the same change.
 
@@ -69,7 +69,7 @@ npm run vm-smoke -- <xpi>    # real Violentmonkey; xpi fetched from AMO into a
 ```
 
 Sanity numbers (they drift; a run reporting very different totals is suspect):
-unit `597`, integration `91 / 90 pass / 1 skipped`, browser-bench `28` rows
+unit `600`, integration `91 / 90 pass / 1 skipped`, browser-bench `28` rows
 (14 gateable, 14 of them report-only shape pairs), vm-smoke `19/19`.
 
 `node --test` with **no file list is wrong in this repo**: Node then discovers
@@ -102,7 +102,7 @@ platform/browser-bench/ gateable web performance rows + baseline.json
 platform/eslint-rules.mjs  pf/no-forced-layout, wired in eslint.config.js
 dist/                   committed artifacts (see §8)
 bench/                  pure-CPU node benchmarks
-docs/ARCHITECTURE-2.0.md  the contract (§0–§9)
+docs/ARCHITECTURE.md  the contract (§0–§9)
 ```
 
 `src/shared/activity.js` holds `createActivity()` — the "passive until an edge
@@ -180,7 +180,7 @@ npm run build && npm test
 npm run ci && npm run vm-smoke -- <xpi>
 ```
 
-Then re-read the §5 and §6 tables in `docs/ARCHITECTURE-2.0.md`: every
+Then re-read the §5 and §6 tables in `docs/ARCHITECTURE.md`: every
 invariant needs a test, and §6's verification counts need to still be true.
 
 ## 5. Style and history

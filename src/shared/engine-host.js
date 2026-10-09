@@ -17,7 +17,7 @@
  *
  * - **No `canRender` / "await paint" flag.** There is no such API to detect, so
  *   claiming one would be a design dependency on an API the Scheduler interface
- *   does not have (ARCHITECTURE-2.0 §2.6).
+ *   does not have (ARCHITECTURE §2.6).
  * - **No `canRaf`.** `yield_()` re-reads `requestAnimationFrame` on every call
  *   because the harness installs and removes it per test
  *   (tests/scheduler.test.mjs, tests/perf-diag.test.mjs). A construction-time
@@ -78,13 +78,13 @@ export class EngineHost {
     // not a branch worth a feature probe.
     this.#version = parseGeckoVersion(globalThis.navigator?.userAgent ?? "");
     this.#realm = globalThis.GM_info?.injectInto ?? null;
-    // postTask ships from Firefox 142 (ARCHITECTURE-2.0 §2.6), inside the 157
+    // postTask ships from Firefox 142 (ARCHITECTURE §2.6), inside the 157
     // floor, and the facade calls it unconditionally. Recording it here is what
     // makes the availability one fact instead of an assumption repeated by
     // every caller.
     this.#canPostTask = typeof globalThis.scheduler?.postTask === "function";
     // Recorded, never driven: scheduler.yield() is architecturally ruled out by
-    // Trap 2 (ARCHITECTURE-2.0 §7), so chunking uses yield_() instead. A future
+    // Trap 2 (ARCHITECTURE §7), so chunking uses yield_() instead. A future
     // strategy that wants to know what the host offers asks here.
     this.#canYield = typeof globalThis.scheduler?.yield === "function";
     // nextTask()'s first choice: MessageChannel tasks are not timer-throttled

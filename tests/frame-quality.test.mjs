@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 /**
- * The dropped-frame report (ARCHITECTURE-2.0 §2.5, §6 item 6): the counters
+ * The dropped-frame report (ARCHITECTURE §2.5, §6 item 6): the counters
  * come from `getVideoPlaybackQuality()` and Gecko's mozPresented/mozPainted
  * pair, and rVFC contributes only the edge the sample is taken on.
  *

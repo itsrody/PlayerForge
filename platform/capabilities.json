@@ -48,8 +48,8 @@
     "overrideEnv": "FIREFOX_PATH",
     "pinEnv": "FIREFOX_CHANNEL",
     "resolver": "platform/harness/target.mjs",
-    "verifiedOn": "Firefox Developer Edition 158.0b3",
-    "why": "Developer Edition is the fastest channel that still runs a real, signed-profile install with userScripts and a temporary add-on, which is what the native harness needs to register the bundle in the isolated content realm. Nightly is accepted for the same reason; a plain release build is the fallback, not the target."
+    "verifiedOn": "Firefox 158.0b5",
+    "why": "Developer Edition is the fastest channel that still runs a real, signed-profile install with userScripts and a temporary add-on, which is what the native harness needs to register the bundle in the isolated content realm. Nightly is accepted for the same reason; a plain release build is the fallback, not the target. Channels are named by app bundle, so a beta riding in Firefox.app (this machine's shape) resolves as release/158.0b5 - and the resolver derives bleeding-edge from the prerelease letter rather than the app name, so the run still reports what engine it measured."
   },
   "managerContract": {
     "injectionContext": {
@@ -497,7 +497,7 @@
       "id": "scheduler-yield",
       "api": "scheduler.yield",
       "summary": "Host chunking primitive that PlayerForge deliberately never calls",
-      "why": "Recorded by L0 and driven by nothing: Trap 2 killed boot through scheduler.yield() and the behaviour is specified rather than buggy (ARCHITECTURE-2.0 §7), so chunking uses yield_() instead. Without it nothing degrades - no path asks for it - but a future strategy has to be able to tell whether the host offers it at all.",
+      "why": "Recorded by L0 and driven by nothing: Trap 2 killed boot through scheduler.yield() and the behaviour is specified rather than buggy (ARCHITECTURE §7), so chunking uses yield_() instead. Without it nothing degrades - no path asks for it - but a future strategy has to be able to tell whether the host offers it at all.",
       "usedBy": [
         "src/shared/engine-host.js"
       ],
