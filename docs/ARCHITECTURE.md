@@ -1630,6 +1630,20 @@ element's life (measured live: `playbackRate = 2` produced zero rate
   CSP-dependent per site.
 - No Chromium compositor assumptions anywhere. All timing reasoning is anchored
   to the Gecko refresh-tick order in §2.1.
+- Work the main thread never does, and why nothing on this list gets expanded
+  without a measured reason. Compositor: WAAPI eases and flashes, CSS
+  transitions and opacity morphs, ViewTransitions, adopted sheets. Manager
+  process: subtitle fetch, GM storage and its change fan-out. Native parsers:
+  WebVTT cue parsing and scheduling, `getCueAsHTML` fragments. Observers, not
+  polling, for everything watchable. Lazily built: panel sections, filter and
+  subtitle wiring wait for first open; listeners are per-document
+  (one GM registration per key, one window listener per frame) with deduped
+  in-flight resolves. Deliberately not taken: a subtitle worker (loads are
+  user-initiated and rare; the string pass is µs-scale beside network plus
+  native parse), panel-chrome deferral past first open (~25 µs per page for
+  two nodes and ten listeners, against teardown-ordering risk), per-document
+  context caching (stale titles on SPA navigation, which the deliberate
+  no-cache avoids), and anything CSS-side (frozen by §0).
 
 ## 8. Build and release policy
 
