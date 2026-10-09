@@ -80,6 +80,12 @@ export default async function runJitShapeBench(bundle = DEFAULT_BUNDLE) {
       pointerCapturePair(),
       swipeTransformPair(),
       roundFactorPair(),
+      freezePair(),
+      withResolversPair(),
+      scopeConstructPair(),
+      realmCopyPair(),
+      mapGetPair(),
+      optionalChainPair(),
     ]) {
       // Which fixture the arms read is passed as an op argument rather than
       // parked on a global, so neither arm can be perturbed by the other.
@@ -177,6 +183,38 @@ const PRIME = `
     POINTERS,
     POINTER_LIST: [...POINTERS.values()]
   };
+
+  // Fixture shapes for the second wave of pairs below. Each mirrors the
+  // production shape it prices rather than an idealized version of it.
+  window.__pfShapes = (() => {
+    // player-status.js #queue freezes {seq,kind,name,from,to,cause} per
+    // transition; the nested error detail below mirrors the object the
+    // realm-crossing dispatch round-trips beside the primitives.
+    const NESTED = { code: 4, message: "NotAllowedError" };
+    // scheduler.js postTask mints a Scope (controller + disposed flag +
+    // null disposers) per scheduled task; the alternative is the bare
+    // controller the handle would own directly.
+    class ScopeLike {
+      #controller = new AbortController();
+      #disposers = null;
+      #disposed = false;
+      dispose() {
+        if (this.#disposed) return;
+        this.#disposed = true;
+        this.#controller.abort();
+      }
+    }
+    // The intent table forge.js consults per keystroke, and the keyed-object
+    // form the candidate would replace it with.
+    const INTENT = new Map([["play", 1], ["pause", 2], ["seek", 3], ["mute", 4]]);
+    const INTENT_OBJ = { play: 1, pause: 2, seek: 3, mute: 4 };
+    const INTENT_KEYS = ["play", "pause", "seek", "mute"];
+    // scheduler.js's "signal?.aborted" / "signal?.addEventListener" shape:
+    // mostly a live signal, sometimes null.
+    const WITH_M = { m(x) { return x + 1; } };
+    const MAYBES = [WITH_M, null, WITH_M, WITH_M, null, WITH_M];
+    return { NESTED, ScopeLike, INTENT, INTENT_OBJ, INTENT_KEYS, MAYBES };
+  })();
 `;
 
 /**
@@ -437,6 +475,197 @@ function roundFactorPair() {
       for (let n = 0; n < 64; n++) {
         const value = 100 + (n % 40) * 1.37;
         acc += Math.round(value * factor) / factor;
+      }
+      window.__pfJitSink = acc;
+    },
+  };
+}
+
+/**
+ * The status transition object. player-status.js #queue freezes
+ * {seq,kind,name,from,to,cause} per transition so a delivered change can
+ * never be mutated under a subscriber; the candidate drops the freeze and
+ * ships the literal.
+ */
+function freezePair() {
+  return {
+    label: "status transition freeze (per transition)",
+    firstName: "Object.freeze per object",
+    secondName: "plain literal",
+    firstOp: function freezeEach() {
+      let acc = 0;
+      for (let n = 0; n < 64; n++) {
+        const change = Object.freeze({ seq: n, kind: "scalar", name: "volume", from: 1, to: 0.5, cause: "volumechange" });
+        acc += change.to === 0.5 ? 1 : 0;
+      }
+      window.__pfJitSink = acc;
+    },
+    secondOp: function plainEach() {
+      let acc = 0;
+      for (let n = 0; n < 64; n++) {
+        const change = { seq: n, kind: "scalar", name: "volume", from: 1, to: 0.5, cause: "volumechange" };
+        acc += change.to === 0.5 ? 1 : 0;
+      }
+      window.__pfJitSink = acc;
+    },
+  };
+}
+
+/**
+ * Deferred primitives. lifecycle.js and context.js build deferred waits with
+ * Promise.withResolvers(); the candidate is the explicit executor form.
+ */
+function withResolversPair() {
+  return {
+    label: "deferred primitive (per wait)",
+    firstName: "Promise.withResolvers",
+    secondName: "new Promise executor",
+    firstOp: function withResolvers() {
+      let acc = 0;
+      for (let n = 0; n < 64; n++) {
+        // Only resolve is read; the promise is created either way, which is
+        // what is being priced.
+        const { resolve } = Promise.withResolvers();
+        resolve(n);
+        acc += 1;
+      }
+      window.__pfJitSink = acc;
+    },
+    secondOp: function executorForm() {
+      let acc = 0;
+      for (let n = 0; n < 64; n++) {
+        let resolve;
+        new Promise((res) => {
+          resolve = res;
+        });
+        resolve(n);
+        acc += 1;
+      }
+      window.__pfJitSink = acc;
+    },
+  };
+}
+
+/**
+ * The per-task teardown owner. scheduler.js postTask mints a Scope
+ * (controller + disposed flag + null disposers) per scheduled task so the
+ * handle and the owner signal share one vocabulary; the candidate is the
+ * bare controller the handle would own directly.
+ */
+function scopeConstructPair() {
+  return {
+    label: "teardown owner construction (per scheduled task)",
+    firstName: "Scope (controller + flags)",
+    secondName: "bare AbortController",
+    firstOp: function scopeEach() {
+      const { ScopeLike } = window.__pfShapes;
+      let acc = 0;
+      for (let n = 0; n < 64; n++) {
+        const scope = new ScopeLike();
+        scope.dispose();
+        acc += 1;
+      }
+      window.__pfJitSink = acc;
+    },
+    secondOp: function controllerEach() {
+      let acc = 0;
+      for (let n = 0; n < 64; n++) {
+        const controller = new AbortController();
+        controller.abort();
+        acc += 1;
+      }
+      window.__pfJitSink = acc;
+    },
+  };
+}
+
+/**
+ * The realm-crossing detail build. player-status.js #dispatch shallow-copies
+ * the change and round-trips nested values through JSON so the page realm
+ * receives plain data, never foreign-realm objects; the candidate passes the
+ * nested reference straight through (unsafe across realms, priced to show
+ * what the safety costs).
+ */
+function realmCopyPair() {
+  return {
+    label: "realm detail build (per transition)",
+    firstName: "shallow copy + JSON round trip",
+    secondName: "reference pass-through",
+    firstOp: function jsonCopy() {
+      const { NESTED } = window.__pfShapes;
+      let acc = 0;
+      for (let n = 0; n < 64; n++) {
+        const detail = { kind: "scalar", nested: JSON.parse(JSON.stringify(NESTED)) };
+        acc += detail.nested.code === 4 ? 1 : 0;
+      }
+      window.__pfJitSink = acc;
+    },
+    secondOp: function refPass() {
+      const { NESTED } = window.__pfShapes;
+      let acc = 0;
+      for (let n = 0; n < 64; n++) {
+        const detail = { kind: "scalar", nested: NESTED };
+        acc += detail.nested.code === 4 ? 1 : 0;
+      }
+      window.__pfJitSink = acc;
+    },
+  };
+}
+
+/**
+ * The intent lookup. forge.js consults a Map per keystroke; the candidate is
+ * the keyed-object read on an equivalent fixed-shape table.
+ */
+function mapGetPair() {
+  return {
+    label: "intent table lookup (per keystroke)",
+    firstName: "Map.get",
+    secondName: "keyed object read",
+    firstOp: function mapGet() {
+      const { INTENT, INTENT_KEYS } = window.__pfShapes;
+      let acc = 0;
+      for (let n = 0; n < 64; n++) {
+        acc += INTENT.get(INTENT_KEYS[n % INTENT_KEYS.length]);
+      }
+      window.__pfJitSink = acc;
+    },
+    secondOp: function objectRead() {
+      const { INTENT_OBJ, INTENT_KEYS } = window.__pfShapes;
+      let acc = 0;
+      for (let n = 0; n < 64; n++) {
+        acc += INTENT_OBJ[INTENT_KEYS[n % INTENT_KEYS.length]];
+      }
+      window.__pfJitSink = acc;
+    },
+  };
+}
+
+/**
+ * The guarded probe. scheduler.js and the gesture key gate read
+ * `signal?.aborted` / `el.closest?.()` where the receiver is usually
+ * present and sometimes null; the candidate is the explicit null check
+ * with a direct call.
+ */
+function optionalChainPair() {
+  return {
+    label: "guarded probe (mostly present, sometimes null)",
+    firstName: "optional call + nullish",
+    secondName: "explicit null check",
+    firstOp: function optionalCall() {
+      const { MAYBES } = window.__pfShapes;
+      let acc = 0;
+      for (let n = 0; n < 64; n++) {
+        const node = MAYBES[n % MAYBES.length];
+        acc += node?.m(1) ?? 0;
+      }
+      window.__pfJitSink = acc;
+    },
+    secondOp: function explicitCheck() {
+      const { MAYBES } = window.__pfShapes;
+      let acc = 0;
+      for (let n = 0; n < 64; n++) {
+        const node = MAYBES[n % MAYBES.length];
+        acc += node == null ? 0 : node.m(1);
       }
       window.__pfJitSink = acc;
     },

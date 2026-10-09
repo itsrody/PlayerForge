@@ -409,6 +409,25 @@ two of them to nothing:
 | hoist `10 ** decimals` per stepper | — | **1.00×** | no |
 | array-back the pinch pointer list | — | 6.8× | no, see below |
 
+ A second wave priced six shapes the first left unmeasured, all on Gecko 158
+ on the device's 158.0b5 build. None had a V8 number to re-price; every one
+ confirms the shape the tree already has:
+
+ | candidate shape | Gecko 158 says | kept |
+ | --- | --- | --- |
+ | freeze the status transition object | 4.8× (3.5 µs per transition) | yes — immutability across the subscriber boundary is worth microseconds at media-edge rate |
+ | `Promise.withResolvers` vs executor form | 1.11× (0.7 µs per wait) | yes — readability; a wash either way |
+ | Scope-per-task vs bare controller | 1.7× (29 µs per scheduled task, ±10% spread) | yes — the teardown vocabulary outranks tens of microseconds at event rate |
+ | JSON realm-copy vs reference pass | 14× (20 µs per transition) | yes — the pass-through is unsafe across realms; this prices the hard-learned lesson |
+ | `Map.get` vs keyed object read | 2.1× (4.2 µs per keystroke) | yes — table semantics at user rate |
+ | optional call vs explicit null check | **1.00×** | yes — guards are free; a wash like the stepper's |
+
+ The pattern holds: the largest absolute on the board is tens of microseconds
+ on paths that run at event rate or rarer, and the one genuine wash joins the
+ stepper's `10 ** decimals` as a recorded non-difference. No `src/` change
+ came out of the wave, which is the expected outcome for an instrument whose
+ job is to confirm shapes, not to hunt wins.
+
 The two washes are the point. Both read as obvious wins, both are recorded in
 the source as deliberate non-changes (`forge.js`'s `#checkPinch`, `panel.js`'s
 `roundTo`) with their numbers, so they cannot be re-proposed as oversights. The
