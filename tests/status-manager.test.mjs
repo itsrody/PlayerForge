@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 
 const { initFsGate, setFullscreen } = await import("./fs-gate.mjs");
-const { PlayerStatus, Playback, Buffer, Presence, Screen, STATUS_EVENT } = await import(
-  "../src/shared/player-status.js"
+const { StatusManager, Playback, Buffer, Presence, Screen, STATUS_EVENT } = await import(
+  "../src/shared/status-manager.js"
 );
 // Kept as the namespace: destructuring an awaited import snapshots the value,
 // and `fs` is a live `export let` this test needs to read after the gate moves.
@@ -31,7 +31,7 @@ function makeRealm() {
   return { dom, video, doc: dom.window.document };
 }
 
-/** One microtask turn - the batch PlayerStatus schedules its commit on. */
+/** One microtask turn - the batch StatusManager schedules its commit on. */
 const tick = () => new Promise((resolve) => queueMicrotask(resolve));
 
 const fire = (node, type) => node.dispatchEvent(new globalThis.Event(type));
@@ -50,14 +50,14 @@ function harness(t) {
   const realm = makeRealm();
   const changes = [];
   const owner = new globalThis.AbortController();
-  const status = new PlayerStatus({ target: realm.video, doc: realm.doc, signal: owner.signal });
+  const status = new StatusManager({ target: realm.video, doc: realm.doc, signal: owner.signal });
   status.subscribe((change) => changes.push(change));
   t.after(() => status.dispose());
   return { ...realm, status, changes, owner };
 }
 
 /**
- * A controllable IntersectionObserver, installed before any PlayerStatus is
+ * A controllable IntersectionObserver, installed before any StatusManager is
  * constructed so `#wire()`'s probe sees this rather than the loader's no-op
  * shim. The shim pins the seed path (never reports, so presence stays what
  * construction guessed); this pins the path that corrects the guess.
@@ -122,7 +122,7 @@ test("construction seeds from the element and emits nothing", async (t) => {
 test("the rate axis reads the element's playbackRate at seed and on ratechange", async (t) => {
   const { video, doc } = makeRealm();
   video.playbackRate = 1.5;
-  const status = new PlayerStatus({ target: video, doc });
+  const status = new StatusManager({ target: video, doc });
   const changes = [];
   const dispatched = [];
   status.subscribe((change) => changes.push(change));
@@ -301,7 +301,7 @@ test("there is no way to write status: no setter API, and the getters refuse", (
   const { status } = harness(t);
 
   assert.equal(
-    Object.getOwnPropertyNames(PlayerStatus.prototype).some((name) => /^set/i.test(name)),
+    Object.getOwnPropertyNames(StatusManager.prototype).some((name) => /^set/i.test(name)),
     false,
     "the class exposes no setter at all"
   );
@@ -321,7 +321,7 @@ test("a delivered change is frozen, so a subscriber cannot rewrite what it was t
   assert.equal(typeof changes[0].seq, "number");
 });
 
-test("fullscreen comes from the shared gate, and PlayerStatus opens no second listener", async () => {
+test("fullscreen comes from the shared gate, and StatusManager opens no second listener", async () => {
   const realm = makeRealm();
 
   const added = [];
@@ -333,7 +333,7 @@ test("fullscreen comes from the shared gate, and PlayerStatus opens no second li
 
   let status;
   try {
-    status = new PlayerStatus({ target: realm.video, doc: realm.doc });
+    status = new StatusManager({ target: realm.video, doc: realm.doc });
   } finally {
     globalThis.document.addEventListener = original;
   }

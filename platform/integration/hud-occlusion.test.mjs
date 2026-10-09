@@ -19,7 +19,7 @@
  * expando the page defines on `document` is invisible across the sandbox
  * boundary (a patched build confirmed the listener fires and only the
  * `visibilityState` read disagrees), and WebDriver has no way to leave a
- * window hidden while it is still executing in it. `tests/player-status.test.mjs`
+ * window hidden while it is still executing in it. `tests/status-manager.test.mjs`
  * and `tests/hud-occlusion.test.mjs` cover that arm, where both worlds are
  * one.
  */

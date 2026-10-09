@@ -188,7 +188,7 @@ const PRIME = `
   // Fixture shapes for the second wave of pairs below. Each mirrors the
   // production shape it prices rather than an idealized version of it.
   window.__pfShapes = (() => {
-    // player-status.js #queue freezes {seq,kind,name,from,to,cause} per
+    // status-manager.js #queue freezes {seq,kind,name,from,to,cause} per
     // transition; the nested error detail below mirrors the object the
     // realm-crossing dispatch round-trips beside the primitives.
     const NESTED = { code: 4, message: "NotAllowedError" };
@@ -490,7 +490,7 @@ function roundFactorPair() {
 }
 
 /**
- * The status transition object. player-status.js #queue freezes
+ * The status transition object. status-manager.js #queue freezes
  * {seq,kind,name,from,to,cause} per transition so a delivered change can
  * never be mutated under a subscriber; the candidate drops the freeze and
  * ships the literal.
@@ -588,7 +588,7 @@ function scopeConstructPair() {
 }
 
 /**
- * The realm-crossing detail build. player-status.js #dispatch shallow-copies
+ * The realm-crossing detail build. status-manager.js #dispatch shallow-copies
  * the change and round-trips nested values through JSON so the page realm
  * receives plain data, never foreign-realm objects; the candidate passes the
  * nested reference straight through (unsafe across realms, priced to show

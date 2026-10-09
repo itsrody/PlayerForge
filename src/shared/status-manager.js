@@ -3,7 +3,7 @@ import { fs, subscribeFullscreen } from "./shadow.js";
 import { DOMManager } from "./dom-manager.js";
 
 /**
- * L2 - PlayerStatus: what this player *is*, stated as one queryable value
+ * L2 - StatusManager: what this player *is*, stated as one queryable value
  * instead of being re-derived at every call site.
  *
  * Today each `createActivity` site authors its own `isActive()` closure
@@ -137,7 +137,7 @@ function errorDetail(error) {
  * this module with the code that issues them; what lands here is only what the
  * element actually did.
  */
-export class PlayerStatus {
+export class StatusManager {
   #target;
   #doc;
   #listeners = new Set();

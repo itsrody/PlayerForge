@@ -17,7 +17,7 @@ import { DOMManager } from "../shared/dom-manager.js";
 import { KEYS, gmGetValue, gmSetValue } from "../shared/storage.js";
 import { Scope } from "../shared/scope.js";
 import { createActivity } from "../shared/activity.js";
-import { PlayerStatus, Playback, Presence } from "../shared/player-status.js";
+import { StatusManager, Playback, Presence } from "../shared/status-manager.js";
 import { HudReconciler, RenderGate } from "../shared/render.js";
 import { writeReferenceBox } from "../shared/geometry.js";
 import { yield_ } from "../shared/scheduler.js";
@@ -366,8 +366,8 @@ export class Shell {
     // own events only. It writes nothing back: status is observed, never
     // optimistic, so a rejected play() cannot leave us rendering a pause icon
     // for a video that never started. Fullscreen comes from shadow.js's single
-    // gate through PlayerStatus's own subscription, not a second listener.
-    this.#status = new PlayerStatus({
+    // gate through StatusManager's own subscription, not a second listener.
+    this.#status = new StatusManager({
       target: video,
       doc: document,
       signal: this.#scope.signal

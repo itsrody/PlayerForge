@@ -1,5 +1,5 @@
 /**
- * PlayerStatus integration tests.
+ * StatusManager integration tests.
  *
  * Records transitions from a real shell in a real Firefox and asserts every
  * one of them names an event this run actually witnessed. That is the whole
@@ -26,7 +26,7 @@ test.after(async () => {
   await server?.stop();
 });
 
-/** Every event PlayerStatus is allowed to name as a transition's cause. */
+/** Every event StatusManager is allowed to name as a transition's cause. */
 const CAUSES = [
   "loadstart", "emptied", "loadedmetadata", "canplay",
   "play", "playing", "pause", "ended",

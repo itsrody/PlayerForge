@@ -577,7 +577,7 @@ media-element events into a rendered control surface. Findings:
   `mediaenterpiprequest`, …) while `MediaUIProps` holds ~47 *observed state*
   properties (`mediaPaused`, `mediaCurrentTime`, `mediaVolume`,
   `mediaIsPip`, `mediaLoading`, …). This is the cleanest confirmation of L2's
-  split: PlayerForge's `PlayerStatus` (observed) must stay separate from
+  split: PlayerForge's `StatusManager` (observed) must stay separate from
   anything intent-shaped, and Media Chrome shows the separation is not optional
   bookkeeping — it is the whole design.
 - **State is never written from a request; requests only *attempt* to fulfil
@@ -600,7 +600,7 @@ media-element events into a rendered control surface. Findings:
   axis. This is an alternative to a static `EngineHost` capability map: media
   Chrome's per-feature availability can change at runtime (e.g. leaving PiP),
   which a static `canX` cannot express. PlayerForge should treat per-feature
-  availability as part of `PlayerStatus` where it can change, and keep only
+  availability as part of `StatusManager` where it can change, and keep only
   truly static environment facts (engine, realm, scheduler) in L0.
 - **Attribute↔event mappings are derived, not hand-maintained.**
   `StateChangeEventToAttributeMap` and its inverse are computed from a single
@@ -635,7 +635,7 @@ disciplines recur. These are the load-bearing patterns of this design:
 ```
 L5  HudReconciler     snapshot -> desired DOM, diffed against applied snapshot
 L4  RenderGate        demand-triggered, tick-coalescing, priority-routed commit
-L2  PlayerStatus      enumerated axes + typed transitions
+L2  StatusManager     enumerated axes + typed transitions
 L1  Signals           media / visibility / layout / frame / lifecycle edges
 L0  EngineHost        engine capability flags (MessageChannel, rVFC, frame quality)
 ```
@@ -716,11 +716,11 @@ record rather than quietly delete:
 - **PiP is gone, not pending.** Picture-in-picture was removed outright
   (`a5bc9fb`, "remove picture-in-picture entirely"), so the earlier draft's "+
   PiP events" has no event to name. `Presence.PIP` survives as an enum member
-  with no writer, alongside `Presence.DETACHED` — `player-status.js:70` records
+  with no writer, alongside `Presence.DETACHED` — `status-manager.js:70` records
   why both are named but undriven.
 
 One structural caveat: L1 has no single owner. Visibility is instantiated
-twice — `player-status.js:461` for the `Presence` axis, and an independent
+twice — `status-manager.js:461` for the `Presence` axis, and an independent
 observer at `resume.js:686` gating off-screen saves. The two answer different
 questions (what is the player's status versus should we churn storage for a
 video the user cannot see) and their lifetimes differ, so folding them would
@@ -728,7 +728,7 @@ couple the resume cadence to the status graph. The single-source discipline L0
 and L5 apply is deliberately not applied here, and that is a choice rather than
 an oversight.
 
-### L2 — PlayerStatus
+### L2 — StatusManager
 
 Today `isActive()` closures are authored independently at each `createActivity`
 call site (`src/shell/shell.js:353`, `src/shell/resume.js:702`,
@@ -759,7 +759,7 @@ Subscribers receive the change; nobody re-diffs the whole status.
 That event has *two* deliveries, not one, and the second is the reason most of
 the axis surface exists. `subscribe()` callbacks fire in-realm, and the same
 change is dispatched as a `pf:status` CustomEvent on the `<video>`
-(`player-status.js:363`) so the **page world** can read status across the
+(`status-manager.js:363`) so the **page world** can read status across the
 sandbox boundary — which is the only consumer of `Buffer`, `Screen`, `duration`,
 `rate`, `volume`, `muted`, `hasTextTrack` and `error`. In-tree exactly one
 subscriber exists (`shell.js:501`, feeding the occlusion resolve), and it reads
@@ -1775,8 +1775,14 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  observer registers as `status-intersection`, the fullscreen subscription
  is a manager cleanup, and the teardown array is gone. The owner signal
  still disposes the status, so shell-scope teardown releases everything
- even where dispose was never called. `tests/player-status.test.mjs`
+ even where dispose was never called. `tests/status-manager.test.mjs`
  gained the abort-releases-all pin.
+
+ The thirty-fourth movement ends with the module renamed to match the
+ role it grew into: `src/shared/player-status.js` is now
+ `src/shared/status-manager.js` (`PlayerStatus` to `StatusManager`),
+ §4's L2 section and the live cites with it; §6 history keeps the old
+ names, like the log it is. No behavior change, no count change.
 
  The thirty-third movement cut L0 down to capabilities with live readers:
  engine brand, Gecko version, manager realm and postTask/yield presence had

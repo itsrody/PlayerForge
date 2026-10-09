@@ -17,7 +17,7 @@ const { initFsGate } = await import("./fs-gate.mjs");
 
 /**
  * A controllable IntersectionObserver, installed before the shell boots so
- * both of its users see this rather than the loader's no-op shim: PlayerStatus
+ * both of its users see this rather than the loader's no-op shim: StatusManager
  * (which turns the report into Presence.OCCLUDED) and resume.js's save gate
  * (which just flips a boolean). A real scroll drives both at once, so this
  * does too.
@@ -60,7 +60,7 @@ const setIntersecting = (isIntersecting) => {
   }
 };
 
-/** One microtask turn - the batch PlayerStatus delivers its commit on. */
+/** One microtask turn - the batch StatusManager delivers its commit on. */
 const tick = () => new Promise((resolve) => queueMicrotask(resolve));
 
 /**
@@ -70,7 +70,7 @@ const tick = () => new Promise((resolve) => queueMicrotask(resolve));
  */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-/** PlayerStatus's commit, then the RenderGate commit it requests. */
+/** StatusManager's commit, then the RenderGate commit it requests. */
 const flush = async () => {
   await tick();
   await settle();
