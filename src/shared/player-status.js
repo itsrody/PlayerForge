@@ -223,6 +223,14 @@ export class PlayerStatus {
   subscribe(cb, signal) {
     this.#listeners.add(cb);
     if (signal) {
+      // An abort listener added to an ALREADY-aborted signal never fires, so
+      // subscribing with one would leak the callback and keep delivering to
+      // a dead owner. Refuse it outright - the same guard scheduler.js keeps
+      // for the same trap.
+      if (signal.aborted) {
+        this.#listeners.delete(cb);
+        return () => {};
+      }
       signal.addEventListener("abort", () => this.#listeners.delete(cb), { once: true });
     }
     return () => this.#listeners.delete(cb);
@@ -235,8 +243,13 @@ export class PlayerStatus {
     this.#disposed = true;
     this.#pending.length = 0;
     this.#listeners.clear();
+    // Isolated like every other fan-out in the tree (Scope disposers, the
+    // mutation feed, #flush below): a throwing teardown must not strand the
+    // ones after it.
     for (const teardown of this.#teardown) {
-      teardown();
+      try {
+        teardown();
+      } catch {}
     }
     this.#teardown.length = 0;
   }
@@ -300,6 +313,11 @@ export class PlayerStatus {
     if (this.#disposed) {
       return;
     }
+    // Snapshotted per change, not per flush: a listener that unsubscribes
+    // (itself or a peer) mid-batch stops receiving later changes in the same
+    // batch, matching DOM dispatch. Hoisting the snapshot out of the loop
+    // would save one small allocation per extra transition to weaken exactly
+    // that - a ratio on a negligible cost, declined on purpose.
     const listeners = this.#listeners;
     for (const change of batch) {
       this.#dispatch(change);

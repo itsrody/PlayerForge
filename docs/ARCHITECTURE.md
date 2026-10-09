@@ -658,7 +658,7 @@ record rather than quietly delete:
   why both are named but undriven.
 
 One structural caveat: L1 has no single owner. Visibility is instantiated
-twice — `player-status.js:440` for the `Presence` axis, and an independent
+twice — `player-status.js:458` for the `Presence` axis, and an independent
 observer at `resume.js:686` gating off-screen saves. The two answer different
 questions (what is the player's status versus should we churn storage for a
 video the user cannot see) and their lifetimes differ, so folding them would
@@ -697,7 +697,7 @@ Subscribers receive the change; nobody re-diffs the whole status.
 That event has *two* deliveries, not one, and the second is the reason most of
 the axis surface exists. `subscribe()` callbacks fire in-realm, and the same
 change is dispatched as a `pf:status` CustomEvent on the `<video>`
-(`player-status.js:341`) so the **page world** can read status across the
+(`player-status.js:359`) so the **page world** can read status across the
 sandbox boundary — which is the only consumer of `Buffer`, `Screen`, `duration`,
 `rate`, `volume`, `muted`, `hasTextTrack` and `error`. In-tree exactly one
 subscriber exists (`shell.js:481`, feeding the occlusion resolve), and it reads
@@ -1383,7 +1383,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved sixteen times since that cut. The first two movements
+The unit count has moved seventeen times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1537,6 +1537,20 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  Node lacks `Temporal` entirely, so the code would need an untestable dual
  path to fix a ±1-hour edge on a 14-day window — floor-safe is not the same
  as worth it.
+
+ The seventeenth movement audited the scheduler, status and engine-host
+ modules for allocation shape and native-direct design, and mostly confirmed
+ them: the scheduler's per-task Scope and closures ride event-rate paths,
+ the engine facts are a frozen singleton, and the status writer was already
+ read-only on its hottest edge. Two latent robustness gaps closed in
+ `player-status.js`: subscribing with an already-aborted signal no longer
+ leaks a permanently-delivering callback, and `dispose()` isolates teardown
+ errors like every other fan-out in the tree. A third candidate — hoisting
+ the listener snapshot out of the flush loop — was weighed against its
+ semantics and rejected: it would delay mid-batch unsubscribes to save one
+ small allocation per extra transition. `tests/player-status.test.mjs`
+ gained 2, both failing pre-fix; `tests/doc-refs.test.mjs` moved two cites
+ with the code.
 
 ## 7. Gecko-specific decisions, and what they rule out
 

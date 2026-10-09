@@ -433,6 +433,47 @@ test("unsubscribing stops delivery; a second unsubscribe is a no-op", async (t) 
   assert.equal(changes.length, 2, "the earlier subscriber still saw both");
 });
 
+test("subscribing with an already-aborted signal never delivers", async (t) => {
+  // An abort listener added to an already-aborted signal never fires, so the
+  // unguarded subscribe would keep the callback (and its owner) alive and
+  // delivering forever. Refuse it outright, the way scheduler.js refuses a
+  // disposed scope's task.
+  const { status, video } = harness(t);
+  const ac = new globalThis.AbortController();
+  ac.abort();
+  const seen = [];
+  const off = status.subscribe(() => seen.push(1), ac.signal);
+  assert.equal(typeof off, "function", "still returns an unsubscribe");
+
+  fire(video, "waiting");
+  await tick();
+  assert.deepEqual(seen, [], "no delivery to a dead owner");
+  off();
+});
+
+test("a throwing teardown does not strand disposal", async (t) => {
+  const { status, video } = harness(t);
+  const seen = [];
+  status.subscribe(() => seen.push(1));
+  // The shared observer fakes live across tests in this file, so the patch
+  // must not escape this case.
+  const io = [...observers].find((o) => o.targets.includes(video));
+  const disconnect = io.disconnect.bind(io);
+  io.disconnect = () => {
+    disconnect();
+    throw new Error("teardown blew up");
+  };
+  try {
+    assert.doesNotThrow(() => status.dispose(), "a throwing teardown must not escape dispose");
+  } finally {
+    io.disconnect = disconnect;
+  }
+
+  fire(video, "waiting");
+  await tick();
+  assert.deepEqual(seen, [], "disposal completed: the flush drops post-dispose");
+});
+
 test("the presence axis reports OCCLUDED when the player leaves the viewport", async (t) => {
   const { status, changes } = harness(t);
 
