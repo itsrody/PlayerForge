@@ -60,6 +60,7 @@
  * registry order, then anchor order.
  */
 import { onDomMutations } from "../shared/dom-manager.js";
+import { isShadowRoot, rootNodeOf } from "../shared/shadow.js";
 
 const REGISTRY = [
   { name: "JW Player", anchors: [".jwplayer", ".jw-wrapper"] },
@@ -607,15 +608,10 @@ export function resolvePlayer(video, { prints = NO_PRINTS, enabled = false } = {
  * forces no layout and disturbs nothing it measures.
  */
 export function describeVideo(video) {
-  // Initialized, not assigned-in-try-only: the try body below is one atomic
-  // assignment, so a throw leaves this at false - the honest answer for a
-  // null or hostile object, with nothing to restore in the catch.
-  let shadow = false;
-  try {
-    shadow = video.getRootNode?.().nodeType === 11;
-  } catch {
-    // Fallthrough value stands - see above.
-  }
+  // Initialized, not assigned-in-try-only: rootNodeOf answers null for a
+  // null or hostile object, which reads as light-DOM - the honest answer
+  // is "not provably shadow", and callers only ever treat shadow as true.
+  const shadow = isShadowRoot(rootNodeOf(video));
   return {
     video,
     shadow,
@@ -665,7 +661,8 @@ export function videoFromEvent(event) {
  * (videoFromEvent), i.e. only once it loaded or played. Verified on the live
  * bundle: a Plyr player whose <video> lives in an open shadow root is never
  * adopted when it sits in the parsed DOM (the static probe check and the
- * kernel boot replay both run document.querySelectorAll("video")), nor when
+ * kernel boot replay both enumerate light DOM only, reaching shadow through
+ * this pass inside surveyVideos), nor when
  * its wrapper is appended after boot (the added-node walk) - a permanent miss
  * for the life of the document for any shadow video that fires no media
  * event.

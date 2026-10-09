@@ -1,5 +1,5 @@
 import { logger, watchFrameQuality } from "../shared/diagnostics.js";
-import { deepestActiveElement, isInsideShell, eventHitsControl, fs } from "../shared/shadow.js";
+import { deepestActiveElement, isInsideShell, eventHitsControl, isShadowRoot, rootNodeOf, fs } from "../shared/shadow.js";
 import { EngineBroker, InputForge } from "./inputs/forge.js";
 import { attachInputActions, releaseShellActions } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
@@ -562,16 +562,11 @@ export class Shell {
     if (typeof reoffer !== "function") {
       return;
     }
-    let root = null;
-    try {
-      root = this.container.getRootNode?.() ?? null;
-    } catch {
-      return;
-    }
-    // Shadow roots report nodeType 11; documents report 9 and are already
-    // covered by the shared feed. The nodeType read (not an instanceof
-    // ShadowRoot) keeps this realm-proof: no global to be missing or foreign.
-    if (!root || root.nodeType !== 11) {
+    // Documents are already covered by the shared feed; detached fragments
+    // cannot host a mounted shell, so only shadow roots arm the watch.
+    // rootNodeOf answers null for hostile objects instead of throwing.
+    const root = rootNodeOf(this.container);
+    if (!isShadowRoot(root)) {
       return;
     }
     const mine = this.video;

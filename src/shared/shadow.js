@@ -82,6 +82,24 @@ function isChromeNode(node) {
   return false;
 }
 
+/** The composed root of a node, or null for hostile objects. getRootNode is
+ *  universal on modern hosts, but the call itself can throw on foreign
+ *  objects - and a throw here must answer "not shadow", never escape. */
+export function rootNodeOf(node) {
+  try {
+    return node?.getRootNode?.() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** True when the node is a shadow root (nodeType 11 - documents report 9,
+ *  detached fragments never reach here through getRootNode of a connected
+ *  node). Realm-proof: no ShadowRoot global to be missing or foreign. */
+export function isShadowRoot(node) {
+  return node?.nodeType === 11;
+}
+
 /** True when any element on the event's path is an SDK control. */
 export function eventHitsControl(event) {
   if (typeof event?.composedPath === "function") {

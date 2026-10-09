@@ -732,7 +732,7 @@ an oversight.
 
 Today `isActive()` closures are authored independently at each `createActivity`
 call site (`src/shell/shell.js:367`, `src/shell/resume.js:702`,
-`src/shared/shadow.js:174`). Nothing answers "what is this player's status right
+`src/shared/shadow.js:192`). Nothing answers "what is this player's status right
 now" as a single queryable value.
 
 L2 introduces orthogonal axes rather than one large enum, so adding an axis never
@@ -808,7 +808,7 @@ one `dispose()`.
 
 **Not landed as a class, and not needed as one.** `Shell` (`src/shell/shell.js`)
 already *is* the per-`<video>` owner: it holds `#scope`, `#status`, two
-`RenderGate`s, and every sub-component, and `destroy()` (`shell.js:647`) fans out
+`RenderGate`s, and every sub-component, and `destroy()` (`shell.js:642`) fans out
 to exactly the single `dispose()` this section describes. Extracting a
 `PlayerSession` would have been a rename with no second implementation behind
 it, so §6's seven phases never opened one — the one layer in the §4 diagram with
@@ -1952,7 +1952,7 @@ In-tree:
 - `src/shared/scheduler.js` — traps in §2.4, `postTask`, `yield_()`
 - `src/shared/scope.js` — teardown primitive
 - `src/shared/activity.js` — passive activity windows
-- `src/shell/shell.js:367`, `src/shell/resume.js:702`, `src/shared/shadow.js:174` — `createActivity` call sites
+- `src/shell/shell.js:367`, `src/shell/resume.js:702`, `src/shared/shadow.js:192` — `createActivity` call sites
 - `src/shared/context.js:637` — the tree's only self-rearming `postTask`, delayed
 - `src/shared/dom-manager.js` — mutation coalescing
 - `src/shell/chrome/panel.js:116` — the only `setInterval` in the tree

@@ -6,7 +6,8 @@ import { onDomMutations } from "../shared/dom-manager.js";
  * Should-boot decisions: the URL skip gate and the video presence probe. One
  * module because both answer the same question before the kernel exists —
  * "does this document deserve a kernel at all" — and entry.js is their only
- * consumer: guard the URL, then arm the sentinel, then boot on evidence.
+ * consumer: guard the URL, then arm the sentinel, then boot on evidence,
+ * handing the kernel what surfaced, in order.
  */
 
 /* ── URL skip gate ───────────────────────────────────────────────────────
