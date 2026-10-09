@@ -158,7 +158,10 @@ export function resolveFirefoxTarget() {
       version: v?.version ?? null,
       major: v?.major ?? null,
       prerelease: v?.prerelease ?? null,
-      bleedingEdge,
+      // A prerelease letter makes it bleeding-edge whatever the app is named:
+      // a beta riding in Firefox.app (the common single-install shape) would
+      // otherwise report as a settled release build.
+      bleedingEdge: bleedingEdge || (v?.prerelease ?? null) !== null,
       minFirefox,
       meetsFloor: v ? v.major >= minFirefox : false,
     };
@@ -166,7 +169,9 @@ export function resolveFirefoxTarget() {
 
   const envPath = process.env.FIREFOX_PATH;
   if (envPath && existsSync(envPath)) {
-    return build("custom", "FIREFOX_PATH binary", envPath, "FIREFOX_PATH", true);
+    // Explicit binary: the channel flag stays false and the build's own
+    // prerelease letter decides bleeding-edge inside build().
+    return build("custom", "FIREFOX_PATH binary", envPath, "FIREFOX_PATH", false);
   }
 
   const pinned = process.env.FIREFOX_CHANNEL;
