@@ -26,8 +26,8 @@ import { postTask, yield_ } from "./scheduler.js";
  * observers elsewhere stay native. The browser filters their subtrees in C++,
  * while a shared dispatcher would filter every document mutation in JS just to
  * reconstruct that scoping. §1 observes `document.documentElement` once; the
- * container/anchor observers in chrome/inject.js, kernel/kernel.js and
- * kernel/lifecycle.js are separate and stay that way.
+ * container/anchor observers in chrome/inject.js and kernel/kernel.js
+ * are separate and stay that way.
  */
 
 /* ==================================================================
@@ -291,7 +291,7 @@ const styleOriginals = new WeakMap();
  * Apply an attribute map to a node: `class` as a property, object `style`
  * merged, `on*` as listeners, everything else as a literal attribute.
  *
- * Shared by DOMManager.createElement and chrome/elements.js so the two
+ * Shared by DOMManager.createElement and chrome/toolbox.js so the two
  * element factories cannot drift into different attribute rules. `signal`
  * binds `on*` listeners to an owner; without it they are plain listeners and
  * the caller owns their lifetime.

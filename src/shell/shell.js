@@ -17,9 +17,8 @@ import { DOMManager } from "../shared/dom-manager.js";
 import { Scope } from "../shared/scope.js";
 import { createActivity } from "../shared/activity.js";
 import { PlayerStatus, Playback, Presence } from "../shared/player-status.js";
-import { HudReconciler } from "../shared/hud-reconciler.js";
+import { HudReconciler, RenderGate } from "../shared/render.js";
 import { writeReferenceBox } from "../shared/geometry.js";
-import { RenderGate } from "../shared/render-gate.js";
 import { yield_ } from "../shared/scheduler.js";
 
 /**
@@ -557,4 +556,19 @@ export class Shell {
     this.#shellDom = null;
     this.#onDestroy?.(this);
   }
+}
+
+/**
+ * The shell plugin's "main": the one place the shell reaches the framework and
+ * hands it a host provider. The kernel (framework) never imports the shell - it
+ * only calls the provider registered here. Keeping the `Shell` import in the
+ * plugin (and out of the kernel) is what makes the shell a plug-in rather than
+ * something the framework constructs directly.
+ */
+export function registerShell(kernel) {
+  kernel.registerShellProvider({
+    create({ video, container, sdk, onDestroy }) {
+      return new Shell({ video, container, sdk, onDestroy });
+    }
+  });
 }

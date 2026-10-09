@@ -1,3 +1,47 @@
+import { applyAttrs } from "../../shared/dom-manager.js";
+
+/**
+ * Shell-owned UI atoms: timing constants, the icon table, element factories,
+ * and the accent-flash effect. One module because all four are stateless
+ * building blocks with the same consumer set (chrome/subtitles/inputs) and
+ * no other importers: splitting them apart bought four import lines per
+ * consumer for boundaries nothing ever needed separately. App-local (not
+ * shared/) since the framework never constructs UI: shared/ stays limited to
+ * modules framework and app use together.
+ */
+
+/* ── Timing constants ────────────────────────────────────────────────────
+ *
+ * Single source of truth for the animation easing curves and durations that
+ * JS hands to the compositor.
+ *
+ * Only the values the WAAPI path actually consumes live here: the flash
+ * accent (flashElement below) and the video-transform snap
+ * (shell/inputs/actions.js). CSS-transition timing is owned by styles.css.
+ *
+ * The WAAPI option bags that used to live here (EASE, EASE_BOUNCE, EASE_OUT,
+ * EASE_*_WAAPI, FLASH_WAAPI and their curve/duration sources) had no
+ * references anywhere in the tree and were removed as leftovers.
+ */
+
+/* ── Curve strings (WAAPI `easing`, CSS `animation-timing-function`) ──────── */
+
+/** Tight/fast snap for video-transform compositor animations. */
+export const EASE_SNAPPY_CURVE = "cubic-bezier(0.16, 1, 0.3, 1)";
+
+/** Linear ease for flash background animation. */
+export const FLASH_EASING = "ease-out";
+
+/* ── Duration constants (milliseconds) ────────────────────────────────────── */
+
+/** Tight snap duration for video-transform animations. */
+export const EASE_SNAPPY_MS = 120;
+
+/** Accent flash duration. */
+export const FLASH_MS = 400;
+
+/* ── Icon table ────────────────────────────────────────────────────────── */
+
 const svgIcon = (path, viewBox = "24 24") =>
   `<svg class="pf-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewBox}" aria-hidden="true" focusable="false" fill="currentColor"><path d="${path}"/></svg>`;
 
@@ -7,7 +51,7 @@ const ICONS = {
   "volume-3": svgIcon("M3 9h4l5-5v16l-5-5H3V9zm9 2a4 4 0 0 1 0 6"),
   muted: svgIcon("M3.5 2A1 1 0 0 0 3 3.719l20 20a1 1 0 1 0 1.406-1.407L17 14.907V3.312c0-1.265-1.105-1.582-1.969-.718L9.812 7.719L4.407 2.312A1 1 0 0 0 3.594 2A1 1 0 0 0 3.5 2zM5 9.063c-.551 0-1 .448-1 1v6c0 .55.449 1 1 1h3.438L15 23.468c1 1 2 .488 2-.875V20.03L6.031 9.063H5z"),
   play: svgIcon("M133 440a35.37 35.37 0 0 1-17.5-4.67c-12-6.8-19.46-20-19.46-34.33V111c0-14.37 7.46-27.53 19.46-34.33a35.13 35.13 0 0 1 35.77.45l247.85 148.36a36 36 0 0 1 0 61l-247.89 148.4A35.5 35.5 0 0 1 133 440Z", "512 512"),
-  pause: svgIcon("M208 432h-48a16 16 0 0 1-16-16V96a16 16 0 0 1 16-16h48a16 16 0 0 1 16 16v320a16 16 0 0 1-16 16Zm144 0h-48a16 16 0 0 1-16-16V96a16 16 0 0 1 16-16h48a16 16 0 0 1 16 16v320a16 16 0 0 1-16 16Z", "512 512"),
+  pause: svgIcon("M208 432h-48a16 16 0 0 1-16-16V96a16 16 0 0 1 16-16h48a16 16 0 0 1 16 16v320a16 16 0 0 1-16 16Zm144 0h-48a16 16 0 0 1-16-16V96a16 16 0 0 1 16-16h48a16 16 0 0 1 16 16v320a16 16 0 0 1 16 16Z", "512 512"),
   "right-arrows": svgIcon("m5.58 16.89l5.77-4.07c.56-.4.56-1.24 0-1.63L5.58 7.11C4.91 6.65 4 7.12 4 7.93v8.14c0 .81.91 1.28 1.58.82zM13 7.93v8.14c0 .81.91 1.28 1.58.82l5.77-4.07c.56-.4.56-1.24 0-1.63l-5.77-4.07c-.67-.47-1.58 0-1.58.81z"),
   "left-arrows": svgIcon("M11 16.07V7.93c0-.81-.91-1.28-1.58-.82l-5.77 4.07c-.56.4-.56 1.24 0 1.63l5.77 4.07c.67.47 1.58 0 1.58-.81zm1.66-3.25l5.77 4.07c.66.47 1.58-.01 1.58-.82V7.93c0-.81-.91-1.28-1.58-.82l-5.77 4.07a1 1 0 0 0 0 1.64z"),
   "down-arrow": svgIcon("M152 0q-21 0-21 21v297l-94-77q-7-6-16-5t-14 7q-6 7-5 16t7 14l143 111l141-111q15-15 2-30q-16-14-30-2l-92 77V21q0-21-21-21z", "304 480"),
@@ -125,4 +169,102 @@ export function createIconElement(name, doc = document) {
     return null;
   }
   return entryFor(canonical, doc).el.cloneNode(true);
+}
+
+/* ── Element factories ───────────────────────────────────────────────────
+ *
+ * Shell-owned DOM construction helpers. Every HUD/settings/subtitle element is
+ * built through these so createElement + attribute + append never repeats
+ * across chrome/subtitles. App-local (not shared/) since the framework never
+ * constructs UI: shared/ stays limited to modules framework and app use
+ * together.
+ */
+
+/**
+ * Create an element, apply attribute map, and append to `parent` in one call.
+ * `style` values given as objects are merged into the element's style (not
+ * set as attributes), `on*` entries become listeners. Attribute handling is
+ * shared/dom-manager.js's applyAttrs so this factory and the lifecycle-tracked
+ * DOMManager.createElement cannot drift into different rules; no signal is
+ * passed here, so `on*` listeners live and die with their node. Returns the
+ * element; callers set textContent/children as needed.
+ */
+export function el(tag, attrs = {}, parent = null) {
+  const node = (parent?.ownerDocument ?? document).createElement(tag);
+  applyAttrs(node, attrs);
+  parent?.appendChild(node);
+  return node;
+}
+
+/**
+ * Icon-button building block: a type=button element with a class, title and
+ * optional icon child. Returns the button for event wiring. Any extra
+ * attributes (`data-action`, off, disabled, ...) in the option map are
+ * forwarded verbatim - the icon buttons only destructure the presentation
+ * keys so the contract (data-action selectors) never silently drops.
+ */
+export function button({ class: cls = "", title = "", "aria-label": ariaLabel = "", icon = null, ...rest }, parent = null) {
+  // One attrs object built by mutation: the conditional-spread form allocated
+  // up to four throwaway objects (present/absent variants) per button.
+  const attrs = { type: "button" };
+  if (cls) {
+    attrs.class = cls;
+  }
+  if (title) {
+    attrs.title = title;
+  }
+  if (ariaLabel) {
+    attrs["aria-label"] = ariaLabel;
+  }
+  Object.assign(attrs, rest);
+  const node = el("button", attrs, parent);
+  if (icon) {
+    node.appendChild(icon);
+  }
+  return node;
+}
+
+/* ── Accent flash ────────────────────────────────────────────────────────
+ *
+ * Restart the accent "flash" on an element natively via the Web Animations
+ * API (Element.animate). This replaces the classic
+ * remove-class -> void offsetWidth (forced reflow) -> re-add pattern: the
+ * WAAPI path hands the job to the compositor, needs no synchronous layout
+ * flush, and guarantees a clean restart by cancelling any prior background
+ * animation on the element. Mirrors the retired @keyframes pf-reset-flash
+ * rule (transparent -> accent -> transparent, 0.4s ease-out).
+ *
+ * Shell-owned UI effect; lives here (not in shared/) because every consumer
+ * is chrome/subtitles, so shared/ stays limited to modules the framework and
+ * the app use together.
+ */
+export function flashElement(el, { duration = FLASH_MS } = {}) {
+  if (!el || typeof el.animate !== "function") {
+    return;
+  }
+  // Single pass over the element's active animations: finished entries are
+  // always accumulated prior flashes (backgroundColor - this module is the
+  // only background animator on flash targets), so they cancel without a
+  // keyframe scan; running/pending animations are scanned so unrelated CSS /
+  // WAAPI animations (transforms, view-transitions) survive the restart.
+  for (const anim of el.getAnimations?.() ?? []) {
+    if (anim.playState === "finished") {
+      anim.cancel();
+      continue;
+    }
+    const keyframes = anim.effect && typeof anim.effect.getKeyframes === "function"
+      ? anim.effect.getKeyframes()
+      : [];
+    if (keyframes.some((kf) => "backgroundColor" in kf)) {
+      anim.cancel();
+    }
+  }
+  el.animate(
+    [
+      { backgroundColor: "transparent" },
+      { backgroundColor: "var(--pf-accent)" },
+      { backgroundColor: "transparent" }
+    ],
+    { duration, easing: FLASH_EASING }
+  );
 }

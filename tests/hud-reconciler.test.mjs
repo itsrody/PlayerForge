@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { HudReconciler } = await import("../src/shared/hud-reconciler.js");
+const { HudReconciler } = await import("../src/shared/render.js");
 
 /**
  * A bindings table that records every invocation instead of touching a DOM.

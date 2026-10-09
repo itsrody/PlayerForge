@@ -1,9 +1,6 @@
 import { delay } from "../../shared/scheduler.js";
-import { HudReconciler } from "../../shared/hud-reconciler.js";
-import { RenderGate } from "../../shared/render-gate.js";
-import { flashElement } from "./animate.js";
-import { button } from "./elements.js";
-import { createIconElement } from "./icons.js";
+import { HudReconciler, RenderGate } from "../../shared/render.js";
+import { flashElement, button, createIconElement } from "./toolbox.js";
 
 /**
  * Single toast surface hosted in the shell HUD layer: icon + text +

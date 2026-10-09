@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { RenderGate } = await import("../src/shared/render-gate.js");
+const { RenderGate } = await import("../src/shared/render.js");
 
 /**
  * L4, the primitive half of phase 3. What is pinned here is the §5 invariant

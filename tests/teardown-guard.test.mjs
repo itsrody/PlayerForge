@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
  *
  * Exactly two constructions survive, and both are the rule's boundary rather
  * than exceptions to it: `scope.js` itself (the primitive owns the one
- * controller everything else shares), and `render-gate.js`, whose controller
+ * controller everything else shares), and `render.js`, whose controller
  * is a child of the session scope that a bare signal parameter cannot
  * express — giving the gate a Scope would mean widening its constructor for
  * no behavioural difference. A new `new AbortController()` anywhere else
@@ -55,7 +55,7 @@ test("the shipping tree constructs AbortController in exactly two places", () =>
     .map((path) => path.slice(ROOT.length + 1))
     .sort();
   assert.deepEqual(files, [
-    "src/shared/render-gate.js",
+    "src/shared/render.js",
     "src/shared/scope.js"
   ], "a new AbortController construction needs a line here saying why it cannot be a Scope");
 });

@@ -1,11 +1,10 @@
 import { logger } from "../../shared/diagnostics.js";
-import { createIconElement } from "./icons.js";
+import { createIconElement, el } from "./toolbox.js";
 import { GESTURE_EVENTS } from "../inputs/actions.js";
 import { deepestActiveElement, subscribeFullscreen } from "../../shared/shadow.js";
 import { clamp } from "../../shared/primitives.js";
 import { Scope } from "../../shared/scope.js";
-import { RenderGate } from "../../shared/render-gate.js";
-import { el } from "./elements.js";
+import { RenderGate } from "../../shared/render.js";
 import { getSetting } from "./config.js";
 
 const HOLD_DELAY_MS = 400;

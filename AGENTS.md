@@ -81,15 +81,17 @@ name files or the `tests/*.test.mjs` glob (fixed in `2dedcbe`).
 
 ```
 src/entry.js            bundle entry — NOT where the version lives
-src/kernel/             contract, lifecycle, sdk, menus, guard, probe, registry
+src/kernel/             kernel (orchestrator + settle + registry), discovery
+                        (URL gate + presence probe), contract, sdk, menus
 src/shared/             the layers: engine-host (L0), player-status (L2),
-                        render-gate (L4), hud-reconciler (L5), plus scheduler,
-                        diagnostics, storage, dom-manager, scope, timing, tuning,
-                        context.js (the ancestor/iframe bridge — second-most-
-                        touched file in the tree, and easy to miss)
-src/shell/              UI: shell.js, chrome/ (panel, toast, history, icons),
-                        inputs/, subtitles/ (forge-track, forgevtt, section),
-                        media.js, resume.js, register.js
+                        render (L4 gate + L5 reconciler), plus scheduler,
+                        diagnostics, storage, dom-manager, scope, geometry,
+                        tuning, context.js (the ancestor/iframe bridge —
+                        second-most-touched file in the tree, and easy to miss)
+src/shell/              UI: shell.js (incl. the registerShell plugin),
+                        chrome/ (panel, toast, history, toolbox), inputs/,
+                        subtitles/ (forge-track, forgevtt, section),
+                        media.js, resume.js
 tests/                  unit only; loader.mjs installs the jsdom shims the
                         bundle expects (ResizeObserver, rAF, CSSOM …)
 platform/run.mjs        gate runner: test|bench|integration|browser-bench|all|ci

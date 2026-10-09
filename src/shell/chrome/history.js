@@ -1,7 +1,5 @@
 import { formatTime } from "../../shared/primitives.js";
-import { flashElement } from "./animate.js";
-import { button } from "./elements.js";
-import { createIconElement } from "./icons.js";
+import { flashElement, button, createIconElement } from "./toolbox.js";
 
 function formatDomain(domain) {
   if (!domain) return "";

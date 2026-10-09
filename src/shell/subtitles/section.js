@@ -4,8 +4,7 @@ import { fmtEm } from "../../shared/primitives.js";
 import { srtToVtt, ensureVttHeader } from "./forgevtt.js";
 import { ForgeTrack } from "./forge-track.js";
 import { debounce } from "../../shared/scheduler.js";
-import { flashElement } from "../chrome/animate.js";
-import { el } from "../chrome/elements.js";
+import { flashElement, el } from "../chrome/toolbox.js";
 import { logger } from "../../shared/diagnostics.js";
 import { Scope } from "../../shared/scope.js";
 

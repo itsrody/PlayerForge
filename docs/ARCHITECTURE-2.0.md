@@ -574,13 +574,17 @@ disciplines recur. These are the load-bearing patterns of this design:
 ```
 L5  HudReconciler     snapshot -> desired DOM, diffed against applied snapshot
 L4  RenderGate        demand-triggered, tick-coalescing, priority-routed commit
-L3  PlayerSession     per-<video> owner: status + subscribers, inside a Scope
 L2  PlayerStatus      enumerated axes + typed transitions
 L1  Signals           media / visibility / layout / frame / lifecycle edges
 L0  EngineHost        engine version, VM realm, scheduler availability
 ```
 
 Dependency direction is strictly downward. No layer reaches around another.
+
+L4 and L5 share one module (`src/shared/render.js`): every commit is both a
+scheduled task and a diffed write, so the file boundary follows the commit
+rather than the layer. The split below is still the contract — the gate never
+touches the DOM and the reconciler never schedules.
 
 ### L0 — EngineHost
 
@@ -1482,7 +1486,7 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  and a subclass freezes the base at module evaluation, ahead of any lending —
  so the primitive holds its controller and the rule is pinned structurally
  instead (`tests/teardown-guard.test.mjs`, in the posttask-guard idiom).
- `render-gate.js` keeps the tree's only other construction, as a
+ `render.js` keeps the tree's only other construction, as a
  session-scope child a bare signal parameter cannot express. The same change
  pinned `performance.memory`, layout-shift records, prerendering markers and
  `interactionCount` in `retired`.
@@ -1607,17 +1611,20 @@ In-tree:
 - `src/shell/shell.js:326`, `src/shell/resume.js:702`, `src/shared/shadow.js:105` — `createActivity` call sites
 - `src/shared/context.js:606` — the tree's only self-rearming `postTask`, delayed
 - `src/shared/dom-manager.js` — mutation coalescing
-- `src/shell/chrome/panel.js:102` — the only `setInterval` in the tree
+- `src/shell/chrome/panel.js:116` — the only `setInterval` in the tree
 - `src/shared/diagnostics.js` — debug-gated rAF frame-gap probe
 - `src/kernel/contract.js:21` — `SHELL_MARKER`
 - `platform/capabilities.json` — Gecko floor and manager contract
 - `platform/run.mjs` — `ensureBundle()`
 - `esbuild.config.mjs:173-177` — unpinned `@resource`
 
-Source-scan guards, both of which exist to make "the next change" fail rather
+Source-scan guards, all three of which exist to make "the next change" fail rather
 than the current one:
 
 - `tests/idle-guard.test.mjs` — the rAF and `setInterval` inventories behind §1
   and §5's first row
 - `tests/posttask-guard.test.mjs` — the `postTask` inventory and self-arm scan
   behind §5's `postTask` row
+- `tests/teardown-guard.test.mjs` — the `AbortController` construction inventory
+  behind the one-teardown-vocabulary rule (§1): only the primitive itself and
+  the render gate's session-scope child may construct one

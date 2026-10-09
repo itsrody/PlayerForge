@@ -23,7 +23,7 @@ function withLocation(href, topHref, run) {
 }
 
 const check = (href, topHref = href) => async () => {
-  const { shouldSkipUrl } = await import("../src/kernel/guard.js");
+  const { shouldSkipUrl } = await import("../src/kernel/discovery.js");
   return withLocation(href, topHref, shouldSkipUrl);
 };
 
@@ -62,7 +62,7 @@ test("a cross-origin top frame on an ad host skips the child frame", async () =>
 test("an unreadable top frame does not skip a clean child frame", async () => {
   // Cross-origin access to window.top.location throws; that must fall through
   // to "do not skip" rather than dropping a real player.
-  const { shouldSkipUrl } = await import("../src/kernel/guard.js");
+  const { shouldSkipUrl } = await import("../src/kernel/discovery.js");
   const savedLocation = globalThis.location;
   const savedWindow = globalThis.window;
   const hostileTop = {

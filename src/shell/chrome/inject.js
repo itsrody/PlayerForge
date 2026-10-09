@@ -1,7 +1,7 @@
 import SHELL_CSS from "./styles.css";
 import { logger } from "../../shared/diagnostics.js";
 import { SHELL_MARKER } from "../../kernel/contract.js";
-import { el } from "./elements.js";
+import { el } from "./toolbox.js";
 import { gmGetResourceText } from "../../shared/storage.js";
 
 // Re-export the single contract-sourced marker so shell/forge keep importing

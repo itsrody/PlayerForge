@@ -21,7 +21,7 @@ import {
   CTX_PIPE_PROBE_MS,
   stopContextPipe
 } from "../src/shared/context.js";
-import { installVideoProbe } from "../src/kernel/probe.js";
+import { installVideoProbe } from "../src/kernel/discovery.js";
 
 const dom = (html = "", url = "https://www.youtube.com/watch?v=1") => {
   const jsdom = new JSDOM(`<!doctype html><html><head><title>Page</title></head><body>${html}</body></html>`, { url });

@@ -36,7 +36,7 @@ import { fileURLToPath } from "node:url";
  * body by the scan below, so a self-arm inside one would not be caught here.
  * What does cover that shape is dynamic and lives with the behaviour —
  * `RenderGate.#running` refuses any re-arm from inside its own commit
- * (`render-gate.js:129`, asserted by `tests/render-gate.test.mjs`), so the gate
+ * (`render.js:140`, asserted by `tests/render-gate.test.mjs`), so the gate
  * cannot starve regardless. The inventory assertion is what makes a new private
  * callback visible to review.
  */
@@ -125,10 +125,9 @@ test("the shipping tree keeps exactly the known postTask call sites", () => {
     .sort();
   assert.deepEqual(files, [
     "src/kernel/kernel.js",
-    "src/kernel/lifecycle.js",
     "src/shared/context.js",
     "src/shared/dom-manager.js",
-    "src/shared/render-gate.js",
+    "src/shared/render.js",
     "src/shared/scheduler.js"
   ], "a new postTask site needs a line here saying whether it self-arms and whether it is delayed");
 });
@@ -174,7 +173,7 @@ test("RenderGate cannot re-arm from inside its own commit", () => {
   // callback, and the gate is exactly that (`postTask(this.#task, …)`). What
   // rules out starvation there is the `#running` latch, checked before the
   // priority comparison so no priority label can get past it.
-  const gate = sources.get("src/shared/render-gate.js");
+  const gate = sources.get("src/shared/render.js");
   assert.match(gate, /if \(this\.#running\) \{\s*\n\s*return false;/, "the latch must short-circuit request()");
   assert.match(
     gate,

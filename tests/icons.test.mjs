@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 
-const { iconMarkup, createIconElement } = await import("../src/shell/chrome/icons.js");
+const { iconMarkup, createIconElement } = await import("../src/shell/chrome/toolbox.js");
 
 function makeDom() {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", {

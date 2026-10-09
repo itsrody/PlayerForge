@@ -646,7 +646,7 @@
       "summary": "Compositor-side accent flash and the transform transition",
       "why": "flashElement() returns early and the settings/toast flash is simply skipped, and the transform path falls back to its rAF setter - both are cosmetic, so no version floor is claimed.",
       "usedBy": [
-        "src/shell/chrome/animate.js",
+        "src/shell/chrome/toolbox.js",
         "src/shell/inputs/actions.js"
       ],
       "token": [
