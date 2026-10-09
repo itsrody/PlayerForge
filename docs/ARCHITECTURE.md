@@ -1424,7 +1424,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved twenty-three times since that cut. The first two movements
+The unit count has moved twenty-four times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1656,6 +1656,15 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  placement memo (resize staleness vs ~30 µs saved per video lifetime),
  async IO visibility (a two-phase kernel for a handful of flushes), and
  offer gating (the free early exits already order first).
+
+ The twenty-fourth movement made generic adoption learn: a successful slow
+ path records the player block as a domain-scoped print (tag, classes, id,
+ depth), and the next visit matches it like a registry anchor - placement
+ re-resolved live, admission gates still applied, behind the same
+ off-by-default switch. Matching is class-subset (state classes churn) with
+ exact tag/depth/id; staleness falls through to the slow path, which
+ re-learns. `tests/sdk-engine.test.mjs` gained 5, `tests/kernel-replay.
+ test.mjs` 3 (persist, second-visit-learned, dormant-when-off).
 
 ## 7. Gecko-specific decisions, and what they rule out
 

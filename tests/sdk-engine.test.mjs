@@ -4,6 +4,8 @@ import { JSDOM } from "jsdom";
 import {
   findSdkForVideo,
   findGenericPlayer,
+  fingerprintFor,
+  matchPrints,
   resolveContainer,
   videoFromEvent,
   meetsMinSize,
@@ -567,4 +569,54 @@ test("the climb continues past a zero-size wrapper to a real box", () => {
     assert.equal(sdk?.container, outer, "the zero box is passed through, not adopted");
     assert.equal(sdk?.hops, 2, "the depth cap still covers the true chain");
   });
+});
+
+/* - Learned fingerprints - */
+
+test("fingerprintFor records tag, classes, id and depth", () => {
+  const doc = dom('<div id="player" class="player wide"><video></video></div>');
+  const wrapper = doc.querySelector("#player");
+  const video = doc.querySelector("video");
+  assert.deepEqual(fingerprintFor(video, wrapper, 2), {
+    tag: "div",
+    cls: ["player", "wide"],
+    id: "player",
+    depth: 2
+  });
+});
+
+test("matchPrints resolves the recorded container", () => {
+  const doc = dom('<div id="player" class="player"><video></video></div>');
+  const wrapper = doc.querySelector("#player");
+  const video = doc.querySelector("video");
+  const hit = matchPrints(video, fingerprintFor(video, wrapper, 1));
+  assert.equal(hit?.el, wrapper);
+  assert.equal(hit?.hops, 1);
+});
+
+test("matchPrints tolerates state classes gained later", () => {
+  const doc = dom('<div class="player"><video></video></div>');
+  const wrapper = doc.querySelector("div");
+  const video = doc.querySelector("video");
+  const print = fingerprintFor(video, wrapper, 1);
+  wrapper.classList.add("playing", "open");
+  assert.equal(matchPrints(video, print)?.el, wrapper, "subset still matches after state churn");
+});
+
+test("matchPrints refuses dropped markers, moved depth and wrong tags", () => {
+  const doc = dom('<div class="player"><div id="slot"><video></video></div></div>');
+  const video = doc.querySelector("video");
+  const print = fingerprintFor(video, doc.querySelector("#slot"), 1);
+  doc.querySelector("#slot").removeAttribute("id");
+  assert.equal(matchPrints(video, print), null, "a dropped marker is a different player");
+  assert.equal(matchPrints(video, { tag: "section", cls: [], id: null, depth: 1 }), null);
+  assert.equal(matchPrints(video, { tag: "div", cls: [], id: null, depth: 5 }), null);
+});
+
+test("matchPrints rejects malformed prints without throwing", () => {
+  const doc = dom('<div><video></video></div>');
+  const video = doc.querySelector("video");
+  for (const bad of [null, undefined, [], "div", { tag: "div" }, { tag: "div", cls: "x", depth: 1 }]) {
+    assert.equal(matchPrints(video, bad), null);
+  }
 });

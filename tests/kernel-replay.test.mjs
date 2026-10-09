@@ -584,3 +584,104 @@ test("an unrecognized player is left alone with the generic path off", async () 
     "the registry stays the only default path"
   );
 });
+
+/** Swap the module-top GM stubs for a writable per-test store. */
+function withWritableStore() {
+  const saved = {
+    get: globalThis.GM_getValue,
+    set: globalThis.GM_setValue
+  };
+  const stored = {};
+  globalThis.GM_getValue = (key, fallback) => (key in stored ? stored[key] : fallback);
+  globalThis.GM_setValue = (key, value) => {
+    stored[key] = value;
+  };
+  return {
+    stored,
+    restore() {
+      globalThis.GM_getValue = saved.get;
+      globalThis.GM_setValue = saved.set;
+    }
+  };
+}
+
+test("a generic adoption persists a print for the hostname", async () => {
+  const { stored, restore } = withWritableStore();
+  try {
+    const { kernel, created } = makeHarness();
+    const generic = makeGenericVideo();
+    await withGenericEnabled(async () => {
+      await withActivatedPage(async () => {
+        kernel.init();
+        await waitFor(() => created.some((shell) => shell.video === generic.video), 3000);
+      });
+    });
+    const doc = stored["pf:sdk-prints"];
+    assert.ok(doc, "learning wrote a prints document");
+    const prints = doc[window.location.hostname];
+    assert.equal(prints.length, 1, "one shape learned");
+    assert.equal(prints[0].tag, "div");
+    assert.equal(prints[0].depth, 1);
+  } finally {
+    restore();
+  }
+});
+
+test("a learned print adopts on the next visit without re-measuring", async () => {
+  const { stored, restore } = withWritableStore();
+  try {
+    const generic = makeGenericVideo();
+    await withGenericEnabled(async () => {
+      await withActivatedPage(async () => {
+        // First visit: the slow path adopts and learns.
+        const first = makeHarness();
+        first.kernel.init();
+        await waitFor(
+          () => first.created.some((shell) => shell.video === generic.video),
+          3000
+        );
+        assert.equal(
+          first.created.find((shell) => shell.video === generic.video).sdk.source,
+          "generic"
+        );
+        // Second visit, fresh kernel, same document and store: the print
+        // answers instead of the behavioral gates re-measuring placement.
+        const second = makeHarness();
+        second.kernel.init();
+        await waitFor(
+          () => second.created.some((shell) => shell.video === generic.video),
+          3000
+        );
+        const shell = second.created.find((entry) => entry.video === generic.video);
+        assert.equal(shell.sdk.source, "learned", "the print fired, not the slow path");
+        assert.equal(shell.container, generic.wrapper);
+      });
+    });
+    assert.ok(stored["pf:sdk-prints"], "the doc survived both visits");
+  } finally {
+    restore();
+  }
+});
+
+test("learned prints stay dormant with the switch off", async () => {
+  const { stored, restore } = withWritableStore();
+  try {
+    // A print learned earlier (or hand-seeded): the video matches it, but
+    // the single switch governs learned matching exactly like the slow path.
+    stored["pf:sdk-prints"] = {
+      [window.location.hostname]: [{ tag: "div", cls: [], id: null, depth: 1 }]
+    };
+    const { kernel, created } = makeHarness();
+    const generic = makeGenericVideo();
+    await withActivatedPage(async () => {
+      kernel.init();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    });
+    assert.ok(
+      !created.some((shell) => shell.video === generic.video),
+      "dormant prints adopt nothing"
+    );
+  } finally {
+    restore();
+  }
+});

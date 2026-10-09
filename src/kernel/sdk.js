@@ -42,7 +42,9 @@
  * matched anchor element and its hop distance, both computed free during the
  * scan), so the kernel has one source of truth for SDK identity AND shell
  * placement. The descriptor is cached - same object per video on every
- * re-query.
+ * re-query. `source` names the path that produced it (registry, generic or
+ * learned): identical shapes, but a reader deciding whether to learn from an
+ * adoption needs to know which one fired.
  *
  * Reserved for future needs (not implemented): corroborating selectors,
  * version gates. Adding an SDK = one record plus one fixture test.
@@ -245,7 +247,8 @@ export function findSdkForVideo(video) {
     host: match.record.host ?? null,
     container: resolveContainer(match),
     anchor: match.el,
-    hops: match.hops
+    hops: match.hops,
+    source: "registry"
   };
   descriptorCache.set(video, entry);
   return entry.descriptor;
@@ -299,7 +302,8 @@ export function findGenericPlayer(video) {
     host: null,
     container: placed.container,
     anchor: placed.container,
-    hops: placed.hops
+    hops: placed.hops,
+    source: "generic"
   };
 }
 
@@ -372,6 +376,63 @@ export function resolveGenericContainer(video) {
     return null;
   }
   return { container, hops };
+}
+
+/**
+ * Learned fingerprints: domain-scoped dynamic records. When the generic slow
+ * path adopts a video, the kernel records what the player block looked like;
+ * on the next visit the print matches like a registry anchor, skipping the
+ * behavioral gates' placement measurement (size, playback and activation
+ * still gate every adoption - the print only answers identity and placement).
+ *
+ * A print names the container element the generic climb resolved: its tag,
+ * its sorted class list (or null when it has none), its id (or null), and
+ * its composed hop distance from the video. Matching is tag + depth +
+ * id-equality plus class SUBSET (every recorded class present, extras
+ * allowed): state classes come and go every session (`playing`, `open`,
+ * `muted`), so exact-set matching would go stale within a visit, while a
+ * subset still refuses a re-skin that drops the recorded markers. A stale
+ * print costs one failed match and falls through to the slow path, which
+ * re-learns - staleness degrades to today's behavior, never to a wrong shell.
+ */
+export function fingerprintFor(video, container, hops) {
+  return {
+    tag: container.localName ?? "",
+    cls: [...(container.classList ?? [])].sort(),
+    id: container.id || null,
+    depth: hops
+  };
+}
+
+/**
+ * Match a video's composed ancestry against one learned print. Returns the
+ * matched element and its hop distance, or null. Mirrors the anchor walk
+ * (same traversal, same hop counting) so shadow-hosted videos resolve the
+ * same way registry matches do.
+ */
+export function matchPrints(video, print) {
+  if (!print || typeof print.tag !== "string" || !Array.isArray(print.cls) ||
+      !Number.isInteger(print.depth) || print.depth < 1) {
+    return null;
+  }
+  let hops = 0;
+  let node = video.parentNode ?? video.host ?? null;
+  while (node) {
+    if (node.nodeType === 1) {
+      hops += 1;
+      if (hops > print.depth) {
+        return null;
+      }
+      if (hops === print.depth &&
+          node.localName === print.tag &&
+          (print.id == null || node.id === print.id) &&
+          print.cls.every((cls) => node.classList?.contains(cls))) {
+        return { el: node, hops };
+      }
+    }
+    node = node.parentNode ?? node.host ?? null;
+  }
+  return null;
 }
 
 /**

@@ -1,9 +1,9 @@
 import { logger } from "../shared/diagnostics.js";
-import { getConfigValue } from "../shared/storage.js";
+import { getConfigValue, loadJsonObject, gmSetValue, KEYS } from "../shared/storage.js";
 import { setDebugRuntime } from "../shared/diagnostics.js";
 import { postTask } from "../shared/scheduler.js";
 import { Scope } from "../shared/scope.js";
-import { findSdkForVideo, findGenericPlayer, meetsMinSize, watchDocumentVideos, watchMediaEvents, forEachShadowVideos } from "./sdk.js";
+import { findSdkForVideo, findGenericPlayer, matchPrints, fingerprintFor, meetsMinSize, watchDocumentVideos, watchMediaEvents, forEachShadowVideos } from "./sdk.js";
 import { GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
 
 /**
@@ -17,6 +17,17 @@ import { GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js"
 const MAX_REMOVAL_DEPTH = 8;
 /** Extra ancestors (beyond the matched anchor) the removal watch observes. */
 const REMOVAL_DEPTH_MARGIN = 1;
+/** Learned prints remembered per hostname; oldest-learned evicted past it. */
+const PRINTS_PER_HOST = 10;
+
+/** Identity of a print for deduping: tag, depth, id and class set. */
+function printKey(print) {
+  if (!print || typeof print !== "object") {
+    return "";
+  }
+  const cls = Array.isArray(print.cls) ? print.cls : [];
+  return `${print.tag ?? ""}\n${print.depth ?? -1}\n${print.id ?? ""}\n${cls.join("\n")}`;
+}
 
 export class Kernel {
   #registry;
@@ -133,12 +144,121 @@ export class Kernel {
   /** Register the shell then fan out to every shell-ready listener. */
   #notifyShellCreated(shell) {
     this.#registry.register(shell);
+    // Learn from generic adoptions only: registry matches are static
+    // knowledge, and learned matches are already learned. Recording what a
+    // successful slow-path adoption looked like is what makes the next visit
+    // fast.
+    if (shell.sdk?.source === "generic") {
+      this.#learnFromShell(shell);
+    }
     for (const cb of this.#createdListeners) {
       try {
         cb(shell);
       } catch (err) {
         logger.error("kernel", "Shell-created listener threw:", err);
       }
+    }
+  }
+
+  /** Whether the opt-in unknown-player path (generic + learned) may run. */
+  #genericEnabled() {
+    return getConfigValue("detection.genericPlayers", false) === true;
+  }
+
+  /**
+   * The learned prints document, read once on first need rather than at
+   * init: registry-only pages never pay the GM read. Shape-guarded on the
+   * way in - a corrupt or foreign doc degrades to "nothing learned".
+   */
+  #printsDoc = null;
+  #printsLoaded = false;
+
+  #loadPrints() {
+    if (!this.#printsLoaded) {
+      this.#printsLoaded = true;
+      const raw = loadJsonObject(KEYS.prints, null);
+      this.#printsDoc = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : null;
+    }
+    return this.#printsDoc;
+  }
+
+  /** Prints remembered for this hostname, or []. */
+  #printsForHost() {
+    const doc = this.#loadPrints();
+    if (!doc) {
+      return [];
+    }
+    let hostname;
+    try {
+      hostname = location.hostname;
+    } catch {
+      return [];
+    }
+    const list = doc[hostname];
+    return Array.isArray(list) ? list : [];
+  }
+
+  /**
+   * Match this video against the hostname's learned prints. Returns a
+   * learned descriptor (placement re-resolved live, gates still apply
+   * downstream) or null. Runs inside the generic opt-in: with the switch
+   * off, learned knowledge stays dormant like the slow path itself.
+   */
+  #matchLearned(video) {
+    for (const print of this.#printsForHost()) {
+      const hit = matchPrints(video, print);
+      if (hit) {
+        return {
+          name: "Custom player",
+          host: null,
+          container: hit.el,
+          anchor: hit.el,
+          hops: hit.hops,
+          source: "learned"
+        };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Record a successful generic adoption as a domain-scoped print. Writes
+   * only when the shape is new (repeat visits match silently without
+   * churning storage), prunes oldest-learned past the per-host cap, and
+   * never throws: learning is an accelerator, and a failed learn must not
+   * fail the adoption it rode in on.
+   */
+  #learnFromShell(shell) {
+    try {
+      const sdk = shell.sdk;
+      const video = shell.video;
+      if (!sdk || !video || !sdk.container || sdk.container.nodeType !== 1 ||
+          !Number.isInteger(sdk.hops)) {
+        return;
+      }
+      const print = fingerprintFor(video, sdk.container, sdk.hops);
+      const key = printKey(print);
+      const doc = { ...(this.#loadPrints() ?? {}) };
+      const hostname = location.hostname;
+      const list = Array.isArray(doc[hostname]) ? [...doc[hostname]] : [];
+      if (list.some((existing) => printKey(existing) === key)) {
+        return;
+      }
+      list.push({ ...print, learnedAt: Date.now() });
+      while (list.length > PRINTS_PER_HOST) {
+        let oldest = 0;
+        for (let i = 1; i < list.length; i++) {
+          if ((list[i].learnedAt ?? 0) < (list[oldest].learnedAt ?? 0)) {
+            oldest = i;
+          }
+        }
+        list.splice(oldest, 1);
+      }
+      doc[hostname] = list;
+      this.#printsDoc = doc;
+      gmSetValue(KEYS.prints, doc);
+    } catch (err) {
+      logger.error("kernel", "Failed to learn player print:", err);
     }
   }
 
@@ -223,9 +343,11 @@ export class Kernel {
     }
     // Registry fast path first; the opt-in generic slow path only runs for
     // videos no record claims, so a renamed-everything fork costs one extra
-    // scan while every known SDK keeps its single lookup.
+    // scan while every known SDK keeps its single lookup. Learned prints sit
+    // between them: same opt-in switch, but a site-specific answer instead of
+    // a fresh measurement.
     const sdk = findSdkForVideo(video) ??
-      (getConfigValue("detection.genericPlayers", false) ? findGenericPlayer(video) : null);
+      (this.#genericEnabled() ? (this.#matchLearned(video) ?? findGenericPlayer(video)) : null);
     if (!sdk) {
       return;
     }
