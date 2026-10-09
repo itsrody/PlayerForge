@@ -176,3 +176,37 @@ test("an abort that arrives before enter does not open a window", () => {
   assert.equal(entered, 0, "cannot enter into an aborted owner scope");
   assert.equal(activity.active, false);
 });
+
+test("constructing with an aborted owner attaches no detection listeners", () => {
+  // The abort the listeners would wait for already fired, so attaching them
+  // leaks listeners that can never be released by signal - only by an
+  // explicit dispose the owner has no reason to call, since it already tore
+  // down. Start disposed instead and stay fully inert.
+  const owner = new AbortController();
+  owner.abort();
+  const target = document.createElement("div");
+  const added = [];
+  const nativeAdd = target.addEventListener.bind(target);
+  target.addEventListener = (type, fn, opts) => {
+    added.push(type);
+    return nativeAdd(type, fn, opts);
+  };
+  let entered = 0;
+  const activity = createActivity({
+    target,
+    events: ["start", "stop"],
+    isActive: () => true,
+    onEnter: () => entered++,
+    signal: owner.signal
+  });
+  try {
+    assert.deepEqual(added, [], "no detection listeners on a dead owner");
+    fire(target, "start");
+    activity.refresh();
+    assert.equal(entered, 0, "no work scope for a dead owner");
+    assert.equal(activity.active, false);
+    activity.dispose();
+  } finally {
+    target.addEventListener = nativeAdd;
+  }
+});

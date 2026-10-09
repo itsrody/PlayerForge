@@ -31,6 +31,20 @@ export const CTX_REQUEST_TYPE = "pf:ctx-request";
 export const CTX_RESPONSE_TYPE = "pf:ctx";
 export const FS_REQUEST_TYPE = "pf:req-fullscreen";
 
+/**
+ * Nonce unique inside the 5s TTL window. `crypto.randomUUID` needs a secure
+ * context; on plain http it is absent and an unguarded call throws out of
+ * `sendRequest`, killing the retry chain and hanging the resolve. Time plus
+ * entropy is plenty for a 5s window (`Math.random` already seeds the retry
+ * jitter on the same path).
+ */
+function randomNonce() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.floor(Math.random() * 0x100000000).toString(36)}`;
+}
+
 /* - 1. Domain identity - */
 
 const DOMAIN_TLDS = {
@@ -40,7 +54,7 @@ const DOMAIN_TLDS = {
     "app", "blog", "dev", "fun", "game", "host", "live", "love", "new", "news", "one", "online",
     "page", "park", "plus", "pro", "shop", "site", "store", "tech", "video", "work", "xyz",
     "club", "life", "world", "today", "tools", "social", "beer", "email", "space", "cool",
-    "social", "games", "legal", "luxury", "fans", "buzz", "country", "kim", "pub", "rest"
+    "games", "legal", "luxury", "fans", "buzz", "country", "kim", "pub", "rest"
   ])
 };
 const IPV4_RE = /^(?:\d{1,3}\.){3}\d{1,3}$/;
@@ -451,7 +465,7 @@ function requestPageContextOverPipe(timeoutMs, deadline) {
 
   pipe.port.addEventListener("message", onData, { signal: ac.signal });
   try {
-    pipe.port.postMessage({ type: CTX_REQUEST_TYPE, nonce: crypto.randomUUID() });
+    pipe.port.postMessage({ type: CTX_REQUEST_TYPE, nonce: randomNonce() });
   } catch {
     // Port already closed under us: re-establish from scratch on the next call.
     dropDeadPipe();
@@ -596,7 +610,7 @@ async function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) 
 
   let portAttached = false;
   const sendRequest = () => {
-    nonce = crypto.randomUUID();
+    nonce = randomNonce();
     const msg = { type: CTX_REQUEST_TYPE, nonce };
     if (transferPort && !portAttached) {
       try {

@@ -36,7 +36,11 @@ import { Scope } from "./scope.js";
  */
 export function createActivity({ target, events, isActive, onEnter, onExit, signal }) {
   let work = null;
-  let disposed = false;
+  // An owner that is already gone owns nothing: detection listeners attached
+  // to an aborted signal leak (the abort they wait for already fired), and a
+  // work scope minted for it hands effects to a dead owner. Start disposed
+  // instead - the same guard scheduler.js keeps for a disposed scope's task.
+  let disposed = signal?.aborted ?? false;
 
   const active = () => work !== null;
 
@@ -70,11 +74,13 @@ export function createActivity({ target, events, isActive, onEnter, onExit, sign
     }
   };
 
-  for (const event of events) {
-    target.addEventListener(event, sync, { signal, passive: true });
+  if (!disposed) {
+    for (const event of events) {
+      target.addEventListener(event, sync, { signal, passive: true });
+    }
+    signal?.addEventListener("abort", onOwnerAbort, { once: true });
+    sync();
   }
-  signal?.addEventListener("abort", onOwnerAbort, { once: true });
-  sync();
 
   return {
     get active() {

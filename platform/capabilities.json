@@ -782,6 +782,20 @@
         "src/shell/media.js"
       ],
       "token": "fastSeek"
+    },
+    {
+      "id": "crypto-random",
+      "api": "crypto.randomUUID",
+      "summary": "Secure nonces for the frame-bridge handshake",
+      "why": "Without it nonces fall back to time plus entropy, which is plenty for the 5s TTL window - only the cryptographic strength is lost.",
+      "usedBy": [
+        "src/shared/context.js"
+      ],
+      "token": "randomUUID",
+      "probes": [
+        "crypto",
+        "crypto.randomUUID"
+      ]
     }
   ]
 }

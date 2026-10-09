@@ -1238,3 +1238,45 @@ test("a shadow-only video too small still commits the probe to the observer", as
   assert.equal(fires, 0, "no candidate - shadow video never reaches player size");
   assert.ok(constructions >= 1, "the shadow video alone still escalated the probe");
 });
+
+test("bridge requests survive a host without crypto.randomUUID", async () => {
+  // crypto.randomUUID needs a secure context; on plain http it is absent and
+  // an unguarded call throws out of sendRequest - killing the retry chain and
+  // hanging the resolve, since the throw lands after the deadline check but
+  // before the next retry is scheduled. The nonce only needs uniqueness
+  // inside the 5s TTL window, so time plus entropy stands in.
+  stopContextPipe();
+  const { window: win } = dom();
+  globalThis.window = crossOriginFrame(win);
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  Object.defineProperty(globalThis, "crypto", { value: {}, writable: true, configurable: true });
+  const posted = [];
+  const originalPost = win.parent.postMessage.bind(win.parent);
+  win.parent.postMessage = (msg, target) => {
+    posted.push({ msg, target });
+  };
+  try {
+    const pending = getPageContext();
+    pending.catch(() => {});
+    assert.equal(posted.length, 1, "the request went out with a fallback nonce");
+    assert.equal(typeof posted[0].msg.nonce, "string");
+    const nonce = posted[0].msg.nonce;
+    win.dispatchEvent(new win.MessageEvent("message", {
+      data: { type: CTX_RESPONSE_TYPE, nonce, domain: "site", path: "/", title: "Show" },
+      origin: "https://top.test",
+      source: win.parent
+    }));
+    assert.deepEqual(await pending, { domain: "site", path: "/", title: "Show" });
+  } finally {
+    win.parent.postMessage = originalPost;
+    if (descriptor) {
+      Object.defineProperty(globalThis, "crypto", descriptor);
+    } else {
+      delete globalThis.crypto;
+    }
+    stopContextPipe();
+  }
+});

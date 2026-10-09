@@ -1383,7 +1383,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved seventeen times since that cut. The first two movements
+The unit count has moved eighteen times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1552,6 +1552,18 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  gained 2, both failing pre-fix; `tests/doc-refs.test.mjs` moved two cites
  with the code.
 
+ The eighteenth movement audited the six remaining shared modules and fixed
+ what was actually wrong: bridge nonces fall back to time plus entropy where
+ `crypto.randomUUID` needs a secure context it does not have (an unguarded
+ call threw out of the retry and hung the resolve on plain http);
+ constructing an activity or subscribing to fullscreen with an
+ already-aborted owner stays fully inert instead of leaking listeners past
+ teardown. `primitives`, `tuning` and `geometry` were measured clean and
+ untouched; the subtitle/i18n surface (locale auto-select, region cues, late
+ tracks) needs product and frozen-markup decisions first and stays a design
+ note. `tests/activity.test.mjs`, `tests/shadow-gate.test.mjs` (new) and
+ `tests/context.test.mjs` gained 4, all failing pre-fix.
+
 ## 7. Gecko-specific decisions, and what they rule out
 
 - Scheduler priorities replace timer-based deferral. `postTask` is available
@@ -1670,7 +1682,7 @@ In-tree:
 - `src/shared/scope.js` — teardown primitive
 - `src/shared/activity.js` — passive activity windows
 - `src/shell/shell.js:333`, `src/shell/resume.js:702`, `src/shared/shadow.js:105` — `createActivity` call sites
-- `src/shared/context.js:623` — the tree's only self-rearming `postTask`, delayed
+- `src/shared/context.js:637` — the tree's only self-rearming `postTask`, delayed
 - `src/shared/dom-manager.js` — mutation coalescing
 - `src/shell/chrome/panel.js:116` — the only `setInterval` in the tree
 - `src/shared/diagnostics.js` — debug-gated rAF frame-gap probe

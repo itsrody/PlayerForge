@@ -126,6 +126,12 @@ export function initFullscreenGate(doc = document) {
 export function subscribeFullscreen(cb, signal) {
   fsSubscribers.add(cb);
   if (signal) {
+    // Same already-aborted trap as the status subscriber: the listener would
+    // never fire, leaking the subscription past its owner's teardown.
+    if (signal.aborted) {
+      fsSubscribers.delete(cb);
+      return () => {};
+    }
     signal.addEventListener("abort", () => fsSubscribers.delete(cb), { once: true });
   }
   return () => fsSubscribers.delete(cb);
