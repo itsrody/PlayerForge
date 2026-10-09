@@ -4,7 +4,7 @@ import { setDebugRuntime } from "../shared/diagnostics.js";
 import { postTask } from "../shared/scheduler.js";
 import { Scope } from "../shared/scope.js";
 import { DOMManager, trackScopedObserver } from "../shared/dom-manager.js";
-import { resolvePlayer, fingerprintFor, meetsMinSize, watchDocumentVideos, watchMediaEvents, forEachShadowVideos } from "./sdk.js";
+import { resolvePlayer, fingerprintFor, registryDataAttributes, meetsMinSize, watchDocumentVideos, watchMediaEvents, surveyVideos } from "./sdk.js";
 import { GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
 
 /**
@@ -20,6 +20,13 @@ const MAX_REMOVAL_DEPTH = 8;
 const REMOVAL_DEPTH_MARGIN = 1;
 /** Learned prints remembered per hostname; oldest-learned evicted past it. */
 const PRINTS_PER_HOST = 10;
+/**
+ * Attribute names the upgrade watch listens for: identity markers (class,
+ * id) plus every data attribute the registry anchors on, derived from the
+ * records so a new data-anchored SDK is watched without a second list to
+ * drift. Exact names - attributeFilter takes no selectors.
+ */
+const UPGRADE_ATTRS = ["class", "id", ...registryDataAttributes()];
 
 /** Identity of a print for deduping: tag, depth, id and class set. */
 function printKey(print) {
@@ -257,7 +264,7 @@ export class Kernel {
     }
   }
 
-  init() {
+  init(hints = []) {
     if (this.#initialized) {
       return;
     }
@@ -279,15 +286,21 @@ export class Kernel {
     // would have seen, the kernel now adopts through the same wiring.
     this.#stopDiscoveryTap = watchDocumentVideos((video) => this.#adoptVideo(video));
     // The probe boots us precisely so a video already in the parsed DOM gets
-    // its shell without waiting for the next media event. Replay once: the
-    // media-event tap (and the downgrade path) still catches script-lazy SDK
-    // players that surface after boot. The shadow pass replays what qSA
-    // cannot see - a shadow player in the parsed DOM was otherwise adopted
-    // only via a media event (forEachShadowVideos has the live repro).
-    for (const video of document.querySelectorAll("video")) {
+    // its shell without waiting for the next media event. Offer its hints
+    // first (discovery order, media-surfaced first), then sweep once for
+    // stragglers that arrived between the probe and this tick: the sweep
+    // stays because a handoff can never prove completeness, only priority.
+    // The media-event tap (and the downgrade path) still catches script-lazy
+    // SDK players that surface after boot.
+    for (const hint of hints) {
+      const video = hint && hint.video ? hint.video : null;
+      if (video) {
+        this.#adoptVideo(video);
+      }
+    }
+    for (const { video } of surveyVideos(document)) {
       this.#adoptVideo(video);
     }
-    forEachShadowVideos(document, (video) => this.#adoptVideo(video));
     logger.log("kernel", "Kernel ready - discovery tap active");
   }
 
@@ -322,6 +335,50 @@ export class Kernel {
     this.#sessions.get(video)?.noteBootFailed();
   }
 
+  /**
+   * Arm the upgrade watch: a scoped attribute observer over the video and
+   * its ancestors (bounded like the removal watch) that re-offers on class,
+   * id or registry data-attribute changes. Covers the SDK that inserts its
+   * <video> bare and builds chrome around it later - a shape the childList
+   * feed structurally cannot see, and the reason the shared feed must never
+   * grow attribute observation itself (one observer designed for its lookup,
+   * per the surveyor rule). Self-limiting: disarms on adopt, on detach, on
+   * teardown, and never arms twice.
+   */
+  #armUpgradeWatch(video) {
+    const session = this.#sessionFor(video);
+    if (session.claimed || session.upgradeArmed) {
+      return;
+    }
+    // Structural candidates only: connected and sized, but unclaimed.
+    // Transient misses (paused, unactivated, tiny) re-resolve on their own
+    // edges - play, gesture, crossing - and arming them would meter every
+    // playback toggle and scroll.
+    if (!video.isConnected || !meetsMinSize(video)) {
+      return;
+    }
+    const watched = [];
+    let node = video;
+    for (let depth = 0; node && depth <= MAX_REMOVAL_DEPTH; depth++, node = node.parentNode ?? node.host ?? null) {
+      if (node.nodeType === 1) {
+        watched.push(node);
+      }
+    }
+    const observer = new MutationObserver(() => {
+      // Detach ends the watch: the removal path owns disconnected videos,
+      // and a dead subtree must not keep re-offering.
+      if (!video.isConnected) {
+        session.disarmUpgrade();
+        return;
+      }
+      this.#adoptVideo(video);
+    });
+    for (const el of watched) {
+      observer.observe(el, { attributes: true, attributeFilter: UPGRADE_ATTRS });
+    }
+    session.armUpgrade(trackScopedObserver(observer, "upgrade-watch", this.#scope.signal));
+  }
+
   /** Adopt the video, emit discovery and start removal watching. */
   #adoptVideo(video) {
     // Ownership is decided JS-side only: the session claim (taken below,
@@ -346,6 +403,10 @@ export class Kernel {
       enabled: this.#genericEnabled()
     });
     if (!sdk) {
+      // No record claimed it: arm the upgrade watch, so SDK classes or ids
+      // arriving late (player chrome built after the video) re-offer instead
+      // of missing for the life of the document. Structural candidates only.
+      this.#armUpgradeWatch(video);
       return;
     }
     if (!meetsMinSize(video)) {
@@ -357,6 +418,10 @@ export class Kernel {
       return;
     }
     session.claim();
+    // Adopted: the session watch takes over from here, so a live upgrade
+    // watch would only re-offer an already-owned video into the claimed
+    // early-return.
+    session.disarmUpgrade();
     // Guarded like the logger contract promises: with chatter off (the
     // default), the dimensions/duration interpolation never runs - a disabled
     // log call must cost one boolean read, not a template build.
@@ -382,7 +447,10 @@ export class Kernel {
       video,
       container,
       sdk,
-      onDestroy: () => this.#registry.unregister(shell)
+      onDestroy: () => this.#registry.unregister(shell),
+      // Shadow-adopted shells re-offer videos that surface late in their own
+      // shadow root (which the document feed structurally cannot see).
+      reoffer: (video) => this.#adoptVideo(video)
     });
     return shell;
   }
@@ -444,6 +512,10 @@ class VideoSession {
   #observer = null;
   /** Registry release for the watch observer, or null when unarmed. */
   #watchRelease = null;
+  /** Upgrade-watch release, or null when unarmed. The handle doubles as the
+   *  armed flag: disarmUpgrade nulls it, so a live handle always means a
+   *  live observer (signal abort ends the kernel with it, never consulted). */
+  #upgradeRelease = null;
 
   constructor(video, { scope, adopt, removeShell }) {
     this.#video = video;
@@ -473,10 +545,30 @@ class VideoSession {
   noteBootFailed() {
     if (this.#retried) {
       this.#claimed = true;
+      // Claimed forever with no re-offer: an armed upgrade watch would fire
+      // into the claimed early-return for the life of the page.
+      this.disarmUpgrade();
       return;
     }
     this.#retried = true;
     this.#claimed = false;
+  }
+
+  /** Whether an upgrade watch is currently armed for this video. */
+  get upgradeArmed() {
+    return this.#upgradeRelease !== null;
+  }
+
+  /** Arm the upgrade watch with its registry release handle. */
+  armUpgrade(release) {
+    this.disarmUpgrade();
+    this.#upgradeRelease = release;
+  }
+
+  /** Drop the upgrade watch, if any. Idempotent. */
+  disarmUpgrade() {
+    this.#upgradeRelease?.();
+    this.#upgradeRelease = null;
   }
 
   armSettleSkip() {
@@ -518,6 +610,7 @@ class VideoSession {
   stopWatching() {
     this.#watchRelease?.();
     this.#watchRelease = null;
+    this.disarmUpgrade();
     this.#observer = null;
     this.#watching = false;
     this.#graceCancel?.();

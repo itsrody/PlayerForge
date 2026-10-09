@@ -12,6 +12,7 @@ import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
 import { SHELL_MARKER, warmStyles, injectShell, watchShellHost } from "./chrome/inject.js";
+import { surveyVideos } from "../kernel/sdk.js";
 import { replayFullscreenProvision } from "../shared/context.js";
 import { DOMManager } from "../shared/dom-manager.js";
 import { KEYS, gmGetValue, gmSetValue } from "../shared/storage.js";
@@ -42,6 +43,9 @@ export class Shell {
   #toasts = null;
   /** Pooled box reused by the referenceBox getter; values are rewritten on every read. */
   #refBox = { width: 0, height: 0 };
+  /** Pre-prep boxes, read first in #injectDom: the mount proof compares
+   *  against them after the yields, so prep that moves the SDK aborts. */
+  #preMountBox = null;
   #onDestroy;
   /** DOM lifecycle manager: listeners, observers, elements, rollbacks. */
   #dom = new DOMManager();
@@ -57,9 +61,12 @@ export class Shell {
    *  when the media clock is attached, status only records what happened. */
   #status = null;
   /** The keyboard broker this shell's engine arbitrates through: the
-   *  plugin's per-document broker in production, a fresh owned one for
-   *  direct constructions (which empties itself on forge teardown). */
+   *  plugin's per-document broker, or a fresh owned one for
+   *  direct constructions (which empties itself on teardown). */
   #broker = null;
+  /** Shadow-adopt re-offer entry back into kernel adoption, or null when
+   *  the shell was built without one (unit harnesses). */
+  #reoffer = null;
   /** L4 render gate. Commits it issues outlive the event that caused them, so
    *  N edges in one tick are one write and the priority is declared by
    *  the work rather than inherited from whichever handler ran first. Today it
@@ -68,11 +75,12 @@ export class Shell {
    *  behind a second gate. It is null until boot has reached that point. */
   #gate = null;
 
-  constructor({ video, container, sdk, onDestroy, broker = null }) {
+  constructor({ video, container, sdk, onDestroy, broker = null, reoffer = null }) {
     this.video = video;
     this.container = container;
     this.sdk = sdk;
     this.#broker = broker ?? new EngineBroker();
+    this.#reoffer = reoffer;
     this.#onDestroy = onDestroy;
     this.#media = createMediaControls({ video });
     // A boot that throws AFTER #injectDom has marked the video would otherwise
@@ -144,6 +152,7 @@ export class Shell {
       signal: this.#scope.signal
     });
     this.#watchFullscreen();
+    this.#watchShadowAdoptions();
     logger.log("shell", `Shell "${this.sdk.name}" constructed`);
   }
 
@@ -289,6 +298,11 @@ export class Shell {
   }
 
   async #injectDom() {
+    // Snapshot first: the mount proof in #verifyPlacement compares against
+    // these, so they must predate every write below (reads-then-writes is
+    // the allowed order - the flush they force is the baseline the prep is
+    // measured against, on the adoption path only).
+    this.#snapshotBoxes();
     // warmStyles() is synchronous - the embedded sheet is adopted immediately,
     // so shell construction never blocks on the @resource fetch. A warm
     // background upgrade later propagates through the same shared sheet.
@@ -534,11 +548,81 @@ export class Shell {
     this.#dom.markAttribute(this.container, SHELL_MARKER, "");
   }
 
+  /**
+   * Late shadow adoptions: videos appended into this shell's shadow root
+   * after boot produce no document-level mutation record, so the shared
+   * feed structurally cannot see them. Watch only this root (never general
+   * shadow surveillance - unbounded observers on custom-element-heavy pages
+   * were rejected deliberately) and re-offer newcomers to the kernel, which
+   * dedups by claim. Light-DOM shells skip this entirely: the document feed
+   * already covers them. Lifetime rides the shell's manager.
+   */
+  #watchShadowAdoptions() {
+    const reoffer = this.#reoffer;
+    if (typeof reoffer !== "function") {
+      return;
+    }
+    let root = null;
+    try {
+      root = this.container.getRootNode?.() ?? null;
+    } catch {
+      return;
+    }
+    // Shadow roots report nodeType 11; documents report 9 and are already
+    // covered by the shared feed. The nodeType read (not an instanceof
+    // ShadowRoot) keeps this realm-proof: no global to be missing or foreign.
+    if (!root || root.nodeType !== 11) {
+      return;
+    }
+    const mine = this.video;
+    const observer = new MutationObserver(() => {
+      for (const { video } of surveyVideos(root)) {
+        if (video !== mine) {
+          reoffer(video);
+        }
+      }
+    });
+    observer.observe(root, { childList: true, subtree: true });
+    this.#dom.trackObserver(observer, "shadow-adopt");
+  }
+
   /** Post-prep placement check: the mount point must still hold the video. */
   #verifyPlacement() {
     if (!this.video.isConnected || !this.container.isConnected ||
         !this.container.contains(this.video)) {
       throw new Error(`Shell "${this.sdk.name}": placement lost mid-boot`);
+    }
+    // Mount proof: prep (relative-without-offsets, isolate, the host
+    // itself) is layout-identical by construction, so boxes that moved
+    // under it mean the SDK reflowed mid-boot and the placement was
+    // resolved against stale geometry. Abort like any boot failure -
+    // rollback plus the kernel's one-retry re-arm. 2px tolerance for
+    // subpixel rounding across the style recalc the prep triggers.
+    const before = this.#preMountBox;
+    if (before) {
+      const shifted = (a, b) => Math.abs(a - b) > 2;
+      const video = this.video.getBoundingClientRect();
+      const container = this.container.getBoundingClientRect();
+      if (shifted(video.width, before.vw) || shifted(video.height, before.vh) ||
+          shifted(video.x, before.vx) || shifted(video.y, before.vy) ||
+          shifted(container.width, before.cw) || shifted(container.height, before.ch) ||
+          shifted(container.x, before.cx) || shifted(container.y, before.cy)) {
+        throw new Error(`Shell "${this.sdk.name}": placement shifted under prep`);
+      }
+    }
+  }
+
+  /** Read both boxes flat: retained numbers, never live rects. */
+  #snapshotBoxes() {
+    try {
+      const video = this.video.getBoundingClientRect();
+      const container = this.container.getBoundingClientRect();
+      this.#preMountBox = {
+        vw: video.width, vh: video.height, vx: video.x, vy: video.y,
+        cw: container.width, ch: container.height, cx: container.x, cy: container.y
+      };
+    } catch {
+      this.#preMountBox = null;
     }
   }
 
@@ -616,8 +700,8 @@ export function registerShell(kernel) {
   // provider -> Shell -> InputForge, so arbitration state is never global.
   const broker = new EngineBroker();
   kernel.registerShellProvider({
-    create({ video, container, sdk, onDestroy }) {
-      return new Shell({ video, container, sdk, onDestroy, broker });
+    create({ video, container, sdk, onDestroy, reoffer }) {
+      return new Shell({ video, container, sdk, onDestroy, broker, reoffer });
     }
   });
 }

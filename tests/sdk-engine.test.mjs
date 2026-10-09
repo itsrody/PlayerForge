@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import {
+  surveyVideos,
   resolvePlayer,
   findSdkForVideo,
   findGenericPlayer,
@@ -721,4 +722,47 @@ test("a registry re-resolve returns the same descriptor object", () => {
   const first = resolvePlayer(video);
   assert.equal(first?.source, "registry");
   assert.equal(resolvePlayer(video), first, "memo identity survived the unification");
+});
+
+/* - Unified survey: one walk, informative, non-destructive - */
+
+test("surveyVideos reports every video with its context, light and shadow", () => {
+  const doc = dom('<div id="plain"><video></video></div>');
+  const plain = doc.querySelector("#plain video");
+  Object.defineProperty(plain, "paused", { value: false, configurable: true });
+  Object.defineProperty(plain, "ended", { value: false, configurable: true });
+  plain.setAttribute("src", "https://example.com/v.mp4");
+  const host = doc.createElement("div");
+  doc.body.appendChild(host);
+  const shadow = host.attachShadow({ mode: "open" });
+  shadow.innerHTML = '<div id="framed"><video></video></div>';
+  const framed = shadow.querySelector("video");
+  Object.defineProperty(framed, "paused", { value: true, configurable: true });
+
+  const found = surveyVideos(doc);
+  assert.equal(found.length, 2, "light and shadow videos in one pass");
+  const [first, second] = found;
+  assert.equal(first.video, plain);
+  assert.equal(first.shadow, false);
+  assert.equal(first.hasSrc, true, "the src attribute counts as sourced");
+  assert.equal(first.playing, true);
+  assert.equal(second.video, framed);
+  assert.equal(second.shadow, true, "the shadow pass marks its own");
+  assert.equal(second.hasSrc, false);
+  assert.equal(second.playing, false);
+});
+
+test("surveyVideos reads no boxes", () => {
+  const doc = dom('<div id="plain"><video></video></div>');
+  const plain = doc.querySelector("#plain video");
+  let rectReads = 0;
+  for (const el of [plain, doc.querySelector("#plain"), doc.body, doc.documentElement]) {
+    el.getBoundingClientRect = () => {
+      rectReads++;
+      return { width: 640, height: 360, top: 0, left: 0, right: 640, bottom: 360 };
+    };
+  }
+  const found = surveyVideos(doc);
+  assert.equal(found.length, 1);
+  assert.equal(rectReads, 0, "surveying is property reads only - placement stays in resolve");
 });

@@ -43,14 +43,14 @@ function bootstrap() {
   if (window.top === window) {
     installMenuCommands();
   }
-  const boot = () => {
+  const boot = (hints) => {
     if (window.PlayerForge) {
       logger.warn("entry", "Kernel already initialized");
       return;
     }
     const kernel = new Kernel();
     registerShell(kernel);
-    kernel.init();
+    kernel.init(hints?.videos ?? []);
 
     // One subscription serves both duties: readiness log always, first-run
     // welcome toast only until the flag flips. Installs from before the key

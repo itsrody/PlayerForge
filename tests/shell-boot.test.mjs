@@ -262,3 +262,68 @@ test("the first generic adoption shows the fallback notice once", async () => {
     delete globalThis.CSSStyleSheet;
   }
 });
+
+test("a shell inside a shadow root re-offers late shadow videos", async () => {
+  const { dom } = makeRealm();
+  const doc = dom.window.document;
+  const host = doc.createElement("div");
+  doc.body.appendChild(host);
+  const shadow = host.attachShadow({ mode: "open" });
+  const container = doc.createElement("div");
+  shadow.appendChild(container);
+  const video = doc.createElement("video");
+  container.appendChild(video);
+
+  const reoffered = [];
+  const shell = new Shell({
+    video,
+    container,
+    sdk: { name: "test-sdk" },
+    reoffer: (v) => reoffered.push(v)
+  });
+  await shell.ready;
+  assert.deepEqual(reoffered, [], "boot offers nothing by itself");
+
+  const late = doc.createElement("video");
+  shadow.appendChild(late);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.ok(reoffered.includes(late), "a video appended to the adopted root is re-offered");
+  assert.ok(!reoffered.includes(video), "the shell never re-offers its own video");
+  shell.destroy();
+  delete globalThis.CSSStyleSheet;
+});
+
+test("a light-DOM shell arms no shadow watch", async () => {
+  const { container, video } = makeRealm();
+  const reoffered = [];
+  const shell = new Shell({
+    video,
+    container,
+    sdk: { name: "test-sdk" },
+    reoffer: (v) => reoffered.push(v)
+  });
+  await shell.ready;
+  const late = document.createElement("video");
+  document.body.appendChild(late);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  assert.deepEqual(reoffered, [], "the document feed owns light-DOM videos, not the shell");
+  late.remove();
+  shell.destroy();
+  delete globalThis.CSSStyleSheet;
+});
+
+test("prep that shifts the player aborts the mount without stranding", async () => {
+  const { container, video } = makeRealm();
+  // The snapshot reads the settled box; the verify re-read must see drift.
+  const box = (w) => ({ width: w, height: 360, x: 0, y: 0, top: 0, left: 0, right: w, bottom: 360 });
+  let reads = 0;
+  video.getBoundingClientRect = () => box(++reads === 1 ? 640 : 700);
+  container.getBoundingClientRect = () => box(640);
+
+  const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
+  await assert.rejects(shell.ready, /placement shifted under prep/);
+  assert.equal(container.querySelector(".pf-shell"), null, "no host stranded by a disturbed mount");
+  assert.equal(video.hasAttribute(SHELL_MARKER), false, "the video gave up its shell claim");
+  assert.equal(container.hasAttribute(SHELL_MARKER), false, "the container gave up its shell claim");
+  delete globalThis.CSSStyleSheet;
+});

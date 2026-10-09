@@ -731,7 +731,7 @@ an oversight.
 ### L2 — StatusManager
 
 Today `isActive()` closures are authored independently at each `createActivity`
-call site (`src/shell/shell.js:353`, `src/shell/resume.js:702`,
+call site (`src/shell/shell.js:367`, `src/shell/resume.js:702`,
 `src/shared/shadow.js:135`). Nothing answers "what is this player's status right
 now" as a single queryable value.
 
@@ -762,7 +762,7 @@ change is dispatched as a `pf:status` CustomEvent on the `<video>`
 (`status-manager.js:363`) so the **page world** can read status across the
 sandbox boundary — which is the only consumer of `Buffer`, `Screen`, `duration`,
 `rate`, `volume`, `muted`, `hasTextTrack` and `error`. In-tree exactly one
-subscriber exists (`shell.js:501`, feeding the occlusion resolve), and it reads
+subscriber exists (`shell.js:515`, feeding the occlusion resolve), and it reads
 two of the ten fields. The other eight are carried for the page, so "no in-tree
 consumer" is the expected shape rather than dead code.
 
@@ -808,7 +808,7 @@ one `dispose()`.
 
 **Not landed as a class, and not needed as one.** `Shell` (`src/shell/shell.js`)
 already *is* the per-`<video>` owner: it holds `#scope`, `#status`, two
-`RenderGate`s, and every sub-component, and `destroy()` (`shell.js:563`) fans out
+`RenderGate`s, and every sub-component, and `destroy()` (`shell.js:647`) fans out
 to exactly the single `dispose()` this section describes. Extracting a
 `PlayerSession` would have been a rename with no second implementation behind
 it, so §6's seven phases never opened one — the one layer in the §4 diagram with
@@ -824,7 +824,7 @@ the layers can assume:
   L2 generally useful in-tree, and it is deliberately not done: only the
   occlusion resolve needs status today, and it is inside the shell.
 - **The gate is not one-per-session.** `Shell` registers two — media-state
-  (`shell.js:406`) and occlusion (`shell.js:493`) — because they have different
+  (`shell.js:420`) and occlusion (`shell.js:507`) — because they have different
   priorities' worth of coalescing and different snapshot shapes. `ToastManager`
   (`toast.js:123`) and `SettingsPanel` (`panel.js:293`) each own a further gate
   on their own scope, so the tree has four `RenderGate` constructions in total.
@@ -1447,7 +1447,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved thirty-four times since that cut. The first two movements
+The unit count has moved thirty-six times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1784,6 +1784,26 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  §4's L2 section and the live cites with it; §6 history keeps the old
  names, like the log it is. No behavior change, no count change.
 
+ The thirty-fifth movement closed two timing gaps: unclaimed structural
+ videos arm a bounded class/id/data-attribute upgrade watch that
+ re-offers on late SDK chrome (disarming on adopt, detach and teardown),
+ and shells adopted inside a shadow root watch that root - and only that
+ root - for late videos, re-offering through the kernel. Host overrides
+ stay proof-gated: a record earns one only with fixture evidence its
+ chrome lives outside the anchor. `tests/kernel-replay.test.mjs` gained 2,
+ `tests/shell-boot.test.mjs` 2.
+
+ The thirty-sixth movement unified discovery around one survey and proved
+ the mount harmless: `surveyVideos` is the only sanctioned video walk
+ (probe sweep, kernel replay and shadow watch enumerate through it, with
+ per-video records and zero box reads), the probe hands its candidates to
+ the kernel in discovery order instead of the kernel re-sweeping blind,
+ and `#verifyPlacement` now compares pre-prep boxes post-yield, aborting
+ on disturbance past subpixel tolerance. `resolvePlayer` stays exactly as
+ it was - pure over video, prints and enabled - because chains are
+ per-video by nature and a shared fill would save nothing. Tests gained 6
+ across the four suites that own the path.
+
  The thirty-third movement cut L0 down to capabilities with live readers:
  engine brand, Gecko version, manager realm and postTask/yield presence had
  no production readers - only tests - so the fields, `parseGeckoVersion`
@@ -1923,7 +1943,7 @@ In-tree:
 - `src/shared/scheduler.js` — traps in §2.4, `postTask`, `yield_()`
 - `src/shared/scope.js` — teardown primitive
 - `src/shared/activity.js` — passive activity windows
-- `src/shell/shell.js:353`, `src/shell/resume.js:702`, `src/shared/shadow.js:135` — `createActivity` call sites
+- `src/shell/shell.js:367`, `src/shell/resume.js:702`, `src/shared/shadow.js:135` — `createActivity` call sites
 - `src/shared/context.js:637` — the tree's only self-rearming `postTask`, delayed
 - `src/shared/dom-manager.js` — mutation coalescing
 - `src/shell/chrome/panel.js:116` — the only `setInterval` in the tree

@@ -1,5 +1,5 @@
 import { logger } from "../shared/diagnostics.js";
-import { watchMediaEvents, meetsMinSize, forEachVideoInMutations, forEachShadowVideos } from "./sdk.js";
+import { watchMediaEvents, meetsMinSize, forEachVideoInMutations, surveyVideos, describeVideo } from "./sdk.js";
 import { onDomMutations } from "../shared/dom-manager.js";
 
 /**
@@ -99,6 +99,8 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
   let offMutations = null;
   let stopEvents = null;
   let sizeWatcher = null;
+  /** Every video surfaced so far, in discovery order, as survey records. */
+  const surfaced = [];
 
   const detach = () => {
     stopEvents?.();
@@ -109,14 +111,16 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
     sizeWatcher = null;
   };
 
-  const finish = () => {
+  const finish = (winner) => {
     if (done) {
       return;
     }
     done = true;
     detach();
     logger.log("probe", "Video candidate found - booting kernel");
-    onCandidate();
+    // The handoff: what surfaced and how, so the kernel adopts in discovery
+    // order instead of re-deriving it with a second full sweep.
+    onCandidate({ videos: surfaced, origin: winner.origin });
   };
 
   const escalate = () => {
@@ -128,7 +132,7 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
       if (done) {
         return;
       }
-      forEachVideoInMutations(mutations, consider);
+      forEachVideoInMutations(mutations, (video) => consider(video, "mutation"));
     });
   };
 
@@ -165,19 +169,22 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
             continue;
           }
           sizeWatcher.unobserve(target);
-          consider(target);
+          consider(target, "resize");
         }
       });
     }
     sizeWatcher.observe(video);
   };
 
-  const consider = (video) => {
+  const consider = (video, origin) => {
     if (done) {
       return;
     }
+    const record = describeVideo(video);
+    record.origin = origin;
+    surfaced.push(record);
     if (meetsMinSize(video, minWidth, minHeight)) {
-      finish();
+      finish(record);
       return;
     }
     // A real <video> exists but isn't player-sized yet - commit to the
@@ -187,31 +194,25 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
     escalate();
   };
 
-  stopEvents = watchMediaEvents(consider);
+  stopEvents = watchMediaEvents((video) => consider(video, "media"));
 
   // Cheap deferred check (atomic, no observer): videos already in the parsed
-  // DOM surface without any media event or mutation subscription. The shadow
-  // pass is the same reach the mutation feed has after escalation - qSA never
-  // crosses a shadow boundary, so a shadow player in the parsed DOM would
-  // otherwise be found by nothing until it fired a media event (see
-  // forEachShadowVideos for the live repro).
+  // DOM surface without any media event or mutation subscription, through
+  // the one sanctioned survey (light and shadow alike - qSA never crosses a
+  // shadow boundary, so a shadow player in the parsed DOM would otherwise be
+  // found by nothing until it fired a media event; see forEachShadowVideos
+  // for the live repro).
   const checkStatic = () => {
     if (done) {
       return;
     }
-    const present = document.querySelectorAll("video");
-    // Index walk, not for..of: a static NodeList is a cheap array underneath,
-    // and the iterator protocol here costs more than the walk it replaces.
-    for (let i = 0; i < present.length; i++) {
-      consider(present[i]);
+    // Index walk, not for..of: a plain array underneath, and the iterator
+    // protocol here costs more than the walk it replaces.
+    const found = surveyVideos(document);
+    for (let i = 0; i < found.length; i++) {
+      consider(found[i].video, found[i].shadow ? "shadow" : "static");
     }
-    let sawVideo = present.length > 0;
-    if (!done) {
-      forEachShadowVideos(document, (video) => {
-        sawVideo = true;
-        consider(video);
-      });
-    }
+    const sawVideo = found.length > 0;
     if (!done && sawVideo) {
       // Video(s) exist but none qualified yet - keep the observer armed
       // so SDK-inserted successors that may reach player size are caught.

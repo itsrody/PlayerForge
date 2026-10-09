@@ -390,6 +390,25 @@ function climbGenericContainer(len, rect, doc) {
 }
 
 /**
+ * Data attributes the registry anchors on, for the upgrade watch's
+ * attributeFilter (which takes exact names, not selectors). Derived from
+ * the records so a new data-anchored SDK is watched without a second list
+ * to drift. Sorted, deduplicated.
+ */
+export function registryDataAttributes() {
+  const names = new Set();
+  for (const record of REGISTRY) {
+    for (const anchor of record.anchors) {
+      const match = /^\[([A-Za-z0-9-]+)/.exec(anchor);
+      if (match && match[1].startsWith("data-")) {
+        names.add(match[1]);
+      }
+    }
+  }
+  return [...names].sort();
+}
+
+/**
  * Learned fingerprints: domain-scoped dynamic records. When the generic slow
  * path adopts a video, the kernel records what the player block looked like;
  * on the next visit the print matches like a registry anchor, skipping the
@@ -453,9 +472,11 @@ function matchPrintsOnChain(len, print) {
 
 /**
  * Resolve the element that hosts the shell DOM: the matched record's `host`
- * override, else the matched element itself. Exported solely so the
- * host-resolution branch (unexercised by the current registry) can be driven
- * by a synthetic match in the sdk-engine test.
+ * override, else the matched element itself. A record earns an override only
+ * with fixture proof that its chrome lives outside the anchor - an override
+ * without proof is a placement guess wearing a record's clothes. Exported
+ * solely so the host-resolution branch (unexercised by the current registry)
+ * can be driven by a synthetic match in the sdk-engine test.
  */
 export function resolveContainer({ record, el }) {
   if (!record.host) {
@@ -571,6 +592,46 @@ export function resolvePlayer(video, { prints = NO_PRINTS, enabled = false } = {
     }
   }
   return measureGenericOnChain(video, len);
+}
+
+/**
+ * One survey pass over a root's videos, light and shadow alike, returning an
+ * informative record per video - identity, placement context and cheap media
+ * state, but never a box. This is the only sanctioned "find the videos"
+ * walk: the probe's static sweep, the kernel's boot replay and the shell's
+ * shadow watch all enumerate through here instead of hand-rolling their own
+ * querySelectorAll, so there is one implementation to keep optimal and one
+ * place the no-layout rule is pinned. Surveys are rare (boot, probe, small
+ * adopted roots); offers stay allocation-lean. Reads are property-only -
+ * getRootNode for the shadow bit, media state for the rest - so a survey
+ * forces no layout and disturbs nothing it measures.
+ */
+export function describeVideo(video) {
+  // Initialized, not assigned-in-try-only: the try body below is one atomic
+  // assignment, so a throw leaves this at false - the honest answer for a
+  // null or hostile object, with nothing to restore in the catch.
+  let shadow = false;
+  try {
+    shadow = video.getRootNode?.().nodeType === 11;
+  } catch {
+    // Fallthrough value stands - see above.
+  }
+  return {
+    video,
+    shadow,
+    hasSrc: !!(video.currentSrc || (typeof video.getAttribute === "function" && video.getAttribute("src"))),
+    playing: !video.paused && !video.ended
+  };
+}
+
+export function surveyVideos(root = document) {
+  const found = [];
+  const videos = root.querySelectorAll("video");
+  for (let i = 0; i < videos.length; i++) {
+    found.push(describeVideo(videos[i]));
+  }
+  forEachShadowVideos(root, (video) => found.push(describeVideo(video)));
+  return found;
 }
 
 /**

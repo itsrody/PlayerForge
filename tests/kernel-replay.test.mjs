@@ -709,3 +709,69 @@ test("the fallback is on unless the user opts out", async () => {
     "an unrecognized player adopts with no opt-in"
   );
 });
+
+test("a late SDK class re-offers the video", async () => {
+  const { trackedObserverLabels } = await import("../src/shared/dom-manager.js");
+  // Labels are document-global and earlier videos hold their own watches;
+  // assert per-label relative deltas, not absolute presence.
+  const upgrades = () => trackedObserverLabels().filter((label) => label === "upgrade-watch").length;
+  const removals = () => trackedObserverLabels().filter((label) => label === "removal-watch").length;
+  const u0 = upgrades();
+  const { kernel, created } = makeHarness();
+  const generic = makeGenericVideo();
+  // No activation: the fallback cannot adopt, so the offer ends unclaimed
+  // and arms the upgrade watch instead.
+  kernel.init();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const armed = upgrades();
+  assert.ok(armed > u0, "unclaimed structural videos arm their upgrade watches");
+  const riding = removals();
+  // The SDK chrome arrives late, as a class on the wrapper.
+  generic.wrapper.classList.add("dplayer");
+  await waitFor(() => created.some((shell) => shell.video === generic.video), 3000);
+  const shell = created.find((entry) => entry.video === generic.video);
+  assert.equal(shell.sdk.source, "registry", "the late anchor wins, not a re-measure");
+  assert.equal(upgrades(), armed - 1, "adoption disarms exactly the watch it rode in on");
+  assert.equal(removals(), riding + 1, "and the session watch takes over one-for-one");
+});
+
+test("a removed video disarms its upgrade watch", async () => {
+  const { trackedObserverLabels } = await import("../src/shared/dom-manager.js");
+  const upgrades = () => trackedObserverLabels().filter((label) => label === "upgrade-watch").length;
+  const removals = () => trackedObserverLabels().filter((label) => label === "removal-watch").length;
+  const u0 = upgrades();
+  const { kernel, created } = makeHarness();
+  const generic = makeGenericVideo();
+  kernel.init();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const armed = upgrades();
+  assert.ok(armed > u0, "unclaimed structural videos arm their upgrade watches");
+  const riding = removals();
+  generic.video.remove();
+  generic.wrapper.classList.add("dplayer");
+  await waitFor(
+    () => upgrades() === armed - 1,
+    3000,
+    "detach ends the watch instead of re-offering a dead subtree"
+  );
+  assert.ok(
+    !created.some((shell) => shell.video === generic.video),
+    "a detached video adopts nothing"
+  );
+  assert.equal(removals(), riding, "no session watch for a video that never adopted");
+});
+
+test("kernel.init accepts probe hints and adopts through the same path", async () => {
+  const { kernel, created } = makeHarness();
+  const generic = makeGenericVideo();
+  // Hints arrive as survey records; the kernel offers them before its own
+  // replay sweep, through identical gates (settle, size, verify).
+  const hints = [{ video: generic.video, shadow: false, hasSrc: false, playing: true }];
+  await withActivatedPage(async () => {
+    kernel.init(hints);
+    await waitFor(() => created.some((shell) => shell.video === generic.video), 3000);
+  });
+  const shell = created.find((entry) => entry.video === generic.video);
+  assert.equal(shell.sdk.source, "generic");
+  assert.equal(shell.container, generic.wrapper, "hints change order, never placement");
+});
