@@ -15,6 +15,12 @@
  * marker and removed for exactly this reason; a framework that ships its own
  * player gets a record for the player's namespaced anchor, not the shell.
  *
+ * Forks restyle freely but keep behavior: prefer anchors the SDK's own JS
+ * reads or writes (tech classes it sets, data-* config it parses, custom
+ * tags it upgrades) over purely cosmetic ones. `.vjs-tech` survives a
+ * re-skin that drops `.video-js`; `data-plyr-config` survives one that
+ * drops `.plyr`.
+ *
  * Record schema:
  *   name    - label used for logging and shell metadata.
  *   anchors - selectors resolved against the video's composed ancestry
@@ -42,8 +48,8 @@ import { onDomMutations } from "../shared/dom-manager.js";
 
 const REGISTRY = [
   { name: "JW Player", anchors: [".jwplayer", ".jw-wrapper"] },
-  { name: "Video.js", anchors: ["[data-vjs-player]", ".video-js"] },
-  { name: "Plyr", anchors: ["[data-plyr]", ".plyr__video-wrapper", ".plyr"] },
+  { name: "Video.js", anchors: ["[data-vjs-player]", ".video-js", ".vjs-tech", "video-js"] },
+  { name: "Plyr", anchors: ["[data-plyr]", "[data-plyr-config]", ".plyr__video-wrapper", ".plyr"] },
   { name: "ArtPlayer", anchors: [".art-video-player", ".artplayer"] },
   { name: "DPlayer", anchors: [".dplayer"] },
   { name: "MediaElement.js", anchors: [".mejs-container", ".mejs__container"] },
@@ -55,6 +61,13 @@ const REGISTRY = [
   { name: "Vidstack", anchors: ["media-player"] },
   { name: "Mux Player", anchors: ["mux-player"] },
   { name: "Radiant Media Player", anchors: ["radiant-media-player"] },
+  // UI builds only: base-library players with no skin ship no DOM markers,
+  // so there is nothing here to match. Shaka's UI adds .shaka-video-container
+  // to the wrapping div (and the declarative setup marks video and container
+  // with data-shaka-player*); THEOplayer fetches its own container through
+  // .theoplayer-container, and its web-ui package upgrades theoplayer-ui tags.
+  { name: "Shaka Player", anchors: [".shaka-video-container", "[data-shaka-player]", "[data-shaka-player-container]"] },
+  { name: "THEOplayer", anchors: [".theoplayer-container", "theoplayer-ui", "theoplayer-default-ui"] },
 ];
 
 export const MIN_VIDEO_WIDTH = 100;

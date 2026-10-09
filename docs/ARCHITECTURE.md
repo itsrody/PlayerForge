@@ -1409,7 +1409,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved twenty times since that cut. The first two movements
+The unit count has moved twenty-one times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1611,6 +1611,17 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  the descriptor field directly), and the event table is frozen while the
  tuning stays mutable for timing tests. `pointerrawupdate` joined `retired`
  next to the coalesced path it must never replace.
+
+ The twenty-first movement grew SDK coverage toward forks: Shaka Player and
+ THEOplayer records (UI-build markers the SDKs' own code reads or writes),
+ plus behavioral anchors on the existing Plyr (`data-plyr-config`) and
+ Video.js (`.vjs-tech` at hop 0, the `video-js` tag) records, so a re-skin
+ that drops every cosmetic class still resolves. The registry header now
+ states the fork rule outright. Two candidates died in verification:
+ Bitmovin and Kaltura UI roots are siblings of the video, not ancestors, so
+ their classes would never match. Platform embeds (YouTube, Vimeo and kin)
+ stay out pending a double-UI product call: adoption inside their frames
+ would stack our HUD over their native controls.
 
 ## 7. Gecko-specific decisions, and what they rule out
 

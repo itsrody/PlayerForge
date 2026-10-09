@@ -37,13 +37,31 @@ test("adopts each registered SDK via its namespaced anchor", () => {
     ['<div data-player><video></video></div>', "Clappr"],
     ['<media-player><video slot="media"></video></media-player>', "Vidstack"],
     ['<mux-player><video></video></mux-player>', "Mux Player"],
-    ['<radiant-media-player><video></video></radiant-media-player>', "Radiant Media Player"]
+    ['<radiant-media-player><video></video></radiant-media-player>', "Radiant Media Player"],
+    ['<div class="shaka-video-container"><video data-shaka-player></video></div>', "Shaka Player"],
+    ['<div data-shaka-player-container><video></video></div>', "Shaka Player"],
+    ['<div class="theoplayer-container"><video></video></div>', "THEOplayer"],
+    ['<theoplayer-ui><video></video></theoplayer-ui>', "THEOplayer"],
+    ['<theoplayer-default-ui><video></video></theoplayer-default-ui>', "THEOplayer"],
+    ['<div class="plyr"><video data-plyr-config=\'{"title": "x"}\'></video></div>', "Plyr"],
+    ['<video-js><video></video></video-js>', "Video.js"]
   ];
   for (const [html, expected] of fixtures) {
     const doc = dom(html);
     const video = doc.querySelector("video");
     assert.equal(findSdkForVideo(video)?.name, expected, html);
   }
+});
+
+test("a re-skinned fork still resolves through its behavioral anchors", () => {
+  // No .plyr, .video-js or .vjs-* chrome classes anywhere: a fork that
+  // restyled everything but kept each SDK's own functional markers.
+  const plyrFork = dom('<div class="acme-player"><video data-plyr-config=\'{"title": "x"}\'></video></div>');
+  assert.equal(findSdkForVideo(plyrFork.querySelector("video"))?.name, "Plyr");
+  // .vjs-tech is written onto the video by the player constructor itself, so
+  // it matches at hop 0 even with the wrapper fully renamed.
+  const vjsFork = dom('<div class="acme-player"><video class="vjs-tech"></video></div>');
+  assert.equal(findSdkForVideo(vjsFork.querySelector("video"))?.name, "Video.js");
 });
 
 test("crosses open shadow boundaries to reach custom-element players", () => {
