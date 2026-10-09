@@ -1,17 +1,22 @@
 /**
- * L0 — EngineHost: the single source of truth for environment facts.
+ * L0 — EngineHost: the single source of truth for engine capability facts.
  *
  * `platform/capabilities.json` is Node-side and cannot be read by the
- * userscript, so every "does this host have X" question the shipped code needs
- * has to be answered here, once, at construction. Higher layers ask the host
- * instead of feature-detecting, which is what keeps one fact from being
- * re-derived at a dozen call sites with a dozen subtly different guards.
+ * userscript, so every "does this host offer X" question the shipped code
+ * needs answered is answered here, once, at construction. Higher layers ask
+ * the host instead of feature-detecting, which is what keeps one fact from
+ * being re-derived at a dozen call sites with a dozen subtly different
+ * guards.
  *
- * Deliberately narrow: only truly static environment facts live here (engine,
- * realm, scheduler, the frame APIs below). Anything that can change while the
- * page runs — document visibility, rAF availability under the test harness,
- * media element state — stays where it is read, because caching it here would
- * freeze a value the caller re-reads live today.
+ * Deliberately narrow: only capabilities with live readers live here
+ * (scheduler and frame APIs below). Identity facts with no readers - engine
+ * brand, Gecko version, manager realm, postTask/yield presence - were cut:
+ * recording them made the snapshot look authoritative about things nothing
+ * branched on, and a fact nobody reads is a fact nobody keeps honest. Anything
+ * that can change while the page runs — document visibility, rAF
+ * availability under the test harness, media element state — stays where it
+ * is read, because caching it here would freeze a value the caller re-reads
+ * live today.
  *
  * Note what is absent, and why:
  *
@@ -23,16 +28,11 @@
  *   (tests/scheduler.test.mjs, tests/perf-diag.test.mjs). A construction-time
  *   snapshot would pick a branch that no longer matches the host.
  *
- * The two frame flags sit on the other side of that line: `canRvfc` and
+ * The frame flags sit on the far side of that line: `canRvfc` and
  * `canMozQuality` are *engine* facts - whether this engine ships the API on
  * `HTMLVideoElement.prototype` - so they are read here and the frame-quality
  * sampler does not re-derive them. Whether a particular element has been
  * upgraded yet is still answered on that element, where it is read.
- *
- * The engine stays realm-agnostic by construction: `realm` is recorded for the
- * about surface and for diagnosis, never consulted to decide whether a page
- * object may be touched. SDK detection reads composed DOM ancestry and never a
- * page-defined global, so no branch on this field can change behaviour.
  *
  * Ownership: the snapshot is taken eagerly at import (the ambient globals at
  * document-start ARE the facts), and entry bootstrap re-probes explicitly via
@@ -42,31 +42,7 @@
  * globals. The class stays directly constructible for per-case tests.
  */
 
-/**
- * Extract the engine version from a Gecko user agent, prerelease-aware so the
- * channel suffix survives (`158.0b3`, `160.0a1`) rather than flattening every
- * build to its release number.
- *
- * A release build reports `Firefox/158.0`, a beta `Firefox/158.0b3`, a Nightly
- * `Firefox/160.0a1` — the suffix is present in the UA, so nothing outside the
- * userscript realm has to be consulted for it.
- *
- * @param {string} userAgent
- * @returns {string|null} the version, or null when the UA is not a Firefox one
- */
-export function parseGeckoVersion(userAgent) {
-  const match = /Firefox\/(\d+(?:\.\d+)?(?:[ab]\d+)?)/.exec(userAgent ?? "");
-  return match ? match[1] : null;
-}
-
 export class EngineHost {
-  #engine = "Gecko";
-  /** Prerelease-aware, e.g. "158.0b3". Null when the host is not Gecko. */
-  #version = null;
-  /** 'page' | 'content' | 'auto' as granted by the manager, else null. */
-  #realm = null;
-  #canPostTask = false;
-  #canYield = false;
   #canMessageChannel = false;
   /** Whether the engine ships requestVideoFrameCallback on HTMLVideoElement. */
   #canRvfc = false;
@@ -80,20 +56,6 @@ export class EngineHost {
   #canMozQuality = false;
 
   constructor() {
-    // Optional reads, not `typeof` guards: the manager supplies GM_info in our
-    // own realm when it provides one, and an absent navigator is a test host,
-    // not a branch worth a feature probe.
-    this.#version = parseGeckoVersion(globalThis.navigator?.userAgent ?? "");
-    this.#realm = globalThis.GM_info?.injectInto ?? null;
-    // postTask ships from Firefox 142 (ARCHITECTURE §2.6), inside the 157
-    // floor, and the facade calls it unconditionally. Recording it here is what
-    // makes the availability one fact instead of an assumption repeated by
-    // every caller.
-    this.#canPostTask = typeof globalThis.scheduler?.postTask === "function";
-    // Recorded, never driven: scheduler.yield() is architecturally ruled out by
-    // Trap 2 (ARCHITECTURE §7), so chunking uses yield_() instead. A future
-    // strategy that wants to know what the host offers asks here.
-    this.#canYield = typeof globalThis.scheduler?.yield === "function";
     // nextTask()'s first choice: MessageChannel tasks are not timer-throttled
     // on Gecko, so a hidden tab still makes progress. Present in every host we
     // run on, but it was probed independently in two modules before this.
@@ -116,26 +78,6 @@ export class EngineHost {
       typeof globalThis.HTMLVideoElement?.prototype?.getVideoPlaybackQuality === "function" &&
       "mozPresentedFrames" in proto &&
       "mozPaintedFrames" in proto;
-  }
-
-  get engine() {
-    return this.#engine;
-  }
-
-  get version() {
-    return this.#version;
-  }
-
-  get realm() {
-    return this.#realm;
-  }
-
-  get canPostTask() {
-    return this.#canPostTask;
-  }
-
-  get canYield() {
-    return this.#canYield;
   }
 
   get canMessageChannel() {

@@ -165,15 +165,11 @@
       "summary": "Priority + delay + abort task scheduling behind every deferred path: removal grace, mutation-dispatch defer, lifecycle settle, context retry, resume throttle",
       "shipsInFirefox": 142,
       "usedBy": [
-        "src/shared/scheduler.js",
-        "src/shared/engine-host.js"
+        "src/shared/scheduler.js"
       ],
       "verifiedBy": "tests/scheduler-native.test.mjs",
       "token": "globalThis.scheduler",
-      "probes": [
-        "globalThis.scheduler.postTask"
-      ],
-      "note": "Called unconditionally by the facade on the 157 floor, so the capability has no guard of its own - the probe that now exists is L0 recording availability (src/shared/engine-host.js), which is what lets a caller ask rather than assume. The jsdom test host gets a timer-backed polyfill from tests/loader.mjs."
+      "note": "Called unconditionally by the facade on the 157 floor: there is deliberately no probe chain for it in src/ (a typeof guard would be dead code on every supported target), so this capability is classified by its floor and its caller, not by a probe. The jsdom test host gets a timer-backed polyfill from tests/loader.mjs."
     },
     {
       "id": "TextTrack",
@@ -521,19 +517,6 @@
       ]
     },
     {
-      "id": "scheduler-yield",
-      "api": "scheduler.yield",
-      "summary": "Host chunking primitive that PlayerForge deliberately never calls",
-      "why": "Recorded by L0 and driven by nothing: Trap 2 killed boot through scheduler.yield() and the behaviour is specified rather than buggy (ARCHITECTURE §7), so chunking uses yield_() instead. Without it nothing degrades - no path asks for it - but a future strategy has to be able to tell whether the host offers it at all.",
-      "usedBy": [
-        "src/shared/engine-host.js"
-      ],
-      "token": "globalThis.scheduler",
-      "probes": [
-        "globalThis.scheduler.yield"
-      ]
-    },
-    {
       "id": "custom-event",
       "api": "CustomEvent",
       "summary": "Constructs the pf:status event that crosses the realm boundary",
@@ -696,11 +679,10 @@
     {
       "id": "GM_info",
       "api": "GM_info",
-      "summary": "Manager and script identity for the about/diagnostics surface, plus the granted realm",
+      "summary": "Manager and script identity for the about/diagnostics surface",
       "why": "Deliberately unprobed and ungranted: Violentmonkey 2.49.0 exposes GM_info to a script with no grants, so bare use is correct. Declared here so nobody 'fixes' it by adding a grant - the grant-equality test would then fail on a permission that buys nothing.",
       "usedBy": [
-        "src/entry.js",
-        "src/shared/engine-host.js"
+        "src/entry.js"
       ]
     },
     {

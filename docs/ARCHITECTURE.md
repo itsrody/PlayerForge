@@ -637,7 +637,7 @@ L5  HudReconciler     snapshot -> desired DOM, diffed against applied snapshot
 L4  RenderGate        demand-triggered, tick-coalescing, priority-routed commit
 L2  PlayerStatus      enumerated axes + typed transitions
 L1  Signals           media / visibility / layout / frame / lifecycle edges
-L0  EngineHost        engine version, VM realm, scheduler availability
+L0  EngineHost        engine capability flags (MessageChannel, rVFC, frame quality)
 ```
 
 Dependency direction is strictly downward. No layer reaches around another.
@@ -649,24 +649,25 @@ touches the DOM and the reconciler never schedules.
 
 ### L0 — EngineHost
 
-Single source of truth for environment facts, so capability checks stop being
+Single source of truth for engine capability facts, so capability checks stop being
 repeated at call sites. `platform/capabilities.json` is Node-side and cannot be
 read by the userscript, which is exactly why this is needed.
 
 ```js
 class EngineHost {
-  #engine = "Gecko";
-  #version;          // prerelease-aware, e.g. 158.0b3
-  #realm;            // 'page' | 'content' | 'auto'
-  #canPostTask;
-  #canYield;
+  #canMessageChannel;
   #canRvfc;         // requestVideoFrameCallback availability
   #canMozQuality;   // getVideoPlaybackQuality + mozPresentedFrames
 }
 ```
 
-Read-only after construction. Every other layer asks this instead of
-feature-detecting. Note what is deliberately *absent*: there is no "can await
+Read-only after construction (frozen; entry bootstrap re-probes explicitly
+via `probeEngineHost()` so import order never decides the facts). Every other
+layer asks this instead of feature-detecting. Deliberately narrow: only
+capabilities with live readers live here. Identity facts with no readers -
+engine brand, Gecko version, manager realm, postTask/yield presence - were
+cut: recording them made the snapshot look authoritative about things nothing
+branched on. Note what else is deliberately *absent*: there is no "can await
 paint" flag, because no such API exists to detect (§2.6). Also absent is any
 `canRaf`: `yield_()` re-reads `requestAnimationFrame` on every call because the
 harness installs and removes it per test, so a construction-time snapshot would
@@ -1446,7 +1447,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved thirty-two times since that cut. The first two movements
+The unit count has moved thirty-three times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1768,6 +1769,14 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  literally), fresh brokers everywhere else. Shells built directly keep a
  fresh owned broker that empties itself on teardown. `tests/input-forge.
  test.mjs` gained the per-broker routing pin; the count moved by one.
+
+ The thirty-third movement cut L0 down to capabilities with live readers:
+ engine brand, Gecko version, manager realm and postTask/yield presence had
+ no production readers - only tests - so the fields, `parseGeckoVersion`
+ and their seven tests went, the scheduler-postTask row lost its probe
+ claim, the scheduler-yield row (whose whole premise was "recorded by L0")
+ went with it, and the §4 L0 sketch now shows the three flags that remain.
+ Net seven tests lighter.
 
 ## 7. Gecko-specific decisions, and what they rule out
 
