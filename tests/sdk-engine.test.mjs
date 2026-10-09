@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import {
   findSdkForVideo,
-  findContainer,
   resolveContainer,
   videoFromEvent,
   meetsMinSize,
@@ -12,6 +11,9 @@ import {
   MIN_VIDEO_WIDTH,
   MIN_VIDEO_HEIGHT
 } from "../src/kernel/sdk.js";
+
+/** The descriptor's container field: what findContainer used to return. */
+const containerOf = (video) => findSdkForVideo(video)?.container ?? null;
 
 const dom = (html) =>
   new JSDOM(`<!doctype html><html><body>${html}</body></html>`).window.document;
@@ -56,7 +58,7 @@ test("crosses open shadow boundaries to reach custom-element players", () => {
       "radiant-media-player": "Radiant Media Player",
       "flowplayer-ui": "Flowplayer"
     }[tag], tag);
-    assert.equal(findContainer(video), player, tag);
+    assert.equal(containerOf(video), player, tag);
   }
 });
 
@@ -66,7 +68,7 @@ test("nearest anchor wins regardless of registry order", () => {
   );
   const video = doc.querySelector("video");
   assert.equal(findSdkForVideo(video)?.name, "Plyr");
-  assert.equal(findContainer(video), doc.querySelector(".plyr__video-wrapper"));
+  assert.equal(containerOf(video), doc.querySelector(".plyr__video-wrapper"));
 });
 
 test("registry order breaks ties on a shared anchor element", () => {
@@ -91,13 +93,13 @@ test("generic player markup stays unrecognized", () => {
     const doc = dom(html);
     const video = doc.querySelector("video");
     assert.equal(findSdkForVideo(video), null, html);
-    assert.equal(findContainer(video), null, html);
+    assert.equal(containerOf(video), null, html);
   }
 });
 
-test("findContainer returns the nearest matched anchor", () => {
+test("the descriptor container is the nearest matched anchor", () => {
   const doc = dom('<div data-vjs-player><div class="video-js"><video></video></div></div>');
-  assert.equal(findContainer(doc.querySelector("video")), doc.querySelector(".video-js"));
+  assert.equal(containerOf(doc.querySelector("video")), doc.querySelector(".video-js"));
 });
 
 test("video size gates stay intact", () => {
@@ -188,7 +190,7 @@ test("findSdkForVideo returns a cached descriptor with anchor and hops", () => {
   const sdk = findSdkForVideo(video);
   assert.equal(sdk.name, "Plyr");
   assert.equal(sdk.host, null);
-  assert.equal(sdk.container, findContainer(video));
+  assert.equal(sdk.container, containerOf(video));
   // anchor is the actually-matched element; hops = distance video -> anchor.
   assert.equal(sdk.anchor, doc.querySelector(".plyr__video-wrapper"));
   assert.equal(sdk.hops >= 1, true);

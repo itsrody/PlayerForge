@@ -86,6 +86,7 @@ export default async function runJitShapeBench(bundle = DEFAULT_BUNDLE) {
       realmCopyPair(),
       mapGetPair(),
       optionalChainPair(),
+      addedNodesPair(),
     ]) {
       // Which fixture the arms read is passed as an op argument rather than
       // parked on a global, so neither arm can be perturbed by the other.
@@ -213,7 +214,14 @@ const PRIME = `
     // mostly a live signal, sometimes null.
     const WITH_M = { m(x) { return x + 1; } };
     const MAYBES = [WITH_M, null, WITH_M, WITH_M, null, WITH_M];
-    return { NESTED, ScopeLike, INTENT, INTENT_OBJ, INTENT_KEYS, MAYBES };
+    // A live NodeList, not an array: forEachVideoInMutations drains
+    // mutation.addedNodes, and only a live list carries the iterator cost
+    // the pair below prices (a plain array would scalar-replace it away).
+    const holder = document.createElement("div");
+    holder.innerHTML = "<i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>";
+    document.body.appendChild(holder);
+    const ADDED = holder.childNodes;
+    return { NESTED, ScopeLike, INTENT, INTENT_OBJ, INTENT_KEYS, MAYBES, ADDED };
   })();
 `;
 
@@ -666,6 +674,41 @@ function optionalChainPair() {
       for (let n = 0; n < 64; n++) {
         const node = MAYBES[n % MAYBES.length];
         acc += node == null ? 0 : node.m(1);
+      }
+      window.__pfJitSink = acc;
+    },
+  };
+}
+
+/**
+ * The added-node walk. forEachVideoInMutations drains mutation.addedNodes -
+ * a live NodeList - with for..of today; the candidate walks it by index, the
+ * way the same function already drains querySelectorAll results. A plain
+ * array would be the wrong fixture here (its iterator scalar-replaces away),
+ * so PRIME parks a live childNodes list for both arms.
+ */
+function addedNodesPair() {
+  return {
+    label: "mutation added-node walk (per batch)",
+    firstName: "for..of over live NodeList",
+    secondName: "indexed walk",
+    firstOp: function forOfNodes() {
+      const list = window.__pfShapes.ADDED;
+      let acc = 0;
+      for (let n = 0; n < 64; n++) {
+        for (const node of list) {
+          acc += node.nodeType === 1 ? 1 : 0;
+        }
+      }
+      window.__pfJitSink = acc;
+    },
+    secondOp: function indexedNodes() {
+      const list = window.__pfShapes.ADDED;
+      let acc = 0;
+      for (let n = 0; n < 64; n++) {
+        for (let i = 0; i < list.length; i++) {
+          acc += list[i].nodeType === 1 ? 1 : 0;
+        }
       }
       window.__pfJitSink = acc;
     },

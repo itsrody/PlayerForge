@@ -186,3 +186,14 @@ test("kernel: registerShellProvider stores provider", () => {
   const provider = makeProvider(makeShell());
   kernel.registerShellProvider(provider);
 });
+
+test("contract event table is frozen against cross-layer mutation", async () => {
+  // A mutated event name silently unwires every dispatcher and listener that
+  // agrees on the string, across both layers at once. FRAMEWORK_TUNING stays
+  // mutable on purpose: timing tests retune the grace delay.
+  const { GESTURE_EVENTS } = await import("../src/kernel/contract.js");
+  assert.ok(Object.isFrozen(GESTURE_EVENTS), "event names are immutable");
+  assert.throws(() => {
+    GESTURE_EVENTS.panel = "pf:other";
+  }, "writing a frozen event name throws instead of forking the contract");
+});

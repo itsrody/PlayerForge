@@ -241,11 +241,6 @@ export function resolveContainer({ record, el }) {
   return el;
 }
 
-/** @deprecated Use the descriptor's `container` field instead. */
-export function findContainer(video) {
-  return findSdkForVideo(video)?.container ?? null;
-}
-
 /**
  * Resolve the real <video> for a media event. Media events don't bubble, but
  * capture listeners on document still receive them through the composed path -
@@ -343,12 +338,17 @@ export function forEachShadowVideos(treeRoot, visit) {
  * form allocated a generator object (and a NodeList iterator) per batch per
  * subscriber, and the added-node walk is on the kernel's hot discovery path.
  * The NodeList is walked by index here, which is also the cheapest way to
- * drain it. Shadow content under the added subtree is picked up by
+ * drain it: a live list's iterator does not scalar-replace the way a plain
+ * array's does (priced 2.9× on Gecko 158 in jit-shape.bench.mjs), so for..of
+ * would reintroduce exactly the allocation the generator removal took out.
+ * Shadow content under the added subtree is picked up by
  * forEachShadowVideos (see its comment for the gap this closes).
  */
 export function forEachVideoInMutations(mutations, visit) {
-  for (const mutation of mutations) {
-    for (const node of mutation.addedNodes) {
+  for (let m = 0; m < mutations.length; m++) {
+    const addedNodes = mutations[m].addedNodes;
+    for (let i = 0; i < addedNodes.length; i++) {
+      const node = addedNodes[i];
       // Cheap element guard: text/comment nodes have no subtree and cannot
       // host a shadow root, so skip both scans (which would otherwise run
       // per added node on every mutation batch of an SPA page).
@@ -359,8 +359,8 @@ export function forEachVideoInMutations(mutations, visit) {
         visit(node);
       } else if (node.querySelectorAll) {
         const videos = node.querySelectorAll("video");
-        for (let i = 0; i < videos.length; i++) {
-          visit(videos[i]);
+        for (let j = 0; j < videos.length; j++) {
+          visit(videos[j]);
         }
         forEachShadowVideos(node, visit);
       }

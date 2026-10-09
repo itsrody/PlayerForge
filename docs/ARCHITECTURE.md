@@ -422,6 +422,13 @@ two of them to nothing:
  | `Map.get` vs keyed object read | 2.1× (4.2 µs per keystroke) | yes — table semantics at user rate |
  | optional call vs explicit null check | **1.00×** | yes — guards are free; a wash like the stepper's |
 
+ A seventh pair priced the one shape the audit found misaligned with its own
+ file: `forEachVideoInMutations` drained the live `addedNodes` NodeList with
+ `for..of` while its header (and the `querySelectorAll` walk beside it)
+ mandates index walks. 2.9× on Gecko 158 at ~0.2 µs per visited node — small
+ in absolute terms, but the fix is four lines with no structural cost, so
+ unlike the array-backed pointer list there is no trade to weigh: taken.
+
  The pattern holds: the largest absolute on the board is tens of microseconds
  on paths that run at event rate or rarer, and the one genuine wash joins the
  stepper's `10 ** decimals` as a recorded non-difference. No `src/` change
@@ -1402,7 +1409,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved nineteen times since that cut. The first two movements
+The unit count has moved twenty times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1595,6 +1602,15 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  coalesced-events path it must never replace. `tests/video-filter.test.mjs`
  gained 2 and `tests/panel-compact.test.mjs` 1, all failing pre-fix; the
  shared stepper fake now cascades like the production widget.
+
+ The twentieth movement audited the kernel, discovery, plugin and contract
+ modules for allocation shape and native-direct design. Three small items
+ stood: the added-node walk now drains its live NodeList by index (2.9× on
+ Gecko 158, taken — the file's own header already mandated it), the
+ deprecated `findContainer` alias is gone (its seven test call sites read
+ the descriptor field directly), and the event table is frozen while the
+ tuning stays mutable for timing tests. `pointerrawupdate` joined `retired`
+ next to the coalesced path it must never replace.
 
 ## 7. Gecko-specific decisions, and what they rule out
 

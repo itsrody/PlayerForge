@@ -22,8 +22,10 @@ export const SHELL_MARKER = "data-pf-shell";
 
 export const DEBUG_LOGS_KEY = "debug.logs";
 
-/** Semantic CustomEvents the shell honors on its host (inputs + panel). */
-export const GESTURE_EVENTS = {
+/** Semantic CustomEvents the shell honors on its host (inputs + panel). Frozen:
+ *  a mutated event name silently unwires every dispatcher and listener that
+ *  agrees on the string, across both layers at once. */
+export const GESTURE_EVENTS = Object.freeze({
   hold: "pf:gesture-hold",
   release: "pf:gesture-release",
   scrub: "pf:gesture-scrub",
@@ -36,9 +38,11 @@ export const GESTURE_EVENTS = {
   mute: "pf:gesture-mute",
   panel: "pf:gesture-panel",
   pinch: "pf:gesture-pinch"
-};
+});
 
-/** Framework-owned calibration (the removal-watch grace delay). */
+/** Framework-owned calibration (the removal-watch grace delay). Deliberately
+ *  unfrozen, unlike the tables around it: tests retune the grace to drive
+ *  timing edges without waiting out the production window. */
 export const FRAMEWORK_TUNING = {
   removalGraceMs: 500
 };
