@@ -9,10 +9,10 @@ if (!globalThis.location) {
   globalThis.location = { hostname: "test.com", pathname: "/", hash: "" };
 }
 if (!globalThis.document) {
-  globalThis.document = { addEventListener() {}, querySelectorAll() { return []; } };
+  globalThis.document = { addEventListener() {}, removeEventListener() {}, querySelectorAll() { return []; } };
 }
 if (!globalThis.window) {
-  globalThis.window = { addEventListener() {} };
+  globalThis.window = { addEventListener() {}, removeEventListener() {} };
 }
 
 globalThis.GM_getValue = (key, fallback) => fallback;
@@ -230,4 +230,13 @@ test("lifecycle: an offer arriving mid-build does not mount a twin", async () =>
   await first;
   await second;
   assert.equal(factoryCalls, 1, "the second offer met the mount in flight, not a new build");
+});
+
+test("kernel: destroy() tears down document ownership idempotently", () => {
+  const kernel = new Kernel();
+  kernel.init();
+  kernel.destroy();
+  // A second pagehide (bfcache hide followed by a real unload, or a double
+  // event) must not throw on disposed scopes, managers or registries.
+  kernel.destroy();
 });

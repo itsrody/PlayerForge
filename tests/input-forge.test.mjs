@@ -5,7 +5,7 @@ import { JSDOM } from "jsdom";
 globalThis.GM_getValue = (key, fallback) => fallback;
 globalThis.GM_setValue = () => {};
 
-const { InputForge } = await import("../src/shell/inputs/forge.js");
+const { InputForge, EngineBroker } = await import("../src/shell/inputs/forge.js");
 const { GESTURE_EVENTS, computeCoverScale, attachInputActions } = await import("../src/shell/inputs/actions.js");
 const { initFsGate, setFullscreen } = await import("./fs-gate.mjs");
 
@@ -1253,4 +1253,111 @@ test("tap replay re-resolves a control the SDK re-rendered mid-window", async (t
   zone.dispatchEvent(mouse(dom.window, "click", { x: 400, y: 200 }));
   await sleep(350);
   assert.equal(freshClicks, 1, "the replay follows the live node, not the detached one");
+});
+
+/* --- EngineBroker: one broker per document, no global arbitration state -- */
+
+function fakeEngine(target, { playing = false, claim = true } = {}) {
+  const calls = [];
+  return {
+    calls,
+    adapter: {
+      target: () => target,
+      isPlaying: () => playing,
+      keydown: (event) => {
+        calls.push(["keydown", event.code]);
+        return claim;
+      },
+      keyup: (event) => {
+        calls.push(["keyup", event.code]);
+      },
+      finishHold: () => {
+        calls.push(["finish"]);
+      }
+    }
+  };
+}
+
+const brokerKey = (win, type, code) =>
+  new win.KeyboardEvent(type, { bubbles: true, cancelable: true, code });
+
+test("a broker arbitrates its engines best-first", (t) => {
+  const { dom } = makeEnv();
+  const broker = new EngineBroker();
+  t.after(() => {
+    broker.unregister(idle.adapter);
+    broker.unregister(active.adapter);
+  });
+  const idle = fakeEngine(dom.window.document.createElement("div"));
+  const active = fakeEngine(dom.window.document.createElement("div"), { playing: true });
+  broker.register(idle.adapter);
+  broker.register(active.adapter);
+  assert.equal(broker.size, 2);
+
+  dom.window.document.dispatchEvent(brokerKey(dom.window, "keydown", "KeyM"));
+  assert.deepEqual(active.calls, [["keydown", "KeyM"]], "the playing engine claims first");
+  assert.deepEqual(idle.calls, [], "a claim ends arbitration - no weaker engine is visited");
+});
+
+test("an empty broker holds no document listeners", (t) => {
+  const { dom } = makeEnv();
+  const doc = dom.window.document;
+  const view = doc.defaultView;
+  let adds = 0;
+  let removes = 0;
+  const realDocAdd = doc.addEventListener.bind(doc);
+  const realViewAdd = view.addEventListener.bind(view);
+  doc.addEventListener = (type, fn, opts) => {
+    if (type === "keydown" || type === "keyup") {
+      adds++;
+    }
+    return realDocAdd(type, fn, opts);
+  };
+  view.addEventListener = (type, fn, opts) => {
+    if (type === "blur") {
+      adds++;
+    }
+    return realViewAdd(type, fn, opts);
+  };
+  // removeEventListener has no per-type hook need: aborts release by signal,
+  // so balance is observed through re-registration instead (see below).
+  const broker = new EngineBroker();
+  assert.equal(broker.size, 0, "a fresh broker attaches nothing");
+  assert.equal(adds, 0);
+
+  const engine = fakeEngine(doc.createElement("div"));
+  broker.register(engine.adapter);
+  assert.equal(adds, 3, "first registration attaches the document pair plus blur");
+  broker.unregister(engine.adapter);
+  assert.equal(broker.size, 0);
+
+  // Re-registration after a full teardown re-attaches exactly once: the
+  // dispose-then-recreate cycle leaves no ghost scope behind.
+  broker.register(engine.adapter);
+  assert.equal(adds, 6, "re-attach after empty is exactly one more set");
+  broker.unregister(engine.adapter);
+  t.after(() => {
+    doc.addEventListener = realDocAdd;
+    view.addEventListener = realViewAdd;
+  });
+});
+
+test("engines from another document never arbitrate", (t) => {
+  const first = makeEnv();
+  const broker = new EngineBroker();
+  const stale = fakeEngine(first.dom.window.document.createElement("div"));
+  broker.register(stale.adapter);
+
+  // A new realm: the broker re-attaches to it, and the previous document's
+  // engine is filtered instead of consulted.
+  const second = makeEnv();
+  const local = fakeEngine(second.dom.window.document.createElement("div"), { claim: false });
+  broker.register(local.adapter);
+  t.after(() => {
+    broker.unregister(stale.adapter);
+    broker.unregister(local.adapter);
+  });
+  second.dom.window.document.dispatchEvent(brokerKey(second.dom.window, "keydown", "KeyM"));
+  assert.deepEqual(stale.calls, [], "the stale engine is filtered, not visited");
+  assert.deepEqual(local.calls, [["keydown", "KeyM"]], "the local engine still arbitrates");
 });

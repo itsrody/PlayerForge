@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { EngineHost, engineHost, parseGeckoVersion } = await import(
+const { EngineHost, engineHost, parseGeckoVersion, probeEngineHost } = await import(
   "../src/shared/engine-host.js"
 );
 
@@ -173,4 +173,26 @@ test("two instances constructed from one host agree", () => {
   assert.equal(a.canMessageChannel, b.canMessageChannel);
   assert.equal(a.canRvfc, b.canRvfc);
   assert.equal(a.canMozQuality, b.canMozQuality);
+});
+
+test("probeEngineHost refreshes the snapshot from current globals", () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  Object.defineProperty(globalThis, "navigator", {
+    value: { userAgent: "Mozilla/5.0 (X11; Linux x86_64; rv:158.0) Gecko/20100101 Firefox/158.0" },
+    writable: true,
+    configurable: true
+  });
+  try {
+    const refreshed = probeEngineHost();
+    assert.equal(refreshed.version, "158.0", "re-probing reads the live globals, not import time");
+    assert.equal(refreshed.engine, "Gecko");
+    assert.ok(Object.isFrozen(refreshed), "the refreshed snapshot stays frozen");
+  } finally {
+    if (descriptor) {
+      Object.defineProperty(globalThis, "navigator", descriptor);
+    } else {
+      delete globalThis.navigator;
+    }
+    probeEngineHost();
+  }
 });

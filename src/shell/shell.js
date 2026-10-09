@@ -1,6 +1,6 @@
 import { logger, watchFrameQuality } from "../shared/diagnostics.js";
 import { deepestActiveElement, isInsideShell, eventHitsControl, fs } from "../shared/shadow.js";
-import { InputForge } from "./inputs/forge.js";
+import { EngineBroker, InputForge } from "./inputs/forge.js";
 import { attachInputActions, releaseShellActions } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
 import { SubtitlesSection } from "./subtitles/section.js";
@@ -56,18 +56,22 @@ export class Shell {
    *  the activity below rather than replacing it - the activity still decides
    *  when the media clock is attached, status only records what happened. */
   #status = null;
+  /** The keyboard broker this shell's engine arbitrates through: the
+   *  plugin's per-document broker, or null for the shared default. */
+  #broker = null;
   /** L4 render gate. Commits it issues outlive the event that caused them, so
-   *  N edges in one tick are one write and the priority is declared by the
-   *  work rather than inherited from whichever handler ran first. Today it
+   *  N edges in one tick are one write and the priority is declared by
+   *  the work rather than inherited from whichever handler ran first. Today it
    *  drives the media-state custom properties (see #forwardMediaEvents),
    *  whose writes are diffed by L5's reconciler inside the commit rather than
    *  behind a second gate. It is null until boot has reached that point. */
   #gate = null;
 
-  constructor({ video, container, sdk, onDestroy }) {
+  constructor({ video, container, sdk, onDestroy, broker = null }) {
     this.video = video;
     this.container = container;
     this.sdk = sdk;
+    this.#broker = broker;
     this.#onDestroy = onDestroy;
     this.#media = createMediaControls({ video });
     // A boot that throws AFTER #injectDom has marked the video would otherwise
@@ -107,7 +111,7 @@ export class Shell {
 
     this.#panel = new SettingsPanel(this);
     this.#toasts = new ToastManager(this.#shellDom.hudLayer, this.#dom, this.#scope.signal);
-    this.#inputs = new InputForge(this.video, this.container, this.shellHost);
+    this.#inputs = new InputForge(this.video, this.container, this.shellHost, this.#broker);
     attachInputActions(this, this.shellHost, this.#inputs.signal);
     this.#resume = new ResumeTracker(this);
     if (this.sdk.source === "generic") {
@@ -607,9 +611,12 @@ export class Shell {
  * something the framework constructs directly.
  */
 export function registerShell(kernel) {
+  // The document's keyboard broker, owned here: one per bootstrap, threaded
+  // provider -> Shell -> InputForge, so arbitration state is never global.
+  const broker = new EngineBroker();
   kernel.registerShellProvider({
     create({ video, container, sdk, onDestroy }) {
-      return new Shell({ video, container, sdk, onDestroy });
+      return new Shell({ video, container, sdk, onDestroy, broker });
     }
   });
 }

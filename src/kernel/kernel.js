@@ -75,30 +75,41 @@ export class Kernel {
   };
 
   #onPageHide = (event) => {
+    // Deliberately gated: a persisted (bfcache) hide restores the page, and
+    // the reconcile path still needs the listeners, the claims and the shells.
     if (!event.persisted) {
       logger.log("kernel", "Page hiding, cleaning up");
-      this.#stopDiscoveryTap?.();
-      this.#stopDiscoveryTap = null;
-      // Scope first: the signal cancels pending removal-grace postTasks.
-      // Then the DOM manager: the pageshow/pagehide listeners above were
-      // registered under ITS signal (listen() owns the signal unconditionally),
-      // so only its destroy drops them - the kernel scope never held them.
-      this.#scope.dispose();
-      this.#dom.destroy();
-      // Subscribers too. The kernel owns this set, so it owns its release:
-      // callers register and drop the returned unsubscribe (nothing re-registers
-      // a listener per page, so there is no double-fire to guard), and a
-      // discarded page should not keep the closures alive. Deliberately inside
-      // the !persisted branch - a bfcache hide restores the page, and the
-      // reconcile path above still needs whoever registered to be listening.
-      this.#createdListeners.clear();
-      // Tear down in-flight settle waits so their observers + timers die
-      // immediately instead of running the full quiet/cap window on a page
-      // that is already leaving.
-      this.#lifecycle.destroy();
-      this.#registry.destroyAll();
+      this.destroy();
     }
   };
+
+  /**
+   * Full teardown: the non-persisted pagehide path, extracted so entry (and
+   * tests) can drive the same sequence directly. Idempotent - every member
+   * tolerate repeat disposal (Scope, DOMManager, lifecycle, registry), and
+   * the discovery tap nulls itself. The persisted (bfcache) hide never comes
+   * here: restore still needs the listeners, the claims and the shells.
+   */
+  destroy() {
+    this.#stopDiscoveryTap?.();
+    this.#stopDiscoveryTap = null;
+    // Scope first: the signal cancels pending removal-grace postTasks.
+    // Then the DOM manager: the pageshow/pagehide listeners above were
+    // registered under ITS signal (listen() owns the signal unconditionally),
+    // so only its destroy drops them - the kernel scope never held them.
+    this.#scope.dispose();
+    this.#dom.destroy();
+    // Subscribers too. The kernel owns this set, so it owns its release:
+    // callers register and drop the returned unsubscribe (nothing re-registers
+    // a listener per page, so there is no double-fire to guard), and a
+    // discarded page should not keep the closures alive.
+    this.#createdListeners.clear();
+    // Tear down in-flight settle waits so their observers + timers die
+    // immediately instead of running the full quiet/cap window on a page
+    // that is already leaving.
+    this.#lifecycle.destroy();
+    this.#registry.destroyAll();
+  }
 
   constructor() {
     this.#registry = new ShellRegistry();

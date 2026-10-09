@@ -33,6 +33,13 @@
  * about surface and for diagnosis, never consulted to decide whether a page
  * object may be touched. SDK detection reads composed DOM ancestry and never a
  * page-defined global, so no branch on this field can change behaviour.
+ *
+ * Ownership: the snapshot is taken eagerly at import (the ambient globals at
+ * document-start ARE the facts), and entry bootstrap re-probes explicitly via
+ * probeEngineHost() before anything reads - so the owner is written down in
+ * code, not just in this comment. Re-probing also serves realm transitions
+ * (a fresh document under test harnesses): same construction, current
+ * globals. The class stays directly constructible for per-case tests.
  */
 
 /**
@@ -144,5 +151,16 @@ export class EngineHost {
   }
 }
 
-/** The host for this document. Frozen: read-only after construction. */
-export const engineHost = Object.freeze(new EngineHost());
+/** The host for this document. Replaced whole by probeEngineHost(); readers
+ *  hold the binding, never a copy, so they always see the current snapshot. */
+export let engineHost = Object.freeze(new EngineHost());
+
+/**
+ * (Re)probe the shared snapshot from the current globals. Entry bootstrap
+ * calls this first: import order must never decide what the facts are.
+ * Idempotent - same globals, same frozen answers.
+ */
+export function probeEngineHost() {
+  engineHost = Object.freeze(new EngineHost());
+  return engineHost;
+}

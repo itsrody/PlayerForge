@@ -63,142 +63,173 @@ const replayedClicks = new WeakSet();
  * (verified in Gecko 157: one player mutes on KeyM, two players mute on
  * nothing). The broker resolves that by picking the engine up front, from a
  * ladder that always has an answer.
+ *
+ * One broker per document, owned by the shell plugin (registerShell) and
+ * threaded provider -> Shell -> InputForge. The module-global registry this
+ * replaces could not scope itself: engines from a previous document shared
+ * the Set, so arbitration carried a realm field and a re-attach dance. A
+ * broker instance serves exactly the document it attached to, and an engine
+ * arbitrates only in its own document - cross-document leftovers are
+ * filtered, never consulted. Direct InputForge constructions (tests, legacy
+ * callers) share one default broker via sharedBroker().
  */
+export class EngineBroker {
+  /** Live engines in boot order, each a private-access adapter (see below). */
+  #engines = new Set();
+  /** The engine the user last touched - a tiebreak now, never a gate. */
+  #lastTouched = null;
+  /** The engine that claimed the CURRENT Space press, so keyup settles exactly
+   *  what its keydown decided even if focus moved in between. */
+  #owner = null;
+  /** Live only while at least one engine is registered; aborting it removes all
+   *  three listeners, so an empty page keeps none. */
+  #listeners = null;
+  /** The document the live listeners are attached to. Re-attached if the
+   *  ambient document is ever a different one (jsdom test harnesses install a
+   *  fresh document per case); in a stable page this is set once and never
+   *  moves. */
+  #document = null;
+  /** Reused per keystroke so arbitration allocates nothing (N is single digits). */
+  #order = [];
 
-/** Live engines in boot order, each a private-access adapter (see below). */
-const engines = new Set();
-/** The engine the user last touched - a tiebreak now, never a gate. */
-let lastTouchedEngine = null;
-/** The engine that claimed the CURRENT Space press, so keyup settles exactly
- *  what its keydown decided even if focus moved in between. */
-let keyboardOwner = null;
-/** Live only while at least one engine is registered; aborting it removes all
- *  three listeners, so an empty page keeps none. */
-let keyboardListeners = null;
-/** The document the live listeners are attached to. The broker is realm-scoped,
- *  so it re-attaches if the ambient document is ever a different one (a host
- *  that re-evaluates the userscript in a fresh document); in a stable page this
- *  is set once and never moves. */
-let keyboardRealm = null;
-/** Reused per keystroke so arbitration allocates nothing (N is single digits). */
-const engineOrder = [];
-
-/** Only this realm's players arbitrate. Engines left over from another
- *  document cannot claim a keystroke, and none of their state is consulted. */
-function inKeyboardRealm(engine) {
-  const target = engine.target();
-  return !!target && target.ownerDocument === keyboardRealm;
-}
-
-/** Relative claim strength: lower wins. Every rung has a defined fallback, so
- *  arbitration cannot dead-end the way the old last-touched gate did. */
-function engineRank(engine, activeElement) {
-  const target = engine.target();
-  let rank = 0;
-  // Focus is the most specific statement of intent: a player whose own chrome
-  // holds the caret/selection owns the keyboard, whatever is playing.
-  if (target && isInsideShell(target, activeElement)) {
-    rank -= 8;
+  /** Live engine count, for the teardown test and diagnostics. */
+  get size() {
+    return this.#engines.size;
   }
-  // Then the player actually in motion - with two paused players there is no
-  // "right" answer, but there is always a playing one worth answering.
-  if (engine.isPlaying()) {
-    rank -= 4;
-  }
-  if (engine === lastTouchedEngine) {
-    rank -= 2;
-  }
-  return rank;
-}
 
-/** Insertion sort into the reused buffer - stable, so equal ranks keep boot
- *  order and arbitration stays deterministic across a player's lifetime. */
-function orderEngines(activeElement) {
-  engineOrder.length = 0;
-  for (const engine of engines) {
-    if (inKeyboardRealm(engine)) {
-      engineOrder.push(engine);
+  /**
+   * Register one engine and (re)attach the shared listeners. The adapter is
+   * closures over the engine's privates, so the broker reaches the keyboard
+   * paths without widening the class's surface.
+   */
+  register(adapter) {
+    this.#engines.add(adapter);
+    if (this.#listeners && this.#document === document) {
+      return adapter;
     }
-  }
-  for (let i = 1; i < engineOrder.length; i++) {
-    const engine = engineOrder[i];
-    const rank = engineRank(engine, activeElement);
-    let j = i - 1;
-    while (j >= 0 && engineRank(engineOrder[j], activeElement) > rank) {
-      engineOrder[j + 1] = engineOrder[j];
-      j--;
-    }
-    engineOrder[j + 1] = engine;
-  }
-}
-
-/** Visit engines best-first; the first to claim the keystroke ends it. Claiming
- *  is reported explicitly rather than sniffed off defaultPrevented, so a page
- *  handler that canceled the event before us cannot hand a false claim to
- *  whichever engine happens to be first. */
-function dispatchKeydown(event) {
-  orderEngines(deepestActiveElement(document));
-  for (const engine of engineOrder) {
-    if (engine.keydown(event)) {
-      keyboardOwner = engine;
-      lastTouchedEngine = engine;
-      return;
-    }
-  }
-}
-
-function dispatchKeyup(event) {
-  if (event.code !== "Space") {
-    return;
-  }
-  const owner = keyboardOwner;
-  keyboardOwner = null;
-  owner?.keyup(event);
-}
-
-/** A window blur can swallow the matching Space keyup; finish the hold through
- *  the normal release path so playback rate never stays boosted. Only the
- *  owner can be mid-hold, so one listener covers every player. */
-function dispatchBlur() {
-  const owner = keyboardOwner;
-  keyboardOwner = null;
-  owner?.finishHold(false);
-}
-
-/**
- * Register one engine and (re)attach the shared listeners. The adapter is
- * closures over the engine's privates, so the broker reaches the keyboard
- * paths without widening the class's surface.
- */
-function registerKeyboardEngine(adapter) {
-  engines.add(adapter);
-  if (keyboardListeners && keyboardRealm === document) {
+    this.#listeners?.dispose();
+    this.#listeners = new Scope();
+    this.#document = document;
+    const signal = this.#listeners.signal;
+    const view = document.defaultView || window;
+    document.addEventListener("keydown", (event) => this.#dispatchKeydown(event), { capture: true, signal });
+    document.addEventListener("keyup", (event) => this.#dispatchKeyup(event), { capture: true, signal });
+    view.addEventListener("blur", () => this.#dispatchBlur(), { signal });
     return adapter;
   }
-  keyboardListeners?.dispose();
-  keyboardListeners = new Scope();
-  keyboardRealm = document;
-  const signal = keyboardListeners.signal;
-  const view = document.defaultView || window;
-  document.addEventListener("keydown", dispatchKeydown, { capture: true, signal });
-  document.addEventListener("keyup", dispatchKeyup, { capture: true, signal });
-  view.addEventListener("blur", dispatchBlur, { signal });
-  return adapter;
+
+  noteTouched(adapter) {
+    this.#lastTouched = adapter;
+  }
+
+  unregister(adapter) {
+    this.#engines.delete(adapter);
+    if (this.#lastTouched === adapter) {
+      this.#lastTouched = null;
+    }
+    if (this.#owner === adapter) {
+      this.#owner = null;
+    }
+    if (this.#engines.size === 0 && this.#listeners) {
+      this.#listeners.dispose();
+      this.#listeners = null;
+      this.#document = null;
+    }
+  }
+
+  /** Only its own document's players arbitrate. Engines left over from another
+   *  document cannot claim a keystroke, and none of their state is consulted. */
+  #inScope(engine) {
+    const target = engine.target();
+    return !!target && target.ownerDocument === this.#document;
+  }
+
+  /** Relative claim strength: lower wins. Every rung has a defined fallback, so
+   *  arbitration cannot dead-end the way the old last-touched gate did. */
+  #rank(engine, activeElement) {
+    const target = engine.target();
+    let rank = 0;
+    // Focus is the most specific statement of intent: a player whose own chrome
+    // holds the caret/selection owns the keyboard, whatever is playing.
+    if (target && isInsideShell(target, activeElement)) {
+      rank -= 8;
+    }
+    // Then the player actually in motion - with two paused players there is no
+    // "right" answer, but there is always a playing one worth answering.
+    if (engine.isPlaying()) {
+      rank -= 4;
+    }
+    if (engine === this.#lastTouched) {
+      rank -= 2;
+    }
+    return rank;
+  }
+
+  /** Insertion sort into the reused buffer - stable, so equal ranks keep boot
+   *  order and arbitration stays deterministic across a player's lifetime. */
+  #orderEngines(activeElement) {
+    const order = this.#order;
+    order.length = 0;
+    for (const engine of this.#engines) {
+      if (this.#inScope(engine)) {
+        order.push(engine);
+      }
+    }
+    for (let i = 1; i < order.length; i++) {
+      const engine = order[i];
+      const rank = this.#rank(engine, activeElement);
+      let j = i - 1;
+      while (j >= 0 && this.#rank(order[j], activeElement) > rank) {
+        order[j + 1] = order[j];
+        j--;
+      }
+      order[j + 1] = engine;
+    }
+  }
+
+  /** Visit engines best-first; the first to claim the keystroke ends it. Claiming
+   *  is reported explicitly rather than sniffed off defaultPrevented, so a page
+   *  handler that canceled the event before us cannot hand a false claim to
+   *  whichever engine happens to be first. */
+  #dispatchKeydown(event) {
+    this.#orderEngines(deepestActiveElement(document));
+    for (const engine of this.#order) {
+      if (engine.keydown(event)) {
+        this.#owner = engine;
+        this.#lastTouched = engine;
+        return;
+      }
+    }
+  }
+
+  #dispatchKeyup(event) {
+    if (event.code !== "Space") {
+      return;
+    }
+    const owner = this.#owner;
+    this.#owner = null;
+    owner?.keyup(event);
+  }
+
+  /** A window blur can swallow the matching Space keyup; finish the hold through
+   *  the normal release path so playback rate never stays boosted. Only the
+   *  owner can be mid-hold, so one listener covers every player. */
+  #dispatchBlur() {
+    const owner = this.#owner;
+    this.#owner = null;
+    owner?.finishHold(false);
+  }
 }
 
-function unregisterKeyboardEngine(adapter) {
-  engines.delete(adapter);
-  if (lastTouchedEngine === adapter) {
-    lastTouchedEngine = null;
+/** The shared broker for direct InputForge constructions. Production shells
+ *  always receive the plugin's per-document broker instead. */
+let defaultBroker = null;
+
+export function sharedBroker() {
+  if (!defaultBroker) {
+    defaultBroker = new EngineBroker();
   }
-  if (keyboardOwner === adapter) {
-    keyboardOwner = null;
-  }
-  if (engines.size === 0 && keyboardListeners) {
-    keyboardListeners.dispose();
-    keyboardListeners = null;
-    keyboardRealm = null;
-  }
+  return defaultBroker;
 }
 
 /**
@@ -434,6 +465,9 @@ export class InputForge {
   /** This engine's handle in the page-wide keyboard broker (set at the end of
    *  the constructor, cleared on teardown). */
   #keyboardEngine = null;
+  /** The broker this engine arbitrates through: the plugin's per-document
+   *  broker in production, the shared default for direct constructions. */
+  #broker = null;
 
   // Trackpad ctrl+wheel pinch cooldown: a lazy deadline avoids per-gesture timers.
   #trackpadPinchCooldownUntil = -Infinity;
@@ -442,10 +476,11 @@ export class InputForge {
   /** Stable reference so the scoped wheel listener can be removed again. */
   #wheelHandler = null;
 
-  constructor(video, zone, eventTarget) {
+  constructor(video, zone, eventTarget, broker = null) {
     this.#video = video;
     this.#zone = zone;
     this.#eventTarget = eventTarget;
+    this.#broker = broker ?? sharedBroker();
     const { signal } = this.#scope;
     // Idle touch behavior: panning and pinch-zoom stay available to the SDK
     // (scrollable playlists, settings sheets) until a gesture actually owns
@@ -524,7 +559,7 @@ export class InputForge {
       this.setTrackpadPinchEnabled(fs);
     }, this.#scope.signal);
 
-    this.#keyboardEngine = registerKeyboardEngine({
+    this.#keyboardEngine = this.#broker.register({
       target: () => this.#eventTarget,
       isLoaded: () => this.#isLoaded(),
       isPlaying: () => !this.#video.paused,
@@ -596,7 +631,7 @@ export class InputForge {
     cancelEase(this.#video);
     // DOM lifecycle: disconnect observers, restore styles, remove elements.
     this.#dom.destroy();
-    unregisterKeyboardEngine(this.#keyboardEngine);
+    this.#broker.unregister(this.#keyboardEngine);
     this.#keyboardEngine = null;
     this.#resetKeyboardHold();
     this.#pointerOwned = false;
@@ -852,7 +887,7 @@ export class InputForge {
     ) {
       return;
     }
-    lastTouchedEngine = this.#keyboardEngine;
+    this.#broker.noteTouched(this.#keyboardEngine);
     const existing = this.#pointers.get(event.pointerId);
     if (existing) {
       existing.x = event.clientX;
