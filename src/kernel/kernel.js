@@ -3,7 +3,7 @@ import { getConfigValue, loadJsonObject, gmSetValue, KEYS } from "../shared/stor
 import { setDebugRuntime } from "../shared/diagnostics.js";
 import { postTask } from "../shared/scheduler.js";
 import { Scope } from "../shared/scope.js";
-import { findSdkForVideo, findGenericPlayer, matchPrints, fingerprintFor, meetsMinSize, watchDocumentVideos, watchMediaEvents, forEachShadowVideos } from "./sdk.js";
+import { resolvePlayer, fingerprintFor, meetsMinSize, watchDocumentVideos, watchMediaEvents, forEachShadowVideos } from "./sdk.js";
 import { GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
 
 /**
@@ -200,29 +200,6 @@ export class Kernel {
   }
 
   /**
-   * Match this video against the hostname's learned prints. Returns a
-   * learned descriptor (placement re-resolved live, gates still apply
-   * downstream) or null. Runs inside the generic opt-in: with the switch
-   * off, learned knowledge stays dormant like the slow path itself.
-   */
-  #matchLearned(video) {
-    for (const print of this.#printsForHost()) {
-      const hit = matchPrints(video, print);
-      if (hit) {
-        return {
-          name: "Custom player",
-          host: null,
-          container: hit.el,
-          anchor: hit.el,
-          hops: hit.hops,
-          source: "learned"
-        };
-      }
-    }
-    return null;
-  }
-
-  /**
    * Record a successful generic adoption as a domain-scoped print. Writes
    * only when the shape is new (repeat visits match silently without
    * churning storage), prunes oldest-learned past the per-host cap, and
@@ -342,13 +319,15 @@ export class Kernel {
     if (session.claimed) {
       return;
     }
-    // Registry fast path first; the opt-in generic slow path only runs for
-    // videos no record claims, so a renamed-everything fork costs one extra
-    // scan while every known SDK keeps its single lookup. Learned prints sit
-    // between them: same opt-in switch, but a site-specific answer instead of
-    // a fresh measurement.
-    const sdk = findSdkForVideo(video) ??
-      (this.#genericEnabled() ? (this.#matchLearned(video) ?? findGenericPlayer(video)) : null);
+    // One unified resolve per offer: the registry probe, the learned prints
+    // and the measured fallback share a single ancestry walk inside, in
+    // that priority order. The fallback runs for videos no record claims,
+    // so a renamed-everything fork costs one shared scan while every known
+    // SDK keeps its single lookup.
+    const sdk = resolvePlayer(video, {
+      prints: this.#printsForHost(),
+      enabled: this.#genericEnabled()
+    });
     if (!sdk) {
       return;
     }

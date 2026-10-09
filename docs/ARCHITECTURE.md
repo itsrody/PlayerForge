@@ -1717,6 +1717,14 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  gained the default-on adoption (plus the converted explicit-off refusal),
  `tests/sdk-engine.test.mjs` 1 (tiles refused), `tests/shell-boot.
  test.mjs` 1 (notice once).
+
+ The twenty-eighth movement unified the offer: `resolvePlayer` fills the
+ composed chain once and probes registry, prints and fallback against it,
+ in that priority, through one descriptor constructor. The registry memo
+ policy moved with it unchanged; every existing probe keeps its signature
+ as a thin delegate, so the suite passed untouched before the 2 new
+ priority tests. `tests/sdk-engine.test.mjs` gained those 2.
+
 ## 7. Gecko-specific decisions, and what they rule out
 
 - Scheduler priorities replace timer-based deferral. `postTask` is available

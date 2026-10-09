@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import {
+  resolvePlayer,
   findSdkForVideo,
   findGenericPlayer,
   fingerprintFor,
@@ -640,5 +641,41 @@ test("the fallback admits only player-sized boxes, not thumbnails", () => {
   withActivation(true, () => {
     assert.equal(findGenericPlayer(tile), null, "a 150px tile is not a player");
     assert.ok(findGenericPlayer(player), "a 640px player still qualifies");
+  });
+});
+
+/* - Unified resolve: one walk, priority order - */
+
+test("resolvePlayer answers registry, learned, generic in that order", () => {
+  // A registered player with a print on file: the anchor wins, not the print.
+  const doc = dom('<div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div>');
+  const video = doc.querySelector("video");
+  const wrapper = doc.querySelector(".plyr__video-wrapper");
+  const print = fingerprintFor(video, wrapper, 1);
+  withActivation(true, () => {
+    assert.equal(resolvePlayer(video, { prints: [print], enabled: true })?.source, "registry");
+    assert.equal(resolvePlayer(video, { prints: [], enabled: false })?.source, "registry");
+  });
+});
+
+test("resolvePlayer falls from learned to generic to null", () => {
+  const { video } = genericFixture();
+  const print = { tag: "div", cls: [], id: null, depth: 1 };
+  withActivation(true, () => {
+    assert.equal(
+      resolvePlayer(video, { prints: [print], enabled: true })?.source,
+      "learned",
+      "a matching print answers before any measurement"
+    );
+    assert.equal(
+      resolvePlayer(video, { prints: [], enabled: true })?.source,
+      "generic",
+      "no print, no anchor: the measured fallback"
+    );
+    assert.equal(
+      resolvePlayer(video, { prints: [], enabled: false }),
+      null,
+      "disabled: unregistered stays unregistered"
+    );
   });
 });

@@ -170,25 +170,14 @@ function isMatchFresh(video, entry) {
 }
 
 /**
- * Full ancestry scan for the owning SDK's record, or null when unregistered.
- *
- * Deliberately uncached. This used to keep a second WeakMap of its own, and it
- * was dead weight: `matchSdk` had exactly one caller, and that caller consults
- * its own descriptor memo first, so this function only ever ran on a
- * descriptor-miss - which is precisely the case where the second memo was
- * guaranteed stale by the identical parent check. Every read was a miss and
- * every write was unreachable, so the map cost an entry and an object per
- * adopted video and a second freshness check (potentially a bounded re-walk of
- * the ancestry) on every re-query after a re-parenting, and saved no scans.
- * The descriptor memo below is the only cache this path needs.
+ * The scan against an already-filled chain: one pass serves every anchor
+ * (uBO's one-pass-over-tokens shape - chain index IS the hop count, so
+ * fewest hops wins with ties keeping registry then anchor order),
+ * and the same fill serves the print and generic probes below, so one offer
+ * climbs each ancestry once instead of three times. Pure reads - no layout
+ * writes anywhere in the resolve path, so sharing the fill cannot flush.
  */
-function matchSdk(video) {
-  // Single composed walk (uBO's one-pass-over-tokens shape): the old code
-  // re-walked ancestry once per anchor via composedClosest, then walked
-  // again per hit to count hops. Chain index IS the hop count, so one pass
-  // serves every anchor. Selection semantics unchanged: fewest hops wins,
-  // ties keep registry order then anchor order (strict < keeps the first).
-  const len = fillComposedChain(video);
+function matchSdkOnChain(len) {
   let best = null;
   for (let hop = 0; hop < (best ? best.hops : len); hop++) {
     // Grouped pre-check: one engine call per node instead of one per anchor.
@@ -227,40 +216,13 @@ const descriptorCache = new WeakMap();
 /**
  * Identify the SDK owning a video, or null when unregistered.
  *
- * Only the positive descriptor is memoized, so a re-query about a surviving
- * video returns the SAME object instead of re-wrapping every call. The null
- * is deliberately NOT memoized: no cheap fingerprint distinguishes "same
- * answer" from "the video's subtree was grafted under a new SDK" — parent,
- * depth and top can all survive such a graft unchanged, and the one exact
- * check (re-running the scan) is the scan itself. A cached null would keep a
- * grafted player permanently unregistered with no path re-offering it (the
- * mutation tap offers the moved video, the memo calls it fresh, adoption
- * never runs). The rescan costs one bounded ancestry walk plus the anchor
- * matches, and offers are rare per video (boot replay, added-node batches,
- * media events) — correctness here is worth more than the saved
- * microseconds. The WeakMap key dies with the video, so positive entries are
- * session-only.
+ * One leg of resolvePlayer below (registry only, no prints, no fallback):
+ * the memo policy and the scan live there, so this stays a thin delegate
+ * with the same signature, same memo identity and same null semantics the
+ * suite pins.
  */
 export function findSdkForVideo(video) {
-  const cached = descriptorCache.get(video);
-  if (cached && isMatchFresh(video, cached)) {
-    return cached.descriptor;
-  }
-  const match = matchSdk(video);
-  if (!match) {
-    return null;
-  }
-  const entry = { best: match, parent: video.parentNode ?? null, descriptor: null };
-  entry.descriptor = {
-    name: match.record.name,
-    host: match.record.host ?? null,
-    container: resolveContainer(match),
-    anchor: match.el,
-    hops: match.hops,
-    source: "registry"
-  };
-  descriptorCache.set(video, entry);
-  return entry.descriptor;
+  return resolvePlayer(video);
 }
 
 /**
@@ -293,27 +255,37 @@ function hasStickyActivation() {
  * tell which path produced it.
  */
 export function findGenericPlayer(video) {
-  if (video.paused || video.ended || !(video.readyState >= 1)) {
-    return null;
-  }
-  if (!hasStickyActivation()) {
-    return null;
-  }
-  if (!meetsMinSize(video, GENERIC_MIN_VIDEO_WIDTH, GENERIC_MIN_VIDEO_HEIGHT)) {
+  if (!genericGates(video)) {
     return null;
   }
   const placed = resolveGenericContainer(video);
   if (!placed) {
     return null;
   }
-  return {
+  return describe({
     name: "Custom player",
     host: null,
     container: placed.container,
     anchor: placed.container,
     hops: placed.hops,
     source: "generic"
-  };
+  });
+}
+
+/**
+ * The anchorless admission, shared by the exported probe and the unified
+ * resolve below: playback state, sticky activation, and the stricter
+ * fallback box. Layout-free by construction - the rect reads live in the
+ * placement climb, so a gate failure pays no flush.
+ */
+function genericGates(video) {
+  if (video.paused || video.ended || !(video.readyState >= 1)) {
+    return false;
+  }
+  if (!hasStickyActivation()) {
+    return false;
+  }
+  return meetsMinSize(video, GENERIC_MIN_VIDEO_WIDTH, GENERIC_MIN_VIDEO_HEIGHT);
 }
 
 /**
@@ -325,6 +297,11 @@ export function findGenericPlayer(video) {
  * rather than per frame, where one flush is inaudible next to a seek.
  */
 export function resolveGenericContainer(video) {
+  return placeGeneric(video, fillComposedChain(video));
+}
+
+/** The video's own box plus its document, or null when unreadable/empty. */
+function videoFrame(video) {
   let rect;
   try {
     rect = video.getBoundingClientRect();
@@ -334,52 +311,75 @@ export function resolveGenericContainer(video) {
   if (!(rect.width > 0) || !(rect.height > 0)) {
     return null;
   }
-  // The element's own document, not the ambient one: an iframe's viewport is
-  // its own, and a bare `window` read would answer for the wrong frame.
-  const doc = video.ownerDocument;
+  return { rect, doc: video.ownerDocument };
+}
+
+/**
+ * Viewport refusal: full-bleed video (ambient background, not a player) and
+ * fully off-viewport video. The element's own document, not the ambient one:
+ * an iframe's viewport is its own, and a bare `window` read would answer for
+ * the wrong frame.
+ */
+function viewportRefuses(rect, doc) {
   const viewportWidth = doc?.documentElement?.clientWidth ?? 0;
   const viewportHeight = doc?.documentElement?.clientHeight ?? 0;
   if (viewportWidth > 0 && viewportHeight > 0) {
     if (rect.width >= viewportWidth * 0.9 && rect.height >= viewportHeight * 0.9) {
-      return null;
+      return true;
     }
     if (rect.bottom <= 0 || rect.top >= viewportHeight || rect.right <= 0 || rect.left >= viewportWidth) {
-      return null;
+      return true;
     }
   }
+  return false;
+}
+/**
+ * Frame + viewport + climb against an already-filled chain: the exported
+ * probe fills first, the unified resolve reuses the offer's fill. Pure
+ * reads - the fill it shares cannot flush, because nothing here writes.
+ */
+function placeGeneric(video, len) {
+  const frame = videoFrame(video);
+  if (!frame || viewportRefuses(frame.rect, frame.doc)) {
+    return null;
+  }
+  return climbGenericContainer(len, frame.rect, frame.doc);
+}
+
+/**
+ * The ancestor climb over chain indices (chain[0] is the video itself):
+ * climb while the ancestor box tracks the video's own box, stopping at the
+ * first ancestor that diverges (layout context, not player chrome) and
+ * never at body/document. Hop counting mirrors the old parentNode walk
+ * exactly, including counting the zero-size ancestors it skips through.
+ */
+function climbGenericContainer(len, rect, doc) {
   let container = null;
   let hops = 0;
-  // Composed walk, mirroring fillComposedChain: a shadow-hosted video's
-  // parentElement is null at its shadow boundary, so parentElement alone
-  // would miss every player built inside a custom element.
-  let node = video.parentNode ?? video.host ?? null;
-  while (node) {
-    if (node.nodeType === 1) {
-      if (node === doc?.body || node === doc?.documentElement) {
-        break;
-      }
-      hops += 1;
-      let box;
-      try {
-        box = node.getBoundingClientRect();
-      } catch {
-        break;
-      }
-      // A zero-size ancestor contributes no box (display:contents wrappers
-      // report zeros while the video inside them renders): skip through it
-      // rather than adopting a host nobody can see - or stopping a climb
-      // that has a real player box above. Hops still count the step so the
-      // removal watch's depth cap covers the true chain.
-      if (!(box.width > 0) || !(box.height > 0)) {
-        node = node.parentNode ?? node.host ?? null;
-        continue;
-      }
-      if (box.width > rect.width * 3 || box.height > rect.height * 3) {
-        break;
-      }
-      container = node;
+  for (let hop = 1; hop < len; hop++) {
+    const node = chain[hop];
+    if (node === doc?.body || node === doc?.documentElement) {
+      break;
     }
-    node = node.parentNode ?? node.host ?? null;
+    hops += 1;
+    let box;
+    try {
+      box = node.getBoundingClientRect();
+    } catch {
+      break;
+    }
+    // A zero-size ancestor contributes no box (display:contents wrappers
+    // report zeros while the video inside them renders): skip through it
+    // rather than adopting a host nobody can see - or stopping a climb
+    // that has a real player box above. Hops still count the step so the
+    // removal watch's depth cap covers the true chain.
+    if (!(box.width > 0) || !(box.height > 0)) {
+      continue;
+    }
+    if (box.width > rect.width * 3 || box.height > rect.height * 3) {
+      break;
+    }
+    container = node;
   }
   if (!container) {
     return null;
@@ -420,26 +420,25 @@ export function fingerprintFor(video, container, hops) {
  * same way registry matches do.
  */
 export function matchPrints(video, print) {
+  return matchPrintsOnChain(fillComposedChain(video), print);
+}
+
+/**
+ * The print probe against an already-filled chain: chain[0] is the video,
+ * so the node at the print's recorded depth is chain[depth] - the same node
+ * the climbing walk lands on, without re-walking. Validation first, so a
+ * malformed print costs the fill and nothing else.
+ */
+function matchPrintsOnChain(len, print) {
   if (!print || typeof print.tag !== "string" || !Array.isArray(print.cls) ||
-      !Number.isInteger(print.depth) || print.depth < 1) {
+      !Number.isInteger(print.depth) || print.depth < 1 || print.depth >= len) {
     return null;
   }
-  let hops = 0;
-  let node = video.parentNode ?? video.host ?? null;
-  while (node) {
-    if (node.nodeType === 1) {
-      hops += 1;
-      if (hops > print.depth) {
-        return null;
-      }
-      if (hops === print.depth &&
-          node.localName === print.tag &&
-          (print.id == null || node.id === print.id) &&
-          print.cls.every((cls) => node.classList?.contains(cls))) {
-        return { el: node, hops };
-      }
-    }
-    node = node.parentNode ?? node.host ?? null;
+  const node = chain[print.depth];
+  if (node.localName === print.tag &&
+      (print.id == null || node.id === print.id) &&
+      print.cls.every((cls) => node.classList?.contains(cls))) {
+    return { el: node, hops: print.depth };
   }
   return null;
 }
@@ -463,6 +462,107 @@ export function resolveContainer({ record, el }) {
     }
   }
   return el;
+}
+
+/**
+ * The host-override probe against an already-filled chain. `match` came off
+ * this same fill, so its anchor sits at chain[hops] and the override scans
+ * upward from there - the same elements the exported walk scans from `el`,
+ * without refilling.
+ */
+function resolveContainerOnChain(len, match) {
+  if (!match.record.host) {
+    return match.el;
+  }
+  for (let hop = match.hops; hop < len; hop++) {
+    if (chain[hop].matches(match.record.host)) {
+      return chain[hop];
+    }
+  }
+  return match.el;
+}
+
+/** The one descriptor constructor: every path emits the same shape, so the
+ *  kernel cannot tell which probe produced it - except by `source`, which the
+ *  learner and the tests read. */
+function describe({ name, host, container, anchor, hops, source }) {
+  return { name, host, container, anchor, hops, source };
+}
+
+/** Gates + placement against an already-filled chain (see genericGates for
+ *  why the gates stay layout-free and first). */
+function measureGenericOnChain(video, len) {
+  if (!genericGates(video)) {
+    return null;
+  }
+  const placed = placeGeneric(video, len);
+  if (!placed) {
+    return null;
+  }
+  return describe({
+    name: "Custom player",
+    host: null,
+    container: placed.container,
+    anchor: placed.container,
+    hops: placed.hops,
+    source: "generic"
+  });
+}
+
+/**
+ * The unified resolve: one composed walk per offer, three probes in priority
+ * order - registry anchor, learned print, measured fallback. The fill is
+ * shared because every probe reads the same ancestry; only the generic climb
+ * reads boxes, and only after its layout-free gates pass, so an offer for a
+ * paused ad costs the walk and nothing else.
+ *
+ * Only the positive registry descriptor is memoized (same entry, same
+ * freshness check findSdkForVideo always had): the null stays unmemoized,
+ * because no cheap fingerprint distinguishes "same answer" from "the video's
+ * subtree was grafted under a new SDK" - parent, depth and top can all
+ * survive such a graft unchanged, and the one exact check (re-running the
+ * scan) is the scan itself. A cached null would keep a grafted player
+ * permanently unregistered with no path re-offering it (the mutation tap
+ * offers the moved video, the memo calls it fresh, adoption never runs).
+ * The WeakMap key dies with the video, so positive entries are session-only.
+ */
+export function resolvePlayer(video, { prints = [], enabled = false } = {}) {
+  const cached = descriptorCache.get(video);
+  if (cached && isMatchFresh(video, cached)) {
+    return cached.descriptor;
+  }
+  const len = fillComposedChain(video);
+  const match = matchSdkOnChain(len);
+  if (match) {
+    const entry = { best: match, parent: video.parentNode ?? null, descriptor: null };
+    entry.descriptor = describe({
+      name: match.record.name,
+      host: match.record.host ?? null,
+      container: resolveContainerOnChain(len, match),
+      anchor: match.el,
+      hops: match.hops,
+      source: "registry"
+    });
+    descriptorCache.set(video, entry);
+    return entry.descriptor;
+  }
+  if (!enabled) {
+    return null;
+  }
+  for (const print of prints) {
+    const hit = matchPrintsOnChain(len, print);
+    if (hit) {
+      return describe({
+        name: "Custom player",
+        host: null,
+        container: hit.el,
+        anchor: hit.el,
+        hops: hit.hops,
+        source: "learned"
+      });
+    }
+  }
+  return measureGenericOnChain(video, len);
 }
 
 /**
