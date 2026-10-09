@@ -15,6 +15,12 @@
  * plus measured placement under stricter admission, and it announces its
  * first adoption with a hint pointing at its toggle.
  *
+ * Learned prints sit between anchor and measurement: a successful fallback
+ * adoption records its player block per hostname, and the next visit matches
+ * the print like an anchor instead of re-measuring. All three probes share
+ * one ancestry walk inside resolvePlayer, in registry-learned-generic
+ * priority.
+ *
  * Framework roots are never anchors. An app-shell marker like Inertia's
  * [data-page] fires for every video on the page - articles, previews, ads -
  * and resolves the container to the app root, so the host spans the whole
@@ -111,6 +117,13 @@ const ANCHOR_GROUP = `:is(${REGISTRY.flatMap((record) => record.anchors).join(",
 const chain = [];
 
 /**
+ * Shared empty prints list: resolvePlayer's `prints` default evaluates on
+ * every call including memo hits, and the hot path must not allocate to
+ * answer from cache. Read-only by convention - no probe writes to it.
+ */
+const NO_PRINTS = [];
+
+/**
  * The single composed-ancestry walk, shared by anchor matching and container
  * resolution. Fills the reusable `chain` with the element nodes from `start`
  * upwards (crossing shadow boundaries via `.host`), and returns the filled
@@ -203,14 +216,8 @@ function matchSdkOnChain(len) {
   return best;
 }
 
-/**
- * Fully-resolved descriptor per video. Cached so the hot re-query path
- * (kernel re-asking about a surviving video) returns the SAME object instead
- * of re-wrapping + re-allocating every call. "Fewer APIs, same facts": the
- * scan already computes `el` and `hops`, so they are surfaced at zero extra
- * cost rather than recomputed downstream. Only positives are cached — see
- * findSdkForVideo for why the null stays unmemoized.
- */
+/** Positive registry descriptors by video. The memo policy (freshness check,
+ *  why the null stays out) is documented on resolvePlayer, its only writer. */
 const descriptorCache = new WeakMap();
 
 /**
@@ -251,8 +258,7 @@ function hasStickyActivation() {
  *
  * Deliberately no audio/duration heuristics: muted users and short clips are
  * legitimate viewing, and each extra heuristic is a false negative for
- * someone. Same descriptor shape as the registry path, so the kernel cannot
- * tell which path produced it.
+ * someone. Emits through describe(), like every path.
  */
 export function findGenericPlayer(video) {
   if (!genericGates(video)) {
@@ -288,14 +294,7 @@ function genericGates(video) {
   return meetsMinSize(video, GENERIC_MIN_VIDEO_WIDTH, GENERIC_MIN_VIDEO_HEIGHT);
 }
 
-/**
- * Generic shell placement: climb while the ancestor box tracks the video's
- * own box, stopping at the first ancestor that diverges (layout context, not
- * player chrome) and never at body/document. Refuses full-bleed video
- * (ambient background, not a player) and fully off-viewport video. Reads
- * rects, so it forces layout - slow-path only, evaluated per playback start
- * rather than per frame, where one flush is inaudible next to a seek.
- */
+/** Placement probe with its own walk; the climb itself is climbGenericContainer. */
 export function resolveGenericContainer(video) {
   return placeGeneric(video, fillComposedChain(video));
 }
@@ -352,6 +351,9 @@ function placeGeneric(video, len) {
  * first ancestor that diverges (layout context, not player chrome) and
  * never at body/document. Hop counting mirrors the old parentNode walk
  * exactly, including counting the zero-size ancestors it skips through.
+ * Reads rects, so it forces layout - the only probe allowed to: it runs
+ * behind the layout-free gates, evaluated per offer rather than per frame,
+ * where one flush is inaudible next to a seek.
  */
 function climbGenericContainer(len, rect, doc) {
   let container = null;
@@ -413,12 +415,7 @@ export function fingerprintFor(video, container, hops) {
   };
 }
 
-/**
- * Match a video's composed ancestry against one learned print. Returns the
- * matched element and its hop distance, or null. Mirrors the anchor walk
- * (same traversal, same hop counting) so shadow-hosted videos resolve the
- * same way registry matches do.
- */
+/** Probe with its own walk; the matching lives in matchPrintsOnChain. */
 export function matchPrints(video, print) {
   return matchPrintsOnChain(fillComposedChain(video), print);
 }
@@ -426,8 +423,10 @@ export function matchPrints(video, print) {
 /**
  * The print probe against an already-filled chain: chain[0] is the video,
  * so the node at the print's recorded depth is chain[depth] - the same node
- * the climbing walk lands on, without re-walking. Validation first, so a
- * malformed print costs the fill and nothing else.
+ * the climbing walk lands on, without re-walking (same traversal, same hop
+ * counting, so shadow-hosted videos resolve the way registry matches do).
+ * A malformed print answers null without touching layout - validation reads
+ * tag and classes only, never a box.
  */
 function matchPrintsOnChain(len, print) {
   if (!print || typeof print.tag !== "string" || !Array.isArray(print.cls) ||
@@ -435,12 +434,21 @@ function matchPrintsOnChain(len, print) {
     return null;
   }
   const node = chain[print.depth];
-  if (node.localName === print.tag &&
-      (print.id == null || node.id === print.id) &&
-      print.cls.every((cls) => node.classList?.contains(cls))) {
-    return { el: node, hops: print.depth };
+  if (node.localName !== print.tag) {
+    return null;
   }
-  return null;
+  if (print.id != null && node.id !== print.id) {
+    return null;
+  }
+  // Indexed subset walk, not cls.every: the probe runs per print per offer,
+  // and the closure form allocates on every one of them.
+  const needed = print.cls;
+  for (let i = 0; i < needed.length; i++) {
+    if (!node.classList?.contains(needed[i])) {
+      return null;
+    }
+  }
+  return { el: node, hops: print.depth };
 }
 
 /**
@@ -526,7 +534,7 @@ function measureGenericOnChain(video, len) {
  * offers the moved video, the memo calls it fresh, adoption never runs).
  * The WeakMap key dies with the video, so positive entries are session-only.
  */
-export function resolvePlayer(video, { prints = [], enabled = false } = {}) {
+export function resolvePlayer(video, { prints = NO_PRINTS, enabled = false } = {}) {
   const cached = descriptorCache.get(video);
   if (cached && isMatchFresh(video, cached)) {
     return cached.descriptor;

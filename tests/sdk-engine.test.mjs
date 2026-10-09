@@ -679,3 +679,46 @@ test("resolvePlayer falls from learned to generic to null", () => {
     );
   });
 });
+
+/* - Resolve-path invariants: what each probe may cost - */
+
+test("anchors and prints read no boxes; only the fallback measures", () => {
+  // The shared fill walks pointers, never boxes: matches() and classList
+  // cost no layout, so registry and learned resolves must complete without
+  // a single getBoundingClientRect anywhere on the chain. The generic climb
+  // is the one probe allowed to flush - the counter proves it does.
+  const doc = dom('<div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div><div id="plain"><video></video></div><div id="open"><video></video></div>');
+  const plyrVideo = doc.querySelector(".plyr video");
+  const plainVideo = doc.querySelector("#plain video");
+  const openVideo = doc.querySelector("#open video");
+  const box = { width: 640, height: 360, top: 0, left: 0, right: 640, bottom: 360 };
+  let rectReads = 0;
+  for (const el of [plyrVideo, plainVideo, openVideo, ...doc.querySelectorAll("div"), doc.body, doc.documentElement]) {
+    el.getBoundingClientRect = () => {
+      rectReads++;
+      return { ...box };
+    };
+  }
+  for (const video of [plyrVideo, plainVideo, openVideo]) {
+    Object.defineProperty(video, "paused", { value: false, configurable: true });
+    Object.defineProperty(video, "ended", { value: false, configurable: true });
+    Object.defineProperty(video, "readyState", { value: 4, configurable: true });
+  }
+  const print = fingerprintFor(plainVideo, doc.querySelector("#plain"), 1);
+  withActivation(true, () => {
+    assert.equal(resolvePlayer(plyrVideo, { prints: [], enabled: true })?.source, "registry");
+    assert.equal(rectReads, 0, "anchor matching reads no boxes");
+    assert.equal(resolvePlayer(plainVideo, { prints: [print], enabled: true })?.source, "learned");
+    assert.equal(rectReads, 0, "print matching reads no boxes");
+    assert.equal(resolvePlayer(openVideo, { prints: [], enabled: true })?.source, "generic");
+    assert.ok(rectReads > 0, "the measured fallback is the only probe that flushes");
+  });
+});
+
+test("a registry re-resolve returns the same descriptor object", () => {
+  const doc = dom('<div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div>');
+  const video = doc.querySelector("video");
+  const first = resolvePlayer(video);
+  assert.equal(first?.source, "registry");
+  assert.equal(resolvePlayer(video), first, "memo identity survived the unification");
+});

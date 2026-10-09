@@ -1444,7 +1444,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved twenty-eight times since that cut. The first two movements
+The unit count has moved twenty-nine times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1724,6 +1724,15 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  policy moved with it unchanged; every existing probe keeps its signature
  as a thin delegate, so the suite passed untouched before the 2 new
  priority tests. `tests/sdk-engine.test.mjs` gained those 2.
+
+ The twenty-ninth movement reviewed the unified path for leftovers: three
+ orphaned headers trimmed back to their functions (the memo essay lives on
+ `resolvePlayer`, the placement essay on the climb), the print probe's
+ rationale moved to the on-chain matcher, and two hot-path allocations
+ removed (a shared empty prints default, an indexed class-subset walk
+ instead of a closure per print per offer). No behavior changed; the pin
+ is two new invariants - anchor/print probes read zero boxes, the memo
+ keeps object identity. `tests/sdk-engine.test.mjs` gained those 2.
 
 ## 7. Gecko-specific decisions, and what they rule out
 
