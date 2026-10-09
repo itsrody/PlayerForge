@@ -97,7 +97,7 @@ test("a video moved to a new container gets a fresh shell in the new location", 
 
   // Reparent the VIDEO itself into a second player. The host was injected
   // into the OLD container (inject.js:88), so the live shell is stranded
-  // over the emptied slot while marker + #seenVideos would refuse the new
+  // over the emptied slot while the session claim would refuse the new
   // location for the life of the document - measured live: at +799ms the
   // host was still in the old slot, zero hosts in the new location,
   // data-pf-shell still set even after the old slot died. The movedOut edge
@@ -237,7 +237,7 @@ test("removal watch observes one node ABOVE the walked range [regression]", asyn
   // removing the OUTERMOST watched anchor was a childList change on its parent
   // - one level further out, and unobserved. No record was delivered,
   // checkAnchors never ran, and the video stayed claimed forever: shell alive,
-  // listeners attached, marker set, #seenVideos entry held. Nothing could
+  // listeners attached, marker set, session claim held. Nothing could
   // reclaim it, because that same missing record is what a re-anchor needs.
   //
   // The guarantee is bounded by design (MAX_REMOVAL_DEPTH=8, no subtree

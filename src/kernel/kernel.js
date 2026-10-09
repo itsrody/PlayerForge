@@ -24,35 +24,16 @@ export class Kernel {
   /** Shell-ready listeners (direct callbacks, no bus). */
   #createdListeners = new Set();
   #initialized = false;
-  // Weak: an adopted video orphaned by an untracked removal path must not
-  // pin the element (and its whole subtree) for the page's lifetime.
-  #seenVideos = new WeakSet();
-  /** Videos that already consumed their one post-failure retry. Weak, and read
-   *  only on the failure path - a boot that throws deterministically must not
-   *  be re-attempted on every mutation record, so the second failure is final. */
-  #bootRetried = new WeakSet();
-  /** Videos whose settle completed while they were detached: shell creation
-   *  was skipped, but #seenVideos still claims them and the discovery tap has
-   *  already downgraded, so no other path would ever offer them again. The
-   *  removal watch's reconnect edge consumes this entry one-shot and
-   *  re-adopts - without it a reattach inside the grace cancels the only
-   *  pending re-check and the video stays claimed with no shell for the life
-   *  of the document (live repro: settle-skip demo). Weak, and never
-   *  iterated. */
-  #settleSkipped = new WeakSet();
-  /** Videos with an armed removal watch: one watcher per video. A settle-skip
-   *  re-adoption re-enters #watchVideoRemoval while the original watcher is
-   *  still live; a second observer pair would leave each stopWatching
-   *  responsible for only its own observer, stranding anchors until pagehide.
-   *  Weak - same rationale as #removalTimers. */
-  #removalWatching = new WeakSet();
-  /** Pending disconnect graces, keyed by the video that is going away. Weak,
-   *  and only ever probed per-video (has/get/set/delete - never iterated):
-   *  the entry is removed by the grace callback, but on pagehide the task is
-   *  aborted, so that callback never runs. A strong Map would then pin a
-   *  detached video and its whole subtree for the rest of the document's
-   *  life, which is exactly what the Weak sets above refuse to do. */
-  #removalTimers = new WeakMap();
+  /**
+   * Per-video session state, keyed by the element. One WeakMap entry per
+   * adopted video carries the claim, the boot-retry flag, the settle-skip
+   * flag, and the removal watch (observer, anchors, grace) - five Weak
+   * collections before, one lookup now. Weak throughout: an adopted video
+   * orphaned by an untracked removal path must not pin the element (and its
+   * whole subtree) for the page's lifetime, and the entry dies with the key.
+   * Never iterated; every path addresses its own video.
+   */
+  #sessions = new WeakMap();
   /** Unsubscribe for the shared discovery tap; dropped at pagehide. */
   #stopDiscoveryTap = null;
   /** True once the full-document discovery tap has been downgraded. */
@@ -70,7 +51,7 @@ export class Kernel {
     logger.log("kernel", "Restored from bfcache - reconciling");
     for (const shell of this.#registry.getAll()) {
       if (!shell.video.isConnected) {
-        this.#seenVideos.delete(shell.video);
+        this.#sessions.get(shell.video)?.releaseClaim();
         shell.destroy();
         logger.log("kernel", `Reconciled orphaned shell: ${shell.sdk.name}`);
       }
@@ -108,9 +89,23 @@ export class Kernel {
       this.#registry,
       (shell) => this.#notifyShellCreated(shell),
       (video) => this.#onShellBootFailed(video),
-      (video) => this.#settleSkipped.add(video)
+      (video) => this.#sessions.get(video)?.armSettleSkip()
     );
     this.#lifecycle.setShellFactory((discovery) => this.#createShell(discovery));
+  }
+
+  /** The live session for a video, minted on first adoption. */
+  #sessionFor(video) {
+    let session = this.#sessions.get(video);
+    if (!session) {
+      session = new VideoSession(video, {
+        scope: this.#scope,
+        adopt: (v) => this.#adoptVideo(v),
+        removeShell: (v) => this.#lifecycle.onVideoRemoved({ video: v })
+      });
+      this.#sessions.set(video, session);
+    }
+    return session;
   }
 
   /**
@@ -200,33 +195,30 @@ export class Kernel {
   }
 
   /**
-   * A shell's boot threw. If the boot failed, the shell already rolled its own
-   * DOM back and the kernel released the claim, so the video is adoptable
-   * again; if a shell came up fine, the seen-set and the registry slot refuse
-   * it either way. Exactly one retry is allowed for the first case: the full-document
-   * discovery tap feeds this path one record per mutation, so an unbounded
-   * re-arm would spin on a deterministically-throwing boot. The second failure
-   * is final and the video goes back into the seen-set.
+   * A shell's boot threw. The session records whether this video already
+   * consumed its one post-failure retry and releases the claim for it: the
+   * full-document discovery tap feeds this path one record per mutation, so
+   * an unbounded re-arm would spin on a deterministically-throwing boot. The
+   * second failure stays claimed with no re-offer. Re-adoption itself still
+   * rides future discovery offers, exactly as before - this path only decides
+   * whether the video is claimable when one arrives.
    */
   #onShellBootFailed(video) {
-    if (this.#bootRetried.has(video)) {
-      this.#seenVideos.add(video);
-      return;
-    }
-    this.#bootRetried.add(video);
-    this.#seenVideos.delete(video);
+    this.#sessions.get(video)?.noteBootFailed();
   }
 
   /** Adopt the video, emit discovery and start removal watching. */
   #adoptVideo(video) {
-    // Ownership is decided JS-side only: #seenVideos (claimed below, before
-    // any yield), the registry slot, and the lifecycle's pending set. The
-    // SHELL_MARKER attribute the shell writes is deliberately NOT read here:
-    // it is observable state (the stylesheet's :fullscreen hook, the DOM's
-    // boot signal), not identity — and attributes clone. A cloneNode(true) of
-    // a managed video carries the marker onto a video no shell owns, and a
-    // veto on it would refuse that clone for the life of the document.
-    if (this.#seenVideos.has(video)) {
+    // Ownership is decided JS-side only: the session claim (taken below,
+    // before any yield), the registry slot, and the lifecycle's pending set.
+    // The SHELL_MARKER attribute the shell writes is deliberately NOT read
+    // here: it is observable state (the stylesheet's :fullscreen hook, the
+    // DOM's boot signal), not identity — and attributes clone. A
+    // cloneNode(true) of a managed video carries the marker onto a video no
+    // shell owns, and a veto on it would refuse that clone for the life of
+    // the document.
+    const session = this.#sessionFor(video);
+    if (session.claimed) {
       return;
     }
     const sdk = findSdkForVideo(video);
@@ -241,7 +233,7 @@ export class Kernel {
       logger.warn("kernel", "No container for video - skipping");
       return;
     }
-    this.#seenVideos.add(video);
+    session.claim();
     // Guarded like the logger contract promises: with chatter off (the
     // default), the dimensions/duration interpolation never runs - a disabled
     // log call must cost one boolean read, not a template build.
@@ -253,202 +245,8 @@ export class Kernel {
       container,
       sdk
     });
-    this.#watchVideoRemoval(video, container, sdk.hops);
+    session.watchRemoval(container, sdk.hops);
     this.#downgradeDiscoveryTap();
-  }
-
-  #watchVideoRemoval(video, container, hops) {
-    // Re-adoption after a settle-skip (connected branch of checkAnchors) or a
-    // container move (the movedOut branch) lands here with the original
-    // watcher still armed; a second observer pair would never be torn down as
-    // a pair. The closure keeps the FIRST adopt's container/hops: reanchor
-    // only reads container as the parentless fallback and the depth as a cap,
-    // both fine for the same video under a new parent.
-    if (this.#removalWatching.has(video)) {
-      return;
-    }
-    this.#removalWatching.add(video);
-    /** Adaptive watch depth: the matched anchor + a margin, never unbounded. */
-    const watchDepth = Number.isInteger(hops) && hops > 0
-      ? Math.min(hops + REMOVAL_DEPTH_MARGIN, MAX_REMOVAL_DEPTH)
-      : MAX_REMOVAL_DEPTH;
-
-    const anchors = [];
-    /** The observed node ABOVE the watched range; null when the chain ends at
-     * the document. Tracked (not just observed) so isChainFresh can detect a
-     * subtree move that leaves anchors[] itself intact but shifts the upper
-     * range off its old node - the shape the live swap probe hit. */
-    let sentinel = null;
-
-    /**
-     * Removal-grace tick: a scheduler.postTask handle on the kernel scope. It
-     * is pure deferral - nothing about it needs timer priority - and being
-     * signal-bound means pagehide (or any kernel abort) cancels every pending
-     * grace without the manual sweep loop racing the page.
-     */
-    const scheduleGraceTimer = (done) => {
-      const handle = postTask(done, {
-        priority: "user-visible",
-        delay: FRAMEWORK_TUNING.removalGraceMs,
-        signal: this.#scope.signal
-      });
-      return () => handle.abort();
-    };
-
-    /**
-     * Is the observed chain still exactly the chain that was recorded? Walks
-     * anchors[] then the hop beyond them against the sentinel: moving the
-     * whole player subtree keeps video.parentElement - and even anchors[] -
-     * intact while the upper range sits on a node that is no longer an
-     * ancestor, so the new chain's removal never reaches checkAnchors
-     * (measured live: host still inside the detached tree at +903ms; a
-     * control mutation on an observed old root destroyed it at +708ms).
-     * Bounded by anchors.length + 1 (<= MAX_REMOVAL_DEPTH + 1 parentElement
-     * reads): 154ns at depth 2 (the plyr/JW shape) / 244ns worst-case per
-     * batch on Gecko against a 48.9ns baseline - priced only to bound a
-     * correctness walk, not sold as a win.
-     */
-    const isChainFresh = () => {
-      let node = video.parentElement;
-      for (let i = 0; i < anchors.length; i++) {
-        if (node !== anchors[i]) {
-          return false;
-        }
-        node = node.parentElement;
-      }
-      return node === sentinel;
-    };
-
-    // Arrow fn keeps the enclosing class-level `this` for timer/lifecycle access.
-    const checkAnchors = () => {
-      if (!video.isConnected) {
-        // One single-shot grace per disconnect; while it is pending the timer
-        // owns the re-check (further removal mutations are the same fact).
-        if (this.#removalTimers.has(video)) {
-          return;
-        }
-        this.#removalTimers.set(video, scheduleGraceTimer(() => {
-          this.#removalTimers.delete(video);
-          if (!video.isConnected) {
-            stopWatching();
-            this.#lifecycle.onVideoRemoved({ video });
-          } else {
-            reanchorObservers();
-          }
-        }));
-        return;
-      }
-      // Connected again: any pending grace is stale - the event that brought
-      // the video back (or moved it) replaces the time-based re-check, so the
-      // stale timer is cancelled instead of firing later against outdated
-      // state, and a fresh grace (if needed) is always measured from the
-      // CURRENT disconnect. Between settled events nothing is pending.
-      this.#removalTimers.get(video)?.();
-      this.#removalTimers.delete(video);
-      // The video leaving its parent means it moved OUT of the shell's
-      // container (the host is injected INTO container - inject.js:88), so
-      // the live HUD is stranded over the emptied slot while marker + seen
-      // refuse the new location for the life of the document. Measured live:
-      // video moved alone -> at +799ms the host was still in the old slot,
-      // zero hosts in the new location, data-pf-shell still set even after
-      // the old slot died. Re-adopt: destroy the stale shell (its destroy
-      // unmarks and unregisters), release the claim, run adoption against
-      // the CURRENT ancestry - which legitimately refuses an unrecognisable
-      // new location (sdk null) and succeeds once the page wraps the video
-      // in a player again. One shell rebuild per re-parent is the accepted
-      // cost; resume re-adopts its saved entry by design.
-      const movedOut = video.parentElement !== anchors[0];
-      if (movedOut || !isChainFresh()) {
-        reanchorObservers();
-      }
-      // A settle that completed while this video was detached skipped shell
-      // creation but left #seenVideos claiming it - and this very reconnect
-      // just cancelled the grace that would have released the claim. With the
-      // discovery tap already downgraded, this edge is the only re-discovery
-      // signal there is: release the claim and run adoption again (fresh
-      // findSdk/size validation; a video that no longer qualifies stays
-      // unclaimed and refusable). One-shot consume, so ordinary re-anchors
-      // with a live shell - and boot-failed videos waiting on their media
-      // event - never re-enter adoption. The movedOut branch re-adopts too,
-      // so the flag is consumed on that path as well instead of staying
-      // armed for a later, now redundant, offer.
-      const skipEdge = this.#settleSkipped.delete(video);
-      if (movedOut) {
-        this.#lifecycle.onVideoRemoved({ video });
-        this.#seenVideos.delete(video);
-        this.#adoptVideo(video);
-      } else if (skipEdge) {
-        this.#seenVideos.delete(video);
-        this.#adoptVideo(video);
-      }
-    };
-
-    /** Single-target consolidation: `MutationObserver.observe()`
-     *  supports multiple root targets natively (childList filtered in C++), so
-     *  up to the active depth (cap: MAX_REMOVAL_DEPTH) per-video C++ wrappers
-     *  collapse to one instance.
-     *  The kernel scope disconnects it at pagehide - no per-video bookkeeping. */
-    const observer = new MutationObserver(checkAnchors);
-    this.#scope.onDispose(() => observer.disconnect());
-
-    /**
-     * The initial walk is tight (matched anchor + margin) so an untouched
-     * player never watches the chatty upper document. Once a re-anchor has
-     * run - a move, a reconnect-out-of-grace - the recorded locality is
-     * known wrong and the next walk uses the MAX_REMOVAL_DEPTH cap: a tight
-     * range after a move is demonstrably blind. The swap probe's drop record
-     * fired only on the new body, two levels past the hops+1 range, so the
-     * orphan survived (host in the detached tree at +905ms) even with a
-     * correct chain compare. Same observer, still bounded by the cap; the
-     * sentinel stays the documented boundary beyond it.
-     */
-    let anchorDepth = watchDepth;
-    const reanchorObservers = () => {
-      // MutationObserver has no per-target unobserve(): disconnect() is the
-      // only way to drop the stale roots (the previous loop called a method
-      // that does not exist and threw, leaving the anchors stranded on their
-      // original parents). Records dropped by the disconnect cost nothing:
-      // this callback never reads the queue - every decision below is
-      // re-derived from live DOM state, which was just evaluated on this
-      // very call - and the next mutation lands on the re-observed roots.
-      observer.disconnect();
-      anchors.length = 0;
-      let anchor = video.parentElement || container;
-      for (let depth = 0; anchor && depth < anchorDepth; depth++, anchor = anchor.parentElement) {
-        observer.observe(anchor, { childList: true });
-        anchors.push(anchor);
-      }
-      anchorDepth = MAX_REMOVAL_DEPTH;
-      /**
-       * Sentinel: the first ancestor ABOVE the watched range. MutationObserver
-       * only reports mutations of the nodes it observes, so removing the
-       * outermost watched anchor was a childList change on a node nobody
-       * watched - no record, no checkAnchors, and the video stayed claimed
-       * forever (shell, listeners, marker, #seenVideos entry). When the chain
-       * ends at the document `anchor` is null and there is nothing to watch.
-       * Kept out of `anchors` deliberately: that array is the watched RANGE,
-       * and anchors[0] means "the video's parent" to checkAnchors.
-       * Tracked in `sentinel` too: a subtree move can leave the whole range
-       * intact while the node ABOVE it is no longer an ancestor, and only a
-       * recorded sentinel can notice (isChainFresh).
-       */
-      if (anchor && !anchors.includes(anchor)) {
-        observer.observe(anchor, { childList: true });
-        sentinel = anchor;
-      } else {
-        sentinel = null;
-      }
-    };
-
-    const stopWatching = () => {
-      observer.disconnect();
-      this.#removalWatching.delete(video);
-      this.#removalTimers.get(video)?.();
-      this.#removalTimers.delete(video);
-      this.#seenVideos.delete(video);
-    };
-
-    reanchorObservers();
   }
 
   #createShell({ video, container, sdk }) {
@@ -481,6 +279,272 @@ export class Kernel {
     host.dispatchEvent(new CustomEvent(GESTURE_EVENTS.panel, {
       detail: { method: "menu" }
     }));
+  }
+}
+
+/* ── VideoSession ────────────────────────────────────────────────────────
+ *
+ * One adopted video's whole kernel-side life: the adoption claim, the
+ * post-failure retry flag, the settle-skip flag, and the removal watch
+ * (observer, anchors, sentinel, grace timer). Five Weak collections before;
+ * one WeakMap entry now, keyed by the element so nothing here pins a video
+ * past its own lifetime. The kernel keeps policy (adopt, registry,
+ * lifecycle); the session keeps state and the watch machine. Never iterated;
+ * every path addresses its own video.
+ */
+class VideoSession {
+  #video;
+  /** FIRST adopt's container: the parentless fallback when re-anchoring. */
+  #container = null;
+  /** Kernel scope: the observer disconnects and the grace cancels with it. */
+  #scope;
+  /** Re-offer entry back into kernel adoption. */
+  #adopt;
+  /** Shell teardown entry: the lifecycle's removal path. */
+  #removeShell;
+  /** Claimed for a shell, or a shell attempt still in flight. */
+  #claimed = false;
+  /** A boot failure already consumed this video's one retry. */
+  #retried = false;
+  /** Settle completed while detached; the reconnect edge consumes one-shot. */
+  #skipArmed = false;
+  /** A removal watcher is armed; re-entry while armed is a no-op. */
+  #watching = false;
+  /** Pending disconnect grace canceller, or null when none is armed. */
+  #graceCancel = null;
+  /** Watched ancestor range, video's parent first. */
+  #anchors = [];
+  /** First ancestor above the watched range; null when the chain ends. */
+  #sentinel = null;
+  /** Current watch-depth cap: tight on first arming, max after any move. */
+  #anchorDepth = MAX_REMOVAL_DEPTH;
+  #observer = null;
+
+  constructor(video, { scope, adopt, removeShell }) {
+    this.#video = video;
+    this.#scope = scope;
+    this.#adopt = adopt;
+    this.#removeShell = removeShell;
+  }
+
+  get claimed() {
+    return this.#claimed;
+  }
+
+  claim() {
+    this.#claimed = true;
+  }
+
+  releaseClaim() {
+    this.#claimed = false;
+  }
+
+  /**
+   * Record a shell-boot failure. The first releases the claim so a future
+   * discovery offer may retry once; the second stays claimed with no
+   * re-offer. Re-adoption itself rides future offers - this only decides
+   * whether the video is claimable when one arrives.
+   */
+  noteBootFailed() {
+    if (this.#retried) {
+      this.#claimed = true;
+      return;
+    }
+    this.#retried = true;
+    this.#claimed = false;
+  }
+
+  armSettleSkip() {
+    this.#skipArmed = true;
+  }
+
+  consumeSettleSkip() {
+    const armed = this.#skipArmed;
+    this.#skipArmed = false;
+    return armed;
+  }
+
+  watchRemoval(container, hops) {
+    // Re-adoption after a settle-skip or a container move lands here with the
+    // original watcher still armed; a second observer pair would never be
+    // torn down as a pair. The session keeps the FIRST adopt's
+    // container/hops: re-anchoring only reads the container as the
+    // parentless fallback and the depth as a cap, both fine for the same
+    // video under a new parent.
+    if (this.#watching) {
+      return;
+    }
+    this.#watching = true;
+    this.#container = container;
+    /** Adaptive watch depth: the matched anchor + a margin, never unbounded. */
+    this.#anchorDepth = Number.isInteger(hops) && hops > 0
+      ? Math.min(hops + REMOVAL_DEPTH_MARGIN, MAX_REMOVAL_DEPTH)
+      : MAX_REMOVAL_DEPTH;
+    this.#anchors.length = 0;
+    this.#sentinel = null;
+    this.#observer = new MutationObserver(() => this.#checkAnchors());
+    this.#scope.onDispose(() => this.#observer.disconnect());
+    this.#reanchorObservers();
+  }
+
+  stopWatching() {
+    this.#observer?.disconnect();
+    this.#observer = null;
+    this.#watching = false;
+    this.#graceCancel?.();
+    this.#graceCancel = null;
+    this.#claimed = false;
+  }
+
+  /**
+   * Removal-grace tick: a scheduler.postTask handle on the kernel scope. It
+   * is pure deferral - nothing about it needs timer priority - and being
+   * signal-bound means pagehide (or any kernel abort) cancels every pending
+   * grace without the manual sweep loop racing the page.
+   */
+  #scheduleGraceTimer(done) {
+    const handle = postTask(done, {
+      priority: "user-visible",
+      delay: FRAMEWORK_TUNING.removalGraceMs,
+      signal: this.#scope.signal
+    });
+    return () => handle.abort();
+  }
+
+  /**
+   * Is the observed chain still exactly the chain that was recorded? Walks
+   * the anchors then the hop beyond them against the sentinel: moving the
+   * whole player subtree keeps the video's parent - and even the anchors -
+   * intact while the upper range sits on a node that is no longer an
+   * ancestor, so the new chain's removal never reaches the check below
+   * (measured live: host still inside the detached tree at +903ms; a
+   * control mutation on an observed old root destroyed it at +708ms).
+   * Bounded by anchors.length + 1 (<= MAX_REMOVAL_DEPTH + 1 parentElement
+   * reads): 154ns at depth 2 (the plyr/JW shape) / 244ns worst-case per
+   * batch on Gecko against a 48.9ns baseline - priced only to bound a
+   * correctness walk, not sold as a win.
+   */
+  #isChainFresh() {
+    let node = this.#video.parentElement;
+    const anchors = this.#anchors;
+    for (let i = 0; i < anchors.length; i++) {
+      if (node !== anchors[i]) {
+        return false;
+      }
+      node = node.parentElement;
+    }
+    return node === this.#sentinel;
+  }
+
+  #checkAnchors() {
+    const video = this.#video;
+    if (!video.isConnected) {
+      // One single-shot grace per disconnect; while it is pending the timer
+      // owns the re-check (further removal mutations are the same fact).
+      if (this.#graceCancel) {
+        return;
+      }
+      this.#graceCancel = this.#scheduleGraceTimer(() => {
+        this.#graceCancel = null;
+        if (!video.isConnected) {
+          this.stopWatching();
+          this.#removeShell(video);
+        } else {
+          this.#reanchorObservers();
+        }
+      });
+      return;
+    }
+    // Connected again: any pending grace is stale - the event that brought
+    // the video back (or moved it) replaces the time-based re-check, so the
+    // stale timer is cancelled instead of firing later against outdated
+    // state, and a fresh grace (if needed) is always measured from the
+    // CURRENT disconnect. Between settled events nothing is pending.
+    this.#graceCancel?.();
+    this.#graceCancel = null;
+    // The video leaving its parent means it moved OUT of the shell's
+    // container (the host is injected INTO container - inject.js:88), so
+    // the live HUD is stranded over the emptied slot while the claim refuses
+    // the new location for the life of the document. Measured live: video
+    // moved alone -> at +799ms the host was still in the old slot, zero
+    // hosts in the new location, data-pf-shell still set even after the old
+    // slot died. Re-adopt: destroy the stale shell (its destroy unmarks and
+    // unregisters), release the claim, run adoption against the CURRENT
+    // ancestry - which legitimately refuses an unrecognisable new location
+    // (sdk null) and succeeds once the page wraps the video in a player
+    // again. One shell rebuild per re-parent is the accepted cost; resume
+    // re-adopts its saved entry by design.
+    const movedOut = video.parentElement !== this.#anchors[0];
+    if (movedOut || !this.#isChainFresh()) {
+      this.#reanchorObservers();
+    }
+    // A settle that completed while this video was detached skipped shell
+    // creation but left the session claiming it - and this very reconnect
+    // just cancelled the grace that would have released the claim. With the
+    // discovery tap already downgraded, this edge is the only re-discovery
+    // signal there is: release the claim and run adoption again (fresh
+    // findSdk/size validation; a video that no longer qualifies stays
+    // unclaimed and refusable). One-shot consume, so ordinary re-anchors
+    // with a live shell - and boot-failed videos waiting on their media
+    // event - never re-enter adoption. The movedOut branch re-adopts too,
+    // so the flag is consumed on that path as well instead of staying
+    // armed for a later, now redundant, offer.
+    const skipEdge = this.consumeSettleSkip();
+    if (movedOut) {
+      this.#removeShell(video);
+      this.releaseClaim();
+      this.#adopt(video);
+    } else if (skipEdge) {
+      this.releaseClaim();
+      this.#adopt(video);
+    }
+  }
+
+  /**
+   * Single-target consolidation: `MutationObserver.observe()` supports
+   * multiple root targets natively (childList filtered in C++), so up to the
+   * active depth (cap: MAX_REMOVAL_DEPTH) per-video C++ wrappers collapse to
+   * one instance. The kernel scope disconnects it at pagehide - no per-video
+   * bookkeeping.
+   */
+  #reanchorObservers() {
+    // MutationObserver has no per-target unobserve(): disconnect() is the
+    // only way to drop the stale roots (the previous loop called a method
+    // that does not exist and threw, leaving the anchors stranded on their
+    // original parents). Records dropped by the disconnect cost nothing:
+    // this callback never reads the queue - every decision below is
+    // re-derived from live DOM state, which was just evaluated on this
+    // very call - and the next mutation lands on the re-observed roots.
+    const video = this.#video;
+    const observer = this.#observer;
+    const anchors = this.#anchors;
+    observer.disconnect();
+    anchors.length = 0;
+    let anchor = video.parentElement || this.#container;
+    for (let depth = 0; anchor && depth < this.#anchorDepth; depth++, anchor = anchor.parentElement) {
+      observer.observe(anchor, { childList: true });
+      anchors.push(anchor);
+    }
+    this.#anchorDepth = MAX_REMOVAL_DEPTH;
+    /**
+     * Sentinel: the first ancestor ABOVE the watched range. MutationObserver
+     * only reports mutations of the nodes it observes, so removing the
+     * outermost watched anchor was a childList change on a node nobody
+     * watched - no record, no checkAnchors, and the video stayed claimed
+     * forever (shell, listeners, marker, session entry). When the chain
+     * ends at the document `anchor` is null and there is nothing to watch.
+     * Kept out of `anchors` deliberately: that array is the watched RANGE,
+     * and anchors[0] means "the video's parent" to the check above.
+     * Tracked in `#sentinel` too: a subtree move can leave the whole range
+     * intact while the node ABOVE it is no longer an ancestor, and only a
+     * recorded sentinel can notice (#isChainFresh).
+     */
+    if (anchor && !anchors.includes(anchor)) {
+      observer.observe(anchor, { childList: true });
+      this.#sentinel = anchor;
+    } else {
+      this.#sentinel = null;
+    }
   }
 }
 
@@ -619,8 +683,8 @@ export class LifecycleManager {
   /** Told which video's shell failed to come up, so the kernel can re-arm. */
   #onShellFailed;
   /** Told which video's settle completed while it was detached. The kernel
-   *  keeps that fact on its removal watch: the reconnect edge must re-enter
-   *  adoption, because #seenVideos still claims the video and the discovery
+   *  keeps that fact on the video's session: the reconnect edge must re-enter
+   *  adoption, because the session still claims the video and the discovery
    *  tap has already downgraded by then. */
   #onSettleSkipped;
   #shellFactory = null;
@@ -676,9 +740,9 @@ export class LifecycleManager {
     // mutation re-enters adoption against the CURRENT container.
     if (!video.isConnected || !container.isConnected || !container.contains(video)) {
       logger.log("lifecycle", `${sdk.name} video left its container before settle - skipping`);
-      // The claim stands (#seenVideos) and the discovery tap is downgraded,
-      // so this video is unreachable unless the removal watch's reconnect
-      // edge re-offers it. Hand the kernel the fact it needs for that.
+      // The claim stands (the session holds it) and the discovery tap is
+      // downgraded, so this video is unreachable unless the removal watch's
+      // reconnect edge re-offers it. Hand the kernel the fact it needs for that.
       this.#onSettleSkipped?.(video);
       return;
     }

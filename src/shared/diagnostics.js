@@ -301,6 +301,8 @@ function teardownEventTiming() {
  * metadata:
  *
  * - `getVideoPlaybackQuality().droppedVideoFrames` is the decoder's own count.
+ * - `corruptedVideoFrames` rides the same report: frames the decoder marks
+ *   unwatchable, accumulated and rebased exactly like dropped ones.
  * - Gecko's `mozPresentedFrames` minus `mozPaintedFrames` is how many frames
  *   were submitted and never reached the screen - the pair §4 reaches for by
  *   name. The standard `presentedFrames` cannot stand in for it: Gecko reports
@@ -330,6 +332,7 @@ const qualityVideos = new Set();
 let qDropped = 0;
 let qPresented = 0;
 let qPainted = 0;
+let qCorrupted = 0;
 
 /** Media edges that arm and cancel the presentation edge. */
 const EDGE_ARM = ["play", "playing"];
@@ -357,11 +360,15 @@ function sampleQuality(entry) {
     qDropped += countedSince(quality.droppedVideoFrames, entry.prev.dropped);
     qPresented += countedSince(presented, entry.prev.presented);
     qPainted += countedSince(painted, entry.prev.painted);
+    // Corrupted frames are the decoder's own "unwatchable" count, beside the
+    // dropped one: same cumulative shape, same rebase rule, one more line.
+    qCorrupted += countedSince(quality.corruptedVideoFrames, entry.prev.corrupted);
   }
   entry.prev = {
     dropped: quality.droppedVideoFrames,
     presented,
-    painted
+    painted,
+    corrupted: quality.corruptedVideoFrames
   };
 }
 
@@ -433,15 +440,17 @@ function flushFrameQuality() {
     }
   }
   const neverPainted = Math.max(0, qPresented - qPainted);
-  if (qDropped > 0 || neverPainted > 0) {
+  if (qDropped > 0 || neverPainted > 0 || qCorrupted > 0) {
     logger.warn(
       "perf",
-      `dropped frames: ${qDropped} dropped, ${qPresented} presented, ${neverPainted} never painted`
+      `dropped frames: ${qDropped} dropped, ${qPresented} presented, ${neverPainted} never painted` +
+        (qCorrupted > 0 ? `, ${qCorrupted} corrupted` : "")
     );
   }
   qDropped = 0;
   qPresented = 0;
   qPainted = 0;
+  qCorrupted = 0;
 }
 
 /**

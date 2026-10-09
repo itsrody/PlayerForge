@@ -1383,7 +1383,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved fifteen times since that cut. The first two movements
+The unit count has moved sixteen times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1523,6 +1523,20 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  refs.test.mjs` pins every `file:line` cite to an anchor on that line and
  requires new cites to add rows, in the posttask-guard idiom; a one-line
  shift was verified to fail it.
+
+ The sixteenth movement gave the kernel's per-video state a class:
+ `VideoSession` owns the adoption claim, the boot-retry and settle-skip
+ flags, and the removal watch (observer, anchors, sentinel, grace) behind one
+ `WeakMap` keyed by the element, replacing five Weak collections with one
+ lookup. The kernel keeps policy, the session keeps state and the watch
+ machine; the moved code is verbatim, measured comments included. The same
+ change extended the dropped-frame report with the decoder's
+ `corruptedVideoFrames` beside dropped (a conditional segment, so clean
+ windows read exactly as before) and pinned the Idle Detection API in
+ `retired`. Temporal staleness math was evaluated and rejected alongside:
+ Node lacks `Temporal` entirely, so the code would need an untestable dual
+ path to fix a ±1-hour edge on a 14-day window — floor-safe is not the same
+ as worth it.
 
 ## 7. Gecko-specific decisions, and what they rule out
 

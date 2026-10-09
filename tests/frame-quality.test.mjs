@@ -38,7 +38,7 @@ function makeVideo({ rvfc = true } = {}) {
     seeking: false,
     mozPresentedFrames: 0,
     mozPaintedFrames: 0,
-    quality: { droppedVideoFrames: 0, totalVideoFrames: 0 },
+    quality: { droppedVideoFrames: 0, corruptedVideoFrames: 0, totalVideoFrames: 0 },
     pending: new Map(),
     cancelled: [],
     nextHandle: 1,
@@ -204,6 +204,26 @@ test("dropped frames are reported when debug is switched off", () => {
       warnings[0],
       /dropped frames: 3 dropped, 30 presented, 2 never painted/,
       "the mozilla pair is reported, and never-painted is derived from it"
+    );
+  });
+});
+
+test("corrupted frames ride the same report as dropped ones", () => {
+  withVideo(({ video, warnings }) => {
+    setDebugRuntime(true);
+    video.paused = false;
+    video.dispatch("play");
+    video.quality.droppedVideoFrames = 1;
+    video.quality.corruptedVideoFrames = 2;
+    video.mozPresentedFrames = 30;
+    video.mozPaintedFrames = 28;
+    assert.ok(video.deliverFrame(), "a frame was presented, so the sample is taken");
+    setDebugRuntime(false);
+    assert.equal(warnings.length, 1);
+    assert.match(
+      warnings[0],
+      /dropped frames: 1 dropped, 30 presented, 2 never painted, 2 corrupted/,
+      "the decoder's unwatchable count is reported beside the dropped one"
     );
   });
 });

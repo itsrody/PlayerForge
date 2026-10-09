@@ -478,6 +478,24 @@
       "mustNotAppearIn": [
         "src/"
       ]
+    },
+    {
+      "id": "interaction-count",
+      "summary": "performance.interactionCount (Event Timing L2)",
+      "why": "Chromium-only counter. Interaction latency groups by interactionId, which Gecko ships; the count has no signal here.",
+      "matchPattern": "interactionCount",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "idle-detection",
+      "summary": "IdleDetector (Idle Detection API)",
+      "why": "Chromium-only. Idleness is derived from playback state, visibility and focus - observed edges, never polled - so there is nothing for a detector to add.",
+      "matchPattern": "IdleDetector|idleDetector",
+      "mustNotAppearIn": [
+        "src/"
+      ]
     }
   ],
   "hostProbes": [
