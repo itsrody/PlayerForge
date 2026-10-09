@@ -81,6 +81,17 @@ export const MIN_VIDEO_WIDTH = 100;
 export const MIN_VIDEO_HEIGHT = 60;
 
 /**
+ * Every anchor in the registry as one grouped selector. `:is()` is matched
+ * once per chain node instead of once per anchor per node: measured 7.0x on
+ * Gecko 158 for the mixed hit/miss discovery mix (see
+ * platform/browser-bench/discovery-match.bench.mjs), because a single engine
+ * call replaces up to forty `matches()` round trips per node. Anchors must
+ * stay `:is()`-compatible - all current ones are simple compounds (classes,
+ * attributes, custom-element tags), which group without changing meaning.
+ */
+const ANCHOR_GROUP = `:is(${REGISTRY.flatMap((record) => record.anchors).join(",")})`;
+
+/**
  * Reusable composed-ancestry scratch: the match loop is fully synchronous and
  * never lets the array escape (callers keep only `el`/`record`/`hops`, never
  * the chain itself), so one array serves every full-scan instead of allocating
@@ -168,24 +179,24 @@ function matchSdk(video) {
   // ties keep registry order then anchor order (strict < keeps the first).
   const len = fillComposedChain(video);
   let best = null;
-  for (let r = 0; r < REGISTRY.length; r++) {
-    const record = REGISTRY[r];
-    const anchors = record.anchors;
-    for (let a = 0; a < anchors.length; a++) {
-      const anchor = anchors[a];
-      // Bound the walk by the best hops so far: a match at or beyond that
-      // index cannot win (strict < keeps the earlier record/anchor), so the
-      // chain is only scanned as deep as a real improvement would need. A
-      // 0-hop best collapses the bound to 0 and the rest of the registry is
-      // walked with zero chain scans.
-      const limit = best ? best.hops : len;
-      for (let hop = 0; hop < limit; hop++) {
-        if (chain[hop].matches(anchor)) {
-          if (!best || hop < best.hops) {
-            best = { record, el: chain[hop], hops: hop };
-          }
+  for (let hop = 0; hop < (best ? best.hops : len); hop++) {
+    // Grouped pre-check: one engine call per node instead of one per anchor.
+    // A miss skips every anchor below; a hit resolves through the same
+    // registry-then-anchor order as the loop this replaced, so the winner is
+    // identical - only the number of `matches()` calls changed.
+    if (!chain[hop].matches(ANCHOR_GROUP)) {
+      continue;
+    }
+    for (let r = 0; r < REGISTRY.length; r++) {
+      const anchors = REGISTRY[r].anchors;
+      for (let a = 0; a < anchors.length; a++) {
+        if (chain[hop].matches(anchors[a])) {
+          best = { record: REGISTRY[r], el: chain[hop], hops: hop };
           break;
         }
+      }
+      if (best && best.hops === hop) {
+        break;
       }
     }
   }

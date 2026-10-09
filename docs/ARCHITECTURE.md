@@ -429,6 +429,21 @@ two of them to nothing:
  in absolute terms, but the fix is four lines with no structural cost, so
  unlike the array-backed pointer list there is no trade to weigh: taken.
 
+ A third instrument, `discovery-match.bench.mjs`, prices anchor-matching
+ strategies instead of JS shapes: the per-video walk with per-anchor
+ `matches()` against `closest()`-first, an inverted `:has(video)` query, and
+ one grouped `:is()` call per node — on a mixed page of four SDK players,
+ twelve unregistered videos, filler depth and one shadow player the
+ light-DOM strategies are structurally blind to. DOM rows run page-side, so
+ the realm caveat applies (fewer DOM touches survive the translation to the
+ userscript realm; close ratios might not). Results on 158.0b5, all tight
+ spreads: `closest()`-first 1.09× (misses pay the attempt plus the full walk
+ anyway — rejected as complexity for 9%), `:has()`-inverted 3.5× (rejected:
+ it restructures offers into batches and still needs the shadow fallback),
+ grouped `:is()` **7.0×, taken** — one engine call per node replaces up to
+ forty, with registry-then-anchor resolution preserving the exact winner, so
+ the whole sdk-engine suite passes unchanged.
+
  The pattern holds: the largest absolute on the board is tens of microseconds
  on paths that run at event rate or rarer, and the one genuine wash joins the
  stepper's `10 ** decimals` as a recorded non-difference. No `src/` change
