@@ -215,7 +215,7 @@ test("re-parenting out of an SDK invalidates the positive memo", () => {
   assert.equal(findSdkForVideo(video), null, "stale descriptor survived re-parenting");
 });
 
-test("re-parenting into an SDK invalidates the negative memo", () => {
+test("re-parenting into an SDK is detected on re-query", () => {
   const doc = dom(
     '<div class="plain"><div id="slot"><video></video></div></div>' +
     '<div data-vjs-player id="target"></div>'
@@ -225,6 +225,33 @@ test("re-parenting into an SDK invalidates the negative memo", () => {
 
   doc.querySelector("#target").append(video);
   assert.equal(findSdkForVideo(video).name, "Video.js", "stale null survived re-parenting");
+});
+
+test("a subtree grafted under an SDK is detected on re-query", () => {
+  const doc = dom(
+    '<div class="plain"><div id="slot"><video></video></div></div>' +
+    '<div class="dplayer" id="target"></div>'
+  );
+  const video = doc.querySelector("video");
+  assert.equal(findSdkForVideo(video), null, "precondition: unregistered to start");
+
+  // Move the video AND its parent together: the direct parent never changes,
+  // so a parent-only freshness check keeps reporting the stale null for the
+  // life of the document while the video sits inside a real player.
+  doc.querySelector("#target").append(doc.querySelector("#slot"));
+  assert.equal(findSdkForVideo(video)?.name, "DPlayer", "stale null survived a subtree graft");
+});
+
+test("a graft that adds no SDK still answers null", () => {
+  const doc = dom(
+    '<div class="plain"><div id="slot"><video></video></div></div>' +
+    '<div class="plain" id="target"></div>'
+  );
+  const video = doc.querySelector("video");
+  assert.equal(findSdkForVideo(video), null);
+
+  doc.querySelector("#target").append(doc.querySelector("#slot"));
+  assert.equal(findSdkForVideo(video), null, "a graft without an SDK must not resurrect a match");
 });
 
 test("a positive memo is invalidated when the matched wrapper is replaced in place", () => {
@@ -241,7 +268,7 @@ test("a positive memo is invalidated when the matched wrapper is replaced in pla
   assert.equal(findSdkForVideo(video), null, "stale descriptor survived wrapper replacement");
 });
 
-test("a negative memo is re-checked after the video is detached entirely", () => {
+test("detachment rescans to null without throwing", () => {
   const doc = dom('<div class="plain"><video></video></div>');
   const video = doc.querySelector("video");
   assert.equal(findSdkForVideo(video), null);

@@ -17,6 +17,14 @@ import { postTask } from "../shared/scheduler.js";
  * additionally resolves the wait immediately - so a video removed / page
  * hidden mid-window never leaves the observer + its two timers running for
  * the full cap.
+ *
+ * The watch covers the container SUBTREE, not just its direct children. SDKs
+ * build their chrome nested several levels down (control bars inside
+ * wrappers inside the anchor), and a childList-only watch never re-arms for
+ * those - so settle could fire mid-build, the host would land, and the SDK's
+ * next innerHTML wipe would take it out again (recovered by the watchdog,
+ * but churn on every such player). The extra records only extend the window,
+ * never beyond the cap, so a chatty build costs latency, not correctness.
  */
 function whenDomSettled(container, { quietMs = 50, capMs = 150, signal } = {}) {
   const { promise, resolve } = Promise.withResolvers();
@@ -50,7 +58,7 @@ function whenDomSettled(container, { quietMs = 50, capMs = 150, signal } = {}) {
   settleHandle = postTask(done, { priority: "user-visible", delay: quietMs });
   capHandle = postTask(done, { priority: "user-visible", delay: capMs });
 
-  observer.observe(container, { childList: true });
+  observer.observe(container, { childList: true, subtree: true });
 
   const onAbort = () => done();
   signal?.addEventListener("abort", onAbort, { once: true });

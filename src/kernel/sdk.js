@@ -104,27 +104,19 @@ function anchorStillMatches(video, anchor, hops) {
 }
 
 /**
- * Is a memo entry still true of the video's current ancestry?
+ * Is a positive memo entry still true of the video's current ancestry?
  *
  * A memo that is never re-validated is wrong the moment a page moves the
  * element: SPA route changes, player re-init, and ad-slot recycling all
  * re-parent the SAME <video>, which keeps the same WeakMap key, so the old
  * answer survived forever - a video adopted by an SDK that later replaced its
- * wrapper kept resolving to the dead one, and a video that an SDK inserted
- * itself around stayed permanently "unregistered".
- *
- * Positive entries are checked exactly (is the recorded anchor still at the
- * recorded hop). Negative entries are checked on the direct composed parent,
- * which is the case that actually moves; an SDK wrapper appearing strictly
- * BETWEEN an unchanged video and its parent is not detected here, and is not
- * claimed to be.
+ * wrapper kept resolving to the dead one. The recorded anchor is re-verified
+ * at its recorded hop, which is exact: wrapper replacement and re-parenting
+ * both move the anchor or change its distance.
  */
 function isMatchFresh(video, entry) {
   if (entry.parent !== (video.parentNode ?? null)) {
     return false;
-  }
-  if (!entry.best) {
-    return true;
   }
   return anchorStillMatches(video, entry.best.el, entry.best.hops);
 }
@@ -175,40 +167,42 @@ function matchSdk(video) {
 }
 
 /**
- * Fully-resolved descriptor per video. Cached alongside the raw match so the
- * hot re-query path (probe/kernel re-asking about surviving videos) returns
- * the SAME object instead of re-wrapping + re-allocating every call.
- * "Fewer APIs, same facts": the scan already computes `el` and `hops`, so they
- * are surfaced at zero extra cost rather than recomputed downstream.
- *
- * The negative null is memoized too, which is what makes the entry wrapper
- * necessary: a cached `null` and an absent entry are now different things, so
- * freshness has to live on the wrapper rather than on the payload.
+ * Fully-resolved descriptor per video. Cached so the hot re-query path
+ * (kernel re-asking about a surviving video) returns the SAME object instead
+ * of re-wrapping + re-allocating every call. "Fewer APIs, same facts": the
+ * scan already computes `el` and `hops`, so they are surfaced at zero extra
+ * cost rather than recomputed downstream. Only positives are cached — see
+ * findSdkForVideo for why the null stays unmemoized.
  */
 const descriptorCache = new WeakMap();
 
 /**
  * Identify the SDK owning a video, or null when unregistered.
  *
- * Both the positive descriptor and the negative null are memoized, so a page of
- * many non-SDK videos (ad grids, untracked embeds) does not re-run the full
- * ancestry scan per discovery pass. The WeakMap key dies with the video, so
- * entries are session-only - but the key surviving is exactly why each entry
- * is re-validated against the video's current ancestry on read (see
- * isMatchFresh): a memo that outlives the fact it recorded would make
- * detection permanently wrong after any re-parenting.
+ * Only the positive descriptor is memoized, so a re-query about a surviving
+ * video returns the SAME object instead of re-wrapping every call. The null
+ * is deliberately NOT memoized: no cheap fingerprint distinguishes "same
+ * answer" from "the video's subtree was grafted under a new SDK" — parent,
+ * depth and top can all survive such a graft unchanged, and the one exact
+ * check (re-running the scan) is the scan itself. A cached null would keep a
+ * grafted player permanently unregistered with no path re-offering it (the
+ * mutation tap offers the moved video, the memo calls it fresh, adoption
+ * never runs). The rescan costs one bounded ancestry walk plus the anchor
+ * matches, and offers are rare per video (boot replay, added-node batches,
+ * media events) — correctness here is worth more than the saved
+ * microseconds. The WeakMap key dies with the video, so positive entries are
+ * session-only.
  */
 export function findSdkForVideo(video) {
   const cached = descriptorCache.get(video);
   if (cached && isMatchFresh(video, cached)) {
-    return cached.best ? cached.descriptor : null;
+    return cached.descriptor;
   }
   const match = matchSdk(video);
-  const entry = { best: match, parent: video.parentNode ?? null, descriptor: null };
   if (!match) {
-    descriptorCache.set(video, entry);
     return null;
   }
+  const entry = { best: match, parent: video.parentNode ?? null, descriptor: null };
   entry.descriptor = {
     name: match.record.name,
     host: match.record.host ?? null,

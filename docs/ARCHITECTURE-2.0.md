@@ -1379,7 +1379,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved nine times since that cut. The first two movements
+The unit count has moved ten times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1433,6 +1433,30 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  under `matchMedia` and beside `context.js` under `AbortSignal`, and
  `src/shared/geometry.js` beside `forge.js` under `screen` — bare calls the
  `typeof`-chain scan cannot see, so the manifest is what keeps them honest.
+
+ The tenth movement hardened injection and SDK domination six ways, and the
+ first of the six broke an integration test in a way that proved the fix was
+ real. Parking focus with `preventScroll` (F1) stopped boot from scroll-
+ yanking below-fold players into view — and the hotkey-broker focus test had
+ been passing only because of that yank: with the player correctly staying
+ occluded and detached, its probe focus silently no-oped inside `display:
+ none` and the keystroke fell through to the playing sibling. The test now
+ scrolls its target into view explicitly, waits out the occlusion resolve,
+ and asserts the focus through the shadow root itself (`document.
+ activeElement` retargets to the host and can never name the probe). The
+ other five: the container becomes a stacking context (`isolation: isolate`,
+ F2) so the host's INT32_MAX ceiling is actually contained as the stylesheet
+ claims; the kernel no longer reads SHELL_MARKER as an adoption veto (F3) —
+ ownership is the seen-set plus the registry slot, and a `cloneNode`d marker
+ would otherwise refuse a shell-less clone forever; the null stays
+ unmemoized (F4) so a subtree graft under a new SDK is detected on re-query
+ instead of answered from a stale parent-only check; settle watches the
+ container subtree (F5) so nested SDK builds re-arm the quiet window within
+ the same cap; and every injection re-asserts the document stylesheet
+ adoption a page script may have clobbered (F6). `tests/shell-boot.test.mjs`
+ gained 3 (scroll-free focus, isolation, re-adoption), `tests/kernel-replay.
+ test.mjs` 2 (cloned marker, subtree observe), `tests/sdk-engine.test.mjs` 2
+ (the graft pair, one of which fails on any parent-only check).
 
 ## 7. Gecko-specific decisions, and what they rule out
 

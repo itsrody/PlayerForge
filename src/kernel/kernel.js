@@ -6,7 +6,7 @@ import { Scope } from "../shared/scope.js";
 import { ShellRegistry } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, meetsMinSize, watchDocumentVideos, watchMediaEvents, forEachShadowVideos } from "./sdk.js";
-import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
+import { GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
 
 /**
  * Top-level orchestrator: watches for <video> elements, identifies the player
@@ -203,9 +203,9 @@ export class Kernel {
 
   /**
    * A shell's boot threw. If the boot failed, the shell already rolled its own
-   * DOM back, so the video lost SHELL_MARKER and is adoptable again; if a shell
-   * came up fine, the marker is still there and #adoptVideo refuses it either
-   * way. Exactly one retry is allowed for the first case: the full-document
+   * DOM back and the kernel released the claim, so the video is adoptable
+   * again; if a shell came up fine, the seen-set and the registry slot refuse
+   * it either way. Exactly one retry is allowed for the first case: the full-document
    * discovery tap feeds this path one record per mutation, so an unbounded
    * re-arm would spin on a deterministically-throwing boot. The second failure
    * is final and the video goes back into the seen-set.
@@ -221,7 +221,14 @@ export class Kernel {
 
   /** Adopt the video, emit discovery and start removal watching. */
   #adoptVideo(video) {
-    if (this.#seenVideos.has(video) || video.hasAttribute(SHELL_MARKER)) {
+    // Ownership is decided JS-side only: #seenVideos (claimed below, before
+    // any yield), the registry slot, and the lifecycle's pending set. The
+    // SHELL_MARKER attribute the shell writes is deliberately NOT read here:
+    // it is observable state (the stylesheet's :fullscreen hook, the DOM's
+    // boot signal), not identity — and attributes clone. A cloneNode(true) of
+    // a managed video carries the marker onto a video no shell owns, and a
+    // veto on it would refuse that clone for the life of the document.
+    if (this.#seenVideos.has(video)) {
       return;
     }
     const sdk = findSdkForVideo(video);

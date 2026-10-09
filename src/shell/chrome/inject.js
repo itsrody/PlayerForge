@@ -9,15 +9,24 @@ import { gmGetResourceText } from "../../shared/storage.js";
 export { SHELL_MARKER };
 
 let sharedSheet = null;
-let adopted = false;
 let styleLoad = null;
 
 function adopt() {
-  if (adopted) {
-    return;
+  // Presence-checked, not flag-latched: a page script can overwrite
+  // document.adoptedStyleSheets wholesale (SPA style resets do), silently
+  // dropping every document-realm rule - the .pf-shell tokens, the
+  // :fullscreen position fix, the pf-detached occlusion gate - while the
+  // shadow HUD keeps working, so nothing visibly breaks except the rules
+  // nobody watches. injectShell re-runs this per shell, and the includes
+  // check makes the re-assertion free when nothing was lost.
+  try {
+    if (!document.adoptedStyleSheets.includes(sharedSheet)) {
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sharedSheet];
+    }
+  } catch {
+    // A hostile or half-torn-down document must not break shell injection;
+    // the shadow adoption below still carries the full surface.
   }
-  adopted = true;
-  document.adoptedStyleSheets = [...document.adoptedStyleSheets, sharedSheet];
 }
 
 /**
@@ -89,6 +98,8 @@ export function injectShell(container) {
   const shadow = host.attachShadow({ mode: "open" });
   if (sharedSheet) {
     shadow.adoptedStyleSheets = [sharedSheet];
+    // Re-assert the document adoption: see adopt() for what can drop it.
+    adopt();
   }
 
   const hudLayer = el("div", { class: "pf-hud-layer" }, shadow);

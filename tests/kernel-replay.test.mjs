@@ -25,7 +25,7 @@ const { logger } = await import("../src/shared/diagnostics.js");
 logger.disable();
 
 const { Kernel } = await import("../src/kernel/kernel.js");
-const { FRAMEWORK_TUNING } = await import("../src/kernel/contract.js");
+const { FRAMEWORK_TUNING, SHELL_MARKER } = await import("../src/kernel/contract.js");
 
 function makeHarness() {
   const body = document.body;
@@ -468,4 +468,47 @@ test("a video moved to another container during settle boots against the new con
   await waitFor(() => created.some((entry) => entry.video === video), 3000);
   const shell = created.find((entry) => entry.video === video);
   assert.equal(shell.container, swap, "the shell boots against the container the video lives in");
+});
+
+test("a video carrying a cloned shell marker is still adopted", async () => {
+  const { kernel, video, created } = makeHarness();
+  // cloneNode(true) copies attributes: a clone of a managed video arrives
+  // WITH the marker but owned by no shell. Ownership is decided JS-side
+  // (seen-set, registry slot), so the attribute must not veto adoption -
+  // otherwise the clone is refused for the life of the document.
+  video.setAttribute(SHELL_MARKER, "");
+  kernel.init();
+  await waitFor(() => created.some((shell) => shell.video === video));
+  assert.equal(
+    created.find((shell) => shell.video === video).sdk.name,
+    "JW Player",
+    "the marker is observable state, not an adoption veto"
+  );
+});
+
+test("the settle watch observes the container subtree, not just its children", async () => {
+  const { kernel, video, created } = makeHarness();
+  // SDKs build their chrome nested several levels down; a childList-only
+  // settle never re-arms for those, fires mid-build, and the SDK's next
+  // innerHTML wipe takes the host out again. Spy the observe() calls and
+  // require the settle's subtree flag on our container.
+  const RealMO = globalThis.MutationObserver;
+  const observed = [];
+  globalThis.MutationObserver = class extends RealMO {
+    observe(target, options) {
+      observed.push({ target, options });
+      return super.observe(target, options);
+    }
+  };
+  try {
+    kernel.init();
+    await waitFor(() => created.some((shell) => shell.video === video));
+  } finally {
+    globalThis.MutationObserver = RealMO;
+  }
+  const container = video.parentElement;
+  assert.ok(
+    observed.some((entry) => entry.target === container && entry.options?.subtree === true),
+    "the settle re-arms on nested SDK builds, not only direct children"
+  );
 });

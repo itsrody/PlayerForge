@@ -140,6 +140,19 @@ test("focus inside a player outranks a playing sibling", async () => {
     return video.play().then(() => !video.paused).catch(() => false);
   });
   assert.equal(playing, true, "the first player must really be playing, or this proves nothing");
+  // Scroll the target into view explicitly: boot used to focus the host
+  // with a bare focus(), whose scroll side effect left the second player
+  // visible, and this test silently depended on it. Parked focus is now
+  // preventScroll, so a below-fold player stays occluded - and an occluded
+  // shell is detached (display:none), in which focusing the probe is a
+  // silent no-op that hands the keystroke to the playing sibling instead.
+  await driver.eval(() => {
+    document.querySelectorAll(".plyr")[1].scrollIntoView();
+  });
+  // Let the intersection crossing resolve through the occlusion gate before
+  // focusing: the focus below must land in a rendered tree, not a detached
+  // one, or it no-ops and the assertion after blames the broker.
+  await sleep(600);
   await driver.eval(() => {
     // A non-interactive holder. It has to go INSIDE the shell's shadow root:
     // isInsideShell() tests shadow containment, so a light-DOM child of the
@@ -152,6 +165,17 @@ test("focus inside a player outranks a playing sibling", async () => {
     focusable.focus();
   });
   await sleep(400);
+
+  // Loud precondition: if the probe never took focus (still occluded,
+  // detached, unrendered), the assertion below would blame the broker for a
+  // focus that never happened. Note document.activeElement can never name a
+  // shadow-interior node - it retargets to the host - so the read goes
+  // through the shadow root itself.
+  const focused = await driver.eval(
+    () => document.querySelectorAll(".plyr")[1].querySelector(".pf-shell")
+      .shadowRoot.activeElement?.id
+  );
+  assert.equal(focused, "pf-focus-probe", "the probe holds focus before the keystroke");
 
   await keyM();
   await sleep(600);

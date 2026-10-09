@@ -89,3 +89,74 @@ test("destroy() stays idempotent after a failed boot rolled back", async () => {
   shell.destroy();
   delete globalThis.CSSStyleSheet;
 });
+
+// Parking focus on the host must never move the viewport: adopting a
+// below-fold player with a bare focus() scrolls the page to it on boot and
+// on every outside click after. jsdom ignores focus options, so the call is
+// observed through a spy rather than through scroll position.
+test("boot parks focus without scrolling the page", async () => {
+  const { dom, container, video } = makeRealm();
+  const calls = [];
+  const proto = dom.window.HTMLElement.prototype;
+  const native = proto.focus;
+  proto.focus = function (options) {
+    calls.push(options);
+    return native.call(this, options);
+  };
+  try {
+    const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
+    await shell.ready;
+    assert.ok(calls.length > 0, "boot focuses the host");
+    for (const options of calls) {
+      assert.equal(options?.preventScroll, true, "every host focus carries preventScroll");
+    }
+    shell.destroy();
+  } finally {
+    proto.focus = native;
+    delete globalThis.CSSStyleSheet;
+  }
+});
+
+// The overlay host carries z-index INT32_MAX, which escapes the player into
+// the page's own stacking context unless the container contains it.
+test("boot contains the overlay paint order on the container", async () => {
+  const { container, video } = makeRealm();
+  const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
+  await shell.ready;
+  try {
+    assert.equal(
+      container.style.getPropertyValue("isolation"),
+      "isolate",
+      "the container becomes a stacking context for the overlay"
+    );
+  } finally {
+    shell.destroy();
+    delete globalThis.CSSStyleSheet;
+  }
+});
+
+// A page script can overwrite document.adoptedStyleSheets wholesale, silently
+// dropping every document-realm rule (tokens, the :fullscreen fix, the
+// occlusion gate) while the shadow HUD keeps working. Shell injection
+// re-asserts the adoption, so the loss is repaired on the next shell.
+test("injection repairs a clobbered document stylesheet adoption", async () => {
+  const { dom, container, video } = makeRealm();
+  const { warmStyles, injectShell } = await import("../src/shell/chrome/inject.js");
+  const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
+  await shell.ready;
+  try {
+    const sheet = warmStyles();
+    assert.ok(dom.window.document.adoptedStyleSheets.includes(sheet), "precondition: sheet is adopted");
+    dom.window.document.adoptedStyleSheets = [];
+    const fresh = dom.window.document.createElement("div");
+    dom.window.document.body.appendChild(fresh);
+    injectShell(fresh);
+    assert.ok(
+      dom.window.document.adoptedStyleSheets.includes(sheet),
+      "injection re-adopted the sheet the page dropped"
+    );
+  } finally {
+    shell.destroy();
+    delete globalThis.CSSStyleSheet;
+  }
+});

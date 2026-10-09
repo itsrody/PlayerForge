@@ -72,11 +72,11 @@ export class Shell {
     this.#media = createMediaControls({ video });
     // A boot that throws AFTER #injectDom has marked the video would otherwise
     // strand a half-live shell: the caller only logs, the video keeps its
-    // SHELL_MARKER, and the kernel refuses to adopt a marked video for the
-    // life of the document. Roll the half-built shell back here, where the
-    // instance is still reachable, then re-throw so the caller still sees the
-    // failure and can allow a retry. destroy() is null-safe across every
-    // sub-component and idempotent via the scope.
+    // SHELL_MARKER, and the kernel's claim release never runs, so the video
+    // stays refused for the life of the document. Roll the half-built shell
+    // back here, where the instance is still reachable, then re-throw so the
+    // caller still sees the failure and can allow a retry. destroy() is
+    // null-safe across every sub-component and idempotent via the scope.
     this.ready = this.#boot().catch((err) => {
       logger.error("shell", `Shell "${this.sdk.name}" boot failed - rolling back`, err);
       this.destroy();
@@ -210,7 +210,10 @@ export class Shell {
     if (!host) {
       return;
     }
-    host.focus();
+    // preventScroll: adopting a below-fold player must not yank the viewport
+    // to it - the integration focus test used to depend on exactly that
+    // scroll, so it scrolls its target into view explicitly instead.
+    host.focus({ preventScroll: true });
     this.#dom.listen(this.container, "pointerdown", (event) => {
       if (this.#scope.disposed) {
         return;
@@ -228,7 +231,10 @@ export class Shell {
   /** Re-focus the host after a pointerdown unless focus already moved inside. */
   #restoreFocusIfNeeded(host) {
     if (!this.#scope.disposed && deepestActiveElement(host) !== host) {
-      host.focus();
+      // preventScroll: the host is parked focus, not a navigation target -
+      // a bare focus() scrolls an off-screen player into view on every
+      // outside click, yanking the page out from under the reader.
+      host.focus({ preventScroll: true });
     }
   }
 
@@ -279,18 +285,27 @@ export class Shell {
     this.#dom.onCleanup(() => this.#shellDom?.host.remove());
     this.#dom.markAttribute(this.#shellDom.host, SHELL_MARKER, "");
     // Mark the video/container in the same synchronous block as the injection.
-    // The kernel treats the marker as "this video already has a shell"
-    // (kernel.js #adoptVideo) and the stylesheet uses it as the fullscreen
-    // hook, so leaving the video unmarked for the rest of boot - which spans
-    // several yields while the panel builds - is a real window: the HUD is
-    // already live and queryable, but the video claims to be unmanaged. A
-    // second adoption in that window would boot a duplicate shell onto it.
+    // The marker is the DOM's observable claim - the stylesheet's :fullscreen
+    // hook and the queryable boot signal - so leaving the video unmarked for
+    // the rest of boot, which spans several yields while the panel builds, is
+    // a real window: the HUD is already live and queryable, but the video
+    // claims to be unmanaged. Double adoption in that window is refused by
+    // the kernel's seen-set, claimed synchronously in #adoptVideo before the
+    // first yield; the marker itself is never a decision input.
     this.#markManaged();
     // Restore container position if we changed it from static.
     const style = getComputedStyle(this.container);
     if (style.position === "static") {
       this.#dom.markStyle(this.container, "position", "relative");
     }
+    // Contain the overlay's paint order. The host carries z-index INT32_MAX
+    // to outrank every sibling stack the SDK paints inside the player — but
+    // position:relative alone creates no stacking context, so without this
+    // the host escapes into the nearest ancestor context (often the page
+    // root) and paints above site chrome that merely overlaps the player
+    // rect. isolation:isolate is paint-order-only: unlike contain:layout it
+    // cannot change what the SDK measures, and it rolls back on destroy.
+    this.#dom.markStyle(this.container, "isolation", "isolate");
     // Parasite watchdog: re-attach host if evicted by SDK. The reconnect
     // subscription is manager-owned, so the watchdog's arm/disarm cycle stops
     // at shell destroy without a paired cleanup handle here.
