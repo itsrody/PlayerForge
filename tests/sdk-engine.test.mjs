@@ -80,7 +80,12 @@ test("generic player markup stays unrecognized", () => {
     '<div class="video-container"><div class="video-wrapper"><video></video></div></div>',
     '<div class="bg-black overflow-hidden select-none"><video></video></div>',
     '<main><video></video></main>',
-    '<div id="dplayer-wrapper"><video></video></div>'
+    '<div id="dplayer-wrapper"><video></video></div>',
+    // Framework app shells are never SDK anchors: Inertia marks every page
+    // root with data-page, so these claimed every video on the page (and
+    // resolved the container to the app root) until the record was dropped.
+    '<div id="app" data-page="{}"><div><video></video></div></div>',
+    '<div data-page="{}"><div><article><video></video></article></div></div>'
   ];
   for (const html of fixtures) {
     const doc = dom(html);

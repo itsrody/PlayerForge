@@ -8,6 +8,13 @@
  * custom element tag), so pages merely styling a <div class="player"> stay
  * unrecognized rather than misidentified. Coverage grows by adding records.
  *
+ * Framework roots are never anchors. An app-shell marker like Inertia's
+ * [data-page] fires for every video on the page - articles, previews, ads -
+ * and resolves the container to the app root, so the host spans the whole
+ * app instead of the player. A record was once added for exactly such a
+ * marker and removed for exactly this reason; a framework that ships its own
+ * player gets a record for the player's namespaced anchor, not the shell.
+ *
  * Record schema:
  *   name    - label used for logging and shell metadata.
  *   anchors - selectors resolved against the video's composed ancestry
@@ -48,7 +55,6 @@ const REGISTRY = [
   { name: "Vidstack", anchors: ["media-player"] },
   { name: "Mux Player", anchors: ["mux-player"] },
   { name: "Radiant Media Player", anchors: ["radiant-media-player"] },
-  { name: "Laravel Video Embed", anchors: ["[data-page] > div:first-child", "#app[data-page]"] },
 ];
 
 export const MIN_VIDEO_WIDTH = 100;
