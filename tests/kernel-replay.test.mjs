@@ -512,3 +512,75 @@ test("the settle watch observes the container subtree, not just its children", a
     "the settle re-arms on nested SDK builds, not only direct children"
   );
 });
+
+/** A playing, sized video in a plain wrapper: no registry record owns it. */
+function makeGenericVideo() {
+  const wrapper = document.createElement("div");
+  const video = document.createElement("video");
+  wrapper.appendChild(video);
+  document.body.appendChild(wrapper);
+  const box = { width: 640, height: 360, top: 0, left: 0, right: 640, bottom: 360 };
+  wrapper.getBoundingClientRect = () => ({ ...box });
+  video.getBoundingClientRect = () => ({ ...box });
+  video.checkVisibility = () => true;
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  Object.defineProperty(video, "ended", { value: false, configurable: true });
+  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
+  return { wrapper, video };
+}
+
+function withActivatedPage(fn) {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  Object.defineProperty(globalThis, "navigator", {
+    value: { userActivation: { hasBeenActive: true, isActive: false } },
+    writable: true,
+    configurable: true
+  });
+  try {
+    return fn();
+  } finally {
+    if (descriptor) {
+      Object.defineProperty(globalThis, "navigator", descriptor);
+    } else {
+      delete globalThis.navigator;
+    }
+  }
+}
+
+async function withGenericEnabled(fn) {
+  const { configStore } = await import("../src/shared/storage.js");
+  configStore.adopt({ version: 1, detection: { genericPlayers: true } });
+  try {
+    return await fn();
+  } finally {
+    configStore.adopt({ version: 1 });
+  }
+}
+
+test("an unrecognized player is adopted with the generic path enabled", async () => {
+  const { kernel, created } = makeHarness();
+  const generic = makeGenericVideo();
+  await withGenericEnabled(async () => {
+    await withActivatedPage(async () => {
+      kernel.init();
+      await waitFor(() => created.some((shell) => shell.video === generic.video), 3000);
+    });
+  });
+  const shell = created.find((entry) => entry.video === generic.video);
+  assert.equal(shell.sdk.name, "Custom player", "the slow path adopted what no record owns");
+  assert.equal(shell.container, generic.wrapper, "placement is the player-like wrapper");
+});
+
+test("an unrecognized player is left alone with the generic path off", async () => {
+  const { kernel, created } = makeHarness();
+  const generic = makeGenericVideo();
+  await withActivatedPage(async () => {
+    kernel.init();
+    // Longer than any settle window: nothing will ever offer this video.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  });
+  assert.ok(
+    !created.some((shell) => shell.video === generic.video),
+    "the registry stays the only default path"
+  );
+});

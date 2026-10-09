@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import {
   findSdkForVideo,
+  findGenericPlayer,
   resolveContainer,
   videoFromEvent,
   meetsMinSize,
@@ -279,6 +280,46 @@ test("a graft that adds no SDK still answers null", () => {
   assert.equal(findSdkForVideo(video), null, "a graft without an SDK must not resurrect a match");
 });
 
+/* - SDK-independent slow path - */
+
+/**
+ * Installs the navigator for the generic path and restores it after: Node's
+ * own navigator has no userActivation, which reads as "not activated" - the
+ * safe direction - so every generic case below installs the activated shape
+ * explicitly.
+ */
+function withActivation(value, fn) {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  const fake = value
+    ? { userActivation: { hasBeenActive: true, isActive: false } }
+    : undefined;
+  Object.defineProperty(globalThis, "navigator", {
+    value: fake, writable: true, configurable: true
+  });
+  try {
+    return fn();
+  } finally {
+    if (descriptor) {
+      Object.defineProperty(globalThis, "navigator", descriptor);
+    } else {
+      delete globalThis.navigator;
+    }
+  }
+}
+
+/** A playing, sized video in a similar-sized wrapper: the qualifying shape. */
+function genericFixture({ wrapperRect = { width: 640, height: 360 }, videoRect = { width: 640, height: 360 }, paused = false } = {}) {
+  const doc = dom('<div id="player"><video></video></div>');
+  const wrapper = doc.querySelector("#player");
+  const video = doc.querySelector("video");
+  wrapper.getBoundingClientRect = () => ({ ...wrapperRect, top: 0, left: 0, right: wrapperRect.width, bottom: wrapperRect.height });
+  video.getBoundingClientRect = () => ({ ...videoRect, top: 0, left: 0, right: videoRect.width, bottom: videoRect.height });
+  Object.defineProperty(video, "paused", { value: paused, configurable: true });
+  Object.defineProperty(video, "ended", { value: false, configurable: true });
+  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
+  return { doc, wrapper, video };
+}
+
 test("a positive memo is invalidated when the matched wrapper is replaced in place", () => {
   // The parent check alone cannot see this one: the video's own parent is
   // untouched, so only re-verifying the anchor at its recorded hop catches it.
@@ -400,4 +441,91 @@ test("findSdkForVideo matches an SDK anchor across a shadow boundary", () => {
   const match = findSdkForVideo(video);
   assert.equal(match?.name, "Plyr", "composed chain crossed the boundary via .host");
   assert.equal(match?.container, doc.querySelector(".plyr__video-wrapper"), "container resolves in the light tree");
+});
+
+test("a playing video with no record qualifies generically on an activated page", () => {
+  const { wrapper, video } = genericFixture();
+  withActivation(true, () => {
+    const sdk = findGenericPlayer(video);
+    assert.equal(sdk?.name, "Custom player");
+    assert.equal(sdk?.container, wrapper, "the similar-sized wrapper hosts the shell");
+    assert.equal(sdk?.hops, 1);
+    assert.equal(sdk?.host, null);
+  });
+});
+
+test("the generic path climbs nested similar wrappers to the outermost", () => {
+  const doc = dom('<div id="outer"><div id="mid"><video></video></div></div>');
+  const outer = doc.querySelector("#outer");
+  const video = doc.querySelector("video");
+  const box = (w, h) => ({ width: w, height: h, top: 0, left: 0, right: w, bottom: h });
+  outer.getBoundingClientRect = () => box(640, 360);
+  doc.querySelector("#mid").getBoundingClientRect = () => box(640, 360);
+  video.getBoundingClientRect = () => box(640, 360);
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  Object.defineProperty(video, "ended", { value: false, configurable: true });
+  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
+  withActivation(true, () => {
+    const sdk = findGenericPlayer(video);
+    assert.equal(sdk?.container, outer, "the outermost player-like box wins");
+    assert.equal(sdk?.hops, 2);
+  });
+});
+
+test("a diverging parent refuses generic placement", () => {
+  // A video sitting directly in a layout context (here 4x wider) has no
+  // player-like box to host the shell - claim nothing rather than the page.
+  const { video } = genericFixture({
+    wrapperRect: { width: 2560, height: 1440 },
+    videoRect: { width: 640, height: 360 }
+  });
+  withActivation(true, () => {
+    assert.equal(findGenericPlayer(video), null);
+  });
+});
+
+test("a video directly under body has no generic container", () => {
+  const doc = dom("<video></video>");
+  const video = doc.querySelector("video");
+  video.getBoundingClientRect = () => ({ width: 640, height: 360, top: 0, left: 0, right: 640, bottom: 360 });
+  doc.body.appendChild(video);
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  Object.defineProperty(video, "ended", { value: false, configurable: true });
+  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
+  withActivation(true, () => {
+    assert.equal(findGenericPlayer(video), null, "full-bleed ambient video is not a player");
+  });
+});
+
+test("the generic path stays off without sticky activation", () => {
+  const { video } = genericFixture();
+  withActivation(false, () => {
+    assert.equal(findGenericPlayer(video), null, "autoplay ads on fresh pages never qualify");
+  });
+});
+
+test("the generic path stays off for paused video", () => {
+  const { video } = genericFixture({ paused: true });
+  withActivation(true, () => {
+    assert.equal(findGenericPlayer(video), null, "poster frames and paused embeds never qualify");
+  });
+});
+
+test("full-bleed and off-viewport video refuse generic placement", () => {
+  // jsdom reports no viewport (clientWidth 0), so these branches need one.
+  const doc = dom('<div id="player"><video></video></div>');
+  Object.defineProperty(doc.documentElement, "clientWidth", { value: 1280, configurable: true });
+  Object.defineProperty(doc.documentElement, "clientHeight", { value: 720, configurable: true });
+  const wrapper = doc.querySelector("#player");
+  const video = doc.querySelector("video");
+  wrapper.getBoundingClientRect = () => ({ width: 1280, height: 720, top: 0, left: 0, right: 1280, bottom: 720 });
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  Object.defineProperty(video, "ended", { value: false, configurable: true });
+  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
+  withActivation(true, () => {
+    video.getBoundingClientRect = () => ({ width: 1280, height: 700, top: 0, left: 0, right: 1280, bottom: 700 });
+    assert.equal(findGenericPlayer(video), null, "ambient full-bleed background is not a player");
+    video.getBoundingClientRect = () => ({ width: 640, height: 360, top: 2000, left: 0, right: 640, bottom: 2360 });
+    assert.equal(findGenericPlayer(video), null, "below-fold video waits for a viewport crossing");
+  });
 });

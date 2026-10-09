@@ -8,6 +8,13 @@
  * custom element tag), so pages merely styling a <div class="player"> stay
  * unrecognized rather than misidentified. Coverage grows by adding records.
  *
+ * The registry stays the only DEFAULT path. Below it, `findGenericPlayer`
+ * offers an opt-in slow path (gated on a setting the kernel checks) for
+ * videos no record claims - renamed-everything forks and bespoke players.
+ * It trades the anchor for behavioral gates (playing, visible, user-driven)
+ * plus measured placement, and it stays off unless asked precisely because
+ * a guess can over-claim where a record cannot.
+ *
  * Framework roots are never anchors. An app-shell marker like Inertia's
  * [data-page] fires for every video on the page - articles, previews, ads -
  * and resolves the container to the app root, so the host spans the whole
@@ -231,6 +238,120 @@ export function findSdkForVideo(video) {
   };
   descriptorCache.set(video, entry);
   return entry.descriptor;
+}
+
+/**
+ * Sticky user activation: the page has seen a real user gesture since load.
+ * Transient `isActive` is too narrow - it lapses the moment the press ends,
+ * while the question here is whether playback on this page is user-driven at
+ * all. Autoplay ads on a fresh page answer no; anything after the first click
+ * answers yes. Firefox 120+, inside the floor; absent on a host without it,
+ * which reads as "not activated" and keeps the slow path off - the safe
+ * direction, since the registry path never asks.
+ */
+function hasStickyActivation() {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+  const activation = navigator.userActivation;
+  return !!activation && activation.hasBeenActive === true;
+}
+
+/**
+ * SDK-independent adoption candidate: a playing, sized, visible video on an
+ * activated page, with no registry record. Each gate kills a false-positive
+ * class: playback state (paused embeds, poster frames), sticky activation
+ * (autoplay ads on fresh pages), size (thumbnails, spacers), viewport and
+ * placement (below-fold carousels, ambient full-bleed backgrounds).
+ *
+ * Deliberately no audio/duration heuristics: muted users and short clips are
+ * legitimate viewing, and each extra heuristic is a false negative for
+ * someone. Same descriptor shape as the registry path, so the kernel cannot
+ * tell which path produced it.
+ */
+export function findGenericPlayer(video) {
+  if (video.paused || video.ended || !(video.readyState >= 1)) {
+    return null;
+  }
+  if (!hasStickyActivation()) {
+    return null;
+  }
+  if (!meetsMinSize(video)) {
+    return null;
+  }
+  const placed = resolveGenericContainer(video);
+  if (!placed) {
+    return null;
+  }
+  return {
+    name: "Custom player",
+    host: null,
+    container: placed.container,
+    anchor: placed.container,
+    hops: placed.hops
+  };
+}
+
+/**
+ * Generic shell placement: climb while the ancestor box tracks the video's
+ * own box, stopping at the first ancestor that diverges (layout context, not
+ * player chrome) and never at body/document. Refuses full-bleed video
+ * (ambient background, not a player) and fully off-viewport video. Reads
+ * rects, so it forces layout - slow-path only, evaluated per playback start
+ * rather than per frame, where one flush is inaudible next to a seek.
+ */
+export function resolveGenericContainer(video) {
+  let rect;
+  try {
+    rect = video.getBoundingClientRect();
+  } catch {
+    return null;
+  }
+  if (!(rect.width > 0) || !(rect.height > 0)) {
+    return null;
+  }
+  // The element's own document, not the ambient one: an iframe's viewport is
+  // its own, and a bare `window` read would answer for the wrong frame.
+  const doc = video.ownerDocument;
+  const viewportWidth = doc?.documentElement?.clientWidth ?? 0;
+  const viewportHeight = doc?.documentElement?.clientHeight ?? 0;
+  if (viewportWidth > 0 && viewportHeight > 0) {
+    if (rect.width >= viewportWidth * 0.9 && rect.height >= viewportHeight * 0.9) {
+      return null;
+    }
+    if (rect.bottom <= 0 || rect.top >= viewportHeight || rect.right <= 0 || rect.left >= viewportWidth) {
+      return null;
+    }
+  }
+  let container = null;
+  let hops = 0;
+  // Composed walk, mirroring fillComposedChain: a shadow-hosted video's
+  // parentElement is null at its shadow boundary, so parentElement alone
+  // would miss every player built inside a custom element.
+  let node = video.parentNode ?? video.host ?? null;
+  while (node) {
+    if (node.nodeType === 1) {
+      if (node === doc?.body || node === doc?.documentElement) {
+        break;
+      }
+      let box;
+      try {
+        box = node.getBoundingClientRect();
+      } catch {
+        break;
+      }
+      if (box.width > rect.width * 3 || box.height > rect.height * 3) {
+        break;
+      }
+      container = node;
+      hops += 1;
+    }
+    node = node.parentNode ?? node.host ?? null;
+  }
+  if (!container) {
+    return null;
+  }
+  return { container, hops };
 }
 
 /**

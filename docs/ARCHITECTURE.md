@@ -1409,7 +1409,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved twenty-one times since that cut. The first two movements
+The unit count has moved twenty-two times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1622,6 +1622,16 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  their classes would never match. Platform embeds (YouTube, Vimeo and kin)
  stay out pending a double-UI product call: adoption inside their frames
  would stack our HUD over their native controls.
+
+ The twenty-second movement added the opt-in SDK-independent slow path:
+ videos no record claims are adopted when playing, sized, visible and
+ user-driven (sticky activation, FF120), placed by climbing box-similar
+ ancestors with ambient-background and off-viewport refusals. No
+ audio/duration heuristics by decision: muted users and short clips are
+ legitimate viewing. The Detect Unknown Players setting defaults off so the
+ registry stays the only default path; `userActivation` is a host probe.
+ `tests/sdk-engine.test.mjs` gained 7, `tests/kernel-replay.test.mjs` 2
+ (adopt-when-enabled, ignore-when-off).
 
 ## 7. Gecko-specific decisions, and what they rule out
 

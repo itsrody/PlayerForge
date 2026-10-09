@@ -805,6 +805,18 @@
         "crypto",
         "crypto.randomUUID"
       ]
+    },
+    {
+      "id": "user-activation",
+      "api": "navigator.userActivation",
+      "summary": "Sticky-activation gate for SDK-independent adoption",
+      "why": "Without it the slow path cannot tell autoplay ads from user-driven playback, so it stays off - the registry path never asks.",
+      "usedBy": [
+        "src/kernel/sdk.js"
+      ],
+      "probes": [
+        "navigator"
+      ]
     }
   ]
 }

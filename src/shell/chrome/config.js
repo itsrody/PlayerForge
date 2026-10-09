@@ -61,6 +61,16 @@ const SETTINGS_SCHEMA = [
     group: "Features"
   },
   {
+    key: "detection.genericPlayers",
+    type: "bool",
+    label: "Detect Unknown Players",
+    // Off unless the user asks: without an anchor the placement is a
+    // measured guess, so the registry stays the default and this covers
+    // renamed forks and bespoke players for those who want it.
+    default: false,
+    group: "Features"
+  },
+  {
     key: "ui.compact",
     type: "bool",
     label: "Compact Panel",

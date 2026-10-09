@@ -3,7 +3,7 @@ import { getConfigValue } from "../shared/storage.js";
 import { setDebugRuntime } from "../shared/diagnostics.js";
 import { postTask } from "../shared/scheduler.js";
 import { Scope } from "../shared/scope.js";
-import { findSdkForVideo, meetsMinSize, watchDocumentVideos, watchMediaEvents, forEachShadowVideos } from "./sdk.js";
+import { findSdkForVideo, findGenericPlayer, meetsMinSize, watchDocumentVideos, watchMediaEvents, forEachShadowVideos } from "./sdk.js";
 import { GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
 
 /**
@@ -221,7 +221,11 @@ export class Kernel {
     if (session.claimed) {
       return;
     }
-    const sdk = findSdkForVideo(video);
+    // Registry fast path first; the opt-in generic slow path only runs for
+    // videos no record claims, so a renamed-everything fork costs one extra
+    // scan while every known SDK keeps its single lookup.
+    const sdk = findSdkForVideo(video) ??
+      (getConfigValue("detection.genericPlayers", false) ? findGenericPlayer(video) : null);
     if (!sdk) {
       return;
     }
