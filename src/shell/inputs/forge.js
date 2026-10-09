@@ -1,6 +1,6 @@
 import { allowsIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo, cancelEase } from "./actions.js";
 import { TUNING } from "../../shared/tuning.js";
-import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../../shared/shadow.js";
+import { deepestActiveElement, isInsideShell, eventHitsControl, fs, subscribeFullscreen } from "../../shared/shadow.js";
 import { DOMManager } from "../../shared/dom-manager.js";
 import { logger } from "../../shared/diagnostics.js";
 import { isBenignMediaPolicyError } from "../../shared/primitives.js";
@@ -447,8 +447,11 @@ export class InputForge {
     this.#zone = zone;
     this.#eventTarget = eventTarget;
     const { signal } = this.#scope;
-    // Track touch-action for automatic rollback on destroy.
-    this.#dom.markStyle(zone, "touch-action", "none");
+    // Idle touch behavior: panning and pinch-zoom stay available to the SDK
+    // (scrollable playlists, settings sheets) until a gesture actually owns
+    // a press - the none below escalates per session, not per lifetime.
+    // Tracked for automatic rollback on destroy.
+    this.#dom.markStyle(zone, "touch-action", "pan-x pan-y");
 
     // NOTE: the native video element is deliberately NEVER patched (no
     // own-property rewrite of play/pause). Assigning JS functions as own
@@ -504,6 +507,16 @@ export class InputForge {
         event.stopImmediatePropagation();
       }
     }, options);
+    // Right-click belongs to the SDK (player menus, stats pages, PiP)
+    // unless a gesture session is live: a hold/scrub/swipe/pinch in flight
+    // owns the press the menu would spring from, an idle page owns nothing.
+    zone.addEventListener("contextmenu", (event) => {
+      if (this.#pointerOwned || this.#holding || this.#scrubbing ||
+          this.#swiping || this.#pinchStartDistance > 0) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    }, { capture: true, signal });
     window.addEventListener("pointerup", (event) => this.#handlePointerUp(event), options);
     window.addEventListener("pointercancel", (event) => this.#handlePointerCancel(event), options);
 
@@ -829,7 +842,13 @@ export class InputForge {
     if (
       event.button !== 0 ||
       this.#eventTarget && isInsideShell(this.#eventTarget, event.target) ||
-      this.#pointers.size === 0 && !this.#hitTestVideo(event)
+      this.#pointers.size === 0 && !this.#hitTestVideo(event) ||
+      // A press on an SDK control was meant for the SDK: never own it, so
+      // control taps stay native, zero-latency and trusted even with the
+      // dbltap intent armed. Only the bare video surface is gesture-eligible.
+      // (A press joining a live session skips this - the session wins over a
+      // late second finger, control or not.)
+      this.#pointers.size === 0 && eventHitsControl(event)
     ) {
       return;
     }
@@ -848,6 +867,10 @@ export class InputForge {
       // single-tap replay - a new press can still turn into a dbltap or a
       // gesture, and the SDK must not be toggled mid-sequence.
       this.#pointerOwned = true;
+      // Escalate touch handling for the session only: the browser must not
+      // start a scroll or zoom from a press the shell owns. Restored on
+      // release/cancel below; destroy rolls back to the idle value.
+      this.#zone.style.setProperty("touch-action", "none");
       if (allowsIntent("dbltap")) {
         this.#cancelTapReplay();
       }
@@ -1061,6 +1084,7 @@ export class InputForge {
       // the compat mouseup the UA fires between pointerup and click still
       // belongs to our stream - keep swallowing it briefly (#awaitClick).
       this.#pointerOwned = false;
+      this.#restoreTouchAction();
       this.#armAwaitClick();
     }
     if (this.#pinchStartDistance > 0 && this.#pointers.size < 2) {
@@ -1140,6 +1164,9 @@ export class InputForge {
     this.#pointers.delete(event.pointerId);
     if (this.#pointers.size === 0) {
       // A cancelled press ends the stream; no click is coming, so no await.
+      if (this.#pointerOwned) {
+        this.#restoreTouchAction();
+      }
       this.#pointerOwned = false;
     }
     if (this.#pinchStartDistance > 0 && this.#pointers.size < 2) {
@@ -1163,7 +1190,7 @@ export class InputForge {
    *  should stop it). Used for touchstart/mousedown, which can arrive before
    *  or without the tracked pointerdown; mirrors #handlePointerDown's
    *  eligibility: armed gestures, left button, outside shell chrome, over the
-   *  video (or joining a live session). */
+   *  video and not on an SDK control (or joining a live session). */
   #dominatesPress(event) {
     if (event.button !== undefined && event.button !== 0) {
       return false;
@@ -1177,11 +1204,21 @@ export class InputForge {
     if (this.#pointers.size > 0) {
       return true;
     }
+    if (eventHitsControl(event)) {
+      return false;
+    }
     const point = (event.touches && event.touches[0]) || event;
     if (point.clientX === undefined) {
       return false;
     }
     return this.#hitTestVideo(point);
+  }
+
+  /** Idle touch behavior back after a session: direct write, not markStyle
+   *  (the manager recorded the construction-time original once and destroy
+   *  still rolls back to it). */
+  #restoreTouchAction() {
+    this.#zone.style.setProperty("touch-action", "pan-x pan-y");
   }
 
   #armAwaitClick() {
@@ -1222,7 +1259,20 @@ export class InputForge {
   #replayTapClick() {
     const target = this.#tapReplayTarget;
     this.#tapReplayTarget = null;
-    if (this.#scope.disposed || !target || !target.isConnected) {
+    if (this.#scope.disposed || !target) {
+      return;
+    }
+    // The SDK may have re-rendered its chrome between the tap and the
+    // window's close (state changes do exactly that): re-resolve the live
+    // node under the original point instead of dropping a tap whose stored
+    // target detached. Still a synthetic click (documented), but no longer
+    // a silently lost one.
+    let live = target;
+    const doc = target.ownerDocument;
+    if (typeof doc?.elementFromPoint === "function") {
+      live = doc.elementFromPoint(this.#tapReplayX, this.#tapReplayY) ?? target;
+    }
+    if (!live.isConnected) {
       return;
     }
     const win = target.ownerDocument && target.ownerDocument.defaultView;
@@ -1240,7 +1290,7 @@ export class InputForge {
       clientY: this.#tapReplayY
     });
     replayedClicks.add(event);
-    target.dispatchEvent(event);
+    live.dispatchEvent(event);
   }
 
   #handleClickCapture(event) {

@@ -2,7 +2,7 @@
  * Shadow DOM traversal helpers. PlayerForge injects its HUD into an open
  * shadow root for style encapsulation, but several DOM APIs
  * (`document.activeElement`, `contains()`, `closest()`) stop at shadow
- * boundaries. These two primitives bridge every gap.
+ * boundaries. These three primitives bridge every gap.
  */
 
 import { createActivity } from "./activity.js";
@@ -29,6 +29,36 @@ export function deepestActiveElement(host) {
  */
 export function isInsideShell(host, node) {
   return node === host || (host.shadowRoot?.contains(node) ?? host.contains(node));
+}
+
+/**
+ * Generic interactive elements - the SDK's own controls, whatever player
+ * they belong to. Buttons, links, form fields, editable text and anything
+ * carrying an interactive ARIA role: no per-SDK selector list, because the
+ * platform already labels these. The gesture engine consults this before
+ * owning a press, and focus/contextmenu handling consults it before
+ * stealing either: a press that lands on a control was meant for the SDK.
+ */
+const CONTROL_SELECTOR =
+  "button, a[href], input, select, option, textarea, summary, " +
+  "[contenteditable=\"\"], [contenteditable=\"true\"], " +
+  "[role=\"button\"], [role=\"link\"], [role=\"menuitem\"], " +
+  "[role=\"menuitemcheckbox\"], [role=\"menuitemradio\"], [role=\"tab\"], " +
+  "[role=\"slider\"], [role=\"switch\"], [role=\"checkbox\"], [role=\"radio\"], " +
+  "[role=\"option\"], [role=\"spinbutton\"]";
+
+/** True when any element on the event's path is an SDK control. */
+export function eventHitsControl(event) {
+  if (typeof event?.composedPath === "function") {
+    const path = event.composedPath();
+    for (const node of path) {
+      if (typeof node?.matches === "function" && node.matches(CONTROL_SELECTOR)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  return !!event?.target?.closest?.(CONTROL_SELECTOR);
 }
 
 /**

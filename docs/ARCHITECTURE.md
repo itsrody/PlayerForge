@@ -711,7 +711,7 @@ record rather than quietly delete:
   exercised by `render-gate.test.mjs`, but nothing in `src/` observes element
   size, because every layout question this fork asks is answered by status
   (`Playback`, `Presence`) or by CSS (`pf-detached`'s `display: none`). The one
-  mention in `src/` is a comment (`src/shell/inputs/forge.js:824`).
+  mention in `src/` is a comment (`src/shell/inputs/forge.js:837`).
 - **PiP is gone, not pending.** Picture-in-picture was removed outright
   (`a5bc9fb`, "remove picture-in-picture entirely"), so the earlier draft's "+
   PiP events" has no event to name. `Presence.PIP` survives as an enum member
@@ -730,8 +730,8 @@ an oversight.
 ### L2 — PlayerStatus
 
 Today `isActive()` closures are authored independently at each `createActivity`
-call site (`src/shell/shell.js:333`, `src/shell/resume.js:702`,
-`src/shared/shadow.js:105`). Nothing answers "what is this player's status right
+call site (`src/shell/shell.js:332`, `src/shell/resume.js:702`,
+`src/shared/shadow.js:135`). Nothing answers "what is this player's status right
 now" as a single queryable value.
 
 L2 introduces orthogonal axes rather than one large enum, so adding an axis never
@@ -761,7 +761,7 @@ change is dispatched as a `pf:status` CustomEvent on the `<video>`
 (`player-status.js:359`) so the **page world** can read status across the
 sandbox boundary — which is the only consumer of `Buffer`, `Screen`, `duration`,
 `rate`, `volume`, `muted`, `hasTextTrack` and `error`. In-tree exactly one
-subscriber exists (`shell.js:481`, feeding the occlusion resolve), and it reads
+subscriber exists (`shell.js:480`, feeding the occlusion resolve), and it reads
 two of the ten fields. The other eight are carried for the page, so "no in-tree
 consumer" is the expected shape rather than dead code.
 
@@ -807,7 +807,7 @@ one `dispose()`.
 
 **Not landed as a class, and not needed as one.** `Shell` (`src/shell/shell.js`)
 already *is* the per-`<video>` owner: it holds `#scope`, `#status`, two
-`RenderGate`s, and every sub-component, and `destroy()` (`shell.js:517`) fans out
+`RenderGate`s, and every sub-component, and `destroy()` (`shell.js:516`) fans out
 to exactly the single `dispose()` this section describes. Extracting a
 `PlayerSession` would have been a rename with no second implementation behind
 it, so §6's seven phases never opened one — the one layer in the §4 diagram with
@@ -823,7 +823,7 @@ the layers can assume:
   L2 generally useful in-tree, and it is deliberately not done: only the
   occlusion resolve needs status today, and it is inside the shell.
 - **The gate is not one-per-session.** `Shell` registers two — media-state
-  (`shell.js:386`) and occlusion (`shell.js:473`) — because they have different
+  (`shell.js:385`) and occlusion (`shell.js:472`) — because they have different
   priorities' worth of coalescing and different snapshot shapes. `ToastManager`
   (`toast.js:123`) and `SettingsPanel` (`panel.js:293`) each own a further gate
   on their own scope, so the tree has four `RenderGate` constructions in total.
@@ -1444,7 +1444,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved twenty-four times since that cut. The first two movements
+The unit count has moved twenty-five times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1686,6 +1686,18 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  re-learns. `tests/sdk-engine.test.mjs` gained 5, `tests/kernel-replay.
  test.mjs` 3 (persist, second-visit-learned, dormant-when-off).
 
+ The twenty-fifth movement inverted gesture ownership: the shell owns
+ presses on the bare video surface, the SDK owns its controls. A press
+ landing on a generic interactive element (buttons, links, form fields,
+ editable text, interactive ARIA roles - no per-SDK list) is never owned,
+ so control taps stay native, zero-latency and trusted with every intent
+ armed; tap replay re-resolves its target at fire time instead of dropping
+ re-rendered chrome; `touch-action` escalates to none per session rather
+ than per lifetime; right-click and focus pass to controls unless a
+ gesture session is live. `tests/input-forge.test.mjs` gained 5, and the
+ doc-refs cites moved with the code (shell.js -1, shadow.js +30,
+ forge.js latch pair 942/943 to 965/966).
+
 ## 7. Gecko-specific decisions, and what they rule out
 
 - Scheduler priorities replace timer-based deferral. `postTask` is available
@@ -1817,7 +1829,7 @@ In-tree:
 - `src/shared/scheduler.js` — traps in §2.4, `postTask`, `yield_()`
 - `src/shared/scope.js` — teardown primitive
 - `src/shared/activity.js` — passive activity windows
-- `src/shell/shell.js:333`, `src/shell/resume.js:702`, `src/shared/shadow.js:105` — `createActivity` call sites
+- `src/shell/shell.js:332`, `src/shell/resume.js:702`, `src/shared/shadow.js:135` — `createActivity` call sites
 - `src/shared/context.js:637` — the tree's only self-rearming `postTask`, delayed
 - `src/shared/dom-manager.js` — mutation coalescing
 - `src/shell/chrome/panel.js:116` — the only `setInterval` in the tree

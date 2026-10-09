@@ -1,5 +1,5 @@
 import { logger, watchFrameQuality } from "../shared/diagnostics.js";
-import { deepestActiveElement, isInsideShell, fs } from "../shared/shadow.js";
+import { deepestActiveElement, isInsideShell, eventHitsControl, fs } from "../shared/shadow.js";
 import { InputForge } from "./inputs/forge.js";
 import { attachInputActions, releaseShellActions } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
@@ -115,7 +115,6 @@ export class Shell {
     });
 
     this.#setupFocusManagement();
-    this.#suppressContextMenu();
     this.#forwardMediaEvents();
     // Needs #status, so it has to follow #forwardMediaEvents.
     this.#watchOcclusion();
@@ -196,12 +195,7 @@ export class Shell {
     return this.#dom;
   }
 
-  #suppressContextMenu() {
-    this.#dom.listen(this.container, "contextmenu", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-    }, { capture: true });
-  }
+  /** Keep focus on the shell host when pointer interactions happen inside it. */
 
   /** Keep focus on the shell host when pointer interactions happen inside it. */
   #setupFocusManagement() {
@@ -219,6 +213,11 @@ export class Shell {
       }
       // Common case: focus already lives on the host - no traversal needed.
       if (document.activeElement === host) {
+        return;
+      }
+      // A press on an SDK control keeps its focus: the control (a play
+      // button, a slider) is the keyboard context now, not the host.
+      if (eventHitsControl(event)) {
         return;
       }
       if (!isInsideShell(host, event.composedPath()[0])) {

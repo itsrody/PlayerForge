@@ -635,9 +635,11 @@ test("a space press that started in a text field never toggles playback on keyup
 });
 
 /* --- SDK dominance contract ------------------------------------------- *
- * The shell owns every stream a gesture can activate; the SDK sees only
- * deliberate passthroughs: single click/tap (replayed after the dbltap
- * window), hover, and presses outside the gesture zone. */
+ * The shell owns gesture-eligible presses on the bare video surface; the
+ * SDK sees deliberate passthroughs: single click/tap (replayed after the
+ * dbltap window), hover, presses outside the gesture zone - and every
+ * press that lands on one of its own controls, which stays native,
+ * zero-latency and trusted no matter which intents are armed. */
 
 /** SDK-side observer: bubble listeners at the same node the platform would
  *  bind to (the container/zone), registered after the forge like a real
@@ -1149,3 +1151,106 @@ test("scrubEnd with no qualifying move settles nothing", () => {
   dom.window.close();
 });
 
+
+/* --- Controls belong to the SDK -------------------------------------- *
+ * A press on an interactive element is never gesture-eligible: control
+ * taps stay on the full native stream (trusted, zero latency) even with
+ * every intent armed, in fullscreen, where a surface tap would be held
+ * back for the dbltap window and replayed synthetic. */
+
+test("a tap on an SDK control stays native with the dbltap intent armed", async (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  stubFullscreen(dom, true); // a surface tap here would be held for replay
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+  const seen = collect(host, dom.window);
+  const sdk = sdkObserver(zone, dom.window);
+
+  const control = dom.window.document.createElement("button");
+  control.className = "sdk-play";
+  zone.appendChild(control);
+  control.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  control.dispatchEvent(mouse(dom.window, "mousedown", { x: 400, y: 200 }));
+  control.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 400, y: 200 }));
+  control.dispatchEvent(mouse(dom.window, "mouseup", { x: 400, y: 200 }));
+  control.dispatchEvent(mouse(dom.window, "click", { x: 400, y: 200 }));
+  assert.deepEqual(sdk, ["pointerdown", "mousedown", "pointerup", "mouseup", "click"],
+    "a control tap passes immediately - no holdback, no replay seed");
+
+  await sleep(350); // past the dbltap window: no synthetic second click
+  assert.deepEqual(sdk, ["pointerdown", "mousedown", "pointerup", "mouseup", "click"],
+    "nothing is replayed for a press the shell never owned");
+  assert.equal(seen.filter((e) => e.type === GESTURE_EVENTS.dbltap).length, 0);
+});
+
+test("a touchstart on a control is not dominated", (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+  const sdk = sdkObserver(zone, dom.window);
+
+  const control = dom.window.document.createElement("input");
+  control.type = "range";
+  zone.appendChild(control);
+  control.dispatchEvent(touch(dom.window, "touchstart", { x: 400, y: 200 }));
+  assert.ok(sdk.includes("touchstart"), "compat touch stream passes for controls");
+});
+
+test("touch-action escalates only for owned sessions", (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+
+  assert.equal(zone.style.touchAction, "pan-x pan-y",
+    "idle: the SDK keeps panning/zooming for its own scrollable chrome");
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  assert.equal(zone.style.touchAction, "none",
+    "owned: the browser must not scroll/zoom from a gesture press");
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 400, y: 200 }));
+  assert.equal(zone.style.touchAction, "pan-x pan-y",
+    "released: idle behavior back, no lifetime kill");
+});
+
+test("contextmenu passes when idle and dies mid-gesture", async (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+  const sdk = sdkObserver(zone, dom.window);
+  let menuSeen = 0;
+  zone.addEventListener("contextmenu", () => menuSeen++);
+
+  const menu = (win) => new win.Event("contextmenu", { bubbles: true, cancelable: true });
+  const idle = menu(dom.window);
+  zone.dispatchEvent(idle);
+  assert.equal(idle.defaultPrevented, false, "idle right-click belongs to the SDK");
+  assert.equal(menuSeen, 1, "it reaches the SDK's menu");
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  await sleep(350); // hold fires: a gesture session is live
+  const held = menu(dom.window);
+  zone.dispatchEvent(held);
+  assert.equal(held.defaultPrevented, true, "a menu mid-hold would spring from an owned press");
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 400, y: 200 }));
+});
+
+test("tap replay re-resolves a control the SDK re-rendered mid-window", async (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  stubFullscreen(dom, true);
+  const controller = new InputForge(video, zone, host);
+  t.after(() => controller.destroy());
+
+  // The SDK swaps its chrome while the first tap waits out the window.
+  const fresh = dom.window.document.createElement("button");
+  fresh.className = "sdk-play-v2";
+  zone.appendChild(fresh);
+  let freshClicks = 0;
+  fresh.addEventListener("click", () => freshClicks++);
+  dom.window.document.elementFromPoint = () => fresh;
+
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 400, y: 200 }));
+  zone.dispatchEvent(mouse(dom.window, "click", { x: 400, y: 200 }));
+  await sleep(350);
+  assert.equal(freshClicks, 1, "the replay follows the live node, not the detached one");
+});
