@@ -440,9 +440,29 @@ two of them to nothing:
  spreads: `closest()`-first 1.09× (misses pay the attempt plus the full walk
  anyway — rejected as complexity for 9%), `:has()`-inverted 3.5× (rejected:
  it restructures offers into batches and still needs the shadow fallback),
- grouped `:is()` **7.0×, taken** — one engine call per node replaces up to
- forty, with registry-then-anchor resolution preserving the exact winner, so
- the whole sdk-engine suite passes unchanged.
+  grouped `:is()` **7.0×, taken** — one engine call per node replaces up to
+  forty, with registry-then-anchor resolution preserving the exact winner, so
+  the whole sdk-engine suite passes unchanged.
+
+  A fourth instrument, `discovery-revisit-offer.bench.mjs`, prices what the
+  twenty-fourth movement's learned prints save per discovery offer: the full
+  slow-path measurement (playback and activation gates plus a container walk
+  with a `getBoundingClientRect` per ancestor) against a print match
+  (tag/class/id compares, zero rect reads) — each op call starting from a
+  freshly dirtied tree, so the cold arm pays a genuine post-mutation layout
+  flush the way an offer after a real state change does. On 158.0b5, four
+  remembered players plus eight ad-grid misses over a 1.5k-node document:
+  **0.30 ms vs 0.059 ms per 96-video sweep** (±2.0% / ±13.5%), roughly
+  2.6 µs saved per single-video offer. The absolute is small and is stated
+  as such; what is not small is structural — the learned path removes every
+  forced layout from the per-offer path, and the cold arm's spread (against
+  the warm arm's flat one) shows the flush component growing with document
+  weight. Deliberately NOT an end-to-end row: navigation-to-shell is
+  wait-dominated on both arms (a print learned while playing does not match
+  a paused pre-click DOM, by the subset rule's design — it fires when that
+  state recurs), so an end-to-end comparison would report ~1.0× and teach
+  nothing. No `src/` change came out; the instrument confirms the shape the
+  twenty-fourth movement shipped.
 
  The pattern holds: the largest absolute on the board is tens of microseconds
  on paths that run at event rate or rarer, and the one genuine wash joins the

@@ -69,8 +69,8 @@ npm run vm-smoke -- <xpi>    # real Violentmonkey; xpi fetched from AMO into a
 ```
 
 Sanity numbers (they drift; a run reporting very different totals is suspect):
-unit `642`, integration `91 / 90 pass / 1 skipped`, browser-bench `48` rows
-(14 gateable, 34 of them report-only shape pairs), vm-smoke `19/19`.
+unit `642`, integration `91 / 90 pass / 1 skipped`, browser-bench `50` rows
+(14 gateable, 36 of them report-only shape pairs), vm-smoke `19/19`.
 
 `node --test` with **no file list is wrong in this repo**: Node then discovers
 `platform/integration/*.test.mjs` too, running the integration suite a second
