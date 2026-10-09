@@ -400,7 +400,7 @@ export class SettingsPanel {
     if (this.#dismissScope || this.#scope.disposed) {
       return;
     }
-    this.#dismissScope = new AbortController();
+    this.#dismissScope = new Scope();
     const { signal } = this.#dismissScope;
     document.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
@@ -436,7 +436,7 @@ export class SettingsPanel {
     this.#closeWatcher = null;
     this.#dismissScope = null;
     watcher?.close();
-    scope?.abort();
+    scope?.dispose();
   }
 
   async openSection(title) {

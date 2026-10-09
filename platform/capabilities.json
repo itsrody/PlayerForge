@@ -442,6 +442,42 @@
       "mustNotAppearIn": [
         "src/"
       ]
+    },
+    {
+      "id": "memory-api",
+      "summary": "performance.memory / measureUserAgentSpecificMemory",
+      "why": "Chromium-only and privacy-blocked. Diagnostics measure jank from the frame clock, never from heap counters.",
+      "matchPattern": "performance\\.memory|measureUserAgentSpecificMemory",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "layout-instability",
+      "summary": "LayoutShift / layout-shift records",
+      "why": "Chromium-only CLS. The observer would never fire on Gecko; occluded-HUD cost is measured by markers that do.",
+      "matchPattern": "LayoutShift|layout-shift|layoutShift",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "prerendering",
+      "summary": "document.prerendering / wasDiscarded",
+      "why": "Chromium prerendering only, with no Gecko counterpart. Boot runs against the live document unconditionally.",
+      "matchPattern": "\\bprerender\\b|prerendering|wasDiscarded",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
+      "id": "interaction-count",
+      "summary": "performance.interactionCount (Event Timing L2)",
+      "why": "Chromium-only counter. Interaction latency groups by interactionId, which Gecko ships; the count has no signal here.",
+      "matchPattern": "interactionCount",
+      "mustNotAppearIn": [
+        "src/"
+      ]
     }
   ],
   "hostProbes": [

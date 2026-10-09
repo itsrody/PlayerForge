@@ -8,6 +8,7 @@ import { logger } from "./shared/diagnostics.js";
 import { shouldSkipUrl } from "./kernel/guard.js";
 import { KEYS, getConfigValue, setConfigValue, deleteConfigField } from "./shared/storage.js";
 import { initFullscreenGate } from "./shared/shadow.js";
+import { Scope } from "./shared/scope.js";
 
 // The version lives in the banner and is read from the installed script at
 // runtime via GM_info, so what the UI reports is always what the manager
@@ -77,7 +78,7 @@ function bootstrap() {
       // not cancel the cap's timer, so the flag is what keeps a dismissed
       // hint from toasting when the cap later elapses.
       const hintCap = AbortSignal.timeout(1200);
-      const hintDismiss = new AbortController();
+      const hintDismiss = new Scope();
       const hintSignal = AbortSignal.any([hintDismiss.signal, hintCap]);
       let hintCancelled = false;
       hintCap.addEventListener("abort", () => {
@@ -95,7 +96,7 @@ function bootstrap() {
       }, { once: true });
       const cancelHint = () => {
         hintCancelled = true;
-        hintDismiss.abort();
+        hintDismiss.dispose();
       };
       document.addEventListener("pointerdown", cancelHint, { capture: true, once: true, signal: hintSignal });
       document.addEventListener("keydown", cancelHint, { capture: true, once: true, signal: hintSignal });

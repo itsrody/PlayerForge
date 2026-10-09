@@ -175,8 +175,8 @@ function registerKeyboardEngine(adapter) {
   if (keyboardListeners && keyboardRealm === document) {
     return adapter;
   }
-  keyboardListeners?.abort();
-  keyboardListeners = new AbortController();
+  keyboardListeners?.dispose();
+  keyboardListeners = new Scope();
   keyboardRealm = document;
   const signal = keyboardListeners.signal;
   const view = document.defaultView || window;
@@ -195,7 +195,7 @@ function unregisterKeyboardEngine(adapter) {
     keyboardOwner = null;
   }
   if (engines.size === 0 && keyboardListeners) {
-    keyboardListeners.abort();
+    keyboardListeners.dispose();
     keyboardListeners = null;
     keyboardRealm = null;
   }
@@ -343,7 +343,7 @@ function clickTime() {
  * declarative INPUT_BINDINGS list, sampled live at each decision point.
  *
  * Native by design: one AbortSignal owns the entire listener lifetime
- * (destroy() === scope.abort()), all pointer listeners are passive, scrub
+ * (destroy() === scope.dispose()), all pointer listeners are passive, scrub
  * sampling consumes getCoalescedEvents() where the host streams it (the
  * live sample otherwise), and fullscreen truth is the single shared `fs`
  * gate (shadow.js), built on the native fullscreen event.

@@ -45,6 +45,7 @@
 
 import { logger } from "./diagnostics.js";
 import { engineHost } from "./engine-host.js";
+import { Scope } from "./scope.js";
 
 /**
  * Hard cap on the rAF wait. A visible document should produce a frame within
@@ -72,17 +73,17 @@ const RAF_BACKSTOP_MS = 50;
  * @returns {{ abort(): void }}
  */
 export function postTask(fn, { priority = "user-visible", delay: ms = 0, signal } = {}) {
-  const ac = new AbortController();
+  const ac = new Scope();
   const dropOwnerSignal = () => signal?.removeEventListener("abort", onOwnerAbort);
   const onOwnerAbort = () => {
     dropOwnerSignal();
-    ac.abort();
+    ac.dispose();
   };
   // An abort listener added to an ALREADY-aborted signal never fires, so a
   // caller that hands us a disposed scope would otherwise get a task that
   // runs to completion after teardown. Check the flag up front.
   if (signal?.aborted) {
-    ac.abort();
+    ac.dispose();
     return { abort: () => {} };
   }
   signal?.addEventListener("abort", onOwnerAbort, { once: true });
@@ -102,7 +103,7 @@ export function postTask(fn, { priority = "user-visible", delay: ms = 0, signal 
   return {
     abort: () => {
       dropOwnerSignal();
-      ac.abort();
+      ac.dispose();
     }
   };
 }

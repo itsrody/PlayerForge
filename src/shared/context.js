@@ -20,6 +20,7 @@
 
 import { postTask } from "./scheduler.js";
 import { engineHost } from "./engine-host.js";
+import { Scope } from "./scope.js";
 
 /**
  * The postMessage types the frame bridge sends and receives across iframe
@@ -376,7 +377,7 @@ let legacyChain = false;
  *  drops the dead pipe) instead of queueing, so the caller can fall back. */
 function requestPageContextOverPipe(timeoutMs, deadline) {
   const { promise, resolve } = Promise.withResolvers();
-  const ac = new AbortController();
+  const ac = new Scope();
   const pipe = contextPipe;
   let settled = false;
   let answered = false;
@@ -386,7 +387,7 @@ function requestPageContextOverPipe(timeoutMs, deadline) {
       return;
     }
     settled = true;
-    ac.abort();
+    ac.dispose();
     resolve(context);
   };
 
@@ -428,7 +429,7 @@ function requestPageContextOverPipe(timeoutMs, deadline) {
 
   if (signal) {
     signal.addEventListener("abort", () => {
-      // The abort fires both on the timeout AND on settle()'s own ac.abort()
+      // The abort fires both on the timeout AND on settle()'s own ac.dispose()
       // after a response. Only a timeout (no answer) means the pipe is dead.
       if (answered) {
         return;
@@ -442,7 +443,7 @@ function requestPageContextOverPipe(timeoutMs, deadline) {
         return;
       }
       dropDeadPipe();
-      ac.abort();
+      ac.dispose();
       settle(null);
     }, Math.max(0, deadline - Date.now()));
     ac.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
@@ -494,7 +495,7 @@ async function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) 
   }
 
   const { promise, resolve } = Promise.withResolvers();
-  const ac = new AbortController();
+  const ac = new Scope();
   let nonce = null;
   let retryHandle = null;
   let attemptCount = 0;
@@ -522,7 +523,7 @@ async function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) 
     }
     settled = true;
     retryHandle?.abort();
-    ac.abort();
+    ac.dispose();
     if (replyPort) {
       if (viaPort) {
         // A port answered: the chain supports a private pipe. Retain the pipe
@@ -612,7 +613,7 @@ async function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) 
   };
   const attempt = () => {
     if (useSignalAny ? signal.aborted : Date.now() >= deadline) {
-      if (!useSignalAny) ac.abort();
+      if (!useSignalAny) ac.dispose();
       settle(null, false);
       return;
     }
@@ -1008,7 +1009,7 @@ export function createFrameProvisioner() {
  * document sandbox.
  */
 export function installContextBridge() {
-  const ac = new AbortController();
+  const ac = new Scope();
   const isTop = window === window.top;
   const onContext = isTop
     ? createTopFrameResponder(() => ({
@@ -1054,7 +1055,7 @@ export function installContextBridge() {
 
   // Torn down with the bridge.
   return () => {
-    ac.abort();
+    ac.dispose();
     stopContextPipe();
   };
 }

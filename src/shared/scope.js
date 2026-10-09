@@ -15,6 +15,14 @@
  *   - `dispose()` — idempotent: marks disposed FIRST (re-entrant destroy
  *                   calls no-op), aborts the signal, then runs disposers.
  *
+ * The controller is held, not extended, on purpose: `new AbortController()`
+ * runs at construction, so the binding resolves to whatever constructor the
+ * current realm lends (jsdom test hosts lend a realm-local one per case,
+ * which their brand-checked addEventListener requires). A subclass would
+ * freeze the base at module evaluation, ahead of any lending. There is no
+ * second object to keep in sync regardless: the signal handed out IS the
+ * controller's, and dispose() is the only writer.
+ *
  * Disposer errors are isolated (one throw never strands the rest), matching
  * the dispatch-isolation policy used across the shared mutation feed and the
  * emitters.

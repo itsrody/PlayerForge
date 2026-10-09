@@ -1,5 +1,6 @@
 import { logger } from "../shared/diagnostics.js";
 import { postTask } from "../shared/scheduler.js";
+import { Scope } from "../shared/scope.js";
 
 /**
  * Resolve once the container's child list has been quiet for a run of
@@ -88,8 +89,8 @@ export class LifecycleManager {
   #shellFactory = null;
   /** Videos with a settle wait in flight - dedups repeated discovery. */
   #pending = new Set();
-  /** Abort source for in-flight settle waits; aborted by destroy() (pagehide). */
-  #scope = new AbortController();
+  /** Abort scope for in-flight settle waits; disposed by destroy() (pagehide). */
+  #scope = new Scope();
 
   /**
    * @param {object} registry shell slot
@@ -181,6 +182,6 @@ export class LifecycleManager {
    * half-created on a dying page.
    */
   destroy() {
-    this.#scope.abort();
+    this.#scope.dispose();
   }
 }

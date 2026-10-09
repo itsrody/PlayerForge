@@ -134,7 +134,7 @@ const onVisibilityChange = () => {
 
 /** Release a parked deferred flush and the visibility listener that resumes it. */
 function clearDefer() {
-  deferAc?.abort();
+  deferAc?.dispose();
   deferAc = null;
   deferHandle?.abort();
   deferHandle = null;
@@ -155,7 +155,7 @@ function deferFlushUntilVisible() {
   if (deferHandle) {
     return;
   }
-  deferAc = new AbortController();
+  deferAc = new Scope();
   deferHandle = postTask(flushPending, { priority: "background", delay: DEFER_VISIBILITY_CAP_MS });
   document.addEventListener("visibilitychange", onVisibilityChange, { signal: deferAc.signal });
 }

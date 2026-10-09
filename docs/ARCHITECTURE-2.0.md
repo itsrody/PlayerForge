@@ -1379,7 +1379,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved eleven times since that cut. The first two movements
+The unit count has moved twelve times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1472,6 +1472,20 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  silent (`tests/media-controls.test.mjs`). No latency numbers are claimed for
  the scrub shape: the win is intent-matching (feedback vs settle, the class
  of argument §2.9 already accepts for rVFC occurrence), not a priced row.
+
+ The twelfth movement unified teardown behind one vocabulary: every bare
+ `AbortController` in the tree is now a `Scope` (lifecycle, scheduler facade,
+ context pipes, keyboard broker, panel dismissal, entry hint), with
+ `dispose()` in place of `abort()`. Extending the platform class was tried
+ and reverted inside the same change: the jsdom hosts lend a realm-local
+ constructor per case, which their brand-checked `addEventListener` requires,
+ and a subclass freezes the base at module evaluation, ahead of any lending —
+ so the primitive holds its controller and the rule is pinned structurally
+ instead (`tests/teardown-guard.test.mjs`, in the posttask-guard idiom).
+ `render-gate.js` keeps the tree's only other construction, as a
+ session-scope child a bare signal parameter cannot express. The same change
+ pinned `performance.memory`, layout-shift records, prerendering markers and
+ `interactionCount` in `retired`.
 
 ## 7. Gecko-specific decisions, and what they rule out
 
