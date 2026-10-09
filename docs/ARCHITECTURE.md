@@ -32,13 +32,13 @@ not a rewrite.
 | Host scheduling facade | `src/shared/scheduler.js` | `postTask`, `delay`, `debounce` (+`.flush()`/`.cancel()`), `yield_()` |
 | Frame coalescing on mutation | `src/shared/dom-manager.js` | MutationObserver with deferred flush |
 | Visibility gating | `src/shell/resume.js:685` | IntersectionObserver for off-screen carousel progress |
-| Media session integration | `src/shell/media.js:220` | `claimMediaSession()` |
-| Observer-based adoption | `src/kernel/sdk.js`, `kernel.js`, `lifecycle.js` | MutationObserver-based `<video>` discovery and settle detection |
+| Media session integration | `src/shell/media.js:265` | `claimMediaSession()` |
+| Observer-based adoption | `src/kernel/sdk.js`, `kernel.js`, `discovery.js` | MutationObserver-based `<video>` discovery and settle detection |
 
 Evidence that the idle-cost goal is already largely met:
 
 - `setInterval` appears exactly once in the whole tree, at
-  `src/shell/chrome/panel.js:102`, as a key-hold auto-repeat. That is a
+  `src/shell/chrome/panel.js:116`, as a key-hold auto-repeat. That is a
   user-driven input affordance, not polling.
 - `requestAnimationFrame` appears only in `src/shared/diagnostics.js` (a
   diagnostic frame-gap probe, debug-gated) and in `scheduler.js`'s `yield_()`.
@@ -650,7 +650,7 @@ record rather than quietly delete:
   exercised by `render-gate.test.mjs`, but nothing in `src/` observes element
   size, because every layout question this fork asks is answered by status
   (`Playback`, `Presence`) or by CSS (`pf-detached`'s `display: none`). The one
-  mention in `src/` is a comment (`src/shell/inputs/forge.js:798`).
+  mention in `src/` is a comment (`src/shell/inputs/forge.js:824`).
 - **PiP is gone, not pending.** Picture-in-picture was removed outright
   (`a5bc9fb`, "remove picture-in-picture entirely"), so the earlier draft's "+
   PiP events" has no event to name. `Presence.PIP` survives as an enum member
@@ -669,7 +669,7 @@ an oversight.
 ### L2 — PlayerStatus
 
 Today `isActive()` closures are authored independently at each `createActivity`
-call site (`src/shell/shell.js:326`, `src/shell/resume.js:702`,
+call site (`src/shell/shell.js:333`, `src/shell/resume.js:702`,
 `src/shared/shadow.js:105`). Nothing answers "what is this player's status right
 now" as a single queryable value.
 
@@ -697,10 +697,10 @@ Subscribers receive the change; nobody re-diffs the whole status.
 That event has *two* deliveries, not one, and the second is the reason most of
 the axis surface exists. `subscribe()` callbacks fire in-realm, and the same
 change is dispatched as a `pf:status` CustomEvent on the `<video>`
-(`player-status.js:325`) so the **page world** can read status across the
+(`player-status.js:341`) so the **page world** can read status across the
 sandbox boundary — which is the only consumer of `Buffer`, `Screen`, `duration`,
 `rate`, `volume`, `muted`, `hasTextTrack` and `error`. In-tree exactly one
-subscriber exists (`shell.js:474`, feeding the occlusion resolve), and it reads
+subscriber exists (`shell.js:481`, feeding the occlusion resolve), and it reads
 two of the ten fields. The other eight are carried for the page, so "no in-tree
 consumer" is the expected shape rather than dead code.
 
@@ -746,7 +746,7 @@ one `dispose()`.
 
 **Not landed as a class, and not needed as one.** `Shell` (`src/shell/shell.js`)
 already *is* the per-`<video>` owner: it holds `#scope`, `#status`, two
-`RenderGate`s, and every sub-component, and `destroy()` (`shell.js:510`) fans out
+`RenderGate`s, and every sub-component, and `destroy()` (`shell.js:517`) fans out
 to exactly the single `dispose()` this section describes. Extracting a
 `PlayerSession` would have been a rename with no second implementation behind
 it, so §6's seven phases never opened one — the one layer in the §4 diagram with
@@ -762,9 +762,9 @@ the layers can assume:
   L2 generally useful in-tree, and it is deliberately not done: only the
   occlusion resolve needs status today, and it is inside the shell.
 - **The gate is not one-per-session.** `Shell` registers two — media-state
-  (`shell.js:379`) and occlusion (`shell.js:466`) — because they have different
+  (`shell.js:386`) and occlusion (`shell.js:473`) — because they have different
   priorities' worth of coalescing and different snapshot shapes. `ToastManager`
-  (`toast.js:126`) and `SettingsPanel` (`panel.js:274`) each own a further gate
+  (`toast.js:123`) and `SettingsPanel` (`panel.js:288`) each own a further gate
   on their own scope, so the tree has four `RenderGate` constructions in total.
   "The render gate registration" (singular) is the sketch's simplification.
 - **`Scope.child()` has no production caller.** The optional child scope §2's
@@ -1383,7 +1383,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved fourteen times since that cut. The first two movements
+The unit count has moved fifteen times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1516,6 +1516,14 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  already absent. `tests/storage.test.mjs` gained 9, two of which (mid-batch
  race, removal-on-truth) fail on the pre-fix store.
 
+ The fifteenth movement made the contract's line numbers fail instead of rot:
+ a hygiene pass corrected fourteen cites at once (one change had shifted all
+ of `shell.js` by +7), and symbols alone could not replace them — three
+ `gmSetValue(KEYS.resume` calls need the number to disambiguate. `tests/doc-
+ refs.test.mjs` pins every `file:line` cite to an anchor on that line and
+ requires new cites to add rows, in the posttask-guard idiom; a one-line
+ shift was verified to fail it.
+
 ## 7. Gecko-specific decisions, and what they rule out
 
 - Scheduler priorities replace timer-based deferral. `postTask` is available
@@ -1633,8 +1641,8 @@ In-tree:
 - `src/shared/scheduler.js` — traps in §2.4, `postTask`, `yield_()`
 - `src/shared/scope.js` — teardown primitive
 - `src/shared/activity.js` — passive activity windows
-- `src/shell/shell.js:326`, `src/shell/resume.js:702`, `src/shared/shadow.js:105` — `createActivity` call sites
-- `src/shared/context.js:606` — the tree's only self-rearming `postTask`, delayed
+- `src/shell/shell.js:333`, `src/shell/resume.js:702`, `src/shared/shadow.js:105` — `createActivity` call sites
+- `src/shared/context.js:623` — the tree's only self-rearming `postTask`, delayed
 - `src/shared/dom-manager.js` — mutation coalescing
 - `src/shell/chrome/panel.js:116` — the only `setInterval` in the tree
 - `src/shared/diagnostics.js` — debug-gated rAF frame-gap probe
@@ -1643,7 +1651,7 @@ In-tree:
 - `platform/run.mjs` — `ensureBundle()`
 - `esbuild.config.mjs:173-177` — unpinned `@resource`
 
-Source-scan guards, all three of which exist to make "the next change" fail rather
+Source-scan guards, all four of which exist to make "the next change" fail rather
 than the current one:
 
 - `tests/idle-guard.test.mjs` — the rAF and `setInterval` inventories behind §1
@@ -1653,3 +1661,7 @@ than the current one:
 - `tests/teardown-guard.test.mjs` — the `AbortController` construction inventory
   behind the one-teardown-vocabulary rule (§1): only the primitive itself and
   the render gate's session-scope child may construct one
+- `tests/doc-refs.test.mjs` — every `file:line` cite this contract carries,
+  pinned to an anchor on that line: numbers rot on every nearby edit (one
+  change shifted all of `shell.js` by +7), and symbols alone stay ambiguous
+  exactly where precision matters (three `gmSetValue(KEYS.resume` calls)

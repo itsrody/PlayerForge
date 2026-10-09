@@ -240,7 +240,7 @@ function presetMatchPair(label, valuesKey) {
 }
 
 /**
- * The scrub velocity curve at actions.js:528. `x ** 1.5` with a
+ * The scrub velocity curve at actions.js:552. `x ** 1.5` with a
  * non-integer exponent is a `Math.pow` call on both engines; the candidate
  * spends a multiply and a sqrt instead. The exponent is the tuning default, so
  * the swap has to stay gated on the exact configured value.

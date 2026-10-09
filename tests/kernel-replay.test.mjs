@@ -44,7 +44,7 @@ function makeHarness() {
   kernel.onShellCreated((shell) => created.push(shell));
   kernel.registerShellProvider({
     create({ video: v, container, sdk, onDestroy }) {
-      // destroy() must unregister like the real shell does (shell.js:550):
+      // destroy() must unregister like the real shell does (shell.js:557):
       // the container-move re-adopt path destroys the stale shell and then
       // relies on the registry slot being free before adoption runs again.
       return { video: v, container, sdk, ready: Promise.resolve(), destroy() { onDestroy?.(); } };
