@@ -248,9 +248,15 @@ function flushSlowInteractions() {
  * Keep only the slowest entry per interactionId. Entries without an
  * interactionId are pointer/key *downs* that never completed a full
  * interaction quartet (e.g. a lone keyup), so they carry no latency verdict.
+ *
+ * The observer hands us a PerformanceObserverEntryList, which has getEntries
+ * but no @@iterator - iterating it directly throws "not iterable" on the
+ * first slow interaction of every debug session. Read through getEntries();
+ * a bare array is still accepted so a host that hands one over keeps working.
  */
 function onEventEntries(list) {
-  for (const entry of list) {
+  const entries = typeof list?.getEntries === "function" ? list.getEntries() : list;
+  for (const entry of entries) {
     if (!entry.interactionId || entry.duration < INTERACTION_THRESHOLD_MS) {
       continue;
     }

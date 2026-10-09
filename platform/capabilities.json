@@ -140,7 +140,7 @@
       "probes": [
         "PerformanceObserver"
       ],
-      "note": "shipsInFirefox 102 is the first release with Event Timing; 157 was verified to list `event` in supportedEntryTypes (it does NOT list longtask or long-animation-frame, which is why the rAF watchdog stays). This is a supplement, never a replacement: Gecko ships no PerformanceScriptTiming, so entries carry no per-script attribution - we learn THAT an interaction was slow, never WHICH handler. Node has no `event` entry type at all, so the test harness drives a fake PerformanceObserver; without that fake these tests would stay green even if the install path broke."
+      "note": "shipsInFirefox 102 is the first release with Event Timing; 157 was verified to list `event` in supportedEntryTypes (it does NOT list longtask or long-animation-frame, which is why the rAF watchdog stays). This is a supplement, never a replacement: Gecko ships no PerformanceScriptTiming, so entries carry no per-script attribution - we learn THAT an interaction was slow, never WHICH handler. Node has no `event` entry type at all, so the test harness drives a fake PerformanceObserver; the fake delivers a platform-faithful non-iterable entry list (getEntries, no @@iterator), because an array-delivering fake stayed green while production threw `not iterable` on the first slow interaction of every debug session."
     },
     {
       "id": "navigator-mediaSession",

@@ -157,11 +157,17 @@ function withEventObserver(body, { supported = ["event"] } = {}) {
   });
   console.warn = (...args) => warnings.push(args.join(" "));
 
-  /** Deliver entries to every still-connected observer. */
+  /** Deliver entries to every still-connected observer, the way the platform
+   *  does: a PerformanceObserverEntryList with getEntries, not an array.
+   *  The list is deliberately non-iterable - iterating it directly is the
+   *  production crash this shape guards against. */
   const emit = (...entries) => {
+    const list = {
+      getEntries: () => entries
+    };
     for (const inst of instances) {
       if (!inst.disconnected) {
-        inst.cb(entries, inst);
+        inst.cb(list, inst);
       }
     }
   };
