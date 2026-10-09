@@ -775,3 +775,46 @@ test("kernel.init accepts probe hints and adopts through the same path", async (
   assert.equal(shell.sdk.source, "generic");
   assert.equal(shell.container, generic.wrapper, "hints change order, never placement");
 });
+
+test("churn bursts stand the upgrade watch down; media re-arms it", async () => {
+  const { trackedObserverLabels } = await import("../src/shared/dom-manager.js");
+  const upgrades = () => trackedObserverLabels().filter((label) => label === "upgrade-watch").length;
+  const { kernel, created } = makeHarness();
+  const generic = makeGenericVideo();
+  // No activation, so every offer ends unclaimed and the watch stays armed.
+  kernel.init();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const armed = upgrades();
+  assert.ok(armed > 0, "unclaimed structural videos arm their upgrade watches");
+
+  // Three fruitless churns, each in its own observer batch: class changes
+  // that complete no anchor. Framework re-renders must not meter resolves
+  // forever.
+  for (const cls of ["junk-a", "junk-b", "junk-c"]) {
+    generic.wrapper.classList.add(cls);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  await waitFor(
+    () => upgrades() === armed - 1,
+    3000,
+    "the miss budget stands a churning watch down"
+  );
+  assert.ok(
+    !created.some((shell) => shell.video === generic.video),
+    "churn alone adopts nothing"
+  );
+
+  // Stood down is not terminal: the next media offer re-arms fresh, misses
+  // reset, so a genuinely late upgrade arriving with playback still lands.
+  // Only the upgrade observer can surface a pure class change (the feed
+  // ignores attributes, no media event fires here), so adoption below
+  // proves the re-arm - no label counting needed.
+  generic.video.dispatchEvent(new window.Event("play"));
+  generic.wrapper.classList.add("dplayer");
+  await waitFor(() => created.some((shell) => shell.video === generic.video), 3000);
+  assert.equal(
+    created.find((shell) => shell.video === generic.video).sdk.source,
+    "registry",
+    "a post-stand-down upgrade still adopts once anything re-offers"
+  );
+});

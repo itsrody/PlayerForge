@@ -194,9 +194,14 @@ test("cross-origin iframe: the bridge supplies the top page's context", async ()
 
   // The child inherited the top page's path through the bridge, so the resume
   // entry is keyed to the embedder rather than to the frame's own URL.
-  const stored = await driver.gmStorage();
-  const entries = stored["pf:resume"]?.entries ?? [];
-  assert.ok(entries.length > 0, "the frame's player wrote a resume entry");
+  // Polled like the nested case below: same media-clock race, same fix.
+  const entries = await until(async () => {
+    const stored = await driver.gmStorage();
+    const list = stored["pf:resume"]?.entries ?? [];
+    return list.length > 0 ? list : null;
+  }, 15000);
+  assert.ok(entries, "the frame's player wrote a resume entry");
+  assert.ok(entries.length > 0);
   assert.equal(
     entries[0].path,
     new URL(parent).pathname,
@@ -229,9 +234,16 @@ test("nested iframe: the video frame inherits context through a relay", async ()
   assert.ok(st?.hasShell, "the innermost frame's video is adopted");
   assert.ok(st.readyState > 0, `media loads two frames deep, readyState=${st.readyState}`);
 
-  const stored = await driver.gmStorage();
-  const entries = stored["pf:resume"]?.entries ?? [];
-  assert.ok(entries.length > 0, "the nested player wrote a resume entry");
+  const entries = await until(async () => {
+    // Polled, not read once: resume persists on the media-clock cadence, so
+    // a fixed read races the save under suite load (observed twice as a
+    // red suite with a green rerun). Same until() the adoption above uses.
+    const stored = await driver.gmStorage();
+    const list = stored["pf:resume"]?.entries ?? [];
+    return list.length > 0 ? list : null;
+  }, 15000);
+  assert.ok(entries, "the nested player wrote a resume entry");
+  assert.ok(entries.length > 0);
   assert.equal(
     entries[0].path,
     new URL(parentUrl).pathname,
@@ -499,6 +511,10 @@ test("switchboard nested: a relay deep enough to break a shallow one", async () 
   assert.ok(st?.hasShell, "a video two cross-origin hops down is adopted");
   assert.ok(st.readyState > 0, `and it has real media, readyState=${st.readyState}`);
 
-  const stored = await driver.gmStorage();
-  assert.ok((stored["pf:resume"]?.entries ?? []).length > 0, "the nested card wrote a resume entry");
+  const stored = await until(async () => {
+    const state = await driver.gmStorage();
+    return (state["pf:resume"]?.entries ?? []).length > 0 ? state : null;
+  }, 15000);
+  assert.ok(stored, "the nested card wrote a resume entry");
+  assert.ok((stored["pf:resume"]?.entries ?? []).length > 0);
 });

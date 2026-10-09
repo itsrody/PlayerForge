@@ -27,6 +27,14 @@ const PRINTS_PER_HOST = 10;
  * drift. Exact names - attributeFilter takes no selectors.
  */
 const UPGRADE_ATTRS = ["class", "id", ...registryDataAttributes()];
+/**
+ * Consecutive fruitless upgrade re-offers before the watch stands down.
+ * Class churn bursts (framework re-renders, carousel rotations) must not
+ * meter a resolve forever; a genuine late upgrade is a single class
+ * addition, not a career. Standing down is never terminal: the next
+ * feed, media or static offer re-arms fresh (see noteUpgradeMiss).
+ */
+const UPGRADE_MISS_LIMIT = 3;
 
 /** Identity of a print for deduping: tag, depth, id and class set. */
 function printKey(print) {
@@ -343,7 +351,7 @@ export class Kernel {
    * feed structurally cannot see, and the reason the shared feed must never
    * grow attribute observation itself (one observer designed for its lookup,
    * per the surveyor rule). Self-limiting: disarms on adopt, on detach, on
-   * teardown, and never arms twice.
+   * teardown, after UPGRADE_MISS_LIMIT fruitless re-offers, and never arms twice.
    */
   #armUpgradeWatch(video) {
     const session = this.#sessionFor(video);
@@ -367,11 +375,21 @@ export class Kernel {
     const observer = new MutationObserver(() => {
       // Detach ends the watch: the removal path owns disconnected videos,
       // and a dead subtree must not keep re-offering.
-      if (!video.isConnected) {
+      // Adopted elsewhere meanwhile (a feed offer claimed it first): the
+      // session watch takes over, same as the claim path below.
+      if (!video.isConnected || session.claimed) {
         session.disarmUpgrade();
         return;
       }
       this.#adoptVideo(video);
+      // Still unclaimed: the re-offer found nothing. Count it, and stand
+      // down at the budget - churn bursts must not meter resolves forever.
+      // Not terminal: the next feed, media or static offer re-arms fresh
+      // (misses reset on disarm), so a genuinely late upgrade that arrives
+      // with any other activity still lands.
+      if (!session.claimed && !session.noteUpgradeMiss()) {
+        session.disarmUpgrade();
+      }
     });
     for (const el of watched) {
       observer.observe(el, { attributes: true, attributeFilter: UPGRADE_ATTRS });
@@ -516,6 +534,8 @@ class VideoSession {
    *  armed flag: disarmUpgrade nulls it, so a live handle always means a
    *  live observer (signal abort ends the kernel with it, never consulted). */
   #upgradeRelease = null;
+  /** Consecutive fruitless upgrade re-offers; reset on every arm/disarm. */
+  #upgradeMisses = 0;
 
   constructor(video, { scope, adopt, removeShell }) {
     this.#video = video;
@@ -569,6 +589,18 @@ class VideoSession {
   disarmUpgrade() {
     this.#upgradeRelease?.();
     this.#upgradeRelease = null;
+    this.#upgradeMisses = 0;
+  }
+
+  /**
+   * Count a fruitless upgrade re-offer (still unclaimed afterwards).
+   * Returns false when the miss budget is spent and the caller should stand
+   * the watch down. Only consecutive misses count: any adoption disarms
+   * outright, and any fresh arm resets.
+   */
+  noteUpgradeMiss() {
+    this.#upgradeMisses += 1;
+    return this.#upgradeMisses < UPGRADE_MISS_LIMIT;
   }
 
   armSettleSkip() {

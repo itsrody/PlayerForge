@@ -1447,7 +1447,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved thirty-seven times since that cut. The first two movements
+The unit count has moved thirty-eight times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1820,6 +1820,13 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  progress) proven against Flowplayer 7's bare-div progressbar - verified
  against its shipped dist, where the delegated mousedown never arrived.
  `tests/input-forge.test.mjs` gained 5.
+
+ The thirty-eighth movement bounded the upgrade watch and de-flaked the
+ nested resume asserts: three consecutive fruitless re-offers stand the
+ watch down (any later feed, media or static offer re-arms with a reset
+ budget, proven by a re-arm-then-adopt test), and the three
+ fixed-timing resume-entry reads poll with the file's own until() instead
+ of racing the media-clock save. `tests/kernel-replay.test.mjs` gained 1.
 
 ## 7. Gecko-specific decisions, and what they rule out
 

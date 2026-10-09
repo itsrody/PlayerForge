@@ -45,6 +45,13 @@ fd -H -d1                               # repo root inventory
 Previews are cheap: `bat -n`, `fd | fzf`, `jq .key`. If a command's output
 exceeds ~2k lines, narrow the query instead of paging.
 
+Apple Git's `git apply` rejects insertion-terminal hunks (added lines with
+no trailing context) that GNU git accepts: every hand-written hunk needs
+trailing context lines, and split patches must carry the original trailing
+context on both halves. When in doubt, `git apply --check` before touching
+the tree, and verify a split by applying both halves in a disposable
+worktree and byte-comparing against the full diff.
+
 ## 1. Commands
 
 Run from the repo root. Every gate below is currently green; treat a red run as
@@ -69,7 +76,7 @@ npm run vm-smoke -- <xpi>    # real Violentmonkey; xpi fetched from AMO into a
 ```
 
 Sanity numbers (they drift; a run reporting very different totals is suspect):
-unit `678`, integration `91 / 90 pass / 1 skipped`, browser-bench `50` rows
+unit `679`, integration `91 / 90 pass / 1 skipped`, browser-bench `50` rows
 (14 gateable, 36 of them report-only shape pairs), vm-smoke `19/19`.
 
 `node --test` with **no file list is wrong in this repo**: Node then discovers
