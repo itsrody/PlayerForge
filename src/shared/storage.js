@@ -18,7 +18,8 @@ export const KEYS = {
   configs: "pf:configs",
   resume: "pf:resume",
   firstRun: "pf:first-run",
-  prints: "pf:sdk-prints"
+  prints: "pf:sdk-prints",
+  genericNotice: "pf:generic-notice"
 };
 
 /**
@@ -26,7 +27,7 @@ export const KEYS = {
  * (or outside a userscript context) there is no stored value to return, so
  * the fallback is the honest answer rather than a ReferenceError into boot.
  */
-function gmGetValue(key, fallback) {
+export function gmGetValue(key, fallback) {
   if (typeof GM_getValue !== "function") {
     return fallback;
   }

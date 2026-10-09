@@ -14,6 +14,7 @@ import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } fro
 import { SHELL_MARKER, warmStyles, injectShell, watchShellHost } from "./chrome/inject.js";
 import { replayFullscreenProvision } from "../shared/context.js";
 import { DOMManager } from "../shared/dom-manager.js";
+import { KEYS, gmGetValue, gmSetValue } from "../shared/storage.js";
 import { Scope } from "../shared/scope.js";
 import { createActivity } from "../shared/activity.js";
 import { PlayerStatus, Playback, Presence } from "../shared/player-status.js";
@@ -109,6 +110,9 @@ export class Shell {
     this.#inputs = new InputForge(this.video, this.container, this.shellHost);
     attachInputActions(this, this.shellHost, this.#inputs.signal);
     this.#resume = new ResumeTracker(this);
+    if (this.sdk.source === "generic") {
+      this.#noticeGenericDetection();
+    }
 
     // Lazy section builder: panel sections (subtitles, filter, history,
     // settings) are constructed on first open to keep boot fast. Construction
@@ -531,6 +535,24 @@ export class Shell {
         !this.container.contains(this.video)) {
       throw new Error(`Shell "${this.sdk.name}": placement lost mid-boot`);
     }
+  }
+
+  /**
+   * First-run notice for the default-on fallback: the one adoption the user
+   * never asked for by name gets one hint pointing at its toggle, then a
+   * stored flag so it never nags again. Registry and learned adoptions stay
+   * silent - only the measured guess announces itself.
+   */
+  #noticeGenericDetection() {
+    try {
+      if (gmGetValue(KEYS.genericNotice, false)) {
+        return;
+      }
+      gmSetValue(KEYS.genericNotice, true);
+    } catch {
+      return;
+    }
+    this.toastHint("detect", "Unknown player detected - toggle in PlayerForge settings");
   }
 
   destroy() {

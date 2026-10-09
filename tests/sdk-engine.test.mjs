@@ -620,3 +620,25 @@ test("matchPrints rejects malformed prints without throwing", () => {
     assert.equal(matchPrints(video, bad), null);
   }
 });
+
+test("the fallback admits only player-sized boxes, not thumbnails", () => {
+  // The anchorless guess pays for its uncertainty with a stricter box than
+  // the registry's 100x60: preview tiles and spacers stay out.
+  const doc = dom('<div id="tile"><video></video></div><div id="player"><video></video></div>');
+  const tile = doc.querySelector("#tile video");
+  const player = doc.querySelector("#player video");
+  const box = (w, h) => ({ width: w, height: h, top: 0, left: 0, right: w, bottom: h });
+  doc.querySelector("#tile").getBoundingClientRect = () => box(150, 90);
+  tile.getBoundingClientRect = () => box(150, 90);
+  doc.querySelector("#player").getBoundingClientRect = () => box(640, 360);
+  player.getBoundingClientRect = () => box(640, 360);
+  for (const video of [tile, player]) {
+    Object.defineProperty(video, "paused", { value: false, configurable: true });
+    Object.defineProperty(video, "ended", { value: false, configurable: true });
+    Object.defineProperty(video, "readyState", { value: 4, configurable: true });
+  }
+  withActivation(true, () => {
+    assert.equal(findGenericPlayer(tile), null, "a 150px tile is not a player");
+    assert.ok(findGenericPlayer(player), "a 640px player still qualifies");
+  });
+});

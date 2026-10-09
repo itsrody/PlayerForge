@@ -3,17 +3,17 @@
  *
  * Detection is registry-driven: every supported player SDK declares exactly one
  * record below, and a video is adopted only when its composed ancestry contains
- * one of that SDK's anchors. There is deliberately NO generic fallback - an
- * anchor must be owned by its SDK (prefixed class, dedicated data attribute, or
- * custom element tag), so pages merely styling a <div class="player"> stay
- * unrecognized rather than misidentified. Coverage grows by adding records.
+ * one of that SDK's anchors. An anchor must be owned by its SDK (prefixed
+ * class, dedicated data attribute, or custom element tag), so pages merely
+ * styling a <div class="player"> stay unrecognized rather than misidentified.
+ * Coverage grows by adding records.
  *
- * The registry stays the only DEFAULT path. Below it, `findGenericPlayer`
- * offers an opt-in slow path (gated on a setting the kernel checks) for
+ * The registry answers first. Below it, `findGenericPlayer` offers a
+ * default-on measured fallback (gated on a setting the kernel checks) for
  * videos no record claims - renamed-everything forks and bespoke players.
  * It trades the anchor for behavioral gates (playing, visible, user-driven)
- * plus measured placement, and it stays off unless asked precisely because
- * a guess can over-claim where a record cannot.
+ * plus measured placement under stricter admission, and it announces its
+ * first adoption with a hint pointing at its toggle.
  *
  * Framework roots are never anchors. An app-shell marker like Inertia's
  * [data-page] fires for every video on the page - articles, previews, ads -
@@ -81,6 +81,15 @@ const REGISTRY = [
 
 export const MIN_VIDEO_WIDTH = 100;
 export const MIN_VIDEO_HEIGHT = 60;
+
+/**
+ * Stricter admission for the anchorless fallback. The registry trusts its
+ * anchors at thumbnail size; a measured guess pays for its uncertainty with
+ * a bigger box - preview tiles, spacers and call-grid thumbnails stay out
+ * while every real player clears it by multiples.
+ */
+export const GENERIC_MIN_VIDEO_WIDTH = 200;
+export const GENERIC_MIN_VIDEO_HEIGHT = 120;
 
 /**
  * Every anchor in the registry as one grouped selector. `:is()` is matched
@@ -290,7 +299,7 @@ export function findGenericPlayer(video) {
   if (!hasStickyActivation()) {
     return null;
   }
-  if (!meetsMinSize(video)) {
+  if (!meetsMinSize(video, GENERIC_MIN_VIDEO_WIDTH, GENERIC_MIN_VIDEO_HEIGHT)) {
     return null;
   }
   const placed = resolveGenericContainer(video);

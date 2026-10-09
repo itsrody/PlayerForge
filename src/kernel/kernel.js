@@ -160,9 +160,10 @@ export class Kernel {
     }
   }
 
-  /** Whether the opt-in unknown-player path (generic + learned) may run. */
+  /** Whether the unknown-player fallback (generic + learned) may run. On
+   *  unless the user opts out - the registry answers first either way. */
   #genericEnabled() {
-    return getConfigValue("detection.genericPlayers", false) === true;
+    return getConfigValue("detection.genericPlayers", true) === true;
   }
 
   /**

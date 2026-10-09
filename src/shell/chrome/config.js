@@ -64,10 +64,12 @@ const SETTINGS_SCHEMA = [
     key: "detection.genericPlayers",
     type: "bool",
     label: "Detect Unknown Players",
-    // Off unless the user asks: without an anchor the placement is a
-    // measured guess, so the registry stays the default and this covers
-    // renamed forks and bespoke players for those who want it.
-    default: false,
+    // On unless the user opts out: the registry answers first, learned
+    // prints answer second, and this measured fallback only runs for videos
+    // neither claims - renamed forks and bespoke players included. Its
+    // admission is stricter than the registry's (see GENERIC_MIN_* in
+    // kernel/sdk.js), and the first adoption says so in a toast.
+    default: true,
     group: "Features"
   },
   {

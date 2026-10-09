@@ -571,18 +571,24 @@ test("an unrecognized player is adopted with the generic path enabled", async ()
   assert.equal(shell.container, generic.wrapper, "placement is the player-like wrapper");
 });
 
-test("an unrecognized player is left alone with the generic path off", async () => {
-  const { kernel, created } = makeHarness();
-  const generic = makeGenericVideo();
-  await withActivatedPage(async () => {
-    kernel.init();
-    // Longer than any settle window: nothing will ever offer this video.
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  });
-  assert.ok(
-    !created.some((shell) => shell.video === generic.video),
-    "the registry stays the only default path"
-  );
+test("an unrecognized player is left alone with the fallback explicitly off", async () => {
+  const { configStore } = await import("../src/shared/storage.js");
+  configStore.adopt({ version: 1, detection: { genericPlayers: false } });
+  try {
+    const { kernel, created } = makeHarness();
+    const generic = makeGenericVideo();
+    await withActivatedPage(async () => {
+      kernel.init();
+      // Longer than any settle window: nothing will ever offer this video.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    });
+    assert.ok(
+      !created.some((shell) => shell.video === generic.video),
+      "explicit false keeps the registry the only path"
+    );
+  } finally {
+    configStore.adopt({ version: 1 });
+  }
 });
 
 /** Swap the module-top GM stubs for a writable per-test store. */
@@ -665,6 +671,8 @@ test("a learned print adopts on the next visit without re-measuring", async () =
 
 test("learned prints stay dormant with the switch off", async () => {
   const { stored, restore } = withWritableStore();
+  const { configStore } = await import("../src/shared/storage.js");
+  configStore.adopt({ version: 1, detection: { genericPlayers: false } });
   try {
     // A print learned earlier (or hand-seeded): the video matches it, but
     // the single switch governs learned matching exactly like the slow path.
@@ -682,6 +690,22 @@ test("learned prints stay dormant with the switch off", async () => {
       "dormant prints adopt nothing"
     );
   } finally {
+    configStore.adopt({ version: 1 });
     restore();
   }
+});
+
+test("the fallback is on unless the user opts out", async () => {
+  const { kernel, created } = makeHarness();
+  const generic = makeGenericVideo();
+  // No withGenericEnabled: the default carries this adoption.
+  await withActivatedPage(async () => {
+    kernel.init();
+    await waitFor(() => created.some((shell) => shell.video === generic.video), 3000);
+  });
+  assert.equal(
+    created.find((shell) => shell.video === generic.video).sdk.source,
+    "generic",
+    "an unrecognized player adopts with no opt-in"
+  );
 });
