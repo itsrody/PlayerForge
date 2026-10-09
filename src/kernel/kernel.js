@@ -3,6 +3,7 @@ import { getConfigValue, loadJsonObject, gmSetValue, KEYS } from "../shared/stor
 import { setDebugRuntime } from "../shared/diagnostics.js";
 import { postTask } from "../shared/scheduler.js";
 import { Scope } from "../shared/scope.js";
+import { DOMManager, trackScopedObserver } from "../shared/dom-manager.js";
 import { resolvePlayer, fingerprintFor, meetsMinSize, watchDocumentVideos, watchMediaEvents, forEachShadowVideos } from "./sdk.js";
 import { GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
 
@@ -49,9 +50,13 @@ export class Kernel {
   #stopDiscoveryTap = null;
   /** True once the full-document discovery tap has been downgraded. */
   #discoveryDowngraded = false;
-  /** Kernel lifecycle scope: removal observers disconnect via onDispose,
-   *  grace timers cancel via the signal. */
+  /** Kernel lifecycle scope: scoped-observer releases and removal grace
+   *  timers cancel via the signal. */
   #scope = new Scope();
+  /** Document-level DOM ownership: the page listeners live here instead of
+   *  as bare addEventListener calls, so the census has one registry and
+   *  destroy() covers them without a paired sweep. */
+  #dom = new DOMManager();
   /** The shell host provider, registered by the shell plugin (never imported). */
   #shellProvider = null;
 
@@ -74,11 +79,12 @@ export class Kernel {
       logger.log("kernel", "Page hiding, cleaning up");
       this.#stopDiscoveryTap?.();
       this.#stopDiscoveryTap = null;
-      // Scope first: onDispose disconnects every removal observer, the
-      // signal cancels pending removal-grace postTasks, and the page-level
-      // pageshow/pagehide listeners drop. Lifecycle/registry teardown below
-      // then runs with all watch machinery already dead.
+      // Scope first: the signal cancels pending removal-grace postTasks.
+      // Then the DOM manager: the pageshow/pagehide listeners above were
+      // registered under ITS signal (listen() owns the signal unconditionally),
+      // so only its destroy drops them - the kernel scope never held them.
       this.#scope.dispose();
+      this.#dom.destroy();
       // Subscribers too. The kernel owns this set, so it owns its release:
       // callers register and drop the returned unsubscribe (nothing re-registers
       // a listener per page, so there is no double-fire to guard), and a
@@ -256,8 +262,8 @@ export class Kernel {
       logger.log("kernel", `Debug logs on (${[storedDebug && "setting", hashDebug && "hash"].filter(Boolean).join(" + ")})`);
     }
     const { signal } = this.#scope;
-    document.addEventListener("pageshow", this.#onPageShow, { signal });
-    window.addEventListener("pagehide", this.#onPageHide, { signal });
+    this.#dom.listen(document, "pageshow", this.#onPageShow, { signal });
+    this.#dom.listen(window, "pagehide", this.#onPageHide, { signal });
     // Permanent rider on the shared discovery tap: every video the probe
     // would have seen, the kernel now adopts through the same wiring.
     this.#stopDiscoveryTap = watchDocumentVideos((video) => this.#adoptVideo(video));
@@ -425,6 +431,8 @@ class VideoSession {
   /** Current watch-depth cap: tight on first arming, max after any move. */
   #anchorDepth = MAX_REMOVAL_DEPTH;
   #observer = null;
+  /** Registry release for the watch observer, or null when unarmed. */
+  #watchRelease = null;
 
   constructor(video, { scope, adopt, removeShell }) {
     this.#video = video;
@@ -489,12 +497,16 @@ class VideoSession {
     this.#anchors.length = 0;
     this.#sentinel = null;
     this.#observer = new MutationObserver(() => this.#checkAnchors());
-    this.#scope.onDispose(() => this.#observer.disconnect());
+    // Lifetime through the registry (disconnect + unlist on scope abort or
+    // stopWatching's release): the observer itself stays native so the
+    // browser keeps filtering the anchor range in C++.
+    this.#watchRelease = trackScopedObserver(this.#observer, "removal-watch", this.#scope.signal);
     this.#reanchorObservers();
   }
 
   stopWatching() {
-    this.#observer?.disconnect();
+    this.#watchRelease?.();
+    this.#watchRelease = null;
     this.#observer = null;
     this.#watching = false;
     this.#graceCancel?.();
@@ -739,13 +751,17 @@ function whenDomSettled(container, { quietMs = 50, capMs = 150, signal } = {}) {
   let settled = false;
   let settleHandle = null;
   let capHandle = null;
+  // Assigned after observe() below; done() only ever runs past setup, but
+  // the nullable slot (same shape as the timer handles) keeps that an
+  // invariant of the declarations rather than of postTask's timing.
+  let releaseSettleObserver = null;
 
   const done = () => {
     if (settled) {
       return;
     }
     settled = true;
-    observer.disconnect();
+    releaseSettleObserver?.();
     settleHandle?.abort();
     capHandle?.abort();
     // Normal settle must release the abort listener too: with `{ once: true }`
@@ -767,6 +783,9 @@ function whenDomSettled(container, { quietMs = 50, capMs = 150, signal } = {}) {
   capHandle = postTask(done, { priority: "user-visible", delay: capMs });
 
   observer.observe(container, { childList: true, subtree: true });
+  // Lifetime through the registry; done() releases below, the signal aborts
+  // to the same release.
+  releaseSettleObserver = trackScopedObserver(observer, "settle", signal);
 
   const onAbort = () => done();
   signal?.addEventListener("abort", onAbort, { once: true });
@@ -782,6 +801,14 @@ function whenDomSettled(container, { quietMs = 50, capMs = 150, signal } = {}) {
  * mid-build, with post-wait guards against videos that vanished or were
  * adopted meanwhile. A ready shell is handed to the onShellCreated callback
  * (the kernel's coordinator). Page-unload cleanup is owned by the kernel.
+ *
+ * Discovery lifecycle phases, in order, with what aborts each:
+ * probe (shared tap + boot replay, kernel scope) -> settle (whenDomSettled,
+ * lifecycle scope) -> mount (factory + shell boot, shell scope; the mount
+ * flight dedups overlapping offers) -> ride (registry slot, session removal
+ * watch, downgraded media-event tap) -> teardown (pagehide destroys kernel,
+ * lifecycle, registry and every shell). An offer may re-enter at probe any
+ * number of times; mount runs at most once per container per moment.
  */
 export class LifecycleManager {
   #registry;

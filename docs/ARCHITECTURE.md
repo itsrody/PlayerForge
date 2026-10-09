@@ -995,6 +995,8 @@ Each is testable, not aspirational.
 | Persist writes never block input | `tests/video-filter.test.mjs` asserts the filter's trailing persist is the one task in its window and that it issues at `background`. The two writers §5 used to name here do not have a deferred write at all and are covered by their own tests rather than by this row: `chrome/history.js` persists nothing (it reads the store the resume tracker owns), and `diagnostics.js` is console I/O behind the debug toggle with no GM write. Resume's persist is deliberately synchronous — see below |
 | No forced synchronous layout | `pf/no-forced-layout` (`platform/eslint-rules.mjs`, wired over `src/` by `eslint.config.js`): a layout-property read in the same task as a layout write fails `npm run lint`. Pinned by `tests/lint-rule.test.mjs`, which drives the rule block read back out of the real config |
 | Hot-path JS shapes are priced on Gecko, and a ratio on a negligible cost is not a win | `platform/browser-bench/jit-shape.bench.mjs` prices seven candidate shapes as report-only non-gated pairs, two arms per shape in interleaved batches, and §2.9 records what survived: three taken (the `matchPreset` unroll, the gated `x * sqrt(x)` scrub curve, the latch-cached swipe prefix), three recorded in-tree as deliberate non-changes (`Math.hypot` at 1.04×, the stepper's `10 ** decimals` at 1.00×, and the array-backed pointer list, which is 6.8× and still the wrong trade). The bound the rows keep is behavioural, not numeric: `tests/input-forge.test.mjs` pins the swipe prefix's output string and that it is rebuilt per stroke rather than carried over, mutation-checked in both directions |
+| Scoped observers are registered, never orphaned | The three native observers (removal watch, settle, shell watchdog) stay native for C++ subtree filtering but their lifetime is owned by the registry in `src/shared/dom-manager.js`: every registration releases on abort or explicit release, and `trackedObserverLabels()` exposes the live set. `tests/dom-manager.test.mjs` pins release/abort/manager-destroy teardown and asserts the label count returns to baseline - the leak radar |
+| No string-to-DOM sinks, no realm-escape primitives, no unowned document listeners | `tests/realm-contract.test.mjs` scans `src/` for `innerHTML`/`outerHTML`/`insertAdjacentHTML`/`document.write`, `wrappedJSObject`/`cloneInto`/`exportFunction`, `eval`/`new Function` (comments excluded), and pins the exact census of raw `document`/`window` listeners - every entry a recorded singleton with its reason, so a new bare listener fails until it is routed through a manager or justified |
 
 One row was narrowed rather than satisfied, and the reason is worth keeping
 visible. "History and diagnostics never block input" named two writers that have
@@ -1444,7 +1446,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved twenty-nine times since that cut. The first two movements
+The unit count has moved thirty times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1733,6 +1735,20 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  instead of a closure per print per offer). No behavior changed; the pin
  is two new invariants - anchor/print probes read zero boxes, the memo
  keeps object identity. `tests/sdk-engine.test.mjs` gained those 2.
+
+ The thirtieth movement put DOM ownership in one place without
+ centralizing mechanism: scoped observers stay native (C++ subtree
+ filtering, with gorhill's December 2025 surveyor fix as the field
+ evidence for specificity over a generic feed) but register lifetimes in
+ `src/shared/dom-manager.js`, whose live labels are a leak radar; the
+ kernel's page listeners moved onto its own manager; the shared feed is
+ pinned childList-only on the document node; the page realm gets a
+ contract (no string-to-DOM sinks, no Xray-unwrapping primitives, every
+ raw document/window listener a recorded singleton); and the discovery
+ lifecycle is named in phases - probe, settle, mount, ride, teardown -
+ with each phase's abort owner written down. `tests/dom-manager.test.mjs`
+ gained 4, `tests/realm-contract.test.mjs` is new with 2, and §5 gained
+ the two rows that verify them.
 
 ## 7. Gecko-specific decisions, and what they rule out
 

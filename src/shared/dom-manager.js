@@ -8,7 +8,9 @@ import { postTask, yield_ } from "./scheduler.js";
  *
  *   1. the shared document-level mutation feed (§1) - one observer per
  *      document, shared by the kernel probe, the kernel's permanent rider and
- *      the shell-host watchdog;
+ *      the shell-host watchdog - plus the scoped-observer registry, which
+ *      owns the lifetime (but never the mechanism) of the three observers
+ *      that stay native for C++ subtree filtering;
  *   2. DOMManager (§2) - the per-shell owner: listeners, created elements,
  *      attribute/style rollbacks, external cleanups, plus the two factories
  *      that used to live in sibling files (`pool`, `watch`);
@@ -269,6 +271,46 @@ export function onDomMutations(handler, { signal } = {}) {
   return off;
 }
 
+/**
+ * Scoped-observer registry: the ownership half of every native observer that
+ * is deliberately NOT the shared feed. Scoped observers stay native (the
+ * browser filters their subtrees in C++, while a shared dispatcher would
+ * filter every document mutation in JS just to reconstruct that scoping -
+ * and gorhill's December 2025 surveyor fix is the field evidence: one
+ * observer designed for its specific lookup beats the generic feed feeding
+ * every consumer). What the registry unifies is the lifetime, not the
+ * mechanism: each entry releases (disconnects + unlists) on its signal's
+ * abort or on an explicit release, and the live labels are inspectable for
+ * diagnostics and the leak-radar test.
+ *
+ * Callers keep disconnecting in their own paths too (settle's done(),
+ * the watchdog's cleanup, the session's stopWatching) - release is
+ * idempotent, and the inventory entry is what those paths must additionally
+ * drop, which is why they go through the returned handle instead of calling
+ * disconnect() directly.
+ */
+const trackedObservers = new Map();
+
+/** Labels of currently live scoped observers, oldest first. */
+export function trackedObserverLabels() {
+  return [...trackedObservers.values()];
+}
+
+export function trackScopedObserver(observer, label, signal) {
+  let released = false;
+  const release = () => {
+    if (released) {
+      return;
+    }
+    released = true;
+    observer.disconnect();
+    trackedObservers.delete(observer);
+  };
+  trackedObservers.set(observer, label);
+  signal?.addEventListener("abort", release, { once: true });
+  return release;
+}
+
 /* ==================================================================
    §2 — DOMManager
    ================================================================== */
@@ -414,6 +456,18 @@ export class DOMManager {
     const off = onDomMutations(handler, { signal: this.#scope.signal });
     this.onCleanup(off);
     return off;
+  }
+
+  /**
+   * Register a natively-created scoped observer under this manager's
+   * lifetime: it disconnects (and unlists) with the manager, and the
+   * returned handle releases it early. The observer stays native - this is
+   * ownership, not mechanism (see trackScopedObserver).
+   */
+  trackObserver(observer, label) {
+    const release = trackScopedObserver(observer, label, this.#scope.signal);
+    this.onCleanup(release);
+    return release;
   }
 
   /**

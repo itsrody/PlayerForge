@@ -10,7 +10,7 @@ globalThis.MutationObserver = window.MutationObserver;
 // class; the deferred-flush visibility listener must resolve to it too.
 globalThis.AbortController = window.AbortController;
 
-const { onDomMutations, DOMManager, DomPool } = await import("../src/shared/dom-manager.js");
+const { onDomMutations, DOMManager, DomPool, trackScopedObserver, trackedObserverLabels } = await import("../src/shared/dom-manager.js");
 const { yield_ } = await import("../src/shared/scheduler.js");
 
 /**
@@ -466,4 +466,71 @@ test("sequential managers do not capture each other's leftovers [regression]", (
   second.destroy();
   assert.equal(el.getAttribute("data-pf"), null, "no marker stranded on the video");
   el.remove();
+});
+
+/* --- Scoped-observer registry ---------------------------------------- *
+ * Scoped observers stay native (C++ subtree filtering), but their lifetime
+ * is owned here: every registration releases on abort or explicit release,
+ * and the live labels are inspectable. */
+
+test("tracked observers release explicitly and idempotently", async (t) => {
+  let disconnects = 0;
+  const observer = { disconnect: () => disconnects++ };
+  const before = trackedObserverLabels().length;
+  const release = trackScopedObserver(observer, "test-watch", null);
+  assert.deepEqual(trackedObserverLabels().slice(before), ["test-watch"]);
+  release();
+  assert.equal(disconnects, 1, "release disconnects the observer");
+  assert.equal(trackedObserverLabels().length, before, "release unlists the label");
+  release();
+  assert.equal(disconnects, 1, "a second release is a no-op");
+  t.after(() => {
+    assert.equal(trackedObserverLabels().length, before, "nothing leaked past the test");
+  });
+});
+
+test("tracked observers release on signal abort", () => {
+  let disconnects = 0;
+  const observer = { disconnect: () => disconnects++ };
+  const controller = new AbortController();
+  const before = trackedObserverLabels().length;
+  trackScopedObserver(observer, "test-abort", controller.signal);
+  controller.abort();
+  assert.equal(disconnects, 1, "abort disconnects without an explicit release");
+  assert.equal(trackedObserverLabels().length, before);
+});
+
+test("a manager-owned observer dies with the manager", async () => {
+  const before = trackedObserverLabels().length;
+  const mgr = new DOMManager();
+  let disconnects = 0;
+  mgr.trackObserver({ disconnect: () => disconnects++ }, "test-managed");
+  assert.deepEqual(trackedObserverLabels().slice(before), ["test-managed"]);
+  mgr.destroy();
+  assert.equal(disconnects, 1);
+  assert.equal(trackedObserverLabels().length, before, "destroy unlists - the leak radar stays quiet");
+});
+
+test("the shared feed observes childList-only on the document node", async () => {
+  const seen = [];
+  const second = new JSDOM("<!doctype html><html><body></body></html>");
+  const RealObserver = globalThis.MutationObserver;
+  globalThis.MutationObserver = class extends second.window.MutationObserver {
+    observe(target, options) {
+      seen.push([target, { ...options }]);
+      return super.observe(target, options);
+    }
+  };
+  const savedDoc = globalThis.document;
+  globalThis.document = second.window.document;
+  try {
+    const off = onDomMutations(() => {});
+    assert.equal(seen.length, 1, "rebind observes once");
+    assert.equal(seen[0][0], second.window.document, "the document node, never the root element");
+    assert.deepEqual(seen[0][1], { childList: true, subtree: true });
+    off();
+  } finally {
+    globalThis.document = savedDoc;
+    globalThis.MutationObserver = RealObserver;
+  }
 });

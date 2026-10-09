@@ -188,8 +188,11 @@ export function watchShellHost(container, host, dom, isAlive = () => true) {
   });
   observer.observe(container, { childList: true });
 
+  // Lifetime through the shell's manager (disconnect + unlist with it);
+  // the observer itself stays native so eviction checks filter in C++.
+  const releaseObserver = dom.trackObserver(observer, "shell-watchdog");
   dom.onCleanup(() => {
-    observer.disconnect();
+    releaseObserver();
     dropReconnectWatch();
   });
 }
