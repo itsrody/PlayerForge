@@ -535,3 +535,19 @@ test("disposing the status stops the observer", async (t) => {
 
   assert.equal(status.presence, Presence.VISIBLE, "a torn-down status observes nothing");
 });
+
+test("aborting the owner signal releases the whole status", async (t) => {
+  const { trackedObserverLabels } = await import("../src/shared/dom-manager.js");
+  const { status, changes, video, owner } = harness(t);
+  const before = trackedObserverLabels().length;
+  assert.ok(before > 0, "the status holds a registered observer while live");
+  owner.abort();
+  fire(video, "playing");
+  await tick();
+  assert.deepEqual(changes, [], "no edge lands after the owner died");
+  assert.equal(
+    trackedObserverLabels().length,
+    before - 1,
+    "the intersection observer unlisted with the manager"
+  );
+});

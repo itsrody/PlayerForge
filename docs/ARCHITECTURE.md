@@ -716,11 +716,11 @@ record rather than quietly delete:
 - **PiP is gone, not pending.** Picture-in-picture was removed outright
   (`a5bc9fb`, "remove picture-in-picture entirely"), so the earlier draft's "+
   PiP events" has no event to name. `Presence.PIP` survives as an enum member
-  with no writer, alongside `Presence.DETACHED` — `player-status.js:69` records
+  with no writer, alongside `Presence.DETACHED` — `player-status.js:70` records
   why both are named but undriven.
 
 One structural caveat: L1 has no single owner. Visibility is instantiated
-twice — `player-status.js:458` for the `Presence` axis, and an independent
+twice — `player-status.js:461` for the `Presence` axis, and an independent
 observer at `resume.js:686` gating off-screen saves. The two answer different
 questions (what is the player's status versus should we churn storage for a
 video the user cannot see) and their lifetimes differ, so folding them would
@@ -759,7 +759,7 @@ Subscribers receive the change; nobody re-diffs the whole status.
 That event has *two* deliveries, not one, and the second is the reason most of
 the axis surface exists. `subscribe()` callbacks fire in-realm, and the same
 change is dispatched as a `pf:status` CustomEvent on the `<video>`
-(`player-status.js:359`) so the **page world** can read status across the
+(`player-status.js:363`) so the **page world** can read status across the
 sandbox boundary — which is the only consumer of `Buffer`, `Screen`, `duration`,
 `rate`, `volume`, `muted`, `hasTextTrack` and `error`. In-tree exactly one
 subscriber exists (`shell.js:501`, feeding the occlusion resolve), and it reads
@@ -1447,7 +1447,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved thirty-three times since that cut. The first two movements
+The unit count has moved thirty-four times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1769,6 +1769,14 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  literally), fresh brokers everywhere else. Shells built directly keep a
  fresh owned broker that empties itself on teardown. `tests/input-forge.
  test.mjs` gained the per-broker routing pin; the count moved by one.
+
+ The thirty-fourth movement wired PlayerStatus lifetimes through its own
+ DOMManager: media listeners ride manager signals, the intersection
+ observer registers as `status-intersection`, the fullscreen subscription
+ is a manager cleanup, and the teardown array is gone. The owner signal
+ still disposes the status, so shell-scope teardown releases everything
+ even where dispose was never called. `tests/player-status.test.mjs`
+ gained the abort-releases-all pin.
 
  The thirty-third movement cut L0 down to capabilities with live readers:
  engine brand, Gecko version, manager realm and postTask/yield presence had

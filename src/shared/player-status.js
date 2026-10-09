@@ -1,5 +1,6 @@
 import { logger } from "./diagnostics.js";
 import { fs, subscribeFullscreen } from "./shadow.js";
+import { DOMManager } from "./dom-manager.js";
 
 /**
  * L2 - PlayerStatus: what this player *is*, stated as one queryable value
@@ -139,15 +140,16 @@ function errorDetail(error) {
 export class PlayerStatus {
   #target;
   #doc;
-  #signal;
   #listeners = new Set();
   /** Transitions waiting for the single scheduled commit. */
   #pending = [];
   #flushScheduled = false;
   #disposed = false;
   #seq = 0;
-  /** Teardown thunks: signal-backed where one exists, explicit where not. */
-  #teardown = [];
+  /** DOM ownership: listeners, the intersection observer, the fullscreen
+   *  subscription. The manager dies with dispose(), so no teardown array,
+   *  no manual removeEventListener sweep, no orphaned observer. */
+  #dom = new DOMManager();
 
   /** Values live in plain objects: `#set` addresses them by axis/key name, and
    *  a private field cannot be named dynamically the way a getter can. */
@@ -168,7 +170,14 @@ export class PlayerStatus {
   constructor({ target, doc = document, signal } = {}) {
     this.#target = target;
     this.#doc = doc;
-    this.#signal = signal;
+    if (signal?.aborted) {
+      // Same already-aborted trap subscribe() guards below: a dead owner at
+      // construction must stillborn the status instead of wiring listeners
+      // whose signal will never fire them loose.
+      this.dispose();
+    } else {
+      signal?.addEventListener("abort", () => this.dispose(), { once: true });
+    }
 
     this.#axis = {
       playback: seedPlayback(target),
@@ -243,15 +252,10 @@ export class PlayerStatus {
     this.#disposed = true;
     this.#pending.length = 0;
     this.#listeners.clear();
-    // Isolated like every other fan-out in the tree (Scope disposers, the
-    // mutation feed, #flush below): a throwing teardown must not strand the
-    // ones after it.
-    for (const teardown of this.#teardown) {
-      try {
-        teardown();
-      } catch {}
-    }
-    this.#teardown.length = 0;
+    // One call takes listeners, the intersection observer and the
+    // fullscreen subscription together - each registered against the
+    // manager below, each released by it exactly once.
+    this.#dom.destroy();
   }
 
   /* ── internals ─────────────────────────────────────────────────────────── */
@@ -359,15 +363,14 @@ export class PlayerStatus {
     this.#target.dispatchEvent(new Ctor(STATUS_EVENT, { bubbles: false, detail }));
   }
 
-  /** Attach every source. Stored so dispose works with or without a signal. */
+  /** Attach every source. Lifetimes ride the DOM manager: listeners drop
+   *  with it natively, the observer unlists through the registry. */
   #wire() {
     const target = this.#target;
     const doc = this.#doc;
-    const signal = this.#signal;
 
     const on = (node, type, handler) => {
-      node.addEventListener(type, handler, { signal, passive: true });
-      this.#teardown.push(() => node.removeEventListener(type, handler));
+      this.#dom.listen(node, type, handler, { passive: true });
     };
 
     const setPlayback = (to, cause) => this.#set("axis", "playback", to, cause);
@@ -465,18 +468,18 @@ export class PlayerStatus {
         this.#set("axis", "presence", this.#presence(), "intersection");
       });
       io.observe(target);
-      // Explicit rather than signal-backed: IntersectionObserverInit has no
-      // `signal` member, so the disconnect cannot ride the options object the
-      // way a listener can.
-      this.#teardown.push(() => io.disconnect());
+      // Registry-owned like every scoped observer: disconnects (and unlists)
+      // with the manager, which is exactly the construct this manual push
+      // predates - IntersectionObserverInit has no `signal` member, so the
+      // disconnect cannot ride the options object the way a listener can.
+      this.#dom.trackObserver(io, "status-intersection");
     }
 
     // Screen comes from shadow.js's single gate, not a second listener. Its
     // edge is still fullscreenchange, so the transition reports that cause.
-    this.#teardown.push(
+    this.#dom.onCleanup(
       subscribeFullscreen(
-        (active) => this.#set("axis", "screen", active ? Screen.FULLSCREEN : Screen.NONE, "fullscreenchange"),
-        signal
+        (active) => this.#set("axis", "screen", active ? Screen.FULLSCREEN : Screen.NONE, "fullscreenchange")
       )
     );
   }
