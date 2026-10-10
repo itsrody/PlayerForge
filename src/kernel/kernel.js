@@ -166,7 +166,7 @@ export class Kernel {
   /**
    * The shell plugin registers its host provider here; the framework never
    * imports the shell, it only calls the provider it was handed. Provider
-   * shape: `{ create({ video, container, sdk, onDestroy }) -> host }`.
+   * shape: `{ create({ video, container, sdk, onDestroy, reoffer }) -> host }`.
    */
   registerShellProvider(provider) {
     this.#shellProvider = provider;
