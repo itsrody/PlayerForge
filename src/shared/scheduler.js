@@ -44,7 +44,6 @@
  */
 
 import { logger } from "./diagnostics.js";
-import { engineHost } from "./engine-host.js";
 import { Scope } from "./scope.js";
 
 /**
@@ -183,9 +182,10 @@ export function debounce(fn, ms, { priority } = {}) {
  * @param {Function} resolve
  */
 function nextTask(resolve) {
-  // Availability is an L0 fact, not a per-call detect: the host answers once so
-  // this and context.js cannot drift into two different answers for one API.
-  if (engineHost.canMessageChannel) {
+  // Probed live, not snapshotted: MessageChannel availability is a realm
+  // fact, so the current globals are the answer - and context.js asks the
+  // same global the same way, which is what keeps the two pipes on one answer.
+  if (typeof MessageChannel === "function") {
     const { port1, port2 } = new MessageChannel();
     port1.onmessage = () => {
       port1.close();

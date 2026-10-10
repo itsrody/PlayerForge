@@ -870,6 +870,41 @@ test("a broadcast-settled chain stops allocating channels on later resolves", as
   }
 });
 
+test("no MessageChannel: the first resolve broadcasts with no channel at all", async () => {
+  // The live probe reads the current globals: with the constructor shadowed
+  // (never delete the real one), the reply pipe is never built, so even the
+  // first resolve allocates no channel and the legacy broadcast settles it.
+  stopContextPipe();
+  Object.defineProperty(globalThis, "MessageChannel", { value: undefined, configurable: true });
+  const { window: win } = dom();
+  globalThis.window = crossOriginFrame(win);
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  let nonce = null;
+  let transferCount = 0;
+  const originalPost = win.parent.postMessage.bind(win.parent);
+  win.parent.postMessage = (msg, target, ports) => {
+    nonce = msg.nonce;
+    if (ports && ports.length) transferCount++;
+  };
+  try {
+    const p = getPageContext();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    win.dispatchEvent(new win.MessageEvent("message", {
+      data: { type: CTX_RESPONSE_TYPE, nonce, domain: "hub", path: "/", title: "Hub" },
+      origin: "https://hub.test",
+      source: win.parent
+    }));
+    assert.deepEqual(await p, { domain: "hub", path: "/", title: "Hub" });
+    assert.equal(transferCount, 0, "no channel allocated when the host offers none");
+  } finally {
+    delete globalThis.MessageChannel;
+    win.parent.postMessage = originalPost;
+    stopContextPipe();
+  }
+});
+
 test("presence probe fires once on the first qualifying insertion", async () => {
   const { window: win } = dom();
   globalThis.window = win;

@@ -1,6 +1,5 @@
 import { Kernel } from "./kernel/kernel.js";
 import { registerShell } from "./shell/shell.js";
-import { probeEngineHost } from "./shared/engine-host.js";
 import { installMenuCommands } from "./kernel/menus.js";
 import { installContextBridge, requestFullscreenProvision } from "./shared/context.js";
 import { installVideoProbe, shouldSkipUrl } from "./kernel/discovery.js";
@@ -25,11 +24,6 @@ function bootstrap() {
   // native fullscreenchange event. Runs before any shell exists so fs-gated
   // paths have a live boolean the moment they first query it.
   initFullscreenGate();
-
-  // Probe the L0 environment facts explicitly: the snapshot defaults to its
-  // import-time evaluation, but import order must never decide what the
-  // facts are - entry owns the document, so entry owns the probe.
-  probeEngineHost();
 
   // The shell stylesheet is warmed lazily at first shell construction
   // (shell.js #injectDom): the embedded sheet is adopted synchronously there,

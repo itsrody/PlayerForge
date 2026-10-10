@@ -90,7 +90,8 @@ name files or the `tests/*.test.mjs` glob (fixed in `2dedcbe`).
 src/entry.js            bundle entry — NOT where the version lives
 src/kernel/             kernel (orchestrator + settle + registry), discovery
                         (URL gate + presence probe), contract, sdk, menus
-src/shared/             the layers: engine-host (L0), player-status (L2),
+src/shared/             the layers: engine facts (L0, probed live at use),
+                        player-status (L2),
                         render (L4 gate + L5 reconciler), plus scheduler,
                         diagnostics, storage, dom-manager, scope, geometry,
                         tuning, context.js (the ancestor/iframe bridge —

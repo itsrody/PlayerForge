@@ -637,7 +637,7 @@ L5  HudReconciler     snapshot -> desired DOM, diffed against applied snapshot
 L4  RenderGate        demand-triggered, tick-coalescing, priority-routed commit
 L2  StatusManager     enumerated axes + typed transitions
 L1  Signals           media / visibility / layout / frame / lifecycle edges
-L0  EngineHost        MessageChannel availability, single shared answer
+L0  Engine facts      MessageChannel availability, probed live at use
 ```
 
 Dependency direction is strictly downward. No layer reaches around another.
@@ -647,34 +647,32 @@ scheduled task and a diffed write, so the file boundary follows the commit
 rather than the layer. The split below is still the contract — the gate never
 touches the DOM and the reconciler never schedules.
 
-### L0 — EngineHost
+### L0 — Engine facts
 
-Single source of truth for engine capability facts, so capability checks stop being
-repeated at call sites. `platform/capabilities.json` is Node-side and cannot be
-read by the userscript, which is exactly why this is needed.
+L0 is not a module: the single remaining engine fact (MessageChannel
+availability) is probed live at its two use sites — `scheduler.js`'s
+`nextTask()` and `context.js`'s reply pipe — as `typeof MessageChannel ===
+"function"`. A shared snapshot used to hold this (frozen singleton,
+re-probed by entry bootstrap for realm transitions), but a snapshot is
+machinery for a fact that cannot change mid-document: the realm's globals
+are the answer, read at use time, so import order stops deciding the facts
+and entry owns no probe step. The two pipes cannot drift into different
+answers because only one question is asked, of the same global.
+`platform/capabilities.json` is Node-side and cannot be read by the
+userscript, which is exactly why the manifest classifies the chain once
+instead of prose keeping two call sites honest.
 
-```js
-class EngineHost {
-  #canMessageChannel;
-}
-```
-
-Read-only after construction (frozen; entry bootstrap re-probes explicitly
-via `probeEngineHost()` so import order never decides the facts). The frame
-facts used to live here, read off `HTMLVideoElement.prototype` - but every
-consumer already probes the element itself (resume.js always did), and a
-built-in element is never un-upgraded, so the prototype read bought a second
-answer to a question the element answers better. `diagnostics.js` now probes
-the quality set per element (all three or nothing, same rule). Deliberately
-narrow: one shared answer for the two pipes that must agree
- (`scheduler.js`'s `nextTask()` and `context.js`'s reply pipe both
-feature-detected MessageChannel independently, which is the repetition L0
-exists to end), and its presence does not vary at runtime. Note what else is
-deliberately *absent*: there is no "can await paint" flag, because no such
-API exists to detect (§2.6). Also absent is any `canRaf`: `yield_()`
-re-reads `requestAnimationFrame` on every call because the harness installs
-and removes it per test, so a construction-time snapshot would freeze a
-branch that callers re-read live.
+The frame facts used to live in the snapshot too, read off
+`HTMLVideoElement.prototype` - but every consumer already probes the
+element itself (resume.js always did), and a built-in element is never
+un-upgraded, so the prototype read bought a second answer to a question the
+element answers better. `diagnostics.js` now probes the quality set per
+element (all three or nothing, same rule). Note what else is deliberately
+*absent*: there is no "can await paint" flag, because no such API exists to
+detect (§2.6). Also absent is any `canRaf`: `yield_()` re-reads
+`requestAnimationFrame` on every call because the harness installs and
+removes it per test — the same reason MessageChannel is read live rather
+than snapshotted.
 
 ### L1 — Signals
 
@@ -1963,7 +1961,7 @@ In-tree:
 - `src/shared/scope.js` — teardown primitive
 - `src/shared/activity.js` — passive activity windows
 - `src/shell/shell.js:383`, `src/shell/resume.js:702`, `src/shared/shadow.js:192` — `createActivity` call sites
-- `src/shared/context.js:637` — the tree's only self-rearming `postTask`, delayed
+- `src/shared/context.js:636` — the tree's only self-rearming `postTask`, delayed
 - `src/shared/dom-manager.js` — mutation coalescing
 - `src/shell/chrome/panel.js:116` — the only `setInterval` in the tree
 - `src/shared/diagnostics.js` — debug-gated rAF frame-gap probe

@@ -102,7 +102,8 @@
       "summary": "Unforgeable child-to-ancestor context pipe",
       "shipsInFirefox": 41,
       "usedBy": [
-        "src/shared/engine-host.js"
+        "src/shared/context.js",
+        "src/shared/scheduler.js"
       ],
       "verifiedBy": "platform/integration/switchboard-lifecycle.test.mjs",
       "probes": [
