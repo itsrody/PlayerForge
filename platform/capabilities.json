@@ -113,16 +113,13 @@
       "id": "requestVideoFrameCallback",
       "summary": "Frame-clock sampling for the jank watchdog and resume timing, plus the coarse presentation edge behind dropped-frame reporting",
       "shipsInFirefox": 132,
-      "probes": [
-        "globalThis.HTMLVideoElement.prototype.requestVideoFrameCallback"
-      ],
       "token": "requestVideoFrameCallback",
       "usedBy": [
         "src/shell/resume.js",
-        "src/shared/engine-host.js",
         "src/shared/diagnostics.js"
       ],
-      "verifiedBy": "tests/resume-tracker.test.mjs"
+      "verifiedBy": "tests/resume-tracker.test.mjs",
+      "note": "Probed per element, never off the prototype: a built-in element is never un-upgraded, so typeof video.requestVideoFrameCallback answers what a prototype read would, without one."
     },
     {
       "id": "event-timing",
@@ -738,18 +735,14 @@
       "summary": "The dropped-frame report: the decoder's own counter plus Gecko's submitted-versus-painted pair",
       "why": "Without it (or without either moz* counter) watchFrameQuality() registers nothing and no dropped-frame line is ever written. Only the debug diagnostic is lost: the frame clock, resume timing and the HUD all carry on, and a player that is genuinely stuttering still shows it as dropped frames in the media element's own counters.",
       "usedBy": [
-        "src/shared/engine-host.js",
         "src/shared/diagnostics.js"
-      ],
-      "probes": [
-        "globalThis.HTMLVideoElement.prototype.getVideoPlaybackQuality"
       ],
       "token": [
         "getVideoPlaybackQuality",
         "mozPresentedFrames",
         "mozPaintedFrames"
       ],
-      "note": "Read as one unit on purpose: Gecko reports the standard presentedFrames as null, so the mozilla counters are not an enhancement but the only painted-versus-submitted read there is. engine-host.js probes all three together rather than letting the report half-work."
+      "note": "Read as one unit on purpose: Gecko reports the standard presentedFrames as null, so the mozilla counters are not an enhancement but the only painted-versus-submitted read there is. Probed per element (getVideoPlaybackQuality plus both moz counters or nothing), never off the prototype."
     },
     {
       "id": "wake-lock",

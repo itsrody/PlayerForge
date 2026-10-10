@@ -8,11 +8,11 @@
  * being re-derived at a dozen call sites with a dozen subtly different
  * guards.
  *
- * Deliberately narrow: only capabilities with live readers live here
- * (scheduler and frame APIs below). Identity facts with no readers - engine
- * brand, Gecko version, manager realm, postTask/yield presence - were cut:
- * recording them made the snapshot look authoritative about things nothing
- * branched on, and a fact nobody reads is a fact nobody keeps honest. Anything
+ * Deliberately narrow: the one capability with live readers. Frame facts
+ * used to live here too, read off `HTMLVideoElement.prototype` - but every
+ * consumer already probes the element itself (resume.js always did), and a
+ * built-in element is never un-upgraded, so the prototype read bought a
+ * second answer to a question the element answers better. Anything
  * that can change while the page runs — document visibility, rAF
  * availability under the test harness, media element state — stays where it
  * is read, because caching it here would freeze a value the caller re-reads
@@ -26,13 +26,7 @@
  * - **No `canRaf`.** `yield_()` re-reads `requestAnimationFrame` on every call
  *   because the harness installs and removes it per test
  *   (tests/scheduler.test.mjs, tests/perf-diag.test.mjs). A construction-time
- *   snapshot would pick a branch that no longer matches the host.
- *
- * The frame flags sit on the far side of that line: `canRvfc` and
- * `canMozQuality` are *engine* facts - whether this engine ships the API on
- * `HTMLVideoElement.prototype` - so they are read here and the frame-quality
- * sampler does not re-derive them. Whether a particular element has been
- * upgraded yet is still answered on that element, where it is read.
+ * snapshot would pick a branch that no longer matches the host.
  *
  * Ownership: the snapshot is taken eagerly at import (the ambient globals at
  * document-start ARE the facts), and entry bootstrap re-probes explicitly via
@@ -44,52 +38,16 @@
 
 export class EngineHost {
   #canMessageChannel = false;
-  /** Whether the engine ships requestVideoFrameCallback on HTMLVideoElement. */
-  #canRvfc = false;
-  /**
-   * Whether the engine ships the whole quality set: the standard
-   * `getVideoPlaybackQuality()` plus Gecko's `mozPresentedFrames` /
-   * `mozPaintedFrames` pair. All three or none — Gecko reports
-   * `VideoPlaybackQuality.presentedFrames` as null, so the standard half alone
-   * cannot produce the "submitted vs painted" number the report is built on.
-   */
-  #canMozQuality = false;
 
   constructor() {
     // nextTask()'s first choice: MessageChannel tasks are not timer-throttled
     // on Gecko, so a hidden tab still makes progress. Present in every host we
     // run on, but it was probed independently in two modules before this.
     this.#canMessageChannel = typeof MessageChannel === "function";
-    // The coarse presentation edge (§2.5): Gecko ships it from 132, well under
-    // the floor, but it is still a stated fact rather than an assumption
-    // because a caller must be able to ask without feature-detecting itself -
-    // and because the answer has to come from the prototype, not from an
-    // element that may not have been upgraded yet.
-    this.#canRvfc =
-      typeof globalThis.HTMLVideoElement?.prototype?.requestVideoFrameCallback === "function";
-    // The quality set that answers "how many frames did we lose" (§2.5, §7),
-    // read as one unit for the reason on the field above. `mozPresentedFrames`
-    // and `mozPaintedFrames` are data members, so they are probed with `in`
-    // rather than a typeof, which would report the value they currently hold
-    // instead of whether the engine has them. The typeof on the standard half
-    // is what keeps the `in` guards from running when there is no prototype.
-    const proto = globalThis.HTMLVideoElement?.prototype;
-    this.#canMozQuality =
-      typeof globalThis.HTMLVideoElement?.prototype?.getVideoPlaybackQuality === "function" &&
-      "mozPresentedFrames" in proto &&
-      "mozPaintedFrames" in proto;
   }
 
   get canMessageChannel() {
     return this.#canMessageChannel;
-  }
-
-  get canRvfc() {
-    return this.#canRvfc;
-  }
-
-  get canMozQuality() {
-    return this.#canMozQuality;
   }
 }
 

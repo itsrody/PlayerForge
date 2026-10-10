@@ -6,8 +6,6 @@
  * reporting.
  */
 
-import { engineHost } from "./engine-host.js";
-
 /* - Logger - */
 
 const PREFIX = "[PlayerForge]";
@@ -402,13 +400,29 @@ function cancelEdge(entry) {
   entry.rvfc = null;
 }
 
+/**
+ * Whether the element carries the whole quality set: the standard
+ * `getVideoPlaybackQuality()` plus Gecko's `mozPresentedFrames` /
+ * `mozPaintedFrames` pair. All three or none - Gecko reports the standard
+ * `presentedFrames` as null, so the standard half alone cannot produce the
+ * submitted-versus-painted number the report is built on. Read on the
+ * element, not the prototype: data members are probed with `in` either way,
+ * and a built-in element is never un-upgraded.
+ */
+function hasQualitySet(video) {
+  return typeof video.getVideoPlaybackQuality === "function" &&
+    "mozPresentedFrames" in video &&
+    "mozPaintedFrames" in video;
+}
+
 function armQuality(entry) {
   if (entry.detach !== null) {
     return;
   }
   const { video, signal } = entry;
-  entry.usesEdge =
-    engineHost.canRvfc && typeof video.requestVideoFrameCallback === "function";
+  // Per-element, like resume.js: a built-in element is never un-upgraded,
+  // so asking the element answers what a prototype probe would, without one.
+  entry.usesEdge = typeof video.requestVideoFrameCallback === "function";
   const arm = () => armEdge(entry);
   const cancel = () => cancelEdge(entry);
   for (const type of EDGE_ARM) {
@@ -468,7 +482,7 @@ function flushFrameQuality() {
  * costs one Set entry, and arms nothing.
  */
 export function watchFrameQuality(video, signal) {
-  if (!engineHost.canMozQuality || !video) {
+  if (!video || !hasQualitySet(video)) {
     return () => {};
   }
   const entry = { video, signal, prev: null, rvfc: null, usesEdge: false, detach: null };

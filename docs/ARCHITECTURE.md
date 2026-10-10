@@ -601,7 +601,7 @@ media-element events into a rendered control surface. Findings:
   Chrome's per-feature availability can change at runtime (e.g. leaving PiP),
   which a static `canX` cannot express. PlayerForge should treat per-feature
   availability as part of `StatusManager` where it can change, and keep only
-  truly static environment facts (engine, realm, scheduler) in L0.
+  truly static environment facts in L0.
 - **Attribute↔event mappings are derived, not hand-maintained.**
   `StateChangeEventToAttributeMap` and its inverse are computed from a single
   registry, so they cannot drift. L5's reconciler should likewise derive its
@@ -637,7 +637,7 @@ L5  HudReconciler     snapshot -> desired DOM, diffed against applied snapshot
 L4  RenderGate        demand-triggered, tick-coalescing, priority-routed commit
 L2  StatusManager     enumerated axes + typed transitions
 L1  Signals           media / visibility / layout / frame / lifecycle edges
-L0  EngineHost        engine capability flags (MessageChannel, rVFC, frame quality)
+L0  EngineHost        MessageChannel availability, single shared answer
 ```
 
 Dependency direction is strictly downward. No layer reaches around another.
@@ -656,39 +656,25 @@ read by the userscript, which is exactly why this is needed.
 ```js
 class EngineHost {
   #canMessageChannel;
-  #canRvfc;         // requestVideoFrameCallback availability
-  #canMozQuality;   // getVideoPlaybackQuality + mozPresentedFrames
 }
 ```
 
 Read-only after construction (frozen; entry bootstrap re-probes explicitly
-via `probeEngineHost()` so import order never decides the facts). Every other
-layer asks this instead of feature-detecting. Deliberately narrow: only
-capabilities with live readers live here. Identity facts with no readers -
-engine brand, Gecko version, manager realm, postTask/yield presence - were
-cut: recording them made the snapshot look authoritative about things nothing
-branched on. Note what else is deliberately *absent*: there is no "can await
-paint" flag, because no such API exists to detect (§2.6). Also absent is any
-`canRaf`: `yield_()` re-reads `requestAnimationFrame` on every call because the
-harness installs and removes it per test, so a construction-time snapshot would
-freeze a branch that callers re-read live.
-
-`canRvfc` and `canMozQuality` exist as of phase 6 and are the one place the
-engine-level distinction matters: both are read from
-`HTMLVideoElement.prototype`, not from an element, because the caller is asking
-what this engine ships rather than whether a particular element has been
-upgraded yet. `canMozQuality` is all-or-nothing — the standard
-`getVideoPlaybackQuality()` *and* Gecko's `mozPresentedFrames` /
-`mozPaintedFrames` — because Gecko reports the standard `presentedFrames` as
-null, so the half set cannot produce the submitted-versus-painted number the
-report is built on. Both answer only what the engine offers; whether one
-particular element has the method is still probed on that element where it is
-read (`resume.js`, `diagnostics.js`).
-
-Two fields beyond the sketch are implemented: `canMessageChannel` and the frame
-pair above. `scheduler.js`'s `nextTask()` and `context.js`'s reply pipe both
-feature-detected MessageChannel independently, which is the repetition L0 exists
-to end, and its presence does not vary at runtime.
+via `probeEngineHost()` so import order never decides the facts). The frame
+facts used to live here, read off `HTMLVideoElement.prototype` - but every
+consumer already probes the element itself (resume.js always did), and a
+built-in element is never un-upgraded, so the prototype read bought a second
+answer to a question the element answers better. `diagnostics.js` now probes
+the quality set per element (all three or nothing, same rule). Deliberately
+narrow: one shared answer for the two pipes that must agree
+ (`scheduler.js`'s `nextTask()` and `context.js`'s reply pipe both
+feature-detected MessageChannel independently, which is the repetition L0
+exists to end), and its presence does not vary at runtime. Note what else is
+deliberately *absent*: there is no "can await paint" flag, because no such
+API exists to detect (§2.6). Also absent is any `canRaf`: `yield_()`
+re-reads `requestAnimationFrame` on every call because the harness installs
+and removes it per test, so a construction-time snapshot would freeze a
+branch that callers re-read live.
 
 ### L1 — Signals
 
@@ -1447,7 +1433,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved thirty-nine times since that cut. The first two movements
+The unit count has moved forty times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1836,6 +1822,13 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  `<dialog closedby="any">` in our shadow root top-layers, traps focus,
  light-dismisses and Esc-closes - the whole custom modal is replaceable,
  filed as the next slice, not smuggled in here. Tests gained 3.
+
+ The fortieth movement took the last `.prototype` reads out of `src/`:
+ L0's frame flags are gone, and the sampler probes the quality set on the
+ element itself (all three or nothing, like resume.js always did). The
+ manifest follows - postTask classified by floor without a probe claim,
+ the yield row deleted, GM_info down to entry - and §4's L0 sketch is one
+ flag. Net one test lighter.
 
 ## 7. Gecko-specific decisions, and what they rule out
 

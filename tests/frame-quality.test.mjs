@@ -6,12 +6,10 @@ import assert from "node:assert/strict";
  * come from `getVideoPlaybackQuality()` and Gecko's mozPresented/mozPainted
  * pair, and rVFC contributes only the edge the sample is taken on.
  *
- * `engineHost` is a frozen singleton built when engine-host.js is first
- * evaluated, so the prototype the two frame flags are read from has to exist
- * BEFORE that import - which is why the fake is installed above a dynamic
- * import rather than beside a static one. Every test drives a hand-built video
- * rather than a jsdom one: jsdom's HTMLVideoElement has no quality API, so it
- * would take the inert registration path and prove nothing.
+ * Every test drives a hand-built video rather than a jsdom one: jsdom's
+ * HTMLVideoElement has no quality API, so it would take the inert
+ * registration path and prove nothing. The quality set is probed on the
+ * element itself - all three or nothing, same rule the sampler enforces.
  */
 
 class FakeVideoElement {}
@@ -22,7 +20,6 @@ FakeVideoElement.prototype.mozPaintedFrames = 0;
 globalThis.HTMLVideoElement = FakeVideoElement;
 
 const { setDebugRuntime, watchFrameQuality } = await import("../src/shared/diagnostics.js");
-const { engineHost } = await import("../src/shared/engine-host.js");
 
 /**
  * A video with controllable counters and a hand-rolled rVFC queue. `rvfc: false`
@@ -30,18 +27,17 @@ const { engineHost } = await import("../src/shared/engine-host.js");
  * flag cannot see - resume.js and diagnostics.js both probe it on the element
  * for exactly that reason.
  */
-function makeVideo({ rvfc = true } = {}) {
+function makeVideo({ rvfc = true, moz = true } = {}) {
   const listeners = new Map();
   const video = {
     paused: true,
     ended: false,
     seeking: false,
-    mozPresentedFrames: 0,
-    mozPaintedFrames: 0,
     quality: { droppedVideoFrames: 0, corruptedVideoFrames: 0, totalVideoFrames: 0 },
     pending: new Map(),
     cancelled: [],
     nextHandle: 1,
+    ...(moz ? { mozPresentedFrames: 0, mozPaintedFrames: 0 } : {}),
     getVideoPlaybackQuality() {
       return { ...this.quality };
     },
@@ -103,10 +99,10 @@ function present(video, n) {
  * off on the way out either way: a registered entry outlives the test that
  * made it otherwise, and would start sampling in the next one.
  */
-function withVideo(body, { rvfc = true } = {}) {
+function withVideo(body, { rvfc = true, moz = true } = {}) {
   const originalWarn = console.warn;
   const warnings = [];
-  const video = makeVideo({ rvfc });
+  const video = makeVideo({ rvfc, moz });
   console.warn = (...args) => warnings.push(args.join(" "));
   const dispose = watchFrameQuality(video);
   try {
@@ -153,13 +149,6 @@ function withFrameClock(body) {
     globalThis.cancelAnimationFrame = originalCAF;
   }
 }
-
-test("the host reports the frame facts this diagnostic is built on", () => {
-  // The fake installed above is what the singleton was built from; the
-  // all-or-nothing and absent-host cases are engine-host.test.mjs's.
-  assert.equal(engineHost.canRvfc, true);
-  assert.equal(engineHost.canMozQuality, true);
-});
 
 test("debug off: the media edges are never listened for and no frame is requested", () => {
   withVideo(({ video, warnings }) => {
@@ -274,6 +263,21 @@ test("an element without rVFC samples at the flush instead", () => {
     assert.equal(warnings.length, 1, "the flush carries the whole interval");
     assert.match(warnings[0], /dropped frames: 1 dropped, 10 presented, 0 never painted/);
   }, { rvfc: false });
+});
+
+test("the standard half without the moz pair registers nothing", () => {
+  // All three or none, enforced on the element: Gecko reports the standard
+  // presentedFrames as null, so half a quality set cannot produce the
+  // submitted-versus-painted number and must not arm at all.
+  withVideo(({ video, warnings }) => {
+    setDebugRuntime(true);
+    video.paused = false;
+    video.dispatch("play");
+    assert.equal(video.listenerCount("play"), 0, "no edges armed without the full set");
+    video.dispatch("pause");
+    assert.equal(warnings.length, 0, "nothing sampled, nothing reported");
+    setDebugRuntime(false);
+  }, { moz: false });
 });
 
 test("pause cancels the outstanding frame and playing arms it again", () => {
