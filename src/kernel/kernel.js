@@ -21,6 +21,13 @@ const REMOVAL_DEPTH_MARGIN = 1;
 /** Learned prints remembered per hostname; oldest-learned evicted past it. */
 const PRINTS_PER_HOST = 10;
 /**
+ * Shared empty prints: most hosts learned nothing, and #printsForHost runs
+ * on every offer - a literal here would allocate once per offer just to say
+ * so. Read-only by convention: resolvePlayer iterates it, #learnFromShell
+ * copies before writing.
+ */
+const NO_PRINTS = [];
+/**
  * Attribute names the upgrade watch listens for: identity markers (class,
  * id) plus every data attribute the registry anchors on, derived from the
  * records so a new data-anchored SDK is watched without a second list to
@@ -219,16 +226,16 @@ export class Kernel {
   #printsForHost() {
     const doc = this.#loadPrints();
     if (!doc) {
-      return [];
+      return NO_PRINTS;
     }
     let hostname;
     try {
       hostname = location.hostname;
     } catch {
-      return [];
+      return NO_PRINTS;
     }
     const list = doc[hostname];
-    return Array.isArray(list) ? list : [];
+    return Array.isArray(list) ? list : NO_PRINTS;
   }
 
   /**
