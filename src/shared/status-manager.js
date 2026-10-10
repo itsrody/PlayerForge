@@ -377,7 +377,15 @@ export class StatusManager {
     const setBuffer = (to, cause) => this.#set("axis", "buffer", to, cause);
 
     on(target, "loadstart", () => {
-      setPlayback(Playback.LOADING, "loadstart");
+      // A fresh src assigned post-boot enters LOADING here rather than
+      // jumping IDLE straight to READY at metadata: the loading window has
+      // an edge of its own. Guarded like the metadata edges - a play() in
+      // flight already reads unpaused, and LOADING must never overwrite
+      // motion. The buffer reset stays unconditional: a new fetch
+      // invalidates whatever was buffered before it.
+      if (target.paused && !target.ended) {
+        setPlayback(Playback.LOADING, "loadstart");
+      }
       setBuffer(Buffer.NONE, "loadstart");
     });
     on(target, "emptied", () => {

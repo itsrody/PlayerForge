@@ -166,8 +166,10 @@ test("MediaSession position state stays live off the media clock", async () => {
   const scope = new AbortController();
   claimMediaSession({ controls, video, signal: scope.signal, session });
 
-  // Replicate the shell's one-line fan-out (#forwardMediaEvents) over the
-  // exported cadence set - the seam under test IS this set.
+  // Replicate sync's cadence over the exported set: the shell drives sync
+  // from status commits plus the clock now, not from this fan-out - but the
+  // set still defines which edges must reach the bridge, so the test drives
+  // the bridge directly against it.
   for (const name of MEDIA_SESSION_SYNC_EVENTS) {
     video.addEventListener(name, () => {
       session.positions.push({ synced: true });

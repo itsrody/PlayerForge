@@ -327,3 +327,135 @@ test("prep that shifts the player aborts the mount without stranding", async () 
   assert.equal(container.hasAttribute(SHELL_MARKER), false, "the container gave up its shell claim");
   delete globalThis.CSSStyleSheet;
 });
+
+test("every sync cadence event reaches the OS session through status", async () => {
+  // The shell drives sync() from status commits (plus the clock and a
+  // seeked exception), never from per-event listeners: dispatching each
+    // cadence event must still move the session. Position bumps force past
+    // the bridge's dedup so every sync is observable as a write - kept small
+    // because the bridge clamps position to duration, and a bump past the end
+    // of the timeline would dedup against the clamp instead of writing.
+  const { dom, container, video } = makeRealm();
+  const writes = [];
+  const states = [];
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  Object.defineProperty(globalThis, "navigator", {
+    value: {
+      mediaSession: {
+        setActionHandler() {},
+        set playbackState(value) {
+          states.push(value);
+        },
+        set metadata(value) {},
+        setPositionState(state) {
+          writes.push({ ...state });
+        }
+      }
+    },
+    writable: true,
+    configurable: true
+  });
+  const MediaMetadataDescriptor = Object.getOwnPropertyDescriptor(globalThis, "MediaMetadata");
+  globalThis.MediaMetadata = class MediaMetadata {
+    constructor(options) {
+      this._captured = options;
+    }
+  };
+  try {
+    Object.defineProperty(video, "duration", { value: 120, configurable: true });
+    Object.defineProperty(video, "paused", { value: true, configurable: true, writable: true });
+    Object.defineProperty(video, "ended", { value: false, configurable: true, writable: true });
+    Object.defineProperty(video, "currentTime", { value: 0, configurable: true, writable: true });
+    const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
+    await shell.ready;
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+    let time = 0;
+    const bump = () => {
+      time += 1;
+      Object.defineProperty(video, "currentTime", { value: time, configurable: true });
+    };
+    const fire = (type) => {
+      bump();
+      video.dispatchEvent(new dom.window.Event(type));
+    };
+    const written = () => writes.length;
+
+    video.paused = false;
+    fire("playing");
+    await tick();
+    assert.ok(states.includes("playing"), "play transition reaches the session");
+    const afterPlaying = written();
+    assert.ok(afterPlaying > 0, "position rides the same commit");
+
+    video.paused = true;
+    fire("pause");
+    await tick();
+    assert.ok(states.includes("paused"));
+
+    video.muted = true;
+    fire("volumechange");
+    await tick();
+    assert.ok(written() > afterPlaying, "volume transition syncs");
+
+    Object.defineProperty(video, "playbackRate", { value: 1.5, configurable: true });
+    fire("ratechange");
+    await tick();
+    assert.ok(written() > afterPlaying, "rate transition syncs");
+
+    Object.defineProperty(video, "duration", { value: 180, configurable: true });
+    fire("durationchange");
+    await tick();
+    assert.ok(written() > afterPlaying, "duration transition syncs");
+
+    fire("seeked");
+    await tick();
+    assert.ok(written() > afterPlaying, "the position exception syncs seek-only moves");
+
+    fire("loadedmetadata");
+    await tick();
+    assert.ok(written() > afterPlaying, "metadata arrival syncs");
+
+    video.ended = true;
+    fire("ended");
+    await tick();
+    assert.ok(written() > afterPlaying, "end-of-stream syncs");
+
+    fire("emptied");
+    await tick();
+    assert.ok(written() > afterPlaying, "emptying syncs");
+
+    // A bare play request with nothing behind it syncs nothing: the request
+    // was accepted but no frame rendered, and observed-not-optimistic means
+    // the OS surface must not claim motion that never started.
+    const silent = written();
+    video.paused = false;
+    fire("play");
+    await tick();
+    assert.equal(written(), silent, "no transition, no sync - dedup equivalence holds");
+
+    // The clock still ticks while playing: attach it, then timeupdate moves.
+    // (ended resets first - the activity gates on motion, not on the flag
+    // the previous step left behind.)
+    video.ended = false;
+    fire("playing");
+    await tick();
+    const clocked = written();
+    fire("timeupdate");
+    await tick();
+    assert.ok(written() > clocked, "the media clock drives position between transitions");
+
+    shell.destroy();
+  } finally {
+    if (navigatorDescriptor) {
+      Object.defineProperty(globalThis, "navigator", navigatorDescriptor);
+    } else {
+      delete globalThis.navigator;
+    }
+    if (MediaMetadataDescriptor) {
+      Object.defineProperty(globalThis, "MediaMetadata", MediaMetadataDescriptor);
+    } else {
+      delete globalThis.MediaMetadata;
+    }
+    delete globalThis.CSSStyleSheet;
+  }
+});

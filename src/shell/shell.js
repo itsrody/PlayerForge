@@ -10,7 +10,7 @@ import { addSettingsSection } from "./chrome/config.js";
 import { TUNING } from "../shared/tuning.js";
 import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
-import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
+import { claimMediaSession, createMediaControls } from "./media.js";
 import { SHELL_MARKER, warmStyles, injectShell, watchShellHost } from "./chrome/inject.js";
 import { surveyVideos } from "../kernel/sdk.js";
 import { replayFullscreenProvision } from "../shared/context.js";
@@ -348,17 +348,33 @@ export class Shell {
   #forwardMediaEvents() {
     const video = this.video;
     const host = this.#shellDom?.host;
-    const handler = () => {
+    // L2 status first: everything below subscribes to it. The activity after
+    // still answers "should the media clock be attached"; this answers "what
+    // is the player", as one queryable value, from the element's own events
+    // only. It writes nothing back: status is observed, never optimistic, so
+    // a rejected play() cannot leave us rendering a pause icon for a video
+    // that never started. Fullscreen comes from shadow.js's single gate
+    // through StatusManager's own subscription, not a second listener.
+    this.#status = new StatusManager({
+      target: video,
+      doc: document,
+      signal: this.#scope.signal
+    });
+    // Discrete transitions arrive as status commits: one subscription drives
+    // MediaSession sync and the HUD commit below, replacing the per-event
+    // boundary listeners (play/pause/ended/seeked/durationchange/...). The
+    // reconciler diffs the props and sync() dedups the session, so commits
+    // that move nothing cost nothing - and transitions that move together
+    // land together, which per-event listeners could never promise. Dies
+    // with the status in dispose(), so no unsubscribe handle is kept.
+    this.#status.subscribe(() => {
       this.#mediaSession?.sync();
-    };
-    // Boundary events (play/pause/ended/seeked/durationchange/...) are rare and
-    // must land even while paused - a seek or a volume change still has to
-    // reach the OS surface - so they stay attached for the shell's life.
-    for (const name of MEDIA_SESSION_SYNC_EVENTS) {
-      if (name !== "timeupdate") {
-        this.#dom.listen(video, name, handler, { passive: true });
-      }
-    }
+      this.#gate?.request("user-visible");
+    });
+    // The position exception: a seek that moves no axis (buffer already
+    // NONE, playback already PAUSED) emits no commit, but the OS surface
+    // still needs the settled position now, not at the next clock tick.
+    this.#dom.listen(video, "seeked", () => this.#mediaSession?.sync(), { passive: true });
     // `timeupdate` is the only continuous one: it is the ~4 Hz media clock, and
     // it only ticks while the playhead advances. That makes playback the
     // activity it belongs to, so it is attached for the playing window and
@@ -370,21 +386,9 @@ export class Shell {
       isActive: () => !video.paused && !video.ended,
       signal: this.#scope.signal,
       onEnter: (work) => {
-        video.addEventListener("timeupdate", handler, { signal: work.signal, passive: true });
+        video.addEventListener("timeupdate", () => this.#mediaSession?.sync(), { signal: work.signal, passive: true });
       },
-      onExit: handler
-    });
-    // L2 status, sitting beside that activity rather than replacing it. The
-    // activity above still answers "should the media clock be attached"; this
-    // answers "what is the player", as one queryable value, from the element's
-    // own events only. It writes nothing back: status is observed, never
-    // optimistic, so a rejected play() cannot leave us rendering a pause icon
-    // for a video that never started. Fullscreen comes from shadow.js's single
-    // gate through StatusManager's own subscription, not a second listener.
-    this.#status = new StatusManager({
-      target: video,
-      doc: document,
-      signal: this.#scope.signal
+      onExit: () => this.#mediaSession?.sync()
     });
     // Expose media state as CSS custom properties on the host so the shadow
     // DOM can style based on playing/paused/muted without crossing the realm
@@ -422,11 +426,9 @@ export class Shell {
       // table): it needs to land before the next frame, not before the input
       // that follows it, and it must never be starved behind a background
       // write. Nothing reads these properties synchronously, so deferring to
-      // the next task is behaviourally invisible.
-      const requestCommit = () => this.#gate?.request("user-visible");
-      for (const evt of ["play", "pause", "volumechange"]) {
-        this.#dom.listen(video, evt, requestCommit, { passive: true });
-      }
+      // the next task is behaviourally invisible. Requested from the status
+      // subscription above, not from per-event listeners: one commit request
+      // per batched commit, however many edges produced it.
     }
   }
 

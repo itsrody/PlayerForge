@@ -551,3 +551,27 @@ test("aborting the owner signal releases the whole status", async (t) => {
     "the intersection observer unlisted with the manager"
   );
 });
+
+test("loadstart opens the loading window a fresh src needs", async (t) => {
+  const { status, changes, video } = harness(t);
+  // Fresh element, nothing loaded: the seed says IDLE.
+  assert.equal(status.playback, "idle");
+  fire(video, "loadstart");
+  await tick();
+  assert.equal(status.playback, "loading", "fetch starting is a transition, not silence");
+  assert.equal(changes.at(-1)?.cause, "loadstart");
+  assert.equal(changes.at(-1)?.to, "loading");
+});
+
+test("loadstart never overwrites a playback in flight", async (t) => {
+  const { status, changes, video } = harness(t);
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  fire(video, "playing");
+  await tick();
+  assert.equal(status.playback, "playing");
+  const settled = changes.length;
+  fire(video, "loadstart");
+  await tick();
+  assert.equal(status.playback, "playing", "LOADING must not overwrite motion");
+  assert.equal(changes.length, settled, "no transition, no commit");
+});
