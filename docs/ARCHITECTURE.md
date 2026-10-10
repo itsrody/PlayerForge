@@ -38,7 +38,7 @@ not a rewrite.
 Evidence that the idle-cost goal is already largely met:
 
 - `setInterval` appears exactly once in the whole tree, at
-  `src/shell/chrome/panel.js:116`, as a key-hold auto-repeat. That is a
+  `src/shell/chrome/panel.js:125`, as a key-hold auto-repeat. That is a
   user-driven input affordance, not polling.
 - `requestAnimationFrame` appears only in `src/shared/diagnostics.js` (a
   diagnostic frame-gap probe, debug-gated) and in `scheduler.js`'s `yield_()`.
@@ -811,7 +811,7 @@ the layers can assume:
 - **The gate is not one-per-session.** `Shell` registers two — media-state
    (`shell.js:435`) and occlusion (`shell.js:520`) — because they have different
   priorities' worth of coalescing and different snapshot shapes. `ToastManager`
-  (`toast.js:123`) and `SettingsPanel` (`panel.js:293`) each own a further gate
+  (`toast.js:130`) and `SettingsPanel` (`panel.js:302`) each own a further gate
   on their own scope, so the tree has four `RenderGate` constructions in total.
   "The render gate registration" (singular) is the sketch's simplification.
 - **`Scope.child()` has no production caller.** The optional child scope §2's
@@ -1963,7 +1963,7 @@ In-tree:
 - `src/shell/shell.js:394`, `src/shell/resume.js:702`, `src/shared/shadow.js:192` — `createActivity` call sites
 - `src/shared/context.js:636` — the tree's only self-rearming `postTask`, delayed
 - `src/shared/dom-manager.js` — mutation coalescing
-- `src/shell/chrome/panel.js:116` — the only `setInterval` in the tree
+- `src/shell/chrome/panel.js:125` — the only `setInterval` in the tree
 - `src/shared/diagnostics.js` — debug-gated rAF frame-gap probe
 - `src/kernel/contract.js:21` — `SHELL_MARKER`
 - `platform/capabilities.json` — Gecko floor and manager contract

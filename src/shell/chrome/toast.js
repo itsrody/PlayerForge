@@ -43,7 +43,9 @@ import { flashElement, button, createIconElement } from "./toolbox.js";
  * Producers must pass a *fresh* payload per call. The scrub hint re-uses and
  * mutates one object between ticks, so show() normalises its arguments into a
  * new snapshot rather than handing the reconciler the caller's object — the
- * identity fast path would otherwise skip every repaint.
+ * identity fast path would otherwise skip every repaint. The same rule covers
+ * the `actions` array: fields diff by identity, so a reused array with
+ * mutated contents would skip the button rebuild the same way.
  */
 export class ToastManager {
   #toast;
@@ -78,10 +80,11 @@ export class ToastManager {
     toast.appendChild(icon);
     toast.appendChild(text);
     toast.appendChild(actions);
-    // Inline, not stylesheet: ".pf-hud-layer > *" re-enables pointer events
-    // on every HUD child and would let the hidden pill swallow clicks across
-    // the player's top strip. show() flips this to "auto" only when action
-    // buttons ride along; the hide path resets to "" which lands back here.
+    // Inline, not stylesheet: the scoped `:scope > *` rule beats the pill's
+    // own `pointer-events: none` on specificity, so without this the hidden
+    // pill would swallow clicks across the player's top strip. show() flips
+    // this to "auto" only while action buttons ride along; every hide lands
+    // back here, never on "" (which would fall through to the scope rule).
     toast.style.pointerEvents = "none";
     hudLayer.appendChild(toast);
     this.#toast = dom.own(toast);
@@ -92,6 +95,10 @@ export class ToastManager {
       bindings: {
         visible: (value) => {
           this.#toast.classList.toggle("pf-visible", !!value);
+          // Interactivity is visible-AND-actions, computed here too: hide()
+          // moves no other field, so leaving it to the actions binding would
+          // strand "auto" on a hidden pill (and the scope rule keeps it).
+          this.#toast.style.pointerEvents = value && this.#snapshot?.actions ? "auto" : "none";
         },
         // Clone from the cached icon template: a repeated icon is a cheap
         // cloneNode, not an HTML re-parse. aria-hidden lives on the template.
@@ -189,11 +196,13 @@ export class ToastManager {
         });
       }
       this.#actions.hidden = false;
-      this.#toast.style.pointerEvents = "auto";
+      // Visible-with-actions is the only interactive state; a hidden pill
+      // showing actions (no path sets that today) still lands click-through.
+      this.#toast.style.pointerEvents = this.#snapshot?.visible ? "auto" : "none";
     } else {
       this.#actions.textContent = "";
       this.#actions.hidden = true;
-      this.#toast.style.pointerEvents = "";
+      this.#toast.style.pointerEvents = "none";
     }
   }
 

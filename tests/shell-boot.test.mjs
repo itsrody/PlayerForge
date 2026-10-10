@@ -461,3 +461,24 @@ test("every sync cadence event reaches the OS session through status", async () 
     delete globalThis.CSSStyleSheet;
   }
 });
+
+test("backdrop presses never reach the SDK as taps", async () => {
+  // The panel root stops five event types from crossing into the SDK; the
+  // backdrop used to stop pointerdown only, so dismissing the panel doubled
+  // as a tap on whatever press dismissed it.
+  const { dom, container, video } = makeRealm();
+  const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
+  await shell.ready;
+  try {
+    let taps = 0;
+    container.addEventListener("click", () => taps++);
+    const backdrop = shell.shellDom.hudLayer.querySelector(".pf-panel-backdrop");
+    backdrop.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+    assert.equal(taps, 0, "backdrop click died at the shield");
+    video.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+    assert.equal(taps, 1, "ordinary clicks still bubble");
+  } finally {
+    shell.destroy();
+    delete globalThis.CSSStyleSheet;
+  }
+});

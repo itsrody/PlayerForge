@@ -249,7 +249,7 @@ test("actions render buttons, fire callbacks, and clear on the next bare show", 
   await settle();
   assert.equal(actions.textContent, "");
   assert.equal(actions.hidden, true);
-  assert.equal(toast.style.pointerEvents, "");
+  assert.equal(toast.style.pointerEvents, "none", "clearing actions lands back at none, not the scope rule");
 });
 
 test("the auto-hide timer hides through the same visibility field", async () => {
@@ -264,4 +264,24 @@ test("the auto-hide timer hides through the same visibility field", async () => 
   mgr.show({ text: "bye" });
   await settle();
   assert.ok(toast.classList.contains("pf-visible"));
+});
+
+test("the pill stays click-through except while action buttons ride along", async () => {
+  // Regression: the scoped `:scope > *` rule beats the pill's own
+  // `pointer-events: none`, so only the inline value keeps the hidden pill
+  // from swallowing clicks - and the no-actions branch used to clear it.
+  const { mgr, toast } = makeManager();
+  assert.equal(toast.style.pointerEvents, "none", "construction seeds the resting state");
+
+  mgr.show({ icon: "play", text: "Hello" });
+  await settle();
+  assert.equal(toast.style.pointerEvents, "none", "a plain show leaves the pill click-through");
+
+  mgr.show({ text: "Pick one", duration: 50, actions: [{ label: "A", onClick() {} }] });
+  await settle();
+  assert.equal(toast.style.pointerEvents, "auto", "action buttons need the pill interactive");
+
+  mgr.hide();
+  await settle();
+  assert.equal(toast.style.pointerEvents, "none", "hide lands back at none, never at the scope rule");
 });

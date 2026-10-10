@@ -58,6 +58,13 @@ test("createIconElement returns null for unknown icons", () => {
   assert.equal(createIconElement("nope"), null);
 });
 
+test("createIconElement returns null instead of throwing without a realm", () => {
+  // A document with no defaultView has no DOMParser to parse with: the
+  // cached template stays empty and every caller already tolerates null.
+  makeDom();
+  assert.equal(createIconElement("settings", {}), null, "no defaultView, no throw");
+});
+
 test("createIconElement and iconMarkup agree on the icon set via aliases", () => {
   makeDom();
   const el = createIconElement("down");

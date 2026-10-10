@@ -168,7 +168,11 @@ export function createIconElement(name, doc = document) {
   if (!canonical) {
     return null;
   }
-  return entryFor(canonical, doc).el.cloneNode(true);
+  const template = entryFor(canonical, doc).el;
+  // A document without a defaultView (or a failed SVG parse) leaves no
+  // template: every caller already tolerates a null icon, so hand that back
+  // instead of throwing out of cloneNode.
+  return template?.cloneNode(true) ?? null;
 }
 
 /* ── Element factories ───────────────────────────────────────────────────

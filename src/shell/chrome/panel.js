@@ -91,7 +91,10 @@ function createStepper({
     button.type = "button";
     button.className = "pf-stepper-btn";
     button.tabIndex = -1;
-    button.appendChild(createIconElement(name));
+    const iconEl = createIconElement(name);
+    if (iconEl) {
+      button.appendChild(iconEl);
+    }
     button.title = title;
     let delayTimer = null;
     let repeatTimer = null;
@@ -108,6 +111,12 @@ function createStepper({
     signal?.addEventListener("abort", stopRepeat, { once: true });
     button.addEventListener("pointerdown", (event) => {
       event.preventDefault();
+      // Own the release: without capture a pointer let go outside the window
+      // delivers no pointerup, and the repeat interval would keep nudging a
+      // detached panel until destroy. Capture routes the release to us
+      // (forge.js takes presses the same way); the window listeners below
+      // stay as the belt.
+      button.setPointerCapture?.(event.pointerId);
       if (input.disabled) {
         return;
       }
@@ -709,10 +718,18 @@ export class SettingsPanel {
     const backdrop = document.createElement("div");
     backdrop.className = "pf-panel-backdrop";
     backdrop.setAttribute("aria-hidden", "true");
-    backdrop.addEventListener("pointerdown", (event) => {
-      event.stopPropagation();
-      this.close();
-    }, { signal: this.#scope.signal });
+    // Swallow the full press, not just its start: the panel root stops five
+    // event types from crossing into the SDK, and a click bubbling off an
+    // only-pointerdown-stopped backdrop would double as a tap (toggling
+    // playback) on the press that just dismissed us.
+    for (const type of ["pointerdown", "pointerup", "click", "touchstart", "touchend"]) {
+      backdrop.addEventListener(type, (event) => {
+        event.stopPropagation();
+        if (type === "pointerdown") {
+          this.close();
+        }
+      }, { signal: this.#scope.signal });
+    }
     this.#hudLayer.appendChild(backdrop);
     this.#backdrop = backdrop;
 
