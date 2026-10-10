@@ -256,6 +256,12 @@ function stopIfIdle() {
  * subscriber from outliving the shell that asked for it.
  */
 export function onDomMutations(handler, { signal } = {}) {
+  // Same already-aborted trap as the status subscriber: an abort listener
+  // added to a dead signal never fires, so the slot (and its live count)
+  // would leak past teardown. Refuse the subscription instead.
+  if (signal?.aborted) {
+    return () => {};
+  }
   ensureObserver();
   const slot = [handler];
   slots.push(slot);
@@ -306,6 +312,12 @@ export function trackScopedObserver(observer, label, signal) {
     observer.disconnect();
     trackedObservers.delete(observer);
   };
+  if (signal?.aborted) {
+    // Dead on arrival: disconnect without listing, so neither the observer
+    // nor its label outlives the owner that asked for it.
+    observer.disconnect();
+    return () => {};
+  }
   trackedObservers.set(observer, label);
   signal?.addEventListener("abort", release, { once: true });
   return release;
@@ -639,7 +651,9 @@ export class DomPool {
 
   /** Return an element to the pool for reuse. Caller must detach first. */
   release(element) {
-    if (!element || this.#idle.has(element)) {
+    // Unknown elements are refused, not pooled: handing back a node the
+    // factory never produced would let a later acquire mount garbage.
+    if (!element || this.#idle.has(element) || !this.#owned.has(element)) {
       return;
     }
     this.#idle.add(element);

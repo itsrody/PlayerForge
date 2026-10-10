@@ -1,8 +1,14 @@
 /**
- * Shadow DOM traversal helpers. PlayerForge injects its HUD into an open
- * shadow root for style encapsulation, but several DOM APIs
- * (`document.activeElement`, `contains()`, `closest()`) stop at shadow
- * boundaries. These three primitives bridge every gap.
+ * Shadow DOM shared surface: traversal helpers, the SDK-control vocabulary,
+ * and the fullscreen gate.
+ *
+ * PlayerForge injects its HUD into an open shadow root for style
+ * encapsulation, but several DOM APIs (`document.activeElement`,
+ * `contains()`, `closest()`) stop at shadow boundaries. The traversal
+ * primitives bridge every gap. `eventHitsControl` and the `fs` gate live
+ * here too: both answer questions about the page's DOM from the shell's
+ * shadow side. Lifetime machinery lives in dom-manager.js instead:
+ * ownership, not proximity, decides the file split.
  */
 
 import { createActivity } from "./activity.js";
@@ -17,7 +23,15 @@ import { logger } from "./diagnostics.js";
 export function deepestActiveElement(host) {
   let el = host?.shadowRoot?.activeElement ?? document.activeElement;
   while (el?.shadowRoot) {
-    el = el.shadowRoot.activeElement;
+    // A null inner focus means focus sits on the shadow host itself: stop
+    // with the host instead of walking past it into null, which contradicts
+    // isInsideShell's own "or is the host itself" contract and costs the
+    // keyboard-ranking focus bonus for host-focused players.
+    const inner = el.shadowRoot.activeElement;
+    if (!inner) {
+      break;
+    }
+    el = inner;
   }
   return el;
 }
@@ -47,6 +61,11 @@ export function isInsideShell(host, node) {
  * consults it before stealing either: a press that lands on a control was
  * meant for the SDK. Custom-element controls without a role stay invisible
  * to this (there is no generic marker for them) - bare-surface rules apply.
+ * A `<video controls>` page renders the UA's own controls in a closed
+ * shadow: taps target the video, so the bare video would own a stream meant
+ * for native UI. The trailing `video[controls]` matcher routes those presses
+ * natively instead; registry players never carry the attribute, so nothing
+ * else moves.
  */
 const CONTROL_SELECTOR =
   "button, a, input, select, option, textarea, summary, label, " +
@@ -54,8 +73,8 @@ const CONTROL_SELECTOR =
   "[role=\"button\"], [role=\"link\"], [role=\"menuitem\"], " +
   "[role=\"menuitemcheckbox\"], [role=\"menuitemradio\"], [role=\"tab\"], " +
   "[role=\"slider\"], [role=\"switch\"], [role=\"checkbox\"], [role=\"radio\"], " +
-  "[role=\"option\"], [role=\"spinbutton\"], [role=\"combobox\"], " +
-  "[role=\"listbox\"], [role=\"menu\"], [role=\"treeitem\"]";
+   "[role=\"option\"], [role=\"spinbutton\"], [role=\"combobox\"], " +
+   "[role=\"listbox\"], [role=\"menu\"], [role=\"treeitem\"], video[controls]";
 
 /** Class-name fragments of div-skinned player chrome (see above). Matched
  *  as substrings against the lowercased class attribute, so `fp-bar-slider`

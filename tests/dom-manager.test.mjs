@@ -135,6 +135,24 @@ test("a signal-bound subscription drops out on abort", async () => {
   assert.equal(calls, 0);
 });
 
+test("a subscription on an already-aborted signal never subscribes [regression]", async () => {
+  // The abort listener added to a dead signal never fires, so without the
+  // up-front check the slot (and its live count) would leak past teardown
+  // and the observer would never be reclaimed. Unsubscribe after asserting
+  // so the (absent) slot cannot pollute the census for later tests.
+  const ac = new AbortController();
+  ac.abort();
+  let calls = 0;
+  const off = onDomMutations(() => {
+    calls++;
+  }, { signal: ac.signal });
+
+  document.body.appendChild(document.createElement("div"));
+  await tick();
+  assert.equal(calls, 0, "no slot was ever added");
+  off();
+});
+
 test("compaction cannot let a stale unsubscribe tombstone a live peer [regression]", async () => {
   // Five subscribers, four leave: 5 slots for 1 live is past the 4:1 ratio, so
   // the next flush compacts and reindexes. An off() closure that captured an
@@ -379,6 +397,14 @@ test("a double release cannot hand one node to two cards [regression]", () => {
   dom.destroy();
 });
 
+test("releasing a foreign node pools nothing [regression]", () => {
+  const dom = new DOMManager();
+  const pool = dom.pool({ factory: () => document.createElement("i") });
+  pool.release(document.createElement("i"));
+  assert.equal(pool.idle, 0, "a node the factory never produced is refused");
+  dom.destroy();
+});
+
 test("watch() routes to the shared feed and unsubscribes with the manager", async () => {
   const dom = new DOMManager();
   let calls = 0;
@@ -498,6 +524,21 @@ test("tracked observers release on signal abort", () => {
   controller.abort();
   assert.equal(disconnects, 1, "abort disconnects without an explicit release");
   assert.equal(trackedObserverLabels().length, before);
+});
+
+test("a tracked observer on an already-aborted signal never lists [regression]", () => {
+  // Same dead-signal trap as the feed subscription above: the abort listener
+  // would never fire, so the observer is disconnected up front and no label
+  // ever outlives the owner that asked for it.
+  let disconnects = 0;
+  const observer = { disconnect: () => disconnects++ };
+  const controller = new AbortController();
+  controller.abort();
+  const before = trackedObserverLabels().length;
+  const release = trackScopedObserver(observer, "test-dead", controller.signal);
+  assert.equal(trackedObserverLabels().length, before, "no label ever outlived the dead owner");
+  assert.equal(disconnects, 1, "dead-on-arrival disconnects without listing");
+  release();
 });
 
 test("a manager-owned observer dies with the manager", async () => {

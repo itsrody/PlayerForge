@@ -716,7 +716,7 @@ an oversight.
 
 Today `isActive()` closures are authored independently at each `createActivity`
 call site (`src/shell/shell.js:394`, `src/shell/resume.js:702`,
-`src/shared/shadow.js:192`). Nothing answers "what is this player's status right
+`src/shared/shadow.js:211`). Nothing answers "what is this player's status right
 now" as a single queryable value.
 
 L2 introduces orthogonal axes rather than one large enum, so adding an axis never
@@ -1960,7 +1960,7 @@ In-tree:
 - `src/shared/scheduler.js` — traps in §2.4, `postTask`, `yield_()`
 - `src/shared/scope.js` — teardown primitive
 - `src/shared/activity.js` — passive activity windows
-- `src/shell/shell.js:394`, `src/shell/resume.js:702`, `src/shared/shadow.js:192` — `createActivity` call sites
+- `src/shell/shell.js:394`, `src/shell/resume.js:702`, `src/shared/shadow.js:211` — `createActivity` call sites
 - `src/shared/context.js:636` — the tree's only self-rearming `postTask`, delayed
 - `src/shared/dom-manager.js` — mutation coalescing
 - `src/shell/chrome/panel.js:125` — the only `setInterval` in the tree
