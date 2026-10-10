@@ -141,6 +141,11 @@ function fillComposedChain(start) {
     }
     node = node.parentNode ?? node.host ?? null;
   }
+  // Drop the tail: a previous deeper scan's nodes past `len` would otherwise
+  // stay referenced here, pinning that subtree until some later scan happens
+  // to run as deep - the one retention the reusable scratch would otherwise
+  // buy. Indices below len are untouched, so no caller re-reads anything.
+  chain.length = len;
   return len;
 }
 

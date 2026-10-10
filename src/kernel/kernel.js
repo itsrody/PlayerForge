@@ -338,9 +338,15 @@ export class Kernel {
             return;
           }
           try {
-            for (const host of document.querySelectorAll(tag)) {
-              for (const video of host.querySelectorAll("video")) {
-                this.#adoptVideo(video);
+            // Indexed walks, not for..of: static NodeLists don't scalar-replace
+            // their iterators the way plain arrays do, so the iterator form
+            // costs an allocation per resolution for no reason.
+            const hosts = document.querySelectorAll(tag);
+            for (let h = 0; h < hosts.length; h++) {
+              const host = hosts[h];
+              const videos = host.querySelectorAll("video");
+              for (let v = 0; v < videos.length; v++) {
+                this.#adoptVideo(videos[v]);
               }
               forEachShadowVideos(host, (video) => this.#adoptVideo(video));
             }
