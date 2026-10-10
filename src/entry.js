@@ -108,13 +108,20 @@ function bootstrap() {
     // in the hash re-exposes it for console debugging sessions; debug log
     // state itself lives in the module-level logger (hash or menu setting).
     const debugMode = location.hash.includes("pf-debug");
-    Object.defineProperty(window, "PlayerForge", {
-      value: Object.freeze(debugMode
-        ? { kernel, version: GM_info.script.version }
-        : { version: GM_info.script.version }),
-      writable: false,
-      configurable: false
-    });
+    try {
+      Object.defineProperty(window, "PlayerForge", {
+        value: Object.freeze(debugMode
+          ? { kernel, version: GM_info.script.version }
+          : { version: GM_info.script.version }),
+        writable: false,
+        configurable: false
+      });
+    } catch {
+      // A page that squatted window.PlayerForge keeps its property: the
+      // kernel above is already booted and discovering, so a failed publish
+      // is log noise, never a half-reported boot.
+      logger.warn("entry", "window.PlayerForge publish blocked by the page; kernel still running");
+    }
 
     logger.log(
       "entry",
@@ -126,8 +133,8 @@ function bootstrap() {
   // The frame bridge is best-effort plumbing: if it ever fails to install
   // (e.g. its iframe-registry observer cannot bind to the document yet), the
   // video probe must still run - a nested frame whose bridge died would
-  // otherwise lose capture entirely, since probe install is order-gated on
-  // the bridge returning.
+  // otherwise lose capture entirely. The two installs are independent on
+  // purpose: neither gates the other.
   try {
     installContextBridge();
   } catch (error) {
