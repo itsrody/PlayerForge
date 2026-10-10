@@ -2,9 +2,8 @@
  * Page context engine.
  *
  * One module answering everything about WHERE a PlayerForge instance runs:
- * which site it belongs to, how to compare sites, how embedded players learn
- * their top-page identity across origins, and whether this document hosts a
- * player at all.
+ * which site it belongs to, how to compare sites, and how embedded players
+ * learn their top-page identity across origins.
  *
  * Sections:
  *   1. Domain identity   - registrable-domain keys and comparison
@@ -60,7 +59,7 @@ const IPV4_RE = /^(?:\d{1,3}\.){3}\d{1,3}$/;
 /** Memoized domain keys: pages resolve their hostname repeatedly (kernel +
  *  probe + responder), and the TLD walk is pure over hostname.
  *  Capped at 256 entries to prevent unbounded growth on SPAs with dynamic
- *  subdomains. Eviction clears the oldest half when the cap is hit.
+ *  subdomains. Eviction clears the oldest quarter when the cap is hit.
  */
 const DOMAIN_KEY_CACHE_MAX = 256;
 const domainKeyCache = new Map();
@@ -71,6 +70,9 @@ const domainKeyCache = new Map();
  * Pure over hostname, so identical inputs share one cached result.
  */
 export function getDomainKey(hostname) {
+  // A trailing-dot FQDN ("example.com.") names the same host: strip it
+  // first, or the empty last label parks the walk on the TLD ("com").
+  hostname = hostname.replace(/\.+$/, "");
   if (!hostname) {
     return "";
   }
@@ -409,8 +411,10 @@ function requestPageContextOverPipe(timeoutMs, deadline) {
     if (answered) {
       return;
     }
+    // Domain and path are both load-bearing (resume identity); a malformed
+    // answer settles nothing and the probe timeout falls back instead.
     if (data && typeof data === "object" && data.type === CTX_RESPONSE_TYPE
-        && typeof data.domain === "string") {
+        && typeof data.domain === "string" && typeof data.path === "string") {
       answered = true;
       settle({
         domain: data.domain,
@@ -557,7 +561,7 @@ async function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) 
   const onReplyPort = (event) => {
     const data = event.data;
     if (data && typeof data === "object" && data.type === CTX_RESPONSE_TYPE
-        && typeof data.domain === "string") {
+        && typeof data.domain === "string" && typeof data.path === "string") {
       settle({
         domain: data.domain,
         path: data.path,
@@ -586,7 +590,7 @@ async function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) 
       event.source === window.parent
       && data && typeof data === "object"
       && data.type === CTX_RESPONSE_TYPE && data.nonce === nonce
-      && typeof data.domain === "string"
+      && typeof data.domain === "string" && typeof data.path === "string"
     ) {
       // Broadcast answer: this chain does not honor ports - remember it so
       // later resolves stop allocating channels it will only drop.
@@ -663,6 +667,10 @@ export function stopContextPipe() {
   }
   contextPipe = null;
   legacyChain = false;
+  // An in-flight request keeps its own promise either way; clearing the memo
+  // only means the next resolve re-handshakes against post-teardown chain
+  // state instead of joining a request the teardown already abandoned.
+  frameContextBridge = null;
 }
 
 /* - 4. Frame bridge - */
@@ -870,6 +878,9 @@ function isOwnFrame(source) {
     return false;
   }
   const scan = (doc, depth) => {
+    // Depth-bounded: the walk runs per bridged message, and legitimate
+    // player trees are shallow. Deeper nesting falls back to own-context -
+    // the same direction as the cross-origin cutoff below.
     if (depth > 4) {
       return false;
     }

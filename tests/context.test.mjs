@@ -58,6 +58,14 @@ test("getDomainKey treats unlisted gTLDs as suffixes instead of keys", () => {
   assert.equal(getDomainKey("a.basketball"), getDomainKey("sub.a.basketball"));
 });
 
+test("getDomainKey strips a trailing-dot FQDN before the walk", () => {
+  // Without the strip the empty last label parks the walk on the TLD, so
+  // "example.com." would key as "com" - a whole resume namespace per dot.
+  assert.equal(getDomainKey("example.com."), "example");
+  assert.equal(getDomainKey("example.com."), getDomainKey("example.com"));
+  assert.equal(getDomainKey("..."), "");
+});
+
 test("hashEntry is deterministic and duration-rounding aware", () => {
   assert.equal(hashEntry("yt", "/watch", 611.2), hashEntry("yt", "/watch", 610.9));
   assert.notEqual(hashEntry("yt", "/watch", 611), hashEntry("yt", "/watch", 612));
@@ -864,6 +872,87 @@ test("a broadcast-settled chain stops allocating channels on later resolves", as
     assert.deepEqual(await p2, { domain: "hub", path: "/", title: "Hub" });
     assert.equal(transferCount, 1, "legacy chain never allocates another channel");
     assert.ok(postCount >= 2);
+  } finally {
+    win.parent.postMessage = originalPost;
+    stopContextPipe();
+  }
+});
+
+test("a response with a malformed path settles nothing; the valid answer still lands", async () => {
+  // Domain and path are both resume identity: a malformed answer (cross-origin
+  // input, never trusted blindly) is ignored and the resolve waits for the
+  // real one instead of adopting garbage.
+  stopContextPipe();
+  const { window: win } = dom();
+  globalThis.window = crossOriginFrame(win);
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  let nonce = null;
+  const originalPost = win.parent.postMessage.bind(win.parent);
+  win.parent.postMessage = (msg) => {
+    nonce = msg.nonce;
+  };
+  try {
+    const p = getPageContext();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    win.dispatchEvent(new win.MessageEvent("message", {
+      data: { type: CTX_RESPONSE_TYPE, nonce, domain: "hub", path: 12345, title: "Hub" },
+      origin: "https://hub.test",
+      source: win.parent
+    }));
+    const raced = await Promise.race([
+      p.then(() => "settled"),
+      new Promise((resolve) => setTimeout(() => resolve("pending"), 100))
+    ]);
+    assert.equal(raced, "pending", "the malformed answer settled nothing");
+
+    win.dispatchEvent(new win.MessageEvent("message", {
+      data: { type: CTX_RESPONSE_TYPE, nonce, domain: "hub", path: "/", title: "Hub" },
+      origin: "https://hub.test",
+      source: win.parent
+    }));
+    assert.deepEqual(await p, { domain: "hub", path: "/", title: "Hub" });
+  } finally {
+    win.parent.postMessage = originalPost;
+    stopContextPipe();
+  }
+});
+
+test("teardown drops the in-flight bridge memo; the next resolve re-handshakes", async () => {
+  // stopContextPipe resets chain state; an in-flight request keeps its own
+  // promise, but joining it after teardown would inherit pre-teardown pipe
+  // assumptions - so the next resolve starts fresh instead.
+  stopContextPipe();
+  const { window: win } = dom();
+  globalThis.window = crossOriginFrame(win);
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+
+  const nonces = [];
+  const originalPost = win.parent.postMessage.bind(win.parent);
+  win.parent.postMessage = (msg) => {
+    nonces.push(msg.nonce);
+  };
+  const answer = (nonce) => win.dispatchEvent(new win.MessageEvent("message", {
+    data: { type: CTX_RESPONSE_TYPE, nonce, domain: "hub", path: "/", title: "Hub" },
+    origin: "https://hub.test",
+    source: win.parent
+  }));
+  try {
+    const first = getPageContext();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(nonces.length, 1);
+    stopContextPipe();
+    const second = getPageContext();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(nonces.length, 2, "the next resolve re-handshakes instead of joining the torn-down request");
+    assert.notEqual(nonces[0], nonces[1]);
+    // Settle both, newest first: nothing retries past the test.
+    answer(nonces[1]);
+    assert.deepEqual(await second, { domain: "hub", path: "/", title: "Hub" });
+    answer(nonces[0]);
+    assert.deepEqual(await first, { domain: "hub", path: "/", title: "Hub" });
   } finally {
     win.parent.postMessage = originalPost;
     stopContextPipe();
