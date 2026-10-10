@@ -1447,7 +1447,7 @@ node bench green, and `vm-smoke` 19/19
 against Violentmonkey 2.49.0 — the one check that exercises the shipping
 bundle in the manager it ships for.
 
-The unit count has moved thirty-eight times since that cut. The first two movements
+The unit count has moved thirty-nine times since that cut. The first two movements
 are the point. `tests/posttask-guard.test.mjs` (5) was added to make §5's "No
 self-rearming `postTask`" row verifiable rather than self-evident. Its
 verification column used to restate the invariant, which is the one form of
@@ -1827,6 +1827,15 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  budget, proven by a re-arm-then-adopt test), and the three
  fixed-timing resume-entry reads poll with the file's own until() instead
  of racing the media-clock save. `tests/kernel-replay.test.mjs` gained 1.
+
+ The thirty-ninth movement put the last DOM gap on a native edge:
+ registry custom-element tags re-offer through `customElements.whenDefined`
+ (one promise per tag, tag subtrees surveyed light and nested shadow,
+ dead kernels guarded), closing late upgrades with no polling and no
+ extra observer. A live-Gecko spike in the same round proved a native
+ `<dialog closedby="any">` in our shadow root top-layers, traps focus,
+ light-dismisses and Esc-closes - the whole custom modal is replaceable,
+ filed as the next slice, not smuggled in here. Tests gained 3.
 
 ## 7. Gecko-specific decisions, and what they rule out
 

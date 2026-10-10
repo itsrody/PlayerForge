@@ -4,7 +4,7 @@ import { setDebugRuntime } from "../shared/diagnostics.js";
 import { postTask } from "../shared/scheduler.js";
 import { Scope } from "../shared/scope.js";
 import { DOMManager, trackScopedObserver } from "../shared/dom-manager.js";
-import { resolvePlayer, fingerprintFor, registryDataAttributes, meetsMinSize, watchDocumentVideos, watchMediaEvents, surveyVideos } from "./sdk.js";
+import { resolvePlayer, fingerprintFor, registryDataAttributes, registryCustomTags, meetsMinSize, watchDocumentVideos, watchMediaEvents, surveyVideos, forEachShadowVideos } from "./sdk.js";
 import { GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
 
 /**
@@ -315,6 +315,35 @@ export class Kernel {
     }
     for (const { video } of surveyVideos(document)) {
       this.#adoptVideo(video);
+    }
+    // Custom-element upgrades the mutation feed cannot see: a player whose
+    // tag upgrades late (SDK script loads after the element parses) fires no
+    // record anywhere, so watch the registry's tags natively instead of
+    // polling for them. One promise per tag, resolving once; each resolution
+    // surveys that tag's subtrees (light and nested shadow) and offers what
+    // it finds through the normal path. Guarded past the floor: hosts
+    // without a custom-elements registry simply never resolve. The
+    // globalThis root (never a bare identifier) keeps this safe where the
+    // registry does not exist at all.
+    const registry = globalThis.customElements;
+    if (typeof registry?.whenDefined === "function") {
+      for (const tag of registryCustomTags()) {
+        registry.whenDefined(tag).then(() => {
+          if (this.#scope.disposed) {
+            return;
+          }
+          try {
+            for (const host of document.querySelectorAll(tag)) {
+              for (const video of host.querySelectorAll("video")) {
+                this.#adoptVideo(video);
+              }
+              forEachShadowVideos(host, (video) => this.#adoptVideo(video));
+            }
+          } catch (err) {
+            logger.error("kernel", `Custom-element re-survey for <${tag}> threw:`, err);
+          }
+        });
+      }
     }
     logger.log("kernel", "Kernel ready - discovery tap active");
   }

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import {
   surveyVideos,
+  registryCustomTags,
   resolvePlayer,
   findSdkForVideo,
   findGenericPlayer,
@@ -765,4 +766,13 @@ test("surveyVideos reads no boxes", () => {
   const found = surveyVideos(doc);
   assert.equal(found.length, 1);
   assert.equal(rectReads, 0, "surveying is property reads only - placement stays in resolve");
+});
+
+test("registryCustomTags derives exactly the custom-element anchors", () => {
+  const tags = registryCustomTags();
+  assert.ok(tags.includes("video-js"), "the tech tag is watched");
+  assert.ok(tags.includes("theoplayer-ui"), "the UI tag is watched");
+  for (const tag of tags) {
+    assert.match(tag, /^[a-z][a-z0-9]*(-[a-z0-9]+)+$/, `${tag} is a valid custom-element name`);
+  }
 });

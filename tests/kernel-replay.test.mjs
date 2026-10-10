@@ -818,3 +818,105 @@ test("churn bursts stand the upgrade watch down; media re-arms it", async () => 
     "a post-stand-down upgrade still adopts once anything re-offers"
   );
 });
+
+test("a late custom-element upgrade re-surveys its subtree", async () => {
+  // The tag is undefined at boot and carries no video yet: nothing matches,
+  // and no record can fire - the video only exists once the upgrade builds
+  // the shadow tree around it. customElements.whenDefined is the only native
+  // edge for the upgrade - no polling, no extra observer.
+  const resolvers = new Map();
+  const saved = Object.getOwnPropertyDescriptor(globalThis, "customElements");
+  globalThis.customElements = {
+    whenDefined: (tag) => new Promise((resolve) => resolvers.set(tag, resolve))
+  };
+  try {
+    const { kernel, created } = makeHarness();
+    const player = document.createElement("video-js");
+    const wrapper = document.createElement("div");
+    player.appendChild(wrapper);
+    document.body.appendChild(player);
+
+    kernel.init();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.ok(resolvers.has("video-js"), "the registry tag is watched at boot");
+    const before = created.length;
+    assert.ok(before > 0, "the harness video adopted normally first");
+
+    // The upgrade attaches shadow chrome with the video inside it - a shape
+    // the document feed structurally cannot see (no record fires for nodes
+    // entering a fresh shadow root).
+    const shadow = player.attachShadow({ mode: "open" });
+    const slot = document.createElement("div");
+    const video = document.createElement("video");
+    video.getBoundingClientRect = () => ({ width: 640, height: 360, top: 0, left: 0, right: 640, bottom: 360 });
+    video.checkVisibility = () => true;
+    Object.defineProperty(video, "paused", { value: true, configurable: true });
+    slot.appendChild(video);
+    shadow.appendChild(slot);
+    // jsdom's contains() does not pierce shadow boundaries (the spec says
+    // it is shadow-including; Gecko agrees). The settle guard asks exactly
+    // that question, so the fixture answers it the spec way - the same class
+    // of stub as the rect and checkVisibility shims above.
+    const realContains = player.contains.bind(player);
+    player.contains = (other) => {
+      let node = other;
+      while (node) {
+        if (node === player) {
+          return true;
+        }
+        node = node.parentNode ?? node.host ?? null;
+      }
+      return realContains(other);
+    };
+    resolvers.get("video-js")();
+    // Identity, not count: settle completions for earlier videos can land
+    // in the same poll window, skipping an exact length past us - while a
+    // shell for this video, once created, stays created.
+    await waitFor(() => created.some((shell) => shell.video === video), 3000);
+    assert.equal(
+      created.find((shell) => shell.video === video).sdk.source,
+      "registry",
+      "the upgrade adopts through the normal path"
+    );
+  } finally {
+    if (saved) {
+      Object.defineProperty(globalThis, "customElements", saved);
+    } else {
+      delete globalThis.customElements;
+    }
+  }
+});
+
+test("a custom-element upgrade after teardown adopts nothing", async () => {
+  const resolvers = new Map();
+  const saved = Object.getOwnPropertyDescriptor(globalThis, "customElements");
+  globalThis.customElements = {
+    whenDefined: (tag) => new Promise((resolve) => resolvers.set(tag, resolve))
+  };
+  try {
+    const { kernel, created } = makeHarness();
+    const player = document.createElement("video-js");
+    document.body.appendChild(player);
+
+    kernel.init();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    kernel.destroy();
+    const shadow = player.attachShadow({ mode: "open" });
+    const video = document.createElement("video");
+    video.getBoundingClientRect = () => ({ width: 640, height: 360, top: 0, left: 0, right: 640, bottom: 360 });
+    video.checkVisibility = () => true;
+    shadow.appendChild(video);
+    resolvers.get("video-js")();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.ok(
+      !created.some((shell) => shell.video === video),
+      "a torn-down kernel ignores late upgrades"
+    );
+  } finally {
+    if (saved) {
+      Object.defineProperty(globalThis, "customElements", saved);
+    } else {
+      delete globalThis.customElements;
+    }
+  }
+});

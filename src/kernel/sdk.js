@@ -410,6 +410,24 @@ export function registryDataAttributes() {
 }
 
 /**
+ * Custom-element tags the registry anchors on, for the upgrade re-offer.
+ * A bare tag with a hyphen is a custom element by construction; classes,
+ * ids and attribute selectors cannot be one. Derived like the data
+ * attributes above, for the same no-second-list reason.
+ */
+export function registryCustomTags() {
+  const names = new Set();
+  for (const record of REGISTRY) {
+    for (const anchor of record.anchors) {
+      if (/^[a-z][a-z0-9]*(-[a-z0-9]+)+$/.test(anchor)) {
+        names.add(anchor);
+      }
+    }
+  }
+  return [...names].sort();
+}
+
+/**
  * Learned fingerprints: domain-scoped dynamic records. When the generic slow
  * path adopts a video, the kernel records what the player block looked like;
  * on the next visit the print matches like a registry anchor, skipping the
