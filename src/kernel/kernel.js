@@ -16,7 +16,12 @@ import { GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js"
  */
 /** Skyline the removal watchdog never exceeds regardless of nesting. */
 const MAX_REMOVAL_DEPTH = 8;
-/** Extra ancestors (beyond the matched anchor) the removal watch observes. */
+/** One ancestor above the matched anchor: removing the anchor fires on its
+ *  parent, but replacing the parent fires one level higher - without this
+ *  margin that level is unwatched and a player-root re-render goes silent.
+ *  Higher is page chrome, whose removal takes the video (always visible via
+ *  anchors[0]); the margin buys exactly the player-root level. Applies to
+ *  the first arming only - re-anchors go wide to MAX_REMOVAL_DEPTH. */
 const REMOVAL_DEPTH_MARGIN = 1;
 /** Learned prints remembered per hostname; oldest-learned evicted past it. */
 const PRINTS_PER_HOST = 10;
