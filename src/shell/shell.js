@@ -24,6 +24,17 @@ import { writeReferenceBox } from "../shared/geometry.js";
 import { yield_ } from "../shared/scheduler.js";
 
 /**
+ * Mark a boot error as timing noise rather than a defect: the kernel spends
+ * these from a separate transient budget instead of the one retry that
+ * abandons deterministically-throwing boots. Only the mount proof throws
+ * these - a video that moved or reflowed mid-boot, never a broken shell -
+ * and re-adoption re-runs the full boot including the proof.
+ */
+function transientBootError(message) {
+  return Object.assign(new Error(message), { transient: true });
+}
+
+/**
  * Per-video facade: wraps the media element with a stable API, injects the
  * HUD, hosts the input layer, playback tracking, subtitles, and settings
  * panel, tracks fullscreen state, and wires MediaSession.
@@ -587,7 +598,7 @@ export class Shell {
   #verifyPlacement() {
     if (!this.video.isConnected || !this.container.isConnected ||
         !this.container.contains(this.video)) {
-      throw new Error(`Shell "${this.sdk.name}": placement lost mid-boot`);
+      throw transientBootError(`Shell "${this.sdk.name}": placement lost mid-boot`);
     }
     // Mount proof: prep (relative-without-offsets, isolate, the host
     // itself) is layout-identical by construction, so boxes that moved
@@ -603,8 +614,8 @@ export class Shell {
       if (shifted(video.width, before.vw) || shifted(video.height, before.vh) ||
           shifted(video.x, before.vx) || shifted(video.y, before.vy) ||
           shifted(container.width, before.cw) || shifted(container.height, before.ch) ||
-          shifted(container.x, before.cx) || shifted(container.y, before.cy)) {
-        throw new Error(`Shell "${this.sdk.name}": placement shifted under prep`);
+           shifted(container.x, before.cx) || shifted(container.y, before.cy)) {
+        throw transientBootError(`Shell "${this.sdk.name}": placement shifted under prep`);
       }
     }
   }

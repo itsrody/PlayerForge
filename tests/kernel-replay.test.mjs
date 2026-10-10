@@ -204,6 +204,92 @@ test("a shell that fails to boot is retried exactly once, then abandoned", async
   assert.equal(attempts, 2, "a boot that keeps throwing does not spin on the discovery tap");
 });
 
+test("a transient boot failure does not spend the defect retry", async () => {
+  // The mount proof trips on mid-boot timing (a CSS scale-in moves boxes
+  // between the snapshot and the verify) - noise, not a defect. It releases
+  // on its own budget: attempt 1 fails transient, attempts 2-3 fail defect,
+  // and the defect retry the transient would have spent is still granted.
+  const wrapper = document.createElement("div");
+  wrapper.className = "jwplayer";
+  const video = document.createElement("video");
+  wrapper.appendChild(video);
+  document.body.appendChild(wrapper);
+  video.getBoundingClientRect = () => ({ width: 640, height: 360, top: 0, left: 0, right: 640, bottom: 360 });
+  video.checkVisibility = () => true;
+
+  let attempts = 0;
+  const kernel = new Kernel();
+  kernel.registerShellProvider({
+    create({ video: v, container, sdk }) {
+      if (v === video) {
+        attempts++;
+      }
+      const err = new Error(attempts === 1 ? "placement shifted under prep" : "boot boom");
+      if (attempts === 1) {
+        err.transient = true;
+      }
+      return { video: v, container, sdk, ready: Promise.reject(err), destroy() {} };
+    }
+  });
+  kernel.init();
+  await waitFor(() => attempts >= 1, 3000);
+
+  const nudge = () => video.dispatchEvent(new dom.window.Event("loadeddata", { bubbles: true }));
+  for (let i = 0; i < 120 && attempts < 3; i++) {
+    nudge();
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  assert.equal(attempts, 3, "the transient failure left the defect retry intact");
+
+  for (let i = 0; i < 24; i++) {
+    nudge();
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  assert.equal(attempts, 3, "the spent defect budget still abandons the video");
+});
+
+test("an always-transient boot stands down on its own budget", async () => {
+  // Timing noise that never clears (a persistently shifting mount) must not
+  // spin on every media event either: past TRANSIENT_BOOT_LIMIT consecutive
+  // misses the video stands down claimed, exactly like a spent defect retry.
+  const wrapper = document.createElement("div");
+  wrapper.className = "jwplayer";
+  const video = document.createElement("video");
+  wrapper.appendChild(video);
+  document.body.appendChild(wrapper);
+  video.getBoundingClientRect = () => ({ width: 640, height: 360, top: 0, left: 0, right: 640, bottom: 360 });
+  video.checkVisibility = () => true;
+
+  let attempts = 0;
+  const kernel = new Kernel();
+  kernel.registerShellProvider({
+    create({ video: v, container, sdk }) {
+      if (v === video) {
+        attempts++;
+      }
+      const err = new Error("placement shifted under prep");
+      err.transient = true;
+      return { video: v, container, sdk, ready: Promise.reject(err), destroy() {} };
+    }
+  });
+  kernel.init();
+  await waitFor(() => attempts >= 1, 3000);
+
+  const nudge = () => video.dispatchEvent(new dom.window.Event("loadeddata", { bubbles: true }));
+  // TRANSIENT_BOOT_LIMIT transient failures, then silence.
+  for (let i = 0; i < 150 && attempts < 3; i++) {
+    nudge();
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  assert.equal(attempts, 3, "the transient budget caps re-arms like the defect one");
+
+  for (let i = 0; i < 24; i++) {
+    nudge();
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  assert.equal(attempts, 3, "a stood-down transient does not spin on the discovery tap");
+});
+
 test("a bfcache pagehide keeps shell-created listeners live for the restored page", async () => {
   const { kernel, video, created } = makeHarness();
   kernel.init();

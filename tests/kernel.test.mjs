@@ -232,6 +232,44 @@ test("lifecycle: an offer arriving mid-build does not mount a twin", async () =>
   assert.equal(factoryCalls, 1, "the second offer met the mount in flight, not a new build");
 });
 
+test("lifecycle: two videos sharing a container both mount", async () => {
+  // #mounting dedups the build window, keyed by video: a second video whose
+  // settle overlaps an in-flight mount on the same container still builds.
+  // Keyed by container it was dropped with #pending already deleted and the
+  // claim held - stuck shell-less, since no future offer retries a claimed
+  // video that never disconnects.
+  const { LifecycleManager } = await import("../src/kernel/kernel.js");
+  const registry = new ShellRegistry();
+  let factoryCalls = 0;
+  let releaseBuild;
+  const buildGate = new Promise((resolve) => { releaseBuild = resolve; });
+  const videoA = { isConnected: true };
+  const videoB = { isConnected: true };
+  const container = { isConnected: true, contains: () => true };
+  const sdk = { name: "test" };
+  const lifecycle = new LifecycleManager(
+    registry,
+    (shell) => registry.register(shell),
+    () => {},
+    null
+  );
+  lifecycle.setShellFactory(({ video }) => {
+    factoryCalls++;
+    return { video, sdk, ready: buildGate };
+  });
+
+  const first = lifecycle.onVideoFound({ video: videoA, container, sdk });
+  await lifecycleSleep(250); // past settle: the first build is in flight
+  const second = lifecycle.onVideoFound({ video: videoB, container, sdk });
+  await lifecycleSleep(250); // past the second settle: overlapping mount, not a twin
+  releaseBuild();
+  await first;
+  await second;
+  assert.equal(factoryCalls, 2, "the second video built despite the shared container");
+  assert.equal(registry.getByVideo(videoA)?.sdk.name, "test", "first video registered");
+  assert.equal(registry.getByVideo(videoB)?.sdk.name, "test", "second video registered");
+});
+
 test("kernel: destroy() tears down document ownership idempotently", () => {
   const kernel = new Kernel();
   kernel.init();

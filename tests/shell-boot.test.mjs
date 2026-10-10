@@ -321,7 +321,9 @@ test("prep that shifts the player aborts the mount without stranding", async () 
   container.getBoundingClientRect = () => box(640);
 
   const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
-  await assert.rejects(shell.ready, /placement shifted under prep/);
+  const err = await shell.ready.then(() => null, (e) => e);
+  assert.match(String(err), /placement shifted under prep/);
+  assert.equal(err?.transient, true, "timing noise must not spend the defect retry");
   assert.equal(container.querySelector(".pf-shell"), null, "no host stranded by a disturbed mount");
   assert.equal(video.hasAttribute(SHELL_MARKER), false, "the video gave up its shell claim");
   assert.equal(container.hasAttribute(SHELL_MARKER), false, "the container gave up its shell claim");

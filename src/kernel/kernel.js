@@ -47,6 +47,16 @@ const UPGRADE_ATTRS = ["class", "id", ...registryDataAttributes()];
  * feed, media or static offer re-arms fresh (see noteUpgradeMiss).
  */
 const UPGRADE_MISS_LIMIT = 3;
+/**
+ * Consecutive transient boot failures (mid-boot timing noise, e.g. a CSS
+ * scale-in tripping the mount proof) before the video stands down. Kept
+ * apart from the defect retry below: timing noise must not spend the budget
+ * that abandons deterministically-throwing boots, but an always-shifting
+ * mount re-offered on every media event would spin just as surely, so the
+ * transient budget is its own cap, in the same consecutive-miss idiom as
+ * UPGRADE_MISS_LIMIT.
+ */
+const TRANSIENT_BOOT_LIMIT = 3;
 
 /** Identity of a print for deduping: tag, depth, id and class set. */
 function printKey(print) {
@@ -143,7 +153,7 @@ export class Kernel {
     this.#lifecycle = new LifecycleManager(
       this.#registry,
       (shell) => this.#notifyShellCreated(shell),
-      (video) => this.#onShellBootFailed(video),
+      (video, transient) => this.#onShellBootFailed(video, transient),
       (video) => this.#sessions.get(video)?.armSettleSkip()
     );
     this.#lifecycle.setShellFactory((discovery) => this.#createShell(discovery));
@@ -188,6 +198,9 @@ export class Kernel {
   /** Register the shell then fan out to every shell-ready listener. */
   #notifyShellCreated(shell) {
     this.#registry.register(shell);
+    // A created shell breaks the transient-miss streak: later timing noise
+    // counts fresh, the way any adoption resets the upgrade-miss streak.
+    this.#sessions.get(shell.video)?.resetTransientMisses();
     // Learn from generic adoptions only: registry matches are static
     // knowledge, and learned matches are already learned. Recording what a
     // successful slow-path adoption looked like is what makes the next visit
@@ -365,8 +378,12 @@ export class Kernel {
    * capture-mode media-event tap. On MPA pages there is no second player to
    * surface, so keeping the per-mutation scan alive for the whole page taxes
    * every DOM change for nothing; the media-event tap still catches a
-   * script-lazy SDK player that fires loadeddata/play, so discovery never goes
-   * fully quiet. Idempotent; pagehide still tears the remaining tap down.
+   * script-lazy SDK player that fires loadeddata or play, so discovery stays
+   * live for anything that announces itself. A video that surfaces after the
+   * downgrade without firing either, and never moves, stays missed until it
+   * does - the standing observer is the cost the downgrade sheds, and a
+   * player that fires nothing needs nothing yet. Idempotent; pagehide still
+   * tears the remaining tap down.
    */
   #downgradeDiscoveryTap() {
     if (this.#discoveryDowngraded) {
@@ -385,8 +402,18 @@ export class Kernel {
    * second failure stays claimed with no re-offer. Re-adoption itself still
    * rides future discovery offers, exactly as before - this path only decides
    * whether the video is claimable when one arrives.
+   *
+   * Transient failures arrive on a separate budget (TRANSIENT_BOOT_LIMIT):
+   * timing noise releases the claim without spending the defect retry, and a
+   * later genuine failure still gets its re-arm. Re-adoption re-runs the full
+   * boot including the mount proof, so the protection timing tripped is
+   * preserved while the noise stops being fatal.
    */
-  #onShellBootFailed(video) {
+  #onShellBootFailed(video, transient = false) {
+    if (transient) {
+      this.#sessions.get(video)?.noteTransientFailed();
+      return;
+    }
     this.#sessions.get(video)?.noteBootFailed();
   }
 
@@ -583,6 +610,8 @@ class VideoSession {
   #upgradeRelease = null;
   /** Consecutive fruitless upgrade re-offers; reset on every arm/disarm. */
   #upgradeMisses = 0;
+  /** Consecutive transient boot failures; reset on every adoption. */
+  #transientMisses = 0;
 
   constructor(video, { scope, adopt, removeShell }) {
     this.#video = video;
@@ -648,6 +677,30 @@ class VideoSession {
   noteUpgradeMiss() {
     this.#upgradeMisses += 1;
     return this.#upgradeMisses < UPGRADE_MISS_LIMIT;
+  }
+
+  /** A shell came up for this video: timing misses stop being consecutive. */
+  resetTransientMisses() {
+    this.#transientMisses = 0;
+  }
+
+  /**
+   * Record a transient boot failure (timing noise, never a defect): release
+   * the claim without touching the defect retry, so a later genuine failure
+   * still gets its re-arm. Only consecutive misses count, like the upgrade
+   * budget above. Stands the video down past the budget - an always-shifting
+   * mount re-offered on every media event would otherwise spin - claimed
+   * with no re-offer, exactly like a spent defect retry.
+   */
+  noteTransientFailed() {
+    this.#transientMisses += 1;
+    if (this.#transientMisses >= TRANSIENT_BOOT_LIMIT) {
+      this.#claimed = true;
+      this.disarmUpgrade();
+      return false;
+    }
+    this.#claimed = false;
+    return true;
   }
 
   armSettleSkip() {
@@ -1006,11 +1059,15 @@ export class LifecycleManager {
   #shellFactory = null;
   /** Videos with a settle wait in flight - dedups repeated discovery. */
   #pending = new Set();
-  /** Containers with a shell build in flight. #pending covers the settle
-   *  window, but it is deleted before the factory runs while registration
-   *  only lands after ready resolves - so a second offer arriving mid-build
-   *  would mount a twin. The build window is short and the factory is the
-   *  only writer, hence a set of containers rather than a second pending set. */
+  /** Videos with a shell build past settle but before registration. #pending
+   *  covers the settle window, but it is deleted before the factory runs
+   *  while registration only lands after ready resolves - so a second offer
+   *  arriving mid-build would mount a twin. Keyed by video, not container:
+   *  the twin risk is a second offer for the SAME video, and keying by
+   *  container drops a different video's build with no re-drive (its session
+   *  stays claimed, so no future offer retries a video that never
+   *  disconnects). Concurrent same-container boots only repeat idempotent
+   *  ops: the marker, the relative prep, the host append. */
   #mounting = new WeakSet();
   /** Abort scope for in-flight settle waits; disposed by destroy() (pagehide). */
   #scope = new Scope();
@@ -1018,10 +1075,12 @@ export class LifecycleManager {
   /**
    * @param {object} registry shell slot
    * @param {(shell: object) => void} onShellCreated ready-shell fan-out
-   * @param {(video: HTMLVideoElement) => void} [onShellFailed] a boot that
-   *   threw after the shell rolled itself back. The shell has already undone
+   * @param {(video: HTMLVideoElement, transient: boolean) => void} [onShellFailed]
+   *   a boot that threw after the shell rolled itself back. The shell has already undone
    *   its DOM by then, so the video is unmarked and adoptable again - the
-   *   callback decides whether to re-arm it.
+   *   callback decides whether to re-arm it. `transient` marks timing noise
+   *   (the mount proof tripped mid-boot): it releases from a separate budget
+   *   and never spends the defect retry.
    * @param {(video: HTMLVideoElement) => void} [onSettleSkipped] the settle
    *   finished with the video (or container) detached. Nothing is created,
    *   but the kernel has already claimed the video - it needs to know so the
@@ -1071,10 +1130,10 @@ export class LifecycleManager {
     if (this.#registry.getByVideo(video)) {
       return;
     }
-    if (this.#mounting.has(container)) {
+    if (this.#mounting.has(video)) {
       return;
     }
-    this.#mounting.add(container);
+    this.#mounting.add(video);
     try {
       const shell = this.#shellFactory({ video, container, sdk });
       await shell?.ready;
@@ -1088,10 +1147,12 @@ export class LifecycleManager {
       // player PlayerForge for the rest of the document. Re-arming is safe
       // even when the throw came from #onShellCreated rather than the boot:
       // a shell that did come up is registered and claimed, so the seen-set
-      // and the registry slot still refuse it a second shell.
-      this.#onShellFailed?.(video);
+      // and the registry slot still refuse it a second shell. Timing noise
+      // (shell.js marks the mount-proof throws transient) forwards its flag
+      // so the kernel spends it from the transient budget instead.
+      this.#onShellFailed?.(video, err?.transient === true);
     } finally {
-      this.#mounting.delete(container);
+      this.#mounting.delete(video);
     }
   }
 
