@@ -66,7 +66,6 @@ const ICONS = {
   trash: svgIcon("M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"),
   upload: svgIcon("M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"),
   copy: svgIcon("M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"),
-  download: svgIcon("M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"),
   link: svgIcon("M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"),
   "chevron-up": svgIcon("M12 7.6l6.3 6.3-1.06 1.06L12 9.72l-5.24 5.24L5.7 13.9z"),
   "chevron-down": svgIcon("M12 16.4L5.7 10.1l1.06-1.06L12 14.28l5.24-5.24 1.06 1.06z"),
@@ -100,7 +99,10 @@ const ALIASES = {
   up: "chevron-up",
   down: "chevron-down",
   inc: "chevron-up",
-  dec: "chevron-down"
+  dec: "chevron-down",
+  // The generic-detection notice names its icon "detect" after what it
+  // reports; it points at the settings toggle the copy names.
+  detect: "settings"
 };
 
 function canonicalName(name) {

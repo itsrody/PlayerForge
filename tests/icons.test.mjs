@@ -26,6 +26,7 @@ test("iconMarkup resolves aliases to the canonical icon", () => {
   makeDom();
   assert.equal(iconMarkup("gear"), iconMarkup("settings"));
   assert.equal(iconMarkup("playing"), iconMarkup("pause"));
+  assert.equal(iconMarkup("detect"), iconMarkup("settings"), "the generic-detection notice names a real icon");
 });
 
 test("iconMarkup returns null for an unknown icon", () => {
