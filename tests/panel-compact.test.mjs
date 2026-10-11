@@ -69,7 +69,7 @@ async function makeShell(autoDetect) {
   const video = dom.window.document.createElement("video");
   container.appendChild(video);
 
-  const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
+  const shell = new Shell({ video, container, sdk: { label: "test-sdk" } });
   await shell.ready;
   const teardown = () => {
     shell.destroy();

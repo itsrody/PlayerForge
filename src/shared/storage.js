@@ -18,7 +18,6 @@ export const KEYS = {
   configs: "pf:configs",
   resume: "pf:resume",
   firstRun: "pf:first-run",
-  prints: "pf:sdk-prints",
   genericNotice: "pf:generic-notice"
 };
 

@@ -62,7 +62,7 @@ test("a boot that throws after injection rolls the shell DOM back", async () => 
     return native(el);
   };
 
-  const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
+  const shell = new Shell({ video, container, sdk: { label: "test-sdk" } });
   await assert.rejects(shell.ready, /late boot failure/);
 
   assert.equal(video.hasAttribute(SHELL_MARKER), false, "the video gave up its shell claim");
@@ -81,7 +81,7 @@ test("destroy() stays idempotent after a failed boot rolled back", async () => {
     return native(el);
   };
 
-  const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
+  const shell = new Shell({ video, container, sdk: { label: "test-sdk" } });
   await assert.rejects(shell.ready, /late boot failure/);
   // The kernel's removal watcher (and any caller holding a reference) will
   // still call destroy(); a second teardown must not throw on the nulled
@@ -104,7 +104,7 @@ test("boot parks focus without scrolling the page", async () => {
     return native.call(this, options);
   };
   try {
-    const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
+    const shell = new Shell({ video, container, sdk: { label: "test-sdk" } });
     await shell.ready;
     assert.ok(calls.length > 0, "boot focuses the host");
     for (const options of calls) {
@@ -121,7 +121,7 @@ test("boot parks focus without scrolling the page", async () => {
 // the page's own stacking context unless the container contains it.
 test("boot contains the overlay paint order on the container", async () => {
   const { container, video } = makeRealm();
-  const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
+  const shell = new Shell({ video, container, sdk: { label: "test-sdk" } });
   await shell.ready;
   try {
     assert.equal(
@@ -142,7 +142,7 @@ test("boot contains the overlay paint order on the container", async () => {
 test("injection repairs a clobbered document stylesheet adoption", async () => {
   const { dom, container, video } = makeRealm();
   const { warmStyles, injectShell } = await import("../src/shell/chrome/inject.js");
-  const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
+  const shell = new Shell({ video, container, sdk: { label: "test-sdk" } });
   await shell.ready;
   try {
     const sheet = warmStyles();
@@ -168,7 +168,7 @@ test("injection repairs a clobbered document stylesheet adoption", async () => {
 // kernel's re-arm, exactly like any other boot failure.
 test("a video moved mid-boot aborts placement without stranding the host", async () => {
   const { dom, container, video } = makeRealm();
-  const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
+  const shell = new Shell({ video, container, sdk: { label: "test-sdk" } });
   // Synchronous with construction - long before the post-prep verify runs.
   const elsewhere = dom.window.document.createElement("div");
   dom.window.document.body.appendChild(elsewhere);
@@ -229,7 +229,7 @@ test("the first generic adoption shows the fallback notice once", async () => {
     const shell1 = new ShellCtor({
       video: first.video,
       container: first.container,
-      sdk: { name: "test-sdk", source: "generic" }
+      sdk: { label: "test-sdk", matched: false }
     });
     await shell1.ready;
     assert.equal(hints.length, 1, "the first measured guess announces itself");
@@ -240,7 +240,7 @@ test("the first generic adoption shows the fallback notice once", async () => {
     const shell2 = new ShellCtor({
       video: second.video,
       container: second.container,
-      sdk: { name: "test-sdk", source: "generic" }
+      sdk: { label: "test-sdk", matched: false }
     });
     await shell2.ready;
     assert.equal(hints.length, 1, "later adoptions stay silent");
@@ -250,7 +250,7 @@ test("the first generic adoption shows the fallback notice once", async () => {
     const shell3 = new ShellCtor({
       video: third.video,
       container: third.container,
-      sdk: { name: "test-sdk", source: "registry" }
+      sdk: { label: "test-sdk", matched: true }
     });
     await shell3.ready;
     assert.equal(hints.length, 1, "anchored players never announced themselves anyway");
@@ -278,7 +278,7 @@ test("a shell inside a shadow root re-offers late shadow videos", async () => {
   const shell = new Shell({
     video,
     container,
-    sdk: { name: "test-sdk" },
+    sdk: { label: "test-sdk" },
     reoffer: (v) => reoffered.push(v)
   });
   await shell.ready;
@@ -299,7 +299,7 @@ test("a light-DOM shell arms no shadow watch", async () => {
   const shell = new Shell({
     video,
     container,
-    sdk: { name: "test-sdk" },
+    sdk: { label: "test-sdk" },
     reoffer: (v) => reoffered.push(v)
   });
   await shell.ready;
@@ -320,7 +320,7 @@ test("prep that shifts the player aborts the mount without stranding", async () 
   video.getBoundingClientRect = () => box(++reads === 1 ? 640 : 700);
   container.getBoundingClientRect = () => box(640);
 
-  const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
+  const shell = new Shell({ video, container, sdk: { label: "test-sdk" } });
   const err = await shell.ready.then(() => null, (e) => e);
   assert.match(String(err), /placement shifted under prep/);
   assert.equal(err?.transient, true, "timing noise must not spend the defect retry");
@@ -368,7 +368,7 @@ test("every sync cadence event reaches the OS session through status", async () 
     Object.defineProperty(video, "paused", { value: true, configurable: true, writable: true });
     Object.defineProperty(video, "ended", { value: false, configurable: true, writable: true });
     Object.defineProperty(video, "currentTime", { value: 0, configurable: true, writable: true });
-    const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
+    const shell = new Shell({ video, container, sdk: { label: "test-sdk" } });
     await shell.ready;
     const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
     let time = 0;
@@ -467,7 +467,7 @@ test("backdrop presses never reach the SDK as taps", async () => {
   // backdrop used to stop pointerdown only, so dismissing the panel doubled
   // as a tap on whatever press dismissed it.
   const { dom, container, video } = makeRealm();
-  const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
+  const shell = new Shell({ video, container, sdk: { label: "test-sdk" } });
   await shell.ready;
   try {
     let taps = 0;

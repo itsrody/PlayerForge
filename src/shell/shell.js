@@ -102,7 +102,7 @@ export class Shell {
     // caller still sees the failure and can allow a retry. destroy() is
     // null-safe across every sub-component and idempotent via the scope.
     this.ready = this.#boot().catch((err) => {
-      logger.error("shell", `Shell "${this.sdk.name}" boot failed - rolling back`, err);
+      logger.error("shell", `Shell "${this.sdk.label}" boot failed - rolling back`, err);
       this.destroy();
       throw err;
     });
@@ -112,7 +112,7 @@ export class Shell {
   async #boot() {
     await this.#injectDom();
     if (!this.#shellDom) {
-      throw new Error(`Shell "${this.sdk.name}": failed to inject shell DOM`);
+      throw new Error(`Shell "${this.sdk.label}": failed to inject shell DOM`);
     }
 
     // Yield between DOM injection and component construction so the browser
@@ -134,7 +134,10 @@ export class Shell {
     this.#inputs = new InputForge(this.video, this.container, this.shellHost, this.#broker);
     attachInputActions(this, this.shellHost, this.#inputs.signal);
     this.#resume = new ResumeTracker(this);
-    if (this.sdk.source === "generic") {
+    // Strictly false, not merely falsy: real descriptors always carry the
+    // boolean, while unit-harness stubs ({ name }) carry no fields at all -
+    // and a harness shell must not nag about a fallback it never took.
+    if (this.sdk.matched === false) {
       this.#noticeGenericDetection();
     }
 
@@ -164,7 +167,7 @@ export class Shell {
     });
     this.#watchFullscreen();
     this.#watchShadowAdoptions();
-    logger.log("shell", `Shell "${this.sdk.name}" constructed`);
+    logger.log("shell", `Shell "${this.sdk.label}" constructed`);
   }
 
   /** Read-only state views; all writes route through `shell.media`. */
@@ -598,7 +601,7 @@ export class Shell {
   #verifyPlacement() {
     if (!this.video.isConnected || !this.container.isConnected ||
         !this.container.contains(this.video)) {
-      throw transientBootError(`Shell "${this.sdk.name}": placement lost mid-boot`);
+      throw transientBootError(`Shell "${this.sdk.label}": placement lost mid-boot`);
     }
     // Mount proof: prep (relative-without-offsets, isolate, the host
     // itself) is layout-identical by construction, so boxes that moved
@@ -615,7 +618,7 @@ export class Shell {
           shifted(video.x, before.vx) || shifted(video.y, before.vy) ||
           shifted(container.width, before.cw) || shifted(container.height, before.ch) ||
            shifted(container.x, before.cx) || shifted(container.y, before.cy)) {
-        throw transientBootError(`Shell "${this.sdk.name}": placement shifted under prep`);
+        throw transientBootError(`Shell "${this.sdk.label}": placement shifted under prep`);
       }
     }
   }
@@ -637,7 +640,7 @@ export class Shell {
   /**
    * First-run notice for the default-on fallback: the one adoption the user
    * never asked for by name gets one hint pointing at its toggle, then a
-   * stored flag so it never nags again. Registry and learned adoptions stay
+   * stored flag so it never nags again. Template-matched adoptions stay
    * silent - only the measured guess announces itself.
    */
   #noticeGenericDetection() {
@@ -656,7 +659,7 @@ export class Shell {
     if (this.#scope.disposed) {
       return;
     }
-    logger.log("shell", `Destroying shell "${this.sdk.name}"`);
+    logger.log("shell", `Destroying shell "${this.sdk.label}"`);
     // Scope first: flips disposed (re-entrancy guard), aborts the shared
     // signal (MediaSession/settings/fullscreen listeners die natively).
     this.#scope.dispose();

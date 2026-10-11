@@ -3,13 +3,10 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import {
   surveyVideos,
-  registryCustomTags,
+  templateCustomTags,
   resolvePlayer,
-  findSdkForVideo,
+  findPlayerForVideo,
   findGenericPlayer,
-  fingerprintFor,
-  matchPrints,
-  resolveContainer,
   videoFromEvent,
   meetsMinSize,
   forEachVideoInMutations,
@@ -19,55 +16,74 @@ import {
 } from "../src/kernel/sdk.js";
 
 /** The descriptor's container field: what findContainer used to return. */
-const containerOf = (video) => findSdkForVideo(video)?.container ?? null;
+const containerOf = (video) => findPlayerForVideo(video)?.container ?? null;
 
 const dom = (html) =>
   new JSDOM(`<!doctype html><html><body>${html}</body></html>`).window.document;
 
-test("adopts each registered SDK via its namespaced anchor", () => {
+test("adopts each framework shape through its structural anchors", () => {
+  // [markup, container selector, hops]: the same corpus the named registry
+  // used to pin, now asserting placement instead of identity. No names
+  // anywhere - the table carries shapes, and the descriptor carries the
+  // matched element, not which row it came from.
   const fixtures = [
-    ['<div class="jwplayer jw-reset"><video></video></div>', "JW Player"],
-    ['<div class="jw-wrapper"><div class="jwplayer"><video></video></div></div>', "JW Player"],
-    ['<div data-vjs-player><div class="video-js"><video></video></div></div>', "Video.js"],
-    ['<div data-plyr><div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div></div>', "Plyr"],
-    ['<div class="art-video-player artplayer"><video></video></div>', "ArtPlayer"],
-    ['<div class="dplayer"><video></video></div>', "DPlayer"],
-    ['<div class="mejs-container mejs-video"><video></video></div>', "MediaElement.js"],
-    ['<div class="mejs__container"><video></video></div>', "MediaElement.js"],
-    ['<div class="xgplayer xgplayer-desktop"><video></video></div>', "XGPlayer"],
-    ['<div class="prism-player"><video></video></div>', "Aliplayer"],
-    ['<div class="fluid_video_wrapper fluid_player_layout_default"><video></video></div>', "Fluid Player"],
-    ['<div data-player-id="4c522212"><video></video></div>', "Flowplayer"],
-    ['<div class="flowplayer is-ready"><video></video></div>', "Flowplayer"],
-    ['<div class="fp-player"><div class="fp-ui"></div><video></video></div>', "Flowplayer"],
-    ['<div data-player><video></video></div>', "Clappr"],
-    ['<media-player><video slot="media"></video></media-player>', "Vidstack"],
-    ['<mux-player><video></video></mux-player>', "Mux Player"],
-    ['<radiant-media-player><video></video></radiant-media-player>', "Radiant Media Player"],
-    ['<div class="shaka-video-container"><video data-shaka-player></video></div>', "Shaka Player"],
-    ['<div data-shaka-player-container><video></video></div>', "Shaka Player"],
-    ['<div class="theoplayer-container"><video></video></div>', "THEOplayer"],
-    ['<theoplayer-ui><video></video></theoplayer-ui>', "THEOplayer"],
-    ['<theoplayer-default-ui><video></video></theoplayer-default-ui>', "THEOplayer"],
-    ['<div class="plyr"><video data-plyr-config=\'{"title": "x"}\'></video></div>', "Plyr"],
-    ['<video-js><video></video></video-js>', "Video.js"]
+    ['<div class="jwplayer jw-reset"><video></video></div>', ".jwplayer", 1],
+    ['<div class="jw-wrapper"><div class="jwplayer"><video></video></div></div>', ".jwplayer", 1],
+    ['<div data-vjs-player><div class="video-js"><video></video></div></div>', ".video-js", 1],
+    ['<div data-plyr><div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div></div>', ".plyr__video-wrapper", 1],
+    ['<div class="art-video-player artplayer"><video></video></div>', ".art-video-player", 1],
+    ['<div class="dplayer"><video></video></div>', ".dplayer", 1],
+    ['<div class="mejs-container mejs-video"><video></video></div>', ".mejs-container", 1],
+    ['<div class="mejs__container"><video></video></div>', ".mejs__container", 1],
+    ['<div class="xgplayer xgplayer-desktop"><video></video></div>', ".xgplayer", 1],
+    ['<div class="prism-player"><video></video></div>', ".prism-player", 1],
+    ['<div class="fluid_video_wrapper fluid_player_layout_default"><video></video></div>', ".fluid_video_wrapper", 1],
+    ['<div data-player-id="4c522212"><video></video></div>', "[data-player-id]", 1],
+    ['<div class="flowplayer is-ready"><video></video></div>', ".flowplayer", 1],
+    ['<div class="fp-player"><div class="fp-ui"></div><video></video></div>', ".fp-player", 1],
+    ['<div data-player><video></video></div>', "[data-player]", 1],
+    ['<media-player><video slot="media"></video></media-player>', "media-player", 1],
+    ['<mux-player><video></video></mux-player>', "mux-player", 1],
+    ['<radiant-media-player><video></video></radiant-media-player>', "radiant-media-player", 1],
+    ['<div class="shaka-video-container"><video data-shaka-player></video></div>', "video", 0],
+    ['<div data-shaka-player-container><video></video></div>', "[data-shaka-player-container]", 1],
+    ['<div class="theoplayer-container"><video></video></div>', ".theoplayer-container", 1],
+    ['<theoplayer-ui><video></video></theoplayer-ui>', "theoplayer-ui", 1],
+    ['<theoplayer-default-ui><video></video></theoplayer-default-ui>', "theoplayer-default-ui", 1],
+    ['<div class="plyr"><video data-plyr-config=\'{"title": "x"}\'></video></div>', "video", 0],
+    ['<video-js><video></video></video-js>', "video-js", 1]
   ];
-  for (const [html, expected] of fixtures) {
+  for (const [html, selector, hops] of fixtures) {
     const doc = dom(html);
     const video = doc.querySelector("video");
-    assert.equal(findSdkForVideo(video)?.name, expected, html);
+    const player = findPlayerForVideo(video);
+    assert.ok(player?.matched, html);
+    assert.equal(player.container, doc.querySelector(selector), `${html} container`);
+    assert.equal(player.hops, hops, `${html} hops`);
   }
+});
+
+test("descriptors carry structural labels, not names", () => {
+  const doc = dom('<div class="jwplayer jw-reset"><video></video></div>');
+  assert.equal(findPlayerForVideo(doc.querySelector("video")).label, "div.jwplayer.jw-reset");
+  const tag = dom('<video-js><video></video></video-js>');
+  assert.equal(findPlayerForVideo(tag.querySelector("video")).label, "video-js");
+  const bare = dom('<div class="player"><video></video></div>');
+  assert.equal(findPlayerForVideo(bare.querySelector("video")), null);
 });
 
 test("a re-skinned fork still resolves through its behavioral anchors", () => {
   // No .plyr, .video-js or .vjs-* chrome classes anywhere: a fork that
-  // restyled everything but kept each SDK's own functional markers.
+  // restyled everything but kept each framework's own functional markers.
   const plyrFork = dom('<div class="acme-player"><video data-plyr-config=\'{"title": "x"}\'></video></div>');
-  assert.equal(findSdkForVideo(plyrFork.querySelector("video"))?.name, "Plyr");
+  const plyrVideo = plyrFork.querySelector("video");
+  assert.equal(findPlayerForVideo(plyrVideo)?.container, plyrVideo, "hop-0 data anchor wins");
+  assert.equal(findPlayerForVideo(plyrVideo)?.hops, 0);
   // .vjs-tech is written onto the video by the player constructor itself, so
   // it matches at hop 0 even with the wrapper fully renamed.
   const vjsFork = dom('<div class="acme-player"><video class="vjs-tech"></video></div>');
-  assert.equal(findSdkForVideo(vjsFork.querySelector("video"))?.name, "Video.js");
+  const vjsVideo = vjsFork.querySelector("video");
+  assert.equal(findPlayerForVideo(vjsVideo)?.container, vjsVideo);
 });
 
 test("crosses open shadow boundaries to reach custom-element players", () => {
@@ -76,38 +92,36 @@ test("crosses open shadow boundaries to reach custom-element players", () => {
     const player = doc.querySelector(tag);
     const video = doc.createElement("video");
     player.attachShadow({ mode: "open" }).append(video);
-    assert.equal(findSdkForVideo(video)?.name, doc.querySelector(tag) && {
-      "media-player": "Vidstack",
-      "mux-player": "Mux Player",
-      "radiant-media-player": "Radiant Media Player",
-      "flowplayer-ui": "Flowplayer"
-    }[tag], tag);
-    assert.equal(containerOf(video), player, tag);
+    const found = findPlayerForVideo(video);
+    assert.ok(found?.matched, tag);
+    assert.equal(found.container, player, tag);
   }
 });
 
-test("nearest anchor wins regardless of registry order", () => {
+test("nearest anchor wins regardless of template order", () => {
   const doc = dom(
     '<div class="jwplayer"><div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div></div>'
   );
   const video = doc.querySelector("video");
-  assert.equal(findSdkForVideo(video)?.name, "Plyr");
+  assert.ok(findPlayerForVideo(video)?.matched);
   assert.equal(containerOf(video), doc.querySelector(".plyr__video-wrapper"));
 });
 
-test("registry order breaks ties on a shared anchor element", () => {
+test("template order breaks ties on a shared anchor element", () => {
   const doc = dom('<div class="dplayer jwplayer"><video></video></div>');
-  assert.equal(findSdkForVideo(doc.querySelector("video"))?.name, "JW Player");
+  const found = findPlayerForVideo(doc.querySelector("video"));
+  assert.equal(found.container, doc.querySelector("div"));
+  assert.equal(found.hops, 1);
 });
 
-test("generic player markup stays unrecognized", () => {
+test("framework-free markup stays unmatched", () => {
   const fixtures = [
     '<div class="player"><video></video></div>',
     '<div class="video-container"><div class="video-wrapper"><video></video></div></div>',
     '<div class="bg-black overflow-hidden select-none"><video></video></div>',
     '<main><video></video></main>',
     '<div id="dplayer-wrapper"><video></video></div>',
-    // Framework app shells are never SDK anchors: Inertia marks every page
+    // Framework app shells are never template anchors: Inertia marks every page
     // root with data-page, so these claimed every video on the page (and
     // resolved the container to the app root) until the record was dropped.
     '<div id="app" data-page="{}"><div><video></video></div></div>',
@@ -116,7 +130,7 @@ test("generic player markup stays unrecognized", () => {
   for (const html of fixtures) {
     const doc = dom(html);
     const video = doc.querySelector("video");
-    assert.equal(findSdkForVideo(video), null, html);
+    assert.equal(findPlayerForVideo(video), null, html);
     assert.equal(containerOf(video), null, html);
   }
 });
@@ -181,111 +195,84 @@ test("videoFromEvent yields null without any video in the path", () => {
   assert.equal(videoFromEvent({ target: host }), null);
 });
 
-test("resolveContainer defaults to the matched element without a host override", () => {
-  const doc = dom('<div class="plyr__video-wrapper"><video></video></div>');
-  const el = doc.querySelector(".plyr__video-wrapper");
-  assert.equal(resolveContainer({ record: { name: "Plyr" }, el }), el);
-});
-
-test("resolveContainer honors a host override targeting an ancestor", () => {
-  const doc = dom('<div class="site-player"><div class="plyr"><video></video></div></div>');
-  const el = doc.querySelector(".plyr");
-  const host = doc.querySelector(".site-player");
-  assert.equal(resolveContainer({ record: { name: "Plyr", host: ".site-player" }, el }), host);
-});
-
-test("resolveContainer falls back to the matched element when host is absent", () => {
-  const doc = dom('<div class="plyr"><div class="site-player"><video></video></div></div>');
-  const el = doc.querySelector(".plyr");
-  assert.equal(resolveContainer({ record: { name: "Plyr", host: ".missing" }, el }), el);
-});
-
-test("resolveContainer crosses open shadow boundaries for a host override", () => {
-  const doc = dom("<site-player></site-player>");
-  const host = doc.querySelector("site-player");
-  const video = doc.createElement("video");
-  host.attachShadow({ mode: "open" }).append(video);
-  assert.equal(resolveContainer({ record: { name: "Plyr", host: "site-player" }, el: video }), host);
-});
-
-test("findSdkForVideo returns a cached descriptor with anchor and hops", () => {
+test("findPlayerForVideo returns a cached descriptor with anchor and hops", () => {
   const doc = dom('<div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div>');
   const video = doc.querySelector("video");
-  const sdk = findSdkForVideo(video);
-  assert.equal(sdk.name, "Plyr");
-  assert.equal(sdk.host, null);
+  const sdk = findPlayerForVideo(video);
+  assert.equal(sdk.matched, true);
+  assert.equal(sdk.label, "div.plyr__video-wrapper");
   assert.equal(sdk.container, containerOf(video));
   // anchor is the actually-matched element; hops = distance video -> anchor.
   assert.equal(sdk.anchor, doc.querySelector(".plyr__video-wrapper"));
   assert.equal(sdk.hops >= 1, true);
   // Every re-query returns the identical cached object - no per-call churn.
-  assert.equal(findSdkForVideo(video), sdk);
+  assert.equal(findPlayerForVideo(video), sdk);
 });
 
 test("the memo survives a re-query that changes nothing", () => {
   const doc = dom('<div class="dplayer"><video></video></div>');
   const video = doc.querySelector("video");
-  const first = findSdkForVideo(video);
+  const first = findPlayerForVideo(video);
   // Warm the positive memo, then re-query: freshness must not re-wrap, or the
   // "same object per video" contract above silently regressed into a re-scan.
-  assert.equal(findSdkForVideo(video), first);
-  assert.equal(findSdkForVideo(video), first);
+  assert.equal(findPlayerForVideo(video), first);
+  assert.equal(findPlayerForVideo(video), first);
 });
 
-test("re-parenting out of an SDK invalidates the positive memo", () => {
+test("re-parenting out of a template invalidates the positive memo", () => {
   const doc = dom(
     '<div class="dplayer"><div id="slot"><video></video></div></div>' +
     '<div class="plain"><div id="target"></div></div>'
   );
   const video = doc.querySelector("video");
-  assert.equal(findSdkForVideo(video).name, "DPlayer");
+  assert.ok(findPlayerForVideo(video)?.matched);
 
   // Same element, new ancestry: the WeakMap key survives, so an unvalidated
   // memo would keep reporting the wrapper the video just left.
   doc.querySelector("#target").append(video);
-  assert.equal(findSdkForVideo(video), null, "stale descriptor survived re-parenting");
+  assert.equal(findPlayerForVideo(video), null, "stale descriptor survived re-parenting");
 });
 
-test("re-parenting into an SDK is detected on re-query", () => {
+test("re-parenting into a template is detected on re-query", () => {
   const doc = dom(
     '<div class="plain"><div id="slot"><video></video></div></div>' +
     '<div data-vjs-player id="target"></div>'
   );
   const video = doc.querySelector("video");
-  assert.equal(findSdkForVideo(video), null, "precondition: unregistered to start");
+  assert.equal(findPlayerForVideo(video), null, "precondition: unregistered to start");
 
   doc.querySelector("#target").append(video);
-  assert.equal(findSdkForVideo(video).name, "Video.js", "stale null survived re-parenting");
+  assert.ok(findPlayerForVideo(video)?.matched, "stale null survived re-parenting");
 });
 
-test("a subtree grafted under an SDK is detected on re-query", () => {
+test("a subtree grafted under a template is detected on re-query", () => {
   const doc = dom(
     '<div class="plain"><div id="slot"><video></video></div></div>' +
     '<div class="dplayer" id="target"></div>'
   );
   const video = doc.querySelector("video");
-  assert.equal(findSdkForVideo(video), null, "precondition: unregistered to start");
+  assert.equal(findPlayerForVideo(video), null, "precondition: unregistered to start");
 
   // Move the video AND its parent together: the direct parent never changes,
   // so a parent-only freshness check keeps reporting the stale null for the
   // life of the document while the video sits inside a real player.
   doc.querySelector("#target").append(doc.querySelector("#slot"));
-  assert.equal(findSdkForVideo(video)?.name, "DPlayer", "stale null survived a subtree graft");
+  assert.ok(findPlayerForVideo(video)?.matched, "stale null survived a subtree graft");
 });
 
-test("a graft that adds no SDK still answers null", () => {
+test("a graft that adds no template still answers null", () => {
   const doc = dom(
     '<div class="plain"><div id="slot"><video></video></div></div>' +
     '<div class="plain" id="target"></div>'
   );
   const video = doc.querySelector("video");
-  assert.equal(findSdkForVideo(video), null);
+  assert.equal(findPlayerForVideo(video), null);
 
   doc.querySelector("#target").append(doc.querySelector("#slot"));
-  assert.equal(findSdkForVideo(video), null, "a graft without an SDK must not resurrect a match");
+  assert.equal(findPlayerForVideo(video), null, "a graft without a template must not resurrect a match");
 });
 
-/* - SDK-independent slow path - */
+/* - Template-independent slow path - */
 
 /**
  * Installs the navigator for the generic path and restores it after: Node's
@@ -330,22 +317,22 @@ test("a positive memo is invalidated when the matched wrapper is replaced in pla
   // untouched, so only re-verifying the anchor at its recorded hop catches it.
   const doc = dom('<div id="slot"><div class="dplayer"><video></video></div></div>');
   const video = doc.querySelector("video");
-  assert.equal(findSdkForVideo(video).name, "DPlayer");
+  assert.ok(findPlayerForVideo(video)?.matched);
 
   const slot = doc.querySelector("#slot");
   slot.textContent = "";
   slot.append(video);
 
-  assert.equal(findSdkForVideo(video), null, "stale descriptor survived wrapper replacement");
+  assert.equal(findPlayerForVideo(video), null, "stale descriptor survived wrapper replacement");
 });
 
 test("detachment rescans to null without throwing", () => {
   const doc = dom('<div class="plain"><video></video></div>');
   const video = doc.querySelector("video");
-  assert.equal(findSdkForVideo(video), null);
+  assert.equal(findPlayerForVideo(video), null);
 
   video.remove();
-  assert.equal(findSdkForVideo(video), null, "detachment must not throw or resurrect a match");
+  assert.equal(findPlayerForVideo(video), null, "detachment must not throw or resurrect a match");
 });
 
 test("forEachVideoInMutations reaches a video inside an added host's open shadow root", () => {
@@ -436,26 +423,26 @@ test("forEachShadowVideos sweeps shadow trees and leaves light videos to the cal
   assert.deepEqual(found, [shadowVideo], "only the shadow video, not the light one");
 });
 
-test("findSdkForVideo matches an SDK anchor across a shadow boundary", () => {
+test("findPlayerForVideo matches a template anchor across a shadow boundary", () => {
   const doc = dom('<div data-plyr><div class="plyr__video-wrapper"><x-holder></x-holder></div></div>');
   const host = doc.querySelector("x-holder");
   const shadow = host.attachShadow({ mode: "open" });
   const video = doc.createElement("video");
   shadow.appendChild(video);
 
-  const match = findSdkForVideo(video);
-  assert.equal(match?.name, "Plyr", "composed chain crossed the boundary via .host");
+  const match = findPlayerForVideo(video);
+  assert.ok(match?.matched, "composed chain crossed the boundary via .host");
   assert.equal(match?.container, doc.querySelector(".plyr__video-wrapper"), "container resolves in the light tree");
 });
 
-test("a playing video with no record qualifies generically on an activated page", () => {
+test("a playing video with no template qualifies on an activated page", () => {
   const { wrapper, video } = genericFixture();
   withActivation(true, () => {
     const sdk = findGenericPlayer(video);
-    assert.equal(sdk?.name, "Custom player");
+    assert.equal(sdk?.matched, false, "the measured fallback says so");
+    assert.equal(sdk?.label, "div#player");
     assert.equal(sdk?.container, wrapper, "the similar-sized wrapper hosts the shell");
     assert.equal(sdk?.hops, 1);
-    assert.equal(sdk?.host, null);
   });
 });
 
@@ -574,59 +561,37 @@ test("the climb continues past a zero-size wrapper to a real box", () => {
   });
 });
 
-/* - Learned fingerprints - */
+/* - Unified resolve: one walk, priority order - */
 
-test("fingerprintFor records tag, classes, id and depth", () => {
-  const doc = dom('<div id="player" class="player wide"><video></video></div>');
-  const wrapper = doc.querySelector("#player");
+test("resolvePlayer answers template, then fallback, then null", () => {
+  // A templated player resolves by anchor whether or not the fallback is on.
+  const doc = dom('<div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div>');
   const video = doc.querySelector("video");
-  assert.deepEqual(fingerprintFor(video, wrapper, 2), {
-    tag: "div",
-    cls: ["player", "wide"],
-    id: "player",
-    depth: 2
+  withActivation(true, () => {
+    assert.equal(resolvePlayer(video, { enabled: true })?.matched, true);
+    assert.equal(resolvePlayer(video, { enabled: false })?.matched, true);
   });
 });
 
-test("matchPrints resolves the recorded container", () => {
-  const doc = dom('<div id="player" class="player"><video></video></div>');
-  const wrapper = doc.querySelector("#player");
-  const video = doc.querySelector("video");
-  const hit = matchPrints(video, fingerprintFor(video, wrapper, 1));
-  assert.equal(hit?.el, wrapper);
-  assert.equal(hit?.hops, 1);
-});
-
-test("matchPrints tolerates state classes gained later", () => {
-  const doc = dom('<div class="player"><video></video></div>');
-  const wrapper = doc.querySelector("div");
-  const video = doc.querySelector("video");
-  const print = fingerprintFor(video, wrapper, 1);
-  wrapper.classList.add("playing", "open");
-  assert.equal(matchPrints(video, print)?.el, wrapper, "subset still matches after state churn");
-});
-
-test("matchPrints refuses dropped markers, moved depth and wrong tags", () => {
-  const doc = dom('<div class="player"><div id="slot"><video></video></div></div>');
-  const video = doc.querySelector("video");
-  const print = fingerprintFor(video, doc.querySelector("#slot"), 1);
-  doc.querySelector("#slot").removeAttribute("id");
-  assert.equal(matchPrints(video, print), null, "a dropped marker is a different player");
-  assert.equal(matchPrints(video, { tag: "section", cls: [], id: null, depth: 1 }), null);
-  assert.equal(matchPrints(video, { tag: "div", cls: [], id: null, depth: 5 }), null);
-});
-
-test("matchPrints rejects malformed prints without throwing", () => {
-  const doc = dom('<div><video></video></div>');
-  const video = doc.querySelector("video");
-  for (const bad of [null, undefined, [], "div", { tag: "div" }, { tag: "div", cls: "x", depth: 1 }]) {
-    assert.equal(matchPrints(video, bad), null);
-  }
+test("resolvePlayer falls from fallback to null", () => {
+  const { video } = genericFixture();
+  withActivation(true, () => {
+    assert.equal(
+      resolvePlayer(video, { enabled: true })?.matched,
+      false,
+      "no anchor: the measured fallback"
+    );
+    assert.equal(
+      resolvePlayer(video, { enabled: false }),
+      null,
+      "disabled: unmatched stays unmatched"
+    );
+  });
 });
 
 test("the fallback admits only player-sized boxes, not thumbnails", () => {
   // The anchorless guess pays for its uncertainty with a stricter box than
-  // the registry's 100x60: preview tiles and spacers stay out.
+  // the templates' 100x60: preview tiles and spacers stay out.
   const doc = dom('<div id="tile"><video></video></div><div id="player"><video></video></div>');
   const tile = doc.querySelector("#tile video");
   const player = doc.querySelector("#player video");
@@ -646,82 +611,42 @@ test("the fallback admits only player-sized boxes, not thumbnails", () => {
   });
 });
 
-/* - Unified resolve: one walk, priority order - */
-
-test("resolvePlayer answers registry, learned, generic in that order", () => {
-  // A registered player with a print on file: the anchor wins, not the print.
-  const doc = dom('<div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div>');
-  const video = doc.querySelector("video");
-  const wrapper = doc.querySelector(".plyr__video-wrapper");
-  const print = fingerprintFor(video, wrapper, 1);
-  withActivation(true, () => {
-    assert.equal(resolvePlayer(video, { prints: [print], enabled: true })?.source, "registry");
-    assert.equal(resolvePlayer(video, { prints: [], enabled: false })?.source, "registry");
-  });
-});
-
-test("resolvePlayer falls from learned to generic to null", () => {
-  const { video } = genericFixture();
-  const print = { tag: "div", cls: [], id: null, depth: 1 };
-  withActivation(true, () => {
-    assert.equal(
-      resolvePlayer(video, { prints: [print], enabled: true })?.source,
-      "learned",
-      "a matching print answers before any measurement"
-    );
-    assert.equal(
-      resolvePlayer(video, { prints: [], enabled: true })?.source,
-      "generic",
-      "no print, no anchor: the measured fallback"
-    );
-    assert.equal(
-      resolvePlayer(video, { prints: [], enabled: false }),
-      null,
-      "disabled: unregistered stays unregistered"
-    );
-  });
-});
-
 /* - Resolve-path invariants: what each probe may cost - */
 
-test("anchors and prints read no boxes; only the fallback measures", () => {
-  // The shared fill walks pointers, never boxes: matches() and classList
-  // cost no layout, so registry and learned resolves must complete without
-  // a single getBoundingClientRect anywhere on the chain. The generic climb
-  // is the one probe allowed to flush - the counter proves it does.
-  const doc = dom('<div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div><div id="plain"><video></video></div><div id="open"><video></video></div>');
+test("anchors read no boxes; only the fallback measures", () => {
+  // The shared fill walks pointers, never boxes: matches() costs no layout,
+  // so template resolves must complete without a single getBoundingClientRect
+  // anywhere on the chain. The generic climb is the one probe allowed to
+  // flush - the counter proves it does.
+  const doc = dom('<div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div><div id="open"><video></video></div>');
   const plyrVideo = doc.querySelector(".plyr video");
-  const plainVideo = doc.querySelector("#plain video");
   const openVideo = doc.querySelector("#open video");
   const box = { width: 640, height: 360, top: 0, left: 0, right: 640, bottom: 360 };
   let rectReads = 0;
-  for (const el of [plyrVideo, plainVideo, openVideo, ...doc.querySelectorAll("div"), doc.body, doc.documentElement]) {
+  for (const el of [plyrVideo, openVideo, ...doc.querySelectorAll("div"), doc.body, doc.documentElement]) {
     el.getBoundingClientRect = () => {
       rectReads++;
       return { ...box };
     };
   }
-  for (const video of [plyrVideo, plainVideo, openVideo]) {
+  for (const video of [plyrVideo, openVideo]) {
     Object.defineProperty(video, "paused", { value: false, configurable: true });
     Object.defineProperty(video, "ended", { value: false, configurable: true });
     Object.defineProperty(video, "readyState", { value: 4, configurable: true });
   }
-  const print = fingerprintFor(plainVideo, doc.querySelector("#plain"), 1);
   withActivation(true, () => {
-    assert.equal(resolvePlayer(plyrVideo, { prints: [], enabled: true })?.source, "registry");
+    assert.equal(resolvePlayer(plyrVideo, { enabled: true })?.matched, true);
     assert.equal(rectReads, 0, "anchor matching reads no boxes");
-    assert.equal(resolvePlayer(plainVideo, { prints: [print], enabled: true })?.source, "learned");
-    assert.equal(rectReads, 0, "print matching reads no boxes");
-    assert.equal(resolvePlayer(openVideo, { prints: [], enabled: true })?.source, "generic");
+    assert.equal(resolvePlayer(openVideo, { enabled: true })?.matched, false);
     assert.ok(rectReads > 0, "the measured fallback is the only probe that flushes");
   });
 });
 
-test("a registry re-resolve returns the same descriptor object", () => {
+test("a template re-resolve returns the same descriptor object", () => {
   const doc = dom('<div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div>');
   const video = doc.querySelector("video");
   const first = resolvePlayer(video);
-  assert.equal(first?.source, "registry");
+  assert.equal(first?.matched, true);
   assert.equal(resolvePlayer(video), first, "memo identity survived the unification");
 });
 
@@ -768,8 +693,8 @@ test("surveyVideos reads no boxes", () => {
   assert.equal(rectReads, 0, "surveying is property reads only - placement stays in resolve");
 });
 
-test("registryCustomTags derives exactly the custom-element anchors", () => {
-  const tags = registryCustomTags();
+test("templateCustomTags derives exactly the custom-element anchors", () => {
+  const tags = templateCustomTags();
   assert.ok(tags.includes("video-js"), "the tech tag is watched");
   assert.ok(tags.includes("theoplayer-ui"), "the UI tag is watched");
   for (const tag of tags) {

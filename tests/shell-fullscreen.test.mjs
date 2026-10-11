@@ -54,7 +54,7 @@ async function makeShell({ embedded = false } = {}) {
   const video = win.document.createElement("video");
   container.appendChild(video);
 
-  const shell = new Shell({ video, container, sdk: { name: "test-sdk" } });
+  const shell = new Shell({ video, container, sdk: { label: "test-sdk" } });
   await shell.ready;
   const teardown = () => {
     setFullscreen(dom, null);

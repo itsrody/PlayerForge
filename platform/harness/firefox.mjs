@@ -897,8 +897,8 @@ function buildTestPageHtml(options = {}) {
 
   const videoAttrs = videoSrc ? `src="${videoSrc}"` : "";
 
-  // Use a Plyr-style player tree so findSdkForVideo() recognizes the video.
-  // A bare <video> is intentionally rejected by the kernel (no SDK anchor).
+  // Use a Plyr-style player tree so the template anchors match the video.
+  // A bare <video> is intentionally rejected by the kernel (no template anchor).
   return `<!DOCTYPE html>
 <html>
 <head>

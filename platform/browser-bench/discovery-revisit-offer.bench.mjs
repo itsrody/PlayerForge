@@ -1,25 +1,22 @@
 /**
- * Revisit-offer browser benchmark - what a learned print saves per offer,
+ * Revisit-offer browser benchmark - what template matching saves per offer,
  * measured in real Gecko.
  *
  * The end-to-end revisit (navigation to HUD) is wait-dominated: the first
- * visit waits for playback, a gesture, and a re-offer, and the revisit
- * still waits for an offer with the learned state's classes live - a
- * print learned while playing does not match a paused pre-click DOM, by
- * the subset rule's design. An end-to-end row would report ~1.0x and teach
- * nothing. What learning guarantees is cheaper OFFERS: every discovery
- * offer for an unrecognized video otherwise runs the full slow-path
- * measurement - playback-state reads, the activation read, and a
- * container walk where every ancestor pays getBoundingClientRect, i.e. a
- * forced layout - while a learned print resolves with tag/class/id
- * compares and zero rect reads. Offers arrive per mutation, so the layout
- * saving compounds across the document's life, and every DOM touch it
- * removes is also one less Xray crossing in the isolated userscript realm
- * (same translation as the discovery-match rows: direction survives,
- * close ratios do not).
+ * visit waits for playback, a gesture, and a re-offer. What the anchor
+ * tables guarantee is cheaper OFFERS: every discovery offer for an
+ * unmatched video runs the full fallback measurement - playback-state
+ * reads, the activation read, and a container walk where every ancestor
+ * pays getBoundingClientRect, i.e. a forced layout - while a repeat offer
+ * for a templated video answers from the descriptor memo (one WeakMap
+ * lookup plus a freshness re-walk of the recorded anchor, zero rect
+ * reads). Offers arrive per mutation, so the layout saving compounds
+ * across the document's life, and every DOM touch it removes is also one
+ * less Xray crossing in the isolated userscript realm (same translation
+ * as the discovery-match rows: direction survives, close ratios do not).
  *
  * The pair reimplements both arms page-side against a fixture of four
- * structural players plus eight ad-grid distractors, with playback state
+ * templated players plus eight ad-grid distractors, with playback state
  * stubbed on the elements (the ops under test read page-side, so the
  * stubs are visible to them; the realm caveat above is the price). Each
  * op call starts by toggling a geometry-affecting class on the stage -
@@ -105,10 +102,9 @@ const PRIME = `
   stage.id = "pf-revisit-stage";
   document.body.appendChild(stage);
   const style = document.createElement("style");
-  style.textContent = ".pf-rv-player{width:640px;height:360px}.pf-rv-player video{width:100%;height:100%}.pf-rv-plain{width:640px;height:360px}.pf-rv-plain video{width:100%;height:100%}#pf-revisit-stage.pf-dirty .pf-rvvid{margin-top:1px}";
+  style.textContent = ".pf-rv-player{width:640px;height:360px}.pf-rv-player video{width:100%;height:100%}.pf-rv-plain{width:640px;height:360px}.pf-rv-plain video{width:100%;height:100%}#pf-revisit-stage.pf-dirty .pf-rvvid{margin-top:1px}.jwplayer,.plyr__video-wrapper,.video-js,.xgplayer{width:640px;height:360px}.jwplayer video,.plyr__video-wrapper video,.video-js video,.xgplayer video{width:100%;height:100%}";
   document.head.appendChild(style);
   const VIDEOS = [];
-  const PRINTS = new Map();
   const playerHtml = (cls, extra) =>
     '<div class="' + cls + '"' + extra + '><video class="pf-rvvid"></video></div>';
   const wrap = (html) => {
@@ -117,27 +113,20 @@ const PRIME = `
     stage.appendChild(holder);
     return holder.firstElementChild;
   };
-  // Four remembered players, depths 1-3, shapes a print records.
+  // Four templated players, depths 1-3, shapes copied from the sdk-engine
+  // fixtures (and from src/kernel/sdk.js TEMPLATES, the source of truth).
   const remembered = [
-    wrap(playerHtml("pf-rv-player wide", ' id="rv-main"')),
-    wrap('<section><div class="pf-rv-player narrow"><video class="pf-rvvid"></video></div></section>').querySelector(".pf-rv-player"),
-    wrap('<div><div><div class="pf-rv-player deep"><video class="pf-rvvid"></video></div></div></div>').querySelector(".pf-rv-player"),
-    wrap(playerHtml("pf-rv-player", "")),
+    wrap(playerHtml("jwplayer", "")),
+    wrap('<div class="plyr"><div class="plyr__video-wrapper"><video class="pf-rvvid"></video></div></div>').querySelector(".plyr__video-wrapper"),
+    wrap('<div><div class="video-js"><video class="pf-rvvid vjs-tech"></video></div></div>').querySelector(".video-js"),
+    wrap('<div><div><div class="xgplayer"><video class="pf-rvvid"></video></div></div></div>').querySelector(".xgplayer"),
   ];
   for (const container of remembered) {
     const video = container.querySelector("video");
     VIDEOS.push(video);
-    let hops = 0;
-    for (let node = video.parentNode; node && node !== container; node = node.parentNode) hops++;
-    PRINTS.set(video, {
-      tag: container.tagName.toLowerCase(),
-      cls: [...container.classList].sort(),
-      id: container.id || null,
-      depth: hops + 1,
-    });
   }
   // Eight distractors: bare videos in plain divs, the ad-grid shape. No
-  // print remembers them, so the warm arm walks each to an honest miss.
+  // template anchors them, so the warm arm walks each to an honest miss.
   for (let i = 0; i < 8; i++) {
     const plain = document.createElement("div");
     plain.className = "pf-rv-plain pf-rv-ad-" + i;
@@ -178,14 +167,14 @@ const PRIME = `
   if (navigator.userActivation?.hasBeenActive !== true) {
     throw new Error("revisit fixture: activation stub did not take");
   }
-  window.__pfRevisit = { VIDEOS, PRINTS, stage };
+  window.__pfRevisit = { VIDEOS, stage, MEMO: new Map() };
 `;
 
 function offerPair() {
   return {
-    label: "generic offer, unrecognized video",
-    firstName: "slow-path measure (gates + rect walk)",
-    secondName: "learned print match (tag/class/id walk)",
+    label: "revisit offer, templated video",
+    firstName: "fallback measure (gates + rect walk)",
+    secondName: "template memo hit (freshness re-walk)",
     firstOp: function slowMeasure() {
       const { VIDEOS, stage } = window.__pfRevisit;
       // The mutation whose offer this prices: add or remove, either way
@@ -245,36 +234,51 @@ function offerPair() {
       }
       window.__pfJitSink = acc;
     },
-    secondOp: function printMatch() {
-      const { VIDEOS, PRINTS, stage } = window.__pfRevisit;
-      // Same dirty tree as the cold arm; class matching reads no layout,
-      // so the flush stays pending and unpaid.
+    secondOp: function templateMemoHit() {
+      const { VIDEOS, stage, MEMO } = window.__pfRevisit;
+      // Same dirty tree as the cold arm. Mirrors resolvePlayer's memo: a
+      // per-video entry holding the anchor, its hop distance and the video's
+      // parent, re-verified per offer with pointer reads only - no layout
+      // anywhere, on hit or miss alike.
+      const GROUP = ":is(.jwplayer,.jw-wrapper,[data-vjs-player],.video-js,.vjs-tech,video-js,[data-plyr],[data-plyr-config],.plyr__video-wrapper,.plyr,.art-video-player,.artplayer,.dplayer,.mejs-container,.mejs__container,.xgplayer,.prism-player,.fluid_video_wrapper,.fp-player,flowplayer-ui,[data-player-id],.flowplayer,[data-player],media-player,mux-player,radiant-media-player,.shaka-video-container,[data-shaka-player],[data-shaka-player-container],.theoplayer-container,theoplayer-ui,theoplayer-default-ui)";
       stage.classList.toggle("pf-dirty");
       let acc = 0;
       for (let n = 0; n < 8; n++) {
         for (let v = 0; v < VIDEOS.length; v++) {
           const video = VIDEOS[v];
-          const print = PRINTS.get(video);
-          if (!print || typeof print !== "object") continue;
-          if (!Array.isArray(print.cls) || !Number.isInteger(print.depth)) continue;
-          // matchPrints: climb to the recorded depth, then compare. No
-          // rect reads anywhere - the print IS the placement answer.
-          let node = video;
-          for (let hop = 0; hop < print.depth; hop++) {
-            node = node.parentNode ?? null;
-            if (!node || node.nodeType !== 1) break;
-          }
-          if (!node || node.nodeType !== 1) continue;
-          if (node.tagName.toLowerCase() !== print.tag) continue;
-          if (print.id !== null && node.id !== print.id) continue;
-          let subset = true;
-          for (const cls of print.cls) {
-            if (!node.classList.contains(cls)) {
-              subset = false;
-              break;
+          const cached = MEMO.get(video);
+          if (cached && cached.parent === video.parentNode) {
+            let node = video;
+            let seen = 0;
+            let fresh = false;
+            while (node) {
+              if (node.nodeType === 1) {
+                if (seen === cached.hops) {
+                  fresh = node === cached.el;
+                  break;
+                }
+                seen++;
+              }
+              node = node.parentNode ?? null;
+            }
+            if (fresh) {
+              acc += 1;
+              continue;
             }
           }
-          acc += subset ? print.depth + 1 : 0;
+          let node = video;
+          let hops = 0;
+          while (node) {
+            if (node.nodeType === 1) {
+              if (node.matches(GROUP)) {
+                MEMO.set(video, { el: node, hops, parent: video.parentNode });
+                acc += hops + 1;
+                break;
+              }
+              hops++;
+            }
+            node = node.parentNode ?? null;
+          }
         }
       }
       window.__pfJitSink = acc;

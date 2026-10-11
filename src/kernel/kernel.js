@@ -1,17 +1,18 @@
 import { logger } from "../shared/diagnostics.js";
-import { getConfigValue, loadJsonObject, gmSetValue, KEYS } from "../shared/storage.js";
+import { getConfigValue } from "../shared/storage.js";
 import { setDebugRuntime } from "../shared/diagnostics.js";
 import { postTask } from "../shared/scheduler.js";
 import { Scope } from "../shared/scope.js";
 import { DOMManager, trackScopedObserver } from "../shared/dom-manager.js";
-import { resolvePlayer, fingerprintFor, registryDataAttributes, registryCustomTags, meetsMinSize, watchDocumentVideos, watchMediaEvents, surveyVideos, forEachShadowVideos } from "./sdk.js";
+import { resolvePlayer, templateDataAttributes, templateCustomTags, meetsMinSize, watchDocumentVideos, watchMediaEvents, surveyVideos, forEachShadowVideos } from "./sdk.js";
 import { GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
 
 /**
- * Top-level orchestrator: watches for <video> elements, identifies the player
- * SDK, drives discovery, and owns the registry/lifecycle pair.
+ * Top-level orchestrator: watches for <video> elements, resolves the player
+ * block around each one, drives discovery, and owns the registry/lifecycle
+ * pair.
  * Under @run-at document-start nothing pre-exists us: the kernel rides the
- * shared discovery tap (sdk.js), catching SDK-created players the moment
+ * shared discovery tap (sdk.js), catching framework-built players the moment
  * their <video> enters the DOM and readiness transitions on existing ones.
  */
 /** Skyline the removal watchdog never exceeds regardless of nesting. */
@@ -23,22 +24,13 @@ const MAX_REMOVAL_DEPTH = 8;
  *  anchors[0]); the margin buys exactly the player-root level. Applies to
  *  the first arming only - re-anchors go wide to MAX_REMOVAL_DEPTH. */
 const REMOVAL_DEPTH_MARGIN = 1;
-/** Learned prints remembered per hostname; oldest-learned evicted past it. */
-const PRINTS_PER_HOST = 10;
-/**
- * Shared empty prints: most hosts learned nothing, and #printsForHost runs
- * on every offer - a literal here would allocate once per offer just to say
- * so. Read-only by convention: resolvePlayer iterates it, #learnFromShell
- * copies before writing.
- */
-const NO_PRINTS = [];
 /**
  * Attribute names the upgrade watch listens for: identity markers (class,
- * id) plus every data attribute the registry anchors on, derived from the
- * records so a new data-anchored SDK is watched without a second list to
- * drift. Exact names - attributeFilter takes no selectors.
+ * id) plus every data attribute the templates anchor on, derived from the
+ * templates so a new data-anchored shape is watched without a second list
+ * to drift. Exact names - attributeFilter takes no selectors.
  */
-const UPGRADE_ATTRS = ["class", "id", ...registryDataAttributes()];
+const UPGRADE_ATTRS = ["class", "id", ...templateDataAttributes()];
 /**
  * Consecutive fruitless upgrade re-offers before the watch stands down.
  * Class churn bursts (framework re-renders, carousel rotations) must not
@@ -57,15 +49,6 @@ const UPGRADE_MISS_LIMIT = 3;
  * UPGRADE_MISS_LIMIT.
  */
 const TRANSIENT_BOOT_LIMIT = 3;
-
-/** Identity of a print for deduping: tag, depth, id and class set. */
-function printKey(print) {
-  if (!print || typeof print !== "object") {
-    return "";
-  }
-  const cls = Array.isArray(print.cls) ? print.cls : [];
-  return `${print.tag ?? ""}\n${print.depth ?? -1}\n${print.id ?? ""}\n${cls.join("\n")}`;
-}
 
 export class Kernel {
   #registry;
@@ -106,7 +89,7 @@ export class Kernel {
       if (!shell.video.isConnected) {
         this.#sessions.get(shell.video)?.releaseClaim();
         shell.destroy();
-        logger.log("kernel", `Reconciled orphaned shell: ${shell.sdk.name}`);
+        logger.log("kernel", `Reconciled orphaned shell: ${shell.sdk.label}`);
       }
     }
   };
@@ -201,13 +184,6 @@ export class Kernel {
     // A created shell breaks the transient-miss streak: later timing noise
     // counts fresh, the way any adoption resets the upgrade-miss streak.
     this.#sessions.get(shell.video)?.resetTransientMisses();
-    // Learn from generic adoptions only: registry matches are static
-    // knowledge, and learned matches are already learned. Recording what a
-    // successful slow-path adoption looked like is what makes the next visit
-    // fast.
-    if (shell.sdk?.source === "generic") {
-      this.#learnFromShell(shell);
-    }
     for (const cb of this.#createdListeners) {
       try {
         cb(shell);
@@ -217,84 +193,10 @@ export class Kernel {
     }
   }
 
-  /** Whether the unknown-player fallback (generic + learned) may run. On
-   *  unless the user opts out - the registry answers first either way. */
+  /** Whether the unmatched-video fallback may run. On unless the user opts
+   *  out - templates answer first either way. */
   #genericEnabled() {
     return getConfigValue("detection.genericPlayers", true) === true;
-  }
-
-  /**
-   * The learned prints document, read once on first need rather than at
-   * init: registry-only pages never pay the GM read. Shape-guarded on the
-   * way in - a corrupt or foreign doc degrades to "nothing learned".
-   */
-  #printsDoc = null;
-  #printsLoaded = false;
-
-  #loadPrints() {
-    if (!this.#printsLoaded) {
-      this.#printsLoaded = true;
-      const raw = loadJsonObject(KEYS.prints, null);
-      this.#printsDoc = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : null;
-    }
-    return this.#printsDoc;
-  }
-
-  /** Prints remembered for this hostname, or []. */
-  #printsForHost() {
-    const doc = this.#loadPrints();
-    if (!doc) {
-      return NO_PRINTS;
-    }
-    let hostname;
-    try {
-      hostname = location.hostname;
-    } catch {
-      return NO_PRINTS;
-    }
-    const list = doc[hostname];
-    return Array.isArray(list) ? list : NO_PRINTS;
-  }
-
-  /**
-   * Record a successful generic adoption as a domain-scoped print. Writes
-   * only when the shape is new (repeat visits match silently without
-   * churning storage), prunes oldest-learned past the per-host cap, and
-   * never throws: learning is an accelerator, and a failed learn must not
-   * fail the adoption it rode in on.
-   */
-  #learnFromShell(shell) {
-    try {
-      const sdk = shell.sdk;
-      const video = shell.video;
-      if (!sdk || !video || !sdk.container || sdk.container.nodeType !== 1 ||
-          !Number.isInteger(sdk.hops)) {
-        return;
-      }
-      const print = fingerprintFor(video, sdk.container, sdk.hops);
-      const key = printKey(print);
-      const doc = { ...(this.#loadPrints() ?? {}) };
-      const hostname = location.hostname;
-      const list = Array.isArray(doc[hostname]) ? [...doc[hostname]] : [];
-      if (list.some((existing) => printKey(existing) === key)) {
-        return;
-      }
-      list.push({ ...print, learnedAt: Date.now() });
-      while (list.length > PRINTS_PER_HOST) {
-        let oldest = 0;
-        for (let i = 1; i < list.length; i++) {
-          if ((list[i].learnedAt ?? 0) < (list[oldest].learnedAt ?? 0)) {
-            oldest = i;
-          }
-        }
-        list.splice(oldest, 1);
-      }
-      doc[hostname] = list;
-      this.#printsDoc = doc;
-      gmSetValue(KEYS.prints, doc);
-    } catch (err) {
-      logger.error("kernel", "Failed to learn player print:", err);
-    }
   }
 
   init(hints = []) {
@@ -345,7 +247,7 @@ export class Kernel {
     // registry does not exist at all.
     const registry = globalThis.customElements;
     if (typeof registry?.whenDefined === "function") {
-      for (const tag of registryCustomTags()) {
+      for (const tag of templateCustomTags()) {
         registry.whenDefined(tag).then(() => {
           if (this.#scope.disposed) {
             return;
@@ -485,19 +387,19 @@ export class Kernel {
     if (session.claimed) {
       return;
     }
-    // One unified resolve per offer: the registry probe, the learned prints
-    // and the measured fallback share a single ancestry walk inside, in
-    // that priority order. The fallback runs for videos no record claims,
-    // so a renamed-everything fork costs one shared scan while every known
-    // SDK keeps its single lookup.
+    // One unified resolve per offer: the template probe and the measured
+    // fallback share a single ancestry walk inside, in that priority order.
+    // The fallback runs for videos no template claims, so a
+    // renamed-everything fork costs one shared scan while every known shape
+    // keeps its single lookup.
     const sdk = resolvePlayer(video, {
-      prints: this.#printsForHost(),
       enabled: this.#genericEnabled()
     });
     if (!sdk) {
-      // No record claimed it: arm the upgrade watch, so SDK classes or ids
-      // arriving late (player chrome built after the video) re-offer instead
-      // of missing for the life of the document. Structural candidates only.
+      // No template claimed it: arm the upgrade watch, so framework classes
+      // or ids arriving late (player chrome built after the video) re-offer
+      // instead of missing for the life of the document. Structural
+      // candidates only.
       this.#armUpgradeWatch(video);
       return;
     }
@@ -518,7 +420,7 @@ export class Kernel {
     // default), the dimensions/duration interpolation never runs - a disabled
     // log call must cost one boolean read, not a template build.
     if (logger.enabled) {
-      logger.log("kernel", `${sdk.name} adopted (${video.videoWidth}x${video.videoHeight}, ${Math.round(video.duration)}s)`);
+      logger.log("kernel", `${sdk.label} adopted (${video.videoWidth}x${video.videoHeight}, ${Math.round(video.duration)}s)`);
     }
     this.#lifecycle.onVideoFound({
       video,
@@ -837,7 +739,7 @@ class VideoSession {
     // just cancelled the grace that would have released the claim. With the
     // discovery tap already downgraded, this edge is the only re-discovery
     // signal there is: release the claim and run adoption again (fresh
-    // findSdk/size validation; a video that no longer qualifies stays
+    // template/size validation; a video that no longer qualifies stays
     // unclaimed and refusable). One-shot consume, so ordinary re-anchors
     // with a live shell - and boot-failed videos waiting on their media
     // event - never re-enter adoption. The movedOut branch re-adopts too,
@@ -928,7 +830,7 @@ export class ShellRegistry {
 
   register(shell) {
     this.#shells.set(shell.video, shell);
-    logger.log("registry", `Shell registered: ${shell.sdk.name}`);
+    logger.log("registry", `Shell registered: ${shell.sdk.label}`);
   }
 
   unregister(shell) {
@@ -939,7 +841,7 @@ export class ShellRegistry {
     if (this.#shells.get(shell.video) === shell) {
       this.#shells.delete(shell.video);
     }
-    logger.log("registry", `Shell unregistered: ${shell.sdk.name}`);
+    logger.log("registry", `Shell unregistered: ${shell.sdk.label}`);
   }
 
   getByVideo(video) {
@@ -1098,7 +1000,7 @@ export class LifecycleManager {
   }
 
   async onVideoFound({ video, container, sdk }) {
-    logger.log("lifecycle", `video:found - ${sdk.name}`);
+    logger.log("lifecycle", `video:found - ${sdk.label}`);
     if (this.#registry.getByVideo(video)) {
       logger.log("lifecycle", "Video already has a shell, skipping");
       return;
@@ -1120,7 +1022,7 @@ export class LifecycleManager {
     // has already re-anchored the watch to the new chain, so the next nearby
     // mutation re-enters adoption against the CURRENT container.
     if (!video.isConnected || !container.isConnected || !container.contains(video)) {
-      logger.log("lifecycle", `${sdk.name} video left its container before settle - skipping`);
+      logger.log("lifecycle", `${sdk.label} video left its container before settle - skipping`);
       // The claim stands (the session holds it) and the discovery tap is
       // downgraded, so this video is unreachable unless the removal watch's
       // reconnect edge re-offers it. Hand the kernel the fact it needs for that.
@@ -1138,9 +1040,9 @@ export class LifecycleManager {
       const shell = this.#shellFactory({ video, container, sdk });
       await shell?.ready;
       this.#onShellCreated(shell);
-      logger.log("lifecycle", `Shell created for ${sdk.name}`);
+      logger.log("lifecycle", `Shell created for ${sdk.label}`);
     } catch (err) {
-      logger.error("lifecycle", `Failed to create shell for ${sdk.name}:`, err);
+      logger.error("lifecycle", `Failed to create shell for ${sdk.label}:`, err);
       // The shell rolls its own DOM back before rethrowing, so the video is
       // adoptable again. Re-arm it - without this the kernel's seen-set kept
       // the video claimed forever and one transient boot throw cost that
@@ -1160,7 +1062,7 @@ export class LifecycleManager {
     const shell = this.#registry.getByVideo(video);
     if (shell) {
       shell.destroy();
-      logger.log("lifecycle", `Shell destroyed: ${shell.sdk.name}`);
+      logger.log("lifecycle", `Shell destroyed: ${shell.sdk.label}`);
     }
   }
 

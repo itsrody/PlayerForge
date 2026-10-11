@@ -1,89 +1,80 @@
 /**
- * SDK detection engine.
+ * Player template engine: structural, never semantic.
  *
- * Detection is registry-driven: every supported player SDK declares exactly one
- * record below, and a video is adopted only when its composed ancestry contains
- * one of that SDK's anchors. An anchor must be owned by its SDK (prefixed
- * class, dedicated data attribute, or custom element tag), so pages merely
- * styling a <div class="player"> stay unrecognized rather than misidentified.
- * Coverage grows by adding records.
+ * Detection is template-driven: every major player framework declares its
+ * DOM shape below as an anonymous anchor list, and a video is adopted when
+ * its composed ancestry contains one. An anchor must be framework-namespaced
+ * (prefixed class, dedicated data attribute, or custom element tag), so pages
+ * merely styling a <div class="player"> stay unrecognized rather than
+ * misidentified. Coverage grows by adding templates.
  *
- * The registry answers first. Below it, `findGenericPlayer` offers a
- * default-on measured fallback (gated on a setting the kernel checks) for
- * videos no record claims - renamed-everything forks and bespoke players.
- * It trades the anchor for behavioral gates (playing, visible, user-driven)
- * plus measured placement under stricter admission, and it announces its
- * first adoption with a hint pointing at its toggle.
+ * Templates carry no names and no sources: there is no SDK identity in this
+ * file, only shapes and the containers they resolve. The shell-facing
+ * descriptor carries the resolved container (plus the matched anchor element
+ * and its hop distance, both computed free during the scan) and a label
+ * derived from the matched element for logs - div.jwplayer, video-js -
+ * so readable diagnostics need no registry of names behind them.
  *
- * Learned prints sit between anchor and measurement: a successful fallback
- * adoption records its player block per hostname, and the next visit matches
- * the print like an anchor instead of re-measuring. All three probes share
- * one ancestry walk inside resolvePlayer, in registry-learned-generic
- * priority.
+ * Below the templates, `findGenericPlayer` offers a default-on measured
+ * fallback (gated on a setting the kernel checks) for videos no template
+ * claims - renamed-everything forks and bespoke players. It trades the
+ * anchor for behavioral gates (playing, visible, user-driven) plus measured
+ * placement under stricter admission, and it announces its first adoption
+ * with a hint pointing at its toggle.
  *
  * Framework roots are never anchors. An app-shell marker like Inertia's
  * [data-page] fires for every video on the page - articles, previews, ads -
  * and resolves the container to the app root, so the host spans the whole
- * app instead of the player. A record was once added for exactly such a
+ * app instead of the player. A template was once added for exactly such a
  * marker and removed for exactly this reason; a framework that ships its own
- * player gets a record for the player's namespaced anchor, not the shell.
+ * player gets a template for the player's namespaced anchor, not the shell.
  *
- * Forks restyle freely but keep behavior: prefer anchors the SDK's own JS
- * reads or writes (tech classes it sets, data-* config it parses, custom
+ * Forks restyle freely but keep behavior: prefer anchors the framework's own
+ * JS reads or writes (tech classes it sets, data-* config it parses, custom
  * tags it upgrades) over purely cosmetic ones. `.vjs-tech` survives a
  * re-skin that drops `.video-js`; `data-plyr-config` survives one that
  * drops `.plyr`.
  *
- * Record schema:
- *   name    - label used for logging and shell metadata.
+ * Template schema:
  *   anchors - selectors resolved against the video's composed ancestry
- *             (closest(), shadow-boundary aware). Each must be SDK-namespaced;
- *             ordered most specific first.
- *   host    - optional selector overriding which element hosts the shell's
- *             DOM; resolved against the matched element's composed ancestry
- *             (overriding default of the matched element itself). Not yet set
- *             by any record - kept as the extensible placement hook.
+ *             (closest(), shadow-boundary aware). Each must be
+ *             framework-namespaced; ordered most specific first.
  *
- * The shell-facing descriptor carries name + the resolved container (plus the
+ * The shell-facing descriptor carries the resolved container (plus the
  * matched anchor element and its hop distance, both computed free during the
- * scan), so the kernel has one source of truth for SDK identity AND shell
- * placement. The descriptor is cached - same object per video on every
- * re-query. `source` names the path that produced it (registry, generic or
- * learned): identical shapes, but a reader deciding whether to learn from an
- * adoption needs to know which one fired.
+ * scan). `matched` tells template hits apart from measured-fallback
+ * adoptions: the fallback announces itself once, so the reader deciding
+ * that needs to know which path fired.
  *
- * Reserved for future needs (not implemented): corroborating selectors,
- * version gates. Adding an SDK = one record plus one fixture test.
- *
- * Selection: among all matching anchors across all records, the element with
- * the fewest composed ancestor hops from the video wins; ties break by
- * registry order, then anchor order.
+ * Selection: among all matching anchors across all templates, the element
+ * with the fewest composed ancestor hops from the video wins; ties break by
+ * template order, then anchor order.
  */
 import { onDomMutations } from "../shared/dom-manager.js";
 import { isShadowRoot, rootNodeOf } from "../shared/shadow.js";
 
-const REGISTRY = [
-  { name: "JW Player", anchors: [".jwplayer", ".jw-wrapper"] },
-  { name: "Video.js", anchors: ["[data-vjs-player]", ".video-js", ".vjs-tech", "video-js"] },
-  { name: "Plyr", anchors: ["[data-plyr]", "[data-plyr-config]", ".plyr__video-wrapper", ".plyr"] },
-  { name: "ArtPlayer", anchors: [".art-video-player", ".artplayer"] },
-  { name: "DPlayer", anchors: [".dplayer"] },
-  { name: "MediaElement.js", anchors: [".mejs-container", ".mejs__container"] },
-  { name: "XGPlayer", anchors: [".xgplayer"] },
-  { name: "Aliplayer", anchors: [".prism-player"] },
-  { name: "Fluid Player", anchors: [".fluid_video_wrapper"] },
-  { name: "Flowplayer", anchors: [".fp-player", "flowplayer-ui", "[data-player-id]", ".flowplayer"] },
-  { name: "Clappr", anchors: ["[data-player]"] },
-  { name: "Vidstack", anchors: ["media-player"] },
-  { name: "Mux Player", anchors: ["mux-player"] },
-  { name: "Radiant Media Player", anchors: ["radiant-media-player"] },
+const TEMPLATES = [
+  { anchors: [".jwplayer", ".jw-wrapper"] },
+  { anchors: ["[data-vjs-player]", ".video-js", ".vjs-tech", "video-js"] },
+  { anchors: ["[data-plyr]", "[data-plyr-config]", ".plyr__video-wrapper", ".plyr"] },
+  { anchors: [".art-video-player", ".artplayer"] },
+  { anchors: [".dplayer"] },
+  { anchors: [".mejs-container", ".mejs__container"] },
+  { anchors: [".xgplayer"] },
+  { anchors: [".prism-player"] },
+  { anchors: [".fluid_video_wrapper"] },
+  { anchors: [".fp-player", "flowplayer-ui", "[data-player-id]", ".flowplayer"] },
+  { anchors: ["[data-player]"] },
+  { anchors: ["media-player"] },
+  { anchors: ["mux-player"] },
+  { anchors: ["radiant-media-player"] },
   // UI builds only: base-library players with no skin ship no DOM markers,
   // so there is nothing here to match. Shaka's UI adds .shaka-video-container
   // to the wrapping div (and the declarative setup marks video and container
   // with data-shaka-player*); THEOplayer fetches its own container through
   // .theoplayer-container, and its web-ui package upgrades theoplayer-ui tags.
-  { name: "Shaka Player", anchors: [".shaka-video-container", "[data-shaka-player]", "[data-shaka-player-container]"] },
-  { name: "THEOplayer", anchors: [".theoplayer-container", "theoplayer-ui", "theoplayer-default-ui"] },
+  { anchors: [".shaka-video-container", "[data-shaka-player]", "[data-shaka-player-container]"] },
+  { anchors: [".theoplayer-container", "theoplayer-ui", "theoplayer-default-ui"] },
 ];
 
 export const MIN_VIDEO_WIDTH = 100;
@@ -107,7 +98,7 @@ export const GENERIC_MIN_VIDEO_HEIGHT = 120;
  * stay `:is()`-compatible - all current ones are simple compounds (classes,
  * attributes, custom-element tags), which group without changing meaning.
  */
-const ANCHOR_GROUP = `:is(${REGISTRY.flatMap((record) => record.anchors).join(",")})`;
+const ANCHOR_GROUP = `:is(${TEMPLATES.flatMap((template) => template.anchors).join(",")})`;
 
 /**
  * Reusable composed-ancestry scratch: the match loop is fully synchronous and
@@ -116,13 +107,6 @@ const ANCHOR_GROUP = `:is(${REGISTRY.flatMap((record) => record.anchors).join(",
  * a fresh one per video. `len` is the filled length each pass.
  */
 const chain = [];
-
-/**
- * Shared empty prints list: resolvePlayer's `prints` default evaluates on
- * every call including memo hits, and the hot path must not allocate to
- * answer from cache. Read-only by convention - no probe writes to it.
- */
-const NO_PRINTS = [];
 
 /**
  * The single composed-ancestry walk, shared by anchor matching and container
@@ -191,26 +175,26 @@ function isMatchFresh(video, entry) {
 /**
  * The scan against an already-filled chain: one pass serves every anchor
  * (uBO's one-pass-over-tokens shape - chain index IS the hop count, so
- * fewest hops wins with ties keeping registry then anchor order),
- * and the same fill serves the print and generic probes below, so one offer
- * climbs each ancestry once instead of three times. Pure reads - no layout
- * writes anywhere in the resolve path, so sharing the fill cannot flush.
+ * fewest hops wins with ties keeping template then anchor order),
+ * and the same fill serves the fallback probe below, so one offer climbs
+ * each ancestry once instead of twice. Pure reads - no layout writes
+ * anywhere in the resolve path, so sharing the fill cannot flush.
  */
-function matchSdkOnChain(len) {
+function matchTemplatesOnChain(len) {
   let best = null;
   for (let hop = 0; hop < (best ? best.hops : len); hop++) {
     // Grouped pre-check: one engine call per node instead of one per anchor.
     // A miss skips every anchor below; a hit resolves through the same
-    // registry-then-anchor order as the loop this replaced, so the winner is
+    // template-then-anchor order as the loop this replaced, so the winner is
     // identical - only the number of `matches()` calls changed.
     if (!chain[hop].matches(ANCHOR_GROUP)) {
       continue;
     }
-    for (let r = 0; r < REGISTRY.length; r++) {
-      const anchors = REGISTRY[r].anchors;
+    for (let r = 0; r < TEMPLATES.length; r++) {
+      const anchors = TEMPLATES[r].anchors;
       for (let a = 0; a < anchors.length; a++) {
         if (chain[hop].matches(anchors[a])) {
-          best = { record: REGISTRY[r], el: chain[hop], hops: hop };
+          best = { template: TEMPLATES[r], el: chain[hop], hops: hop };
           break;
         }
       }
@@ -222,19 +206,19 @@ function matchSdkOnChain(len) {
   return best;
 }
 
-/** Positive registry descriptors by video. The memo policy (freshness check,
+/** Positive template descriptors by video. The memo policy (freshness check,
  *  why the null stays out) is documented on resolvePlayer, its only writer. */
 const descriptorCache = new WeakMap();
 
 /**
- * Identify the SDK owning a video, or null when unregistered.
+ * Identify the player template owning a video, or null when unrecognized.
  *
- * One leg of resolvePlayer below (registry only, no prints, no fallback):
+ * One leg of resolvePlayer below (templates only, no fallback):
  * the memo policy and the scan live there, so this stays a thin delegate
  * with the same signature, same memo identity and same null semantics the
  * suite pins.
  */
-export function findSdkForVideo(video) {
+export function findPlayerForVideo(video) {
   return resolvePlayer(video);
 }
 
@@ -275,12 +259,11 @@ export function findGenericPlayer(video) {
     return null;
   }
   return describe({
-    name: "Custom player",
-    host: null,
     container: placed.container,
     anchor: placed.container,
     hops: placed.hops,
-    source: "generic"
+    label: describeElement(placed.container),
+    matched: false
   });
 }
 
@@ -396,15 +379,15 @@ function climbGenericContainer(len, rect, doc) {
 }
 
 /**
- * Data attributes the registry anchors on, for the upgrade watch's
+ * Data attributes the templates anchor on, for the upgrade watch's
  * attributeFilter (which takes exact names, not selectors). Derived from
- * the records so a new data-anchored SDK is watched without a second list
- * to drift. Sorted, deduplicated.
+ * the templates so a new data-anchored shape is watched without a second
+ * list to drift. Sorted, deduplicated.
  */
-export function registryDataAttributes() {
+export function templateDataAttributes() {
   const names = new Set();
-  for (const record of REGISTRY) {
-    for (const anchor of record.anchors) {
+  for (const template of TEMPLATES) {
+    for (const anchor of template.anchors) {
       const match = /^\[([A-Za-z0-9-]+)/.exec(anchor);
       if (match && match[1].startsWith("data-")) {
         names.add(match[1]);
@@ -415,15 +398,15 @@ export function registryDataAttributes() {
 }
 
 /**
- * Custom-element tags the registry anchors on, for the upgrade re-offer.
+ * Custom-element tags the templates anchor on, for the upgrade re-offer.
  * A bare tag with a hyphen is a custom element by construction; classes,
  * ids and attribute selectors cannot be one. Derived like the data
  * attributes above, for the same no-second-list reason.
  */
-export function registryCustomTags() {
+export function templateCustomTags() {
   const names = new Set();
-  for (const record of REGISTRY) {
-    for (const anchor of record.anchors) {
+  for (const template of TEMPLATES) {
+    for (const anchor of template.anchors) {
       if (/^[a-z][a-z0-9]*(-[a-z0-9]+)+$/.test(anchor)) {
         names.add(anchor);
       }
@@ -432,114 +415,31 @@ export function registryCustomTags() {
   return [...names].sort();
 }
 
-/**
- * Learned fingerprints: domain-scoped dynamic records. When the generic slow
- * path adopts a video, the kernel records what the player block looked like;
- * on the next visit the print matches like a registry anchor, skipping the
- * behavioral gates' placement measurement (size, playback and activation
- * still gate every adoption - the print only answers identity and placement).
- *
- * A print names the container element the generic climb resolved: its tag,
- * its sorted class list (or null when it has none), its id (or null), and
- * its composed hop distance from the video. Matching is tag + depth +
- * id-equality plus class SUBSET (every recorded class present, extras
- * allowed): state classes come and go every session (`playing`, `open`,
- * `muted`), so exact-set matching would go stale within a visit, while a
- * subset still refuses a re-skin that drops the recorded markers. A stale
- * print costs one failed match and falls through to the slow path, which
- * re-learns - staleness degrades to today's behavior, never to a wrong shell.
- */
-export function fingerprintFor(video, container, hops) {
-  return {
-    tag: container.localName ?? "",
-    cls: [...(container.classList ?? [])].sort(),
-    id: container.id || null,
-    depth: hops
-  };
-}
-
-/** Probe with its own walk; the matching lives in matchPrintsOnChain. */
-export function matchPrints(video, print) {
-  return matchPrintsOnChain(fillComposedChain(video), print);
-}
-
-/**
- * The print probe against an already-filled chain: chain[0] is the video,
- * so the node at the print's recorded depth is chain[depth] - the same node
- * the climbing walk lands on, without re-walking (same traversal, same hop
- * counting, so shadow-hosted videos resolve the way registry matches do).
- * A malformed print answers null without touching layout - validation reads
- * tag and classes only, never a box.
- */
-function matchPrintsOnChain(len, print) {
-  if (!print || typeof print.tag !== "string" || !Array.isArray(print.cls) ||
-      !Number.isInteger(print.depth) || print.depth < 1 || print.depth >= len) {
-    return null;
-  }
-  const node = chain[print.depth];
-  if (node.localName !== print.tag) {
-    return null;
-  }
-  if (print.id != null && node.id !== print.id) {
-    return null;
-  }
-  // Indexed subset walk, not cls.every: the probe runs per print per offer,
-  // and the closure form allocates on every one of them.
-  const needed = print.cls;
-  for (let i = 0; i < needed.length; i++) {
-    if (!node.classList?.contains(needed[i])) {
-      return null;
-    }
-  }
-  return { el: node, hops: print.depth };
-}
-
-/**
- * Resolve the element that hosts the shell DOM: the matched record's `host`
- * override, else the matched element itself. A record earns an override only
- * with fixture proof that its chrome lives outside the anchor - an override
- * without proof is a placement guess wearing a record's clothes. Exported
- * solely so the host-resolution branch (unexercised by the current registry)
- * can be driven by a synthetic match in the sdk-engine test.
- */
-export function resolveContainer({ record, el }) {
-  if (!record.host) {
-    return el;
-  }
-  // Composed-ancestry walk mirroring anchor matching: the host override may
-  // target an element above the matched anchor and across shadow boundaries.
-  const len = fillComposedChain(el);
-  for (let hop = 0; hop < len; hop++) {
-    if (chain[hop].matches(record.host)) {
-      return chain[hop];
-    }
-  }
-  return el;
-}
-
-/**
- * The host-override probe against an already-filled chain. `match` came off
- * this same fill, so its anchor sits at chain[hops] and the override scans
- * upward from there - the same elements the exported walk scans from `el`,
- * without refilling.
- */
-function resolveContainerOnChain(len, match) {
-  if (!match.record.host) {
-    return match.el;
-  }
-  for (let hop = match.hops; hop < len; hop++) {
-    if (chain[hop].matches(match.record.host)) {
-      return chain[hop];
-    }
-  }
-  return match.el;
-}
-
 /** The one descriptor constructor: every path emits the same shape, so the
- *  kernel cannot tell which probe produced it - except by `source`, which the
- *  learner and the tests read. */
-function describe({ name, host, container, anchor, hops, source }) {
-  return { name, host, container, anchor, hops, source };
+ *  kernel cannot tell which probe produced it - except by `matched`, which
+ *  the fallback announcer reads. */
+function describe({ container, anchor, hops, label, matched }) {
+  return { container, anchor, hops, label, matched };
+}
+
+/**
+ * A readable label for a resolved element, derived from the element itself:
+ * tag plus id and classes when present (div.jwplayer, video-js). Logs stay
+ * informative with no registry of names behind them.
+ */
+function describeElement(el) {
+  if (!el || typeof el.localName !== "string") {
+    return "video";
+  }
+  let label = el.localName;
+  if (typeof el.id === "string" && el.id) {
+    label += `#${el.id}`;
+  }
+  const classes = typeof el.getAttribute === "function" ? el.getAttribute("class") : null;
+  if (typeof classes === "string" && classes.trim()) {
+    label += `.${classes.trim().split(/\s+/).join(".")}`;
+  }
+  return label;
 }
 
 /** Gates + placement against an already-filled chain (see genericGates for
@@ -553,67 +453,52 @@ function measureGenericOnChain(video, len) {
     return null;
   }
   return describe({
-    name: "Custom player",
-    host: null,
     container: placed.container,
     anchor: placed.container,
     hops: placed.hops,
-    source: "generic"
+    label: describeElement(placed.container),
+    matched: false
   });
 }
 
 /**
- * The unified resolve: one composed walk per offer, three probes in priority
- * order - registry anchor, learned print, measured fallback. The fill is
- * shared because every probe reads the same ancestry; only the generic climb
- * reads boxes, and only after its layout-free gates pass, so an offer for a
- * paused ad costs the walk and nothing else.
+ * The unified resolve: one composed walk per offer, two probes in priority
+ * order - template anchor, measured fallback. The fill is shared because
+ * both probes read the same ancestry; only the generic climb reads boxes,
+ * and only after its layout-free gates pass, so an offer for a paused ad
+ * costs the walk and nothing else.
  *
- * Only the positive registry descriptor is memoized (same entry, same
- * freshness check findSdkForVideo always had): the null stays unmemoized,
+ * Only the positive template descriptor is memoized (same entry, same
+ * freshness check findPlayerForVideo always had): the null stays unmemoized,
  * because no cheap fingerprint distinguishes "same answer" from "the video's
- * subtree was grafted under a new SDK" - parent, depth and top can all
+ * subtree was grafted under a new shape" - parent, depth and top can all
  * survive such a graft unchanged, and the one exact check (re-running the
  * scan) is the scan itself. A cached null would keep a grafted player
- * permanently unregistered with no path re-offering it (the mutation tap
+ * permanently unmatched with no path re-offering it (the mutation tap
  * offers the moved video, the memo calls it fresh, adoption never runs).
  * The WeakMap key dies with the video, so positive entries are session-only.
  */
-export function resolvePlayer(video, { prints = NO_PRINTS, enabled = false } = {}) {
+export function resolvePlayer(video, { enabled = false } = {}) {
   const cached = descriptorCache.get(video);
   if (cached && isMatchFresh(video, cached)) {
     return cached.descriptor;
   }
   const len = fillComposedChain(video);
-  const match = matchSdkOnChain(len);
+  const match = matchTemplatesOnChain(len);
   if (match) {
     const entry = { best: match, parent: video.parentNode ?? null, descriptor: null };
     entry.descriptor = describe({
-      name: match.record.name,
-      host: match.record.host ?? null,
-      container: resolveContainerOnChain(len, match),
+      container: match.el,
       anchor: match.el,
       hops: match.hops,
-      source: "registry"
+      label: describeElement(match.el),
+      matched: true
     });
     descriptorCache.set(video, entry);
     return entry.descriptor;
   }
   if (!enabled) {
     return null;
-  }
-  for (const print of prints) {
-    const hit = matchPrintsOnChain(len, print);
-    if (hit) {
-      return describe({
-        name: "Custom player",
-        host: null,
-        container: hit.el,
-        anchor: hit.el,
-        hops: hit.hops,
-        source: "learned"
-      });
-    }
   }
   return measureGenericOnChain(video, len);
 }

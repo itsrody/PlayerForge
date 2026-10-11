@@ -71,7 +71,8 @@ test("kernel.init() adopts a video already present in the parsed DOM", async () 
   await deadline;
   assert.equal(created.length, 1, "the pre-existing video got a shell without any media event");
   assert.equal(created[0].video, video);
-  assert.equal(created[0].sdk.name, "JW Player");
+  assert.equal(created[0].sdk.label, "div.jwplayer");
+  assert.equal(created[0].sdk.matched, true);
 });
 
 async function waitFor(cond, ms = 2000) {
@@ -566,8 +567,8 @@ test("a video carrying a cloned shell marker is still adopted", async () => {
   kernel.init();
   await waitFor(() => created.some((shell) => shell.video === video));
   assert.equal(
-    created.find((shell) => shell.video === video).sdk.name,
-    "JW Player",
+    created.find((shell) => shell.video === video).sdk.label,
+    "div.jwplayer",
     "the marker is observable state, not an adoption veto"
   );
 });
@@ -615,7 +616,11 @@ function makeGenericVideo() {
   return { wrapper, video };
 }
 
-function withActivatedPage(fn) {
+async function withActivatedPage(fn) {
+  // Async-aware, like withGenericEnabled below: a bare `return fn()` would
+  // run this finally the moment the async body yields, restoring the real
+  // navigator while the enclosed flow still runs - every adoption past the
+  // first await would read "not activated".
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
   Object.defineProperty(globalThis, "navigator", {
     value: { userActivation: { hasBeenActive: true, isActive: false } },
@@ -623,7 +628,7 @@ function withActivatedPage(fn) {
     configurable: true
   });
   try {
-    return fn();
+    return await fn();
   } finally {
     if (descriptor) {
       Object.defineProperty(globalThis, "navigator", descriptor);
@@ -653,7 +658,7 @@ test("an unrecognized player is adopted with the generic path enabled", async ()
     });
   });
   const shell = created.find((entry) => entry.video === generic.video);
-  assert.equal(shell.sdk.name, "Custom player", "the slow path adopted what no record owns");
+  assert.equal(shell.sdk.matched, false, "the slow path adopted what no template owns");
   assert.equal(shell.container, generic.wrapper, "placement is the player-like wrapper");
 });
 
@@ -670,7 +675,7 @@ test("an unrecognized player is left alone with the fallback explicitly off", as
     });
     assert.ok(
       !created.some((shell) => shell.video === generic.video),
-      "explicit false keeps the registry the only path"
+      "explicit false keeps templates the only path"
     );
   } finally {
     configStore.adopt({ version: 1 });
@@ -697,7 +702,9 @@ function withWritableStore() {
   };
 }
 
-test("a generic adoption persists a print for the hostname", async () => {
+test("a fallback adoption writes no prints document", async () => {
+  // There is nothing to learn anymore: templates match structurally and the
+  // fallback re-measures every visit, so a prints document must never appear.
   const { stored, restore } = withWritableStore();
   try {
     const { kernel, created } = makeHarness();
@@ -708,24 +715,19 @@ test("a generic adoption persists a print for the hostname", async () => {
         await waitFor(() => created.some((shell) => shell.video === generic.video), 3000);
       });
     });
-    const doc = stored["pf:sdk-prints"];
-    assert.ok(doc, "learning wrote a prints document");
-    const prints = doc[window.location.hostname];
-    assert.equal(prints.length, 1, "one shape learned");
-    assert.equal(prints[0].tag, "div");
-    assert.equal(prints[0].depth, 1);
+    assert.equal(stored["pf:sdk-prints"], undefined, "no learning rides the adoption");
   } finally {
     restore();
   }
 });
 
-test("a learned print adopts on the next visit without re-measuring", async () => {
+test("a fallback adoption re-resolves on revisit", async () => {
   const { stored, restore } = withWritableStore();
   try {
     const generic = makeGenericVideo();
     await withGenericEnabled(async () => {
       await withActivatedPage(async () => {
-        // First visit: the slow path adopts and learns.
+        // First visit: the slow path adopts and measures.
         const first = makeHarness();
         first.kernel.init();
         await waitFor(
@@ -733,11 +735,11 @@ test("a learned print adopts on the next visit without re-measuring", async () =
           3000
         );
         assert.equal(
-          first.created.find((shell) => shell.video === generic.video).sdk.source,
-          "generic"
+          first.created.find((shell) => shell.video === generic.video).sdk.matched,
+          false
         );
-        // Second visit, fresh kernel, same document and store: the print
-        // answers instead of the behavioral gates re-measuring placement.
+        // Second visit, fresh kernel, same document and store: the fallback
+        // measures again instead of answering from memory.
         const second = makeHarness();
         second.kernel.init();
         await waitFor(
@@ -745,38 +747,12 @@ test("a learned print adopts on the next visit without re-measuring", async () =
           3000
         );
         const shell = second.created.find((entry) => entry.video === generic.video);
-        assert.equal(shell.sdk.source, "learned", "the print fired, not the slow path");
+        assert.equal(shell.sdk.matched, false, "no memory, just re-measurement");
         assert.equal(shell.container, generic.wrapper);
       });
     });
-    assert.ok(stored["pf:sdk-prints"], "the doc survived both visits");
+    assert.equal(stored["pf:sdk-prints"], undefined, "revisits learn nothing either");
   } finally {
-    restore();
-  }
-});
-
-test("learned prints stay dormant with the switch off", async () => {
-  const { stored, restore } = withWritableStore();
-  const { configStore } = await import("../src/shared/storage.js");
-  configStore.adopt({ version: 1, detection: { genericPlayers: false } });
-  try {
-    // A print learned earlier (or hand-seeded): the video matches it, but
-    // the single switch governs learned matching exactly like the slow path.
-    stored["pf:sdk-prints"] = {
-      [window.location.hostname]: [{ tag: "div", cls: [], id: null, depth: 1 }]
-    };
-    const { kernel, created } = makeHarness();
-    const generic = makeGenericVideo();
-    await withActivatedPage(async () => {
-      kernel.init();
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    });
-    assert.ok(
-      !created.some((shell) => shell.video === generic.video),
-      "dormant prints adopt nothing"
-    );
-  } finally {
-    configStore.adopt({ version: 1 });
     restore();
   }
 });
@@ -790,8 +766,8 @@ test("the fallback is on unless the user opts out", async () => {
     await waitFor(() => created.some((shell) => shell.video === generic.video), 3000);
   });
   assert.equal(
-    created.find((shell) => shell.video === generic.video).sdk.source,
-    "generic",
+    created.find((shell) => shell.video === generic.video).sdk.matched,
+    false,
     "an unrecognized player adopts with no opt-in"
   );
 });
@@ -816,7 +792,7 @@ test("a late SDK class re-offers the video", async () => {
   generic.wrapper.classList.add("dplayer");
   await waitFor(() => created.some((shell) => shell.video === generic.video), 3000);
   const shell = created.find((entry) => entry.video === generic.video);
-  assert.equal(shell.sdk.source, "registry", "the late anchor wins, not a re-measure");
+  assert.equal(shell.sdk.matched, true, "the late anchor wins, not a re-measure");
   assert.equal(upgrades(), armed - 1, "adoption disarms exactly the watch it rode in on");
   assert.equal(removals(), riding + 1, "and the session watch takes over one-for-one");
 });
@@ -858,7 +834,7 @@ test("kernel.init accepts probe hints and adopts through the same path", async (
     await waitFor(() => created.some((shell) => shell.video === generic.video), 3000);
   });
   const shell = created.find((entry) => entry.video === generic.video);
-  assert.equal(shell.sdk.source, "generic");
+  assert.equal(shell.sdk.matched, false);
   assert.equal(shell.container, generic.wrapper, "hints change order, never placement");
 });
 
@@ -899,8 +875,8 @@ test("churn bursts stand the upgrade watch down; media re-arms it", async () => 
   generic.wrapper.classList.add("dplayer");
   await waitFor(() => created.some((shell) => shell.video === generic.video), 3000);
   assert.equal(
-    created.find((shell) => shell.video === generic.video).sdk.source,
-    "registry",
+    created.find((shell) => shell.video === generic.video).sdk.matched,
+    true,
     "a post-stand-down upgrade still adopts once anything re-offers"
   );
 });
@@ -924,12 +900,12 @@ test("a late custom-element upgrade re-surveys its subtree", async () => {
 
     kernel.init();
     await new Promise((resolve) => setTimeout(resolve, 300));
-    assert.ok(resolvers.has("video-js"), "the registry tag is watched at boot");
+    assert.ok(resolvers.has("video-js"), "the template tag is watched at boot");
     const before = created.length;
     assert.ok(before > 0, "the harness video adopted normally first");
 
     // The upgrade attaches shadow chrome with the video inside it - a shape
-    // the document feed structurally cannot see (no record fires for nodes
+    // the document feed structurally cannot see (no template fires for nodes
     // entering a fresh shadow root).
     const shadow = player.attachShadow({ mode: "open" });
     const slot = document.createElement("div");
@@ -960,8 +936,8 @@ test("a late custom-element upgrade re-surveys its subtree", async () => {
     // shell for this video, once created, stays created.
     await waitFor(() => created.some((shell) => shell.video === video), 3000);
     assert.equal(
-      created.find((shell) => shell.video === video).sdk.source,
-      "registry",
+      created.find((shell) => shell.video === video).sdk.matched,
+      true,
       "the upgrade adopts through the normal path"
     );
   } finally {

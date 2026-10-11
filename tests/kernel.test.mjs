@@ -34,7 +34,7 @@ const { ShellRegistry } = await import("../src/kernel/kernel.js");
 
 function makeShell(overrides = {}) {
   return {
-    sdk: { name: "test", hops: 0 },
+    sdk: { label: "test", hops: 0 },
     video: { videoWidth: 0, videoHeight: 0, duration: 0, isConnected: true },
     container: { clientWidth: 0, clientHeight: 0 },
     shellHost: {},
@@ -153,7 +153,7 @@ test("registry: destroyAll tears down every shell, not just one", () => {
   const slot = new ShellRegistry();
   const destroyed = [];
   for (const name of ["a", "b", "c"]) {
-    slot.register(makeShell({ sdk: { name, hops: 0 }, destroy: () => destroyed.push(name) }));
+    slot.register(makeShell({ sdk: { label: name, hops: 0 }, destroy: () => destroyed.push(name) }));
   }
   slot.destroyAll();
   assert.deepEqual(destroyed, ["a", "b", "c"], "every live shell is torn down");
@@ -213,7 +213,7 @@ test("lifecycle: an offer arriving mid-build does not mount a twin", async () =>
   const buildGate = new Promise((resolve) => { releaseBuild = resolve; });
   const video = { isConnected: true };
   const container = { isConnected: true, contains: () => true };
-  const sdk = { name: "test" };
+  const sdk = { label: "test" };
   const lifecycle = new LifecycleManager(registry, () => {}, () => {}, null);
   lifecycle.setShellFactory(() => {
     factoryCalls++;
@@ -246,7 +246,7 @@ test("lifecycle: two videos sharing a container both mount", async () => {
   const videoA = { isConnected: true };
   const videoB = { isConnected: true };
   const container = { isConnected: true, contains: () => true };
-  const sdk = { name: "test" };
+  const sdk = { label: "test" };
   const lifecycle = new LifecycleManager(
     registry,
     (shell) => registry.register(shell),
@@ -266,8 +266,8 @@ test("lifecycle: two videos sharing a container both mount", async () => {
   await first;
   await second;
   assert.equal(factoryCalls, 2, "the second video built despite the shared container");
-  assert.equal(registry.getByVideo(videoA)?.sdk.name, "test", "first video registered");
-  assert.equal(registry.getByVideo(videoB)?.sdk.name, "test", "second video registered");
+  assert.equal(registry.getByVideo(videoA)?.sdk.label, "test", "first video registered");
+  assert.equal(registry.getByVideo(videoB)?.sdk.label, "test", "second video registered");
 });
 
 test("kernel: destroy() tears down document ownership idempotently", () => {

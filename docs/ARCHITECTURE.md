@@ -449,29 +449,26 @@ two of them to nothing:
  spreads: `closest()`-first 1.09× (misses pay the attempt plus the full walk
  anyway — rejected as complexity for 9%), `:has()`-inverted 3.5× (rejected:
  it restructures offers into batches and still needs the shadow fallback),
-  grouped `:is()` **7.0×, taken** — one engine call per node replaces up to
-  forty, with registry-then-anchor resolution preserving the exact winner, so
-  the whole sdk-engine suite passes unchanged.
+   grouped `:is()` **7.0×, taken** — one engine call per node replaces up to
+   forty, with template-then-anchor resolution preserving the exact winner, so
+   the whole sdk-engine suite passes unchanged. Re-measured after the identity
+   removal below: ~7.2× on the same mix, the grouping untouched.
 
   A fourth instrument, `discovery-revisit-offer.bench.mjs`, prices what the
-  twenty-fourth movement's learned prints save per discovery offer: the full
-  slow-path measurement (playback and activation gates plus a container walk
-  with a `getBoundingClientRect` per ancestor) against a print match
-  (tag/class/id compares, zero rect reads) — each op call starting from a
-  freshly dirtied tree, so the cold arm pays a genuine post-mutation layout
-  flush the way an offer after a real state change does. On 158.0b5, four
-  remembered players plus eight ad-grid misses over a 1.5k-node document:
-  **0.30 ms vs 0.059 ms per 96-video sweep** (±2.0% / ±13.5%), roughly
-  2.6 µs saved per single-video offer. The absolute is small and is stated
-  as such; what is not small is structural — the learned path removes every
-  forced layout from the per-offer path, and the cold arm's spread (against
-  the warm arm's flat one) shows the flush component growing with document
-  weight. Deliberately NOT an end-to-end row: navigation-to-shell is
-  wait-dominated on both arms (a print learned while playing does not match
-  a paused pre-click DOM, by the subset rule's design — it fires when that
-  state recurs), so an end-to-end comparison would report ~1.0× and teach
-  nothing. No `src/` change came out; the instrument confirms the shape the
-  twenty-fourth movement shipped.
+  template memo saves per revisit offer: the full fallback measurement
+  (playback and activation gates plus a container walk with a
+  `getBoundingClientRect` per ancestor) against a memo hit (one WeakMap
+  lookup plus a freshness re-walk of the recorded anchor, zero rect reads) -
+  each op call starting from a freshly dirtied tree, so the cold arm pays a
+  genuine post-mutation layout flush the way an offer after a real state
+  change does. On 158.0b5, four templated players plus eight ad-grid misses
+  over a 1.5k-node document: **0.31 ms vs 0.22 ms per sweep** (±3.1% /
+  ±1.7%). The absolute is small and is stated as such; what is not small is
+  structural - the memo path removes every forced layout from the per-offer
+  path for recognized players, and there is no per-host learned state left
+  to keep fresh. Deliberately NOT an end-to-end row: navigation-to-shell is
+  wait-dominated on both arms. No `src/` change came out; the instrument
+  confirms the shape the forty-first movement shipped.
 
  The pattern holds: the largest absolute on the board is tens of microseconds
  on paths that run at event rate or rarer, and the one genuine wash joins the
@@ -724,7 +721,7 @@ an oversight.
 ### L2 — StatusManager
 
 Today `isActive()` closures are authored independently at each `createActivity`
-call site (`src/shell/shell.js:394`, `src/shell/resume.js:727`,
+call site (`src/shell/shell.js:397`, `src/shell/resume.js:727`,
 `src/shared/shadow.js:211`). Nothing answers "what is this player's status right
 now" as a single queryable value.
 
@@ -755,8 +752,8 @@ change is dispatched as a `pf:status` CustomEvent on the `<video>`
 (`status-manager.js:363`) so the **page world** can read status across the
 sandbox boundary — which is the only consumer of `Buffer`, `Screen`, `duration`,
 `rate`, `volume`, `muted`, `hasTextTrack` and `error`. In-tree two subscribers
-exist: the media/HUD drive (`shell.js:381`), which reads no fields — the
-commit itself is the signal — and the occlusion resolve (`shell.js:528`),
+exist: the media/HUD drive (`shell.js:384`), which reads no fields — the
+commit itself is the signal — and the occlusion resolve (`shell.js:531`),
 which reads two of the ten fields. The other eight are carried for the page, so "no in-tree
 consumer" is the expected shape rather than dead code.
 
@@ -802,7 +799,7 @@ one `dispose()`.
 
 **Not landed as a class, and not needed as one.** `Shell` (`src/shell/shell.js`)
 already *is* the per-`<video>` owner: it holds `#scope`, `#status`, two
-`RenderGate`s, and every sub-component, and `destroy()` (`shell.js:655`) fans out
+`RenderGate`s, and every sub-component, and `destroy()` (`shell.js:658`) fans out
 to exactly the single `dispose()` this section describes. Extracting a
 `PlayerSession` would have been a rename with no second implementation behind
 it, so §6's seven phases never opened one — the one layer in the §4 diagram with
@@ -818,7 +815,7 @@ the layers can assume:
   L2 generally useful in-tree, and it is deliberately not done: only the
   occlusion resolve needs status today, and it is inside the shell.
 - **The gate is not one-per-session.** `Shell` registers two — media-state
-   (`shell.js:435`) and occlusion (`shell.js:520`) — because they have different
+   (`shell.js:438`) and occlusion (`shell.js:523`) — because they have different
   priorities' worth of coalescing and different snapshot shapes. `ToastManager`
   (`toast.js:130`) and `SettingsPanel` (`panel.js:302`) each own a further gate
   on their own scope, so the tree has four `RenderGate` constructions in total.
@@ -1831,12 +1828,24 @@ element's life (measured live: `playbackRate = 2` produced zero rate
  light-dismisses and Esc-closes - the whole custom modal is replaceable,
  filed as the next slice, not smuggled in here. Tests gained 3.
 
- The fortieth movement took the last `.prototype` reads out of `src/`:
- L0's frame flags are gone, and the sampler probes the quality set on the
- element itself (all three or nothing, like resume.js always did). The
- manifest follows - postTask classified by floor without a probe claim,
- the yield row deleted, GM_info down to entry - and §4's L0 sketch is one
- flag. Net one test lighter.
+  The fortieth movement took the last `.prototype` reads out of `src/`:
+  L0's frame flags are gone, and the sampler probes the quality set on the
+  element itself (all three or nothing, like resume.js always did). The
+  manifest follows - postTask classified by floor without a probe claim,
+  the yield row deleted, GM_info down to entry - and §4's L0 sketch is one
+  flag. Net one test lighter.
+
+  The forty-first movement deleted SDK identity: the registry is an
+  anonymous template table now (same anchors in the same order, so winners
+  resolve identically), descriptors carry a structural label and a matched
+  flag instead of names and sources, and learned prints are gone with their
+  storage, eviction and re-measure machinery. Revisit offers answer from
+  the descriptor memo; the fallback re-measures every visit. The
+  twenty-fourth movement's revisit numbers above are re-based on that shape
+  (template memo hit vs fallback measure). `tests/sdk-engine` pins
+  containers, hops and labels where it pinned names; the two learned kernel
+  tests became a no-prints-write pin and a re-resolve pin. Net nine tests
+  lighter.
 
 ## 7. Gecko-specific decisions, and what they rule out
 
@@ -1969,7 +1978,7 @@ In-tree:
 - `src/shared/scheduler.js` — traps in §2.4, `postTask`, `yield_()`
 - `src/shared/scope.js` — teardown primitive
 - `src/shared/activity.js` — passive activity windows
-- `src/shell/shell.js:394`, `src/shell/resume.js:727`, `src/shared/shadow.js:211` — `createActivity` call sites
+- `src/shell/shell.js:397`, `src/shell/resume.js:727`, `src/shared/shadow.js:211` — `createActivity` call sites
 - `src/shared/context.js:640` — the tree's only self-rearming `postTask`, delayed
 - `src/shared/dom-manager.js` — mutation coalescing
 - `src/shell/chrome/panel.js:125` — the only `setInterval` in the tree

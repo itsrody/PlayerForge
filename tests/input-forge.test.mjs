@@ -1061,7 +1061,7 @@ test("fill pinch owns object-fit: contain and restores it on clear", () => {
   Object.defineProperty(video, "videoHeight", { value: 1080, configurable: true });
   const shell = {
     video,
-    sdk: { name: "test" },
+    sdk: { label: "test" },
     referenceBox: { width: 1080, height: 2400 },
     toast() {},
     toastFlash() {}

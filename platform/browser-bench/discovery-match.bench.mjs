@@ -107,7 +107,7 @@ const PRIME = `
     stage.appendChild(wrap);
     return wrap;
   };
-  // Four SDK hits, shapes copied from the sdk-engine fixtures.
+  // Four template hits, shapes copied from the sdk-engine fixtures.
   player('<div class="plyr"><div class="plyr__video-wrapper"><video class="pf-testvid" data-sdk="plyr"></video></div></div>');
   player('<div class="jwplayer"><video class="pf-testvid" data-sdk="jw"></video></div>');
   player('<div data-vjs-player><div class="video-js"><video class="pf-testvid" data-sdk="vjs"></video></div></div>');
@@ -136,25 +136,25 @@ const PRIME = `
   host.attachShadow({ mode: "open" }).innerHTML =
     '<div class="plyr__video-wrapper"><video class="pf-testvid" data-sdk="shadow"></video></div>';
 
-  // Groups mirror REGISTRY order (registry, then anchor) for tie-breaking.
+  // Groups mirror TEMPLATES order (template, then anchor) for tie-breaking.
   // Keep in sync with src/kernel/sdk.js if anchors move.
   const GROUPS = [
-    { name: "JW Player", anchors: [".jwplayer", ".jw-wrapper"] },
-    { name: "Video.js", anchors: ["[data-vjs-player]", ".video-js", ".vjs-tech", "video-js"] },
-    { name: "Plyr", anchors: ["[data-plyr]", "[data-plyr-config]", ".plyr__video-wrapper", ".plyr"] },
-    { name: "ArtPlayer", anchors: [".art-video-player", ".artplayer"] },
-    { name: "DPlayer", anchors: [".dplayer"] },
-    { name: "MediaElement.js", anchors: [".mejs-container", ".mejs__container"] },
-    { name: "XGPlayer", anchors: [".xgplayer"] },
-    { name: "Aliplayer", anchors: [".prism-player"] },
-    { name: "Fluid Player", anchors: [".fluid_video_wrapper"] },
-    { name: "Flowplayer", anchors: [".fp-player", "flowplayer-ui", "[data-player-id]", ".flowplayer"] },
-    { name: "Clappr", anchors: ["[data-player]"] },
-    { name: "Vidstack", anchors: ["media-player"] },
-    { name: "Mux Player", anchors: ["mux-player"] },
-    { name: "Radiant Media Player", anchors: ["radiant-media-player"] },
-    { name: "Shaka Player", anchors: [".shaka-video-container", "[data-shaka-player]", "[data-shaka-player-container]"] },
-    { name: "THEOplayer", anchors: [".theoplayer-container", "theoplayer-ui", "theoplayer-default-ui"] }
+    { anchors: [".jwplayer", ".jw-wrapper"] },
+    { anchors: ["[data-vjs-player]", ".video-js", ".vjs-tech", "video-js"] },
+    { anchors: ["[data-plyr]", "[data-plyr-config]", ".plyr__video-wrapper", ".plyr"] },
+    { anchors: [".art-video-player", ".artplayer"] },
+    { anchors: [".dplayer"] },
+    { anchors: [".mejs-container", ".mejs__container"] },
+    { anchors: [".xgplayer"] },
+    { anchors: [".prism-player"] },
+    { anchors: [".fluid_video_wrapper"] },
+    { anchors: [".fp-player", "flowplayer-ui", "[data-player-id]", ".flowplayer"] },
+    { anchors: ["[data-player]"] },
+    { anchors: ["media-player"] },
+    { anchors: ["mux-player"] },
+    { anchors: ["radiant-media-player"] },
+    { anchors: [".shaka-video-container", "[data-shaka-player]", "[data-shaka-player-container]"] },
+    { anchors: [".theoplayer-container", "theoplayer-ui", "theoplayer-default-ui"] }
   ];
   const seen = new Set();
   const MEGA_PARTS = [];
@@ -246,7 +246,7 @@ function closestPair() {
             const anchors = GROUPS[r].anchors;
             for (let a = 0; a < anchors.length; a++) {
               if (hit.matches(anchors[a])) {
-                won = GROUPS[r].name;
+                won = true;
                 break;
               }
             }
@@ -369,7 +369,7 @@ function groupedPair() {
                 const anchors = GROUPS[r].anchors;
                 for (let a = 0; a < anchors.length; a++) {
                   if (chain[hop].matches(anchors[a])) {
-                    if (!best || hop < best.hops) best = { hops: hop, name: GROUPS[r].name };
+                    if (!best || hop < best.hops) best = { hops: hop, won: true };
                     break;
                   }
                 }
