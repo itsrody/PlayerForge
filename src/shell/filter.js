@@ -1,4 +1,4 @@
-import { getConfigValue, setConfigFields } from "../shared/storage.js";
+import { getConfigValue, setConfigFields, configStore } from "../shared/storage.js";
 import { flashElement } from "./chrome/toolbox.js";
 import { debounce } from "../shared/scheduler.js";
 import { clamp, fmtPercent } from "../shared/primitives.js";
@@ -26,22 +26,28 @@ const PRESET_ENTRIES = Object.entries(PRESETS);
 const PRESET_OPTIONS = Object.keys(PRESETS).concat(["Custom"]);
 
 /**
- * Coerce a stored filter value to a number, falling back to `def` only when
- * the stored value is not a usable number.
+ * Coerce a stored filter value to a number, falling back to `def` for
+ * anything that is not a usable number.
  *
  * The obvious `Number(raw) || def` is wrong here: 0 is a legitimate,
  * user-reachable value for brightness, contrast and saturate (their steppers
  * start at 0, and the B&W preset stores saturate: 0), so the `||` threw away
  * exactly the value the user picked and substituted the default instead.
- * Reject only what is genuinely not a number - null, undefined, empty string,
- * NaN, Infinity.
+ * And a bare Number() is too eager the other way: Number([]) is 0 and
+ * Number(true) is 1, so a hand-edited store could hand a black video
+ * (brightness 0) to a page that never asked for one. Only numbers and
+ * numeric strings are usable; null, undefined, empty/blank strings,
+ * booleans, collections and non-finite results all take the default.
  */
 function coerceNumber(raw, def) {
-  if (raw === null || raw === undefined || raw === "") {
-    return def;
+  if (typeof raw === "number") {
+    return Number.isFinite(raw) ? raw : def;
   }
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : def;
+  if (typeof raw === "string" && raw.trim() !== "") {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : def;
+  }
+  return def;
 }
 
 // Static UI maps hoisted out of #buildSection: they are pure constants, so
@@ -189,6 +195,18 @@ export class VideoFilter {
     this.#buildSection(panel);
     this.#loadFromConfig();
     this.#apply();
+    // Cross-tab live reload, mirroring the settings bus: another tab's
+    // preset or slider move re-reads here instead of waiting for a rebuild.
+    // Own persist echoes arrive identical, so the equality skip in setValue
+    // stops them cascading back into a write. A foreign write landing
+    // mid-drag overwrites the in-progress values - last-write-wins, the same
+    // rule as the settings bus. Dies with the scope.
+    configStore.onChange(({ paths }) => {
+      if (!paths || [...paths].some((p) => p === CONFIG_PREFIX || p.startsWith(`${CONFIG_PREFIX}.`))) {
+        this.#loadFromConfig();
+        this.#apply();
+      }
+    }, { signal: this.#scope.signal });
   }
 
   #buildSection(panel) {

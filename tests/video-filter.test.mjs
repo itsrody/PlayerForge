@@ -7,7 +7,7 @@ globalThis.GM_setValue = (key, value) => { writes[key] = value; };
 globalThis.GM_addValueChangeListener = () => {};
 
 const { VideoFilter } = await import("../src/shell/filter.js");
-const { configStore } = await import("../src/shared/storage.js");
+const { configStore, setConfigFields } = await import("../src/shared/storage.js");
 
 function makeFakeVideo() {
   return { style: { filter: "" }, closest: () => null };
@@ -18,7 +18,7 @@ function makeFakeShell(video) {
 }
 
 function makeFakePanel() {
-  const calls = { sections: [], selects: [], buttons: [], steppers: [] };
+  const calls = { sections: [], selects: [], buttons: [], steppers: [], stepperHandles: [], selectHandles: [] };
   const node = (tag, attrs = {}, parent = null) => {
     const el = {
       tag, attrs, parent, children: [], textContent: "", style: {},
@@ -41,12 +41,14 @@ function makeFakePanel() {
     addSelect: (parent, opts) => {
       calls.selects.push(opts);
       let val = opts.value;
-      return {
+      const handle = {
         get value() { return val; },
         set value(v) { val = v; },
         setValue: (v) => { val = v; },
         style: {}
       };
+      calls.selectHandles.push(handle);
+      return handle;
     },
     addButton: (parent, opts) => {
       calls.buttons.push(opts);
@@ -55,7 +57,7 @@ function makeFakePanel() {
     addStepper: (parent, opts) => {
       calls.steppers.push(opts);
       let val = opts.value;
-      return {
+      const handle = {
         getValue: () => val,
         // The production widget cascades setValue through onChange like a
         // user edit (panel.js); the fake does the same so bulk paths pay
@@ -70,6 +72,8 @@ function makeFakePanel() {
         get value() { return val; },
         set value(v) { val = v; }
       };
+      calls.stepperHandles.push(handle);
+      return handle;
     },
     addControl: (parent, { type, ...opts }) => {
       switch (type) {
@@ -384,6 +388,38 @@ test("garbage stored values still fall back to the default", () => {
   const video = makeFakeVideo();
   const filter = new VideoFilter(makeFakeShell(video), makeFakePanel());
   assert.equal(video.style.filter, "none", "unusable input falls back, not NaN leaking into the string");
+  filter.destroy();
+});
+
+test("non-numeric stored values fall back instead of coercing", () => {
+  // Number([]) is 0 and Number(true) is 1: accepting either hands a
+  // hand-edited store a black video (brightness 0) the page never asked
+  // for. Only numbers and numeric strings are usable.
+  cleanWrites();
+  configStore.adopt({ version: 1, filter: { brightness: [], contrast: true, saturate: "  ", hue: "45" } });
+
+  const video = makeFakeVideo();
+  const filter = new VideoFilter(makeFakeShell(video), makeFakePanel());
+  assert.equal(video.style.filter, "hue-rotate(45deg)", "only the numeric string survived; junk took defaults");
+  filter.destroy();
+});
+
+test("a foreign filter write live-reloads values, steppers and the select", () => {
+  // A write from another tab arrives through the store, not through a
+  // stepper: the video, the widgets and the preset menu must all follow
+  // without a rebuild.
+  cleanWrites();
+  const video = makeFakeVideo();
+  const panel = makeFakePanel();
+  const filter = new VideoFilter(makeFakeShell(video), panel);
+  assert.equal(video.style.filter, "none");
+
+  setConfigFields({ "filter.contrast": 130, "filter.saturate": 0 });
+  assert.match(video.style.filter, /contrast\(130%\)/, "the video follows the foreign write");
+  assert.match(video.style.filter, /saturate\(0%\)/);
+  const contrastIdx = panel.calls.steppers.findIndex((s) => s.label === "Contrast");
+  assert.equal(panel.calls.stepperHandles[contrastIdx].getValue(), 130, "the widget follows");
+  assert.equal(panel.calls.selectHandles[0].value, "Custom", "the menu follows");
   filter.destroy();
 });
 
