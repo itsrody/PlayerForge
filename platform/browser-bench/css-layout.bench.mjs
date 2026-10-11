@@ -225,6 +225,85 @@ export default async function runCssLayoutBench(bundle = DEFAULT_BUNDLE) {
         occludedTimes[Math.floor(occludedTimes.length / 2)],
       gateable: false,
     });
+
+    // Benchmark: toast-visibility style recalc with and without host
+    // containment, each half of the pair amplified the same way.
+    //
+    // The host carries `contain: strict` so HUD churn cannot invalidate page
+    // layout (and vice versa). Both arms flip the toast's visibility class
+    // and force a document-level layout read; the contained arm scopes that
+    // invalidation to the host box while the overridden arm pays the whole
+    // document. Filler weight (same 1500-node shape as the revisit bench)
+    // gives uncontained invalidation something to chew - without it both
+    // arms measure an empty page and the pair reports ~1.0x by construction.
+    //
+    // Reported, not gated: the rows only mean something read together, and
+    // a gate on the difference would be a gate on machine noise. First
+    // reading on 158.0b5: ~1.0x (0.0138 vs 0.0139 ms) - the flip dirties
+    // only the toast and no ancestor geometry depends on it, so there is
+    // nothing here for containment to bound. That does not remove it: the
+    // guarantee is structural (future HUD shapes cannot accidentally cost
+    // the page), and this pair is what would catch it if one did.
+    const containedTimes = [];
+    const uncontainedTimes = [];
+    await driver.eval(() => {
+      document.__pfBenchToast = document
+        .querySelector(".pf-shell")
+        .shadowRoot.querySelector("pf-toast");
+      for (let i = 0; i < 1500; i++) {
+        const filler = document.createElement("div");
+        filler.className = "pf-bench-filler";
+        filler.appendChild(document.createElement("span"));
+        document.body.appendChild(filler);
+      }
+      const override = document.createElement("style");
+      override.id = "pf-bench-contain-override";
+      override.textContent = ".pf-shell{contain:none!important}";
+      document.head.appendChild(override);
+      override.disabled = true;
+      document.__pfBenchOverride = override;
+    });
+    for (const [store, overrideOn] of [
+      [containedTimes, false],
+      [uncontainedTimes, true],
+    ]) {
+      await driver.eval((disabled) => {
+        document.__pfBenchOverride.disabled = disabled;
+      }, !overrideOn);
+      for (let b = 0; b < BATCHES; b++) {
+        const timings = [];
+        for (let i = 0; i < ITERATIONS; i++) {
+          const { perOp } = await driver.amplifiedEval(
+            () => {},
+            () => {
+              const toast = document.__pfBenchToast;
+              toast.classList.toggle("pf-visible");
+              void document.body.offsetHeight;
+            }
+          );
+          timings.push(perOp);
+        }
+        const batchMedian = timings.sort((a, b) => a - b)[Math.floor(timings.length / 2)];
+        store.push(batchMedian);
+      }
+    }
+    await driver.eval(() => {
+      document.__pfBenchOverride.remove();
+      for (const filler of document.querySelectorAll(".pf-bench-filler")) {
+        filler.remove();
+      }
+    });
+    const pushPair = (name, times) => {
+      times.sort((a, b) => a - b);
+      results.push({
+        name,
+        medianMsPerOp: times[Math.floor(times.length / 2)],
+        spread: (times[times.length - 1] - times[0]) / times[Math.floor(times.length / 2)],
+        gateable: false,
+      });
+    };
+    pushPair("toast visibility flip + document layout flush, host contained (amplified)", containedTimes);
+    pushPair("toast visibility flip + document layout flush, containment overridden (amplified)", uncontainedTimes);
   } finally {
     await driver.destroy();
     await server.stop();

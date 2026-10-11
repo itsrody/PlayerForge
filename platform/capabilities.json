@@ -499,6 +499,15 @@
       "mustNotAppearIn": [
         "src/"
       ]
+    },
+    {
+      "id": "sdk-identity",
+      "summary": "Named SDK registry, learned prints, and per-identity match state",
+      "why": "Mounting reads shapes, not names: the template table carries the same anchors with no identity attached, descriptors carry a structural label and a matched flag, and revisit offers answer from the descriptor memo while the fallback re-measures. Reintroducing any of it would rebuild the registry treadmill the forty-first movement deleted.",
+      "matchPattern": "findSdkForVideo|matchSdkOnChain|fingerprintFor|matchPrints|resolveContainer\\(|sdk\\.name|sdk\\.source|REGISTRY|NO_PRINTS|PRINTS_PER_HOST|printKey|learnFromShell|printsForHost|loadPrints|pf:sdk-prints",
+      "mustNotAppearIn": [
+        "src/"
+      ]
     }
   ],
   "hostProbes": [
@@ -785,8 +794,8 @@
     {
       "id": "user-activation",
       "api": "navigator.userActivation",
-      "summary": "Sticky-activation gate for SDK-independent adoption",
-      "why": "Without it the slow path cannot tell autoplay ads from user-driven playback, so it stays off - the registry path never asks.",
+      "summary": "Sticky-activation gate for template-independent adoption",
+      "why": "Without it the slow path cannot tell autoplay ads from user-driven playback, so it stays off - the template path never asks.",
       "usedBy": [
         "src/kernel/sdk.js"
       ],

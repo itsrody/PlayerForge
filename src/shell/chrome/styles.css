@@ -87,6 +87,13 @@
      stacking context: the INT32_MAX ceiling outranks every sibling stack the
      SDK paints inside the player and cannot escape onto page chrome. */
   z-index: 2147483647;
+  /* Contain the HUD's style, layout and paint to the host box: toast morphs,
+     panel opens and cue swaps must neither force page-level invalidation nor
+     pay for it. Size containment is safe - inset offsets size the host off
+     the container, never off its contents - and there are no fixed-position
+     descendants to re-anchor and nothing painted outside the box. Measured
+     against the override in platform/browser-bench/css-layout.bench.mjs. */
+  contain: strict;
   outline: none;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   font-size: var(--pf-font-lg);
@@ -512,6 +519,9 @@
 
       .pf-panel-body {
         padding: var(--pf-space-sm) var(--pf-space-md) var(--pf-space-lg);
+        /* Reserve the scrollbar gutter: history growth past max-height must
+           not reflow panel content sideways mid-read. */
+        scrollbar-gutter: stable;
       }
 
       .pf-panel-section {
@@ -1142,6 +1152,7 @@
         left: var(--pf-space-md);
         right: var(--pf-space-md);
         max-height: 62vh;
+        max-height: 62dvh;
         margin: 0;
         border-radius: 16px 16px 0 0;
       }
@@ -1162,6 +1173,7 @@
         margin: auto;
         width: min(340px, 45vw);
         max-height: 70vh;
+        max-height: 70dvh;
         border-radius: var(--pf-radius-lg);
       }
       .pf-tab-label { display: none; }
@@ -1268,6 +1280,7 @@
         left: var(--pf-space-sm);
         right: var(--pf-space-sm);
         max-height: 56vh;
+        max-height: 56dvh;
         border-radius: 14px 14px 0 0;
       }
     }
@@ -1324,5 +1337,38 @@
   ::view-transition-old(pf-panel),
   ::view-transition-new(pf-panel) {
     animation: none;
+  }
+}
+
+/* Forced-colors mode (Windows High Contrast): the flat dark palette and
+   translucent surfaces go unreadable or invisible when the system takes
+   over color. Map the load-bearing roles onto system keywords and go fully
+   opaque - decoration yields, function stays. Untestable headless; verify
+   on a Windows run before calling this finished (see the movement entry). */
+@media (forced-colors: active) {
+  .pf-shell {
+    --pf-fg: CanvasText;
+    --pf-accent: Highlight;
+    --pf-panel-bg: Canvas;
+    --pf-toast-bg: Canvas;
+    --pf-surface-mid: ButtonFace;
+    --pf-surface-strong: ButtonFace;
+    --pf-text-dim: CanvasText;
+    --pf-text-mid: CanvasText;
+    --pf-text-soft: CanvasText;
+    --pf-border: ButtonBorder;
+    --pf-border-soft: ButtonBorder;
+    --pf-border-control: ButtonBorder;
+    --pf-border-input: ButtonBorder;
+  }
+}
+
+/* Higher-contrast preference without full forcing: lift the hairlines so
+   dividers and control outlines survive dimmed displays. */
+@media (prefers-contrast: more) {
+  .pf-shell {
+    --pf-border-soft: rgba(255, 255, 255, 0.22);
+    --pf-border: rgba(255, 255, 255, 0.28);
+    --pf-text-dim: rgba(255, 255, 255, 0.78);
   }
 }

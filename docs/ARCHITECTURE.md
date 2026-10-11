@@ -1847,6 +1847,18 @@ element's life (measured live: `playbackRate = 2` produced zero rate
   tests became a no-prints-write pin and a re-resolve pin. Net nine tests
   lighter.
 
+  The forty-second movement contains the mount: `contain: strict` on the
+  shell host so HUD churn cannot invalidate page layout (no fixed-position
+  descendants to re-anchor, nothing painted outside the box), priced by a
+  report-only toast-flip pair against a page-side `contain: none` override
+  rather than claimed. The pair reads ~1.0x on current shapes - the flip
+  dirties only the toast - so the win is structural, and the pair is what
+  would catch a future shape that escapes it. Bottom sheets gain `dvh` behind their `vh`, the
+  panel body reserves its scrollbar gutter, and a forced-colors block maps
+  the load-bearing roles onto system keywords - the last one unverified
+  headless and recorded as needing a Windows run. SDK identity joins the
+  retired manifest so no mount path can re-read a name. Net even on tests.
+
 ## 7. Gecko-specific decisions, and what they rule out
 
 - Scheduler priorities replace timer-based deferral. `postTask` is available
