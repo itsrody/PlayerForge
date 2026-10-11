@@ -126,6 +126,13 @@ export function createMediaControls({ video }) {
     * write it always was.
     */
     scrubToLatched(time, duration) {
+      // Live or duration-less strokes can arithmetic their way to non-finite
+      // targets (Infinity gains on an unbounded timeline, NaN on a zero
+      // one): drop the move instead of writing it - the next move recomputes,
+      // and the release settles only finite latched values.
+      if (!Number.isFinite(time)) {
+        return;
+      }
       const target = Number.isFinite(duration) && duration > 0
         ? clamp(time, 0, duration)
         : Math.max(0, time);
@@ -146,6 +153,9 @@ export function createMediaControls({ video }) {
     * (the stranded-boost class of bug endBoost documents).
     */
     scrubSettle(time) {
+      if (!Number.isFinite(time)) {
+        return;
+      }
       video.currentTime = Math.max(0, time);
     },
 
@@ -165,7 +175,7 @@ export function createMediaControls({ video }) {
     },
 
     setVolume(value) {
-      if (!isReady()) {
+      if (!isReady() || !Number.isFinite(value)) {
         return;
       }
       video.volume = clamp(value, 0, 1);
@@ -262,7 +272,7 @@ function buildSessionMetadata(video) {
  * teardown runs once when `signal` aborts. No-op (returns null) without a
  * MediaSession implementation.
  */
-export function claimMediaSession({ controls, video, signal, session = navigator.mediaSession }) {
+export function claimMediaSession({ controls, video, signal, session = globalThis.navigator?.mediaSession }) {
   if (!session) {
     return null;
   }
@@ -326,7 +336,12 @@ class MediaSessionBridge {
     const session = this.#session;
     const controls = this.#controls;
     const video = this.#video;
-    session.setActionHandler("play", () => controls.play());
+    session.setActionHandler("play", () => {
+      // play() rejects on genuine (non-policy) failures, and the UA gives
+      // action handlers no error channel: report through the logger instead
+      // of leaking an unhandled rejection into the page's error channel.
+      controls.play().catch((err) => logger.error("media", "OS play action failed:", err));
+    });
     session.setActionHandler("pause", () => controls.pause());
     session.setActionHandler("stop", () => controls.stop());
     session.setActionHandler("seekbackward", (details) => controls.skip(-(details?.seekOffset || 10)));

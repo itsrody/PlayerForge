@@ -32,7 +32,7 @@ not a rewrite.
 | Host scheduling facade | `src/shared/scheduler.js` | `postTask`, `delay`, `debounce` (+`.flush()`/`.cancel()`), `yield_()` |
 | Frame coalescing on mutation | `src/shared/dom-manager.js` | MutationObserver with deferred flush |
 | Visibility gating | `src/shell/resume.js:685` | IntersectionObserver for off-screen carousel progress |
-| Media session integration | `src/shell/media.js:265` | `claimMediaSession()` |
+| Media session integration | `src/shell/media.js:275` | `claimMediaSession()` |
 | Observer-based adoption | `src/kernel/sdk.js`, `kernel.js`, `discovery.js` | MutationObserver-based `<video>` discovery and settle detection |
 
 Evidence that the idle-cost goal is already largely met:

@@ -126,6 +126,24 @@ test("seek applies in the MSE window: duration known while readyState is still 0
   assert.equal(video.currentTime, 600, "still clamped to the known duration");
 });
 
+test("non-finite scrub and volume targets are dropped, never written", () => {
+  // Live (infinite) or zero durations arithmetic scrub gains into Infinity,
+  // and degenerate geometry into NaN: the per-move path must drop the move
+  // instead of handing the engine a non-finite seek - and setVolume must not
+  // adopt NaN.
+  const { video, controls } = makeEnv(4);
+  Object.defineProperty(video, "duration", { value: 120, configurable: true });
+  video.currentTime = 10;
+  video.volume = 0.5;
+
+  controls.scrubToLatched(NaN, 120);
+  controls.scrubToLatched(Infinity, Infinity);
+  controls.scrubSettle(NaN);
+  controls.setVolume(NaN);
+  assert.equal(video.currentTime, 10, "no non-finite seek landed");
+  assert.equal(video.volume, 0.5, "no non-finite volume landed");
+});
+
 test("gating reads live readyState, not a snapshot at creation", async () => {
   const { video, controls } = makeEnv(0);
   let played = 0;
@@ -183,6 +201,41 @@ test("MediaSession position state stays live off the media clock", async () => {
 
   assert.equal(MEDIA_SESSION_SYNC_EVENTS.has("timeupdate"), true);
   scope.abort();
+});
+
+test("a rejected OS play action reports through the logger, not the page channel", async () => {
+  // play() rethrows genuine (non-policy) failures, but the UA gives action
+  // handlers no error channel: the bridge logs instead of leaking an
+  // unhandled rejection into the page.
+  const { dom, video, controls } = makeEnv(4);
+  video.play = () => Promise.reject(Object.assign(new Error("decode"), { name: "NotSupportedError" }));
+  globalThis.AbortController = dom.window.AbortController;
+  const { logger } = await import("../src/shared/diagnostics.js");
+  const errors = [];
+  const realError = logger.error;
+  logger.error = (...args) => errors.push(args);
+  const handlers = {};
+  const session = {
+    setActionHandler(action, handler) { handlers[action] = handler; },
+    setPositionState() {},
+    set playbackState(value) {},
+    set metadata(value) {}
+  };
+  const scope = new AbortController();
+  claimMediaSession({ controls, video, signal: scope.signal, session });
+  let unhandled = null;
+  const onUnhandled = (err) => { unhandled = err; };
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    handlers.play();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(unhandled, null, "no unhandled rejection escapes into the page channel");
+    assert.ok(errors.some((args) => String(args[2]?.message ?? args[2]).includes("decode")), "the failure surfaced in PF logs");
+  } finally {
+    process.removeListener("unhandledRejection", onUnhandled);
+    logger.error = realError;
+    scope.abort();
+  }
 });
 
 test("URL.canParse gates MediaSession poster artwork", () => {

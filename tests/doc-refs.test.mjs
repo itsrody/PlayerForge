@@ -29,7 +29,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const REFS = [
   // docs/ARCHITECTURE.md cites, in doc order.
   { file: "src/shell/resume.js", line: 685, anchor: "IntersectionObserver" },
-  { file: "src/shell/media.js", line: 265, anchor: "export function claimMediaSession" },
+  { file: "src/shell/media.js", line: 275, anchor: "export function claimMediaSession" },
   { file: "src/shell/shell.js", line: 394, anchor: "createActivity({" },
   { file: "src/shell/resume.js", line: 702, anchor: "createActivity({" },
   { file: "src/shared/shadow.js", line: 211, anchor: "fsGate = createActivity({" },
