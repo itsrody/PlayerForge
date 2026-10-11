@@ -319,6 +319,15 @@ matches every manager's actual behaviour. PlayerForge's existing
 selector-only detection (`src/kernel/sdk.js`), which never reads a page-defined
 global or an expando, is therefore not merely adequate but correctly targeted.
 
+X-ray vision is what makes that targeting hold under a hostile page: DOM
+reads resolve natives from pristine interfaces, so a page overriding
+`querySelectorAll`, `contains`, `getBoundingClientRect`, or media-element
+getters cannot disturb discovery - and the tree's zero-`instanceof`,
+nodeType-first discipline is the compatible shape, not a coincidence. The
+one thing X-ray does not pierce is closed shadow roots (only
+chrome-privileged `openOrClosedShadowRoot` does, which a userscript never
+gets): a video behind closed shadow is a silent, accepted miss.
+
 #### What Greasemonkey does *not* have, and why that is fine
 
 The `GM_*` surface is where the two managers genuinely diverge, and it confirms

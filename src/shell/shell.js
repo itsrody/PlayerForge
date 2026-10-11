@@ -403,9 +403,9 @@ export class Shell {
     });
     // Expose media state as CSS custom properties on the host so the shadow
     // DOM can style based on playing/paused/muted without crossing the realm
-    // boundary. The :playing/:paused/:muted pseudo-classes (which Firefox
-    // does not ship, and which cannot reach into shadow roots anywhere)
-    // are not relied on; custom properties bridge the gap.
+    // boundary. The :playing/:paused/:muted pseudo-classes ship since
+    // Firefox 150 but cannot reach into shadow roots anywhere, so custom
+    // properties bridge the gap.
     if (host) {
       // One bindings table for both properties (§3.2: derived from one table,
       // not hand-maintained twice). The reconciler owns the "has this value
