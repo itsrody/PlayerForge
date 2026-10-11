@@ -893,6 +893,10 @@ function buildTestPageHtml(options = {}) {
     // same-key multi-subscriber case only exists with several players sharing a
     // realm, which is what a page with a main player plus an embed actually is.
     players = 1,
+    // Template-free players: sized plain wrappers no anchor matches, so the
+    // measured fallback (not a template) adopts them. The unknown-framework
+    // case - pass real media and it exercises the whole fallback chain live.
+    barePlayers = 0,
   } = options;
 
   const videoAttrs = videoSrc ? `src="${videoSrc}"` : "";
@@ -908,6 +912,7 @@ function buildTestPageHtml(options = {}) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #000; width: ${width}px; height: ${height}px; }
     .plyr { position: relative; width: 100%; height: 100%; }
+    .pf-bare-player { position: relative; width: 640px; height: 360px; }
     video { width: 100%; height: 100%; object-fit: contain; }
   </style>
 </head>
@@ -917,6 +922,10 @@ function buildTestPageHtml(options = {}) {
     <div class="plyr__video-wrapper">
       <video id="test-video${i === 0 ? "" : `-${i}`}" ${videoAttrs} preload="metadata"></video>
     </div>
+  </div>`).join("")}
+  ${Array.from({ length: barePlayers }, (_, i) => `
+  <div class="pf-bare-player">
+    <video id="test-bare-video${i === 0 ? "" : `-${i}`}" ${videoAttrs} preload="metadata"></video>
   </div>`).join("")}
 </body>
 </html>`;

@@ -220,6 +220,29 @@ export class Kernel {
     // Permanent rider on the shared discovery tap: every video the probe
     // would have seen, the kernel now adopts through the same wiring.
     this.#stopDiscoveryTap = watchDocumentVideos((video) => this.#adoptVideo(video));
+    // First-gesture re-sweep: sticky activation latches permanently on the
+    // first key/pointer press, but nothing observable fires when it flips -
+    // so an offer refused for lack of activation (muted autoplay before any
+    // gesture) would otherwise sit unoffered until a random mutation or
+    // media event. One document-level sweep on the first gesture re-runs
+    // adoption for exactly that window; claimed videos early-return, so the
+    // sweep costs one pass and then detaches itself. Signal-bound like
+    // every other tap.
+    //
+    // Deferred past dispatch, not run in it: the activation bit lands during
+    // event dispatch, and a capture listener runs before it is guaranteed
+    // visible - a synchronous sweep would read the pre-gesture state and
+    // burn its one shot refusing everything again. A microtask runs after
+    // dispatch completes, when the latch is settled either way.
+    const resweepOnGesture = () => {
+      queueMicrotask(() => {
+        for (const { video } of surveyVideos(document)) {
+          this.#adoptVideo(video);
+        }
+      });
+    };
+    this.#dom.listen(document, "pointerdown", resweepOnGesture, { capture: true, once: true });
+    this.#dom.listen(document, "keydown", resweepOnGesture, { capture: true, once: true });
     // The probe boots us precisely so a video already in the parsed DOM gets
     // its shell without waiting for the next media event. Offer its hints
     // first (discovery order, media-surfaced first), then sweep once for
@@ -283,7 +306,8 @@ export class Kernel {
    * script-lazy SDK player that fires loadeddata or play, so discovery stays
    * live for anything that announces itself. A video that surfaces after the
    * downgrade without firing either, and never moves, stays missed until it
-   * does - the standing observer is the cost the downgrade sheds, and a
+   * does - or until the first-gesture re-sweep above re-offers it. The
+   * standing observer is the cost the downgrade sheds, and a
    * player that fires nothing needs nothing yet. Idempotent; pagehide still
    * tears the remaining tap down.
    */

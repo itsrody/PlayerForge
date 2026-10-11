@@ -1859,6 +1859,17 @@ element's life (measured live: `playbackRate = 2` produced zero rate
   headless and recorded as needing a Windows run. SDK identity joins the
   retired manifest so no mount path can re-read a name. Net even on tests.
 
+  The forty-third movement closes the activation-timing hole in fallback
+  adoption: an offer refused for lack of sticky activation sat unoffered
+  until a random mutation or media event, because activation flips with no
+  observable edge. One document-level sweep on the first pointerdown/keydown
+  re-runs adoption for exactly that window - deferred past dispatch, since a
+  capture listener runs before the latch is guaranteed visible and would burn
+  its one shot refusing everything again. A live-browser test plays muted
+  media with no gesture, asserts no shell, clicks, and asserts adoption;
+  pausing and replaying to prove the gates instead would have tested
+  everything except the fix. Net one test heavier.
+
 ## 7. Gecko-specific decisions, and what they rule out
 
 - Scheduler priorities replace timer-based deferral. `postTask` is available
