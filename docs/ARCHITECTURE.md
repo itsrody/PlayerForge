@@ -31,7 +31,7 @@ not a rewrite.
 | Passive activity windows | `src/shared/activity.js` | `createActivity()`: zero work until an edge fires; work scope minted on enter, disposed on exit; edges not events; `isActive()` reads the platform property at the moment Gecko fires |
 | Host scheduling facade | `src/shared/scheduler.js` | `postTask`, `delay`, `debounce` (+`.flush()`/`.cancel()`), `yield_()` |
 | Frame coalescing on mutation | `src/shared/dom-manager.js` | MutationObserver with deferred flush |
-| Visibility gating | `src/shell/resume.js:685` | IntersectionObserver for off-screen carousel progress |
+| Visibility gating | `src/shell/resume.js:710` | IntersectionObserver for off-screen carousel progress |
 | Media session integration | `src/shell/media.js:275` | `claimMediaSession()` |
 | Observer-based adoption | `src/kernel/sdk.js`, `kernel.js`, `discovery.js` | MutationObserver-based `<video>` discovery and settle detection |
 
@@ -524,7 +524,7 @@ Worth adopting (FIT):
   rather than per-node listeners. Same shape as PlayerForge's event delegation.
 - **One-shot `IntersectionObserver` (`onFirstShown`).** uBO disconnects the
   observer after the first intersection. Directly analogous to L1's occlusion
-  gating and to the existing `src/shell/resume.js:685` observer: pay once, then
+  gating and to the existing `src/shell/resume.js:710` observer: pay once, then
   stop.
 - **Coarse parse → specialized engine dispatch.**
   `static-ext-filtering.js` parses once, then routes to cosmetic / html /
@@ -705,7 +705,7 @@ record rather than quietly delete:
 
 One structural caveat: L1 has no single owner. Visibility is instantiated
 twice — `status-manager.js:469` for the `Presence` axis, and an independent
-observer at `resume.js:686` gating off-screen saves. The two answer different
+observer at `resume.js:711` gating off-screen saves. The two answer different
 questions (what is the player's status versus should we churn storage for a
 video the user cannot see) and their lifetimes differ, so folding them would
 couple the resume cadence to the status graph. The single-source discipline L0
@@ -715,7 +715,7 @@ an oversight.
 ### L2 — StatusManager
 
 Today `isActive()` closures are authored independently at each `createActivity`
-call site (`src/shell/shell.js:394`, `src/shell/resume.js:702`,
+call site (`src/shell/shell.js:394`, `src/shell/resume.js:727`,
 `src/shared/shadow.js:211`). Nothing answers "what is this player's status right
 now" as a single queryable value.
 
@@ -994,7 +994,7 @@ the other two are covered elsewhere rather than implying a guarantee they were
 never subject to.
 
 That leaves **resume's persist, which is synchronous by decision, not by
-omission.** `gmSetValue` runs inline from `#persist()` (`resume.js:269`), on the
+omission.** `gmSetValue` runs inline from `#persist()` (`resume.js:283`), on the
 incremental `timeupdate` path, on the pause flush and from `destroy()`. §6's
 phase 3 identified the fix — splitting the scheduled save from the unload flush
 so only the former can go `background` — and did not do it, because the flush
@@ -1960,7 +1960,7 @@ In-tree:
 - `src/shared/scheduler.js` — traps in §2.4, `postTask`, `yield_()`
 - `src/shared/scope.js` — teardown primitive
 - `src/shared/activity.js` — passive activity windows
-- `src/shell/shell.js:394`, `src/shell/resume.js:702`, `src/shared/shadow.js:211` — `createActivity` call sites
+- `src/shell/shell.js:394`, `src/shell/resume.js:727`, `src/shared/shadow.js:211` — `createActivity` call sites
 - `src/shared/context.js:640` — the tree's only self-rearming `postTask`, delayed
 - `src/shared/dom-manager.js` — mutation coalescing
 - `src/shell/chrome/panel.js:125` — the only `setInterval` in the tree

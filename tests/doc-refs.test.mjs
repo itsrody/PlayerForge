@@ -28,10 +28,10 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const REFS = [
   // docs/ARCHITECTURE.md cites, in doc order.
-  { file: "src/shell/resume.js", line: 685, anchor: "IntersectionObserver" },
+  { file: "src/shell/resume.js", line: 710, anchor: "IntersectionObserver" },
   { file: "src/shell/media.js", line: 275, anchor: "export function claimMediaSession" },
   { file: "src/shell/shell.js", line: 394, anchor: "createActivity({" },
-  { file: "src/shell/resume.js", line: 702, anchor: "createActivity({" },
+  { file: "src/shell/resume.js", line: 727, anchor: "createActivity({" },
   { file: "src/shared/shadow.js", line: 211, anchor: "fsGate = createActivity({" },
   { file: "src/shared/context.js", line: 640, anchor: "postTask(attempt" },
   { file: "src/shell/chrome/panel.js", line: 125, anchor: "setInterval" },
@@ -40,7 +40,7 @@ const REFS = [
   { file: "src/shell/inputs/forge.js", line: 855, anchor: "ResizeObserver" },
   { file: "src/shared/status-manager.js", line: 70, anchor: "PIP" },
   { file: "src/shared/status-manager.js", line: 469, anchor: "VISIBLE or BACKGROUND" },
-  { file: "src/shell/resume.js", line: 686, anchor: "new IntersectionObserver" },
+  { file: "src/shell/resume.js", line: 711, anchor: "new IntersectionObserver" },
   { file: "src/shared/status-manager.js", line: 363, anchor: "STATUS_EVENT" },
   { file: "src/shell/shell.js", line: 381, anchor: "this.#status.subscribe" },
   { file: "src/shell/shell.js", line: 528, anchor: "status.subscribe" },
@@ -50,7 +50,7 @@ const REFS = [
   { file: "src/shell/chrome/panel.js", line: 302, anchor: "#compactGate = new RenderGate" },
   { file: "src/shell/chrome/toast.js", line: 130, anchor: "this.#gate = new RenderGate" },
   { file: "tests/scope.test.mjs", line: 76, anchor: "parent.child()" },
-  { file: "src/shell/resume.js", line: 269, anchor: "gmSetValue(KEYS.resume" },
+  { file: "src/shell/resume.js", line: 283, anchor: "gmSetValue(KEYS.resume" },
   { file: "tests/resume-tracker.test.mjs", line: 268, anchor: "wall floor gates" },
   // Live cites in src/tests/platform (not the contract, but the same rot).
   { file: "src/shell/chrome/inject.js", line: 88, anchor: "child ever changes index" },

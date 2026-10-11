@@ -774,3 +774,96 @@ test("a tracker destroyed after its document was replaced still releases its sto
   globalThis.GM_addValueChangeListener = undefined;
   globalThis.GM_removeValueChangeListener = undefined;
 });
+
+test("a throwing store subscriber never aborts its peers", async () => {
+  // Dispatch isolation, matching the status/fullscreen fan-outs: History
+  // rendering throwing must not silence later subscribers or escape.
+  delete writes["pf:resume"];
+  const { shell } = makeEnv(600);
+  const tracker = new ResumeTracker(shell);
+  const seen = [];
+  tracker.onChange(() => { throw new Error("render boom"); });
+  tracker.onChange((structural) => seen.push(structural));
+  await flush();
+  await flush();
+  assert.ok(seen.includes(true), "the peer still heard the structural adoption");
+  tracker.destroy();
+});
+
+test("same-millisecond cross-tab writes converge on content, not direction", async () => {
+  // Two documents share one GM table but keep separate stores. Same-id,
+  // same-millisecond writes with different positions must converge on one
+  // winner whichever direction the merge runs, or the tabs diverge forever.
+  delete writes["pf:resume"];
+  const envA = makeEnv(600);
+  const envB = makeEnv(600);
+  const trackerA = new ResumeTracker(envA.shell);
+  const trackerB = new ResumeTracker(envB.shell);
+  await flush();
+  await flush();
+  const template = { ...trackerA.getEntries()[0] };
+  const stamp = template.updatedAt;
+  const doc = (resume) => JSON.stringify({
+    version: 1,
+    entries: [{ ...template, resume, updatedAt: stamp }]
+  });
+  trackerA.importResume(doc(10));
+  trackerB.importResume(doc(20));
+  trackerA.importResume(trackerB.exportResume());
+  trackerB.importResume(trackerA.exportResume());
+  assert.equal(trackerA.getEntries()[0].resume, 20, "A converged on the content winner");
+  assert.equal(trackerB.getEntries()[0].resume, 20, "B converged on the same winner");
+  trackerA.destroy();
+  trackerB.destroy();
+});
+
+test("Start over persists the reset instead of waiting for the next tick", async () => {
+  // A seeded 300s marker raises the resume toast; the action must write 0
+  // now - closing the tab before another save would otherwise resurrect the
+  // old marker.
+  delete writes["pf:resume"];
+  const { hashEntry } = await import("../src/shared/context.js");
+  const now = Date.now();
+  writes["pf:resume"] = {
+    version: 1,
+    entries: [{
+      id: hashEntry("youtube", "/watch", 600),
+      domain: "youtube",
+      path: "/watch",
+      title: "T",
+      duration: 600,
+      resume: 300,
+      createdAt: now,
+      updatedAt: now
+    }]
+  };
+  const { shell } = makeEnv(600);
+  const tracker = new ResumeTracker(shell);
+  await flush();
+  await flush();
+  const toast = shell.toasts.find((t) => t.actions?.length);
+  assert.ok(toast, "the saved marker raised the resume toast");
+  assert.equal(shell.seeks.at(-1), 300, "adopt sought the marker");
+  toast.actions[0].onClick();
+  assert.equal(tracker.getEntries()[0].resume, 0, "the reset landed on disk now, not next tick");
+  assert.equal(shell.seeks.at(-1), 0);
+  tracker.destroy();
+});
+
+test("import drops pending entries instead of displaying dead rows", async () => {
+  // Pending imports are provisional and never resumable: like the load-time
+  // purge, they join nothing rather than sitting visible-but-dead until reload.
+  delete writes["pf:resume"];
+  const { shell } = makeEnv(600);
+  const tracker = new ResumeTracker(shell);
+  await flush();
+  await flush();
+  const ghost = {
+    id: "ghost", domain: "youtube", path: "/ghost", title: "G",
+    duration: 600, resume: 10, createdAt: 1, updatedAt: Date.now(), pending: true
+  };
+  const result = tracker.importResume(JSON.stringify({ version: 1, entries: [ghost] }));
+  assert.equal(result.added, 0, "provisional imports join nothing");
+  assert.ok(!tracker.getEntries().some((e) => e.id === "ghost"), "no dead row until reload");
+  tracker.destroy();
+});

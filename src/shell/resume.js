@@ -87,8 +87,15 @@ export class ResumeStore {
   }
 
   #notify(structural = false) {
-    for (const cb of this.#listeners) {
-      cb(structural);
+    // Dispatch isolation, the same policy as the status and fullscreen
+    // fan-outs: one throwing consumer must neither abort its peers nor
+    // escape into the GM change listener that called #adoptExternal.
+    for (const cb of [...this.#listeners]) {
+      try {
+        cb(structural);
+      } catch (err) {
+        logger.error("resume", "Store subscriber threw during dispatch", err);
+      }
     }
   }
 
@@ -153,7 +160,14 @@ export class ResumeStore {
       const shaped = toFixedShape(incoming);
       byId.set(incoming.id, shaped);
       added++;
-    } else if ((incoming.updatedAt || 0) > (known.updatedAt || 0)) {
+    } else if (
+      (incoming.updatedAt || 0) > (known.updatedAt || 0) ||
+      // Same-millisecond writes from two tabs would otherwise diverge (each
+      // side keeps its own): break the tie on content so both directions
+      // converge on one winner.
+      ((incoming.updatedAt || 0) === (known.updatedAt || 0) &&
+        (incoming.resume || 0) > (known.resume || 0))
+    ) {
       for (const key of RESUME_ENTRY_FIELDS) {
         if (key in incoming) {
           known[key] = incoming[key];
@@ -403,7 +417,13 @@ export class ResumeStore {
     if (!isValidStore(raw)) {
       return null;
     }
-    const result = this.#mergeRaw(raw);
+    // Pending entries are provisional imports, never resumable: drop them
+    // like the load-time purge instead of displaying dead rows until reload.
+    const active = raw.entries.filter((entry) => !(entry && typeof entry === "object" && entry.pending));
+    if (active.length !== raw.entries.length) {
+      logger.log("resume", `Dropped ${raw.entries.length - active.length} pending entries on import`);
+    }
+    const result = this.#mergeRaw({ ...raw, entries: active });
     if (result.added || result.updated) {
       this.#persist(true);
     }
@@ -616,6 +636,11 @@ export class ResumeTracker {
         title: "Start over",
         onClick: () => {
           this.#lastSavedPosition = 0;
+          // Persist the reset now, not on the next tick: closing the tab
+          // before another save would otherwise resurrect the old marker.
+          if (this.#entry) {
+            this.#store.updateResume(this.#entry.id, 0);
+          }
           shell.media.seekTo(0);
         }
       }]);
