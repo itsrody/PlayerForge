@@ -949,7 +949,7 @@ export function createTestPage(server, options = {}) {
  * Create a Plyr-style test page URL.
  *
  * @param {TestServer} server
- * @returns {string} HTTP URL to the Plyr test page.
+ * @returns {string} URL to the Plyr test page.
  */
 export function createPlyrPage(server) {
   const html = `<!DOCTYPE html>
@@ -964,6 +964,62 @@ export function createPlyrPage(server) {
 </body>
 </html>`;
   const path = `/plyr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`;
+  server.addPage(path, html);
+  return `${server.url}${path}`;
+}
+
+/**
+ * Build the scorer-corpus page: five labeled videos covering the adoption
+ * matrix the fallback (and, later, the 3.0 scorer) must get right - a main
+ * player, a small ad tile, a full-bleed ambient background, a dormant
+ * poster video, and a muted autoplay. No template anchors anywhere, so
+ * every adoption on this page goes through the measured path.
+ *
+ * All videos share one real media URL. Autoplay roles carry muted+autoplay;
+ * the main and dormant roles wait for the test to drive playback, which is
+ * what separates pre-gesture state from user-driven state.
+ */
+export function createScorerCorpusPage(server, { mediaUrl, width = 1280, height = 720 } = {}) {
+  const src = mediaUrl ? `src="${mediaUrl}"` : "";
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=${width},initial-scale=1">
+  <title>Scorer Corpus</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; width: ${width}px; height: ${height}px; }
+    /* Compact side-by-side layout: every role stays (at least partly) in
+       view on any sane viewport, so viewport refusal never triggers for
+       the wrong reason - a video below the fold is refused as off-viewport,
+       which is correct behavior, not a fixture artifact. All boxes stay
+       above the generic 200x120 admission floor. */
+    .pf-corpus-main, .pf-corpus-muted { display: inline-block; vertical-align: top; width: 320px; height: 180px; }
+    .pf-corpus-ad { width: 160px; height: 90px; }
+    .pf-corpus-dormant { width: 320px; height: 180px; }
+    .pf-corpus-ambient { position: fixed; inset: 0; width: 100vw; height: 100vh; }
+    video { width: 100%; height: 100%; object-fit: contain; }
+  </style>
+</head>
+<body>
+  <div class="pf-corpus-main" data-pf-corpus="main">
+    <video id="corpus-main-video" ${src} preload="metadata"></video>
+  </div>
+  <div class="pf-corpus-ad" data-pf-corpus="ad">
+    <video id="corpus-ad-video" ${src} autoplay muted playsinline preload="auto"></video>
+  </div>
+  <div class="pf-corpus-dormant" data-pf-corpus="dormant">
+    <video id="corpus-dormant-video" ${src} preload="metadata"></video>
+  </div>
+  <div class="pf-corpus-muted" data-pf-corpus="muted-autoplay">
+    <video id="corpus-muted-video" ${src} autoplay muted playsinline preload="auto"></video>
+  </div>
+  <div class="pf-corpus-ambient" data-pf-corpus="ambient">
+    <video id="corpus-ambient-video" ${src} autoplay muted playsinline preload="auto"></video>
+  </div>
+</body>
+</html>`;
+  const path = `/corpus-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`;
   server.addPage(path, html);
   return `${server.url}${path}`;
 }
