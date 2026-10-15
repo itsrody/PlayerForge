@@ -404,15 +404,15 @@ function pointerCapturePair() {
 }
 
 /**
- * The swipe transform at forge.js:943. The value being concatenated onto is
- * `translateY(<drag>px)`, but the arm being concatenated ONTO - the base
- * transform, latched once when the stroke latches - is re-read and re-joined
- * into a fresh prefix on every single move, behind a ternary, even though it
- * cannot have changed since the latch. The candidate caches the prefix at latch
- * time and leaves one concat per move.
+ * The swipe transform, whose prefix the shipped code caches at latch time
+ * (forge.js:992): the base transform, latched once when the stroke latches,
+ * joined once to a translateY prefix, leaving one concat per move. The row
+ * below replays both shapes - re-derived prefix per move versus the cached
+ * one - so the ratio guards the shipped shape against regression rather
+ * than proposing it.
  *
  * Note what this row is NOT: it is not a before/after for guarding on the drag
- * delta. `forge.js:942` already does that, so both arms below carry the guard.
+ * delta. `forge.js:1020` already does that, so both arms below carry the guard.
  * The delta measured here is purely the per-move prefix derivation.
  */
 function swipeTransformPair() {
@@ -426,7 +426,7 @@ function swipeTransformPair() {
       let last = "";
       let acc = 0;
       for (let n = 0; n < 64; n++) {
-        // Both arms carry the drag-delta guard that forge.js:942 already has.
+        // Both arms carry the drag-delta guard that forge.js:1020 already has.
         // The drag changes on only some moves, exactly as in a real drag.
         drag = n % 8 === 0 ? (drag + 1) % 40 : drag;
         const t = base ? base + " translateY(" + drag + "px)" : "translateY(" + drag + "px)";
