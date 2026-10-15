@@ -1933,6 +1933,16 @@ element's life (measured live: `playbackRate = 2` produced zero rate
   paid off by forcing the two attributions above. No behavior changed;
   net even on tests.
 
+  The forty-ninth movement proves the no-sink posture instead of asserting
+  it: a strict-CSP page (`script-src 'self'` plus
+  `require-trusted-types-for 'script'`, Trusted Types having shipped in
+  Firefox 148, inside the floor) boots the bundle and adopts a templated
+  player in the isolated realm page CSP does not govern. The test first
+  proves enforcement is live - a page-realm string sink must throw,
+  compared by error name because WebDriver evaluates in a sandbox realm
+  where page-realm `instanceof` fails. The dead `barePlayers` fixture
+  option goes with the tier it served. Net one test heavier.
+
   The fiftieth movement adds the last discovery edge: visibility-transition
   offers for template-resolved near misses. A rect-sized but invisible
   video enrolls one IntersectionObserver that re-offers on entering -
@@ -1943,15 +1953,15 @@ element's life (measured live: `playbackRate = 2` produced zero rate
   like upgrade churn does. The size gate splits for it: the rect question
   enrolls, the visibility question still refuses. Net four tests heavier.
 
-  The forty-ninth movement proves the no-sink posture instead of asserting
-  it: a strict-CSP page (`script-src 'self'` plus
-  `require-trusted-types-for 'script'`, Trusted Types having shipped in
-  Firefox 148, inside the floor) boots the bundle and adopts a templated
-  player in the isolated realm page CSP does not govern. The test first
-  proves enforcement is live - a page-realm string sink must throw,
-  compared by error name because WebDriver evaluates in a sandbox realm
-  where page-realm `instanceof` fails. The dead `barePlayers` fixture
-  option goes with the tier it served. Net one test heavier.
+  The fifty-first movement opens the site pack: bespoke embeds no
+  template can hold resolve by host and path instead. The first row
+  covers a Tailwind/Inertia player whose chrome carries no namespaced
+  marker, gated to its embed pages where every video is the player, with
+  the video's own wrapper as the container - a structural fact no
+  redesign can rot. Site rules answer before templates, memoize the same
+  way, and ride every downstream gate unchanged; each future row needs
+  the same host gate, path gate and live-markup fixture. Net two tests
+  heavier.
 
 ## 7. Gecko-specific decisions, and what they rule out
 

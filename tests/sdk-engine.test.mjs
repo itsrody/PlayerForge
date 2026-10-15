@@ -137,6 +137,40 @@ test("framework-free markup stays unmatched", () => {
   }
 });
 
+/**
+ * Bespoke Tailwind player on a site-ruled host: no template anchors
+ * anywhere (the 71stream embed shape - utilities, Lucide icons, Inertia
+ * shell), resolved by the host+path gate to the video's own wrapper.
+ * Documents carry their own URL here because the rule reads the video's
+ * document, never a global.
+ */
+function bespokeEmbedDoc(url) {
+  return new JSDOM(`<!doctype html><html><body>
+    <div id="app" data-page='{"component":"Video/Embed"}'>
+      <div class="w-full h-full bg-black relative overflow-hidden select-none text-white group font-sans">
+        <div class="absolute inset-0 z-0 w-full h-full"><video class="w-full h-full relative z-0 cursor-pointer object-contain" playsinline></video></div>
+      </div>
+    </div>
+  </body></html>`, { url }).window.document;
+}
+
+test("a site-ruled bespoke embed resolves to the video wrapper", () => {
+  const doc = bespokeEmbedDoc("https://71stream.one/embed/l5KJMAN1ra");
+  const video = doc.querySelector("video");
+  const found = findPlayerForVideo(video);
+  assert.ok(found, "host+path gate claims the bespoke video");
+  assert.equal(found.container, video.parentNode, "the wrapper is structural, not a selector");
+  assert.equal(found.hops, 1);
+});
+
+test("the site rule holds its gates: other hosts and paths stay unmatched", () => {
+  for (const url of ["https://example.com/embed/l5KJMAN1ra", "https://71stream.one/dashboard", "https://71stream.one/"]) {
+    const doc = bespokeEmbedDoc(url);
+    const video = doc.querySelector("video");
+    assert.equal(findPlayerForVideo(video), null, url);
+  }
+});
+
 test("the descriptor container is the nearest matched anchor", () => {
   const doc = dom('<div data-vjs-player><div class="video-js"><video></video></div></div>');
   assert.equal(containerOf(doc.querySelector("video")), doc.querySelector(".video-js"));

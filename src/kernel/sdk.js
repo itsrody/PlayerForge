@@ -6,7 +6,10 @@
  * its composed ancestry contains one. An anchor must be framework-namespaced
  * (prefixed class, dedicated data attribute, or custom element tag), so pages
  * merely styling a <div class="player"> stay unrecognized rather than
- * misidentified. Coverage grows by adding templates.
+ * misidentified. Coverage grows by adding templates. Bespoke embeds no
+ * template can hold are covered one by one instead: SITE_RULES below
+ * gates by host and path, where generic selectors are safe because the
+ * host serves only the player on those paths.
  *
  * Templates carry no names and no sources: there is no SDK identity in this
  * file, only shapes and the containers they resolve. The shell-facing
@@ -82,6 +85,56 @@ const TEMPLATES = [
   { anchors: [".shaka-video-container", "[data-shaka-player]", "[data-shaka-player-container]"] },
   { anchors: [".theoplayer-container", "theoplayer-ui", "theoplayer-default-ui"] },
 ];
+
+/**
+ * Site rules: bespoke embeds no template can hold, gated by host and path.
+ * Generic selectors are unsafe globally but safe scoped to a host that
+ * serves only a player on the gated paths - the over-match class collapses
+ * to videos that are the player. One row per bespoke embed, each with a
+ * host gate plus a path gate wherever the host also serves non-player
+ * pages, a fixture mirroring the live markup, and no unscoped generic
+ * selectors. container "parent" resolves the video's own wrapper (a
+ * structural fact - object-contain sizing needs it), so no selector in
+ * the row can rot on the site's next redesign.
+ */
+const SITE_RULES = [
+  {
+    hosts: ["71stream.one"],
+    paths: [/^\/embed\//],
+    container: "parent",
+  },
+];
+
+/**
+ * The bespoke container for a video on a site-ruled document, or null.
+ * Host and path read off the video's own document (never a global), so
+ * framing pages cannot donate their URL and iframes answer for
+ * themselves. Suffix host match covers embed subdomains; paths are
+ * anchored regexes against pathname.
+ */
+function siteContainerFor(video) {
+  const loc = video?.ownerDocument?.location;
+  if (!loc) {
+    return null;
+  }
+  const host = loc.hostname || "";
+  const path = loc.pathname || "/";
+  for (const rule of SITE_RULES) {
+    if (!rule.hosts.some((h) => host === h || host.endsWith(`.${h}`))) {
+      continue;
+    }
+    if (!rule.paths.some((re) => re.test(path))) {
+      continue;
+    }
+    if (rule.container === "parent") {
+      const parent = video.parentNode ?? null;
+      return parent && parent.nodeType === 1 ? parent : null;
+    }
+    const found = typeof video.closest === "function" ? video.closest(rule.container) : null;
+    return found ?? null;
+  }
+  return null;
+}
 
 export const MIN_VIDEO_WIDTH = 100;
 export const MIN_VIDEO_HEIGHT = 60;
@@ -218,9 +271,9 @@ function matchTemplatesOnChain(len) {
 const descriptorCache = new WeakMap();
 
 /**
- * Identify the player template owning a video, or null when unrecognized.
- * Unmatched videos adopt nothing: there is no measured fallback, so the
- * null is the honest answer for bespoke players without a template.
+ * Identify the player owning a video, or null when unrecognized: the
+ * site rule for bespoke embeds first, then the template table. Videos
+ * neither claims adopt nothing.
  */
 export function findPlayerForVideo(video) {
   return resolvePlayer(video);
@@ -289,9 +342,10 @@ function describeElement(el) {
 }
 
 /**
- * The resolve: one composed walk per offer against the template table.
- * A renamed-everything fork costs one shared scan while every known shape
- * keeps its single lookup; unmatched videos adopt nothing.
+ * The resolve: site rule first (host-specific beats generic), then one
+ * composed walk per offer against the template table. Every known shape
+ * keeps its single lookup; unmatched videos adopt nothing - a
+ * renamed-everything fork costs one full miss scan and no shell.
  *
  * Only the positive descriptor is memoized: the null stays unmemoized,
  * because no cheap fingerprint distinguishes "same answer" from "the video's
@@ -306,6 +360,17 @@ export function resolvePlayer(video) {
   const cached = descriptorCache.get(video);
   if (cached && isMatchFresh(video, cached)) {
     return cached.descriptor;
+  }
+  const site = siteContainerFor(video);
+  if (site) {
+    const entry = { best: { el: site, hops: 1 }, parent: video.parentNode ?? null, descriptor: null };
+    entry.descriptor = describe({
+      container: site,
+      hops: 1,
+      label: describeElement(site)
+    });
+    descriptorCache.set(video, entry);
+    return entry.descriptor;
   }
   const len = fillComposedChain(video);
   const match = matchTemplatesOnChain(len);
