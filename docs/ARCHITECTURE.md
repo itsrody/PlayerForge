@@ -4,7 +4,7 @@ Status: implemented. §4's layer model and all seven migration phases in §6
 have landed, and every invariant in §5 is pinned by a test. The design text
 below is written as it was reasoned out; where an implementation forced a
 change, the section says so at the point it happened.
-Target: Gecko 157+ (floor), tested on Firefox 158.0b5.
+Target: Gecko 157+ (floor), tested on Firefox 158.0 stable.
 Manager contract: Violentmonkey MV2 2.49+.
 
 ## 0. Scope
@@ -1869,6 +1869,18 @@ element's life (measured live: `playbackRate = 2` produced zero rate
   media with no gesture, asserts no shell, clicks, and asserts adoption;
   pausing and replaying to prove the gates instead would have tested
   everything except the fix. Net one test heavier.
+
+  The forty-fourth movement re-verifies on 158 stable: `testTarget.verifiedOn`
+  moves from 158.0b5 to 158.0 with the floor untouched at 157 (the release
+  carries no new API behind a feature - typed arithmetic, deliveryType and
+  the Sanitizer scoping stay unused, and the Nightly-only flags stay
+  unwatched). The bench compare re-ran green on the stable build, and the
+  automation touch-tolerance zeroing needed no code: the harness dispatches
+  no touch actions and the forge tracks Pointer Events, swallowing raw
+  touchstart/touchmove only. The one adaptation is `aria-busy` on the panel
+  dialog across the lazy section build, so assistive tech waits for the
+  finished region instead of announcing partial sections - desktop honored
+  it all along, 158 brings Android along. Net two tests heavier.
 
 ## 7. Gecko-specific decisions, and what they rule out
 

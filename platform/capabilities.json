@@ -48,8 +48,8 @@
     "overrideEnv": "FIREFOX_PATH",
     "pinEnv": "FIREFOX_CHANNEL",
     "resolver": "platform/harness/target.mjs",
-    "verifiedOn": "Firefox 158.0b5",
-    "why": "Developer Edition is the fastest channel that still runs a real, signed-profile install with userScripts and a temporary add-on, which is what the native harness needs to register the bundle in the isolated content realm. Nightly is accepted for the same reason; a plain release build is the fallback, not the target. Channels are named by app bundle, so a beta riding in Firefox.app (this machine's shape) resolves as release/158.0b5 - and the resolver derives bleeding-edge from the prerelease letter rather than the app name, so the run still reports what engine it measured."
+    "verifiedOn": "Firefox 158.0",
+    "why": "Developer Edition is the fastest channel that still runs a real, signed-profile install with userScripts and a temporary add-on, which is what the native harness needs to register the bundle in the isolated content realm. Nightly is accepted for the same reason; a plain release build is the fallback, not the target. Channels are named by app bundle, so a beta riding in Firefox.app (the common single-install shape) resolves as release/158.0b5 - and the resolver derives bleeding-edge from the prerelease letter rather than the app name, so the run still reports what engine it measured. This machine currently carries stable 158.0, which resolves as a settled release build and still clears the 157 floor."
   },
   "managerContract": {
     "injectionContext": {

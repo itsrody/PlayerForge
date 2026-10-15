@@ -360,14 +360,32 @@ export class SettingsPanel {
     this.#sectionBuilder = fn;
   }
 
+  /** Run the lazy section builder once, reporting busy while it settles.
+   *
+   *  The builder populates sections across awaits (fonts, styles, subtitle
+   *  modules), so the dialog reports busy until it settles: assistive tech
+   *  then waits for the finished region instead of announcing partial
+   *  sections. Desktop honored this all along; Firefox 158 brings Android
+   *  along (bug 908042). One helper because open() and openSection() both
+   *  consume the builder, and the busy window must not drift between them.
+   */
+  async #runSectionBuilder() {
+    const build = this.#sectionBuilder;
+    this.#sectionBuilder = null;
+    this.#root.setAttribute("aria-busy", "true");
+    try {
+      await build();
+    } finally {
+      this.#root.removeAttribute("aria-busy");
+    }
+  }
+
   async open() {
     if (!this.#root || this.#scope.disposed || this.isOpen) {
       return;
     }
     if (this.#sectionBuilder) {
-      const build = this.#sectionBuilder;
-      this.#sectionBuilder = null;
-      await build();
+      await this.#runSectionBuilder();
     }
     if (!this.#body.childElementCount) {
       return;
@@ -466,9 +484,7 @@ export class SettingsPanel {
       return false;
     }
     if (this.#sectionBuilder) {
-      const build = this.#sectionBuilder;
-      this.#sectionBuilder = null;
-      await build();
+      await this.#runSectionBuilder();
     }
     for (const [section, tab] of this.#sections) {
       if (section.dataset.title === title) {
