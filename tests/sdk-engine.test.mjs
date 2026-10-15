@@ -195,15 +195,14 @@ test("videoFromEvent yields null without any video in the path", () => {
   assert.equal(videoFromEvent({ target: host }), null);
 });
 
-test("findPlayerForVideo returns a cached descriptor with anchor and hops", () => {
+test("findPlayerForVideo returns a cached descriptor with container and hops", () => {
   const doc = dom('<div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div>');
   const video = doc.querySelector("video");
   const sdk = findPlayerForVideo(video);
   assert.ok(sdk);
   assert.equal(sdk.label, "div.plyr__video-wrapper");
   assert.equal(sdk.container, containerOf(video));
-  // anchor is the actually-matched element; hops = distance video -> anchor.
-  assert.equal(sdk.anchor, doc.querySelector(".plyr__video-wrapper"));
+  // Hops = distance video -> container.
   assert.equal(sdk.hops >= 1, true);
   // Every re-query returns the identical cached object - no per-call churn.
   assert.equal(findPlayerForVideo(video), sdk);

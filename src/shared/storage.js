@@ -24,8 +24,10 @@ export const KEYS = {
  * Synchronous manager read with a fallback, never a throw: without the grant
  * (or outside a userscript context) there is no stored value to return, so
  * the fallback is the honest answer rather than a ReferenceError into boot.
+ * Module-private: the only reader is loadJsonObject below, and callers
+ * speak configs/resume, never raw keys.
  */
-export function gmGetValue(key, fallback) {
+function gmGetValue(key, fallback) {
   if (typeof GM_getValue !== "function") {
     return fallback;
   }

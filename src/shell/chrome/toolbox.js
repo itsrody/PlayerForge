@@ -30,7 +30,7 @@ import { applyAttrs } from "../../shared/dom-manager.js";
 export const EASE_SNAPPY_CURVE = "cubic-bezier(0.16, 1, 0.3, 1)";
 
 /** Linear ease for flash background animation. */
-export const FLASH_EASING = "ease-out";
+const FLASH_EASING = "ease-out";
 
 /* ── Duration constants (milliseconds) ────────────────────────────────────── */
 
@@ -38,7 +38,7 @@ export const FLASH_EASING = "ease-out";
 export const EASE_SNAPPY_MS = 120;
 
 /** Accent flash duration. */
-export const FLASH_MS = 400;
+const FLASH_MS = 400;
 
 /* ── Icon table ────────────────────────────────────────────────────────── */
 
@@ -99,10 +99,7 @@ const ALIASES = {
   up: "chevron-up",
   down: "chevron-down",
   inc: "chevron-up",
-  dec: "chevron-down",
-  // The generic-detection notice names its icon "detect" after what it
-  // reports; it points at the settings toggle the copy names.
-  detect: "settings"
+  dec: "chevron-down"
 };
 
 function canonicalName(name) {

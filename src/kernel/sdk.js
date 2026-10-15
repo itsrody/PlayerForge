@@ -10,11 +10,11 @@
  *
  * Templates carry no names and no sources: there is no SDK identity in this
  * file, only shapes and the containers they resolve. The shell-facing
- * descriptor carries the resolved container (plus the matched anchor element
- * and its hop distance, both computed free during the scan) and a label
- * derived from the matched element for logs - div.jwplayer, video-js -
- * so readable diagnostics need no registry of names behind them. Videos no
- * template claims stay unadopted: coverage grows by adding templates.
+ * descriptor carries the resolved container (plus its hop distance,
+ * computed free during the scan) and a label derived from the matched
+ * element for logs - div.jwplayer, video-js - so readable diagnostics
+ * need no registry of names behind them. Videos no template claims stay
+ * unadopted: coverage grows by adding templates.
  *
  * Framework roots are never anchors. An app-shell marker like Inertia's
  * [data-page] fires for every video on the page - articles, previews, ads -
@@ -34,9 +34,8 @@
  *             (closest(), shadow-boundary aware). Each must be
  *             framework-namespaced; ordered most specific first.
  *
- * The shell-facing descriptor carries the resolved container (plus the
- * matched anchor element and its hop distance, both computed free during the
- * scan).
+ * The shell-facing descriptor carries the resolved container, its hop
+ * distance, and a structural label.
  *
  * Selection: among all matching anchors across all templates, the element
  * with the fewest composed ancestor hops from the video wins; ties break by
@@ -264,9 +263,9 @@ export function templateCustomTags() {
   return [...names].sort();
 }
 
-/** The one descriptor constructor: container, anchor, hops, label. */
-function describe({ container, anchor, hops, label }) {
-  return { container, anchor, hops, label };
+/** The one descriptor constructor: container, hops, label. */
+function describe({ container, hops, label }) {
+  return { container, hops, label };
 }
 
 /**
@@ -314,7 +313,6 @@ export function resolvePlayer(video) {
     const entry = { best: match, parent: video.parentNode ?? null, descriptor: null };
     entry.descriptor = describe({
       container: match.el,
-      anchor: match.el,
       hops: match.hops,
       label: describeElement(match.el)
     });
