@@ -1919,6 +1919,20 @@ element's life (measured live: `playbackRate = 2` produced zero rate
   compounds, so a combinator or pseudo would silently change what the
   grouped pre-check matches. Net two tests heavier.
 
+  The forty-eighth movement audits the anchor table instead of growing
+  it. Bare `data-player` is Brightcove's (in-page embeds stamp the player
+  id; the tag row already covers the element), kept with its attribution
+  and its accepted residual. MediaElement 7 moved its containers from JS
+  to CSS while the v4 name survives on legacy players, so both anchors
+  stay with a version note each. Slotted videos join the shadow walk's
+  recorded boundaries: assigned nodes keep light-DOM parents, so anchors
+  past a slot are missed, with no observed instance to price a fix
+  against. Anchor freshness itself moves to a scratch probe
+  (`platform/scratch/template-freshness.mjs`, manual, never a gate) that
+  checks each anchor against pinned dist builds - its first run already
+  paid off by forcing the two attributions above. No behavior changed;
+  net even on tests.
+
 ## 7. Gecko-specific decisions, and what they rule out
 
 - Scheduler priorities replace timer-based deferral. `postTask` is available

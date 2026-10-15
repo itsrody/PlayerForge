@@ -51,11 +51,26 @@ const TEMPLATES = [
   { anchors: ["[data-plyr]", "[data-plyr-config]", ".plyr__video-wrapper", ".plyr"] },
   { anchors: [".art-video-player", ".artplayer"] },
   { anchors: [".dplayer"] },
+  // MediaElement 7 no longer writes containers from JS (only mejs-controls
+  // survives in the bundle); .mejs__container lives on in the v7
+  // stylesheet, and .mejs-container is the v4-era name. Both stay: one
+  // covers current players, one the legacy ones still serving old markup.
   { anchors: [".mejs-container", ".mejs__container"] },
   { anchors: [".xgplayer"] },
   { anchors: [".prism-player"] },
   { anchors: [".fluid_video_wrapper"] },
   { anchors: [".fp-player", "flowplayer-ui", "[data-player-id]", ".flowplayer"] },
+  // data-player-id is publisher markup, not a JS string: the async-embed
+  // snippet stamps it per Flowplayer's docs, so a dist grep misses it by
+  // construction. .fp-player is the legacy (v6/v7) root class the native
+  // v3 bundle no longer ships - kept for the old players still on it.
+  // Bare data-player is Brightcove's: in-page embeds stamp data-player
+  // (the player id) on the <video-js> element itself, and on .vjs-playlist
+  // containers for player association. The tag row above already covers
+  // the element; this row covers videos nested under a stamped wrapper.
+  // Generic name, attributed writer: a page-authored data-player div with
+  // a video inside would also match, which is the accepted residual -
+  // the same class of risk as any framework class, minus the prefix.
   { anchors: ["[data-player]"] },
   { anchors: ["media-player"] },
   { anchors: ["mux-player"] },
@@ -394,13 +409,21 @@ export function videoFromEvent(event) {
  * Set.has(string) over 6300 names measured 3.5ms, 5x the 0.72ms of just
  * reading .shadowRoot everywhere.
  *
- * Residual boundary (deliberate): a video appended into a shadow root that
- * already existed still produces no document-level record, and stays covered
- * only by the media-event tap. Closing it needs one MutationObserver per
- * discovered shadow root - unbounded observers on any custom-element-heavy
- * page - not worth the case. Closed roots remain invisible by design, as
- * with videoFromEvent.
- */
+  * Residual boundary (deliberate): a video appended into a shadow root that
+  * already existed still produces no document-level record, and stays covered
+  * only by the media-event tap. Closing it needs one MutationObserver per
+  * discovered shadow root - unbounded observers on any custom-element-heavy
+  * page - not worth the case. Closed roots remain invisible by design, as
+  * with videoFromEvent.
+  *
+  * Second boundary, same verdict: a video assigned to a <slot> keeps its
+  * light-DOM parents, so the composed walk never climbs through the slot
+  * into the shadow tree above it - anchors strictly inside shadow past a
+  * slot are missed. No observed instance (hosts carrying anchors are light
+  * ancestors in every surveyed shape); a slot-aware chain walk would cost
+  * every offer for a case with no witness. Recorded so it is not
+  * re-derived as a discovery.
+  */
 function walkShadowRoot(root, visit) {
   const videos = root.querySelectorAll("video");
   for (let i = 0; i < videos.length; i++) {
