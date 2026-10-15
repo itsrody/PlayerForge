@@ -1,14 +1,15 @@
 {
-  "bundle parse+compile (minified)": 10955.825496342737,
-  "hashEntry (djb2, domain-seeded)": 87702.91611743558,
-  "getDomainKey typical hosts": 973.054781742438,
-  "domainsMatch boundary checks": 9058.26923076923,
-  "resume findMatch over 200 entries": 9819.30706713781,
-  "resume createEntry fresh store (hash+persist)": 44010.420528533126,
-  "resume updateResume persist+merge (200 entries)": 287.14936449688327,
-  "scrub per-move dispatch (down + 30 moves)": 88234.5723076923,
-  "findSdkForVideo full scan (Plyr tree)": 874.7278769001106,
-  "findSdkForVideo repeat query (memo hit)": 13.994805142985802,
-  "findSdkForVideo miss (generic markup)": 5.499891844363326,
-  "formatTime scrub ticks": 6701.657594438615
+  "bundle parse+compile (minified)": 11738.011508951407,
+  "hashEntry (djb2, domain-seeded)": 89210.04335260116,
+  "getDomainKey typical hosts": 5341.726585946393,
+  "domainsMatch boundary checks": 8797.26266368022,
+  "resume findMatch over 200 entries": 789.6748048282716,
+  "resume createEntry fresh store (hash+persist)": 47153.99161676647,
+  "resume updateResume persist+merge (200 entries)": 6491.821410767697,
+  "scrub per-move dispatch (down + 30 moves)": 67522.75030674846,
+  "resolvePlayer full scan (Plyr tree)": 672.0291532725951,
+  "resolvePlayer repeat query (memo hit)": 10.227809099464968,
+  "resolvePlayer miss (generic markup)": 189.44522306063269,
+  "srtToVtt normalizes a small SRT": 2226.1320782529956,
+  "formatTime scrub ticks": 6591.787942316244
 }

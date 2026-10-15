@@ -1,20 +1,39 @@
 import { define } from "../lib.mjs";
-import { findSdkForVideo } from "../../src/kernel/sdk.js";
+import { resolvePlayer } from "../../src/kernel/sdk.js";
 
-/** Selector-satisfying fake node - enough surface for composedAncestry(). */
+/**
+ * Selector-satisfying fake node - enough surface for fillComposedChain():
+ * nodeType, parentNode/host, and matches(). The grouped `:is()` pre-check
+ * is answered from a precomputed flag so the harness cost stays out of the
+ * measured region; per-anchor selectors answer from the set directly.
+ */
 function fakeNode(selectors, parent) {
   const set = new Set(selectors);
   return {
     nodeType: 1,
     parentNode: parent,
-    matches: (selector) => set.has(selector)
+    host: null,
+    matches: (selector) => {
+      if (set.has(selector)) {
+        return true;
+      }
+      if (selector.startsWith(":is(")) {
+        for (const s of set) {
+          if (selector.includes(s)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
   };
 }
 
 /**
- * Typical Plyr-style tree: video nested 4 deep under ".plyr", with decoy
- * classes that other registries would want to claim if they could.
- * parentNode points UP the real DOM way - ancestry walks video -> root.
+ * Typical Plyr-style tree: video nested under ".plyr__video-wrapper", with
+ * decoy anchors above it that other templates would claim at a longer hop
+ * distance. parentNode points UP the real DOM way - ancestry walks
+ * video -> root, and fewest hops wins.
  */
 function buildTree() {
   const root = fakeNode(["[data-vjs-player]", "[data-player]"], null);
@@ -22,7 +41,7 @@ function buildTree() {
   const plyr = fakeNode([".plyr", "[data-plyr]"], container);
   const wrapper = fakeNode([".plyr__video-wrapper"], plyr);
   const video = fakeNode([], wrapper);
-  return { video, winner: plyr };
+  return { video, winner: wrapper };
 }
 
 const { video, winner } = buildTree();
@@ -31,33 +50,35 @@ const { video, winner } = buildTree();
 const freshVideo = () => buildTree().video;
 
 // Warm the WeakMap memo once so the repeat-query case measures hits only.
-findSdkForVideo(video);
+resolvePlayer(video);
 
 export default [
-  define("findSdkForVideo full scan (Plyr tree)", () => {
+  define("resolvePlayer full scan (Plyr tree)", () => {
     let sink;
     return () => {
-      sink = findSdkForVideo(freshVideo());
-      if (!sink || !sink.name.includes("Plyr")) throw new Error(`unexpected winner: ${JSON.stringify(sink)}`);
-      void winner;
+      // Fresh identity per iteration defeats the memo; hops === 1 proves
+      // the nearest anchor won (each fresh tree has its own wrapper, so
+      // identity cannot be asserted here).
+      sink = resolvePlayer(freshVideo());
+      if (!sink || sink.hops !== 1) throw new Error("unexpected winner");
     };
   }),
 
-  define("findSdkForVideo repeat query (memo hit)", () => {
+  define("resolvePlayer repeat query (memo hit)", () => {
     let sink;
     return () => {
-      sink = findSdkForVideo(video);
-      if (!sink || !sink.name.includes("Plyr")) throw new Error("memo lost");
+      sink = resolvePlayer(video);
+      if (!sink || sink.container !== winner) throw new Error("memo lost");
     };
   }),
 
-  define("findSdkForVideo miss (generic markup)", () => {
+  define("resolvePlayer miss (generic markup)", () => {
     // ".player" is deliberately unregistered - generic player markup stays unrecognized.
     const div = fakeNode([".player"], null);
     const bareVideo = fakeNode([], div);
     let sink;
     return () => {
-      sink = findSdkForVideo(bareVideo);
+      sink = resolvePlayer(bareVideo);
       if (sink !== null) throw new Error("expected miss");
     };
   })

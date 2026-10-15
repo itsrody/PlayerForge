@@ -42,7 +42,7 @@ Object.defineProperty(shared.window.document, "fullscreenElement", {
 });
 shared.window.document.dispatchEvent(new shared.window.Event("fullscreenchange"));
 
-const { InputForge } = await import("../../src/shell/inputs/forge.js");
+const { InputForge, EngineBroker } = await import("../../src/shell/inputs/forge.js");
 const { GESTURE_EVENTS } = await import("../../src/shell/inputs/actions.js");
 
 /**
@@ -86,8 +86,9 @@ export default [
   define("scrub per-move dispatch (down + 30 moves)", () => {
     const { dom, video, zone, host } = makeEnv();
     // The handle itself is never read - the constructor is the point: it binds
-    // the pointer/gesture listeners this case is measuring.
-    new InputForge(video, zone, host);
+    // the pointer/gesture listeners this case is measuring. Every forge
+    // takes its own broker (no shared default since the broker split).
+    new InputForge(video, zone, host, new EngineBroker());
     let scrubCount = 0;
     host.addEventListener(GESTURE_EVENTS.scrub, () => { scrubCount++; });
 
