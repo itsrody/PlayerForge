@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import {
   surveyVideos,
+  templateAnchors,
   templateCustomTags,
   resolvePlayer,
   findPlayerForVideo,
@@ -486,5 +487,20 @@ test("templateCustomTags derives exactly the custom-element anchors", () => {
   assert.ok(tags.includes("theoplayer-ui"), "the UI tag is watched");
   for (const tag of tags) {
     assert.match(tag, /^[a-z][a-z0-9]*(-[a-z0-9]+)+$/, `${tag} is a valid custom-element name`);
+  }
+});
+
+test("every anchor stays a simple compound for :is() grouping", () => {
+  // The grouped pre-check matches each chain node against all anchors at
+  // once, which preserves meaning only for single-node compounds: a
+  // combinator or pseudo would silently change what the group matches
+  // versus the per-anchor loop it gates. Only classes, attributes and
+  // custom-element tags may enter the table.
+  for (const anchor of templateAnchors()) {
+    assert.match(
+      anchor,
+      /^(?:\.[A-Za-z0-9_-]+|\[[^\[\]]+\]|[a-z][a-z0-9]*(?:-[a-z0-9]+)*)$/,
+      `${anchor} must stay a simple compound`
+    );
   }
 });

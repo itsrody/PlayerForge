@@ -1902,10 +1902,22 @@ element's life (measured live: `playbackRate = 2` produced zero rate
   is absolute - an anchored ambient background adopts, which is an anchor
   hygiene question, not a tier question. This is the opposite direction
   from the scorer sketch (which would delete identification, not the
-  fallback); the two do not compose, and this one is the tree's answer.
+  fallback); the two do not compose, and this one is   the tree's answer.
   The corpus and fallback integration files go with the tier, the revisit
   bench re-pairs as full scan versus memo hit, and the memo's own numbers
   move with it. Net seventeen tests lighter.
+
+  The forty-seventh movement hardens the template table two ways. First,
+  the upgrade watch learns `hidden` and arms for every connected video,
+  not just sized ones: a hidden or undersized video revealed or grown by
+  an attribute write had no re-offer edge (the feed is childList-only,
+  spent media events never re-fire), and the old arming rule's rationale
+  died with the fallback - paused videos still re-offer on play, but tiny
+  videos have no edge of their own. The miss budget bounds the wider
+  arming the same way it bounds churn. Second, the anchors gain a
+  `:is()`-compatibility pin: grouping preserves meaning only for simple
+  compounds, so a combinator or pseudo would silently change what the
+  grouped pre-check matches. Net two tests heavier.
 
 ## 7. Gecko-specific decisions, and what they rule out
 

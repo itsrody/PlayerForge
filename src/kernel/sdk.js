@@ -73,6 +73,17 @@ export const MIN_VIDEO_WIDTH = 100;
 export const MIN_VIDEO_HEIGHT = 60;
 
 /**
+ * Every anchor in the templates as a flat list. Single source behind
+ * ANCHOR_GROUP below and the suite's `:is()`-compatibility pin: grouping
+ * preserves meaning only for simple compounds (classes, attributes,
+ * custom-element tags), so a combinator or pseudo here would silently
+ * change what the grouped pre-check matches.
+ */
+export function templateAnchors() {
+  return TEMPLATES.flatMap((template) => template.anchors);
+}
+
+/**
  * Every anchor in the registry as one grouped selector. `:is()` is matched
  * once per chain node instead of once per anchor per node: measured 7.0x on
  * Gecko 158 for the mixed hit/miss discovery mix (see
@@ -81,7 +92,7 @@ export const MIN_VIDEO_HEIGHT = 60;
  * stay `:is()`-compatible - all current ones are simple compounds (classes,
  * attributes, custom-element tags), which group without changing meaning.
  */
-const ANCHOR_GROUP = `:is(${TEMPLATES.flatMap((template) => template.anchors).join(",")})`;
+const ANCHOR_GROUP = `:is(${templateAnchors().join(",")})`;
 
 /**
  * Reusable composed-ancestry scratch: the match loop is fully synchronous and

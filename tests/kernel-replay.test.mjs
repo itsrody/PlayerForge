@@ -641,6 +641,25 @@ test("a late SDK class re-offers the video", async () => {
   assert.equal(removals(), riding + 1, "and the session watch takes over one-for-one");
 });
 
+test("removing hidden re-offers the video", async () => {
+  const { kernel, video, created } = makeHarness();
+  // checkVisibility maps the hidden attribute the way Gecko's UA style
+  // does (hidden <=> display:none); jsdom has no such mapping, so the
+  // test installs it the way it installs the rect stub.
+  video.checkVisibility = () => !video.hasAttribute("hidden");
+  video.setAttribute("hidden", "");
+  kernel.init();
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.ok(
+    !created.some((shell) => shell.video === video),
+    "a hidden player adopts nothing, but arms its upgrade watch"
+  );
+  video.removeAttribute("hidden");
+  await waitFor(() => created.some((shell) => shell.video === video), 3000);
+  const shell = created.find((entry) => entry.video === video);
+  assert.ok(shell.sdk, "the reveal re-offered through the upgrade watch");
+});
+
 test("a removed video disarms its upgrade watch", async () => {
   const { trackedObserverLabels } = await import("../src/shared/dom-manager.js");
   const upgrades = () => trackedObserverLabels().filter((label) => label === "upgrade-watch").length;

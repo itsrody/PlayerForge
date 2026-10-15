@@ -26,11 +26,12 @@ const MAX_REMOVAL_DEPTH = 8;
 const REMOVAL_DEPTH_MARGIN = 1;
 /**
  * Attribute names the upgrade watch listens for: identity markers (class,
- * id) plus every data attribute the templates anchor on, derived from the
- * templates so a new data-anchored shape is watched without a second list
- * to drift. Exact names - attributeFilter takes no selectors.
+ * id), the reveal marker (hidden), plus every data attribute the templates
+ * anchor on, derived from the templates so a new data-anchored shape is
+ * watched without a second list to drift. Exact names - attributeFilter
+ * takes no selectors.
  */
-const UPGRADE_ATTRS = ["class", "id", ...templateDataAttributes()];
+const UPGRADE_ATTRS = ["class", "id", "hidden", ...templateDataAttributes()];
 /**
  * Consecutive fruitless upgrade re-offers before the watch stands down.
  * Class churn bursts (framework re-renders, carousel rotations) must not
@@ -317,11 +318,13 @@ export class Kernel {
   /**
    * Arm the upgrade watch: a scoped attribute observer over the video and
    * its ancestors (bounded like the removal watch) that re-offers on class,
-   * id or registry data-attribute changes. Covers the SDK that inserts its
-   * <video> bare and builds chrome around it later - a shape the childList
-   * feed structurally cannot see, and the reason the shared feed must never
-   * grow attribute observation itself (one observer designed for its lookup,
-   * per the surveyor rule). Self-limiting: disarms on adopt, on detach, on
+   * id, hidden or registry data-attribute changes. Covers the SDK that
+   * inserts its <video> bare and builds chrome around it later - a shape
+   * the childList feed structurally cannot see, and the reason the shared
+   * feed must never grow attribute observation itself (one observer designed
+   * for its lookup, per the surveyor rule). Also covers reveal: a hidden
+   * or undersized video grown or shown by an attribute write has no other
+   * re-offer edge. Self-limiting: disarms on adopt, on detach, on
    * teardown, after UPGRADE_MISS_LIMIT fruitless re-offers, and never arms twice.
    */
   #armUpgradeWatch(video) {
@@ -329,11 +332,14 @@ export class Kernel {
     if (session.claimed || session.upgradeArmed) {
       return;
     }
-    // Structural candidates only: connected and sized, but unclaimed.
-    // Transient misses (paused, unactivated, tiny) re-resolve on their own
-    // edges - play, gesture, crossing - and arming them would meter every
-    // playback toggle and scroll.
-    if (!video.isConnected || !meetsMinSize(video)) {
+    // Arm for every connected video, sized or not: a hidden or undersized
+    // video revealed or grown by an attribute write this watch observes
+    // (hidden removal, class-driven growth) has no other re-offer edge -
+    // the feed is childList-only and spent media events never re-fire.
+    // The miss budget below bounds the cost: perpetual churn stands down
+    // after UPGRADE_MISS_LIMIT fruitless re-offers, and any later feed,
+    // media or static offer re-arms fresh.
+    if (!video.isConnected) {
       return;
     }
     const watched = [];
@@ -389,12 +395,16 @@ export class Kernel {
     if (!sdk) {
       // No template claimed it: arm the upgrade watch, so framework classes
       // or ids arriving late (player chrome built after the video) re-offer
-      // instead of missing for the life of the document. Structural
-      // candidates only.
+      // instead of missing for the life of the document.
       this.#armUpgradeWatch(video);
       return;
     }
     if (!meetsMinSize(video)) {
+      // Template claimed it but the box is not there yet (hidden,
+      // undersized): arm the upgrade watch, so a reveal or growth by
+      // attribute write re-offers instead of missing for the life of
+      // the document. The watch stands down on its miss budget.
+      this.#armUpgradeWatch(video);
       return;
     }
     const container = sdk.container;
