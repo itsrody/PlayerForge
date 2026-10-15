@@ -1933,6 +1933,16 @@ element's life (measured live: `playbackRate = 2` produced zero rate
   paid off by forcing the two attributions above. No behavior changed;
   net even on tests.
 
+  The forty-ninth movement proves the no-sink posture instead of asserting
+  it: a strict-CSP page (`script-src 'self'` plus
+  `require-trusted-types-for 'script'`, Trusted Types having shipped in
+  Firefox 148, inside the floor) boots the bundle and adopts a templated
+  player in the isolated realm page CSP does not govern. The test first
+  proves enforcement is live - a page-realm string sink must throw,
+  compared by error name because WebDriver evaluates in a sandbox realm
+  where page-realm `instanceof` fails. The dead `barePlayers` fixture
+  option goes with the tier it served. Net one test heavier.
+
 ## 7. Gecko-specific decisions, and what they rule out
 
 - Scheduler priorities replace timer-based deferral. `postTask` is available

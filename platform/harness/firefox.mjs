@@ -893,10 +893,6 @@ function buildTestPageHtml(options = {}) {
     // same-key multi-subscriber case only exists with several players sharing a
     // realm, which is what a page with a main player plus an embed actually is.
     players = 1,
-    // Template-free players: sized plain wrappers no anchor matches, so the
-    // measured fallback (not a template) adopts them. The unknown-framework
-    // case - pass real media and it exercises the whole fallback chain live.
-    barePlayers = 0,
   } = options;
 
   const videoAttrs = videoSrc ? `src="${videoSrc}"` : "";
@@ -912,7 +908,6 @@ function buildTestPageHtml(options = {}) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #000; width: ${width}px; height: ${height}px; }
     .plyr { position: relative; width: 100%; height: 100%; }
-    .pf-bare-player { position: relative; width: 640px; height: 360px; }
     video { width: 100%; height: 100%; object-fit: contain; }
   </style>
 </head>
@@ -922,10 +917,6 @@ function buildTestPageHtml(options = {}) {
     <div class="plyr__video-wrapper">
       <video id="test-video${i === 0 ? "" : `-${i}`}" ${videoAttrs} preload="metadata"></video>
     </div>
-  </div>`).join("")}
-  ${Array.from({ length: barePlayers }, (_, i) => `
-  <div class="pf-bare-player">
-    <video id="test-bare-video${i === 0 ? "" : `-${i}`}" ${videoAttrs} preload="metadata"></video>
   </div>`).join("")}
 </body>
 </html>`;
@@ -942,6 +933,32 @@ export function createTestPage(server, options = {}) {
   const html = buildTestPageHtml(options);
   const path = `/test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`;
   server.addPage(path, html);
+  return `${server.url}${path}`;
+}
+
+/**
+ * Create a strict-CSP + Trusted-Types-enforcing test page URL.
+ *
+ * The document locks its own realm down hard - no page-realm script, and
+ * string-to-sink writes throw - while the bundle runs in the isolated
+ * userScript realm, which page CSP does not govern. A boot here proves
+ * the no-sink posture instead of asserting it: any string-to-DOM sink in
+ * the shipped bundle (or in Violentmonkey's inlining of it) fails the
+ * adoption below instead of shipping silently. style-src-elem stays open
+ * because the fixture's layout CSS is an inline block; script is where
+ * the guarantee lives.
+ *
+ * @param {TestServer} server
+ * @param {object} [options] Same options as createTestPage.
+ * @returns {string} HTTP URL to the test page.
+ */
+export function createStrictCspPage(server, options = {}) {
+  const html = buildTestPageHtml(options);
+  const path = `/strict-csp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`;
+  server.addPageWithHeaders(path, html, {
+    "Content-Security-Policy":
+      "default-src 'self'; script-src 'self'; style-src-elem 'unsafe-inline'; require-trusted-types-for 'script'",
+  });
   return `${server.url}${path}`;
 }
 
