@@ -6,7 +6,6 @@ import {
   templateCustomTags,
   resolvePlayer,
   findPlayerForVideo,
-  findGenericPlayer,
   videoFromEvent,
   meetsMinSize,
   forEachVideoInMutations,
@@ -57,7 +56,7 @@ test("adopts each framework shape through its structural anchors", () => {
     const doc = dom(html);
     const video = doc.querySelector("video");
     const player = findPlayerForVideo(video);
-    assert.ok(player?.matched, html);
+    assert.ok(player, html);
     assert.equal(player.container, doc.querySelector(selector), `${html} container`);
     assert.equal(player.hops, hops, `${html} hops`);
   }
@@ -93,7 +92,7 @@ test("crosses open shadow boundaries to reach custom-element players", () => {
     const video = doc.createElement("video");
     player.attachShadow({ mode: "open" }).append(video);
     const found = findPlayerForVideo(video);
-    assert.ok(found?.matched, tag);
+    assert.ok(found, tag);
     assert.equal(found.container, player, tag);
   }
 });
@@ -103,7 +102,7 @@ test("nearest anchor wins regardless of template order", () => {
     '<div class="jwplayer"><div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div></div>'
   );
   const video = doc.querySelector("video");
-  assert.ok(findPlayerForVideo(video)?.matched);
+  assert.ok(findPlayerForVideo(video));
   assert.equal(containerOf(video), doc.querySelector(".plyr__video-wrapper"));
 });
 
@@ -199,7 +198,7 @@ test("findPlayerForVideo returns a cached descriptor with anchor and hops", () =
   const doc = dom('<div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div>');
   const video = doc.querySelector("video");
   const sdk = findPlayerForVideo(video);
-  assert.equal(sdk.matched, true);
+  assert.ok(sdk);
   assert.equal(sdk.label, "div.plyr__video-wrapper");
   assert.equal(sdk.container, containerOf(video));
   // anchor is the actually-matched element; hops = distance video -> anchor.
@@ -225,7 +224,7 @@ test("re-parenting out of a template invalidates the positive memo", () => {
     '<div class="plain"><div id="target"></div></div>'
   );
   const video = doc.querySelector("video");
-  assert.ok(findPlayerForVideo(video)?.matched);
+  assert.ok(findPlayerForVideo(video));
 
   // Same element, new ancestry: the WeakMap key survives, so an unvalidated
   // memo would keep reporting the wrapper the video just left.
@@ -242,7 +241,7 @@ test("re-parenting into a template is detected on re-query", () => {
   assert.equal(findPlayerForVideo(video), null, "precondition: unregistered to start");
 
   doc.querySelector("#target").append(video);
-  assert.ok(findPlayerForVideo(video)?.matched, "stale null survived re-parenting");
+  assert.ok(findPlayerForVideo(video), "stale null survived re-parenting");
 });
 
 test("a subtree grafted under a template is detected on re-query", () => {
@@ -257,7 +256,7 @@ test("a subtree grafted under a template is detected on re-query", () => {
   // so a parent-only freshness check keeps reporting the stale null for the
   // life of the document while the video sits inside a real player.
   doc.querySelector("#target").append(doc.querySelector("#slot"));
-  assert.ok(findPlayerForVideo(video)?.matched, "stale null survived a subtree graft");
+  assert.ok(findPlayerForVideo(video), "stale null survived a subtree graft");
 });
 
 test("a graft that adds no template still answers null", () => {
@@ -272,52 +271,12 @@ test("a graft that adds no template still answers null", () => {
   assert.equal(findPlayerForVideo(video), null, "a graft without a template must not resurrect a match");
 });
 
-/* - Template-independent slow path - */
-
-/**
- * Installs the navigator for the generic path and restores it after: Node's
- * own navigator has no userActivation, which reads as "not activated" - the
- * safe direction - so every generic case below installs the activated shape
- * explicitly.
- */
-function withActivation(value, fn) {
-  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
-  const fake = value
-    ? { userActivation: { hasBeenActive: true, isActive: false } }
-    : undefined;
-  Object.defineProperty(globalThis, "navigator", {
-    value: fake, writable: true, configurable: true
-  });
-  try {
-    return fn();
-  } finally {
-    if (descriptor) {
-      Object.defineProperty(globalThis, "navigator", descriptor);
-    } else {
-      delete globalThis.navigator;
-    }
-  }
-}
-
-/** A playing, sized video in a similar-sized wrapper: the qualifying shape. */
-function genericFixture({ wrapperRect = { width: 640, height: 360 }, videoRect = { width: 640, height: 360 }, paused = false } = {}) {
-  const doc = dom('<div id="player"><video></video></div>');
-  const wrapper = doc.querySelector("#player");
-  const video = doc.querySelector("video");
-  wrapper.getBoundingClientRect = () => ({ ...wrapperRect, top: 0, left: 0, right: wrapperRect.width, bottom: wrapperRect.height });
-  video.getBoundingClientRect = () => ({ ...videoRect, top: 0, left: 0, right: videoRect.width, bottom: videoRect.height });
-  Object.defineProperty(video, "paused", { value: paused, configurable: true });
-  Object.defineProperty(video, "ended", { value: false, configurable: true });
-  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
-  return { doc, wrapper, video };
-}
-
 test("a positive memo is invalidated when the matched wrapper is replaced in place", () => {
   // The parent check alone cannot see this one: the video's own parent is
   // untouched, so only re-verifying the anchor at its recorded hop catches it.
   const doc = dom('<div id="slot"><div class="dplayer"><video></video></div></div>');
   const video = doc.querySelector("video");
-  assert.ok(findPlayerForVideo(video)?.matched);
+  assert.ok(findPlayerForVideo(video));
 
   const slot = doc.querySelector("#slot");
   slot.textContent = "";
@@ -431,200 +390,29 @@ test("findPlayerForVideo matches a template anchor across a shadow boundary", ()
   shadow.appendChild(video);
 
   const match = findPlayerForVideo(video);
-  assert.ok(match?.matched, "composed chain crossed the boundary via .host");
+  assert.ok(match, "composed chain crossed the boundary via .host");
   assert.equal(match?.container, doc.querySelector(".plyr__video-wrapper"), "container resolves in the light tree");
 });
 
-test("a playing video with no template qualifies on an activated page", () => {
-  const { wrapper, video } = genericFixture();
-  withActivation(true, () => {
-    const sdk = findGenericPlayer(video);
-    assert.equal(sdk?.matched, false, "the measured fallback says so");
-    assert.equal(sdk?.label, "div#player");
-    assert.equal(sdk?.container, wrapper, "the similar-sized wrapper hosts the shell");
-    assert.equal(sdk?.hops, 1);
-  });
-});
+/* - Resolve: templates only, unmatched stays unmatched - */
 
-test("the generic path climbs nested similar wrappers to the outermost", () => {
-  const doc = dom('<div id="outer"><div id="mid"><video></video></div></div>');
-  const outer = doc.querySelector("#outer");
-  const video = doc.querySelector("video");
-  const box = (w, h) => ({ width: w, height: h, top: 0, left: 0, right: w, bottom: h });
-  outer.getBoundingClientRect = () => box(640, 360);
-  doc.querySelector("#mid").getBoundingClientRect = () => box(640, 360);
-  video.getBoundingClientRect = () => box(640, 360);
-  Object.defineProperty(video, "paused", { value: false, configurable: true });
-  Object.defineProperty(video, "ended", { value: false, configurable: true });
-  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
-  withActivation(true, () => {
-    const sdk = findGenericPlayer(video);
-    assert.equal(sdk?.container, outer, "the outermost player-like box wins");
-    assert.equal(sdk?.hops, 2);
-  });
-});
-
-test("a diverging parent refuses generic placement", () => {
-  // A video sitting directly in a layout context (here 4x wider) has no
-  // player-like box to host the shell - claim nothing rather than the page.
-  const { video } = genericFixture({
-    wrapperRect: { width: 2560, height: 1440 },
-    videoRect: { width: 640, height: 360 }
-  });
-  withActivation(true, () => {
-    assert.equal(findGenericPlayer(video), null);
-  });
-});
-
-test("a video directly under body has no generic container", () => {
-  const doc = dom("<video></video>");
-  const video = doc.querySelector("video");
-  video.getBoundingClientRect = () => ({ width: 640, height: 360, top: 0, left: 0, right: 640, bottom: 360 });
-  doc.body.appendChild(video);
-  Object.defineProperty(video, "paused", { value: false, configurable: true });
-  Object.defineProperty(video, "ended", { value: false, configurable: true });
-  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
-  withActivation(true, () => {
-    assert.equal(findGenericPlayer(video), null, "no player-like ancestor claims the video");
-  });
-});
-
-test("the generic path stays off without sticky activation", () => {
-  const { video } = genericFixture();
-  withActivation(false, () => {
-    assert.equal(findGenericPlayer(video), null, "autoplay ads on fresh pages never qualify");
-  });
-});
-
-test("the generic path stays off for paused video", () => {
-  const { video } = genericFixture({ paused: true });
-  withActivation(true, () => {
-    assert.equal(findGenericPlayer(video), null, "poster frames and paused embeds never qualify");
-  });
-});
-
-test("full-bleed and off-viewport video adopt by design, not by viewport", () => {
-  // The kernel never consults the viewport: a playing, sized box adopts
-  // wherever it sits, and screen-size fit belongs to the HUD's
-  // @media/@container rules. jsdom reports no viewport (clientWidth 0),
-  // so these branches install one to prove it goes unread.
-  const doc = dom('<div id="player"><video></video></div>');
-  Object.defineProperty(doc.documentElement, "clientWidth", { value: 1280, configurable: true });
-  Object.defineProperty(doc.documentElement, "clientHeight", { value: 720, configurable: true });
-  const wrapper = doc.querySelector("#player");
-  const video = doc.querySelector("video");
-  wrapper.getBoundingClientRect = () => ({ width: 1280, height: 720, top: 0, left: 0, right: 1280, bottom: 720 });
-  Object.defineProperty(video, "paused", { value: false, configurable: true });
-  Object.defineProperty(video, "ended", { value: false, configurable: true });
-  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
-  withActivation(true, () => {
-    video.getBoundingClientRect = () => ({ width: 1280, height: 700, top: 0, left: 0, right: 1280, bottom: 700 });
-    const fullBleed = findGenericPlayer(video);
-    assert.equal(fullBleed?.container, wrapper, "a full-bleed background still adopts");
-    assert.equal(fullBleed?.matched, false);
-    video.getBoundingClientRect = () => ({ width: 640, height: 360, top: 2000, left: 0, right: 640, bottom: 2360 });
-    const belowFold = findGenericPlayer(video);
-    assert.equal(belowFold?.container, wrapper, "a below-fold video adopts without waiting for a viewport crossing");
-    assert.equal(belowFold?.matched, false);
-  });
-});
-
-test("a zero-size wrapper is skipped, not adopted or blocking", () => {
-  // display:contents wrappers report a zero box while the video inside them
-  // renders. Adopting one hosts the shell in a box nobody can see - yet the
-  // climb must continue past it, because stopping there strands the real
-  // player box above it just the same.
-  const doc = dom('<div id="outer"><div id="mid"><video></video></div></div>');
-  const video = doc.querySelector("video");
-  const box = (w, h) => ({ width: w, height: h, top: 0, left: 0, right: w, bottom: h });
-  doc.querySelector("#outer").getBoundingClientRect = () => box(2000, 1200);
-  doc.querySelector("#mid").getBoundingClientRect = () => box(0, 0);
-  video.getBoundingClientRect = () => box(640, 360);
-  Object.defineProperty(video, "paused", { value: false, configurable: true });
-  Object.defineProperty(video, "ended", { value: false, configurable: true });
-  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
-  withActivation(true, () => {
-    // The layout context above diverges, so there is no player-like box:
-    // refuse, instead of adopting the invisible middle one.
-    assert.equal(findGenericPlayer(video), null);
-  });
-});
-
-test("the climb continues past a zero-size wrapper to a real box", () => {
-  const doc = dom('<div id="outer"><div id="mid"><video></video></div></div>');
-  const outer = doc.querySelector("#outer");
-  const video = doc.querySelector("video");
-  const box = (w, h) => ({ width: w, height: h, top: 0, left: 0, right: w, bottom: h });
-  outer.getBoundingClientRect = () => box(640, 360);
-  doc.querySelector("#mid").getBoundingClientRect = () => box(0, 0);
-  video.getBoundingClientRect = () => box(640, 360);
-  Object.defineProperty(video, "paused", { value: false, configurable: true });
-  Object.defineProperty(video, "ended", { value: false, configurable: true });
-  Object.defineProperty(video, "readyState", { value: 4, configurable: true });
-  withActivation(true, () => {
-    const sdk = findGenericPlayer(video);
-    assert.equal(sdk?.container, outer, "the zero box is passed through, not adopted");
-    assert.equal(sdk?.hops, 2, "the depth cap still covers the true chain");
-  });
-});
-
-/* - Unified resolve: one walk, priority order - */
-
-test("resolvePlayer answers template, then fallback, then null", () => {
-  // A templated player resolves by anchor whether or not the fallback is on.
-  const doc = dom('<div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div>');
-  const video = doc.querySelector("video");
-  withActivation(true, () => {
-    assert.equal(resolvePlayer(video, { enabled: true })?.matched, true);
-    assert.equal(resolvePlayer(video, { enabled: false })?.matched, true);
-  });
-});
-
-test("resolvePlayer falls from fallback to null", () => {
-  const { video } = genericFixture();
-  withActivation(true, () => {
-    assert.equal(
-      resolvePlayer(video, { enabled: true })?.matched,
-      false,
-      "no anchor: the measured fallback"
-    );
-    assert.equal(
-      resolvePlayer(video, { enabled: false }),
-      null,
-      "disabled: unmatched stays unmatched"
-    );
-  });
-});
-
-test("the fallback admits only player-sized boxes, not thumbnails", () => {
-  // The anchorless guess pays for its uncertainty with a stricter box than
-  // the templates' 100x60: preview tiles and spacers stay out.
-  const doc = dom('<div id="tile"><video></video></div><div id="player"><video></video></div>');
-  const tile = doc.querySelector("#tile video");
-  const player = doc.querySelector("#player video");
-  const box = (w, h) => ({ width: w, height: h, top: 0, left: 0, right: w, bottom: h });
-  doc.querySelector("#tile").getBoundingClientRect = () => box(150, 90);
-  tile.getBoundingClientRect = () => box(150, 90);
-  doc.querySelector("#player").getBoundingClientRect = () => box(640, 360);
-  player.getBoundingClientRect = () => box(640, 360);
-  for (const video of [tile, player]) {
-    Object.defineProperty(video, "paused", { value: false, configurable: true });
-    Object.defineProperty(video, "ended", { value: false, configurable: true });
-    Object.defineProperty(video, "readyState", { value: 4, configurable: true });
-  }
-  withActivation(true, () => {
-    assert.equal(findGenericPlayer(tile), null, "a 150px tile is not a player");
-    assert.ok(findGenericPlayer(player), "a 640px player still qualifies");
-  });
+test("resolvePlayer answers templates and null", () => {
+  // A templated player resolves by anchor; a bare video resolves to null -
+  // there is no second tier, so no option to enable one.
+  const doc = dom('<div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div><div id="open"><video></video></div>');
+  const templated = doc.querySelector(".plyr video");
+  const bare = doc.querySelector("#open video");
+  assert.equal(resolvePlayer(templated)?.container, doc.querySelector(".plyr__video-wrapper"));
+  assert.equal(resolvePlayer(bare), null, "unmatched stays unmatched");
 });
 
 /* - Resolve-path invariants: what each probe may cost - */
 
-test("anchors read no boxes; only the fallback measures", () => {
+test("anchor matching reads no boxes", () => {
   // The shared fill walks pointers, never boxes: matches() costs no layout,
-  // so template resolves must complete without a single getBoundingClientRect
-  // anywhere on the chain. The generic climb is the one probe allowed to
-  // flush - the counter proves it does.
+  // so resolves must complete without a single getBoundingClientRect
+  // anywhere on the chain - hit or miss alike, since misses no longer
+  // fall through to a measuring probe.
   const doc = dom('<div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div><div id="open"><video></video></div>');
   const plyrVideo = doc.querySelector(".plyr video");
   const openVideo = doc.querySelector("#open video");
@@ -636,24 +424,16 @@ test("anchors read no boxes; only the fallback measures", () => {
       return { ...box };
     };
   }
-  for (const video of [plyrVideo, openVideo]) {
-    Object.defineProperty(video, "paused", { value: false, configurable: true });
-    Object.defineProperty(video, "ended", { value: false, configurable: true });
-    Object.defineProperty(video, "readyState", { value: 4, configurable: true });
-  }
-  withActivation(true, () => {
-    assert.equal(resolvePlayer(plyrVideo, { enabled: true })?.matched, true);
-    assert.equal(rectReads, 0, "anchor matching reads no boxes");
-    assert.equal(resolvePlayer(openVideo, { enabled: true })?.matched, false);
-    assert.ok(rectReads > 0, "the measured fallback is the only probe that flushes");
-  });
+  assert.ok(resolvePlayer(plyrVideo), "template hit");
+  assert.equal(resolvePlayer(openVideo), null, "template miss");
+  assert.equal(rectReads, 0, "anchor matching reads no boxes on either path");
 });
 
 test("a template re-resolve returns the same descriptor object", () => {
   const doc = dom('<div class="plyr"><div class="plyr__video-wrapper"><video></video></div></div>');
   const video = doc.querySelector("video");
   const first = resolvePlayer(video);
-  assert.equal(first?.matched, true);
+  assert.ok(first);
   assert.equal(resolvePlayer(video), first, "memo identity survived the unification");
 });
 

@@ -2,28 +2,21 @@
  * Revisit-offer browser benchmark - what template matching saves per offer,
  * measured in real Gecko.
  *
- * The end-to-end revisit (navigation to HUD) is wait-dominated: the first
- * visit waits for playback, a gesture, and a re-offer. What the anchor
- * tables guarantee is cheaper OFFERS: every discovery offer for an
- * unmatched video runs the full fallback measurement - playback-state
- * reads, the activation read, and a container walk where every ancestor
- * pays getBoundingClientRect, i.e. a forced layout - while a repeat offer
- * for a templated video answers from the descriptor memo (one WeakMap
- * lookup plus a freshness re-walk of the recorded anchor, zero rect
- * reads). Offers arrive per mutation, so the layout saving compounds
- * across the document's life, and every DOM touch it removes is also one
- * less Xray crossing in the isolated userscript realm (same translation
- * as the discovery-match rows: direction survives, close ratios do not).
+ * A repeat offer for a templated video answers from the descriptor memo
+ * (one WeakMap lookup plus a freshness re-walk of the recorded anchor,
+ * zero rect reads), while a first offer pays the full grouped anchor scan
+ * over the composed ancestry. Offers arrive per mutation, so the saving
+ * compounds across the document's life, and every DOM touch it removes is
+ * also one less Xray crossing in the isolated userscript realm (same
+ * translation as the discovery-match rows: direction survives, close ratios
+ * do not). Unmatched videos re-scan every offer - the null stays
+ * unmemoized by design - so the miss arm prices the honest repeat cost.
  *
  * The pair reimplements both arms page-side against a fixture of four
- * templated players plus eight ad-grid distractors, with playback state
- * stubbed on the elements (the ops under test read page-side, so the
- * stubs are visible to them; the realm caveat above is the price). Each
- * op call starts by toggling a geometry-affecting class on the stage -
- * the same shape of mutation whose offer this prices - so the cold arm's
- * rect walk pays a genuine post-mutation layout flush instead of reading
- * a clean tree. Both rows are report-only: the ratio between arms is the
- * finding, and no row touches baseline.json.
+ * templated players plus eight ad-grid distractors. Each op call starts by
+ * toggling a geometry-affecting class on the stage - the same shape of
+ * mutation whose offer this prices. Both rows are report-only: the ratio
+ * between arms is the finding, and no row touches baseline.json.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -88,14 +81,11 @@ function push(results, name, batchMedians) {
 }
 
 /* ------------------------------------------------------------------ *
- * Fixture page. Four structural players the prints remember, eight
- * ad-grid distractors that walk to a miss, all sized from parse so the
- * size gate is green the way a real above-the-fold player is. Playback
- * state is stubbed per element and sticky activation is shadowed onto
- * the instance: without them the cold arm early-exits before the layout
- * work this bench exists to price, which would report the gate order,
- * not the measurement. PRIME throws if either stub fails to take, so a
- * silent early-exit cannot masquerade as a fast slow path.
+ * Fixture page. Four templated players the memo remembers, eight
+ * ad-grid distractors that walk to a miss. The scan reads matches()
+ * only, so no playback or activation stubs are needed - and none are
+ * installed, so a stub-shaped early-exit cannot masquerade as a fast
+ * scan.
  * ------------------------------------------------------------------ */
 const PRIME = `
   const stage = document.createElement("div");
@@ -136,36 +126,13 @@ const PRIME = `
     stage.appendChild(plain);
     VIDEOS.push(video);
   }
-  // Filler weight so the post-mutation flush has a document to chew:
-  // the arms never query it, but layout does not skip it.
+  // Filler weight so the post-mutation tree has a document to chew:
+  // the arms never query it, but matching does not skip it.
   for (let i = 0; i < 1500; i++) {
     const filler = document.createElement("div");
     filler.className = "pf-rv-filler";
     filler.appendChild(document.createElement("span"));
     stage.appendChild(filler);
-  }
-  // Playback-state stubs: playing, sized, with metadata, not ended.
-  for (const video of VIDEOS) {
-    Object.defineProperties(video, {
-      paused: { value: false, configurable: true },
-      ended: { value: false, configurable: true },
-      readyState: { value: 4, configurable: true },
-    });
-  }
-  // Sticky activation shadowed onto the instance (prototype attributes
-  // stay untouched). Without a real gesture this is the only way the
-  // cold arm reaches past its activation early-exit.
-  Object.defineProperty(navigator, "userActivation", {
-    value: { isActive: false, hasBeenActive: true },
-    configurable: true,
-  });
-  // Fail loudly if a stub did not take: an early-exiting cold arm would
-  // otherwise report gate order as measurement cost.
-  if (VIDEOS[0].paused !== false || VIDEOS[0].readyState !== 4) {
-    throw new Error("revisit fixture: playback stubs did not take");
-  }
-  if (navigator.userActivation?.hasBeenActive !== true) {
-    throw new Error("revisit fixture: activation stub did not take");
   }
   window.__pfRevisit = { VIDEOS, stage, MEMO: new Map() };
 `;
@@ -173,58 +140,33 @@ const PRIME = `
 function offerPair() {
   return {
     label: "revisit offer, templated video",
-    firstName: "fallback measure (gates + rect walk)",
+    firstName: "template miss (full anchor scan)",
     secondName: "template memo hit (freshness re-walk)",
-    firstOp: function slowMeasure() {
+    firstOp: function coldScan() {
       const { VIDEOS, stage } = window.__pfRevisit;
       // The mutation whose offer this prices: add or remove, either way
-      // the tree needs a flush, which the rect walk below pays.
+      // the tree is dirty the way a real offer finds it.
       stage.classList.toggle("pf-dirty");
+      const GROUP = ":is(.jwplayer,.jw-wrapper,[data-vjs-player],.video-js,.vjs-tech,video-js,[data-plyr],[data-plyr-config],.plyr__video-wrapper,.plyr,.art-video-player,.artplayer,.dplayer,.mejs-container,.mejs__container,.xgplayer,.prism-player,.fluid_video_wrapper,.fp-player,flowplayer-ui,[data-player-id],.flowplayer,[data-player],media-player,mux-player,radiant-media-player,.shaka-video-container,[data-shaka-player],[data-shaka-player-container],.theoplayer-container,theoplayer-ui,theoplayer-default-ui)";
       let acc = 0;
       for (let n = 0; n < 8; n++) {
         for (let v = 0; v < VIDEOS.length; v++) {
-          const video = VIDEOS[v];
-          // findGenericPlayer gate order: playback, activation, size.
-          if (video.paused || video.ended || !(video.readyState >= 1)) continue;
-          if (!navigator.userActivation || navigator.userActivation.hasBeenActive !== true) continue;
-          let rect;
-          try {
-            rect = video.getBoundingClientRect();
-          } catch {
-            continue;
+          // Mirrors matchTemplatesOnChain without the memo: grouped
+          // pre-check per node, best-hops bound, no rect reads anywhere.
+          // Template-order resolution on hit nodes is omitted - the warm
+          // arm omits it too, so the ratio prices the memo, not the
+          // grouping (discovery-match prices the grouping itself).
+          const chain = [];
+          for (let node = VIDEOS[v]; node; node = node.parentNode ?? null) {
+            if (node.nodeType === 1) chain.push(node);
           }
-          if (!(rect.width > 0) || !(rect.height > 0)) continue;
-          // resolveGenericContainer: straight into the climb with a rect
-          // per ancestor (the forced layout per offer). No viewport
-          // consult anywhere - where the box sits is not an input.
-          const doc = video.ownerDocument;
-          let container = null;
-          let hops = 0;
-          let node = video.parentNode ?? null;
-          while (node) {
-            if (node.nodeType === 1) {
-              if (node === doc?.body || node === doc?.documentElement) break;
-              hops += 1;
-              let box;
-              try {
-                box = node.getBoundingClientRect();
-              } catch {
-                break;
-              }
-              if (box.width <= 0 || box.height <= 0) {
-                node = node.parentNode;
-                continue;
-              }
-              const same =
-                Math.abs(box.width - rect.width) < 2 && Math.abs(box.height - rect.height) < 2;
-              if (!same) {
-                container = node;
-                break;
-              }
-            }
-            node = node.parentNode;
+          let best = -1;
+          for (let hop = 0; hop < (best === -1 ? chain.length : best); hop++) {
+            if (!chain[hop].matches(GROUP)) continue;
+            best = hop;
+            break;
           }
-          acc += container ? hops + 1 : 0;
+          acc += best + 1;
         }
       }
       window.__pfJitSink = acc;

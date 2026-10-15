@@ -209,60 +209,6 @@ test("the watchdog re-attaches while alive and yields once dead", async () => {
   delete globalThis.CSSStyleSheet;
 });
 
-// The default-on fallback announces itself exactly once: the first generic
-// adoption gets a hint pointing at its toggle, later ones stay silent.
-test("the first generic adoption shows the fallback notice once", async () => {
-  const savedGet = globalThis.GM_getValue;
-  const savedSet = globalThis.GM_setValue;
-  const stored = {};
-  globalThis.GM_getValue = (key, fallback) => (key in stored ? stored[key] : fallback);
-  globalThis.GM_setValue = (key, value) => { stored[key] = value; };
-  const { Shell: ShellCtor } = await import("../src/shell/shell.js");
-  const hints = [];
-  const origHint = ShellCtor.prototype.toastHint;
-  ShellCtor.prototype.toastHint = function (icon, text) {
-    hints.push(text);
-    return origHint.call(this, icon, text);
-  };
-  try {
-    const first = makeRealm();
-    const shell1 = new ShellCtor({
-      video: first.video,
-      container: first.container,
-      sdk: { label: "test-sdk", matched: false }
-    });
-    await shell1.ready;
-    assert.equal(hints.length, 1, "the first measured guess announces itself");
-    assert.equal(stored["pf:generic-notice"], true, "the flag lands in the same adoption");
-    shell1.destroy();
-
-    const second = makeRealm();
-    const shell2 = new ShellCtor({
-      video: second.video,
-      container: second.container,
-      sdk: { label: "test-sdk", matched: false }
-    });
-    await shell2.ready;
-    assert.equal(hints.length, 1, "later adoptions stay silent");
-    shell2.destroy();
-
-    const third = makeRealm();
-    const shell3 = new ShellCtor({
-      video: third.video,
-      container: third.container,
-      sdk: { label: "test-sdk", matched: true }
-    });
-    await shell3.ready;
-    assert.equal(hints.length, 1, "anchored players never announced themselves anyway");
-    shell3.destroy();
-  } finally {
-    ShellCtor.prototype.toastHint = origHint;
-    globalThis.GM_getValue = savedGet;
-    globalThis.GM_setValue = savedSet;
-    delete globalThis.CSSStyleSheet;
-  }
-});
-
 test("a shell inside a shadow root re-offers late shadow videos", async () => {
   const { dom } = makeRealm();
   const doc = dom.window.document;

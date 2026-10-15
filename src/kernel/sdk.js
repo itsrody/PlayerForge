@@ -13,14 +13,8 @@
  * descriptor carries the resolved container (plus the matched anchor element
  * and its hop distance, both computed free during the scan) and a label
  * derived from the matched element for logs - div.jwplayer, video-js -
- * so readable diagnostics need no registry of names behind them.
- *
- * Below the templates, `findGenericPlayer` offers a default-on measured
- * fallback (gated on a setting the kernel checks) for videos no template
- * claims - renamed-everything forks and bespoke players. It trades the
- * anchor for behavioral gates (playing, visible, user-driven) plus measured
- * placement under stricter admission, and it announces its first adoption
- * with a hint pointing at its toggle.
+ * so readable diagnostics need no registry of names behind them. Videos no
+ * template claims stay unadopted: coverage grows by adding templates.
  *
  * Framework roots are never anchors. An app-shell marker like Inertia's
  * [data-page] fires for every video on the page - articles, previews, ads -
@@ -42,9 +36,7 @@
  *
  * The shell-facing descriptor carries the resolved container (plus the
  * matched anchor element and its hop distance, both computed free during the
- * scan). `matched` tells template hits apart from measured-fallback
- * adoptions: the fallback announces itself once, so the reader deciding
- * that needs to know which path fired.
+ * scan).
  *
  * Selection: among all matching anchors across all templates, the element
  * with the fewest composed ancestor hops from the video wins; ties break by
@@ -79,15 +71,6 @@ const TEMPLATES = [
 
 export const MIN_VIDEO_WIDTH = 100;
 export const MIN_VIDEO_HEIGHT = 60;
-
-/**
- * Stricter admission for the anchorless fallback. The registry trusts its
- * anchors at thumbnail size; a measured guess pays for its uncertainty with
- * a bigger box - preview tiles, spacers and call-grid thumbnails stay out
- * while every real player clears it by multiples.
- */
-export const GENERIC_MIN_VIDEO_WIDTH = 200;
-export const GENERIC_MIN_VIDEO_HEIGHT = 120;
 
 /**
  * Every anchor in the registry as one grouped selector. `:is()` is matched
@@ -175,10 +158,9 @@ function isMatchFresh(video, entry) {
 /**
  * The scan against an already-filled chain: one pass serves every anchor
  * (uBO's one-pass-over-tokens shape - chain index IS the hop count, so
- * fewest hops wins with ties keeping template then anchor order),
- * and the same fill serves the fallback probe below, so one offer climbs
- * each ancestry once instead of twice. Pure reads - no layout writes
- * anywhere in the resolve path, so sharing the fill cannot flush.
+ * fewest hops wins with ties keeping template then anchor order). Pure
+ * reads - no layout writes anywhere in the resolve path, so sharing the
+ * fill cannot flush.
  */
 function matchTemplatesOnChain(len) {
   let best = null;
@@ -212,159 +194,11 @@ const descriptorCache = new WeakMap();
 
 /**
  * Identify the player template owning a video, or null when unrecognized.
- *
- * One leg of resolvePlayer below (templates only, no fallback):
- * the memo policy and the scan live there, so this stays a thin delegate
- * with the same signature, same memo identity and same null semantics the
- * suite pins.
+ * Unmatched videos adopt nothing: there is no measured fallback, so the
+ * null is the honest answer for bespoke players without a template.
  */
 export function findPlayerForVideo(video) {
   return resolvePlayer(video);
-}
-
-/**
- * Sticky user activation: the page has seen a real user gesture since load.
- * Transient `isActive` is too narrow - it lapses the moment the press ends,
- * while the question here is whether playback on this page is user-driven at
- * all. Autoplay ads on a fresh page answer no; anything after the first click
- * answers yes. Firefox 120+, inside the floor; absent on a host without it,
- * which reads as "not activated" and keeps the slow path off - the safe
- * direction, since the registry path never asks.
- */
-function hasStickyActivation() {
-  if (typeof navigator === "undefined") {
-    return false;
-  }
-  const activation = navigator.userActivation;
-  return !!activation && activation.hasBeenActive === true;
-}
-
-/**
- * SDK-independent adoption candidate: a playing, sized video on an
- * activated page, with no registry record. Each gate kills a false-positive
- * class: playback state (paused embeds, poster frames), sticky activation
- * (autoplay ads on fresh pages), size (thumbnails, spacers), placement
- * (the climb still refuses videos with no player-like box - layout
- * contexts, bare body children).
- *
- * Deliberately no viewport consult: full-bleed backgrounds and below-fold
- * videos adopt like any other playing, sized box. Screen-size fit is the
- * HUD's job (@media/@container in the shell stylesheet), not an adoption
- * criterion - and a viewport verdict can only go stale on scroll or resize
- * with no edge to re-fire it, while playback state always arrives on one.
- *
- * Deliberately no audio/duration heuristics: muted users and short clips are
- * legitimate viewing, and each extra heuristic is a false negative for
- * someone. Emits through describe(), like every path.
- */
-export function findGenericPlayer(video) {
-  if (!genericGates(video)) {
-    return null;
-  }
-  const placed = resolveGenericContainer(video);
-  if (!placed) {
-    return null;
-  }
-  return describe({
-    container: placed.container,
-    anchor: placed.container,
-    hops: placed.hops,
-    label: describeElement(placed.container),
-    matched: false
-  });
-}
-
-/**
- * The anchorless admission, shared by the exported probe and the unified
- * resolve below: playback state, sticky activation, and the stricter
- * fallback box. Layout-free by construction - the rect reads live in the
- * placement climb, so a gate failure pays no flush.
- */
-function genericGates(video) {
-  if (video.paused || video.ended || !(video.readyState >= 1)) {
-    return false;
-  }
-  if (!hasStickyActivation()) {
-    return false;
-  }
-  return meetsMinSize(video, GENERIC_MIN_VIDEO_WIDTH, GENERIC_MIN_VIDEO_HEIGHT);
-}
-
-/** Placement probe with its own walk; the climb itself is climbGenericContainer. */
-export function resolveGenericContainer(video) {
-  return placeGeneric(video, fillComposedChain(video));
-}
-
-/** The video's own box plus its document, or null when unreadable/empty. */
-function videoFrame(video) {
-  let rect;
-  try {
-    rect = video.getBoundingClientRect();
-  } catch {
-    return null;
-  }
-  if (!(rect.width > 0) || !(rect.height > 0)) {
-    return null;
-  }
-  return { rect, doc: video.ownerDocument };
-}
-
-/**
- * Frame + climb against an already-filled chain: the exported
- * probe fills first, the unified resolve reuses the offer's fill. Pure
- * reads - the fill it shares cannot flush, because nothing here writes.
- * No viewport anywhere: where the box sits on the page is not consulted.
- */
-function placeGeneric(video, len) {
-  const frame = videoFrame(video);
-  if (!frame) {
-    return null;
-  }
-  return climbGenericContainer(len, frame.rect, frame.doc);
-}
-
-/**
- * The ancestor climb over chain indices (chain[0] is the video itself):
- * climb while the ancestor box tracks the video's own box, stopping at the
- * first ancestor that diverges (layout context, not player chrome) and
- * never at body/document. Hop counting mirrors the old parentNode walk
- * exactly, including counting the zero-size ancestors it skips through.
- * Reads rects, so it forces layout - the only probe allowed to: it runs
- * behind the layout-free gates, evaluated per offer rather than per frame,
- * where one flush is inaudible next to a seek.
- */
-function climbGenericContainer(len, rect, doc) {
-  let container = null;
-  let hops = 0;
-  for (let hop = 1; hop < len; hop++) {
-    const node = chain[hop];
-    if (node === doc?.body || node === doc?.documentElement) {
-      break;
-    }
-    hops += 1;
-    let box;
-    try {
-      box = node.getBoundingClientRect();
-    } catch {
-      break;
-    }
-    // A zero-size ancestor contributes no box (display:contents wrappers
-    // report zeros while the video inside them renders): skip through it
-    // rather than adopting a host nobody can see - or stopping a climb
-    // that has a real player box above. Hops still count the step so the
-    // removal watch's depth cap covers the true chain.
-    if (!(box.width > 0) || !(box.height > 0)) {
-      continue;
-    }
-    if (box.width > rect.width * 3 || box.height > rect.height * 3) {
-      break;
-    }
-    container = node;
-  }
-  if (!container) {
-    return null;
-  }
-  return { container, hops };
 }
 
 /**
@@ -404,11 +238,9 @@ export function templateCustomTags() {
   return [...names].sort();
 }
 
-/** The one descriptor constructor: every path emits the same shape, so the
- *  kernel cannot tell which probe produced it - except by `matched`, which
- *  the fallback announcer reads. */
-function describe({ container, anchor, hops, label, matched }) {
-  return { container, anchor, hops, label, matched };
+/** The one descriptor constructor: container, anchor, hops, label. */
+function describe({ container, anchor, hops, label }) {
+  return { container, anchor, hops, label };
 }
 
 /**
@@ -431,34 +263,12 @@ function describeElement(el) {
   return label;
 }
 
-/** Gates + placement against an already-filled chain (see genericGates for
- *  why the gates stay layout-free and first). */
-function measureGenericOnChain(video, len) {
-  if (!genericGates(video)) {
-    return null;
-  }
-  const placed = placeGeneric(video, len);
-  if (!placed) {
-    return null;
-  }
-  return describe({
-    container: placed.container,
-    anchor: placed.container,
-    hops: placed.hops,
-    label: describeElement(placed.container),
-    matched: false
-  });
-}
-
 /**
- * The unified resolve: one composed walk per offer, two probes in priority
- * order - template anchor, measured fallback. The fill is shared because
- * both probes read the same ancestry; only the generic climb reads boxes,
- * and only after its layout-free gates pass, so an offer for a paused ad
- * costs the walk and nothing else.
+ * The resolve: one composed walk per offer against the template table.
+ * A renamed-everything fork costs one shared scan while every known shape
+ * keeps its single lookup; unmatched videos adopt nothing.
  *
- * Only the positive template descriptor is memoized (same entry, same
- * freshness check findPlayerForVideo always had): the null stays unmemoized,
+ * Only the positive descriptor is memoized: the null stays unmemoized,
  * because no cheap fingerprint distinguishes "same answer" from "the video's
  * subtree was grafted under a new shape" - parent, depth and top can all
  * survive such a graft unchanged, and the one exact check (re-running the
@@ -467,7 +277,7 @@ function measureGenericOnChain(video, len) {
  * offers the moved video, the memo calls it fresh, adoption never runs).
  * The WeakMap key dies with the video, so positive entries are session-only.
  */
-export function resolvePlayer(video, { enabled = false } = {}) {
+export function resolvePlayer(video) {
   const cached = descriptorCache.get(video);
   if (cached && isMatchFresh(video, cached)) {
     return cached.descriptor;
@@ -480,16 +290,12 @@ export function resolvePlayer(video, { enabled = false } = {}) {
       container: match.el,
       anchor: match.el,
       hops: match.hops,
-      label: describeElement(match.el),
-      matched: true
+      label: describeElement(match.el)
     });
     descriptorCache.set(video, entry);
     return entry.descriptor;
   }
-  if (!enabled) {
-    return null;
-  }
-  return measureGenericOnChain(video, len);
+  return null;
 }
 
 /**

@@ -239,6 +239,15 @@
   ],
   "retired": [
     {
+      "id": "user-activation",
+      "summary": "navigator.userActivation sticky-activation gate",
+      "why": "The only consumer was the generic fallback's autoplay-ads gate; templates never ask whether playback is user-driven. Cut with the fallback - re-adding it means re-adding a tier that needs it.",
+      "matchPattern": "userActivation",
+      "mustNotAppearIn": [
+        "src/"
+      ]
+    },
+    {
       "id": "window.onurlchange-grant",
       "summary": "The @grant for a manager's URL-change event",
       "why": "Nothing in the fork subscribes to route changes: same-document navigation is out of scope, so there is no consumer to receive the event. Re-granting it would widen the permission surface for zero coverage.",
@@ -789,18 +798,6 @@
       "probes": [
         "crypto",
         "crypto.randomUUID"
-      ]
-    },
-    {
-      "id": "user-activation",
-      "api": "navigator.userActivation",
-      "summary": "Sticky-activation gate for template-independent adoption",
-      "why": "Without it the slow path cannot tell autoplay ads from user-driven playback, so it stays off - the template path never asks.",
-      "usedBy": [
-        "src/kernel/sdk.js"
-      ],
-      "probes": [
-        "navigator"
       ]
     }
   ]

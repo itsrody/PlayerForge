@@ -61,18 +61,6 @@ const SETTINGS_SCHEMA = [
     group: "Features"
   },
   {
-    key: "detection.genericPlayers",
-    type: "bool",
-    label: "Detect Unknown Players",
-    // On unless the user opts out: templates answer first, and this measured
-    // fallback only runs for videos neither claims - renamed forks and
-    // bespoke players included. Its admission is stricter than the
-    // templates' (see GENERIC_MIN_* in kernel/sdk.js), and the first
-    // adoption says so in a toast.
-    default: true,
-    group: "Features"
-  },
-  {
     key: "ui.compact",
     type: "bool",
     label: "Compact Panel",

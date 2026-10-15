@@ -193,12 +193,6 @@ export class Kernel {
     }
   }
 
-  /** Whether the unmatched-video fallback may run. On unless the user opts
-   *  out - templates answer first either way. */
-  #genericEnabled() {
-    return getConfigValue("detection.genericPlayers", true) === true;
-  }
-
   init(hints = []) {
     if (this.#initialized) {
       return;
@@ -220,29 +214,6 @@ export class Kernel {
     // Permanent rider on the shared discovery tap: every video the probe
     // would have seen, the kernel now adopts through the same wiring.
     this.#stopDiscoveryTap = watchDocumentVideos((video) => this.#adoptVideo(video));
-    // First-gesture re-sweep: sticky activation latches permanently on the
-    // first key/pointer press, but nothing observable fires when it flips -
-    // so an offer refused for lack of activation (muted autoplay before any
-    // gesture) would otherwise sit unoffered until a random mutation or
-    // media event. One document-level sweep on the first gesture re-runs
-    // adoption for exactly that window; claimed videos early-return, so the
-    // sweep costs one pass and then detaches itself. Signal-bound like
-    // every other tap.
-    //
-    // Deferred past dispatch, not run in it: the activation bit lands during
-    // event dispatch, and a capture listener runs before it is guaranteed
-    // visible - a synchronous sweep would read the pre-gesture state and
-    // burn its one shot refusing everything again. A microtask runs after
-    // dispatch completes, when the latch is settled either way.
-    const resweepOnGesture = () => {
-      queueMicrotask(() => {
-        for (const { video } of surveyVideos(document)) {
-          this.#adoptVideo(video);
-        }
-      });
-    };
-    this.#dom.listen(document, "pointerdown", resweepOnGesture, { capture: true, once: true });
-    this.#dom.listen(document, "keydown", resweepOnGesture, { capture: true, once: true });
     // The probe boots us precisely so a video already in the parsed DOM gets
     // its shell without waiting for the next media event. Offer its hints
     // first (discovery order, media-surfaced first), then sweep once for
@@ -411,14 +382,10 @@ export class Kernel {
     if (session.claimed) {
       return;
     }
-    // One unified resolve per offer: the template probe and the measured
-    // fallback share a single ancestry walk inside, in that priority order.
-    // The fallback runs for videos no template claims, so a
-    // renamed-everything fork costs one shared scan while every known shape
-    // keeps its single lookup.
-    const sdk = resolvePlayer(video, {
-      enabled: this.#genericEnabled()
-    });
+    // One resolve per offer against the template table: every known shape
+    // keeps its single lookup, and unmatched videos adopt nothing - a
+    // renamed-everything fork costs one full miss scan and no shell.
+    const sdk = resolvePlayer(video);
     if (!sdk) {
       // No template claimed it: arm the upgrade watch, so framework classes
       // or ids arriving late (player chrome built after the video) re-offer

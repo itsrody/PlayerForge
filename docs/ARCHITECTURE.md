@@ -455,20 +455,18 @@ two of them to nothing:
    removal below: ~7.2× on the same mix, the grouping untouched.
 
   A fourth instrument, `discovery-revisit-offer.bench.mjs`, prices what the
-  template memo saves per revisit offer: the full fallback measurement
-  (playback and activation gates plus a container walk with a
-  `getBoundingClientRect` per ancestor) against a memo hit (one WeakMap
-  lookup plus a freshness re-walk of the recorded anchor, zero rect reads) -
-  each op call starting from a freshly dirtied tree, so the cold arm pays a
-  genuine post-mutation layout flush the way an offer after a real state
-  change does. On 158.0b5, four templated players plus eight ad-grid misses
-  over a 1.5k-node document: **0.31 ms vs 0.22 ms per sweep** (±3.1% /
-  ±1.7%). The absolute is small and is stated as such; what is not small is
-  structural - the memo path removes every forced layout from the per-offer
-  path for recognized players, and there is no per-host learned state left
-  to keep fresh. Deliberately NOT an end-to-end row: navigation-to-shell is
-  wait-dominated on both arms. No `src/` change came out; the instrument
-  confirms the shape the forty-first movement shipped.
+  template memo saves per revisit offer: a full grouped anchor scan (no
+  memo, no boxes - misses re-scan every offer by design) against a memo
+  hit (one WeakMap lookup plus a freshness re-walk of the recorded
+  anchor) - each op call starting from a freshly dirtied tree, the way an
+  offer after a real state change finds it. On 158.0, four templated
+  players plus eight ad-grid misses over a 1.5k-node document: **0.25 ms
+  vs 0.21 ms per sweep** (±2.9% / ±2.3%) - the memo's saving is small in
+  absolute terms now that both arms are layout-free, and it stays for
+  freshness correctness, not the ratio. Deliberately NOT an end-to-end
+  row: navigation-to-shell is wait-dominated on both arms. No `src/`
+  change came out; the instrument confirms the shape the forty-first
+  movement shipped.
 
  The pattern holds: the largest absolute on the board is tens of microseconds
  on paths that run at event rate or rarer, and the one genuine wash joins the
@@ -721,7 +719,7 @@ an oversight.
 ### L2 — StatusManager
 
 Today `isActive()` closures are authored independently at each `createActivity`
-call site (`src/shell/shell.js:397`, `src/shell/resume.js:727`,
+call site (`src/shell/shell.js:390`, `src/shell/resume.js:727`,
 `src/shared/shadow.js:211`). Nothing answers "what is this player's status right
 now" as a single queryable value.
 
@@ -752,8 +750,8 @@ change is dispatched as a `pf:status` CustomEvent on the `<video>`
 (`status-manager.js:363`) so the **page world** can read status across the
 sandbox boundary — which is the only consumer of `Buffer`, `Screen`, `duration`,
 `rate`, `volume`, `muted`, `hasTextTrack` and `error`. In-tree two subscribers
-exist: the media/HUD drive (`shell.js:384`), which reads no fields — the
-commit itself is the signal — and the occlusion resolve (`shell.js:531`),
+exist: the media/HUD drive (`shell.js:377`), which reads no fields — the
+commit itself is the signal — and the occlusion resolve (`shell.js:524`),
 which reads two of the ten fields. The other eight are carried for the page, so "no in-tree
 consumer" is the expected shape rather than dead code.
 
@@ -799,7 +797,7 @@ one `dispose()`.
 
 **Not landed as a class, and not needed as one.** `Shell` (`src/shell/shell.js`)
 already *is* the per-`<video>` owner: it holds `#scope`, `#status`, two
-`RenderGate`s, and every sub-component, and `destroy()` (`shell.js:658`) fans out
+`RenderGate`s, and every sub-component, and `destroy()` (`shell.js:633`) fans out
 to exactly the single `dispose()` this section describes. Extracting a
 `PlayerSession` would have been a rename with no second implementation behind
 it, so §6's seven phases never opened one — the one layer in the §4 diagram with
@@ -815,7 +813,7 @@ the layers can assume:
   L2 generally useful in-tree, and it is deliberately not done: only the
   occlusion resolve needs status today, and it is inside the shell.
 - **The gate is not one-per-session.** `Shell` registers two — media-state
-   (`shell.js:438`) and occlusion (`shell.js:523`) — because they have different
+   (`shell.js:431`) and occlusion (`shell.js:516`) — because they have different
   priorities' worth of coalescing and different snapshot shapes. `ToastManager`
   (`toast.js:130`) and `SettingsPanel` (`panel.js:302`) each own a further gate
   on their own scope, so the tree has four `RenderGate` constructions in total.
@@ -1892,6 +1890,23 @@ element's life (measured live: `playbackRate = 2` produced zero rate
   nothing. The revisit bench's cold arm loses its mirrored refusal with it,
   and the scorer corpus gains its third shell (ambient). Net even on tests.
 
+  The forty-sixth movement cuts the generic fallback entirely: adoption is
+  template-only, and videos no template claims stay unadopted. Out goes the
+  measured climb with its gates, the first-gesture re-sweep (it existed to
+  re-offer activation-refused candidates, and templates never ask), the
+  first-run notice with its stored flag, the Detect Unknown Players toggle,
+  and the `userActivation` probe, which joins the retired manifest as the
+  tier's last reader. The descriptor loses its `matched` field with the
+  tier it distinguished. Coverage is the template table now; a fork that
+  renames everything costs one miss scan and no shell, and template trust
+  is absolute - an anchored ambient background adopts, which is an anchor
+  hygiene question, not a tier question. This is the opposite direction
+  from the scorer sketch (which would delete identification, not the
+  fallback); the two do not compose, and this one is the tree's answer.
+  The corpus and fallback integration files go with the tier, the revisit
+  bench re-pairs as full scan versus memo hit, and the memo's own numbers
+  move with it. Net seventeen tests lighter.
+
 ## 7. Gecko-specific decisions, and what they rule out
 
 - Scheduler priorities replace timer-based deferral. `postTask` is available
@@ -2023,7 +2038,7 @@ In-tree:
 - `src/shared/scheduler.js` — traps in §2.4, `postTask`, `yield_()`
 - `src/shared/scope.js` — teardown primitive
 - `src/shared/activity.js` — passive activity windows
-- `src/shell/shell.js:397`, `src/shell/resume.js:727`, `src/shared/shadow.js:211` — `createActivity` call sites
+- `src/shell/shell.js:390`, `src/shell/resume.js:727`, `src/shared/shadow.js:211` — `createActivity` call sites
 - `src/shared/context.js:640` — the tree's only self-rearming `postTask`, delayed
 - `src/shared/dom-manager.js` — mutation coalescing
 - `src/shell/chrome/panel.js:125` — the only `setInterval` in the tree

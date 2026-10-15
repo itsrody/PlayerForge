@@ -17,8 +17,7 @@ import { logger } from "./diagnostics.js";
 export const KEYS = {
   configs: "pf:configs",
   resume: "pf:resume",
-  firstRun: "pf:first-run",
-  genericNotice: "pf:generic-notice"
+  firstRun: "pf:first-run"
 };
 
 /**
