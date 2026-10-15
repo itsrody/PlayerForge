@@ -278,10 +278,10 @@ export class Kernel {
    * script-lazy SDK player that fires loadeddata or play, so discovery stays
    * live for anything that announces itself. A video that surfaces after the
    * downgrade without firing either, and never moves, stays missed until it
-   * does - or until the first-gesture re-sweep above re-offers it. The
-   * standing observer is the cost the downgrade sheds, and a
-   * player that fires nothing needs nothing yet. Idempotent; pagehide still
-   * tears the remaining tap down.
+   * does - the upgrade watch is the only net for it, and only when an
+   * attribute it filters changes. The standing observer is the cost the
+   * downgrade sheds, and a player that fires nothing needs nothing yet.
+   * Idempotent; pagehide still tears the remaining tap down.
    */
   #downgradeDiscoveryTap() {
     if (this.#discoveryDowngraded) {
