@@ -493,6 +493,19 @@ export function forEachVideoInMutations(mutations, visit) {
   }
 }
 
+/** Rect-sized ignoring visibility: the enrollment question for the
+ *  visibility watch below. A rect-sized but invisible video can be fixed
+ *  by a reveal; a rect-small one cannot be fixed by scrolling, so only
+ *  the former is worth re-offering on intersection crossings. */
+export function rectMeetsMinSize(video, minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_VIDEO_HEIGHT) {
+  try {
+    const rect = video.getBoundingClientRect();
+    return rect.width >= minWidth && rect.height >= minHeight;
+  } catch {
+    return false;
+  }
+}
+
 /** Shared adoption gate: the rendered box must reach minimum player size. */
 export function meetsMinSize(video, minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_VIDEO_HEIGHT) {
   // Layout-free visibility pre-gate: hidden-but-sized players (carousels,
@@ -514,12 +527,7 @@ export function meetsMinSize(video, minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_
       !video.checkVisibility({ opacityProperty: true, visibilityProperty: true })) {
     return false;
   }
-  try {
-    const rect = video.getBoundingClientRect();
-    return rect.width >= minWidth && rect.height >= minHeight;
-  } catch {
-    return false;
-  }
+  return rectMeetsMinSize(video, minWidth, minHeight);
 }
 
 /**
@@ -562,5 +570,50 @@ export function watchDocumentVideos(onVideo) {
   return () => {
     offEvents();
     offMutations();
+  };
+}
+
+/**
+ * Visibility-transition offers for enrolled videos: a single
+ * IntersectionObserver that re-offers a video when any part of it crosses
+ * into view. This is the one edge that is neither a mutation, a media
+ * event, nor an attribute write - notably a reveal by stylesheet change
+ * (no attribute record fires anywhere) or by leaving a skipped
+ * `content-visibility` subtree. Exiting fires nothing: an exit cannot
+ * newly qualify a video, and adopted videos are claimed anyway.
+ *
+ * Enrollment is the caller's diagnosis, not this watch's: observe only
+ * videos whose gates could flip on a reveal (template-resolved,
+ * rect-sized, visibility-failed). Observing everything would re-offer
+ * every thumbnail on every scroll crossing. Unobserving is the caller's
+ * too - on adopt, on budget, on teardown. Missing API (jsdom) answers a
+ * no-op handle so construction never throws off-Gecko.
+ */
+export function watchVisibilityOffers(onVideo, { signal } = {}) {
+  if (typeof IntersectionObserver !== "function") {
+    return { observe() {}, unobserve() {}, dispose() {} };
+  }
+  const io = new IntersectionObserver((entries) => {
+    for (let i = 0; i < entries.length; i++) {
+      if (entries[i].isIntersecting) {
+        onVideo(entries[i].target);
+      }
+    }
+  });
+  signal?.addEventListener("abort", () => io.disconnect(), { once: true });
+  return {
+    observe(video) {
+      try {
+        io.observe(video);
+      } catch {}
+    },
+    unobserve(video) {
+      try {
+        io.unobserve(video);
+      } catch {}
+    },
+    dispose() {
+      io.disconnect();
+    }
   };
 }

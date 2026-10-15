@@ -660,6 +660,69 @@ test("removing hidden re-offers the video", async () => {
   assert.ok(shell.sdk, "the reveal re-offered through the upgrade watch");
 });
 
+test("a stylesheet reveal re-offers through visibility crossings", async () => {
+  // style is deliberately outside UPGRADE_ATTRS, so no attribute record
+  // can surface this reveal - only the intersection crossing re-offers.
+  // The loader's no-op IntersectionObserver never fires, so the test
+  // installs a firing fake around kernel init only.
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "IntersectionObserver");
+  const instances = [];
+  globalThis.IntersectionObserver = class {
+    constructor(cb) {
+      this.cb = cb;
+      this.targets = [];
+      this.dead = false;
+      instances.push(this);
+    }
+    observe(target) {
+      this.targets.push(target);
+    }
+    unobserve(target) {
+      this.targets = this.targets.filter((t) => t !== target);
+    }
+    disconnect() {
+      this.dead = true;
+    }
+  };
+  const fire = (video, isIntersecting) => {
+    for (const io of instances) {
+      if (!io.dead && io.targets.includes(video)) {
+        io.cb([{ isIntersecting, target: video }]);
+      }
+    }
+  };
+  try {
+    const { kernel, video, created } = makeHarness();
+    // checkVisibility maps inline display the way Gecko does; jsdom has
+    // no such mapping, so the test installs it like the rect stub.
+    video.checkVisibility = () => video.style.display !== "none";
+    video.style.display = "none";
+    kernel.init();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.ok(
+      !created.some((shell) => shell.video === video),
+      "a display:none player adopts nothing, but enrolls visibility offers"
+    );
+    assert.ok(
+      instances.some((io) => io.targets.includes(video)),
+      "the rect-sized near miss is enrolled"
+    );
+    // A stylesheet-class reveal writes no attribute the upgrade watch
+    // filters - the crossing below is the only edge that can adopt this.
+    video.style.display = "block";
+    fire(video, true);
+    await waitFor(() => created.some((shell) => shell.video === video), 3000);
+    const shell = created.find((entry) => entry.video === video);
+    assert.ok(shell.sdk, "the crossing re-offered what no record could surface");
+  } finally {
+    if (descriptor) {
+      Object.defineProperty(globalThis, "IntersectionObserver", descriptor);
+    } else {
+      delete globalThis.IntersectionObserver;
+    }
+  }
+});
+
 test("a removed video disarms its upgrade watch", async () => {
   const { trackedObserverLabels } = await import("../src/shared/dom-manager.js");
   const upgrades = () => trackedObserverLabels().filter((label) => label === "upgrade-watch").length;

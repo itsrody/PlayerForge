@@ -9,8 +9,10 @@ import {
   findPlayerForVideo,
   videoFromEvent,
   meetsMinSize,
+  rectMeetsMinSize,
   forEachVideoInMutations,
   forEachShadowVideos,
+  watchVisibilityOffers,
   MIN_VIDEO_WIDTH,
   MIN_VIDEO_HEIGHT
 } from "../src/kernel/sdk.js";
@@ -173,6 +175,100 @@ test("meetsMinSize still size-gates after a visibility pass", () => {
   const small = sizedVideo(doc, { width: 40, height: 40 });
   small.checkVisibility = () => true;
   assert.equal(meetsMinSize(small), false, "visible undersized player still rejected");
+});
+
+test("rectMeetsMinSize answers the box alone, visibility aside", () => {
+  const doc = dom("");
+  assert.equal(rectMeetsMinSize(sizedVideo(doc, { width: 200, height: 100 })), true);
+  assert.equal(rectMeetsMinSize(sizedVideo(doc, { width: 50, height: 50 })), false);
+  const hidden = sizedVideo(doc, { width: 800, height: 450 });
+  hidden.checkVisibility = () => false;
+  assert.equal(rectMeetsMinSize(hidden), true, "invisible but rect-sized enrolls");
+  const broken = doc.createElement("video");
+  broken.getBoundingClientRect = () => {
+    throw new Error("unreadable");
+  };
+  assert.equal(rectMeetsMinSize(broken), false);
+});
+
+/** Controllable IntersectionObserver: the loader's no-op shim never fires. */
+function installFiringObserver() {
+  const instances = [];
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "IntersectionObserver");
+  globalThis.IntersectionObserver = class {
+    constructor(cb) {
+      this.cb = cb;
+      this.targets = [];
+      this.dead = false;
+      instances.push(this);
+    }
+    observe(target) {
+      this.targets.push(target);
+    }
+    unobserve(target) {
+      this.targets = this.targets.filter((t) => t !== target);
+    }
+    disconnect() {
+      this.dead = true;
+    }
+  };
+  return {
+    instances,
+    fire(video, isIntersecting) {
+      for (const io of instances) {
+        if (!io.dead && io.targets.includes(video)) {
+          io.cb([{ isIntersecting, target: video }]);
+        }
+      }
+    },
+    restore() {
+      if (descriptor) {
+        Object.defineProperty(globalThis, "IntersectionObserver", descriptor);
+      } else {
+        delete globalThis.IntersectionObserver;
+      }
+    }
+  };
+}
+
+test("visibility offers fire on entering, never on exiting", () => {
+  const rig = installFiringObserver();
+  try {
+    const doc = dom('<div class="dplayer"><video></video></div>');
+    const video = doc.querySelector("video");
+    const seen = [];
+    const watch = watchVisibilityOffers((v) => seen.push(v));
+    watch.observe(video);
+    rig.fire(video, false);
+    assert.deepEqual(seen, [], "an exit cannot newly qualify a video");
+    rig.fire(video, true);
+    assert.deepEqual(seen, [video], "a crossing re-offers");
+    watch.unobserve(video);
+    rig.fire(video, true);
+    assert.deepEqual(seen, [video], "unobserved videos stay silent");
+    watch.dispose();
+  } finally {
+    rig.restore();
+  }
+});
+
+test("visibility offers degrade to a no-op handle without the API", () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "IntersectionObserver");
+  delete globalThis.IntersectionObserver;
+  try {
+    const doc = dom('<div class="dplayer"><video></video></div>');
+    const video = doc.querySelector("video");
+    const watch = watchVisibilityOffers(() => {
+      throw new Error("must never fire without the API");
+    });
+    watch.observe(video);
+    watch.unobserve(video);
+    watch.dispose();
+  } finally {
+    if (descriptor) {
+      Object.defineProperty(globalThis, "IntersectionObserver", descriptor);
+    }
+  }
 });
 
 test("videoFromEvent prefers an explicit video target", () => {

@@ -1933,6 +1933,16 @@ element's life (measured live: `playbackRate = 2` produced zero rate
   paid off by forcing the two attributions above. No behavior changed;
   net even on tests.
 
+  The fiftieth movement adds the last discovery edge: visibility-transition
+  offers for template-resolved near misses. A rect-sized but invisible
+  video enrolls one IntersectionObserver that re-offers on entering -
+  stylesheet reveals and skipped-subtree entries fire no mutation, media,
+  or attribute record, so nothing else could surface them. Exits fire
+  nothing, adopted videos unobserve on claim, and misses spend from the
+  shared miss budget, so chronic crossers stand down to spontaneous edges
+  like upgrade churn does. The size gate splits for it: the rect question
+  enrolls, the visibility question still refuses. Net four tests heavier.
+
   The forty-ninth movement proves the no-sink posture instead of asserting
   it: a strict-CSP page (`script-src 'self'` plus
   `require-trusted-types-for 'script'`, Trusted Types having shipped in

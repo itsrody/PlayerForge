@@ -4,7 +4,7 @@ import { setDebugRuntime } from "../shared/diagnostics.js";
 import { postTask } from "../shared/scheduler.js";
 import { Scope } from "../shared/scope.js";
 import { DOMManager, trackScopedObserver } from "../shared/dom-manager.js";
-import { resolvePlayer, templateDataAttributes, templateCustomTags, meetsMinSize, watchDocumentVideos, watchMediaEvents, surveyVideos, forEachShadowVideos } from "./sdk.js";
+import { resolvePlayer, templateDataAttributes, templateCustomTags, meetsMinSize, rectMeetsMinSize, watchDocumentVideos, watchMediaEvents, watchVisibilityOffers, surveyVideos, forEachShadowVideos } from "./sdk.js";
 import { GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
 
 /**
@@ -69,6 +69,9 @@ export class Kernel {
   #sessions = new WeakMap();
   /** Unsubscribe for the shared discovery tap; dropped at pagehide. */
   #stopDiscoveryTap = null;
+  /** Visibility-transition offers for enrolled near-miss videos. The scope
+   *  signal disconnects the observer; enrollment itself is per video. */
+  #visibility = null;
   /** True once the full-document discovery tap has been downgraded. */
   #discoveryDowngraded = false;
   /** Kernel lifecycle scope: scoped-observer releases and removal grace
@@ -215,6 +218,12 @@ export class Kernel {
     // Permanent rider on the shared discovery tap: every video the probe
     // would have seen, the kernel now adopts through the same wiring.
     this.#stopDiscoveryTap = watchDocumentVideos((video) => this.#adoptVideo(video));
+    // Visibility-transition offers for template-resolved near misses (sized
+    // box, failed visibility): the one edge that is neither mutation, media
+    // nor attribute write - stylesheet reveals and skipped-subtree entries.
+    // Claimed videos unobserve on their next offer; the miss budget bounds
+    // chronic crossers the same way it bounds upgrade churn.
+    this.#visibility = watchVisibilityOffers((video) => this.#onVisibilityCrossing(video), { signal });
     // The probe boots us precisely so a video already in the parsed DOM gets
     // its shell without waiting for the next media event. Offer its hints
     // first (discovery order, media-surfaced first), then sweep once for
@@ -386,6 +395,7 @@ export class Kernel {
     // the document.
     const session = this.#sessionFor(video);
     if (session.claimed) {
+      this.#visibility?.unobserve(video);
       return;
     }
     // One resolve per offer against the template table: every known shape
@@ -403,8 +413,14 @@ export class Kernel {
       // Template claimed it but the box is not there yet (hidden,
       // undersized): arm the upgrade watch, so a reveal or growth by
       // attribute write re-offers instead of missing for the life of
-      // the document. The watch stands down on its miss budget.
+      // the document. The watch stands down on its miss budget. A
+      // rect-sized failure additionally enrolls visibility offers, so a
+      // reveal by stylesheet (no attribute record anywhere) re-offers on
+      // its intersection crossing instead of not at all.
       this.#armUpgradeWatch(video);
+      if (rectMeetsMinSize(video)) {
+        this.#visibility?.observe(video);
+      }
       return;
     }
     const container = sdk.container;
@@ -415,7 +431,8 @@ export class Kernel {
     session.claim();
     // Adopted: the session watch takes over from here, so a live upgrade
     // watch would only re-offer an already-owned video into the claimed
-    // early-return.
+    // early-return. Visibility enrollment ends with it for the same reason.
+    this.#visibility?.unobserve(video);
     session.disarmUpgrade();
     // Guarded like the logger contract promises: with chatter off (the
     // default), the dimensions/duration interpolation never runs - a disabled
@@ -432,8 +449,26 @@ export class Kernel {
     this.#downgradeDiscoveryTap();
   }
 
-  #createShell({ video, container, sdk }) {
-    const provider = this.#shellProvider;
+  /**
+   * A visibility crossing re-offers an enrolled video. Claimed videos
+   * unobserve instead of re-entering; a still-unclaimed video adopts
+   * through the normal path, and a miss spends from the shared miss
+   * budget - chronic crossers (carousels) stand down to spontaneous
+   * edges the same way upgrade churn does.
+   */
+  #onVisibilityCrossing(video) {
+    const session = this.#sessionFor(video);
+    if (session.claimed) {
+      this.#visibility?.unobserve(video);
+      return;
+    }
+    this.#adoptVideo(video);
+    if (!session.claimed && !session.noteUpgradeMiss()) {
+      this.#visibility?.unobserve(video);
+    }
+  }
+
+  #createShell({ video, container, sdk }) {    const provider = this.#shellProvider;
     if (!provider) {
       logger.error("kernel", "No shell provider registered");
       return null;
@@ -572,10 +607,11 @@ class VideoSession {
   }
 
   /**
-   * Count a fruitless upgrade re-offer (still unclaimed afterwards).
-   * Returns false when the miss budget is spent and the caller should stand
-   * the watch down. Only consecutive misses count: any adoption disarms
-   * outright, and any fresh arm resets.
+   * Count a fruitless spontaneous re-offer (still unclaimed afterwards) -
+   * from the upgrade watch or a visibility crossing alike. Returns false
+   * when the miss budget is spent and the caller should stand down. Only
+   * consecutive misses count: any adoption disarms outright, and any fresh
+   * arm resets.
    */
   noteUpgradeMiss() {
     this.#upgradeMisses += 1;
