@@ -3,9 +3,9 @@
  *
  * The template suite (sdk-engine, multi-shell) only proves anchored shapes.
  * This file proves the other half: a video NO template owns is adopted
- * through the measured fallback - playing, activated, sized, in viewport -
- * with real media, real layout and real user activation, none of which
- * jsdom can stand in for.
+ * through the measured fallback - playing, activated, sized - with real
+ * media, real layout and real user activation, none of which jsdom can
+ * stand in for.
  *
  * The core case is muted autoplay before any gesture: the play event offers
  * while activation is still missing, so the gates refuse it - and with no
@@ -91,7 +91,7 @@ test("muted autoplay with no gesture builds no shell, then adopts on first inter
 
   // First trusted interaction: a real pointer press anywhere on the page.
   // Activation latches, the gesture sweep re-offers, and the fallback -
-  // playing, sized, in viewport - adopts through the measured path.
+  // playing, sized - adopts through the measured path.
   await driver.raw.actions().move({ x: 100, y: 100 }).press().release().perform();
   const st = await until(async () => {
     const r = await driver.eval(readBare);

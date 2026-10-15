@@ -1882,6 +1882,16 @@ element's life (measured live: `playbackRate = 2` produced zero rate
   finished region instead of announcing partial sections - desktop honored
   it all along, 158 brings Android along. Net two tests heavier.
 
+  The forty-fifth movement drops the viewport from the generic resolve by
+  design: full-bleed backgrounds and below-fold videos adopt like any other
+  playing, sized box, and screen-size fit stays the HUD's job
+  (@media/@container in the shell stylesheet). A viewport verdict can only
+  go stale on scroll or resize with no edge to re-fire it, while playback
+  state always arrives on one - and the placement climb still refuses videos
+  with no player-like box, so layout contexts and bare body children claim
+  nothing. The revisit bench's cold arm loses its mirrored refusal with it,
+  and the scorer corpus gains its third shell (ambient). Net even on tests.
+
 ## 7. Gecko-specific decisions, and what they rule out
 
 - Scheduler priorities replace timer-based deferral. `postTask` is available

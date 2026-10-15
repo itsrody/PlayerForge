@@ -240,11 +240,18 @@ function hasStickyActivation() {
 }
 
 /**
- * SDK-independent adoption candidate: a playing, sized, visible video on an
+ * SDK-independent adoption candidate: a playing, sized video on an
  * activated page, with no registry record. Each gate kills a false-positive
  * class: playback state (paused embeds, poster frames), sticky activation
- * (autoplay ads on fresh pages), size (thumbnails, spacers), viewport and
- * placement (below-fold carousels, ambient full-bleed backgrounds).
+ * (autoplay ads on fresh pages), size (thumbnails, spacers), placement
+ * (the climb still refuses videos with no player-like box - layout
+ * contexts, bare body children).
+ *
+ * Deliberately no viewport consult: full-bleed backgrounds and below-fold
+ * videos adopt like any other playing, sized box. Screen-size fit is the
+ * HUD's job (@media/@container in the shell stylesheet), not an adoption
+ * criterion - and a viewport verdict can only go stale on scroll or resize
+ * with no edge to re-fire it, while playback state always arrives on one.
  *
  * Deliberately no audio/duration heuristics: muted users and short clips are
  * legitimate viewing, and each extra heuristic is a false negative for
@@ -303,32 +310,14 @@ function videoFrame(video) {
 }
 
 /**
- * Viewport refusal: full-bleed video (ambient background, not a player) and
- * fully off-viewport video. The element's own document, not the ambient one:
- * an iframe's viewport is its own, and a bare `window` read would answer for
- * the wrong frame.
- */
-function viewportRefuses(rect, doc) {
-  const viewportWidth = doc?.documentElement?.clientWidth ?? 0;
-  const viewportHeight = doc?.documentElement?.clientHeight ?? 0;
-  if (viewportWidth > 0 && viewportHeight > 0) {
-    if (rect.width >= viewportWidth * 0.9 && rect.height >= viewportHeight * 0.9) {
-      return true;
-    }
-    if (rect.bottom <= 0 || rect.top >= viewportHeight || rect.right <= 0 || rect.left >= viewportWidth) {
-      return true;
-    }
-  }
-  return false;
-}
-/**
- * Frame + viewport + climb against an already-filled chain: the exported
+ * Frame + climb against an already-filled chain: the exported
  * probe fills first, the unified resolve reuses the offer's fill. Pure
  * reads - the fill it shares cannot flush, because nothing here writes.
+ * No viewport anywhere: where the box sits on the page is not consulted.
  */
 function placeGeneric(video, len) {
   const frame = videoFrame(video);
-  if (!frame || viewportRefuses(frame.rect, frame.doc)) {
+  if (!frame) {
     return null;
   }
   return climbGenericContainer(len, frame.rect, frame.doc);

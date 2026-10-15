@@ -194,15 +194,10 @@ function offerPair() {
             continue;
           }
           if (!(rect.width > 0) || !(rect.height > 0)) continue;
-          // resolveGenericContainer: viewport refusal, then the climb
-          // with a rect per ancestor (the forced layout per offer).
+          // resolveGenericContainer: straight into the climb with a rect
+          // per ancestor (the forced layout per offer). No viewport
+          // consult anywhere - where the box sits is not an input.
           const doc = video.ownerDocument;
-          const vw = doc?.documentElement?.clientWidth ?? 0;
-          const vh = doc?.documentElement?.clientHeight ?? 0;
-          if (vw > 0 && vh > 0) {
-            if (rect.width >= vw * 0.9 && rect.height >= vh * 0.9) continue;
-            if (rect.bottom <= 0 || rect.top >= vh || rect.right <= 0 || rect.left >= vw) continue;
-          }
           let container = null;
           let hops = 0;
           let node = video.parentNode ?? null;

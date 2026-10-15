@@ -485,7 +485,7 @@ test("a video directly under body has no generic container", () => {
   Object.defineProperty(video, "ended", { value: false, configurable: true });
   Object.defineProperty(video, "readyState", { value: 4, configurable: true });
   withActivation(true, () => {
-    assert.equal(findGenericPlayer(video), null, "full-bleed ambient video is not a player");
+    assert.equal(findGenericPlayer(video), null, "no player-like ancestor claims the video");
   });
 });
 
@@ -503,8 +503,11 @@ test("the generic path stays off for paused video", () => {
   });
 });
 
-test("full-bleed and off-viewport video refuse generic placement", () => {
-  // jsdom reports no viewport (clientWidth 0), so these branches need one.
+test("full-bleed and off-viewport video adopt by design, not by viewport", () => {
+  // The kernel never consults the viewport: a playing, sized box adopts
+  // wherever it sits, and screen-size fit belongs to the HUD's
+  // @media/@container rules. jsdom reports no viewport (clientWidth 0),
+  // so these branches install one to prove it goes unread.
   const doc = dom('<div id="player"><video></video></div>');
   Object.defineProperty(doc.documentElement, "clientWidth", { value: 1280, configurable: true });
   Object.defineProperty(doc.documentElement, "clientHeight", { value: 720, configurable: true });
@@ -516,9 +519,13 @@ test("full-bleed and off-viewport video refuse generic placement", () => {
   Object.defineProperty(video, "readyState", { value: 4, configurable: true });
   withActivation(true, () => {
     video.getBoundingClientRect = () => ({ width: 1280, height: 700, top: 0, left: 0, right: 1280, bottom: 700 });
-    assert.equal(findGenericPlayer(video), null, "ambient full-bleed background is not a player");
+    const fullBleed = findGenericPlayer(video);
+    assert.equal(fullBleed?.container, wrapper, "a full-bleed background still adopts");
+    assert.equal(fullBleed?.matched, false);
     video.getBoundingClientRect = () => ({ width: 640, height: 360, top: 2000, left: 0, right: 640, bottom: 2360 });
-    assert.equal(findGenericPlayer(video), null, "below-fold video waits for a viewport crossing");
+    const belowFold = findGenericPlayer(video);
+    assert.equal(belowFold?.container, wrapper, "a below-fold video adopts without waiting for a viewport crossing");
+    assert.equal(belowFold?.matched, false);
   });
 });
 
