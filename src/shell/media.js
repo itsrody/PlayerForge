@@ -287,7 +287,9 @@ class MediaSessionBridge {
    * metadata for a frame before the successor rewrites them.
    */
   static claim({ session, controls, video, signal }) {
-    sessionOwner?.#yieldHandlers();
+    if (sessionOwner) {
+      sessionOwner.#yieldHandlers();
+    }
     const bridge = new MediaSessionBridge(session, controls, video);
     sessionOwner = bridge;
     liveBridges.add(bridge);
