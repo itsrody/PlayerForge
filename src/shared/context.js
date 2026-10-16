@@ -416,6 +416,9 @@ function requestPageContextOverPipe(timeoutMs, deadline) {
     if (data && typeof data === "object" && data.type === CTX_RESPONSE_TYPE
         && typeof data.domain === "string" && typeof data.path === "string") {
       answered = true;
+      // The answer arrived: drop the combined-abort registration with it,
+      // or it lingers on the caller scope until the timeout fires.
+      signal?.removeEventListener("abort", onCombinedAbort);
       settle({
         domain: data.domain,
         path: data.path,
@@ -444,16 +447,18 @@ function requestPageContextOverPipe(timeoutMs, deadline) {
     }
   };
 
+  // Named so the response path above can drop it: the abort fires both
+  // on the timeout AND on settle()'s own ac.dispose() after a response.
+  // Only a timeout (no answer) means the pipe is dead.
+  const onCombinedAbort = () => {
+    if (answered) {
+      return;
+    }
+    dropDeadPipe();
+    settle(null);
+  };
   if (signal) {
-    signal.addEventListener("abort", () => {
-      // The abort fires both on the timeout AND on settle()'s own ac.dispose()
-      // after a response. Only a timeout (no answer) means the pipe is dead.
-      if (answered) {
-        return;
-      }
-      dropDeadPipe();
-      settle(null);
-    }, { once: true });
+    signal.addEventListener("abort", onCombinedAbort, { once: true });
   } else {
     const timer = setTimeout(() => {
       if (answered) {
@@ -539,6 +544,10 @@ async function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) 
       return;
     }
     settled = true;
+    // Settle ends the abort listener's purpose wherever it runs from -
+    // including here, when the abort listener itself is the settler
+    // (removing an already-fired once listener is a no-op).
+    signal?.removeEventListener("abort", onOwnerAbort);
     retryHandle?.abort();
     ac.dispose();
     if (replyPort) {
@@ -603,10 +612,13 @@ async function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) 
     }
   };
 
+  // Named so settle() above can drop it: a response settles first and
+  // must not leave a dead once-listener on the caller scope per resolve.
+  const onOwnerAbort = () => {
+    settle(null, false);
+  };
   if (useSignalAny) {
-    signal.addEventListener("abort", () => {
-      settle(null, false);
-    }, { once: true });
+    signal.addEventListener("abort", onOwnerAbort, { once: true });
   }
 
   window.addEventListener("message", onMessage, { signal });

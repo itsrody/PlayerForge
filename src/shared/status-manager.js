@@ -240,7 +240,18 @@ export class StatusManager {
         this.#listeners.delete(cb);
         return () => {};
       }
-      signal.addEventListener("abort", () => this.#listeners.delete(cb), { once: true });
+      // Named so unsubscribe drops it: the abort path only matters while
+      // subscribed, and a dead once-listener would stay retained by the
+      // owner signal past every subscribe cycle on churny pages.
+      const onOwnerAbort = () => {
+        signal.removeEventListener("abort", onOwnerAbort);
+        this.#listeners.delete(cb);
+      };
+      signal.addEventListener("abort", onOwnerAbort, { once: true });
+      return () => {
+        signal.removeEventListener("abort", onOwnerAbort);
+        this.#listeners.delete(cb);
+      };
     }
     return () => this.#listeners.delete(cb);
   }

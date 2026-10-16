@@ -203,15 +203,17 @@ export class ForgeTrack {
         }
         done = true;
         watchdog.abort();
+        this.#scope.signal.removeEventListener("abort", onScopeAbort);
         el.removeEventListener("load", onLoad);
         el.removeEventListener("error", onError);
         resolve(ok);
       };
       const onLoad = () => finish(true);
       const onError = () => finish(false);
+      const onScopeAbort = () => finish(false);
       el.addEventListener("load", onLoad);
       el.addEventListener("error", onError);
-      this.#scope.signal.addEventListener("abort", () => finish(false), { once: true });
+      this.#scope.signal.addEventListener("abort", onScopeAbort, { once: true });
       // Gecko only fetches/parses while the TextTrack mode is not disabled.
       this.#track.mode = "hidden";
       el.src = url;

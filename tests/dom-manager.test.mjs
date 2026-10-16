@@ -575,3 +575,30 @@ test("the shared feed observes childList-only on the document node", async () =>
     globalThis.MutationObserver = RealObserver;
   }
 });
+
+test("early release drops abort registrations instead of stranding them", () => {
+  // A once-listener that never fires stays retained by the owner signal -
+  // one dead closure per subscribe cycle on churny pages. Both early exits
+  // below must drop their registration with their purpose.
+  const added = [];
+  const removed = [];
+  const signal = {
+    get aborted() {
+      return false;
+    },
+    addEventListener: (_type, fn) => {
+      added.push(fn);
+    },
+    removeEventListener: (_type, fn) => {
+      removed.push(fn);
+    }
+  };
+  const off = onDomMutations(() => {}, { signal });
+  off();
+  const release = trackScopedObserver({ disconnect() {} }, "test-release", signal);
+  release();
+  assert.ok(added.length > 0, "the registrations happened");
+  for (const fn of added) {
+    assert.ok(removed.includes(fn), "every abort registration is dropped with its purpose");
+  }
+});

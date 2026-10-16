@@ -238,7 +238,17 @@ export function subscribeFullscreen(cb, signal) {
       fsSubscribers.delete(cb);
       return () => {};
     }
-    signal.addEventListener("abort", () => fsSubscribers.delete(cb), { once: true });
+    // Named so both ends drop it: an unsubscribe ends the purpose early,
+    // and a dead once-listener would stay retained by the owner signal.
+    const onOwnerAbort = () => {
+      signal.removeEventListener("abort", onOwnerAbort);
+      fsSubscribers.delete(cb);
+    };
+    signal.addEventListener("abort", onOwnerAbort, { once: true });
+    return () => {
+      signal.removeEventListener("abort", onOwnerAbort);
+      fsSubscribers.delete(cb);
+    };
   }
   return () => fsSubscribers.delete(cb);
 }

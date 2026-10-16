@@ -271,6 +271,11 @@ export function onDomMutations(handler, { signal } = {}) {
       slot[0] = null;
       live -= 1;
     }
+    // Unsubscribe must drop the abort listener too: it fired its purpose
+    // (owner death) the other way, and a once-listener that never fires
+    // stays retained by the owner signal for the rest of its life - one
+    // dead closure per subscribe cycle on churny pages.
+    signal?.removeEventListener("abort", off);
     stopIfIdle();
   };
   signal?.addEventListener("abort", off, { once: true });
@@ -311,6 +316,9 @@ export function trackScopedObserver(observer, label, signal) {
     released = true;
     observer.disconnect();
     trackedObservers.delete(observer);
+    // Same dead-listener rule as the feed's off() above: release ends the
+    // purpose early, so drop the abort registration with it.
+    signal?.removeEventListener("abort", release);
   };
   if (signal?.aborted) {
     // Dead on arrival: disconnect without listing, so neither the observer

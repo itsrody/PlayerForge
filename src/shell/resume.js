@@ -565,7 +565,13 @@ export class ResumeTracker {
     // Resolving twice is a no-op, so racing media events against destroy is safe.
     const { signal } = this.#scope;
     const { promise: metadataReady, resolve: resolveMetadata } = Promise.withResolvers();
-    const finishWaiting = () => resolveMetadata();
+    // Named so resolution drops it: metadata lands far more often than
+    // teardown, and a dead once-listener would stay retained by the shell
+    // signal past every boot.
+    const finishWaiting = () => {
+      signal.removeEventListener("abort", finishWaiting);
+      resolveMetadata();
+    };
     const onDurationChange = () => {
       if (video.duration && isFinite(video.duration)) {
         finishWaiting();

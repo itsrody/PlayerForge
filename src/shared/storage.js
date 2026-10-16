@@ -131,12 +131,20 @@ export function gmRequestText(url, { timeoutMs = 30000, signal } = {}) {
     return promise;
   }
   let req = null;
-  signal?.addEventListener("abort", () => {
+  // Named so every settle path drops it: a fulfilled request must not
+  // leave a dead once-listener on the caller's scope per fetch.
+  const onOwnerAbort = () => {
+    signal?.removeEventListener("abort", onOwnerAbort);
     try {
       req?.abort?.();
     } catch {}
     reject(new Error("Aborted"));
-  }, { once: true });
+  };
+  const settle = (fn, ...args) => {
+    signal?.removeEventListener("abort", onOwnerAbort);
+    fn(...args);
+  };
+  signal?.addEventListener("abort", onOwnerAbort, { once: true });
   req = GM_xmlhttpRequest({
     url,
     method: "GET",
@@ -144,14 +152,14 @@ export function gmRequestText(url, { timeoutMs = 30000, signal } = {}) {
     onload: (res) => {
       const status = res?.status ?? 0;
       if (status >= 200 && status < 300) {
-        resolve(res);
+        settle(resolve, res);
       } else {
-        reject(new Error(`HTTP ${status}`));
+        settle(reject, new Error(`HTTP ${status}`));
       }
     },
-    onerror: () => reject(new Error("Network error")),
-    ontimeout: () => reject(new Error(`Timed out after ${timeoutMs}ms`)),
-    onabort: () => reject(new Error("Aborted"))
+    onerror: () => settle(reject, new Error("Network error")),
+    ontimeout: () => settle(reject, new Error(`Timed out after ${timeoutMs}ms`)),
+    onabort: () => settle(reject, new Error("Aborted"))
   });
   return promise;
 }
@@ -468,6 +476,10 @@ export class ConfigStore {
     this.#listeners.add(listener);
     this.#watch();
     const off = () => {
+      // Drop the abort registration with the subscription: the abort path
+      // only matters while subscribed, and a dead once-listener would stay
+      // retained by the owner signal past every subscribe cycle.
+      signal?.removeEventListener("abort", off);
       if (!this.#listeners.delete(listener)) {
         return;
       }

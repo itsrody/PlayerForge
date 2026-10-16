@@ -99,6 +99,10 @@ function createStepper({
     let delayTimer = null;
     let repeatTimer = null;
     const stopRepeat = () => {
+      // Drop the abort registration with the timers: holds end by pointer
+      // release as often as by destroy, and a dead once-listener would
+      // stay retained by the panel signal past every hold.
+      signal?.removeEventListener("abort", stopRepeat);
       clearTimeout(delayTimer);
       clearInterval(repeatTimer);
       delayTimer = null;

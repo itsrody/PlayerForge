@@ -38,7 +38,7 @@ not a rewrite.
 Evidence that the idle-cost goal is already largely met:
 
 - `setInterval` appears exactly once in the whole tree, at
-  `src/shell/chrome/panel.js:125`, as a key-hold auto-repeat. That is a
+  `src/shell/chrome/panel.js:129`, as a key-hold auto-repeat. That is a
   user-driven input affordance, not polling.
 - `requestAnimationFrame` appears only in `src/shared/diagnostics.js` (a
   diagnostic frame-gap probe, debug-gated) and in `scheduler.js`'s `yield_()`.
@@ -708,8 +708,8 @@ record rather than quietly delete:
   why both are named but undriven.
 
 One structural caveat: L1 has no single owner. Visibility is instantiated
-twice — `status-manager.js:469` for the `Presence` axis, and an independent
-observer at `resume.js:711` gating off-screen saves. The two answer different
+twice — `status-manager.js:480` for the `Presence` axis, and an independent
+observer at `resume.js:717` gating off-screen saves. The two answer different
 questions (what is the player's status versus should we churn storage for a
 video the user cannot see) and their lifetimes differ, so folding them would
 couple the resume cadence to the status graph. The single-source discipline L0
@@ -719,7 +719,7 @@ an oversight.
 ### L2 — StatusManager
 
 Today `isActive()` closures are authored independently at each `createActivity`
-call site (`src/shell/shell.js:390`, `src/shell/resume.js:727`,
+call site (`src/shell/shell.js:390`, `src/shell/resume.js:733`,
 `src/shared/shadow.js:211`). Nothing answers "what is this player's status right
 now" as a single queryable value.
 
@@ -747,7 +747,7 @@ Subscribers receive the change; nobody re-diffs the whole status.
 That event has *two* deliveries, not one, and the second is the reason most of
 the axis surface exists. `subscribe()` callbacks fire in-realm, and the same
 change is dispatched as a `pf:status` CustomEvent on the `<video>`
-(`status-manager.js:363`) so the **page world** can read status across the
+(`status-manager.js:374`) so the **page world** can read status across the
 sandbox boundary — which is the only consumer of `Buffer`, `Screen`, `duration`,
 `rate`, `volume`, `muted`, `hasTextTrack` and `error`. In-tree two subscribers
 exist: the media/HUD drive (`shell.js:377`), which reads no fields — the
@@ -815,7 +815,7 @@ the layers can assume:
 - **The gate is not one-per-session.** `Shell` registers two — media-state
    (`shell.js:431`) and occlusion (`shell.js:516`) — because they have different
   priorities' worth of coalescing and different snapshot shapes. `ToastManager`
-  (`toast.js:130`) and `SettingsPanel` (`panel.js:302`) each own a further gate
+  (`toast.js:130`) and `SettingsPanel` (`panel.js:306`) each own a further gate
   on their own scope, so the tree has four `RenderGate` constructions in total.
   "The render gate registration" (singular) is the sketch's simplification.
 - **`Scope.child()` has no production caller.** The optional child scope §2's
@@ -1977,6 +1977,14 @@ element's life (measured live: `playbackRate = 2` produced zero rate
   behavior - the twin-boot tests pin the windows, and the postTask guard
   pins the new call site the way it pins every site. Net even on tests.
 
+  The fifty-fourth movement stops dead abort listeners from accumulating
+  on long-lived scope signals: every manual once-registration whose
+  purpose can end early (unsubscribes, releases, request settles, load
+  finishes) now drops itself with it, instead of staying retained until
+  scope death. The dom-manager pair covers all consumers at once; a
+  leak-count test pins the rule with a recording signal. Net one test
+  heavier.
+
 ## 7. Gecko-specific decisions, and what they rule out
 
 - Scheduler priorities replace timer-based deferral. `postTask` is available
@@ -2108,10 +2116,10 @@ In-tree:
 - `src/shared/scheduler.js` — traps in §2.4, `postTask`, `yield_()`
 - `src/shared/scope.js` — teardown primitive
 - `src/shared/activity.js` — passive activity windows
-- `src/shell/shell.js:390`, `src/shell/resume.js:727`, `src/shared/shadow.js:211` — `createActivity` call sites
-- `src/shared/context.js:640` — the tree's only self-rearming `postTask`, delayed
+- `src/shell/shell.js:390`, `src/shell/resume.js:733`, `src/shared/shadow.js:211` — `createActivity` call sites
+- `src/shared/context.js:652` — the tree's only self-rearming `postTask`, delayed
 - `src/shared/dom-manager.js` — mutation coalescing
-- `src/shell/chrome/panel.js:125` — the only `setInterval` in the tree
+- `src/shell/chrome/panel.js:129` — the only `setInterval` in the tree
 - `src/shared/diagnostics.js` — debug-gated rAF frame-gap probe
 - `src/kernel/contract.js:21` — `SHELL_MARKER`
 - `platform/capabilities.json` — Gecko floor and manager contract
