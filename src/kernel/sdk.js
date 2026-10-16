@@ -407,7 +407,7 @@ export function describeVideo(video) {
   return {
     video,
     shadow,
-    hasSrc: !!(video.currentSrc || (typeof video.getAttribute === "function" && video.getAttribute("src"))),
+    hasSrc: !!(video.currentSrc || video.srcObject || (typeof video.getAttribute === "function" && video.getAttribute("src"))),
     playing: !video.paused && !video.ended
   };
 }

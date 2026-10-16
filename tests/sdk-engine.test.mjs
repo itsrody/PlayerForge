@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import {
   surveyVideos,
+  describeVideo,
   templateAnchors,
   templateCustomTags,
   resolvePlayer,
@@ -209,6 +210,30 @@ test("meetsMinSize still size-gates after a visibility pass", () => {
   const small = sizedVideo(doc, { width: 40, height: 40 });
   small.checkVisibility = () => true;
   assert.equal(meetsMinSize(small), false, "visible undersized player still rejected");
+});
+
+test("size gates hold on fractional boxes from unrounded scroll", () => {
+  // Since 158 scroll positions are fractional; thresholds are inequalities,
+  // so fractions change nothing - pinned so a future rounding "cleanup"
+  // cannot sneak an epsilon in.
+  const doc = dom("");
+  assert.equal(meetsMinSize(sizedVideo(doc, { width: 199.7, height: 119.7 })), true);
+  assert.equal(meetsMinSize(sizedVideo(doc, { width: 99.7, height: 59.7 })), false);
+  assert.equal(rectMeetsMinSize(sizedVideo(doc, { width: 100.5, height: 60.5 })), true);
+});
+
+test("describeVideo counts a live srcObject as sourced", () => {
+  // Camera and WebRTC previews never set src/currentSrc; without this they
+  // survey as sourceless. The stream object itself is the source signal.
+  const doc = dom("<video></video>");
+  const video = doc.querySelector("video");
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  Object.defineProperty(video, "ended", { value: false, configurable: true });
+  assert.equal(describeVideo(video).hasSrc, false, "no src anywhere reads sourceless");
+  video.srcObject = { id: "fake-stream" };
+  const record = describeVideo(video);
+  assert.equal(record.hasSrc, true, "an attached stream counts as sourced");
+  assert.equal(record.playing, true);
 });
 
 test("rectMeetsMinSize answers the box alone, visibility aside", () => {

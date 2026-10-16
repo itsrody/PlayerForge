@@ -1963,6 +1963,13 @@ element's life (measured live: `playbackRate = 2` produced zero rate
   the same host gate, path gate and live-markup fixture. Net two tests
   heavier.
 
+  The fifty-second movement covers stream-sourced video: `describeVideo`
+  counts an attached `srcObject` as sourced, so camera and WebRTC
+  previews survey honestly instead of as sourceless. Size gates hold on
+  fractional boxes (pinned - unrounded scroll since 158 must never grow
+  an epsilon), and a fake-device integration test adopts a live camera
+  preview with no hardware and no prompt. Net three tests heavier.
+
 ## 7. Gecko-specific decisions, and what they rule out
 
 - Scheduler priorities replace timer-based deferral. `postTask` is available
