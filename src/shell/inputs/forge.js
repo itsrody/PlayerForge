@@ -489,12 +489,23 @@ export class InputForge {
     zone.addEventListener("pointercancel", (event) => this.#handlePointerCancel(event), options);
     zone.addEventListener("click", (event) => this.#handleClickCapture(event), { capture: true, signal });
     zone.addEventListener("dblclick", (event) => this.#handleDblClickCapture(event), { capture: true, signal });
-    // SDK stream dominance: the compat mouse/touch streams mirror the pointer
-    // stream, so while a press is owned they stop at this capture as well -
-    // the SDK never observes a partial sequence. touchstart/mousedown can
-    // precede (or arrive without) a tracked pointerdown, so they also probe
-    // prospective eligibility directly. Plain hover input (#pointerOwned
-    // false, no session) always passes through untouched.
+    // SDK stream dominance: every press arrives as three streams, and that
+    // is spec behavior on Gecko too, not a compat shim for other engines -
+    // the UA synthesizes compat mouse events after touch/pointer by default,
+    // and tracking Pointer Events does not suppress them. So while a press
+    // is owned, its mouse/touch mirrors stop at this capture as well, or
+    // the SDK observes a partial sequence (a mousedown without its pointer
+    // head, a tap's click without its press) and acts on half a gesture.
+    // `touch-action` cannot do this job: it governs scrolling, pinch-zoom
+    // and double-tap-zoom gestures (pan-x pan-y idle, none per session),
+    // not compat mouse synthesis - and no API declares press ownership to
+    // the UA. The swallow is therefore manual, under three conditions:
+    // #pointerOwned (a live session), #dominatesPress (touchstart/mousedown
+    // can precede or arrive without a tracked pointerdown, so they probe
+    // eligibility directly), and #awaitClick (the post-pointerup window in
+    // which the UA's mouseup still belongs to our stream - keep swallowing
+    // it briefly). Plain hover input (#pointerOwned false, no session)
+    // always passes through untouched.
     const swallowOwned = (event) => {
       if (this.#pointerOwned) {
         event.stopImmediatePropagation();
