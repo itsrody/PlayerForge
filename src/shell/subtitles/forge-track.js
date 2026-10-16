@@ -1,5 +1,6 @@
 import { DOMManager } from "../../shared/dom-manager.js";
 import { Scope } from "../../shared/scope.js";
+import { postTask } from "../../shared/scheduler.js";
 
 const STACK_OVERLAP_EM = 1.6;
 const MAX_SLOTS = 8;
@@ -190,19 +191,24 @@ export class ForgeTrack {
     const el = this.#trackEl;
     return new Promise((resolve) => {
       let done = false;
+      // The watchdog rides the scheduler, not a raw timeout: aborting the
+      // handle drops the owner listener and the native task together. The
+      // scope-abort listener below still settles the promise itself -
+      // postTask disposal is silent, and an aborted ingest must resolve
+      // (never reject, never hang) so teardown stays prompt.
+      const watchdog = postTask(() => finish(false), { delay: LOAD_TIMEOUT_MS, signal: this.#scope.signal });
       const finish = (ok) => {
         if (done) {
           return;
         }
         done = true;
-        clearTimeout(timer);
+        watchdog.abort();
         el.removeEventListener("load", onLoad);
         el.removeEventListener("error", onError);
         resolve(ok);
       };
       const onLoad = () => finish(true);
       const onError = () => finish(false);
-      const timer = setTimeout(() => finish(false), LOAD_TIMEOUT_MS);
       el.addEventListener("load", onLoad);
       el.addEventListener("error", onError);
       this.#scope.signal.addEventListener("abort", () => finish(false), { once: true });

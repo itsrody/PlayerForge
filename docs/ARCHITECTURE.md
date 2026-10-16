@@ -700,7 +700,7 @@ record rather than quietly delete:
   exercised by `render-gate.test.mjs`, but nothing in `src/` observes element
   size, because every layout question this fork asks is answered by status
   (`Playback`, `Presence`) or by CSS (`pf-detached`'s `display: none`). The one
-  mention in `src/` is a comment (`src/shell/inputs/forge.js:855`).
+  mention in `src/` is a comment (`src/shell/inputs/forge.js:866`).
 - **PiP is gone, not pending.** Picture-in-picture was removed outright
   (`a5bc9fb`, "remove picture-in-picture entirely"), so the earlier draft's "+
   PiP events" has no event to name. `Presence.PIP` survives as an enum member
@@ -1969,6 +1969,13 @@ element's life (measured live: `playbackRate = 2` produced zero rate
   fractional boxes (pinned - unrounded scroll since 158 must never grow
   an epsilon), and a fake-device integration test adopts a live camera
   preview with no hardware and no prompt. Net three tests heavier.
+
+  The fifty-third movement merges twin lifecycle structures without
+  moving their windows: the settle set and the mount weak-set become one
+  flights map keyed by video, and the subtitle watchdog's raw timeout
+  plus abort listener becomes one scheduler handle. Neither changes
+  behavior - the twin-boot tests pin the windows, and the postTask guard
+  pins the new call site the way it pins every site. Net even on tests.
 
 ## 7. Gecko-specific decisions, and what they rule out
 

@@ -199,9 +199,9 @@ test("contract event table is frozen against cross-layer mutation", async () => 
 });
 
 // ── Lifecycle single-flight mount ────────────────────────────────────
-// #pending dedups offers inside the settle window, but it is deleted before
-// the factory runs while registration only lands after ready resolves - so
-// an offer arriving mid-build used to mount a twin shell.
+// #flights dedups offers inside the settle window, but the settle flight
+// ends before the factory runs while registration only lands after ready
+// resolves - so an offer arriving mid-build used to mount a twin shell.
 
 const lifecycleSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -233,11 +233,11 @@ test("lifecycle: an offer arriving mid-build does not mount a twin", async () =>
 });
 
 test("lifecycle: two videos sharing a container both mount", async () => {
-  // #mounting dedups the build window, keyed by video: a second video whose
+  // #flights dedups the build window, keyed by video: a second video whose
   // settle overlaps an in-flight mount on the same container still builds.
-  // Keyed by container it was dropped with #pending already deleted and the
-  // claim held - stuck shell-less, since no future offer retries a claimed
-  // video that never disconnects.
+  // Keyed by container it was dropped with the settle flight already ended
+  // and the claim held - stuck shell-less, since no future offer retries a
+  // claimed video that never disconnects.
   const { LifecycleManager } = await import("../src/kernel/kernel.js");
   const registry = new ShellRegistry();
   let factoryCalls = 0;

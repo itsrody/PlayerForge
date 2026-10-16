@@ -996,18 +996,18 @@ export class LifecycleManager {
    *  tap has already downgraded by then. */
   #onSettleSkipped;
   #shellFactory = null;
-  /** Videos with a settle wait in flight - dedups repeated discovery. */
-  #pending = new Set();
-  /** Videos with a shell build past settle but before registration. #pending
-   *  covers the settle window, but it is deleted before the factory runs
-   *  while registration only lands after ready resolves - so a second offer
-   *  arriving mid-build would mount a twin. Keyed by video, not container:
-   *  the twin risk is a second offer for the SAME video, and keying by
-   *  container drops a different video's build with no re-drive (its session
-   *  stays claimed, so no future offer retries a video that never
-   *  disconnects). Concurrent same-container boots only repeat idempotent
-   *  ops: the marker, the relative prep, the host append. */
-  #mounting = new WeakSet();
+  /** In-flight adoptions by video ("settle" past discovery, "mount" past
+   *  settle): the settle window ends before the factory runs while
+   *  registration only lands after ready resolves, so one flag cannot
+   *  cover both - a second offer arriving mid-build would mount a twin.
+   *  Keyed by video, not container: the twin risk is a second offer for
+   *  the SAME video, and keying by container drops a different video's
+   *  build with no re-drive (its session stays claimed, so no future
+   *  offer retries a video that never disconnects). Deleted as each
+   *  window ends, so entries never outlive their flight. Concurrent
+   *  same-container boots only repeat idempotent ops: the marker, the
+   *  relative prep, the host append. */
+  #flights = new Map();
   /** Abort scope for in-flight settle waits; disposed by destroy() (pagehide). */
   #scope = new Scope();
 
@@ -1046,12 +1046,12 @@ export class LifecycleManager {
       logger.error("lifecycle", "No shell factory set!");
       return;
     }
-    if (this.#pending.has(video)) {
+    if (this.#flights.has(video)) {
       return;
     }
-    this.#pending.add(video);
+    this.#flights.set(video, "settle");
     await whenDomSettled(container, { signal: this.#scope.signal });
-    this.#pending.delete(video);
+    this.#flights.delete(video);
     // container.contains(): the video can also be moved OUT of its container
     // mid-settle (a re-parent lands inside the quiet window) while both nodes
     // stay connected - booting there would strand the host in the abandoned
@@ -1069,10 +1069,10 @@ export class LifecycleManager {
     if (this.#registry.getByVideo(video)) {
       return;
     }
-    if (this.#mounting.has(video)) {
+    if (this.#flights.has(video)) {
       return;
     }
-    this.#mounting.add(video);
+    this.#flights.set(video, "mount");
     try {
       const shell = this.#shellFactory({ video, container, sdk });
       await shell?.ready;
@@ -1091,7 +1091,7 @@ export class LifecycleManager {
       // so the kernel spends it from the transient budget instead.
       this.#onShellFailed?.(video, err?.transient === true);
     } finally {
-      this.#mounting.delete(video);
+      this.#flights.delete(video);
     }
   }
 

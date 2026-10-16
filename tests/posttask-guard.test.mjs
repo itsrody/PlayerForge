@@ -128,7 +128,8 @@ test("the shipping tree keeps exactly the known postTask call sites", () => {
     "src/shared/context.js",
     "src/shared/dom-manager.js",
     "src/shared/render.js",
-    "src/shared/scheduler.js"
+    "src/shared/scheduler.js",
+    "src/shell/subtitles/forge-track.js"
   ], "a new postTask site needs a line here saying whether it self-arms and whether it is delayed");
 });
 
