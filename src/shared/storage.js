@@ -473,6 +473,14 @@ export class ConfigStore {
    * the notification.
    */
   onChange(listener, { signal } = {}) {
+    // Same already-aborted trap the sibling subscribers refuse (dom-manager,
+    // shadow, status-manager, gmRequestText): an abort listener added to a
+    // dead signal never fires, so the callback would stay in #listeners and
+    // the manager change listener would start for an owner already gone.
+    // Refuse the subscription outright.
+    if (signal?.aborted) {
+      return () => {};
+    }
     this.#listeners.add(listener);
     this.#watch();
     const off = () => {

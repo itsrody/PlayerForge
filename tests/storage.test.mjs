@@ -252,6 +252,34 @@ test("onChange detaches with an AbortSignal", () => {
   assert.equal(calls, 1, "the signal-detached listener stopped receiving");
 });
 
+test("onChange refuses an already-aborted signal", async () => {
+  // An abort listener on a dead signal never fires, so without an up-front
+  // check the callback stays in #listeners and #watch() starts the manager
+  // listener for an owner that is already gone. Every sibling subscriber
+  // refuses this shape; this pins that onChange does too.
+  const { ConfigStore } = await import("../src/shared/storage.js");
+  const added = [];
+  const realAdd = globalThis.GM_addValueChangeListener;
+  globalThis.GM_addValueChangeListener = (key, cb) => {
+    added.push({ key, cb });
+    return added.length;
+  };
+  try {
+    const store = new ConfigStore();
+    store.adopt({ version: 1 });
+    const ac = new AbortController();
+    ac.abort();
+    let calls = 0;
+    const off = store.onChange(() => { calls += 1; }, { signal: ac.signal });
+    assert.deepEqual(added, [], "no manager listener is started for a dead owner");
+    store.adopt({ a: 1 });
+    assert.equal(calls, 0, "the dead-owner callback never receives");
+    off();
+  } finally {
+    globalThis.GM_addValueChangeListener = realAdd;
+  }
+});
+
 test("the configs GM listener is removed when the last subscriber goes away", async () => {
   const { ConfigStore } = await import("../src/shared/storage.js");
   const added = [];
