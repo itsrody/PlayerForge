@@ -700,7 +700,7 @@ record rather than quietly delete:
   exercised by `render-gate.test.mjs`, but nothing in `src/` observes element
   size, because every layout question this fork asks is answered by status
   (`Playback`, `Presence`) or by CSS (`pf-detached`'s `display: none`). The one
-  mention in `src/` is a comment (`src/shell/inputs/forge.js:866`).
+  mention in `src/` is a comment (`src/shell/inputs/forge.js:876`).
 - **PiP is gone, not pending.** Picture-in-picture was removed outright
   (`a5bc9fb`, "remove picture-in-picture entirely"), so the earlier draft's "+
   PiP events" has no event to name. `Presence.PIP` survives as an enum member
@@ -1984,6 +1984,13 @@ element's life (measured live: `playbackRate = 2` produced zero rate
   scope death. The dom-manager pair covers all consumers at once; a
   leak-count test pins the rule with a recording signal. Net one test
   heavier.
+
+  The fifty-fifth movement hardens the gesture engine's release funnel:
+  `#endPointerSession()` now clears the latched primary pointer and its
+  origin along with the gesture flags, so a second finger joining a live
+  pinch cannot leave stale coordinates behind for a later press to
+  compute distance against. A two-finger robustness suite pins the
+  pointer path that had zero coverage. Net five tests heavier.
 
 ## 7. Gecko-specific decisions, and what they rule out
 

@@ -715,6 +715,16 @@ export class InputForge {
     }
     this.#gestureFsActive = false;
     this.#suppressNextActivations();
+    // Clear the latched primary pointer and its origin: once the session
+    // ends the origin is dead, and leaving it set means a later press that
+    // re-enters through #beginPinchTracking (or a stale #handlePointerUp)
+    // computes distance against a coordinate from a dead finger. The map
+    // is cleared by the caller (pinch) or on the next down (single).
+    this.#primaryPointerId = null;
+    this.#gestureZone = null;
+    this.#startX = 0;
+    this.#startY = 0;
+    this.#startTime = 0;
   }
 
   #clearHoldTimer() {
