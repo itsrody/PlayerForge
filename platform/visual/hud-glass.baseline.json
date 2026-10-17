@@ -2,54 +2,65 @@
   "note": "Recorded by platform/visual/hud-glass.mjs --record. Legibility/radius are the values to watch when retuning the glass tokens.",
   "tokens": {
     "backdropFilter": "blur(30px) saturate(1.8) brightness(1)",
-    "backgroundColor": "color(srgb 0 0 0 / 0.58)",
+    "backgroundColor": "color(srgb 0 0 0 / 0.76)",
     "blurLg": "blur(30px)saturate(1.8)brightness(1)",
     "borderRadius": "18px",
-    "boxShadow": "rgba(255, 255, 255, 0.3) 0px 1px 0px 0px inset, rgba(255, 255, 255, 0.06) 0px 0px 0px 1px inset, rgba(0, 0, 0, 0.45) 0px 10px 30px 0px",
+    "boxShadow": "rgba(255, 255, 255, 0.34) 0px 1px 0px 0px inset, rgba(255, 255, 255, 0.07) 0px 0px 0px 1px inset, rgba(0, 0, 0, 0.52) 0px 18px 48px 0px",
     "glassTint": "color-mix(in srgb,#000/**/58%,transparent)",
-    "radiusLg": "18px"
+    "panelRect": {
+      "h": 232,
+      "w": 382,
+      "x": 289,
+      "y": 156
+    },
+    "radiusLg": "18px",
+    "viewport": {
+      "dpr": 1,
+      "h": 442,
+      "w": 748
+    }
   },
   "panelOpen": {
     "found": true,
     "box": {
       "w": 382,
-      "h": 239
+      "h": 250
     },
     "interiorLuma": [
-      82,
-      85,
-      81,
-      75,
-      62
+      58,
+      53,
+      47,
+      42,
+      34
     ],
     "legibilityDelta": [
-      51,
-      46,
-      48,
-      53,
-      65
+      73,
+      75,
+      80,
+      84,
+      89
     ],
-    "minLegibilityDelta": 46,
+    "minLegibilityDelta": 73,
     "rimLuma": [
-      90,
-      66,
-      42,
-      42,
-      42,
-      43
+      73,
+      135,
+      57,
+      55,
+      53,
+      51
     ],
-    "rimPeak": 66,
-    "rimInterior": 43,
-    "rimLift": 0.5348837209302325,
+    "rimPeak": 135,
+    "rimInterior": 53,
+    "rimLift": 1.5471698113207548,
     "cornerRun": [
-      3,
-      8,
-      11,
-      14,
+      6,
+      9,
+      12,
       15,
+      16,
       17,
       18,
-      18,
+      19,
       19,
       19
     ],

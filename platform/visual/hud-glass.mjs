@@ -290,7 +290,10 @@ function readTokens(driver) {
   return driver.eval(() => {
     const panel = document.querySelector(".pf-shell").shadowRoot.querySelector(".pf-panel");
     const cs = getComputedStyle(panel);
+    const r = panel.getBoundingClientRect();
     return {
+      panelRect: { x: r.x, y: r.y, w: r.width, h: r.height },
+      viewport: { w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio },
       backdropFilter: cs.backdropFilter,
       backgroundColor: cs.backgroundColor,
       borderRadius: cs.borderRadius,
@@ -384,6 +387,7 @@ async function main() {
 
   const m = res.panelOpen;
   console.log(`\n  panel           : ${m.box.w}x${m.box.h}px`);
+  console.log(`  DIAG dom rect   : ${JSON.stringify(res.tokens.panelRect)} vp=${JSON.stringify(res.tokens.viewport)}`);
   console.log(`  interior luma   : ${m.interiorLuma.join(", ")}  (backdrop beside it is ~125)`);
   console.log(`  legibility delta: ${m.legibilityDelta.join(", ")}  (positive = sheet is darker)`);
   console.log(`  rim luma        : ${m.rimLuma.join(", ")}  (edge ${(m.rimLift * 100).toFixed(0)}% brighter than surface below)`);
