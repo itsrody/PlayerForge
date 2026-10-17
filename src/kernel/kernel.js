@@ -1,6 +1,5 @@
-import { logger } from "../shared/diagnostics.js";
+import { logger, setDebugRuntime } from "../shared/diagnostics.js";
 import { getConfigValue } from "../shared/storage.js";
-import { setDebugRuntime } from "../shared/diagnostics.js";
 import { postTask } from "../shared/scheduler.js";
 import { Scope } from "../shared/scope.js";
 import { DOMManager, trackScopedObserver } from "../shared/dom-manager.js";
@@ -468,7 +467,8 @@ export class Kernel {
     }
   }
 
-  #createShell({ video, container, sdk }) {    const provider = this.#shellProvider;
+  #createShell({ video, container, sdk }) {
+    const provider = this.#shellProvider;
     if (!provider) {
       logger.error("kernel", "No shell provider registered");
       return null;
@@ -1052,6 +1052,14 @@ export class LifecycleManager {
     this.#flights.set(video, "settle");
     await whenDomSettled(container, { signal: this.#scope.signal });
     this.#flights.delete(video);
+    // Disposed while we waited: pagehide aborts the settle, but keeps the DOM
+    // connected, so the connectivity guards below cannot catch a teardown. The
+    // abort only ends the wait - without this the continuation would still run
+    // the factory and register a shell into a registry destroy() already
+    // emptied (the shell's own scope is independent, so nothing would reap it).
+    if (this.#scope.disposed) {
+      return;
+    }
     // container.contains(): the video can also be moved OUT of its container
     // mid-settle (a re-parent lands inside the quiet window) while both nodes
     // stay connected - booting there would strand the host in the abandoned
@@ -1106,8 +1114,9 @@ export class LifecycleManager {
   /**
    * Tear down every in-flight settle wait: the observer + its two timers die
    * immediately instead of running their full quiet/cap window after pagehide.
-   * Continuations resume and hit the still-connected guards, so nothing is
-   * half-created on a dying page.
+   * Continuations resume and see the disposed scope, so nothing is mounted on
+   * a dying page - the connectivity guards alone cannot catch it, since
+   * pagehide keeps the DOM connected.
    */
   destroy() {
     this.#scope.dispose();

@@ -270,6 +270,32 @@ test("lifecycle: two videos sharing a container both mount", async () => {
   assert.equal(registry.getByVideo(videoB)?.sdk.label, "test", "second video registered");
 });
 
+test("lifecycle: destroy mid-settle mounts no shell", async () => {
+  // A non-persisted pagehide keeps the DOM connected, so the connectivity
+  // guards below the settle await do not catch a teardown. Without the
+  // disposed check the continuation built the shell and registered it into a
+  // registry destroy() had already emptied - and nothing reaped it, because a
+  // shell's scope is independent of the kernel's.
+  const { LifecycleManager } = await import("../src/kernel/kernel.js");
+  const registry = new ShellRegistry();
+  let factoryCalls = 0;
+  const video = { isConnected: true };
+  const container = { isConnected: true, contains: () => true };
+  const sdk = { label: "test" };
+  const lifecycle = new LifecycleManager(registry, () => {}, () => {}, null);
+  lifecycle.setShellFactory(() => {
+    factoryCalls++;
+    return { video, sdk, ready: Promise.resolve() };
+  });
+
+  const pending = lifecycle.onVideoFound({ video, container, sdk });
+  lifecycle.destroy();
+  await pending;
+  await lifecycleSleep(250); // past the settle window the abort should have ended
+  assert.equal(factoryCalls, 0, "no shell mounts after teardown");
+  assert.equal(registry.getAll().length, 0, "no shell registered after teardown");
+});
+
 test("kernel: destroy() tears down document ownership idempotently", () => {
   const kernel = new Kernel();
   kernel.init();
