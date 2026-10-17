@@ -67,26 +67,26 @@ Direct quotes, with the reasoning that matters for a hand-built HUD:
 
 ## 3. Current state against each principle
 
-Measured from `src/shell/chrome/styles.css` at `276526b`. This is the honest
-starting point, including where the HUD already complies.
+The "Starting point" column is the audit measured from
+`src/shell/chrome/styles.css` at `276526b`. The "Now" column records where the
+redesign landed; it is the column that stays current.
 
-| # | Principle | Today | Verdict |
+| # | Principle | Starting point (`276526b`) | Now |
 |---|---|---|---|
-| 1 | Reduce custom backgrounds in controls | In-panel controls are already flat tinted surfaces; only the toast and panel carry `backdrop-filter` (2 sites total). | **Mostly holds.** |
-| 2 | Avoid overusing the material | Two floating surfaces, both load-bearing (navigation + transient messaging). | **Holds.** |
-| 3 | Legibility under scrolling content | `.pf-panel` is `overflow-y: auto` (styles.css:470) with **no scroll-edge treatment** — cue text scrolls directly under the panel header. | **Gap.** |
-| 4 | Concentric radii | `--pf-radius-lg: 12px` on the sheet; `--pf-radius-xs: 7px` is *larger* than `--pf-radius-sm: 6px`; the tab strip and section heads carry their own radii with no concentric relationship to the panel. | **Gap.** |
-| 5 | Distinct navigation layer | Panel and toasts are separate from SDK chrome. | **Holds.** |
-| 6 | Increased-contrast option | No `prefers-contrast` support, and no contrast token — `--pf-blur-sm/-lg` are bare `blur() saturate()`, with no `brightness()` term to modulate. | **Gap.** |
-| 7 | Accessibility settings | `data-pf-cpu-tier="low"`, `prefers-reduced-transparency`, `prefers-reduced-motion` all present. | **Holds.** |
-| 8 | Title-style section headers | `text-transform: uppercase` at styles.css:641 **and** :745. | **Gap — Apple calls this out by name.** |
-| 9 | Increased sheet radius + edge clearance | 12px on the largest surface in the HUD. | **Gap.** |
-| 10 | Combine effects for performance | 2 composited layers total. | **Holds.** |
+| 1 | Reduce custom backgrounds in controls | In-panel controls were already flat tinted; only toast + panel carried `backdrop-filter` (2 sites). | **Holds** — still 2. |
+| 2 | Avoid overusing the material | Two floating surfaces, both load-bearing. | **Holds.** |
+| 3 | Legibility under scrolling content | `.pf-panel` scrolled with **no scroll-edge treatment**. | **Fixed (R4)** — header pinned; a 16px gradient hangs off its bottom edge. |
+| 4 | Concentric radii | `--pf-radius-xs: 7px` was *larger* than `--pf-radius-sm: 6px`; nested radii were chosen, not derived. | **Fixed (R5)** — panel 18 → strip/close 10 → tab 7, each derived. |
+| 5 | Distinct navigation layer | Panel and toasts separate from SDK chrome. | **Holds** — and now the header is a pinned layer. |
+| 6 | Increased-contrast option | No `prefers-contrast`; `--pf-blur-*` were bare `blur() saturate()`. | **Fixed (R2)** — `brightness(var(--pf-glass-contrast))` + a `prefers-contrast: more` path. |
+| 7 | Accessibility settings | `data-pf-cpu-tier="low"`, `prefers-reduced-transparency`, `prefers-reduced-motion` all present. | **Holds** — all three, plus contrast (R8). |
+| 8 | Title-style section headers | `text-transform: uppercase` at :641 and :745. | **Fixed (R7)** — removed; markup was already title case. |
+| 9 | Increased sheet radius + edge clearance | 12px on the largest surface. | **Fixed (R6)** — 18px. |
+| 10 | Combine effects for performance | 2 composited layers total. | **Holds** — still 2; the scroll edge is paint, not a third blur. |
 
-The pattern: the HUD is **structurally restrained** (principles 1, 2, 5, 10 were
-respected long before this document existed) and **deficient in the material
-details** (3, 4, 6, 8, 9). A redesign should spend its effort on the right
-column, not re-litigate the left one.
+The pattern the audit drew still frames the change: the HUD was **structurally
+restrained** (1, 2, 5, 10) and **deficient in material details** (3, 4, 6, 8,
+9), so the redesign spent its effort on the second list.
 
 ---
 
@@ -159,22 +159,31 @@ contrast between HUD foreground and the composited backdrop, and assert it.
 - **Contrast must be measured** against a hostile, *fixed* backdrop (R9). A
   moving video frame makes any such measurement irreproducible.
 
-### Known gap in the tooling on this branch
+### Tooling note
 
 The measurement harness R9 depends on — `platform/visual/hud-glass.mjs`, its
-baseline, and the rim/legibility invariants — **does not exist on this branch.**
-It landed after the pre-ScriptCat rewind point and is preserved on the `v1.0.0`
-tag.
+baseline, and the rim/legibility invariants — was authored after the
+pre-ScriptCat rewind point and preserved on the `v1.0.0` tag. It is now on this
+branch (cherry-picked forward in `e8a98a5`), which deliberately kept the
+`v1.0.0` baseline as a *target* for the redesign to converge on rather than a
+snapshot of the current HUD.
 
-That matters for sequencing: R9 cannot be satisfied on this branch as it stands.
-Either cherry-pick the harness forward from `v1.0.0` before starting the
-redesign, or accept that R9 is enforced by inspection until then. Do not record a
-new baseline while the harness is absent — there would be nothing to compare it
-against.
+The redesign converged on it. `backdropFilter`, `borderRadius`, `glassTint` and
+`radiusLg` now match the target exactly, and the pixel metrics exceed it:
+`minLegibilityDelta` 73 against a target of 46, `rimLift` 1.55 against 0.53.
+The one token that differs is `backgroundColor` — `0.76` (focus) against the
+target's `0.58` (resting) — which is the deliberate R3 two-state tint the target
+predates. The baseline has since been re-recorded so it tracks the *shipped*
+design for regression detection; the v1.0.0 target is preserved on its tag.
 
----
+### Change log
 
-## Change log
-
+- **Redesign landed.** R2 (contrast-modulated blur + `prefers-contrast`), R3
+  (resting 58% / focus 76% tints), R4 (pinned header + scroll-edge gradient),
+  R5/R6 (derived concentric radii, panel 18px), R7 (title-case headers), R8
+  (focus tint + scroll edge reach every collapse path) are in
+  `src/shell/chrome/styles.css`. Two defects in the first cut were corrected:
+  the R3 selector could not cross the shadow boundary, and the
+  `prefers-contrast` tints were overriding the reduced-transparency collapse.
 - **Initial document.** Principles and applicability filter taken from Apple's
   adoption guide; current-state audit measured from `styles.css` at `276526b`.
