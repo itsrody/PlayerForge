@@ -1,7 +1,7 @@
 /**
  * Shell lifecycle integration tests.
  *
- * Verifies the full userscript lifecycle in a real Chromium 154 instance:
+ * Verifies the full userscript lifecycle in a real Chromium 155 instance:
  * video detection → shell construction → HUD layer → settings panel.
  */
 import test from "node:test";

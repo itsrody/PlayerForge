@@ -2,7 +2,7 @@ import { getSetting, onSettingsChanged } from "../chrome/config.js";
 import { TUNING } from "../../shared/tuning.js";
 import { formatTime } from "../../shared/time.js";
 import { fs, subscribeFullscreen } from "../../shared/shadow.js";
-import { GESTURE_EVENTS } from "../../kernel/contract.js";
+import { GESTURE_EVENTS, GESTURES, GESTURE_IDS } from "../../kernel/contract.js";
 import { gestureHaptic } from "../chrome/haptics.js";
 import { EASE_SNAPPY_CURVE, EASE_SNAPPY_MS, REDUCED_MOTION } from "../../shared/timing.js";
 
@@ -30,11 +30,11 @@ export { GESTURE_EVENTS };
 
 export const INPUT_BINDINGS = [
   // - Pointer intents -
-  { id: "hold-speed", gesture: "hold", setting: "gestures.hold", fs: false },
-  { id: "drag-scrub", gesture: "scrub", setting: "gestures.scrub", fs: true },
-  { id: "drag-swipe", gesture: "swipe", setting: "gestures.swipe", fs: true },
-  { id: "double-tap", gesture: "dbltap", setting: "gestures.dbltap", fs: true },
-  { id: "pinch-fill", gesture: "pinch", setting: "gestures.pinch", fs: true },
+  { id: "hold-speed", gesture: "hold", setting: GESTURES.hold.setting, fs: false },
+  { id: "drag-scrub", gesture: "scrub", setting: GESTURES.scrub.setting, fs: true },
+  { id: "drag-swipe", gesture: "swipe", setting: GESTURES.swipe.setting, fs: true },
+  { id: "double-tap", gesture: "dbltap", setting: GESTURES.dbltap.setting, fs: true },
+  { id: "pinch-fill", gesture: "pinch", setting: GESTURES.pinch.setting, fs: true },
 
   // - Keyboard -
   {
@@ -107,7 +107,7 @@ let intentsArmedFs = false;
  * input the shell deliberately passes through (single click/tap, hover,
  * presses outside the gesture zone).
  */
-export const POINTER_GESTURE_INTENTS = ["scrub", "swipe", "hold", "dbltap", "pinch"];
+export const POINTER_GESTURE_INTENTS = GESTURE_IDS;
 /** Precomputed OR of POINTER_GESTURE_INTENTS over intentsArmed: pointerdown
  *  ownership checked it via a 5-iteration `.some(allowsIntent)` scan per
  *  press (and again from #dominatesPress); one boolean read replaces both. */

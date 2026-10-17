@@ -1,7 +1,7 @@
 /**
  * Render cue browser benchmark.
  *
- * Measures subtitle cue DOM operation cost in Chromium 154.
+ * Measures subtitle cue DOM operation cost in Chromium 155.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

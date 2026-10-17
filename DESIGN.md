@@ -178,6 +178,17 @@ design for regression detection; the v1.0.0 target is preserved on its tag.
 
 ### Change log
 
+- **Key unification pass.** The gesture vocabulary is now a single registry
+  (`GESTURES`/`GESTURE_IDS` in `src/kernel/contract.js`) that the input
+  bindings, the settings schema, the pointer-intent list and `GESTURE_EVENTS`
+  all derive from; the settings-schema gesture toggles are generated from it.
+  The GM storage namespace dropped from three roots to two — `firstRun` moved
+  under the configs doc's `meta` subtree (with one-shot migration from both the
+  `pf:first-run` and bare `firstRun` legacy fields). The filter's five parallel
+  key/range/label/format maps collapsed into one `FILTER_SCHEMA`, and the CSS
+  cue-position and glass-contrast tokens are typed `@property` registrations
+  (their initial-values now replace the redundant `.pf-cue-layer` defaults).
+  Documented platform floor raised from Chromium 154 to 155.
 - **Redesign landed.** R2 (contrast-modulated blur + `prefers-contrast`), R3
   (resting 58% / focus 76% tints), R4 (pinned header + scroll-edge gradient),
   R5/R6 (derived concentric radii, panel 18px), R7 (title-case headers), R8

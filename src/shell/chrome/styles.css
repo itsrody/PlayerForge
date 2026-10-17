@@ -1,5 +1,5 @@
 /* ------------------------------------------------------------------
-   PlayerForge HUD styles - Chromium 154+ native: CSS nesting, @container,
+   PlayerForge HUD styles - Chromium 155+ native: CSS nesting, @container,
    @starting-style, @property, :has, color-mix. Design tokens live on the shell
    root; every surface derives from them, so theming/contrast tuning is
    one edit. Components are grouped per tree with native nesting (&).
@@ -17,7 +17,7 @@
      In the document realm the scope root never exists, so a page that
      happens to use `.pf-panel`, `pf-toast`, `.pf-btn`, etc. can never be
      styled by PlayerForge, and PF rules can never escape the HUD subtree
-     into second SDK content. @scope is Chromium 118+; on the 154 baseline
+     into second SDK content. @scope is Chromium 118+; on the 155 baseline
      that needs no @supports fallback.
    ------------------------------------------------------------------ */
 .pf-shell {
@@ -148,7 +148,7 @@
   }
 }
 
-/* -- Low CPU-tier fidelity gate (CPU Performance API, Chromium 154+) --
+/* -- Low CPU-tier fidelity gate (CPU Performance API, Chromium 155+) --
    Set on the host element by injectShell. On a "low" device the most
    expensive visual effects - backdrop blur/saturate and promiscuous
    compositor hints - cost more than they delight, so they are turned down
@@ -222,7 +222,9 @@
    reason about them as layout/percentage values instead of opaque strings.
    The cue pool sets these per cuechange (our hottest DOM churn); typed
    registration lets the style engine invalidate only the affected
-   descendants and opens the door to compositor-friendly transitions. */
+   descendants and opens the door to compositor-friendly transitions. Their
+   initial-values ARE the cue defaults, so `.pf-cue` never needs a fallback
+   and the layer no longer re-declares them. */
 @property --pf-cue-top {
   syntax: "<length-percentage>";
   inherits: false;
@@ -237,6 +239,15 @@
   syntax: "<length-percentage>";
   inherits: false;
   initial-value: -50%;
+}
+/* Glass contrast is the one glass knob that is a bare number (it feeds
+   brightness() inside both blur tokens). Typed <number> registration keeps it
+   animatable and clamps it to a real number, so a foreign/inline write can
+   never turn the blur filter invalid. */
+@property --pf-glass-contrast {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
 }
 
 /* - Component surface (parasite chrome) ------------------------------------
@@ -319,9 +330,9 @@
       --pf-cue-font-weight: 500;
       --pf-cue-line-height: 1.4;
       --pf-cue-text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.9);
-      --pf-cue-top: 85%;
-      --pf-cue-left: 50%;
-      --pf-cue-x: -50%;
+      /* --pf-cue-top/left/x are not declared here: they are @property-registered
+         above with these exact values as initial-values, and are set per slot
+         by forge-track.js. */
 
       position: absolute;
       /* Excludes notches and gesture bars: percentage-positioned cues
@@ -1237,7 +1248,7 @@
       max-height: 168px;
       /* One-axis scroll container: horizontal overflow is clipped, never
          turned into a second scroller. The two-value scroll+clip form shipped
-         in Chromium 154 (probe-verified: `overflow: clip auto` maps x=clip,
+         in Chromium 155 (probe-verified: `overflow: clip auto` maps x=clip,
          y=auto), so one shorthand covers both axes. */
       overflow: clip auto;
       scrollbar-width: thin;

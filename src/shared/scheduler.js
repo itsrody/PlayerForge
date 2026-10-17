@@ -42,7 +42,7 @@ export function postTask(fn, { priority = "user-visible", delay: ms = 0, signal 
     return { abort() {} };
   }
   if (!HAS_POST_TASK) {
-    // setTimeout fallback - dead code on the Chromium 154 floor, kept for the
+    // setTimeout fallback - dead code on the Chromium 155 floor, kept for the
     // jsdom test harness. It honors the owner signal too, so the abort
     // contract is identical on both backends. Natural completion must also
     // drop the owner-signal listener: an owner signal outlives its tasks, so

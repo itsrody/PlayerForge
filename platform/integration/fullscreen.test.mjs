@@ -1,7 +1,7 @@
 /**
  * Fullscreen integration tests.
  *
- * Tests the real Fullscreen API behavior in Chromium 154.
+ * Tests the real Fullscreen API behavior in Chromium 155.
  */
 import test from "node:test";
 import assert from "node:assert/strict";

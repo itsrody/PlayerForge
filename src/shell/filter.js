@@ -8,9 +8,26 @@ import { Scope } from "../shared/scope.js";
 
 const CONFIG_PREFIX = "filter";
 
-const FILTER_KEYS = ["brightness", "contrast", "saturate", "hue", "grayscale", "sepia", "invert"];
-const EXTRA_KEYS = ["temperature", "tint"];
-const ALL_KEYS = [...FILTER_KEYS, ...EXTRA_KEYS];
+const signed = (v) => `${v > 0 ? "+" : ""}${v}`;
+
+/**
+ * The color-control schema - one entry per filter key and the single source for
+ * its label, stepper range, value formatter and default. The panel steppers,
+ * the defaults map, and the config load/save loops all derive from this instead
+ * of re-listing the keys across parallel key/range/label/format maps.
+ */
+const FILTER_SCHEMA = {
+  brightness: { label: "Brightness", min: 0, max: 200, step: 5, fmt: fmtPercent, default: 100 },
+  contrast: { label: "Contrast", min: 0, max: 200, step: 5, fmt: fmtPercent, default: 100 },
+  saturate: { label: "Saturate", min: 0, max: 200, step: 5, fmt: fmtPercent, default: 100 },
+  hue: { label: "Hue", min: 0, max: 360, step: 5, fmt: (v) => `${v}°`, default: 0 },
+  grayscale: { label: "Grayscale", min: 0, max: 100, step: 5, fmt: fmtPercent, default: 0 },
+  sepia: { label: "Sepia", min: 0, max: 100, step: 5, fmt: fmtPercent, default: 0 },
+  invert: { label: "Invert", min: 0, max: 100, step: 5, fmt: fmtPercent, default: 0 },
+  temperature: { label: "Temp", min: -100, max: 100, step: 5, fmt: signed, default: 0 },
+  tint: { label: "Tint", min: -100, max: 100, step: 5, fmt: signed, default: 0 }
+};
+const ALL_KEYS = Object.keys(FILTER_SCHEMA);
 
 const PRESETS = {
   Default: { brightness: 100, contrast: 100, saturate: 100, hue: 0, grayscale: 0, sepia: 0, invert: 0, temperature: 0, tint: 0 },
@@ -22,46 +39,9 @@ const PRESETS = {
   Vintage: { brightness: 102, contrast: 95, saturate: 80, hue: 0, grayscale: 15, sepia: 25, invert: 0, temperature: 12, tint: 5 }
 };
 
-const DEFAULTS = PRESETS.Default;
+const DEFAULTS = Object.fromEntries(ALL_KEYS.map((key) => [key, FILTER_SCHEMA[key].default]));
 const PRESET_ENTRIES = Object.entries(PRESETS);
 const PRESET_OPTIONS = Object.keys(PRESETS).concat(["Custom"]);
-
-// Static UI maps hoisted out of #buildSection: they are pure constants, so
-// building three object literals + nine format closures per VideoFilter
-// construction (once per shell, i.e. per video) was pure per-shell garbage.
-const RANGE_MAP = {
-  brightness: [0, 200, 5],
-  contrast: [0, 200, 5],
-  saturate: [0, 200, 5],
-  hue: [0, 360, 5],
-  grayscale: [0, 100, 5],
-  sepia: [0, 100, 5],
-  invert: [0, 100, 5],
-  temperature: [-100, 100, 5],
-  tint: [-100, 100, 5]
-};
-const LABEL_MAP = {
-  brightness: "Brightness",
-  contrast: "Contrast",
-  saturate: "Saturate",
-  hue: "Hue",
-  grayscale: "Grayscale",
-  sepia: "Sepia",
-  invert: "Invert",
-  temperature: "Temp",
-  tint: "Tint"
-};
-const FORMAT_MAP = {
-  brightness: fmtPercent,
-  contrast: fmtPercent,
-  saturate: fmtPercent,
-  hue: (v) => `${v}°`,
-  grayscale: fmtPercent,
-  sepia: fmtPercent,
-  invert: fmtPercent,
-  temperature: (v) => `${v > 0 ? "+" : ""}${v}`,
-  tint: (v) => `${v > 0 ? "+" : ""}${v}`
-};
 
 // Monomorphic literal comparison. A keyed inner loop (values[key]/preset[key]
 // over ALL_KEYS) makes both load sites megamorphic - measured 93 ns/op vs
@@ -178,16 +158,16 @@ export class VideoFilter {
     const grid = panel.el("div", { class: "pf-panel-grid pf-panel-grid-compact" }, sectionRoot);
 
     for (const key of ALL_KEYS) {
-      const [min, max, step] = RANGE_MAP[key];
+      const { label, min, max, step, fmt } = FILTER_SCHEMA[key];
       const stepper = panel.addControl(grid, {
         type: "stepper",
-        label: LABEL_MAP[key],
+        label,
         min,
         max,
         step,
         value: DEFAULTS[key],
         head: true,
-        format: FORMAT_MAP[key],
+        format: fmt,
         deferTextInput: true,
         onChange: (v) => this.#onStepperChange(key, v)
       });

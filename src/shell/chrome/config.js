@@ -3,6 +3,7 @@
  * panel renderer for that schema.
  */
 import { KEYS, getConfigValue, setConfigValue, invalidateConfigCache, gmAddValueChangeListener } from "../../shared/storage.js";
+import { GESTURES, GESTURE_IDS } from "../../kernel/contract.js";
 import { logger } from "../../shared/logger.js";
 import { fmtSeconds } from "../../shared/formatters.js";
 
@@ -11,6 +12,19 @@ const SETTINGS_PREFIX = "settings";
 /** Unique-id seed for option-group labels (one settings section per shell). */
 let optionsGroupCounter = 0;
 const ARROW_DIRECTIONS = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+
+/**
+ * One bool toggle per gesture family, derived from the registry: the key is the
+ * family's configs gate and the label is its panel text, so a new gesture is a
+ * single contract entry - never a second edit here.
+ */
+const GESTURE_TOGGLES = GESTURE_IDS.map((id) => ({
+  key: GESTURES[id].setting,
+  type: "bool",
+  label: GESTURES[id].label,
+  default: true,
+  group: "Features"
+}));
 
 const SETTINGS_SCHEMA = [
   {
@@ -29,41 +43,7 @@ const SETTINGS_SCHEMA = [
     default: true,
     group: "Features"
   },
-  {
-    key: "gestures.hold",
-    type: "bool",
-    label: "Speed Up Hold",
-    default: true,
-    group: "Features"
-  },
-  {
-    key: "gestures.scrub",
-    type: "bool",
-    label: "Scrub Seeking",
-    default: true,
-    group: "Features"
-  },
-  {
-    key: "gestures.swipe",
-    type: "bool",
-    label: "Swiping",
-    default: true,
-    group: "Features"
-  },
-  {
-    key: "gestures.dbltap",
-    type: "bool",
-    label: "Double-tap Skip",
-    default: true,
-    group: "Features"
-  },
-  {
-    key: "gestures.pinch",
-    type: "bool",
-    label: "Pinch to Fill",
-    default: true,
-    group: "Features"
-  },
+  ...GESTURE_TOGGLES,
   {
     key: "gestures.haptics",
     type: "bool",

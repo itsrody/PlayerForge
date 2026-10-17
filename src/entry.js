@@ -6,7 +6,7 @@ import { installVideoProbe } from "./kernel/probe.js";
 import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/sdk.js";
 import { logger } from "./shared/logger.js";
 import { shouldSkipUrl } from "./kernel/guard.js";
-import { KEYS, getConfigValue, setConfigValue, deleteConfigField } from "./shared/storage.js";
+import { getConfigValue, setConfigValue, deleteConfigField } from "./shared/storage.js";
 import { initFullscreenGate } from "./shared/shadow.js";
 
 // The version lives in the banner and is read from the installed script at
@@ -47,14 +47,17 @@ function bootstrap() {
     kernel.init();
 
     // One subscription serves both duties: readiness log always, first-run
-    // welcome toast only until the flag flips. Installs from before the key
-    // rename carry a bare "firstRun" field inside the configs doc - absorb
-    // it once, then sweep the field (it never was a root GM key).
-    const legacyFirstRun = getConfigValue("firstRun", undefined);
-    let welcomePending = getConfigValue(KEYS.firstRun, legacyFirstRun !== false);
-    if (legacyFirstRun !== undefined) {
-      deleteConfigField("firstRun");
-    }
+    // welcome toast only until the flag flips. The flag lives under the single
+    // "meta" subtree of the configs doc. Installs from before that move carry
+    // it as a flat "pf:first-run" field (the previous name) or a bare
+    // "firstRun" field (the oldest) - absorb either once, then sweep it.
+    const seenBefore = getConfigValue(
+      "meta.firstRun",
+      getConfigValue("pf:first-run", getConfigValue("firstRun", undefined) !== false)
+    );
+    let welcomePending = seenBefore;
+    deleteConfigField("pf:first-run");
+    deleteConfigField("firstRun");
     kernel.onShellCreated((shell) => {
       logger.log("entry", `Shell ready: ${shell.sdk.name}`);
       // Nested embeds can silently lose fullscreen (browsers require
@@ -68,7 +71,7 @@ function bootstrap() {
         return;
       }
       welcomePending = false;
-      setConfigValue(KEYS.firstRun, false);
+      setConfigValue("meta.firstRun", false);
       const coarsePointer = matchMedia("(pointer: coarse)").matches;
       // One composed signal owns the hint's lifetime: the 1.2s cap and the
       // visitor's first interaction are its sources, so either one detaches

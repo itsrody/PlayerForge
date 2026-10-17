@@ -3,8 +3,7 @@ import { logger } from "./logger.js";
 /** The whole GM storage namespace: every root key lives here. */
 export const KEYS = {
   configs: "pf:configs",
-  resume: "pf:resume",
-  firstRun: "pf:first-run"
+  resume: "pf:resume"
 };
 
 export function gmGetValue(key, fallback) {

@@ -28,7 +28,7 @@ const DECODER = new TextDecoder();
 
 /**
  * Report every long animation frame the worker produced. LoAF in workers
- * landed in Chromium 153, so it is always present on the 154 floor; the
+ * landed in Chromium 153, so it is always present on the 155 floor; the
  * observer costs nothing when the support is absent (jsdom test hosts).
  */
 if (

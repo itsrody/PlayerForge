@@ -84,7 +84,7 @@ const versionCache = new Map();
 
 /**
  * Helium's embedded Chromium version, read from the framework bundle's
- * Versions/ directory (named after the Chromium version, e.g. 154.0.8037.92).
+ * Versions/ directory (named after the Chromium version, e.g. 155.0.8059.79).
  * Reading the directory beats probing `--version`: a running instance swallows
  * every unknown flag and forwards it to the existing session, so the probe
  * would hang or return nothing exactly when Helium is already open.
@@ -189,7 +189,7 @@ function seleniumPlatform() {
 /**
  * Locate a chromedriver in Selenium Manager's cache that matches the browser's
  * embedded Chromium version. A chromedriver only drives the exact major it was
- * built for, and the Homebrew one routinely lags (152 against a 154 Helium),
+ * built for, and the Homebrew one routinely lags (152 against a 155 Helium),
  * so a version-matched cached download beats the fixed Homebrew path.
  */
 function findCachedChromedriver(version) {
@@ -293,7 +293,7 @@ export class ChromiumDriver {
   }
 
   /**
-   * Launch a headless Helium (Chromium 154) instance.
+   * Launch a headless Helium (Chromium 155) instance.
    * @param {object} [options]
    * @param {boolean} [options.headless=true] - Run headless.
    * @param {number} [options.port=0] - ChromeDriver port (0 = auto).
