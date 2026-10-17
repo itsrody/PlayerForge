@@ -37,7 +37,32 @@
      layer. The backdrop-filter blurs + saturates what is behind the glass,
      which keeps the tint see-through while light text stays legible over
      arbitrary video. */
-  --pf-glass-tint: color-mix(in srgb, var(--pf-bg) 60%, transparent);
+  --pf-glass-tint: color-mix(in srgb, var(--pf-bg) 58%, transparent);
+  /* Focus raises the tint rather than only the rim: the material exists to
+     bring attention to the content beneath it, so an idle HUD should recede
+     and a focused one should assert. DESIGN.md R3 - the two states must be
+     legible in the token set, not implied. */
+  --pf-glass-tint-focus: color-mix(in srgb, var(--pf-bg) 76%, transparent);
+  /* Apple's "increased contrast option for each variant" (adoption guide,
+     Controls). A bare saturate() cannot express it; every blur carries this so
+     a single token moves all surfaces. DESIGN.md R2. */
+  --pf-glass-contrast: 1;
+  /* R4: the panel scrolls, so content passing beneath the pinned header has to
+     be obscured at the scroll edge for it to stay legible. Apple's rule is a
+     short gradient - sized to the header, anchored to the scroll edge - not a
+     blanket scrim over the whole sheet. Kept out of the glass budget (R1): it
+     is paint, not a second backdrop-filter. */
+  --pf-scroll-edge-size: 16px;
+  --pf-scroll-edge: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--pf-bg) 88%, transparent) 0%,
+    color-mix(in srgb, var(--pf-bg) 0%, transparent) 100%
+  );
+  /* The panel's specular top rim is an inset shadow on the sheet; once the
+     header paints its own tint over that region the rim has to move onto the
+     header, or the topmost edge loses its highlight. Collapsed with the rest
+     of the glass paint (R8). */
+  --pf-header-rim: inset 0 1px 0 rgba(255, 255, 255, 0.34);
   --pf-glass-sheen: linear-gradient(
     180deg,
     rgba(255, 255, 255, 0.18) 0%,
@@ -60,13 +85,19 @@
 
   --pf-text-dim: rgba(255, 255, 255, 0.6);       /* secondary text              */
   --pf-text-mid: rgba(255, 255, 255, 0.7);       /* meta / hint emphasis        */
-  --pf-text-soft: rgba(255, 255, 255, 0.65);     /* uppercase labels            */
+  --pf-text-soft: rgba(255, 255, 255, 0.65);     /* section labels              */
 
   --pf-radius-pill: 999px;
-  --pf-radius-lg: 12px;
-  --pf-radius-md: 8px;
-  --pf-radius-sm: 6px;
-  --pf-radius-xs: 7px;
+  /* Concentric scale (DESIGN.md R5/R6). The panel is the outermost surface so
+     it holds the largest radius; everything nested inside is derived from it
+     by subtracting its own inset padding, so a change to the container
+     propagates instead of silently breaking concentricity.
+       panel 18 (outermost)  -> tab strip 18-8=10  -> tab 10-3=7  -> close 10
+     -xs was 7px, i.e. LARGER than -sm at 6px: the scale was not monotonic. */
+  --pf-radius-lg: 18px;   /* panel, toast sheet edge */
+  --pf-radius-md: 12px;   /* sections, rows */
+  --pf-radius-sm: 10px;   /* inset tab strip, close button */
+  --pf-radius-xs: 7px;    /* tab inside the strip */
 
   --pf-font-xs: 11px;
   --pf-font-sm: 12px;
@@ -78,8 +109,8 @@
   --pf-ease-bounce: 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
   --pf-ease-out: 0.2s cubic-bezier(0.4, 0, 1, 1);
 
-  --pf-blur-sm: blur(18px) saturate(1.8);
-  --pf-blur-lg: blur(26px) saturate(1.9);
+  --pf-blur-sm: blur(20px) saturate(1.7) brightness(var(--pf-glass-contrast));
+  --pf-blur-lg: blur(30px) saturate(1.8) brightness(var(--pf-glass-contrast));
 
   --pf-space-xs: 4px;
   --pf-space-sm: 6px;
@@ -128,24 +159,50 @@
   /* Flat, opaque surfaces: no translucent layers to composite, no blur, and
      none of the sheen/edge/shadow paint. */
   --pf-glass-tint: var(--pf-surface);
+  --pf-glass-tint-focus: var(--pf-surface);
   --pf-glass-sheen: none;
   --pf-glass-shadow: none;
   --pf-glass-border: none;
   --pf-blur-sm: none;
   --pf-blur-lg: none;
+  --pf-scroll-edge: none;
+  --pf-header-rim: none;
+}
+
+/* R2/R8: the "increased contrast option" Apple asks for alongside every custom
+   color. Deliberately NOT a collapse - this keeps the glass and moves the
+   contrast token instead, so the material survives at a legible strength. That
+   is only possible because both blur tokens carry
+   brightness(var(--pf-glass-contrast)) (R2); with the previous bare saturate()
+   there was nothing here to move. Declared BEFORE the reduced-transparency
+   block: both set --pf-glass-tint at equal specificity on .pf-shell, so the
+   later block wins, and reduced transparency - not increased contrast - is the
+   request that must never leak translucency (R8). The scroll edge is a gradient
+   scrim and collapses with it. */
+@media (prefers-contrast: more) {
+  .pf-shell {
+    --pf-glass-contrast: 1.35;
+    --pf-glass-tint: color-mix(in srgb, var(--pf-bg) 72%, transparent);
+    --pf-glass-tint-focus: color-mix(in srgb, var(--pf-bg) 88%, transparent);
+  }
 }
 
 /* OS-level accessibility preference (Chromium 118+): honor "reduce
    transparency" by collapsing the same glass tokens to a flat opaque sheet.
-   Declared at the same level as the token block so source order lets it win. */
+   Declared last of the three so source order lets it win over the
+   increased-contrast tints above (equal specificity), and so a user who set
+   both preferences still gets the flat sheet they asked for. */
 @media (prefers-reduced-transparency: reduce) {
   .pf-shell {
     --pf-glass-tint: var(--pf-surface);
+    --pf-glass-tint-focus: var(--pf-surface);
     --pf-glass-sheen: none;
     --pf-glass-shadow: none;
     --pf-glass-border: none;
     --pf-blur-sm: none;
     --pf-blur-lg: none;
+    --pf-scroll-edge: none;
+    --pf-header-rim: none;
   }
 }
 
@@ -491,7 +548,11 @@
         opacity var(--pf-ease-duration) var(--pf-ease-curve),
         translate var(--pf-ease-duration) var(--pf-ease-curve),
         scale var(--pf-ease-duration) var(--pf-ease-curve),
-        display var(--pf-ease-duration) allow-discrete;
+        display var(--pf-ease-duration) allow-discrete,
+        /* R3: the focus tint rides this same list rather than a second
+           `transition` declaration, which would replace the open/close
+           animation above instead of extending it. */
+        background-color var(--pf-ease-duration) var(--pf-ease-curve);
 
       &.pf-open {
         display: block;
@@ -503,13 +564,55 @@
         pointer-events: auto;
       }
 
-      /* Single header row: [segmented tabs] [close]. */
+      /* R3: a focused HUD asserts. The selector is `&:focus-within` - the
+         panel itself - because the one shared sheet is adopted by the shadow
+         root: a `.pf-shell ... .pf-panel` ancestor selector cannot match across
+         the shadow boundary (the host is not in its own tree), so the earlier
+         form was dead in both realms. The panel is the element whose
+         :focus-within survives, and it wins the tie against the base tint by
+         living after it in the same rule. */
+      &:focus-within {
+        background-color: var(--pf-glass-tint-focus);
+
+        .pf-panel-header {
+          background-color: var(--pf-glass-tint-focus);
+        }
+      }
+
+      /* Single header row: [segmented tabs] [close]. It is the panel's control
+         layer (principle 5), so it is pinned: body content scrolls beneath it
+         rather than carrying the tabs and close button away. It repaints the
+         same tint + sheen + top rim so the material is continuous and the
+         specular highlight stays on the topmost edge; R4's scroll-edge gradient
+         hangs just below it. */
       .pf-panel-header {
+        position: sticky;
+        top: 0;
+        z-index: 1;
         display: flex;
         align-items: center;
         gap: var(--pf-space-md);
         padding: var(--pf-space-md);
+        background-color: var(--pf-glass-tint);
+        background-image: var(--pf-glass-sheen);
+        box-shadow: var(--pf-header-rim);
         border-bottom: 1px solid var(--pf-border-soft);
+
+        /* R4: a gradient anchored to the scroll edge, sized to the header, that
+           obscures content as it passes beneath the pinned header. This is
+           Apple's scroll edge effect - it obscures at the edge, not a blanket
+           scrim over the sheet - and it is paint, not a third backdrop-filter
+           (R1). Collapses to `none` wherever the glass does (R8). */
+        &::after {
+          content: "";
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: 100%;
+          height: var(--pf-scroll-edge-size);
+          background-image: var(--pf-scroll-edge);
+          pointer-events: none;
+        }
       }
 
       /* Segmented tab strip - icon + label, active label accent-tinted. Tabs
@@ -522,7 +625,10 @@
         justify-content: space-evenly;
         padding: 3px;
         border: 1px solid var(--pf-border-soft);
-        border-radius: var(--pf-space-lg);
+        /* R5: concentric with the panel it is inset in - the strip sits on the
+           header's 8px padding, so 18 - 8 = 10 = --pf-radius-sm (was a space
+           token that merely happened to equal it). */
+        border-radius: var(--pf-radius-sm);
         background: var(--pf-surface-mid);
 
         .pf-panel-tab {
@@ -534,6 +640,8 @@
           gap: 3px;
           padding: 6px 7px;
           border: none;
+          /* R5: the last ring in - inset on the strip's 3px padding, so
+             10 - 3 = 7 = --pf-radius-xs. */
           border-radius: var(--pf-radius-xs);
           background: transparent;
           color: var(--pf-text-mid);
@@ -579,7 +687,10 @@
         line-height: 1;
         cursor: pointer;
         padding: 5px 8px;
-        border-radius: var(--pf-radius-xs);
+        /* R5: also inset on the header's 8px padding, so the same 18 - 8 = 10
+           as the tab strip - the token comment already groups "tab strip,
+           close button" under --pf-radius-sm. */
+        border-radius: var(--pf-radius-sm);
 
         @media (hover: hover) {
           &:hover {
@@ -638,8 +749,9 @@
       .pf-panel-label {
         display: block;
         font-size: var(--pf-font-xs);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
+        /* R7: title-style capitalization. Apple removed system-wide ALL-CAPS
+           section headers so they read as sentences; `uppercase` overrode that
+           convention. Labels ship in title case in the markup. */
         color: var(--pf-text-soft);
         margin-bottom: var(--pf-space-xs);
       }
@@ -742,8 +854,9 @@
         .pf-panel-label {
           margin-bottom: 0;
           font-size: var(--pf-font-xs);
-          text-transform: uppercase;
-          letter-spacing: 0.04em;
+          /* R7: title-style capitalization. Apple removed system-wide
+             ALL-CAPS section headers so they read as sentences; `uppercase`
+             overrode that convention. Labels ship in title case in markup. */
           color: var(--pf-text-soft);
         }
 
