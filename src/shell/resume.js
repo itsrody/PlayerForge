@@ -707,19 +707,18 @@ export class ResumeTracker {
     // layout-free "is this player on screen" boolean, so the media-clock saves
     // stop churning GM storage writes for a video the user cannot see. The
     // pause flush above still runs whenever playback actually pauses, so the
-    // final position is never lost by this gate. IntersectionObserverInit has
-    // no `signal` member, so the observer registers its disconnect with the
+    // final position is never lost by this gate. IntersectionObserver ships the
+    // whole 157 floor, so the observation is unconditional. IntersectionObserverInit
+    // has no `signal` member, so the observer registers its disconnect with the
     // scope - otherwise a shell torn down while the element stays in the page
     // (a player the page moves rather than removes) would leak the observer +
     // target for the rest of the page lifetime.
     let onScreen = true;
-    if (typeof IntersectionObserver === "function") {
-      const io = new IntersectionObserver(([entry]) => {
-        onScreen = entry.isIntersecting;
-      });
-      io.observe(video);
-      this.#scope.onDispose(() => io.disconnect());
-    }
+    const io = new IntersectionObserver(([entry]) => {
+      onScreen = entry.isIntersecting;
+    });
+    io.observe(video);
+    this.#scope.onDispose(() => io.disconnect());
     const gatedSaveIfDue = () => {
       if (onScreen) {
         saveIfDue();

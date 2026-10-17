@@ -193,6 +193,36 @@
       ],
       "verifiedBy": "tests/media-controls.test.mjs",
       "note": "Constructed unguarded, so this is an implicit dependency: tests/loader.mjs shims MediaMetadata because no test host has it."
+    },
+    {
+      "id": "IntersectionObserver",
+      "summary": "Off-screen gates: media-clock saves for players the user cannot see, Presence.OCCLUDED for HUD detach, and visibility-transition re-offers for template-resolved near misses no other edge surfaces",
+      "shipsInFirefox": 55,
+      "usedBy": [
+        "src/shell/resume.js",
+        "src/shared/status-manager.js",
+        "src/kernel/sdk.js"
+      ],
+      "verifiedBy": "tests/hud-occlusion.test.mjs"
+    },
+    {
+      "id": "matchMedia",
+      "summary": "Compact-mode auto-detect, the panel breakpoint listener, and the first-run hint pointer form",
+      "shipsInFirefox": 55,
+      "usedBy": [
+        "src/shell/chrome/panel.js",
+        "src/entry.js"
+      ],
+      "verifiedBy": "tests/panel-compact.test.mjs"
+    },
+    {
+      "id": "CustomEvent",
+      "summary": "Constructs the pf:status event that crosses the realm boundary",
+      "shipsInFirefox": 11,
+      "usedBy": [
+        "src/shared/status-manager.js"
+      ],
+      "verifiedBy": "tests/status-manager.test.mjs"
     }
   ],
   "grants": [
@@ -483,15 +513,6 @@
       ]
     },
     {
-      "id": "interaction-count",
-      "summary": "performance.interactionCount (Event Timing L2)",
-      "why": "Chromium-only counter. Interaction latency groups by interactionId, which Gecko ships; the count has no signal here.",
-      "matchPattern": "interactionCount",
-      "mustNotAppearIn": [
-        "src/"
-      ]
-    },
-    {
       "id": "idle-detection",
       "summary": "IdleDetector (Idle Detection API)",
       "why": "Chromium-only. Idleness is derived from playback state, visibility and focus - observed edges, never polled - so there is nothing for a detector to add.",
@@ -533,18 +554,6 @@
       ]
     },
     {
-      "id": "custom-event",
-      "api": "CustomEvent",
-      "summary": "Constructs the pf:status event that crosses the realm boundary",
-      "why": "StatusManager still serves every importer through subscribe() without it, so only the outer-realm channel is lost - status becomes reachable to module consumers but not to a page holding the same element. Every shipping browser has it, so it is a host probe that degrades rather than a capability with a floor.",
-      "usedBy": [
-        "src/shared/status-manager.js"
-      ],
-      "probes": [
-        "globalThis.CustomEvent"
-      ]
-    },
-    {
       "id": "requestAnimationFrame",
       "api": "requestAnimationFrame",
       "summary": "Frame boundary for yield_() and the jank watchdog",
@@ -555,33 +564,6 @@
       ],
       "probes": [
         "requestAnimationFrame"
-      ]
-    },
-    {
-      "id": "IntersectionObserver",
-      "api": "IntersectionObserver",
-      "summary": "Off-screen gates: media-clock saves for players the user cannot see, Presence.OCCLUDED for HUD detach, and visibility-transition re-offers for template-resolved near misses no other edge surfaces",
-      "why": "Without it both gates stay open, which is the safe direction: saves keep running and the HUD stays attached - only the idle-cost win is lost. Without the re-offers a reveal by stylesheet change stays missed until a mutation or media event; same safe direction, same reason.",
-      "usedBy": [
-        "src/shell/resume.js",
-        "src/shared/status-manager.js",
-        "src/kernel/sdk.js"
-      ],
-      "probes": [
-        "IntersectionObserver"
-      ]
-    },
-    {
-      "id": "matchMedia",
-      "api": "matchMedia",
-      "summary": "Compact-mode auto-detect, the panel breakpoint listener, and the first-run hint pointer form",
-      "why": "jsdom has no viewport engine; matches is false, so the shell never auto-switches to compact and no listener fires. entry.js reads it bare for the hint text behind the same floor guarantee rather than a second probe.",
-      "usedBy": [
-        "src/shell/chrome/panel.js",
-        "src/entry.js"
-      ],
-      "probes": [
-        "matchMedia"
       ]
     },
     {
@@ -705,8 +687,8 @@
     {
       "id": "WebAnimations",
       "api": "WebAnimations",
-      "summary": "Compositor-side accent flash and the transform transition",
-      "why": "flashElement() returns early and the settings/toast flash is simply skipped, and the transform path falls back to its rAF setter - both are cosmetic, so no version floor is claimed.",
+      "summary": "Compositor-side accent flash and the eased transform snap",
+      "why": "flashElement() returns early and the settings/toast flash is simply skipped, and the transform path snaps synchronously - both are cosmetic, so no version floor is claimed.",
       "usedBy": [
         "src/shell/chrome/toolbox.js",
         "src/shell/inputs/actions.js"
@@ -715,7 +697,7 @@
         "el.animate",
         "video.animate"
       ],
-      "note": "Two guarded call sites, one degradation story: the first has no fallback (nothing flashes), the second has an rAF one. getAnimations()/effect.getKeyframes() are optional-chained or typeof-guarded inside the same pass."
+      "note": "Two guarded call sites, one degradation story: the first has no fallback (nothing flashes), the second takes a plain synchronous snap. getAnimations()/effect.getKeyframes() are optional-chained or typeof-guarded inside the same pass."
     },
     {
       "id": "checkVisibility",

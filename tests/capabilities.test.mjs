@@ -218,6 +218,14 @@ test("capability ids are unique", () => {
   assert.equal(new Set(ids).size, ids.length, "no duplicate capability ids");
 });
 
+test("retired ids are unique", () => {
+  // The duplicate `interaction-count` row this caught was inert - the retirement
+  // scan runs to completion either way - but a duplicated row means one edit
+  // landing twice, and the next reader cannot tell which copy is authoritative.
+  const ids = manifest.retired.map((r) => r.id);
+  assert.equal(new Set(ids).size, ids.length, "no duplicate retired ids");
+});
+
 /** The literals an entry is searched for: an explicit token, else the first probe
  *  chain, else the API name, else the id - always as a list, because the code
  *  rarely spells the capability's own name. Token is separate from id so an id

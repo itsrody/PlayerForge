@@ -708,7 +708,7 @@ record rather than quietly delete:
   why both are named but undriven.
 
 One structural caveat: L1 has no single owner. Visibility is instantiated
-twice — `status-manager.js:471` for the `Presence` axis, and an independent
+twice — `status-manager.js:468` for the `Presence` axis, and an independent
 observer at `resume.js:717` gating off-screen saves. The two answer different
 questions (what is the player's status versus should we churn storage for a
 video the user cannot see) and their lifetimes differ, so folding them would
@@ -719,7 +719,7 @@ an oversight.
 ### L2 — StatusManager
 
 Today `isActive()` closures are authored independently at each `createActivity`
-call site (`src/shell/shell.js:388`, `src/shell/resume.js:733`,
+call site (`src/shell/shell.js:388`, `src/shell/resume.js:732`,
 `src/shared/shadow.js:212`). Nothing answers "what is this player's status right
 now" as a single queryable value.
 
@@ -747,7 +747,7 @@ Subscribers receive the change; nobody re-diffs the whole status.
 That event has *two* deliveries, not one, and the second is the reason most of
 the axis surface exists. `subscribe()` callbacks fire in-realm, and the same
 change is dispatched as a `pf:status` CustomEvent on the `<video>`
-(`status-manager.js:365`) so the **page world** can read status across the
+(`status-manager.js:362`) so the **page world** can read status across the
 sandbox boundary — which is the only consumer of `Buffer`, `Screen`, `duration`,
 `rate`, `volume`, `muted`, `hasTextTrack` and `error`. In-tree two subscribers
 exist: the media/HUD drive (`shell.js:375`), which reads no fields — the
@@ -2123,7 +2123,7 @@ In-tree:
 - `src/shared/scheduler.js` — traps in §2.4, `postTask`, `yield_()`
 - `src/shared/scope.js` — teardown primitive
 - `src/shared/activity.js` — passive activity windows
-- `src/shell/shell.js:388`, `src/shell/resume.js:733`, `src/shared/shadow.js:212` — `createActivity` call sites
+- `src/shell/shell.js:388`, `src/shell/resume.js:732`, `src/shared/shadow.js:212` — `createActivity` call sites
 - `src/shared/context.js:653` — the tree's only self-rearming `postTask`, delayed
 - `src/shared/dom-manager.js` — mutation coalescing
 - `src/shell/chrome/panel.js:129` — the only `setInterval` in the tree

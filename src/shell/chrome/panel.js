@@ -16,9 +16,9 @@ const COMPACT_MEDIA_QUERY = "(max-width: 480px) and (pointer: coarse)";
 // Live query: the open/close view transition is decoration, so a visitor who
 // asked the OS for reduced motion gets the plain update with no animation.
 // .matches is re-read per call, so a mid-session preference change applies.
-const REDUCED_MOTION_QUERY = typeof matchMedia === "function"
-  ? matchMedia("(prefers-reduced-motion: reduce)")
-  : null;
+const REDUCED_MOTION_QUERY = matchMedia(
+  "(prefers-reduced-motion: reduce)"
+);
 
 function decimalsOf(step) {
   const str = String(step);
@@ -907,7 +907,7 @@ export class SettingsPanel {
   }
 
   #runWithViewTransition(type, update) {
-    if (typeof document.startViewTransition === "function" && !REDUCED_MOTION_QUERY?.matches) {
+    if (typeof document.startViewTransition === "function" && !REDUCED_MOTION_QUERY.matches) {
       document.startViewTransition({ types: [type], update });
     } else {
       update();

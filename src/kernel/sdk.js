@@ -651,13 +651,10 @@ export function watchDocumentVideos(onVideo) {
  * videos whose gates could flip on a reveal (template-resolved,
  * rect-sized, visibility-failed). Observing everything would re-offer
  * every thumbnail on every scroll crossing. Unobserving is the caller's
- * too - on adopt, on budget, on teardown. Missing API (jsdom) answers a
- * no-op handle so construction never throws off-Gecko.
+ * too - on adopt, on budget, on teardown. IntersectionObserver ships the
+ * whole 157 floor, so construction is unconditional.
  */
 export function watchVisibilityOffers(onVideo, { signal } = {}) {
-  if (typeof IntersectionObserver !== "function") {
-    return { observe() {}, unobserve() {}, dispose() {} };
-  }
   const io = new IntersectionObserver((entries) => {
     for (let i = 0; i < entries.length; i++) {
       if (entries[i].isIntersecting) {

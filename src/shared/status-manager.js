@@ -344,12 +344,9 @@ export class StatusManager {
    * on the first field access. Nested values (the `error` shape) are rebuilt
    * the same way; primitives are copied as they are, so NaN survives.
    *
-   * Degrades to `subscribe()` only where the host has no CustomEvent at all.
+   * CustomEvent ships the whole 157 floor, so the publish is unconditional.
    */
   #dispatch(change) {
-    if (typeof globalThis.CustomEvent !== "function") {
-      return;
-    }
     const win = this.#target.ownerDocument?.defaultView;
     const Ctor = win?.CustomEvent ?? globalThis.CustomEvent;
     const detail = win ? new win.Object() : {};
@@ -467,23 +464,19 @@ export class StatusManager {
     // target. Its callbacks are posted as a task after layout, which is
     // correct here - HUD occlusion is not frame-critical (§7).
     //
-    // Absent on a host without it, the gate simply never opens and presence
-    // stays VISIBLE or BACKGROUND. That is the safe direction: nothing is
-    // lost except the idle-cost win. The probe is guarded so a missing API
-    // degrades instead of throwing during construction, the same shape
-    // `resume.js` uses for its own off-screen save gate.
-    if (typeof IntersectionObserver === "function") {
-      const io = new IntersectionObserver(([entry]) => {
-        this.#intersecting = !!entry?.isIntersecting;
-        this.#set("axis", "presence", this.#presence(), "intersection");
-      });
-      io.observe(target);
-      // Registry-owned like every scoped observer: disconnects (and unlists)
-      // with the manager, which is exactly the construct this manual push
-      // predates - IntersectionObserverInit has no `signal` member, so the
-      // disconnect cannot ride the options object the way a listener can.
-      this.#dom.trackObserver(io, "status-intersection");
-    }
+    // IntersectionObserver ships the whole 157 floor, so the gate is always
+    // live; until the first crossing presence stays VISIBLE or BACKGROUND,
+    // which is the safe default.
+    const io = new IntersectionObserver(([entry]) => {
+      this.#intersecting = !!entry?.isIntersecting;
+      this.#set("axis", "presence", this.#presence(), "intersection");
+    });
+    io.observe(target);
+    // Registry-owned like every scoped observer: disconnects (and unlists)
+    // with the manager, which is exactly the construct this manual push
+    // predates - IntersectionObserverInit has no `signal` member, so the
+    // disconnect cannot ride the options object the way a listener can.
+    this.#dom.trackObserver(io, "status-intersection");
 
     // Screen comes from shadow.js's single gate, not a second listener. Its
     // edge is still fullscreenchange, so the transition reports that cause.

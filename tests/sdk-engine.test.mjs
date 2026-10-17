@@ -311,25 +311,6 @@ test("visibility offers fire on entering, never on exiting", () => {
   }
 });
 
-test("visibility offers degrade to a no-op handle without the API", () => {
-  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "IntersectionObserver");
-  delete globalThis.IntersectionObserver;
-  try {
-    const doc = dom('<div class="dplayer"><video></video></div>');
-    const video = doc.querySelector("video");
-    const watch = watchVisibilityOffers(() => {
-      throw new Error("must never fire without the API");
-    });
-    watch.observe(video);
-    watch.unobserve(video);
-    watch.dispose();
-  } finally {
-    if (descriptor) {
-      Object.defineProperty(globalThis, "IntersectionObserver", descriptor);
-    }
-  }
-});
-
 test("videoFromEvent prefers an explicit video target", () => {
   const doc = dom("");
   const video = doc.createElement("video");
