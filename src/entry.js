@@ -80,7 +80,10 @@ function bootstrap() {
       const hintDismiss = new Scope();
       const hintSignal = AbortSignal.any([hintDismiss.signal, hintCap]);
       let hintCancelled = false;
-      hintCap.addEventListener("abort", () => {
+      // Named so cancelHint can drop it: a dismissed hint must not leave a
+      // dead once-listener on the cap's signal until the 1.2s elapses.
+      const onCapAbort = () => {
+        hintCap.removeEventListener("abort", onCapAbort);
         if (hintCancelled) {
           return;
         }
@@ -92,9 +95,11 @@ function bootstrap() {
               : "Press S for settings · Swipe down to exit fullscreen"
           );
         }
-      }, { once: true });
+      };
+      hintCap.addEventListener("abort", onCapAbort, { once: true });
       const cancelHint = () => {
         hintCancelled = true;
+        hintCap.removeEventListener("abort", onCapAbort);
         hintDismiss.dispose();
       };
       document.addEventListener("pointerdown", cancelHint, { capture: true, once: true, signal: hintSignal });

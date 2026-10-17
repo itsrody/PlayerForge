@@ -214,6 +214,9 @@ export class ForgeTrack {
       el.addEventListener("load", onLoad);
       el.addEventListener("error", onError);
       this.#scope.signal.addEventListener("abort", onScopeAbort, { once: true });
+      // onScopeAbort calls finish(false), which removes this registration
+      // with it - a settled load must not leave a dead once-listener on
+      // the shell signal (the same rule as the rest of the tree).
       // Gecko only fetches/parses while the TextTrack mode is not disabled.
       this.#track.mode = "hidden";
       el.src = url;
