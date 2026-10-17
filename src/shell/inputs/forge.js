@@ -554,6 +554,10 @@ export class InputForge {
     subscribeFullscreen(() => {
       this.setTrackpadPinchEnabled(fs);
     }, this.#scope.signal);
+    // Seed the live value: subscribeFullscreen fires only on an actual flip, so
+    // a shell built while the document is ALREADY fullscreen would never attach
+    // the wheel listener (the same reason StatusManager reads `fs` at boot).
+    this.setTrackpadPinchEnabled(fs);
 
     this.#keyboardEngine = this.#broker.register({
       target: () => this.#eventTarget,

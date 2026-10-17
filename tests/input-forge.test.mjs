@@ -430,6 +430,25 @@ test("wheel pinch listener is inert until enabled and detaches on disable", () =
   controller.destroy();
 });
 
+test("engine built after the page entered fullscreen still arms trackpad pinch", () => {
+  const { dom, video, zone, host } = makeEnv();
+  // The document went fullscreen before this player was discovered: the
+  // fullscreenchange fired with no engine subscribed, and no later flip is
+  // coming - so the wheel listener has to be seeded from the live `fs` at
+  // construction (subscribeFullscreen alone fires only on a transition).
+  stubFullscreen(dom, true);
+  const controller = new InputForge(video, zone, host, new EngineBroker());
+  const seen = collect(host, dom.window);
+
+  const wheel = wheelEvent(dom.window, { deltaY: -100, ctrlKey: true });
+  zone.dispatchEvent(wheel);
+  const pinches = seen.filter((entry) => entry.type === GESTURE_EVENTS.pinch);
+  assert.equal(pinches.length, 1, "wheel pinch armed from the live fs at boot");
+  assert.equal(pinches[0].detail.method, "trackpad");
+  assert.equal(wheel.defaultPrevented, true);
+  controller.destroy();
+});
+
 test("pointer gestures never cancel defaults (passivity contract)", () => {
   const { dom, video, zone, host } = makeEnv();
   stubFullscreen(dom, true);
