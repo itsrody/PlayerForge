@@ -231,8 +231,6 @@ export class Shell {
   }
 
   /** Keep focus on the shell host when pointer interactions happen inside it. */
-
-  /** Keep focus on the shell host when pointer interactions happen inside it. */
   #setupFocusManagement() {
     const host = this.shellHost;
     if (!host) {
@@ -610,7 +608,7 @@ export class Shell {
       if (shifted(video.width, before.vw) || shifted(video.height, before.vh) ||
           shifted(video.x, before.vx) || shifted(video.y, before.vy) ||
           shifted(container.width, before.cw) || shifted(container.height, before.ch) ||
-           shifted(container.x, before.cx) || shifted(container.y, before.cy)) {
+          shifted(container.x, before.cx) || shifted(container.y, before.cy)) {
         throw transientBootError(`Shell "${this.sdk.label}": placement shifted under prep`);
       }
     }

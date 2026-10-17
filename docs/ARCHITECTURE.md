@@ -700,7 +700,7 @@ record rather than quietly delete:
   exercised by `render-gate.test.mjs`, but nothing in `src/` observes element
   size, because every layout question this fork asks is answered by status
   (`Playback`, `Presence`) or by CSS (`pf-detached`'s `display: none`). The one
-  mention in `src/` is a comment (`src/shell/inputs/forge.js:876`).
+  mention in `src/` is a comment (`src/shell/inputs/forge.js:880`).
 - **PiP is gone, not pending.** Picture-in-picture was removed outright
   (`a5bc9fb`, "remove picture-in-picture entirely"), so the earlier draft's "+
   PiP events" has no event to name. `Presence.PIP` survives as an enum member
@@ -719,7 +719,7 @@ an oversight.
 ### L2 — StatusManager
 
 Today `isActive()` closures are authored independently at each `createActivity`
-call site (`src/shell/shell.js:390`, `src/shell/resume.js:733`,
+call site (`src/shell/shell.js:388`, `src/shell/resume.js:733`,
 `src/shared/shadow.js:211`). Nothing answers "what is this player's status right
 now" as a single queryable value.
 
@@ -750,8 +750,8 @@ change is dispatched as a `pf:status` CustomEvent on the `<video>`
 (`status-manager.js:374`) so the **page world** can read status across the
 sandbox boundary — which is the only consumer of `Buffer`, `Screen`, `duration`,
 `rate`, `volume`, `muted`, `hasTextTrack` and `error`. In-tree two subscribers
-exist: the media/HUD drive (`shell.js:377`), which reads no fields — the
-commit itself is the signal — and the occlusion resolve (`shell.js:524`),
+exist: the media/HUD drive (`shell.js:375`), which reads no fields — the
+commit itself is the signal — and the occlusion resolve (`shell.js:522`),
 which reads two of the ten fields. The other eight are carried for the page, so "no in-tree
 consumer" is the expected shape rather than dead code.
 
@@ -797,7 +797,7 @@ one `dispose()`.
 
 **Not landed as a class, and not needed as one.** `Shell` (`src/shell/shell.js`)
 already *is* the per-`<video>` owner: it holds `#scope`, `#status`, two
-`RenderGate`s, and every sub-component, and `destroy()` (`shell.js:633`) fans out
+`RenderGate`s, and every sub-component, and `destroy()` (`shell.js:631`) fans out
 to exactly the single `dispose()` this section describes. Extracting a
 `PlayerSession` would have been a rename with no second implementation behind
 it, so §6's seven phases never opened one — the one layer in the §4 diagram with
@@ -813,7 +813,7 @@ the layers can assume:
   L2 generally useful in-tree, and it is deliberately not done: only the
   occlusion resolve needs status today, and it is inside the shell.
 - **The gate is not one-per-session.** `Shell` registers two — media-state
-   (`shell.js:431`) and occlusion (`shell.js:516`) — because they have different
+   (`shell.js:429`) and occlusion (`shell.js:514`) — because they have different
   priorities' worth of coalescing and different snapshot shapes. `ToastManager`
   (`toast.js:130`) and `SettingsPanel` (`panel.js:306`) each own a further gate
   on their own scope, so the tree has four `RenderGate` constructions in total.
@@ -2123,7 +2123,7 @@ In-tree:
 - `src/shared/scheduler.js` — traps in §2.4, `postTask`, `yield_()`
 - `src/shared/scope.js` — teardown primitive
 - `src/shared/activity.js` — passive activity windows
-- `src/shell/shell.js:390`, `src/shell/resume.js:733`, `src/shared/shadow.js:211` — `createActivity` call sites
+- `src/shell/shell.js:388`, `src/shell/resume.js:733`, `src/shared/shadow.js:211` — `createActivity` call sites
 - `src/shared/context.js:652` — the tree's only self-rearming `postTask`, delayed
 - `src/shared/dom-manager.js` — mutation coalescing
 - `src/shell/chrome/panel.js:129` — the only `setInterval` in the tree

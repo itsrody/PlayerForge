@@ -144,45 +144,45 @@ export class ResumeStore {
     }
   }
 
-#mergeRaw(raw) {
-  let added = 0;
-  let updated = 0;
-  const byId = new Map();
-  for (const entry of this.#state.entries) {
-    byId.set(entry.id, entry);
-  }
-  for (const incoming of raw.entries) {
-    if (!incoming || typeof incoming !== "object" || typeof incoming.id !== "string") {
-      continue;
+  #mergeRaw(raw) {
+    let added = 0;
+    let updated = 0;
+    const byId = new Map();
+    for (const entry of this.#state.entries) {
+      byId.set(entry.id, entry);
     }
-    const known = byId.get(incoming.id);
-    if (!known) {
-      const shaped = toFixedShape(incoming);
-      byId.set(incoming.id, shaped);
-      added++;
-    } else if (
-      (incoming.updatedAt || 0) > (known.updatedAt || 0) ||
-      // Same-millisecond writes from two tabs would otherwise diverge (each
-      // side keeps its own): break the tie on content so both directions
-      // converge on one winner.
-      ((incoming.updatedAt || 0) === (known.updatedAt || 0) &&
-        (incoming.resume || 0) > (known.resume || 0))
-    ) {
-      for (const key of RESUME_ENTRY_FIELDS) {
-        if (key in incoming) {
-          known[key] = incoming[key];
-        }
+    for (const incoming of raw.entries) {
+      if (!incoming || typeof incoming !== "object" || typeof incoming.id !== "string") {
+        continue;
       }
-      updated++;
+      const known = byId.get(incoming.id);
+      if (!known) {
+        const shaped = toFixedShape(incoming);
+        byId.set(incoming.id, shaped);
+        added++;
+      } else if (
+        (incoming.updatedAt || 0) > (known.updatedAt || 0) ||
+        // Same-millisecond writes from two tabs would otherwise diverge (each
+        // side keeps its own): break the tie on content so both directions
+        // converge on one winner.
+        ((incoming.updatedAt || 0) === (known.updatedAt || 0) &&
+          (incoming.resume || 0) > (known.resume || 0))
+      ) {
+        for (const key of RESUME_ENTRY_FIELDS) {
+          if (key in incoming) {
+            known[key] = incoming[key];
+          }
+        }
+        updated++;
+      }
     }
-  }
-  if (added === 0 && updated === 0) {
+    if (added === 0 && updated === 0) {
+      return { added, updated };
+    }
+    this.#state.entries = [...byId.values()];
+    this.#invalidateCaches();
     return { added, updated };
   }
-  this.#state.entries = [...byId.values()];
-  this.#invalidateCaches();
-  return { added, updated };
-}
 
   /** Drop lazy lookup state; called after every structural entries change. */
   #invalidateCaches() {
