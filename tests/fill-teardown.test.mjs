@@ -99,7 +99,7 @@ test("pinch-in releases the same way teardown does", () => {
   pinch("in");
 
   assert.equal(video.style.objectFit, "cover", "pinch-in did not restore object-fit");
-  // This host has no WAAPI, so easeTransformTo takes the transition fallback,
+  // This host has no WAAPI, so easeTransformTo takes the synchronous snap,
   // which commits the target inline immediately. The point of the case is that
   // the animated path restores the same value teardown snaps to.
   assert.equal(video.style.transform, "rotate(1deg)", "pinch-in did not restore the transform");
@@ -159,24 +159,4 @@ test("cancelling an in-flight WAAPI ease drops the compositor promotion", () => 
   } finally {
     globalThis.getComputedStyle = priorGCS;
   }
-});
-
-test("the CSS-transition fallback clears its shorthand when it settles", () => {
-  const listeners = new Map();
-  const video = {
-    style: { transform: "", transition: "", willChange: "" },
-    addEventListener(type, fn) {
-      listeners.set(type, fn);
-    },
-    removeEventListener(type) {
-      listeners.delete(type);
-    }
-  };
-
-  easeTransformTo(video, "scale(2)");
-  assert.match(video.style.transition, /transform/, "precondition: the fallback armed a transition");
-
-  listeners.get("transitionend")({ propertyName: "transform" });
-  assert.equal(video.style.transition, "", "the fallback must not leave the shorthand armed");
-  assert.equal(video.style.willChange, "", "the layer is dropped when the transition settles");
 });

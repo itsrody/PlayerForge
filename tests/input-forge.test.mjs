@@ -1032,18 +1032,12 @@ test("swipe-down drag promotes a compositor layer, released on restore", () => {
   // Drag further, then release (no fullscreen exit distance).
   zone.dispatchEvent(pointerEvent(dom.window, "pointermove", { x: 405, y: 280 }));
   zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 405, y: 300 }));
-  // The restore eases the video back (layer stays active during the ease); in
-  // jsdom the WAAPI finish never runs, so the CSS-transition end releases it.
-  assert.equal(
-    video.style.willChange, "transform",
-    "layer persists while the restore ease is in flight"
-  );
-  video.dispatchEvent(Object.assign(new dom.window.Event("transitionend", { bubbles: true }), {
-    propertyName: "transform"
-  }));
+  // This host has no WAAPI, so the restore is a synchronous snap: it hands the
+  // transform back and releases the layer at once. (Production eases through
+  // the WAAPI path and drops the layer on finish.)
   assert.equal(
     video.style.willChange, "",
-    "restore released the compositor layer once the ease settled"
+    "restore released the compositor layer"
   );
   controller.destroy();
   dom.window.close();

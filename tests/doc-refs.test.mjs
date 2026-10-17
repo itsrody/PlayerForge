@@ -56,7 +56,7 @@ const REFS = [
   { file: "src/shell/chrome/inject.js", line: 88, anchor: "child ever changes index" },
   { file: "src/shell/shell.js", line: 671, anchor: "this.#onDestroy?.(this)" },
   { file: "src/shared/render.js", line: 140, anchor: "if (this.#running)" },
-  { file: "src/shell/inputs/actions.js", line: 571, anchor: "x ** SCRUB_EXPONENT" },
+  { file: "src/shell/inputs/actions.js", line: 554, anchor: "x ** SCRUB_EXPONENT" },
   { file: "src/shell/inputs/forge.js", line: 1016, anchor: "#swipeDirection" },
   { file: "src/shell/inputs/forge.js", line: 1017, anchor: "#swipeBaseTransform" },
 ];

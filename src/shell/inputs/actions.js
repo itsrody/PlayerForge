@@ -257,15 +257,15 @@ function performSkip(shell, state, direction) {
  * exit, pinch fill, and swipe/pinch restore. A newer snap cancels the previous
  * in-flight animation so no cleanup can land mid-gesture.
  *
- * Where Element.animate (Web Animations API) is available - baseline on
- * this fork - the snap runs a WAAPI animation on the compositor: one
- * deterministic compositor animation with a real finish/cancel, replacing
- * the will-change + CSS-transition + transitionend listener puzzle that
- * could race when the transition shorthand was flipped off. The video is
- * promoted to its own compositor layer while a transform is live (fill-mode,
- * swipe/pinch restore) so the compositor renders the scale/translate instead
- * of re-rasterizing the media surface every frame; the layer is released
- * once the snap settles (or is cancelled).
+ * The snap runs a WAAPI animation on the compositor: one deterministic
+ * compositor animation with a real finish/cancel, rather than a
+ * will-change + CSS-transition + transitionend puzzle that could race when the
+ * transition shorthand was flipped off. The video is promoted to its own
+ * compositor layer while a transform is live (fill-mode, swipe/pinch restore)
+ * so the compositor renders the scale/translate instead of re-rasterizing the
+ * media surface every frame; the layer is released once the snap settles (or
+ * is cancelled). A host without Element.animate (headless/test realms, never
+ * the Firefox target) takes a plain synchronous snap.
  */
 const EASE_STYLE = EASE_SNAPPY_CURVE;
 const EASE_MS = EASE_SNAPPY_MS;
@@ -299,82 +299,65 @@ export function easeTransformTo(video, transform) {
   if (prior) {
     prior();
   }
+
+  // No WAAPI (test/headless realms, never the Firefox target): there is no
+  // compositor to ease on, so commit the target synchronously and promote
+  // nothing. A plain snap also has no listener to miss.
+  if (typeof video.animate !== "function") {
+    video.style.transform = transform;
+    dropPromotion(video);
+    return;
+  }
+
+  // Promote the video to its own compositor layer for the snap's duration so
+  // the scale/translate composites instead of re-rasterizing each frame.
   if (transform) {
     video.style.willChange = "transform";
   }
 
-  // WAAPI path: one compositor animation from the current
-  // computed transform to the target. On finish the final value is committed
-  // to an inline style and the animation is cancelled so its fill gives way;
-  // on cancel (via stop() or supersession) the layer is dropped immediately.
-  if (typeof video.animate === "function") {
-    const animation = video.animate(
-      [
-        { transform: getComputedStyle(video).transform || "none" },
-        { transform: transform || "none" }
-      ],
-      { duration: EASE_MS, easing: EASE_STYLE, fill: "both" }
-    );
-    const stop = () => {
-      if (pendingEase.get(video) !== stop) {
-        return;
-      }
+  // One compositor animation from the current computed transform to the
+  // target. On finish the final value is committed to an inline style and the
+  // animation is cancelled so its fill gives way; on cancel (via stop() or
+  // supersession) the layer is dropped immediately.
+  const animation = video.animate(
+    [
+      { transform: getComputedStyle(video).transform || "none" },
+      { transform: transform || "none" }
+    ],
+    { duration: EASE_MS, easing: EASE_STYLE, fill: "both" }
+  );
+  const stop = () => {
+    if (pendingEase.get(video) !== stop) {
+      return;
+    }
+    pendingEase.delete(video);
+    video.style.transition = "";
+    // The cancel listener below guards on `pendingEase.get(video) === stop`,
+    // which this delete has already made false - so its dropPromotion can
+    // never run. Drop the layer here or a teardown cancel (cancelEase) leaves
+    // will-change: transform inline on the embed's video.
+    dropPromotion(video);
+    animation.cancel();
+  };
+  pendingEase.set(video, stop);
+  animation.addEventListener("finish", () => {
+    if (pendingEase.get(video) !== stop) {
+      return;
+    }
+    // Commit the final transform as inline style, then cancel the animation's
+    // fill so the committed style owns the element from here on.
+    video.style.transition = "";
+    video.style.transform = transform;
+    animation.cancel();
+    pendingEase.delete(video);
+    dropPromotion(video);
+  });
+  animation.addEventListener("cancel", () => {
+    if (pendingEase.get(video) === stop) {
       pendingEase.delete(video);
-      video.style.transition = "";
-      // The cancel listener below guards on `pendingEase.get(video) === stop`,
-      // which this delete has already made false - so its dropPromotion can
-      // never run. Drop the layer here or a teardown cancel (cancelEase) leaves
-      // will-change: transform inline on the embed's video.
-      dropPromotion(video);
-      animation.cancel();
-    };
-    pendingEase.set(video, stop);
-    animation.addEventListener("finish", () => {
-      if (pendingEase.get(video) !== stop) {
-        return;
-      }
-      // Commit the final transform as inline style, then cancel the animation's
-      // fill so the committed style owns the element from here on.
-      video.style.transition = "";
-      video.style.transform = transform;
-      animation.cancel();
-      pendingEase.delete(video);
-      dropPromotion(video);
-    });
-    animation.addEventListener("cancel", () => {
-      if (pendingEase.get(video) === stop) {
-        pendingEase.delete(video);
-        dropPromotion(video);
-      }
-    });
-    return;
-  }
-
-  // CSS transition fallback (hosts without WAAPI, e.g. jsdom): the eased style
-  // is stripped by the transition's own end/cancel event - never by a timer.
-  const pendingStop = () => {
-    video.removeEventListener("transitionend", onEnd);
-    video.removeEventListener("transitioncancel", onCancel);
-    if (pendingEase.get(video) === pendingStop) {
-      pendingEase.delete(video);
-      // Mirror the WAAPI path: clear the shorthand and drop the layer, so the
-      // eased transition never lingers on the host element after it settles.
-      video.style.transition = "";
       dropPromotion(video);
     }
-  };
-  const onEnd = (event) => {
-    if (event.propertyName === "transform") {
-      pendingStop();
-    }
-  };
-  const onCancel = () => pendingStop();
-  pendingEase.set(video, pendingStop);
-  // Listeners first, styles second: no completion event can slip past us.
-  video.addEventListener("transitionend", onEnd);
-  video.addEventListener("transitioncancel", onCancel);
-  video.style.transition = `transform ${EASE_MS}ms ${EASE_STYLE}`;
-  video.style.transform = transform;
+  });
 }
 
 /**
