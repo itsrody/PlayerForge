@@ -499,12 +499,12 @@ function install() {
   // clock, so a jank-free page still reports slow interactions.
   installEventTiming();
   // Likewise: the presentation edge does not need a frame clock either. Only
-  // the flush window does, so a host with no rAF still samples on pause/seek/end
-  // and reports when the runtime is switched off.
+  // the flush window does, so a still frame samples on pause/seek/end and
+  // reports when the runtime is switched off.
   for (const entry of qualityVideos) {
     armQuality(entry);
   }
-  if (rafId !== null || typeof requestAnimationFrame !== "function") {
+  if (rafId !== null) {
     return;
   }
   slowFrames = [];
@@ -525,13 +525,13 @@ function install() {
 }
 
 function teardown() {
-  // The observer is torn down on its own guard, NOT under the rAF one: a
-  // context with no requestAnimationFrame still gets interaction timings, and
-  // an early return here would strand the observer past the debug toggle.
+  // The observer is torn down on its own guard, NOT under the rAF one: Event
+  // Timing does not need a frame clock, and an early return here would strand
+  // the observer past the debug toggle.
   teardownEventTiming();
   // Sampled and reported before its own listeners go, and on the same
-  // independent guard as Event Timing: a host with no frame clock still owns
-  // buffered drops, and releasing the listeners first is what would strand them.
+  // independent guard as Event Timing: the presentation edge is not fed by the
+  // frame loop, and releasing the listeners first is what would strand it.
   flushFrameQuality();
   for (const entry of qualityVideos) {
     entry.detach?.();

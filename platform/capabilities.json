@@ -105,10 +105,7 @@
         "src/shared/context.js",
         "src/shared/scheduler.js"
       ],
-      "verifiedBy": "platform/integration/switchboard-lifecycle.test.mjs",
-      "probes": [
-        "MessageChannel"
-      ]
+      "verifiedBy": "platform/integration/switchboard-lifecycle.test.mjs"
     },
     {
       "id": "requestVideoFrameCallback",
@@ -168,6 +165,17 @@
       "verifiedBy": "tests/scheduler-native.test.mjs",
       "token": "globalThis.scheduler",
       "note": "Called unconditionally by the facade on the 157 floor: there is deliberately no probe chain for it in src/ (a typeof guard would be dead code on every supported target), so this capability is classified by its floor and its caller, not by a probe. The jsdom test host gets a timer-backed polyfill from tests/loader.mjs."
+    },
+    {
+      "id": "requestAnimationFrame",
+      "summary": "Frame boundary for yield_() and the jank watchdog's frame-gap loop",
+      "shipsInFirefox": 23,
+      "usedBy": [
+        "src/shared/diagnostics.js",
+        "src/shared/scheduler.js"
+      ],
+      "verifiedBy": "tests/scheduler-native.test.mjs",
+      "note": "Called unconditionally on the floor; Node/jsdom has no rAF, so tests/loader.mjs installs a timer-backed one-shot (with cancelAnimationFrame) rather than a src/ branch no Gecko build takes."
     },
     {
       "id": "TextTrack",
@@ -551,19 +559,6 @@
       ],
       "probes": [
         "document"
-      ]
-    },
-    {
-      "id": "requestAnimationFrame",
-      "api": "requestAnimationFrame",
-      "summary": "Frame boundary for yield_() and the jank watchdog",
-      "why": "Absent on Node/jsdom, where yield_ falls back to a MessageChannel task behind a 50ms backstop, so boot cannot stall on a host that never paints.",
-      "usedBy": [
-        "src/shared/diagnostics.js",
-        "src/shared/scheduler.js"
-      ],
-      "probes": [
-        "requestAnimationFrame"
       ]
     },
     {

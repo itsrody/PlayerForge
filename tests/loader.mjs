@@ -53,6 +53,15 @@ if (typeof globalThis.matchMedia !== "function") {
     removeEventListener() {}
   });
 }
+if (typeof globalThis.requestAnimationFrame !== "function") {
+  // The Firefox 157 floor always has rAF, so src/ calls it unconditionally
+  // (scheduler.yield_ and the diagnostics frame watchdog). Node/jsdom does not
+  // provide it unless a case opts into pretendToBeVisual, so the harness
+  // supplies the task-boundary shape: a timer-backed one-shot carrying a
+  // monotonic timestamp, plus the cancel that tears the loop down.
+  globalThis.requestAnimationFrame = (callback) => setTimeout(() => callback(Date.now()), 0);
+  globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
+}
 if (typeof globalThis.scheduler?.postTask !== "function") {
   // The Firefox 157 floor always has the Task Scheduling API; Node/jsdom does
   // not, and src/shared/scheduler.js calls scheduler.postTask unconditionally

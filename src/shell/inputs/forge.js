@@ -1511,17 +1511,14 @@ export class InputForge {
       this.#dispatchKeyboardRelease();
     } else if (allowToggle && owned && this.#shouldHandleKeys()) {
       if (this.#video.paused) {
-        // play() returns a promise on spec engines; guard so an odd host
-        // (test shims, minimal webviews) degrades to a silent no-op instead
-        // of a TypeError inside the keyup handler.
-        const played = this.#video.play();
-        if (played && typeof played.catch === "function") {
-          played.catch((err) => {
-            if (!isBenignMediaPolicyError(err)) {
-              logger.log("forge", "bare-tap play rejected:", err.name);
-            }
-          });
-        }
+        // HTMLMediaElement.play() returns a Promise on the whole 157 floor; a
+        // rejection (autoplay policy, interrupted load) is reported rather than
+        // left as an unhandled rejection in the keyup handler.
+        this.#video.play().catch((err) => {
+          if (!isBenignMediaPolicyError(err)) {
+            logger.log("forge", "bare-tap play rejected:", err.name);
+          }
+        });
       } else {
         this.#video.pause();
       }

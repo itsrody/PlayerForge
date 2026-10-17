@@ -2124,7 +2124,7 @@ In-tree:
 - `src/shared/scope.js` — teardown primitive
 - `src/shared/activity.js` — passive activity windows
 - `src/shell/shell.js:388`, `src/shell/resume.js:732`, `src/shared/shadow.js:212` — `createActivity` call sites
-- `src/shared/context.js:653` — the tree's only self-rearming `postTask`, delayed
+- `src/shared/context.js:654` — the tree's only self-rearming `postTask`, delayed
 - `src/shared/dom-manager.js` — mutation coalescing
 - `src/shell/chrome/panel.js:129` — the only `setInterval` in the tree
 - `src/shared/diagnostics.js` — debug-gated rAF frame-gap probe

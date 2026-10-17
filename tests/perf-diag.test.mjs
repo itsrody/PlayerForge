@@ -271,25 +271,6 @@ test("an engine without event timing installs nothing and never throws", () => {
   }, { supported: ["mark", "measure"] });
 });
 
-test("the observer survives a context with no requestAnimationFrame", () => {
-  const originalRAF = globalThis.requestAnimationFrame;
-  const originalWarn = console.warn;
-  delete globalThis.requestAnimationFrame;
-  try {
-    withEventObserver(({ instances, emit, warnings }) => {
-      setDebugRuntime(true);
-      assert.equal(instances.length, 1, "event timing does not depend on rAF");
-      emit({ interactionId: 3, duration: 640, name: "pointerup" });
-      setDebugRuntime(false);
-      assert.equal(warnings.length, 1);
-      assert.match(warnings[0], /slow interaction: 640ms/);
-    });
-  } finally {
-    globalThis.requestAnimationFrame = originalRAF;
-    console.warn = originalWarn;
-  }
-});
-
 /* - Backgrounding (Gecko rAF catch-up) - */
 
 /**

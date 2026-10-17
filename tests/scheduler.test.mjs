@@ -7,10 +7,9 @@ import { postTask, yield_ } from "../src/shared/scheduler.js";
  * yield_() must never depend on scheduler.yield (non-Baseline, and it
  * inherits poisoned abort state from self-aborting postTask tasks - see
  * shared/scheduler.js header). These tests pin the two branches it does
- * use: a frame boundary with a hard backstop when rAF is usable, a
- * MessageChannel task when it is not, and a timer when MessageChannel
- * itself is absent (the live probe reads the current globals, so each
- * branch is pinned by arranging the host, never by re-probing one).
+ * use: a frame boundary with a hard backstop when the document is visible,
+ * and a MessageChannel task when it is not. Both primitives ship the whole
+ * 157 floor, so there is no absence branch to arrange here.
  *
  * The postTask() tests here cover the OTHER half of the facade. postTask now
  * calls scheduler.postTask unconditionally (the Firefox 157 floor always has
@@ -19,38 +18,6 @@ import { postTask, yield_ } from "../src/shared/scheduler.js";
  * task contract is pinned separately in scheduler-native.test.mjs; the abort
  * and signal cases are asserted in both places.
  */
-
-test("task path (no rAF): resolves on a task, not a microtask", async () => {
-  assert.equal(typeof globalThis.requestAnimationFrame, "undefined");
-  let resolved = false;
-  const p = yield_().then(() => {
-    resolved = true;
-  });
-  await Promise.resolve();
-  assert.equal(resolved, false, "still pending at the microtask checkpoint");
-  await p;
-  assert.equal(resolved, true);
-});
-
-test("no MessageChannel: the task path falls back to a timer", async () => {
-  // Shadow the global with an own property (never delete the real one):
-  // the probe must move nextTask off ports the same call, with no snapshot
-  // to refresh first.
-  assert.equal(typeof globalThis.requestAnimationFrame, "undefined");
-  Object.defineProperty(globalThis, "MessageChannel", { value: undefined, configurable: true });
-  try {
-    let resolved = false;
-    const p = yield_().then(() => {
-      resolved = true;
-    });
-    await Promise.resolve();
-    assert.equal(resolved, false, "still pending at the microtask checkpoint");
-    await p;
-    assert.equal(resolved, true, "the timer fallback resolves the task");
-  } finally {
-    delete globalThis.MessageChannel;
-  }
-});
 
 test("rAF path: a live frame resolves promptly and skips the backstop", async () => {
   const originalRAF = globalThis.requestAnimationFrame;

@@ -173,29 +173,22 @@ export function debounce(fn, ms, { priority } = {}) {
 }
 
 /**
- * Resolve on the next task. MessageChannel first: its tasks are not timer-
- * throttled on Gecko, so hidden tabs still make progress; setTimeout is the
- * fallback for hosts without it. Both ports are closed once the message
- * lands - an open port holds a handle on Node's event loop, which would
- * otherwise keep test processes alive after the work is done.
+ * Resolve on the next task. MessageChannel's tasks are not timer-throttled on
+ * Gecko, so hidden tabs still make progress; the channel ships the whole 157
+ * floor (and Node), so it is unconditional. Both ports are closed once the
+ * message lands - an open port holds a handle on Node's event loop, which
+ * would otherwise keep test processes alive after the work is done.
  *
  * @param {Function} resolve
  */
 function nextTask(resolve) {
-  // Probed live, not snapshotted: MessageChannel availability is a realm
-  // fact, so the current globals are the answer - and context.js asks the
-  // same global the same way, which is what keeps the two pipes on one answer.
-  if (typeof MessageChannel === "function") {
-    const { port1, port2 } = new MessageChannel();
-    port1.onmessage = () => {
-      port1.close();
-      port2.close();
-      resolve();
-    };
-    port2.postMessage(null);
-  } else {
-    setTimeout(resolve, 0);
-  }
+  const { port1, port2 } = new MessageChannel();
+  port1.onmessage = () => {
+    port1.close();
+    port2.close();
+    resolve();
+  };
+  port2.postMessage(null);
 }
 
 /**
@@ -205,16 +198,15 @@ function nextTask(resolve) {
  *
  * Visible documents resume on the next frame (rAF), which is the boundary the
  * callers' comments promise; a 50ms backstop timer covers frames that never
- * arrive. Hidden documents - where rAF does not run - and hosts without rAF
- * resume on the next task instead. Never reads scheduler.yield (see header).
+ * arrive. Hidden documents - where rAF does not run - resume on the next task
+ * instead. Never reads scheduler.yield (see header).
  *
  * @returns {Promise<void>}
  */
 export function yield_() {
   const frameAvailable =
-    typeof requestAnimationFrame === "function" &&
-    (typeof document === "undefined" ||
-      document.visibilityState !== "hidden");
+    typeof document === "undefined" ||
+    document.visibilityState !== "hidden";
   if (!frameAvailable) {
     return new Promise((resolve) => {
       nextTask(resolve);

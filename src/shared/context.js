@@ -579,9 +579,10 @@ async function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) 
       }, true);
     }
   };
-  // Same live probe scheduler.js asks, so the two pipes agree on whether the
-  // host offers one at all: one global, one question, read at use time.
-  if (!legacyChain && typeof MessageChannel === "function") {
+  // MessageChannel ships the whole 157 floor, so the private pipe is always
+  // attempted; a chain that only honors the nonce broadcast is remembered
+  // below so later resolves stop allocating channels it will only drop.
+  if (!legacyChain) {
     try {
       const mc = new MessageChannel();
       replyPort = mc.port1;
