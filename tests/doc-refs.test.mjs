@@ -33,7 +33,7 @@ const REFS = [
   { file: "src/shell/shell.js", line: 388, anchor: "createActivity({" },
   { file: "src/shell/resume.js", line: 733, anchor: "createActivity({" },
   { file: "src/shared/shadow.js", line: 211, anchor: "fsGate = createActivity({" },
-  { file: "src/shared/context.js", line: 652, anchor: "postTask(attempt" },
+  { file: "src/shared/context.js", line: 653, anchor: "postTask(attempt" },
   { file: "src/shell/chrome/panel.js", line: 129, anchor: "setInterval" },
   { file: "src/kernel/contract.js", line: 21, anchor: "SHELL_MARKER" },
   { file: "esbuild.config.mjs", line: 173, anchor: "fingerprint" },

@@ -15,10 +15,11 @@
  * lazily, so a video-bearing iframe cannot assume its ancestors run anything
  * unless the relay chain is already listening.
  */
-/* - Window message types - */
 
 import { postTask } from "./scheduler.js";
 import { Scope } from "./scope.js";
+
+/* - Window message types - */
 
 /**
  * The postMessage types the frame bridge sends and receives across iframe

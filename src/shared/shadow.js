@@ -73,8 +73,8 @@ const CONTROL_SELECTOR =
   "[role=\"button\"], [role=\"link\"], [role=\"menuitem\"], " +
   "[role=\"menuitemcheckbox\"], [role=\"menuitemradio\"], [role=\"tab\"], " +
   "[role=\"slider\"], [role=\"switch\"], [role=\"checkbox\"], [role=\"radio\"], " +
-   "[role=\"option\"], [role=\"spinbutton\"], [role=\"combobox\"], " +
-   "[role=\"listbox\"], [role=\"menu\"], [role=\"treeitem\"], video[controls]";
+  "[role=\"option\"], [role=\"spinbutton\"], [role=\"combobox\"], " +
+  "[role=\"listbox\"], [role=\"menu\"], [role=\"treeitem\"], video[controls]";
 
 /** Class-name fragments of div-skinned player chrome (see above). Matched
  *  as substrings against the lowercased class attribute, so `fp-bar-slider`
