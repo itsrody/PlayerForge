@@ -1,4 +1,5 @@
 import { logger } from "./diagnostics.js";
+import { subscribeWithSignal } from "./scope.js";
 
 /**
  * Manager-API policy: a manager API is used only where it uniquely supplies a
@@ -397,6 +398,10 @@ export class ConfigStore {
   /**
    * Remove one dotted field from the configs document (migration sweeps).
    * No-op when any intermediate segment or the leaf itself is missing.
+   *
+   * @returns {boolean} true only when a removal was persisted. False covers
+   *   both a no-op (the path was already absent) and a failed write, so a
+   *   caller that must tell them apart has to re-read.
    */
   remove(path) {
     // Operate on truth for the same reason set() rebases: a removal computed
@@ -473,24 +478,11 @@ export class ConfigStore {
    * the notification.
    */
   onChange(listener, { signal } = {}) {
-    // Same already-aborted trap the sibling subscribers refuse (dom-manager,
-    // shadow, status-manager, gmRequestText): an abort listener added to a
-    // dead signal never fires, so the callback would stay in #listeners and
-    // the manager change listener would start for an owner already gone.
-    // Refuse the subscription outright.
-    if (signal?.aborted) {
-      return () => {};
-    }
-    this.#listeners.add(listener);
-    this.#watch();
-    const off = () => {
-      // Drop the abort registration with the subscription: the abort path
-      // only matters while subscribed, and a dead once-listener would stay
-      // retained by the owner signal past every subscribe cycle.
-      signal?.removeEventListener("abort", off);
-      if (!this.#listeners.delete(listener)) {
-        return;
-      }
+    // The abort-scoped helper refuses an already-dead owner and drops the
+    // abort registration with the subscription. Starting the manager listener
+    // is this subscriber's own side effect, so it runs only when the helper
+    // actually retained the callback - a dead owner is refused outright.
+    const off = subscribeWithSignal(this.#listeners, listener, signal, () => {
       // Last consumer gone, so drop the manager listener with it. The GM
       // subscription outlives the subscribers that justified it otherwise,
       // and a frame that has torn its shell down keeps adopting every remote
@@ -498,9 +490,9 @@ export class ConfigStore {
       if (this.#listeners.size === 0) {
         this.#unwatch();
       }
-    };
-    if (signal) {
-      signal.addEventListener("abort", off, { once: true });
+    });
+    if (!signal?.aborted) {
+      this.#watch();
     }
     return off;
   }

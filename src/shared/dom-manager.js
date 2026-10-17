@@ -361,7 +361,10 @@ const styleOriginals = new WeakMap();
 export function applyAttrs(node, attrs, signal) {
   for (const [key, value] of Object.entries(attrs)) {
     if (key === "class") {
-      node.className = value;
+      // setAttribute, not `className`: SVG elements expose a read-only
+      // SVGAnimatedString there, so the property assignment silently no-ops
+      // (or throws) the moment a factory hands over an SVG node.
+      node.setAttribute("class", value);
     } else if (key === "style" && typeof value === "object") {
       Object.assign(node.style, value);
     } else if (key.length > 2 && key.startsWith("on") && typeof value === "function") {

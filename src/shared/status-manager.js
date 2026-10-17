@@ -1,6 +1,7 @@
 import { logger } from "./diagnostics.js";
 import { fs, subscribeFullscreen } from "./shadow.js";
 import { DOMManager } from "./dom-manager.js";
+import { subscribeWithSignal } from "./scope.js";
 
 /**
  * L2 - StatusManager: what this player *is*, stated as one queryable value
@@ -223,37 +224,15 @@ export class StatusManager {
   /**
    * Receive every change, one typed event each, in order. Delivery is batched
    * to a microtask; the value itself has already changed by the time the event
-   * was produced.
+   * was produced. Lifetime rides `signal` through the shared abort-scoped
+   * helper, which also refuses an already-dead owner (see scope.js).
    *
    * @param {(change: StatusChange) => void} cb
    * @param {AbortSignal} [signal]
    * @returns {() => void} unsubscribe
    */
   subscribe(cb, signal) {
-    this.#listeners.add(cb);
-    if (signal) {
-      // An abort listener added to an ALREADY-aborted signal never fires, so
-      // subscribing with one would leak the callback and keep delivering to
-      // a dead owner. Refuse it outright - the same guard scheduler.js keeps
-      // for the same trap.
-      if (signal.aborted) {
-        this.#listeners.delete(cb);
-        return () => {};
-      }
-      // Named so unsubscribe drops it: the abort path only matters while
-      // subscribed, and a dead once-listener would stay retained by the
-      // owner signal past every subscribe cycle on churny pages.
-      const onOwnerAbort = () => {
-        signal.removeEventListener("abort", onOwnerAbort);
-        this.#listeners.delete(cb);
-      };
-      signal.addEventListener("abort", onOwnerAbort, { once: true });
-      return () => {
-        signal.removeEventListener("abort", onOwnerAbort);
-        this.#listeners.delete(cb);
-      };
-    }
-    return () => this.#listeners.delete(cb);
+    return subscribeWithSignal(this.#listeners, cb, signal);
   }
 
   dispose() {
@@ -335,7 +314,15 @@ export class StatusManager {
     // that - a ratio on a negligible cost, declined on purpose.
     const listeners = this.#listeners;
     for (const change of batch) {
-      this.#dispatch(change);
+      // The realm-crossing publish is isolated from the in-realm fan-out: a
+      // host that cannot build the CustomEvent detail must still deliver the
+      // change to subscribers, and one failure must not drop the rest of the
+      // batch.
+      try {
+        this.#dispatch(change);
+      } catch (err) {
+        logger.error("status", "Status event dispatch failed", err);
+      }
       for (const cb of [...listeners]) {
         try {
           cb(change);
@@ -366,10 +353,14 @@ export class StatusManager {
     const win = this.#target.ownerDocument?.defaultView;
     const Ctor = win?.CustomEvent ?? globalThis.CustomEvent;
     const detail = win ? new win.Object() : {};
+    // Nested values are rebuilt in the target realm when there is one; a host
+    // with no window (a bare element probe) falls back to the global JSON, so
+    // the copy never dereferences a missing `win`.
+    const json = win?.JSON ?? JSON;
     for (const key of Object.keys(change)) {
       const value = change[key];
       detail[key] =
-        value !== null && typeof value === "object" ? win.JSON.parse(JSON.stringify(value)) : value;
+        value !== null && typeof value === "object" ? json.parse(json.stringify(value)) : value;
     }
     this.#target.dispatchEvent(new Ctor(STATUS_EVENT, { bubbles: false, detail }));
   }

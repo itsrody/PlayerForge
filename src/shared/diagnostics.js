@@ -18,7 +18,7 @@ const STYLES = {
 };
 
 /**
- * Chatter (log/group) is compiled out at runtime until enable() flips it -
+ * Chatter (log) is compiled out at runtime until enable() flips it -
  * page-facing cost of a disabled log call is one boolean check, no string
  * building, no console I/O. warn/error stay unconditional: they mark
  * exceptional paths and must surface even in silent mode.
@@ -36,17 +36,6 @@ function log(channel, ...args) {
   console.log(`%c${PREFIX}%c[${channel}]`, "color: #FF6B35", styleFor(channel), ...args);
 }
 
-function group(channel, label) {
-  if (!chatterEnabled) {
-    return;
-  }
-  console.group(`%c${PREFIX}%c[${channel}] ${label}`, "color: #FF6B35", styleFor(channel));
-}
-
-function groupEnd() {
-  console.groupEnd();
-}
-
 function warn(channel, ...args) {
   console.warn(`%c${PREFIX}%c[${channel}]`, "color: #FF6B35", STYLES.warn, ...args);
 }
@@ -59,8 +48,6 @@ export const logger = {
   log,
   warn,
   error,
-  group,
-  groupEnd,
   /** Enable chatter - wired to the #pf-debug hash / debug setting in kernel. */
   enable() {
     chatterEnabled = true;

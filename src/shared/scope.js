@@ -56,7 +56,11 @@ export class Scope {
    */
   onDispose(fn) {
     if (this.#disposed) {
-      fn();
+      // Isolated like the dispose() sweep: a throw from a late registrant
+      // must not escape into whatever is registering it.
+      try {
+        fn();
+      } catch {}
       return;
     }
     (this.#disposers ??= []).push(fn);
@@ -86,4 +90,35 @@ export class Scope {
       }
     }
   }
+}
+
+/**
+ * Register `cb` in `set` and tie its removal to `signal`, returning the
+ * unsubscribe. An already-aborted signal is refused outright rather than
+ * registered: an abort listener added to a dead signal never fires, so the
+ * callback would outlive the owner that asked for it - the trap every copy of
+ * this block used to re-defend by hand, and the one copy that forgot.
+ *
+ * `onRemove` runs once, only when the callback was actually removed, for an
+ * owner that must also release what the subscription started (a manager
+ * listener with no reason to outlive its last subscriber).
+ */
+export function subscribeWithSignal(set, cb, signal, onRemove) {
+  if (signal?.aborted) {
+    return () => {};
+  }
+  set.add(cb);
+  let removed = false;
+  const off = () => {
+    if (removed) {
+      return;
+    }
+    removed = true;
+    signal?.removeEventListener("abort", off);
+    if (set.delete(cb)) {
+      onRemove?.();
+    }
+  };
+  signal?.addEventListener("abort", off, { once: true });
+  return off;
 }

@@ -1,7 +1,13 @@
 /**
- * Engineering calibration - every tunable value in the codebase lives here.
- * These are behavior constants, not user preferences: no panel controls, no
- * storage. Grouped by subsystem, units embedded.
+ * Engineering calibration for the interaction and UI layers - every knob the
+ * shell shares lives here. These are behavior constants, not user
+ * preferences: no panel controls, no storage. Grouped by subsystem, units
+ * embedded.
+ *
+ * Self-contained engines keep their own calibration beside the code that owns
+ * it instead (scheduler's rAF backstop, dom-manager's batch caps, context's
+ * bridge timings, diagnostics' debug-gated thresholds): those are internal to
+ * one module, not the cross-layer values this table exists to collect.
  */
 export const TUNING = {
   gestures: {

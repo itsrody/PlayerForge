@@ -10,7 +10,7 @@ globalThis.MutationObserver = window.MutationObserver;
 // class; the deferred-flush visibility listener must resolve to it too.
 globalThis.AbortController = window.AbortController;
 
-const { onDomMutations, DOMManager, DomPool, trackScopedObserver, trackedObserverLabels } = await import("../src/shared/dom-manager.js");
+const { onDomMutations, DOMManager, DomPool, trackScopedObserver, trackedObserverLabels, applyAttrs } = await import("../src/shared/dom-manager.js");
 const { yield_ } = await import("../src/shared/scheduler.js");
 
 /**
@@ -297,6 +297,14 @@ test("createElement() binds on* handlers and drops them with the manager", () =>
   click(node);
   assert.equal(clicks, 1, "the handler went with the manager's signal");
   el.remove();
+});
+
+test("applyAttrs sets class on an SVG node, where className is read-only", () => {
+  // SVGElement.className is an SVGAnimatedString: assigning it is at best a
+  // silent no-op, so the class map must go through setAttribute to land.
+  const node = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  applyAttrs(node, { class: "pf-icon" });
+  assert.equal(node.getAttribute("class"), "pf-icon");
 });
 
 test("own() adopts a tree built elsewhere", () => {

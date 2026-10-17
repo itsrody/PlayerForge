@@ -15,7 +15,6 @@ test("logger chatter gates on enable/disable, warn stays unconditional", async (
 
     // Fresh module state: silent until enabled.
     logger.log("test", "hidden");
-    logger.group("test", "hidden");
     assert.equal(logCalls, 0);
 
     logger.enable();

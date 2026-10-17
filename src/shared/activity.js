@@ -33,6 +33,12 @@ import { Scope } from "./scope.js";
  * re-enter, because `isActive()` still answers true. `refresh()` re-reads the
  * property for the rare caller that changed state through a route Gecko does
  * not fire an event for.
+ *
+ * Disposal is not an exit edge. `dispose()` - and the owner's abort, which is
+ * the same teardown - releases the work scope without running `onExit`,
+ * because the owner that would consume the flush is already gone. A caller
+ * that needs a final flush on teardown runs it in its own destroy path (see
+ * `ResumeStore.destroy`, which flushes separately).
  */
 export function createActivity({ target, events, isActive, onEnter, onExit, signal }) {
   let work = null;

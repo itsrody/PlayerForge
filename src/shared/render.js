@@ -47,9 +47,9 @@ import { postTask } from "./scheduler.js";
  *   same-or-lower one is dropped, because the pending task already outranks it.
  *   Either way there is still exactly one commit this tick.
  *
- *   Aborted with its owner. The controller is a child of the session scope, so
- *   `pagehide` / kernel teardown / SPA re-injection leaves no task to fire into
- *   a dead DOM.
+ *   Aborted with its owner: the gate's own controller follows the session
+ *   scope's signal (see the constructor), so `pagehide` / kernel teardown /
+ *   SPA re-injection leaves no task to fire into a dead DOM.
  *
  * The commit reads *current state*, not a delta. That is what makes dropping a
  * request raised mid-commit safe for the one producer registered so far: the

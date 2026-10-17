@@ -417,6 +417,29 @@ test("a subscriber that throws does not take out the ones after it", async (t) =
   assert.deepEqual(reached, ["playback"]);
 });
 
+test("a failing realm publish still delivers to subscribers", async (t) => {
+  // The in-realm fan-out must not depend on the page-world CustomEvent: a
+  // detail that cannot be built (or a host that refuses the dispatch) is the
+  // page's problem, not the subscriber's.
+  const { status, video } = harness(t);
+  const reached = [];
+  status.subscribe((change) => reached.push(change.name));
+  const dispatch = video.dispatchEvent.bind(video);
+  video.dispatchEvent = (event) => {
+    if (event.type === STATUS_EVENT) {
+      throw new Error("no detail for you");
+    }
+    return dispatch(event);
+  };
+  try {
+    fire(video, "playing");
+    await tick();
+  } finally {
+    video.dispatchEvent = dispatch;
+  }
+  assert.deepEqual(reached, ["playback"]);
+});
+
 test("unsubscribing stops delivery; a second unsubscribe is a no-op", async (t) => {
   const { status, changes, video } = harness(t);
   const seen = [];

@@ -13,6 +13,7 @@
 
 import { createActivity } from "./activity.js";
 import { logger } from "./diagnostics.js";
+import { subscribeWithSignal } from "./scope.js";
 
 /**
  * The deepest active element, piercing open shadow boundaries.
@@ -227,28 +228,10 @@ export function initFullscreenGate(doc = document) {
 /**
  * Subscribe to fullscreen state transitions (fires only on an actual flip,
  * before the gates' consumers observe the new `fs`). Returns an unsubscribe
- * function; pass `signal` to have it torn down automatically.
+ * function; pass `signal` to have it torn down automatically. The already-
+ * aborted refusal and the retained-listener cleanup live in the shared
+ * abort-scoped helper (see scope.js).
  */
 export function subscribeFullscreen(cb, signal) {
-  fsSubscribers.add(cb);
-  if (signal) {
-    // Same already-aborted trap as the status subscriber: the listener would
-    // never fire, leaking the subscription past its owner's teardown.
-    if (signal.aborted) {
-      fsSubscribers.delete(cb);
-      return () => {};
-    }
-    // Named so both ends drop it: an unsubscribe ends the purpose early,
-    // and a dead once-listener would stay retained by the owner signal.
-    const onOwnerAbort = () => {
-      signal.removeEventListener("abort", onOwnerAbort);
-      fsSubscribers.delete(cb);
-    };
-    signal.addEventListener("abort", onOwnerAbort, { once: true });
-    return () => {
-      signal.removeEventListener("abort", onOwnerAbort);
-      fsSubscribers.delete(cb);
-    };
-  }
-  return () => fsSubscribers.delete(cb);
+  return subscribeWithSignal(fsSubscribers, cb, signal);
 }
