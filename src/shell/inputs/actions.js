@@ -168,7 +168,7 @@ const SCRUB_CURVE_IS_SQRT = SCRUB_EXPONENT === 1.5;
 
 /* get() is stateFor(shell); release() is its teardown half, so the pool is
  * only ever touched from inside this closure. */
-const { get: stateFor, release: releaseStateFor } = (() => {
+const { get: stateFor, peek: peekStateFor, release: releaseStateFor } = (() => {
   const states = new WeakMap();
   return {
     get(shell) {
@@ -213,6 +213,11 @@ const { get: stateFor, release: releaseStateFor } = (() => {
         states.set(shell, state);
       }
       return state;
+    },
+    /** Non-allocating read for teardown/reset paths: never mints a state just
+     *  to look at it (unlike get), returns undefined when none exists. */
+    peek(shell) {
+      return states.get(shell);
     },
     release(shell) {
       const state = states.get(shell);
@@ -316,6 +321,11 @@ export function easeTransformTo(video, transform) {
       }
       pendingEase.delete(video);
       video.style.transition = "";
+      // The cancel listener below guards on `pendingEase.get(video) === stop`,
+      // which this delete has already made false - so its dropPromotion can
+      // never run. Drop the layer here or a teardown cancel (cancelEase) leaves
+      // will-change: transform inline on the embed's video.
+      dropPromotion(video);
       animation.cancel();
     };
     pendingEase.set(video, stop);
@@ -347,6 +357,9 @@ export function easeTransformTo(video, transform) {
     video.removeEventListener("transitioncancel", onCancel);
     if (pendingEase.get(video) === pendingStop) {
       pendingEase.delete(video);
+      // Mirror the WAAPI path: clear the shorthand and drop the layer, so the
+      // eased transition never lingers on the host element after it settles.
+      video.style.transition = "";
       dropPromotion(video);
     }
   };
@@ -476,8 +489,8 @@ export function attachInputActions(shell, host, signal) {
   /** Fullscreen exit also collapses fill mode - the one cross-feature rule. */
   subscribeFullscreen((active) => {
     if (!active) {
-      const state = stateFor(shell);
-      if (state.fillActive) {
+      const state = peekStateFor(shell);
+      if (state?.fillActive) {
         clearFillMode(shell, state, false);
       }
     }
@@ -489,7 +502,13 @@ export function attachInputActions(shell, host, signal) {
     }
     const state = stateFor(shell);
     const source = detail.method || "pointer";
-    if (state.activeHolds.has(source) || (state.activeHolds.add(source), state.activeHolds.size > 1)) {
+    if (state.activeHolds.has(source)) {
+      return;
+    }
+    // Track every holding source, but only the first one actually boosts - a
+    // second source joining a live hold must not re-capture the saved rate.
+    state.activeHolds.add(source);
+    if (state.activeHolds.size > 1) {
       return;
     }
     const speed = TUNING.controller.holdSpeed;
@@ -499,9 +518,9 @@ export function attachInputActions(shell, host, signal) {
   }, { signal });
 
   host.addEventListener(GESTURE_EVENTS.release, ({ detail }) => {
-    const state = stateFor(shell);
+    const state = peekStateFor(shell);
     const source = detail.method || "pointer";
-    if (!state.activeHolds.delete(source) || state.activeHolds.size > 0) {
+    if (!state || !state.activeHolds.delete(source) || state.activeHolds.size > 0) {
       return;
     }
     if (shell.video) {

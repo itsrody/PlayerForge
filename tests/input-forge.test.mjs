@@ -330,6 +330,65 @@ test("key arbitration: destroying the owner hands keys to the survivor", () => {
   assert.equal(seenB.length, 1, "a torn-down broker must not claim anything");
 });
 
+test("a hotkey claimed mid-hold does not retarget the Space release", async (t) => {
+  const { dom, video, zone, host } = makeEnv();
+  Object.defineProperty(video, "paused", { value: false, configurable: true });
+  const video2 = dom.window.document.createElement("video");
+  dom.window.document.body.appendChild(video2);
+  video2.getBoundingClientRect = video.getBoundingClientRect;
+  Object.defineProperty(video2, "readyState", { value: 4, configurable: true });
+  const zone2 = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(zone2);
+  const host2 = dom.window.document.createElement("div");
+  dom.window.document.body.appendChild(host2);
+
+  const broker = new EngineBroker();
+  const controllerA = new InputForge(video, zone, host, broker);
+  const controllerB = new InputForge(video2, zone2, host2, broker);
+  t.after(() => {
+    controllerA.destroy();
+    controllerB.destroy();
+  });
+  const seenA = collect(host, dom.window);
+  const seenB = collect(host2, dom.window);
+
+  // Touch A so it tops the arbitration ladder, then start the Space hold there.
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  zone.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 400, y: 200 }));
+  space(dom.window, "keydown");
+  await sleep(350);
+  assert.equal(
+    seenA.filter((e) => e.type === GESTURE_EVENTS.hold).length, 1,
+    "A owns and holds the Space press"
+  );
+  // A need only have been playing to arm the hold; park it so recency alone
+  // decides the next key, then hand recency to B.
+  Object.defineProperty(video, "paused", { value: true, configurable: true });
+
+  // A hotkey arrives while B is the most-recently-touched engine: B wins it.
+  // That claim must not steal A's in-flight Space release (the old broker set
+  // #owner on every claimed key), which would leave A's boost latched.
+  zone2.dispatchEvent(pointerEvent(dom.window, "pointerdown", { x: 400, y: 200 }));
+  zone2.dispatchEvent(pointerEvent(dom.window, "pointerup", { x: 400, y: 200 }));
+  dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", {
+    code: "ArrowUp", bubbles: true, cancelable: true
+  }));
+  assert.equal(
+    seenB.filter((e) => e.type === GESTURE_EVENTS.volume).length, 1,
+    "B won the arrow by recency"
+  );
+
+  space(dom.window, "keyup");
+  assert.equal(
+    seenA.filter((e) => e.type === GESTURE_EVENTS.release).length, 1,
+    "the Space release still reaches its holder, not the arrow's engine"
+  );
+  assert.equal(
+    seenB.filter((e) => e.type === GESTURE_EVENTS.release).length, 0,
+    "B never held Space, so it must not release"
+  );
+});
+
 test("an engine left over from another realm cannot claim this one's keys", () => {
   // A player that was never torn down still holds a loaded video, but it
   // belongs to a different document. The broker is realm-scoped, so it must not

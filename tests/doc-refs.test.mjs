@@ -37,7 +37,7 @@ const REFS = [
   { file: "src/shell/chrome/panel.js", line: 129, anchor: "setInterval" },
   { file: "src/kernel/contract.js", line: 21, anchor: "SHELL_MARKER" },
   { file: "esbuild.config.mjs", line: 173, anchor: "fingerprint" },
-  { file: "src/shell/inputs/forge.js", line: 880, anchor: "ResizeObserver" },
+  { file: "src/shell/inputs/forge.js", line: 888, anchor: "ResizeObserver" },
   { file: "src/shared/status-manager.js", line: 71, anchor: "PIP" },
   { file: "src/shared/status-manager.js", line: 471, anchor: "VISIBLE or BACKGROUND" },
   { file: "src/shell/resume.js", line: 717, anchor: "new IntersectionObserver" },
@@ -56,9 +56,9 @@ const REFS = [
   { file: "src/shell/chrome/inject.js", line: 88, anchor: "child ever changes index" },
   { file: "src/shell/shell.js", line: 671, anchor: "this.#onDestroy?.(this)" },
   { file: "src/shared/render.js", line: 140, anchor: "if (this.#running)" },
-  { file: "src/shell/inputs/actions.js", line: 552, anchor: "x ** SCRUB_EXPONENT" },
-  { file: "src/shell/inputs/forge.js", line: 1008, anchor: "#swipeDirection" },
-  { file: "src/shell/inputs/forge.js", line: 1009, anchor: "#swipeBaseTransform" },
+  { file: "src/shell/inputs/actions.js", line: 571, anchor: "x ** SCRUB_EXPONENT" },
+  { file: "src/shell/inputs/forge.js", line: 1016, anchor: "#swipeDirection" },
+  { file: "src/shell/inputs/forge.js", line: 1017, anchor: "#swipeBaseTransform" },
 ];
 
 function lineOf(file, line) {

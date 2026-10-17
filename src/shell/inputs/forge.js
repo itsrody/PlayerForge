@@ -1,4 +1,5 @@
-import { allowsIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo, cancelEase } from "./actions.js";
+import { allowsIntent, isKeyArmed, KEY_BINDINGS, easeTransformTo, cancelEase } from "./actions.js";
+import { GESTURE_EVENTS } from "../../kernel/contract.js";
 import { TUNING } from "../../shared/tuning.js";
 import { deepestActiveElement, isInsideShell, eventHitsControl, fs, subscribeFullscreen } from "../../shared/shadow.js";
 import { DOMManager } from "../../shared/dom-manager.js";
@@ -196,7 +197,13 @@ export class EngineBroker {
     this.#orderEngines(deepestActiveElement(document));
     for (const engine of this.#order) {
       if (engine.keydown(event)) {
-        this.#owner = engine;
+        // Only Space has a release half routed through #owner (keyup/blur). A
+        // hotkey claim must not retarget an in-flight Space press: a sibling
+        // that wins an arrow mid-hold would otherwise swallow the Space keyup
+        // and leave the original engine's boost latched.
+        if (event.code === "Space") {
+          this.#owner = engine;
+        }
         this.#lastTouched = engine;
         return;
       }
@@ -599,9 +606,9 @@ export class InputForge {
     }
     this.#trackpadPinchSubscribed = false;
     if (this.#wheelHandler) {
-      // Managed manually: live scoping needs add/remove symmetry outside the
-      // shared AbortSignal.
-      this.#zone.removeEventListener("wheel", this.#wheelHandler, true);
+      // Same descriptor as the attach: only `capture` is matched on removal,
+      // but mirroring the object keeps the two ends obviously paired.
+      this.#zone.removeEventListener("wheel", this.#wheelHandler, WHEEL_CAPTURE);
       this.#wheelHandler = null;
     }
   }
@@ -737,6 +744,10 @@ export class InputForge {
   }
 
   #beginPinchTracking() {
+    // Latch the zone the first press established BEFORE ending the session:
+    // #endPointerSession clears #gestureZone, so reading it afterwards would
+    // always fall back to "screen" and drop edge attribution.
+    const zone = this.#gestureZone || "screen";
     this.#endPointerSession();
     this.#primaryPointerId = null;
     for (const pointerId of this.#pointers.keys()) {
@@ -744,7 +755,7 @@ export class InputForge {
     }
     this.#pinchStartDistance = 0;
     this.#pinchFired = false;
-    this.#pinchZone = this.#gestureZone || "screen";
+    this.#pinchZone = zone;
     clearTimeout(this.#pinchInitTimer);
     this.#pinchInitTimer = setTimeout(() => {
       this.#pinchInitTimer = null;
@@ -797,9 +808,6 @@ export class InputForge {
    */
   #shouldHandleKeys(allowControlFocus = false) {
     const activeElement = deepestActiveElement(this.#eventTarget);
-    if (!this.#zone) {
-      return false;
-    }
     if (!this.#keysAllowedForTarget(activeElement, allowControlFocus)) {
       return false;
     }

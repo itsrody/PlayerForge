@@ -19,6 +19,8 @@ globalThis.GM_addValueChangeListener = () => {};
 const {
   attachInputActions,
   releaseShellActions,
+  easeTransformTo,
+  cancelEase,
   GESTURE_EVENTS
 } = await import("../src/shell/inputs/actions.js");
 
@@ -116,4 +118,65 @@ test("a released shell can be filled again from a clean slate", () => {
   // leftovers the first release wrote.
   assert.equal(video.style.objectFit, "cover");
   assert.equal(video.style.transform, "rotate(1deg)");
+});
+
+/** A minimal WAAPI animation stand-in that records cancel and lets a test fire
+ *  the finish/cancel listeners synchronously. */
+function fakeAnimation() {
+  const listeners = new Map();
+  return {
+    addEventListener(type, fn) {
+      listeners.set(type, fn);
+    },
+    cancel() {
+      listeners.get("cancel")?.();
+    },
+    finish() {
+      listeners.get("finish")?.();
+    }
+  };
+}
+
+test("cancelling an in-flight WAAPI ease drops the compositor promotion", () => {
+  const priorGCS = globalThis.getComputedStyle;
+  globalThis.getComputedStyle = () => ({ transform: "none" });
+  try {
+    const video = {
+      style: { transform: "", transition: "", willChange: "" },
+      addEventListener() {},
+      removeEventListener() {},
+      animate: () => fakeAnimation()
+    };
+
+    easeTransformTo(video, "scale(2)");
+    assert.equal(video.style.willChange, "transform", "precondition: the ease promoted the layer");
+
+    // cancelEase is the teardown path (InputForge.destroy). The cancel listener
+    // can no longer see the pending ref once stop() deleted it, so the layer
+    // must be dropped by stop() itself or it lingers on the host video.
+    cancelEase(video);
+    assert.equal(video.style.willChange, "", "a cancelled ease must not leave will-change promoted");
+  } finally {
+    globalThis.getComputedStyle = priorGCS;
+  }
+});
+
+test("the CSS-transition fallback clears its shorthand when it settles", () => {
+  const listeners = new Map();
+  const video = {
+    style: { transform: "", transition: "", willChange: "" },
+    addEventListener(type, fn) {
+      listeners.set(type, fn);
+    },
+    removeEventListener(type) {
+      listeners.delete(type);
+    }
+  };
+
+  easeTransformTo(video, "scale(2)");
+  assert.match(video.style.transition, /transform/, "precondition: the fallback armed a transition");
+
+  listeners.get("transitionend")({ propertyName: "transform" });
+  assert.equal(video.style.transition, "", "the fallback must not leave the shorthand armed");
+  assert.equal(video.style.willChange, "", "the layer is dropped when the transition settles");
 });
