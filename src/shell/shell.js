@@ -17,6 +17,7 @@ import { requestFullscreenProvision } from "../shared/context.js";
 import { DOMManager } from "../shared/dom-manager.js";
 import { Scope } from "../shared/scope.js";
 import { yield_ } from "../shared/scheduler.js";
+import { runSteps, runStepsAsync } from "../shared/steps.js";
 
 /**
  * Surfaces that legitimately own the native context menu inside the shell:
@@ -36,6 +37,27 @@ const MEDIA_ERROR_LABELS = {
 };
 
 /**
+ * Panel sections, in the order they appear, built lazily on the panel's first
+ * open (never at boot). Each entry runs with a `{ shell, panel, signal }`
+ * context and returns a section that owns a destroy() - or nothing when the
+ * panel itself owns the teardown (history, settings register into the panel
+ * tree, whose destroy() already takes them down). The boot loop yields to the
+ * event loop BETWEEN entries so the first-open construction burst never wedges
+ * input handling. Order here is the single source of truth for both build and
+ * teardown.
+ */
+const PANEL_SECTIONS = [
+  ({ shell }) => new SubtitlesSection(shell),
+  ({ shell, panel }) => new VideoFilter(shell, panel),
+  ({ shell, panel }) => {
+    addHistorySection(panel, shell);
+  },
+  ({ panel, signal }) => {
+    addSettingsSection(panel, signal);
+  }
+];
+
+/**
  * Per-video facade: wraps the media element with a stable API, injects the
  * HUD, hosts the input layer, playback tracking, subtitles, and settings
  * panel, tracks fullscreen state, and wires MediaSession.
@@ -49,8 +71,8 @@ export class Shell {
   #shellDom = null;
   #inputs = null;
   #resume = null;
-  #subtitles = null;
-  #filter = null;
+  /** Lazy panel sections built on first open; torn down with the shell. */
+  #panelSections = [];
   #panel;
   #toasts = null;
   /** Pooled reference-box result + validity flag (see the referenceBox getter). */
@@ -100,35 +122,42 @@ export class Shell {
     attachInputActions(this, this.shellHost, this.#inputs.signal);
     this.#resume = new ResumeTracker(this);
 
-    // Lazy section builder: panel sections (subtitles, filter, history,
-    // settings) are constructed on first open to keep boot fast. Construction
-    // yields to the event loop between sections so the first-open burst never
-    // wedges input handling.
-    this.#panel.setSectionBuilder(async () => {
-      this.#subtitles = new SubtitlesSection(this);
-      await yield_();
-      this.#filter = new VideoFilter(this, this.#panel);
-      await yield_();
-      addHistorySection(this.#panel, this);
-      await yield_();
-      addSettingsSection(this.#panel, this.#scope.signal);
+    // Lazy section builder: panel sections are constructed on first open to
+    // keep boot fast. The table is the single source of truth for the section
+    // order; the step loop yields between entries so the first-open burst
+    // never wedges input handling.
+    this.#panel.setSectionBuilder(() => {
+      const context = { shell: this, panel: this.#panel, signal: this.#scope.signal };
+      return runStepsAsync(
+        PANEL_SECTIONS.map((build) => () => {
+          const section = build(context);
+          if (section) {
+            this.#panelSections.push(section);
+          }
+        }),
+        { yieldBetween: true }
+      );
     });
 
-    this.#setupFocusManagement();
-    this.#suppressContextMenu();
-    this.#forwardMediaEvents();
-    this.#watchMediaErrors();
-    this.#mediaSession = claimMediaSession({
-      controls: this.#media,
-      video: this.video,
-      signal: this.#scope.signal
-    });
-    this.#watchFullscreen();
-    this.#watchWakeLock();
-    this.#watchOrientation();
-    this.#watchReferenceBoxSize();
-    this.#watchVisualViewport();
-    this.#markManaged();
+    runSteps([
+      () => this.#setupFocusManagement(),
+      () => this.#suppressContextMenu(),
+      () => this.#forwardMediaEvents(),
+      () => this.#watchMediaErrors(),
+      () => {
+        this.#mediaSession = claimMediaSession({
+          controls: this.#media,
+          video: this.video,
+          signal: this.#scope.signal
+        });
+      },
+      () => this.#watchFullscreen(),
+      () => this.#watchWakeLock(),
+      () => this.#watchOrientation(),
+      () => this.#watchReferenceBoxSize(),
+      () => this.#watchVisualViewport(),
+      () => this.#markManaged()
+    ]);
     logger.log("shell", `Shell "${this.sdk.name}" constructed`);
   }
 
@@ -539,28 +568,45 @@ export class Shell {
       return;
     }
     logger.log("shell", `Destroying shell "${this.sdk.name}"`);
-    // Scope first: flips disposed (re-entrancy guard), aborts the shared
-    // signal (MediaSession/settings/fullscreen listeners die natively).
-    this.#scope.dispose();
-    // Destroy sub-components (each manages its own internal state).
-    this.#resume?.destroy();
-    this.#resume = null;
-    this.#subtitles?.destroy();
-    this.#subtitles = null;
-    this.#filter?.destroy();
-    this.#filter = null;
-    this.#wakeLockAbort?.abort();
-    this.#wakeLockAbort = null;
-    this.#inputs?.destroy();
-    this.#inputs = null;
-    this.#panel?.destroy();
-    this.#panel = null;
-    this.#toasts?.destroy();
-    this.#toasts = null;
-    // DOM lifecycle: remove elements, disconnect observers, remove
-    // listeners, restore attributes/styles — all in one call.
-    this.#dom.destroy();
-    this.#shellDom = null;
-    this.#onDestroy?.(this);
+    runSteps([
+      // Scope first: flips disposed (re-entrancy guard), aborts the shared
+      // signal (MediaSession/settings/fullscreen listeners die natively).
+      () => this.#scope.dispose(),
+      // Destroy sub-components (each manages its own internal state). Lazy
+      // panel sections tear down in build order.
+      () => {
+        this.#resume?.destroy();
+        this.#resume = null;
+      },
+      () => {
+        for (const section of this.#panelSections) {
+          section.destroy();
+        }
+        this.#panelSections = [];
+      },
+      () => {
+        this.#wakeLockAbort?.abort();
+        this.#wakeLockAbort = null;
+      },
+      () => {
+        this.#inputs?.destroy();
+        this.#inputs = null;
+      },
+      () => {
+        this.#panel?.destroy();
+        this.#panel = null;
+      },
+      () => {
+        this.#toasts?.destroy();
+        this.#toasts = null;
+      },
+      // DOM lifecycle: remove elements, disconnect observers, remove
+      // listeners, restore attributes/styles - all in one call.
+      () => {
+        this.#dom.destroy();
+        this.#shellDom = null;
+      },
+      () => this.#onDestroy?.(this)
+    ]);
   }
 }

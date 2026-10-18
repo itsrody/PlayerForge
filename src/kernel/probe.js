@@ -21,8 +21,7 @@
  * documents without a usable player never boot a kernel.
  */
 import { logger } from "../shared/logger.js";
-import { watchMediaEvents, meetsMinSize, createLayoutGate, createOnScreenGate, isOnScreen, hasPresentBox, forEachVideoInMutations } from "./sdk.js";
-import { onDomMutations } from "../shared/dom-watch.js";
+import { createDiscoveryTap, meetsMinSize, createLayoutGate, createOnScreenGate, isOnScreen, hasPresentBox } from "./sdk.js";
 
 /**
  * Returns an idempotent stop() that cancels discovery when the kernel never
@@ -32,9 +31,6 @@ import { onDomMutations } from "../shared/dom-watch.js";
  */
 export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
   let done = false;
-  let escalated = false;
-  let offMutations = null;
-  let stopEvents = null;
   // Re-checks candidates that failed the size gate when their box grows: the
   // observer-driven layout-presence gate re-reads the delivered box (no forced
   // reflow) and lands off the mutation batch, so a candidate that only reaches
@@ -44,12 +40,12 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
   // full kernel boot is not paid for a video the user cannot see. The lookahead
   // margin readies the shell just before it scrolls in.
   const onScreenGate = createOnScreenGate();
+  // Starts as the cheap media-event tap; consider() escalates it to the full
+  // document observer once a rendered candidate appears (see below).
+  const tap = createDiscoveryTap(consider, { mutations: false });
 
   const detach = () => {
-    stopEvents?.();
-    stopEvents = null;
-    offMutations?.();
-    offMutations = null;
+    tap.stop();
     layoutGate.stop();
     onScreenGate.stop();
   };
@@ -62,19 +58,6 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
     detach();
     logger.log("probe", "Video candidate found - booting kernel");
     onCandidate();
-  };
-
-  const escalate = () => {
-    if (escalated) {
-      return;
-    }
-    escalated = true;
-    offMutations = onDomMutations((mutations) => {
-      if (done) {
-        return;
-      }
-      forEachVideoInMutations(mutations, consider);
-    });
   };
 
   // A player-sized candidate that is not yet on screen (a carousel slide, a
@@ -92,7 +75,7 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
     onScreenGate.watch(video, () => tryFinish(video));
   };
 
-  const consider = (video) => {
+  function consider(video) {
     if (done) {
       return;
     }
@@ -110,12 +93,10 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
     // changes its box can qualify it, and a hidden-but-real player is caught
     // when it starts loading/playing (media events route back here).
     if (hasPresentBox(video)) {
-      escalate();
+      tap.escalate();
     }
     layoutGate.watch(video, () => tryFinish(video));
-  };
-
-  stopEvents = watchMediaEvents(consider);
+  }
 
   // Cheap deferred check (atomic, no observer): videos already in the parsed
   // DOM surface without any media event or mutation subscription.

@@ -327,6 +327,62 @@ function entryBoxSize(entry) {
 }
 
 /**
+ * Shared engine behind createLayoutGate / createOnScreenGate. Both gates are
+ * the same step shape: register an element + callback in a WeakMap, let ONE
+ * observer fire the callback exactly once when the element qualifies, dedupe
+ * repeat watches, and tear everything down in one stop(). They differ only in
+ * which observer is used, what "qualifies" means, what an API-less host falls
+ * back to, and an optional side-channel listener with its own teardown.
+ *
+ * `createObserver(cb)` returns a fresh observer, or null when the host lacks
+ * the API (then `fallbackWatch` stands in). `qualifies(entry)` decides an
+ * observer entry is a pass. `extras(qualify)` may register a side-channel
+ * listener and returns its teardown.
+ */
+function createPresenceGate({ createObserver, qualifies, fallbackWatch, extras }) {
+  if (!createObserver) {
+    return { watch: fallbackWatch, stop() {} };
+  }
+  // WeakMap, not Map: neither observer notifies when an observed target is
+  // removed from the DOM, so a detached candidate that never qualified would
+  // otherwise be pinned (and so would the observer's own target list) until
+  // stop() - a leak that matters for the long-lived kernel gate on an SPA that
+  // recycles players. stop() swaps in a fresh one instead of clear().
+  let waiting = new WeakMap();
+  function qualify(target) {
+    if (!waiting.has(target)) {
+      return;
+    }
+    observer.unobserve(target);
+    const onQualify = waiting.get(target);
+    waiting.delete(target);
+    onQualify?.();
+  }
+  const observer = createObserver((entries) => {
+    for (const entry of entries) {
+      if (waiting.has(entry.target) && qualifies(entry)) {
+        qualify(entry.target);
+      }
+    }
+  });
+  const removeExtras = extras?.(qualify);
+  return {
+    watch(target, onQualify) {
+      if (waiting.has(target)) {
+        return;
+      }
+      waiting.set(target, onQualify);
+      observer.observe(target);
+    },
+    stop() {
+      observer.disconnect();
+      removeExtras?.();
+      waiting = new WeakMap();
+    }
+  };
+}
+
+/**
  * Observer-driven layout-presence gate. Watches candidates that are not yet
  * player-sized and calls back the first time their delivered ResizeObserver
  * box both reaches minimum size AND passes the CSS-presence check. Because
@@ -343,45 +399,6 @@ function entryBoxSize(entry) {
  * gate and still qualifies immediately.
  */
 export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_VIDEO_HEIGHT } = {}) {
-  if (typeof ResizeObserver !== "function") {
-    return {
-      watch(video, onQualify) {
-        if (meetsMinSize(video, minWidth, minHeight)) {
-          onQualify();
-        }
-      },
-      stop() {}
-    };
-  }
-  // WeakMap, not Map: ResizeObserver never notifies when an observed target is
-  // removed from the DOM, so a detached candidate that never reached player
-  // size would otherwise be pinned by this table (and the observer's own
-  // target list) until stop() - a leak that matters for the long-lived kernel
-  // gate on an SPA that recycles players. Only has/get/set/delete are used, so
-  // a WeakMap is a drop-in; stop() swaps in a fresh one instead of clear().
-  let waiting = new WeakMap();
-  const observer = new ResizeObserver((entries) => {
-    for (const entry of entries) {
-      const target = entry.target;
-      if (!waiting.has(target)) {
-        continue;
-      }
-      const { width, height } = entryBoxSize(entry);
-      if (width < minWidth || height < minHeight || !hasPresentBox(target)) {
-        continue;
-      }
-      qualify(target);
-    }
-  });
-  const qualify = (target) => {
-    if (!waiting.has(target)) {
-      return;
-    }
-    observer.unobserve(target);
-    const onQualify = waiting.get(target);
-    waiting.delete(target);
-    onQualify?.();
-  };
   // content-visibility: auto subtrees report an unchanged placeholder box to
   // ResizeObserver when they flip back into rendering, so the delivered size
   // alone can never re-qualify one. The native autostatechange event is the
@@ -389,28 +406,31 @@ export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_V
   // non-bubbling dispatch without a per-target listener that would otherwise
   // pin a detached, never-sized video. Guarded so a host without a global
   // document (the unit harness before it installs one) still constructs.
-  const onReveal = (event) => {
-    const target = event.target;
-    if (target && waiting.has(target) && meetsMinSize(target, minWidth, minHeight)) {
-      qualify(target);
-    }
-  };
   const doc = typeof document !== "undefined" ? document : null;
-  doc?.addEventListener("contentvisibilityautostatechange", onReveal, true);
-  return {
-    watch(video, onQualify) {
-      if (waiting.has(video)) {
-        return;
-      }
-      waiting.set(video, onQualify);
-      observer.observe(video);
+  return createPresenceGate({
+    createObserver: typeof ResizeObserver === "function"
+      ? (cb) => new ResizeObserver(cb)
+      : null,
+    qualifies: (entry) => {
+      const { width, height } = entryBoxSize(entry);
+      return width >= minWidth && height >= minHeight && hasPresentBox(entry.target);
     },
-    stop() {
-      observer.disconnect();
-      doc?.removeEventListener("contentvisibilityautostatechange", onReveal, true);
-      waiting = new WeakMap();
+    fallbackWatch: (video, onQualify) => {
+      if (meetsMinSize(video, minWidth, minHeight)) {
+        onQualify();
+      }
+    },
+    extras: (qualify) => {
+      const onReveal = (event) => {
+        const target = event.target;
+        if (target && meetsMinSize(target, minWidth, minHeight)) {
+          qualify(target);
+        }
+      };
+      doc?.addEventListener("contentvisibilityautostatechange", onReveal, true);
+      return () => doc?.removeEventListener("contentvisibilityautostatechange", onReveal, true);
     }
-  };
+  });
 }
 
 /**
@@ -452,49 +472,21 @@ export function isOnScreen(el, margin = ON_SCREEN_MARGIN_PX) {
  * immediately, so a host lacking the API keeps the previous eager behavior.
  */
 export function createOnScreenGate({ rootMargin = `${ON_SCREEN_MARGIN_PX}px` } = {}) {
-  if (typeof IntersectionObserver !== "function") {
-    return {
-      watch(_el, onEnter) {
-        onEnter();
-      },
-      stop() {}
-    };
-  }
-  let callbacks = new WeakMap();
-  const observer = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (!entry.isIntersecting) {
-        continue;
-      }
-      const onEnter = callbacks.get(entry.target);
-      if (!onEnter) {
-        continue;
-      }
-      observer.unobserve(entry.target);
-      callbacks.delete(entry.target);
-      onEnter();
-    }
-  }, { rootMargin });
-  return {
-    watch(el, onEnter) {
-      if (callbacks.has(el)) {
-        return;
-      }
-      callbacks.set(el, onEnter);
-      observer.observe(el);
-    },
-    stop() {
-      observer.disconnect();
-      callbacks = new WeakMap();
-    }
-  };
+  return createPresenceGate({
+    createObserver: typeof IntersectionObserver === "function"
+      ? (cb) => new IntersectionObserver(cb, { rootMargin })
+      : null,
+    qualifies: (entry) => entry.isIntersecting,
+    fallbackWatch: (_el, onEnter) => onEnter()
+  });
 }
 
 /**
- * Capture-phase media-event tap with NO mutation observer - the cheap signal
- * used by the two-phase boot probe before it commits to a full-document
- * observer. Media events travel the composed path to document, so even
- * shadow-hosted SDK videos surface here without any subtree observer.
+ * Capture-phase media-event tap with NO mutation observer - the cheap floor of
+ * every discovery tap (createDiscoveryTap). The boot probe starts here and only
+ * commits to a full-document observer once there is evidence of a player.
+ * Media events travel the composed path to document, so even shadow-hosted SDK
+ * videos surface here without any subtree observer.
  *
  * Accepts an optional AbortSignal: on abort the browser drops both capture
  * listeners itself - no manual unsubscribe needed for pagehide teardown. The
@@ -523,19 +515,42 @@ export function watchMediaEvents(onVideo, { signal } = {}) {
 }
 
 /**
- * Full discovery tap used by the kernel's permanent rider: capture media
- * events plus the shared dom-watch dispatcher, multiplexed to a subscriber.
- * This is the heavier signal (it keeps a full-document childList+subtree
- * observer alive while subscribed); the boot probe prefers watchMediaEvents.
- * Returns the unsubscribe function.
+ * One discovery tap: the capture-phase media-event feed plus, optionally, the
+ * shared full-document mutation feed, multiplexed into a single `onVideo`.
+ * `escalate()` upgrades a media-only tap to the full tap in place, so the boot
+ * probe can start cheap and commit to the document observer only once there is
+ * evidence of a player. `stop()` detaches whichever feeds are live. This is the
+ * single definition of how videos are discovered; the kernel and the boot
+ * probe differ only in when they escalate.
+ */
+export function createDiscoveryTap(onVideo, { mutations = true } = {}) {
+  const offEvents = watchMediaEvents(onVideo);
+  let offMutations = null;
+  const escalate = () => {
+    if (!offMutations) {
+      offMutations = onDomMutations((records) => forEachVideoInMutations(records, onVideo));
+    }
+  };
+  if (mutations) {
+    escalate();
+  }
+  return {
+    escalate,
+    stop() {
+      offEvents();
+      offMutations?.();
+      offMutations = null;
+    }
+  };
+}
+
+/**
+ * Full discovery tap used by the kernel's permanent rider: media events plus
+ * the shared dom-watch dispatcher. This is the heavier signal (it keeps a
+ * full-document childList+subtree observer alive while subscribed); the boot
+ * probe uses createDiscoveryTap(..., { mutations: false }) and escalates on
+ * demand. Returns the unsubscribe function.
  */
 export function watchDocumentVideos(onVideo) {
-  const offEvents = watchMediaEvents(onVideo);
-  const offMutations = onDomMutations((mutations) => {
-    forEachVideoInMutations(mutations, onVideo);
-  });
-  return () => {
-    offEvents();
-    offMutations();
-  };
+  return createDiscoveryTap(onVideo).stop;
 }

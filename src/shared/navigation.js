@@ -23,20 +23,35 @@
  * Returns an unsubscribe function; passing `signal` tears the subscription
  * down the same way.
  */
-export function onNavigate(listener, { signal } = {}) {
+import { firstAvailable } from "./fallback.js";
+
+/** Backend 1: the native Navigation API (any URL change, no grant). */
+function subscribeNavigationApi(listener, signal) {
   const nav = globalThis.navigation;
-  if (nav && typeof nav.addEventListener === "function") {
-    nav.addEventListener("currententrychange", listener, { signal });
-    return () => nav.removeEventListener("currententrychange", listener);
+  if (!nav || typeof nav.addEventListener !== "function") {
+    return null;
   }
+  nav.addEventListener("currententrychange", listener, { signal });
+  return () => nav.removeEventListener("currententrychange", listener);
+}
+
+/** Backend 2: popstate + hashchange (harness / API-less realms). */
+function subscribeWindowEvents(listener, signal) {
   const win = globalThis.window;
-  if (win && typeof win.addEventListener === "function") {
-    win.addEventListener("popstate", listener, { signal });
-    win.addEventListener("hashchange", listener, { signal });
-    return () => {
-      win.removeEventListener("popstate", listener);
-      win.removeEventListener("hashchange", listener);
-    };
+  if (!win || typeof win.addEventListener !== "function") {
+    return null;
   }
-  return () => {};
+  win.addEventListener("popstate", listener, { signal });
+  win.addEventListener("hashchange", listener, { signal });
+  return () => {
+    win.removeEventListener("popstate", listener);
+    win.removeEventListener("hashchange", listener);
+  };
+}
+
+export function onNavigate(listener, { signal } = {}) {
+  return firstAvailable([
+    () => subscribeNavigationApi(listener, signal),
+    () => subscribeWindowEvents(listener, signal)
+  ]) ?? (() => {});
 }

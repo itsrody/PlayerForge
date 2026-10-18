@@ -178,6 +178,17 @@ design for regression detection; the v1.0.0 target is preserved on its tag.
 
 ### Change log
 
+- **Architecture step unification.** The ordered sequences that were spelled
+  out as long method bodies are now single declarative lists behind shared
+  helpers. `src/shared/steps.js` (`runSteps` / `runStepsAsync`) runs the shell
+  boot and teardown, the kernel `init` / pagehide teardown, and the panel
+  section build. The two observer gates collapsed onto one `createPresenceGate`
+  engine (`createLayoutGate` / `createOnScreenGate` stay as named wrappers), and
+  the probe's two-phase tap plus the kernel's full and downgraded taps collapsed
+  onto one `createDiscoveryTap` with an `escalate()` upgrade. The panel's lazy
+  sections are a `PANEL_SECTIONS` table, and the navigation and scheduler
+  backends pick their implementation through `firstAvailable`
+  (`src/shared/fallback.js`). No user-visible behavior or output change.
 - **Key unification pass.** The gesture vocabulary is now a single registry
   (`GESTURES`/`GESTURE_IDS` in `src/kernel/contract.js`) that the input
   bindings, the settings schema, the pointer-intent list and `GESTURE_EVENTS`

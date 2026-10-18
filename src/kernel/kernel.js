@@ -3,9 +3,10 @@ import { getConfigValue } from "../shared/storage.js";
 import { setDebugRuntime } from "../shared/perf-diag.js";
 import { postTask } from "../shared/scheduler.js";
 import { Scope } from "../shared/scope.js";
+import { runSteps } from "../shared/steps.js";
 import { ShellSlot } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
-import { findSdkForVideo, meetsMinSize, createLayoutGate, createOnScreenGate, isOnScreen, watchDocumentVideos, watchMediaEvents } from "./sdk.js";
+import { findSdkForVideo, meetsMinSize, createLayoutGate, createOnScreenGate, createDiscoveryTap, isOnScreen } from "./sdk.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
 
 /**
@@ -30,8 +31,8 @@ export class Kernel {
   // pin the element (and its whole subtree) for the page's lifetime.
   #seenVideos = new WeakSet();
   #removalTimers = new Map();
-  /** Unsubscribe for the shared discovery tap; dropped at pagehide. */
-  #stopDiscoveryTap = null;
+  /** The live discovery tap (createDiscoveryTap); dropped at pagehide. */
+  #discoveryTap = null;
   /** True once the full-document discovery tap has been downgraded. */
   #discoveryDowngraded = false;
   /** Lazily built observer-driven layout-presence gate for videos that failed
@@ -81,21 +82,26 @@ export class Kernel {
   }
 
   #onPageHide = (event) => {
-    if (!event.persisted) {
-      logger.log("kernel", "Page hiding, cleaning up");
-      this.#stopDiscoveryTap?.();
-      this.#stopDiscoveryTap = null;
+    if (event.persisted) {
+      return;
+    }
+    logger.log("kernel", "Page hiding, cleaning up");
+    runSteps([
+      () => {
+        this.#discoveryTap?.stop();
+        this.#discoveryTap = null;
+      },
       // Scope first: onDispose disconnects every removal observer, the
       // signal cancels pending removal-grace postTasks, and the page-level
       // pageshow/pagehide listeners drop. Lifecycle/registry teardown below
       // then runs with all watch machinery already dead.
-      this.#scope.dispose();
+      () => this.#scope.dispose(),
       // Tear down in-flight settle waits so their observers + timers die
       // immediately instead of running the full quiet/cap window on a page
       // that is already leaving.
-      this.#lifecycle.destroy();
-      this.#registry.destroyAll();
-    }
+      () => this.#lifecycle.destroy(),
+      () => this.#registry.destroyAll()
+    ]);
   };
 
   constructor() {
@@ -137,20 +143,24 @@ export class Kernel {
     }
     this.#initialized = true;
     logger.log("kernel", "Initializing kernel");
-    // Debug logs activate from the persisted menu toggle or the #pf-debug
-    // hash. The hash alone is a per-load override - it never writes the
-    // setting, and an explicit menu "Off" wins over it.
-    const storedDebug = getConfigValue(DEBUG_LOGS_KEY, false);
-    const hashDebug = location.hash.includes("pf-debug");
-    if (storedDebug || hashDebug) {
-      setDebugRuntime(true);
-      logger.log("kernel", `Debug logs on (${[storedDebug && "setting", hashDebug && "hash"].filter(Boolean).join(" + ")})`);
-    }
     const { signal } = this.#scope;
-    document.addEventListener("pageshow", this.#onPageShow, { signal });
-    document.addEventListener("resume", this.#onResume, { signal });
-    window.addEventListener("pagehide", this.#onPageHide, { signal });
-    this.#armDiscoveryTap();
+    runSteps([
+      // Debug logs activate from the persisted menu toggle or the #pf-debug
+      // hash. The hash alone is a per-load override - it never writes the
+      // setting, and an explicit menu "Off" wins over it.
+      () => {
+        const storedDebug = getConfigValue(DEBUG_LOGS_KEY, false);
+        const hashDebug = location.hash.includes("pf-debug");
+        if (storedDebug || hashDebug) {
+          setDebugRuntime(true);
+          logger.log("kernel", `Debug logs on (${[storedDebug && "setting", hashDebug && "hash"].filter(Boolean).join(" + ")})`);
+        }
+      },
+      () => document.addEventListener("pageshow", this.#onPageShow, { signal }),
+      () => document.addEventListener("resume", this.#onResume, { signal }),
+      () => window.addEventListener("pagehide", this.#onPageHide, { signal }),
+      () => this.#armDiscoveryTap()
+    ]);
     logger.log("kernel", "Kernel ready - discovery tap active");
   }
 
@@ -162,8 +172,8 @@ export class Kernel {
    * at init and again whenever the last shell leaves (see #onRegistryEmpty).
    */
   #armDiscoveryTap() {
-    this.#stopDiscoveryTap?.();
-    this.#stopDiscoveryTap = watchDocumentVideos((video) => this.#adoptVideo(video));
+    this.#discoveryTap?.stop();
+    this.#discoveryTap = createDiscoveryTap((video) => this.#adoptVideo(video));
     this.#discoveryDowngraded = false;
     // Mutations only report future changes: a rebuild (SPA route swap) can
     // leave a new player sitting in the tree with no pending record for us.
@@ -202,8 +212,8 @@ export class Kernel {
       return;
     }
     this.#discoveryDowngraded = true;
-    this.#stopDiscoveryTap?.();
-    this.#stopDiscoveryTap = watchMediaEvents((video) => this.#adoptVideo(video));
+    this.#discoveryTap?.stop();
+    this.#discoveryTap = createDiscoveryTap((video) => this.#adoptVideo(video), { mutations: false });
   }
 
   /**

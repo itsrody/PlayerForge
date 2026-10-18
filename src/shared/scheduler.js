@@ -15,6 +15,8 @@
  * penalty per call).
  */
 
+import { firstAvailable } from "./fallback.js";
+
 const HAS_POST_TASK =
   typeof globalThis.scheduler?.postTask === "function";
 
@@ -90,8 +92,11 @@ export function postTask(fn, { priority = "user-visible", delay: ms = 0, signal 
  *
  * @returns {Promise<void>}
  */
-export const yield_ = HAS_YIELD
-  ? () => globalThis.scheduler.yield()
-  : typeof globalThis.requestAnimationFrame === "function"
-    ? () => new Promise((r) => { globalThis.requestAnimationFrame(() => r()); })
-    : () => Promise.resolve();
+export const yield_ = firstAvailable([
+  () => (HAS_YIELD ? () => globalThis.scheduler.yield() : null),
+  () =>
+    typeof globalThis.requestAnimationFrame === "function"
+      ? () => new Promise((r) => { globalThis.requestAnimationFrame(() => r()); })
+      : null,
+  () => () => Promise.resolve()
+]);
