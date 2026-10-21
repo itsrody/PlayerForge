@@ -24,15 +24,3 @@ export const FLASH_EASING = "ease-out";
 
 /** Accent flash duration. */
 export const FLASH_MS = 400;
-
-/* ── Motion preference ────────────────────────────────────────────────────── */
-
-/**
- * Live `prefers-reduced-motion` query. Re-read `.matches` at call time (the
- * OS setting can flip while a shell is up), and null-guarded for non-DOM
- * harnesses. Consumers use it to skip decorative motion while keeping the
- * identical end state.
- */
-export const REDUCED_MOTION = typeof matchMedia === "function"
-  ? matchMedia("(prefers-reduced-motion: reduce)")
-  : null;

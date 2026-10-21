@@ -78,8 +78,8 @@ redesign landed; it is the column that stays current.
 | 3 | Legibility under scrolling content | `.pf-panel` scrolled with **no scroll-edge treatment**. | **Fixed (R4)** — header pinned; a 16px gradient hangs off its bottom edge. |
 | 4 | Concentric radii | `--pf-radius-xs: 7px` was *larger* than `--pf-radius-sm: 6px`; nested radii were chosen, not derived. | **Fixed (R5)** — panel 18 → strip/close 10 → tab 7, each derived. |
 | 5 | Distinct navigation layer | Panel and toasts separate from SDK chrome. | **Holds** — and now the header is a pinned layer. |
-| 6 | Increased-contrast option | No `prefers-contrast`; `--pf-blur-*` were bare `blur() saturate()`. | **Fixed (R2)** — `brightness(var(--pf-glass-contrast))` + a `prefers-contrast: more` path. |
-| 7 | Accessibility settings | `data-pf-cpu-tier="low"`, `prefers-reduced-transparency`, `prefers-reduced-motion` all present. | **Holds** — all three, plus contrast (R8). |
+| 6 | Increased-contrast option | No `prefers-contrast`; `--pf-blur-*` were bare `blur() saturate()`. | **Retired in scope** — back to bare `blur() saturate()`; no `prefers-contrast` path. |
+| 7 | Accessibility settings | `data-pf-cpu-tier="low"`, `prefers-reduced-transparency`, `prefers-reduced-motion` all present. | **Retired in scope** — removed with the low-CPU path (product decision: honor no accessibility setting); no media path remains. |
 | 8 | Title-style section headers | `text-transform: uppercase` at :641 and :745. | **Fixed (R7)** — removed; markup was already title case. |
 | 9 | Increased sheet radius + edge clearance | 12px on the largest surface. | **Fixed (R6)** — 18px. |
 | 10 | Combine effects for performance | 2 composited layers total. | **Holds** — still 2; the scroll edge is paint, not a third blur. |
@@ -101,11 +101,11 @@ a third is a redesign decision requiring its own justification: each blurred
 surface is an independently composited layer that must re-rasterize whenever the
 video frame beneath it changes. In-panel controls stay flat tinted.
 
-**R2 — Blur must be contrast-modulated.** *(principle 6)*
-`--pf-blur-sm` / `--pf-blur-lg` must include `brightness(var(--pf-glass-contrast))`
-rather than a bare `saturate()`. A fixed saturation cannot express "increased
-contrast option"; a token can, and it is the only way the material responds to a
-user's contrast preference.
+**R2 — (RETIRED) blur must be contrast-modulated.** *(principle 6)*
+Retired in scope: the blur tokens are again bare `blur() saturate()` and no
+`prefers-contrast` path exists — the increased-contrast option applies to no
+user in this product's audience. If user-facing contrast support returns, a
+bare `saturate()` cannot express "increased contrast option"; a token can.
 
 **R3 — Resting tint stays lower than focused tint.** *(principles 2, 5)*
 The material exists "to bring attention to the underlying content." A single
@@ -135,12 +135,13 @@ Remove `text-transform: uppercase` from `.pf-panel-label` and its compact
 variant. Apple changed this system-wide specifically so headers read as
 sentences; the override defeats it.
 
-**R8 — Reduced-transparency, reduced-motion, and low-CPU keep their collapse.** *(principle 7)*
-These already exist and must keep collapsing to `--pf-surface` with no sheen, no
-shadow, no border, no blur, no scrim. A redesign that adds a glass token must add
-it to all three collapse paths, or it will leak translucency exactly where the
-user asked for none. Contrast must be reachable in the high-contrast path
-independently of the blur path.
+**R8 — (RETIRED) user-preference collapse paths.** *(principle 7)*
+The honor system is retired entirely in scope: neither reduced-transparency,
+reduced-motion, the (earlier retired) low-CPU tier path, nor
+`prefers-contrast` changes the HUD any more - it renders and animates
+uniformly for every user. If any accessibility honor is ever restored, the
+collapses go to `--pf-surface` with no sheen, no shadow, no border, no blur, no
+scrim, and the contrast path modulates the token rather than collapsing.
 
 **R9 — Every HUD change needs a legibility measurement, not a screenshot.** *(principles 3, 10)*
 A screenshot cannot answer "is text still readable over this frame." Measure the
@@ -150,20 +151,6 @@ contrast between HUD foreground and the composited backdrop, and assert it.
 
 ## 5. Verification
 
-- **Hygiene pass.** The platform floor's remaining Chromium-154 references (the
-  banner description, the main and worker esbuild targets, the test-loader
-  comment) moved to 155 to match package.json. Four exports with no external
-  consumer were closed (`forEachVideoInMutations`, `gmGetValue`, `VOLUME_STEP`
-  de-exported; `watchDocumentVideos` deleted along with its stale
-  "used by the kernel" claim), the `POINTER_GESTURE_INTENTS` alias was inlined
-  onto `GESTURE_IDS`, and the non-gesture setting keys became a single frozen
-  vocabulary (`SETTING_KEYS` in `config.js`) that the schema and every consumer
-  (bindings, haptics gate, panel, shell) now derive from. No behavior change.
-
-- **`prefers-contrast: more`** must visibly change the HUD (R2, R8). Check the
-  token actually moves, not just that the media query parses.
-- **Reduced-transparency and `data-pf-cpu-tier="low"`** must produce no
-  `backdrop-filter`, no sheen, no shadow, no border on any surface.
 - **Geometry must not move.** A redesign that changes resting radii or control
   positions has changed layout, not appearance; those are separate changes.
 - **Contrast must be measured** against a hostile, *fixed* backdrop (R9). A
@@ -188,6 +175,26 @@ design for regression detection; the v1.0.0 target is preserved on its tag.
 
 ### Change log
 
+- **Contrast path retired.** The last accessibility honor is gone:
+  `prefers-contrast: more` no longer moves `--pf-glass-contrast`; that token,
+  its `@property` registration, and the `brightness(var(--pf-glass-contrast))`
+  factor inside both blur tokens were removed with it (a constant multiplier
+  with no writer is dead machinery). The blur tokens are again bare
+  `blur() saturate()`, matching the pre-redesign filter shape - the glass
+  itself is untouched. R2 and the remaining verification bullet are retired.
+- **User-preference collapses retired.** The `prefers-reduced-transparency`
+  glass collapse, the `prefers-reduced-motion` token/`::view-transition`
+  collapse, and the JS-side `REDUCED_MOTION` gates (snap easing, accent flash,
+  panel view transition) were removed: the HUD now renders and animates
+  uniformly on every device in scope. `prefers-contrast: more` (R2) survives -
+  it modulates rather than collapses. R8 is retired outright.
+- **CPU-tier collapse retired.** The `data-pf-cpu-tier` attribute, the
+  `navigator.cpuPerformance` tier detection behind it, and the low-tier glass
+  collapse in `styles.css` were removed: Helium (desktop) and Titanium
+  (Android) do not target low-tier devices, so the hardware-tier path served
+  no reachable user. R8 now covers the two user-preference collapses
+  (reduced-transparency, reduced-motion); no token or selector changed for
+  mid/high-tier devices.
 - **Vocabulary derivation pass.** The gesture contract stopped hand-spelling
   its machine-facing strings: `GESTURES` and `GESTURE_EVENTS` are now
   formula-derived (`pf:gesture-<id>`, `gestures.<id>`, camel→kebab for the

@@ -43,10 +43,6 @@
      and a focused one should assert. DESIGN.md R3 - the two states must be
      legible in the token set, not implied. */
   --pf-glass-tint-focus: color-mix(in srgb, var(--pf-bg) 76%, transparent);
-  /* Apple's "increased contrast option for each variant" (adoption guide,
-     Controls). A bare saturate() cannot express it; every blur carries this so
-     a single token moves all surfaces. DESIGN.md R2. */
-  --pf-glass-contrast: 1;
   /* R4: the panel scrolls, so content passing beneath the pinned header has to
      be obscured at the scroll edge for it to stay legible. Apple's rule is a
      short gradient - sized to the header, anchored to the scroll edge - not a
@@ -109,8 +105,8 @@
   --pf-ease-bounce: 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
   --pf-ease-out: 0.2s cubic-bezier(0.4, 0, 1, 1);
 
-  --pf-blur-sm: blur(20px) saturate(1.7) brightness(var(--pf-glass-contrast));
-  --pf-blur-lg: blur(30px) saturate(1.8) brightness(var(--pf-glass-contrast));
+  --pf-blur-sm: blur(20px) saturate(1.7);
+  --pf-blur-lg: blur(30px) saturate(1.8);
 
   --pf-space-xs: 4px;
   --pf-space-sm: 6px;
@@ -148,64 +144,6 @@
   }
 }
 
-/* -- Low CPU-tier fidelity gate (CPU Performance API, Chromium 155+) --
-   Set on the host element by injectShell. On a "low" device the most
-   expensive visual effects - backdrop blur/saturate and promiscuous
-   compositor hints - cost more than they delight, so they are turned down
-   at the token and hint level rather than per-component. "medium" leaves
-   everything at the default. High-tier is untouched (the default already
-   favors the rich look). */
-.pf-shell[data-pf-cpu-tier="low"] {
-  /* Flat, opaque surfaces: no translucent layers to composite, no blur, and
-     none of the sheen/edge/shadow paint. */
-  --pf-glass-tint: var(--pf-surface);
-  --pf-glass-tint-focus: var(--pf-surface);
-  --pf-glass-sheen: none;
-  --pf-glass-shadow: none;
-  --pf-glass-border: none;
-  --pf-blur-sm: none;
-  --pf-blur-lg: none;
-  --pf-scroll-edge: none;
-  --pf-header-rim: none;
-}
-
-/* R2/R8: the "increased contrast option" Apple asks for alongside every custom
-   color. Deliberately NOT a collapse - this keeps the glass and moves the
-   contrast token instead, so the material survives at a legible strength. That
-   is only possible because both blur tokens carry
-   brightness(var(--pf-glass-contrast)) (R2); with the previous bare saturate()
-   there was nothing here to move. Declared BEFORE the reduced-transparency
-   block: both set --pf-glass-tint at equal specificity on .pf-shell, so the
-   later block wins, and reduced transparency - not increased contrast - is the
-   request that must never leak translucency (R8). The scroll edge is a gradient
-   scrim and collapses with it. */
-@media (prefers-contrast: more) {
-  .pf-shell {
-    --pf-glass-contrast: 1.35;
-    --pf-glass-tint: color-mix(in srgb, var(--pf-bg) 72%, transparent);
-    --pf-glass-tint-focus: color-mix(in srgb, var(--pf-bg) 88%, transparent);
-  }
-}
-
-/* OS-level accessibility preference (Chromium 118+): honor "reduce
-   transparency" by collapsing the same glass tokens to a flat opaque sheet.
-   Declared last of the three so source order lets it win over the
-   increased-contrast tints above (equal specificity), and so a user who set
-   both preferences still gets the flat sheet they asked for. */
-@media (prefers-reduced-transparency: reduce) {
-  .pf-shell {
-    --pf-glass-tint: var(--pf-surface);
-    --pf-glass-tint-focus: var(--pf-surface);
-    --pf-glass-sheen: none;
-    --pf-glass-shadow: none;
-    --pf-glass-border: none;
-    --pf-blur-sm: none;
-    --pf-blur-lg: none;
-    --pf-scroll-edge: none;
-    --pf-header-rim: none;
-  }
-}
-
 /* Neutralize the inline 'position: relative' we set on the container
    while it is the native fullscreen element. The UA's ':fullscreen'
    rule uses 'position: fixed' (non-important), which an inline style
@@ -239,15 +177,6 @@
   syntax: "<length-percentage>";
   inherits: false;
   initial-value: -50%;
-}
-/* Glass contrast is the one glass knob that is a bare number (it feeds
-   brightness() inside both blur tokens). Typed <number> registration keeps it
-   animatable and clamps it to a real number, so a foreign/inline write can
-   never turn the blur filter invalid. */
-@property --pf-glass-contrast {
-  syntax: "<number>";
-  inherits: true;
-  initial-value: 1;
 }
 
 /* - Component surface (parasite chrome) ------------------------------------
@@ -1563,25 +1492,5 @@
   @keyframes pf-panel-fade-in {
     from { opacity: 0; transform: scale(0.96); }
     to   { opacity: 1; transform: scale(1); }
-  }
-}
-
-/* Motion preference (declared outside @layer pf-hud so it outranks the
-   unlayered token block above by source order). Collapsing the three motion
-   tokens takes the toast drop-in, panel open/close, @starting-style, and
-   control micro-motion with them - every transition that reads them - while
-   color-only feedback stays. The panel view transition is already refused in
-   JS (panel.js REDUCED_MOTION_QUERY); neutralizing its pseudo layers here
-   covers any path that still starts one. */
-@media (prefers-reduced-motion: reduce) {
-  .pf-shell {
-    --pf-ease-duration: 0s;
-    --pf-ease-bounce: 0s;
-    --pf-ease-out: 0s;
-  }
-
-  ::view-transition-old(pf-panel),
-  ::view-transition-new(pf-panel) {
-    animation: none;
   }
 }

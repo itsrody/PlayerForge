@@ -1,9 +1,9 @@
 {
   "note": "Recorded by platform/visual/hud-glass.mjs --record. Legibility/radius are the values to watch when retuning the glass tokens.",
   "tokens": {
-    "backdropFilter": "blur(30px) saturate(1.8) brightness(1)",
+    "backdropFilter": "blur(30px) saturate(1.8)",
     "backgroundColor": "color(srgb 0 0 0 / 0.76)",
-    "blurLg": "blur(30px)saturate(1.8)brightness(1)",
+    "blurLg": "blur(30px)saturate(1.8)",
     "borderRadius": "18px",
     "boxShadow": "rgba(255, 255, 255, 0.34) 0px 1px 0px 0px inset, rgba(255, 255, 255, 0.07) 0px 0px 0px 1px inset, rgba(0, 0, 0, 0.52) 0px 18px 48px 0px",
     "glassTint": "color-mix(in srgb,#000/**/58%,transparent)",

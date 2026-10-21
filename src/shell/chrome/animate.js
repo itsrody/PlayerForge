@@ -1,4 +1,4 @@
-import { FLASH_MS, FLASH_EASING, REDUCED_MOTION } from "../../shared/timing.js";
+import { FLASH_MS, FLASH_EASING } from "../../shared/timing.js";
 
 /**
  * Restart the accent "flash" on an element natively via the Web Animations
@@ -14,10 +14,7 @@ import { FLASH_MS, FLASH_EASING, REDUCED_MOTION } from "../../shared/timing.js";
  * the app use together.
  */
 export function flashElement(el, { duration = FLASH_MS } = {}) {
-  // The accent flash is decorative motion: skip it outright under
-  // prefers-reduced-motion (no color pulse either - the state it announces
-  // is already visible in the control that triggered it).
-  if (!el || typeof el.animate !== "function" || REDUCED_MOTION?.matches) {
+  if (!el || typeof el.animate !== "function") {
     return;
   }
   // Single pass over the element's active animations: finished entries are

@@ -6,7 +6,6 @@ import { clamp } from "../../shared/clamp.js";
 import { Scope } from "../../shared/scope.js";
 import { el } from "./elements.js";
 import { getSetting, SETTING_KEYS } from "./config.js";
-import { REDUCED_MOTION } from "../../shared/timing.js";
 
 const HOLD_DELAY_MS = 400;
 const HOLD_REPEAT_MS = 75;
@@ -871,7 +870,7 @@ export class SettingsPanel {
   }
 
   #runWithViewTransition(type, update) {
-    if (typeof document.startViewTransition === "function" && !REDUCED_MOTION?.matches) {
+    if (typeof document.startViewTransition === "function") {
       document.startViewTransition({ types: [type], update });
     } else {
       update();
