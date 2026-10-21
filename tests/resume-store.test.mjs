@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { KEYS } from "../src/shared/storage.js";
 
 globalThis.GM_getValue = (key, fallback) => fallback;
 globalThis.GM_setValue = () => {};
 
 const { ResumeStore } = await import("../src/shell/resume.js");
 
-const STORE_KEY = "pf:resume";
+const STORE_KEY = KEYS.resume;
 
 function installGm(initial) {
   let data = initial;

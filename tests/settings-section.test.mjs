@@ -1,11 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { KEYS as CFG } from "../src/shared/storage.js";
+
+const CFG_ROOT = CFG.configs;
 
 const writes = {};
 globalThis.GM_getValue = (key, fallback) => writes[key] ?? fallback;
 let configsListener = null;
 globalThis.GM_addValueChangeListener = (key, cb) => {
-  if (key === "pf:configs") {
+  if (key === CFG_ROOT) {
     configsListener = cb;
   }
 };
@@ -114,7 +117,7 @@ test("toggle onChange persists through setSetting", () => {
   const hotkeysBox = panel.calls.checkboxes[0];
   hotkeysBox.onChange(false);
   assert.equal(getSetting("gestures.hotkeys"), false);
-  assert.equal(writes["pf:configs"]?.settings?.gestures?.hotkeys, false);
+  assert.equal(writes[CFG_ROOT]?.settings?.gestures?.hotkeys, false);
 });
 
 test("panels without a body or section are ignored gracefully", () => {
@@ -127,12 +130,12 @@ test("panels without a body or section are ignored gracefully", () => {
 
 test("storage change events live-reload the cache", () => {
   // Another tab replaced pf:configs behind our back.
-  writes["pf:configs"] = {
+  writes[CFG_ROOT] = {
     version: 1,
     settings: { controller: { stepSeek: 15 } }
   };
   assert.notEqual(getSetting("controller.stepSeek"), 15);
-  configsListener?.("pf:configs", null, null, true);
+  configsListener?.(CFG_ROOT, null, null, true);
   assert.equal(getSetting("controller.stepSeek"), 15);
   // Keys absent from the foreign doc fall back to defaults.
   assert.equal(getSetting("gestures.hotkeys"), true);
@@ -140,16 +143,16 @@ test("storage change events live-reload the cache", () => {
 
 test("live-reload coerces type-violating foreign values", () => {
   // A foreign writer stored a string where the schema says boolean.
-  writes["pf:configs"] = { version: 1, settings: { gestures: { hotkeys: "yes" } } };
+  writes[CFG_ROOT] = { version: 1, settings: { gestures: { hotkeys: "yes" } } };
   assert.notEqual(getSetting("gestures.hotkeys"), "yes");
-  configsListener?.("pf:configs", null, null, true);
+  configsListener?.(CFG_ROOT, null, null, true);
   assert.equal(getSetting("gestures.hotkeys"), true, "bool fields fall back to the schema default");
 });
 
 test("live-reload rejects option values outside the schema set", () => {
   // A 7-second skip step is not a member of the allowed [5, 10, 15] enum.
-  writes["pf:configs"] = { version: 1, settings: { controller: { stepSeek: 7 } } };
-  configsListener?.("pf:configs", null, null, true);
+  writes[CFG_ROOT] = { version: 1, settings: { controller: { stepSeek: 7 } } };
+  configsListener?.(CFG_ROOT, null, null, true);
   assert.equal(getSetting("controller.stepSeek"), 5, "out-of-enum values fall back to the schema default");
 });
 
@@ -196,11 +199,11 @@ test("a cross-tab settings change re-syncs open controls without echoing back", 
   assert.ok(stepButtons[0].classList.has("pf-options-active"), "5s active by default");
 
   // Another tab wrote: hotkeys off, stepSeek 15.
-  writes["pf:configs"] = {
+  writes[CFG_ROOT] = {
     version: 1,
     settings: { gestures: { hotkeys: false }, controller: { stepSeek: 15 } }
   };
-  configsListener?.("pf:configs", null, null, true);
+  configsListener?.(CFG_ROOT, null, null, true);
 
   assert.equal(hotkeys.checked, false, "checkbox follows the foreign value");
   assert.ok(!stepButtons[0].classList.has("pf-options-active"), "5s deactivated");

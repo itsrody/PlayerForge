@@ -23,11 +23,13 @@ import { postTask } from "./scheduler.js";
 /**
  * The postMessage types the frame bridge sends and receives across iframe
  * edges. Inlined here - they are used only by this module, so a shared
- * namespace would just add indirection.
+ * namespace would just add indirection. Types and the dispatch gate below
+ * derive from ONE prefix, so the gate can never drift from what it vets.
  */
-export const CTX_REQUEST_TYPE = "pf:ctx-request";
-export const CTX_RESPONSE_TYPE = "pf:ctx";
-export const FS_REQUEST_TYPE = "pf:req-fullscreen";
+export const BRIDGE_MSG_PREFIX = "pf:";
+export const CTX_REQUEST_TYPE = `${BRIDGE_MSG_PREFIX}ctx-request`;
+export const CTX_RESPONSE_TYPE = `${BRIDGE_MSG_PREFIX}ctx`;
+export const FS_REQUEST_TYPE = `${BRIDGE_MSG_PREFIX}req-fullscreen`;
 
 /* - 1. Domain identity - */
 
@@ -1153,7 +1155,7 @@ export function installContextBridge() {
       return;
     }
     const type = data.type;
-    if (typeof type !== "string" || !type.startsWith("pf:")) {
+    if (typeof type !== "string" || !type.startsWith(BRIDGE_MSG_PREFIX)) {
       return;
     }
     // The live iframe registry exists only to vouch incoming bridged messages

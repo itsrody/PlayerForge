@@ -7,7 +7,7 @@ import { runSteps } from "../shared/steps.js";
 import { ShellSlot } from "./registry.js";
 import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, meetsMinSize, createLayoutGate, createOnScreenGate, createDiscoveryTap, isOnScreen } from "./sdk.js";
-import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, FRAMEWORK_TUNING } from "./contract.js";
+import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, DEBUG_HASH_TAG, FRAMEWORK_TUNING } from "./contract.js";
 
 /**
  * Top-level orchestrator: watches for <video> elements, identifies the player
@@ -145,12 +145,12 @@ export class Kernel {
     logger.log("kernel", "Initializing kernel");
     const { signal } = this.#scope;
     runSteps([
-      // Debug logs activate from the persisted menu toggle or the #pf-debug
-      // hash. The hash alone is a per-load override - it never writes the
+      // Debug logs activate from the persisted menu toggle or the debug
+      // hash tag (contract) - a per-load override that never writes the
       // setting, and an explicit menu "Off" wins over it.
       () => {
         const storedDebug = getConfigValue(DEBUG_LOGS_KEY, false);
-        const hashDebug = location.hash.includes("pf-debug");
+        const hashDebug = location.hash.includes(DEBUG_HASH_TAG);
         if (storedDebug || hashDebug) {
           setDebugRuntime(true);
           logger.log("kernel", `Debug logs on (${[storedDebug && "setting", hashDebug && "hash"].filter(Boolean).join(" + ")})`);

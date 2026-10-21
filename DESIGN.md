@@ -188,6 +188,17 @@ design for regression detection; the v1.0.0 target is preserved on its tag.
 
 ### Change log
 
+- **Vocabulary derivation pass.** The gesture contract stopped hand-spelling
+  its machine-facing strings: `GESTURES` and `GESTURE_EVENTS` are now
+  formula-derived (`pf:gesture-<id>`, `gestures.<id>`, camel→kebab for the
+  one-shot handles) from one table of `{id: label}` pairs, the frame-bridge
+  message types and their dispatch gate share one `BRIDGE_MSG_PREFIX`, the
+  `#pf-debug` hash needle moved into the contract (`DEBUG_HASH_TAG`) so the
+  entry and kernel debug decisions read one constant, the cpu-tier attribute
+  got a named const at its single writer, and the unit tests now import the
+  storage `KEYS` vocabulary instead of re-spelling the roots. All derived
+  strings are byte-identical to the hand-spelled ones (asserted) - no
+  migration, no behavior change.
 - **Hygiene pass.** The platform floor's remaining Chromium-154 references (the
   banner description, the main and worker esbuild targets, the test-loader
   comment) moved to 155 to match package.json. Four exports with no external

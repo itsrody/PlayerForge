@@ -29,39 +29,53 @@ export const SHELL_MARKER = "data-pf-shell";
 
 export const DEBUG_LOGS_KEY = "debug.logs";
 
-/**
- * The gesture families, one key each. `event` is the CustomEvent the shell
- * dispatches, `setting` is the configs-doc gate (`<setting>` under the settings
- * subtree), `label` is the settings-panel text. Every other module derives its
- * gesture strings from here - never re-declares them.
- */
-export const GESTURES = Object.freeze({
-  hold: { event: "pf:gesture-hold", setting: "gestures.hold", label: "Speed Up Hold" },
-  scrub: { event: "pf:gesture-scrub", setting: "gestures.scrub", label: "Scrub Seeking" },
-  swipe: { event: "pf:gesture-swipe", setting: "gestures.swipe", label: "Swiping" },
-  dbltap: { event: "pf:gesture-dbltap", setting: "gestures.dbltap", label: "Double-tap Skip" },
-  pinch: { event: "pf:gesture-pinch", setting: "gestures.pinch", label: "Pinch to Fill" }
-});
-
-/** Gesture-family ids in declaration order (the canonical vocabulary). */
-export const GESTURE_IDS = Object.freeze(Object.keys(GESTURES));
+/** The hash tag that flips debug mode for one page load (never persisted).
+ *  An explicit menu "Off" wins over it. */
+export const DEBUG_HASH_TAG = "pf-debug";
 
 /**
- * Semantic CustomEvents the shell honors on its host (inputs + panel). The five
- * family events are folded in from GESTURES; the rest are one-shot action
- * events that have no settings gate of their own.
+ * The gesture families: ONE hand-written entry per family - the id (the key)
+ * and its settings-panel label (the value). Everything machine-facing is
+ * formula-derived below, so a new family is a one-line addition: its semantic
+ * event becomes `pf:gesture-<id>` and its configs gate becomes `gestures.<id>`.
  */
-export const GESTURE_EVENTS = Object.freeze({
-  release: "pf:gesture-release",
-  scrubEnd: "pf:gesture-scrub-end",
-  swipeStart: "pf:gesture-swipe-start",
-  skip: "pf:gesture-skip",
-  volume: "pf:gesture-volume",
-  mute: "pf:gesture-mute",
-  pip: "pf:gesture-pip",
-  panel: "pf:gesture-panel",
-  ...Object.fromEntries(GESTURE_IDS.map((id) => [id, GESTURES[id].event]))
+const GESTURE_LABELS = Object.freeze({
+  hold: "Speed Up Hold",
+  scrub: "Scrub Seeking",
+  swipe: "Swiping",
+  dbltap: "Double-tap Skip",
+  pinch: "Pinch to Fill"
 });
+
+/** Gesture-family ids in registry-declaration order (the canonical vocabulary). */
+export const GESTURE_IDS = Object.freeze(Object.keys(GESTURE_LABELS));
+
+export const GESTURES = Object.freeze(Object.fromEntries(
+  GESTURE_IDS.map((id) => [id, {
+    event: `pf:gesture-${id}`,
+    setting: `gestures.${id}`,
+    label: GESTURE_LABELS[id]
+  }])
+));
+
+/** One-shot action event handles: no settings gate of their own, each derived
+ *  `pf:gesture-<kebab(handle)>` like the family events (scrubEnd -> -scrub-end). */
+const GESTURE_ACTIONS = Object.freeze([
+  "release", "scrubEnd", "swipeStart", "skip", "volume", "mute", "pip", "panel"
+]);
+
+const kebab = (id) => id.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+
+/**
+ * Semantic CustomEvents the shell honors on its host (inputs + panel). The
+ * family events derive from GESTURES; the one-shot actions derive from the
+ * formula. The framework may emit the panel one to toggle a shell's panel from
+ * outside the input stack (GM menu).
+ */
+export const GESTURE_EVENTS = Object.freeze(Object.fromEntries([
+  ...GESTURE_ACTIONS.map((handle) => [handle, `pf:gesture-${kebab(handle)}`]),
+  ...GESTURE_IDS.map((id) => [id, GESTURES[id].event])
+]));
 
 /** Framework-owned calibration (the removal-watch grace delay). */
 export const FRAMEWORK_TUNING = {

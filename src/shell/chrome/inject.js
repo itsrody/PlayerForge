@@ -84,6 +84,8 @@ export function ensureStyles() {
  * to the shell's fidelity tier. "medium" for unknown/absent, so the gate
  * degrades to the current default on hosts without the API.
  */
+const CPU_TIER_ATTRIBUTE = "data-pf-cpu-tier";
+
 function mapCpuTier(tier) {
   return tier === 1 ? "low" : tier === 3 || tier === 4 ? "high" : "medium";
 }
@@ -111,11 +113,12 @@ export function injectShell(container) {
   }
   const host = el("div", { class: "pf-shell", tabindex: "-1" }, container);
   // CPU tier gating: low-tier devices skip backdrop blur / heavy compositor
-  // hints (see `.pf-shell[data-pf-cpu-tier] > ...` in styles.css). Attached at
-  // host creation so the stylesheet can branch without a JS-driven class flip.
+  // hints - styles.css branches on the CPU_TIER_ATTRIBUTE state written here.
+  // Attached at host creation so the stylesheet can branch without a
+  // JS-driven class flip.
   const tier = detectCpuTier();
   if (tier !== "medium") {
-    host.setAttribute("data-pf-cpu-tier", tier);
+    host.setAttribute(CPU_TIER_ATTRIBUTE, tier);
   }
 
   const shadow = host.attachShadow({ mode: "open" });

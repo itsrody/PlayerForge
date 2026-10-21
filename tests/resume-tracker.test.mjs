@@ -8,6 +8,7 @@ globalThis.GM_setValue = (key, value) => {
   writes[key] = value;
 };
 
+const { KEYS } = await import("../src/shared/storage.js");
 const { ResumeTracker } = await import("../src/shell/resume.js");
 const { TUNING } = await import("../src/shared/tuning.js");
 const { createMediaControls } = await import("../src/shell/media.js");
@@ -61,18 +62,18 @@ function makeEnv(duration) {
 }
 
 test("finite duration creates the pf:resume entry without waiting", async () => {
-  delete writes["pf:resume"];
+  delete writes[KEYS.resume];
   const { shell } = makeEnv(600);
   new ResumeTracker(shell);
   await flush();
   await flush();
-  assert.ok(writes["pf:resume"], "store was never touched");
-  assert.equal(writes["pf:resume"].entries.length, 1);
-  assert.equal(writes["pf:resume"].entries[0].duration, 600);
+  assert.ok(writes[KEYS.resume], "store was never touched");
+  assert.equal(writes[KEYS.resume].entries.length, 1);
+  assert.equal(writes[KEYS.resume].entries[0].duration, 600);
 });
 
 test("off-screen save gate observer is disconnected on destroy", async () => {
-  delete writes["pf:resume"];
+  delete writes[KEYS.resume];
   let observeCalls = 0;
   let disconnectCalls = 0;
   class FakeIO {
@@ -103,22 +104,22 @@ test("off-screen save gate observer is disconnected on destroy", async () => {
 });
 
 test("missing duration waits for loadedmetadata before creating the entry", async () => {
-  delete writes["pf:resume"];
+  delete writes[KEYS.resume];
   const { dom, video, shell } = makeEnv(null);
   new ResumeTracker(shell);
   await flush();
-  assert.ok(writes["pf:resume"], "store was warmed eagerly");
-  assert.equal(writes["pf:resume"].entries.length, 0, "no entry created before metadata");
+  assert.ok(writes[KEYS.resume], "store was warmed eagerly");
+  assert.equal(writes[KEYS.resume].entries.length, 0, "no entry created before metadata");
   Object.defineProperty(video, "duration", { value: 120, configurable: true });
   video.dispatchEvent(new dom.window.Event("loadedmetadata"));
   await flush();
   await flush();
-  assert.equal(writes["pf:resume"].entries.length, 1);
-  assert.equal(writes["pf:resume"].entries[0].duration, 120);
+  assert.equal(writes[KEYS.resume].entries.length, 1);
+  assert.equal(writes[KEYS.resume].entries[0].duration, 120);
 });
 
 test("late finite duration also resolves through durationchange", async () => {
-  delete writes["pf:resume"];
+  delete writes[KEYS.resume];
   const { dom, video, shell } = makeEnv(null);
   new ResumeTracker(shell);
   await flush();
@@ -126,37 +127,37 @@ test("late finite duration also resolves through durationchange", async () => {
   video.dispatchEvent(new dom.window.Event("durationchange"));
   await flush();
   await flush();
-  assert.ok(writes["pf:resume"]);
-  assert.equal(writes["pf:resume"].entries[0].duration, 90);
+  assert.ok(writes[KEYS.resume]);
+  assert.equal(writes[KEYS.resume].entries[0].duration, 90);
 });
 
 test("destroy during the metadata wait cancels it without creating the entry", async () => {
-  delete writes["pf:resume"];
+  delete writes[KEYS.resume];
   const { shell } = makeEnv(null);
   const tracker = new ResumeTracker(shell);
   await flush();
   tracker.destroy();
   await flush();
   await flush();
-  assert.ok(writes["pf:resume"], "store was warmed eagerly");
-  assert.equal(writes["pf:resume"].entries.length, 0, "no entry created after destroy");
+  assert.ok(writes[KEYS.resume], "store was warmed eagerly");
+  assert.equal(writes[KEYS.resume].entries.length, 0, "no entry created after destroy");
 });
 
 test("the metadata wait is event-driven - error gives up with no timer involved", async () => {
-  delete writes["pf:resume"];
+  delete writes[KEYS.resume];
   const { dom, video, shell } = makeEnv(null);
   new ResumeTracker(shell);
   await flush();
-  assert.equal(writes["pf:resume"].entries.length, 0, "still waiting on media events");
+  assert.equal(writes[KEYS.resume].entries.length, 0, "still waiting on media events");
   // The broken-source event is the give-up signal - no deadline is consulted.
   video.dispatchEvent(new dom.window.Event("error"));
   await flush();
   await flush();
-  assert.equal(writes["pf:resume"].entries.length, 0, "error ended the wait without an entry");
+  assert.equal(writes[KEYS.resume].entries.length, 0, "error ended the wait without an entry");
 });
 
 test("a saved position past the threshold seeks and toasts immediately", async () => {
-  writes["pf:resume"] = {
+  writes[KEYS.resume] = {
     version: 1,
     entries: [{
       id: "abc123",
@@ -179,7 +180,7 @@ test("a saved position past the threshold seeks and toasts immediately", async (
 });
 
 test("resume seeks land through the real command plane even when metadata lags (MSE window)", async () => {
-  writes["pf:resume"] = {
+  writes[KEYS.resume] = {
     version: 1,
     entries: [{
       id: "mse1",
@@ -223,7 +224,7 @@ test("resume seeks land through the real command plane even when metadata lags (
 });
 
 test("autoplaying video seeks immediately without waiting for canplay", async () => {
-  writes["pf:resume"] = {
+  writes[KEYS.resume] = {
     version: 1,
     entries: [{
       id: "xyz789",
@@ -248,7 +249,7 @@ test("autoplaying video seeks immediately without waiting for canplay", async ()
 });
 
 test("qualifying timeupdate persists progress; sub-epsilon moves do not", async () => {
-  writes["pf:resume"] = {
+  writes[KEYS.resume] = {
     version: 1,
     entries: [{ id: "aaa", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 42, createdAt: 0, updatedAt: Date.now() }]
   };
@@ -262,7 +263,7 @@ test("qualifying timeupdate persists progress; sub-epsilon moves do not", async 
   await flush();
   await flush();
   await flush();
-  const stored = () => writes["pf:resume"].entries[0].resume;
+  const stored = () => writes[KEYS.resume].entries[0].resume;
 
   shell.currentTime = 45; // +3 from last save: exactly at epsilon, qualifies
   video.dispatchEvent(new dom.window.Event("timeupdate"));
@@ -275,7 +276,7 @@ test("qualifying timeupdate persists progress; sub-epsilon moves do not", async 
 });
 
 test("content span gates incremental timeupdate saves but never the pause flush", async () => {
-  writes["pf:resume"] = {
+  writes[KEYS.resume] = {
     version: 1,
     entries: [{ id: "bbb", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
   };
@@ -289,7 +290,7 @@ test("content span gates incremental timeupdate saves but never the pause flush"
   await flush();
   await flush();
   await flush();
-  const stored = () => writes["pf:resume"].entries[0].resume;
+  const stored = () => writes[KEYS.resume].entries[0].resume;
 
   shell.currentTime = 10; // far past epsilon, but inside the content span
   video.dispatchEvent(new dom.window.Event("timeupdate"));
@@ -302,7 +303,7 @@ test("content span gates incremental timeupdate saves but never the pause flush"
 });
 
 test("already-playing video persists on its first qualifying timeupdate - no interval", async () => {
-  writes["pf:resume"] = {
+  writes[KEYS.resume] = {
     version: 1,
     entries: [{ id: "ccc", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
   };
@@ -315,7 +316,7 @@ test("already-playing video persists on its first qualifying timeupdate - no int
   await flush();
   await flush();
   await flush();
-  const stored = () => writes["pf:resume"].entries[0].resume;
+  const stored = () => writes[KEYS.resume].entries[0].resume;
   assert.equal(stored(), 0);
 
   shell.currentTime = 5;
@@ -325,7 +326,7 @@ test("already-playing video persists on its first qualifying timeupdate - no int
 });
 
 test("off-screen IntersectionObserver observation gates incremental resume saves", async () => {
-  writes["pf:resume"] = {
+  writes[KEYS.resume] = {
     version: 1,
     entries: [{ id: "ddd", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
   };
@@ -350,7 +351,7 @@ test("off-screen IntersectionObserver observation gates incremental resume saves
     await flush();
     await flush();
     await flush();
-    const stored = () => writes["pf:resume"].entries[0].resume;
+    const stored = () => writes[KEYS.resume].entries[0].resume;
     assert.equal(stored(), 0);
 
     // Player scrolls off-screen: subsequent media-clock saves are suppressed.
@@ -379,7 +380,7 @@ test("off-screen IntersectionObserver observation gates incremental resume saves
 });
 
 test("SPA route change flushes the leaving entry and adopts the new route's media", async () => {
-  delete writes["pf:resume"];
+  delete writes[KEYS.resume];
   const { dom, video, shell } = makeEnv(600);
   TUNING.resume.minCheckpointSeconds = 0;
   TUNING.resume.maxCheckpointSeconds = 0;
@@ -389,8 +390,8 @@ test("SPA route change flushes the leaving entry and adopts the new route's medi
   await flush();
   await flush();
   await flush();
-  assert.equal(writes["pf:resume"].entries.length, 1);
-  assert.equal(writes["pf:resume"].entries[0].path, "/watch");
+  assert.equal(writes[KEYS.resume].entries.length, 1);
+  assert.equal(writes[KEYS.resume].entries[0].path, "/watch");
 
   // Watch some progress, then let the SPA push a different route.
   shell.currentTime = 120;
@@ -399,7 +400,7 @@ test("SPA route change flushes the leaving entry and adopts the new route's medi
   await flush();
   await flush();
 
-  const entries = () => writes["pf:resume"].entries;
+  const entries = () => writes[KEYS.resume].entries;
   const watchEntry = () => entries().find((e) => e.path === "/watch");
   assert.equal(watchEntry().resume, 120, "navigation flushed the position being left behind");
 
@@ -423,14 +424,14 @@ test("SPA route change flushes the leaving entry and adopts the new route's medi
 });
 
 test("a hash-only navigation does not re-adopt - same path, same entry", async () => {
-  delete writes["pf:resume"];
+  delete writes[KEYS.resume];
   const { dom, video, shell } = makeEnv(600);
   shell.currentTime = 0;
   const tracker = new ResumeTracker(shell);
   await flush();
   await flush();
   await flush();
-  assert.equal(writes["pf:resume"].entries.length, 1);
+  assert.equal(writes[KEYS.resume].entries.length, 1);
 
   // pathname is untouched by a fragment change; only the hash moves.
   dom.window.history.pushState({}, "", "/watch#chapter=2");
@@ -442,7 +443,7 @@ test("a hash-only navigation does not re-adopt - same path, same entry", async (
   video.dispatchEvent(new dom.window.Event("loadstart"));
   await flush();
   await flush();
-  assert.equal(writes["pf:resume"].entries.length, 1, "no re-adoption for a same-path navigation");
+  assert.equal(writes[KEYS.resume].entries.length, 1, "no re-adoption for a same-path navigation");
 
   tracker.destroy();
 });
@@ -450,7 +451,7 @@ test("a hash-only navigation does not re-adopt - same path, same entry", async (
 /* --- Dynamic content cadence + playback-status flushes ---------------- */
 
 test("the checkpoint span scales with duration rather than wall time", async (t) => {
-  writes["pf:resume"] = {
+  writes[KEYS.resume] = {
     version: 1,
     entries: [{ id: "span1", domain: "youtube", path: "/watch", title: "", duration: 6000, resume: 0, createdAt: 0, updatedAt: Date.now() }]
   };
@@ -466,7 +467,7 @@ test("the checkpoint span scales with duration rather than wall time", async (t)
   await flush();
   await flush();
   await flush();
-  const stored = () => writes["pf:resume"].entries[0].resume;
+  const stored = () => writes[KEYS.resume].entries[0].resume;
 
   shell.currentTime = 30; // under the duration-derived 60s span
   video.dispatchEvent(new dom.window.Event("timeupdate"));
@@ -478,7 +479,7 @@ test("the checkpoint span scales with duration rather than wall time", async (t)
 });
 
 test("a seeked flush persists the landed position, bypassing the span", async (t) => {
-  writes["pf:resume"] = {
+  writes[KEYS.resume] = {
     version: 1,
     entries: [{ id: "seek1", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
   };
@@ -493,7 +494,7 @@ test("a seeked flush persists the landed position, bypassing the span", async (t
   await flush();
   await flush();
   await flush();
-  const stored = () => writes["pf:resume"].entries[0].resume;
+  const stored = () => writes[KEYS.resume].entries[0].resume;
 
   shell.currentTime = 300;
   video.dispatchEvent(new dom.window.Event("seeked"));
@@ -501,7 +502,7 @@ test("a seeked flush persists the landed position, bypassing the span", async (t
 });
 
 test("ended resets the entry so the next visit restarts", async (t) => {
-  writes["pf:resume"] = {
+  writes[KEYS.resume] = {
     version: 1,
     entries: [{ id: "end1", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
   };
@@ -515,7 +516,7 @@ test("ended resets the entry so the next visit restarts", async (t) => {
   await flush();
   await flush();
   await flush();
-  const stored = () => writes["pf:resume"].entries[0].resume;
+  const stored = () => writes[KEYS.resume].entries[0].resume;
 
   shell.currentTime = 300;
   video.dispatchEvent(new dom.window.Event("timeupdate"));
@@ -527,7 +528,7 @@ test("ended resets the entry so the next visit restarts", async (t) => {
 });
 
 test("a hidden tab flushes and suspends checkpoints until visible again", async (t) => {
-  writes["pf:resume"] = {
+  writes[KEYS.resume] = {
     version: 1,
     entries: [{ id: "vis1", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
   };
@@ -541,7 +542,7 @@ test("a hidden tab flushes and suspends checkpoints until visible again", async 
   await flush();
   await flush();
   await flush();
-  const stored = () => writes["pf:resume"].entries[0].resume;
+  const stored = () => writes[KEYS.resume].entries[0].resume;
   const doc = dom.window.document;
 
   shell.currentTime = 25;
@@ -563,7 +564,7 @@ test("a hidden tab flushes and suspends checkpoints until visible again", async 
 });
 
 test("pagehide and freeze flush the final position", async (t) => {
-  writes["pf:resume"] = {
+  writes[KEYS.resume] = {
     version: 1,
     entries: [{ id: "life1", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
   };
@@ -578,7 +579,7 @@ test("pagehide and freeze flush the final position", async (t) => {
   await flush();
   await flush();
   await flush();
-  const stored = () => writes["pf:resume"].entries[0].resume;
+  const stored = () => writes[KEYS.resume].entries[0].resume;
 
   shell.currentTime = 25;
   dom.window.dispatchEvent(new dom.window.Event("pagehide"));
@@ -590,7 +591,7 @@ test("pagehide and freeze flush the final position", async (t) => {
 });
 
 test("the rVFC crank checkpoints on presented frames within the dynamic span", async (t) => {
-  writes["pf:resume"] = {
+  writes[KEYS.resume] = {
     version: 1,
     entries: [{ id: "rvfc1", domain: "youtube", path: "/watch", title: "", duration: 600, resume: 0, createdAt: 0, updatedAt: Date.now() }]
   };
@@ -612,7 +613,7 @@ test("the rVFC crank checkpoints on presented frames within the dynamic span", a
   await flush();
   await flush();
   await flush();
-  const stored = () => writes["pf:resume"].entries[0].resume;
+  const stored = () => writes[KEYS.resume].entries[0].resume;
 
   assert.equal(typeof frameCb, "function", "the crank armed a frame callback");
   frameCb(0, { mediaTime: 4 });

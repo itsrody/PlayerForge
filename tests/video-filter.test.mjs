@@ -7,7 +7,9 @@ globalThis.GM_setValue = (key, value) => { writes[key] = value; };
 globalThis.GM_addValueChangeListener = () => {};
 
 const { VideoFilter } = await import("../src/shell/filter.js");
-const { invalidateConfigCache } = await import("../src/shared/storage.js");
+const { KEYS, invalidateConfigCache } = await import("../src/shared/storage.js");
+
+const CFG_ROOT = KEYS.configs;
 
 function makeFakeVideo() {
   return { style: { filter: "" }, closest: () => null };
@@ -212,10 +214,10 @@ test("persist writes to pf:configs after the trailing debounce", async () => {
 
   const contrastStepper = panel.calls.steppers.find((s) => s.label === "Contrast");
   contrastStepper.onChange(130);
-  assert.equal(writes["pf:configs"]?.filter?.contrast, undefined,
+  assert.equal(writes[CFG_ROOT]?.filter?.contrast, undefined,
     "preview is instant but the storage write waits for the drag to settle");
   await sleep(380);
-  assert.equal(writes["pf:configs"]?.filter?.contrast, 130);
+  assert.equal(writes[CFG_ROOT]?.filter?.contrast, 130);
   filter.destroy();
 });
 
@@ -239,7 +241,7 @@ test("rapid stepper changes coalesce into a single storage write", async () => {
 
   globalThis.GM_setValue = realSet;
   assert.equal(setCalls, 1, "a drag burst settles to exactly one write");
-  assert.equal(writes["pf:configs"]?.filter?.brightness, 130);
+  assert.equal(writes[CFG_ROOT]?.filter?.brightness, 130);
   filter.destroy();
 });
 
@@ -251,9 +253,9 @@ test("destroy flushes a pending persist so the last value lands", () => {
 
   const tintStepper = panel.calls.steppers.find((s) => s.label === "Tint");
   tintStepper.onChange(-20);
-  assert.equal(writes["pf:configs"], undefined, "nothing persisted until flushed");
+  assert.equal(writes[CFG_ROOT], undefined, "nothing persisted until flushed");
   filter.destroy();
-  assert.equal(writes["pf:configs"]?.filter?.tint, -20);
+  assert.equal(writes[CFG_ROOT]?.filter?.tint, -20);
 });
 
 test("second destroy is a no-op", () => {
@@ -275,7 +277,7 @@ test("temperature persists to config", async () => {
   const tempStepper = panel.calls.steppers.find((s) => s.label === "Temp");
   tempStepper.onChange(30);
   await sleep(380);
-  assert.equal(writes["pf:configs"]?.filter?.temperature, 30);
+  assert.equal(writes[CFG_ROOT]?.filter?.temperature, 30);
   filter.destroy();
 });
 
@@ -288,7 +290,7 @@ test("tint persists to config", async () => {
   const tintStepper = panel.calls.steppers.find((s) => s.label === "Tint");
   tintStepper.onChange(-20);
   await sleep(380);
-  assert.equal(writes["pf:configs"]?.filter?.tint, -20);
+  assert.equal(writes[CFG_ROOT]?.filter?.tint, -20);
   filter.destroy();
 });
 
@@ -309,7 +311,7 @@ test("preset apply persists all fields in a single write", async () => {
 
   globalThis.GM_setValue = realSet;
   assert.equal(setCalls, 1, "all preset fields coalesce into a single write");
-  assert.equal(Object.keys(writes["pf:configs"]?.filter ?? {}).length, 9, "all color fields persisted in one doc");
+  assert.equal(Object.keys(writes[CFG_ROOT]?.filter ?? {}).length, 9, "all color fields persisted in one doc");
   filter.destroy();
 });
 
@@ -317,7 +319,7 @@ test("a saved zero is a real value, not a missing one", () => {
   cleanWrites();
   // Seed the configs doc directly: brightness/contrast/saturate all allow 0,
   // and the old `Number(raw) || def` silently reset each to its default.
-  writes["pf:configs"] = {
+  writes[CFG_ROOT] = {
     version: 1,
     filter: { brightness: 0, contrast: 0, saturate: 0 }
   };
