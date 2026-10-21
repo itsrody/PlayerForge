@@ -175,6 +175,30 @@ design for regression detection; the v1.0.0 target is preserved on its tag.
 
 ### Change log
 
+- **Kernel-layer unification pass.** `src/kernel/` shrank from 5 modules to 4
+  with a real seam repair: `sdk.js` was doing two unrelated jobs under one
+  "SDK detection engine" title, so it split by data shape into `detection.js`
+  (the import-free identity engine - registry, composed-ancestry scan,
+  parent-stamped descriptor caches) and `discovery.js` (presence checks,
+  presence gates, discovery taps, min-size thresholds). Absorbed (same
+  single-consumer rationale as earlier passes): `probe.js` - the boot
+  sentinel belongs to the discovery machinery it arms - into `discovery.js`,
+  and `menus.js` (39 lines of boot wiring) into `kernel.js`, keeping
+  `installMenuCommands` an export (the test seam). `contract.js` stays alone
+  deliberately: the interface BOTH layers import, so the shell never has to
+  pull the orchestrator for six constants and neither side can drift on the
+  shared strings. OOP moves: a per-video `RemovalWatch` class (kernel.js)
+  replaces `#watchVideoRemoval`'s closure machine whose state was split
+  between a kernel-level Map and closure variables - the observed anchors,
+  the single multi-root observer and the pending grace hang on one instance
+  with the same semantics (one grace per disconnect, stale-grace cancel on
+  reconnect, re-anchor on re-parent); the stateful factory outputs became
+  classes too - `PresenceGate` (the WeakMap+observer exactly-once engine,
+  with the per-instance MutationObserver check that keeps jsdom swap tests
+  honest) and `DiscoveryTap` (media feed + lazy escalation) - with the
+  public factory names unchanged so consumer churn is import-paths only.
+  356/356 tests unchanged (the shared-feed prune test caught a hoisting
+  mistake mid-pass - the MutationObserver check is per-instance on purpose).
 - **Shared-layer unification pass.** `src/shared/` collapsed from 20 modules
   to 5 data-shaped planes plus the version harness: `core.js` (clamping,
   tuning, timing, formatters, error typing, `firstAvailable` - no imports),

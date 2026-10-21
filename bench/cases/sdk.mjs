@@ -1,5 +1,5 @@
 import { measure } from "../lib.mjs";
-import { findSdkForVideo } from "../../src/kernel/sdk.js";
+import { findSdkForVideo } from "../../src/kernel/detection.js";
 
 /** Selector-satisfying fake node - enough surface for composedAncestry(). */
 function fakeNode(selectors, parent) {

@@ -1,10 +1,10 @@
 import { Kernel } from "./kernel/kernel.js";
 import { DEBUG_HASH_TAG } from "./kernel/contract.js";
 import { Shell } from "./shell/shell.js";
-import { installMenuCommands } from "./kernel/menus.js";
+import { installMenuCommands } from "./kernel/kernel.js";
 import { installContextBridge, requestFullscreenProvision } from "./shared/page.js";
-import { installVideoProbe } from "./kernel/probe.js";
-import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/sdk.js";
+import { installVideoProbe } from "./kernel/discovery.js";
+import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/discovery.js";
 import { logger } from "./shared/runtime.js";
 import { getConfigValue, setConfigValue, deleteConfigField } from "./shared/store.js";
 import { initFullscreenGate } from "./shared/dom.js";

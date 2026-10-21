@@ -20,7 +20,7 @@ import { Scope, logger, postTask, yield_ } from "./runtime.js";
 /**
  * Single document-level mutation feed for every document-wide interest.
  *
- * Discovery (kernel/sdk.js) and the shell-host reconnect watchdog
+ * Discovery (kernel/discovery.js) and the shell-host reconnect watchdog
  * (chrome/inject.js) both need "something anywhere changed" - running two
  * full-document MutationObservers makes SPA pages pay twice per mutation
  * batch. This dispatcher observes once, coalesces records per microtask,

@@ -1,11 +1,8 @@
-import { logger } from "../shared/runtime.js";
-import { getConfigValue } from "../shared/store.js";
-import { setDebugRuntime } from "../shared/runtime.js";
-import { postTask } from "../shared/runtime.js";
-import { Scope } from "../shared/runtime.js";
-import { runSteps } from "../shared/runtime.js";
-import { findSdkForVideo, meetsMinSize, createLayoutGate, createOnScreenGate, createDiscoveryTap, isOnScreen } from "./sdk.js";
+import { logger, setDebugRuntime, postTask, Scope, runSteps } from "../shared/runtime.js";
+import { getConfigValue, setConfigValue, gmRegisterMenu, gmUnregisterMenu } from "../shared/store.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, DEBUG_HASH_TAG, FRAMEWORK_TUNING } from "./contract.js";
+import { findSdkForVideo } from "./detection.js";
+import { meetsMinSize, createLayoutGate, createOnScreenGate, isOnScreen, createDiscoveryTap } from "./discovery.js";
 
 /**
  * Resolve once the container's child list has been quiet for a run of
@@ -131,13 +128,133 @@ export class ShellSlot {
  * SDK, drives discovery, and owns the shell slot plus the discovery-to-shell
  * settle pipeline (former lifecycle.js, absorbed as privates).
  * Under @run-at document-start nothing pre-exists us: the kernel rides the
- * shared discovery tap (sdk.js), catching SDK-created players the moment
+ * shared discovery tap (discovery.js), catching SDK-created players the moment
  * their <video> enters the DOM and readiness transitions on existing ones.
  */
+
 /** Skyline the removal watchdog never exceeds regardless of nesting. */
 const MAX_REMOVAL_DEPTH = 8;
 /** Extra ancestors (beyond the matched anchor) the removal watch observes. */
 const REMOVAL_DEPTH_MARGIN = 1;
+
+/**
+ * One video's removal watchdog, extracted from a per-closure Kernel private.
+ *
+ * Previously the watch lived in Kernel#watchVideoRemoval as a closure machine
+ * whose state - the observed anchors, the MutationObserver, the pending grace
+ * - was split between a kernel-level `Map` (video -> grace-cancel) and the
+ * closure's own surround variables, kept in step by hand at every path. Here
+ * that state hangs on one instance: `#anchors` (what is being observed),
+ * `#observer` (one instance watching up to `watchDepth` roots natively) and
+ * `#graceCancel` (the pending single-shot grace).
+ *
+ * Lifecycle: connected mutations re-check anchor currency (a re-parent
+ * re-observes); a disconnect schedules exactly ONE grace timer (further
+ * mutations are the same fact while it is pending); a grace fire that still
+ * finds the video detached ends the watch and removes the shell, while one
+ * that finds it reconnected re-anchors. stop() is the single teardown for
+ * both ends - a really-removed video and a page that is leaving - and both
+ * release the seen-video pin via the owner's onStop callback.
+ */
+class RemovalWatch {
+  #video;
+  #container;
+  #watchDepth;
+  #signal;
+  #onRemoved;
+  #onStop;
+  #anchors = [];
+  #observer = new MutationObserver(() => this.#checkAnchors());
+  #graceCancel = null;
+
+  constructor({ video, container, hops, signal, onRemoved, onStop }) {
+    this.#video = video;
+    this.#container = container;
+    this.#onRemoved = onRemoved;
+    this.#onStop = onStop;
+    /** Adaptive watch depth: the matched anchor + a margin, never unbounded. */
+    this.#watchDepth = Number.isInteger(hops) && hops > 0
+      ? Math.min(hops + REMOVAL_DEPTH_MARGIN, MAX_REMOVAL_DEPTH)
+      : MAX_REMOVAL_DEPTH;
+    this.#signal = signal;
+    this.#reanchor();
+  }
+
+  /** Chromium-native single-target consolidation: `MutationObserver.observe()`
+   *  supports multiple root targets natively (childList filtered in C++), so
+   *  up to `watchDepth` per-video C++ wrappers collapse to one instance.
+   *  The kernel scope disconnects it at pagehide - no per-video bookkeeping. */
+  #reanchor() {
+    // MutationObserver has no per-target unobserve(): disconnect() is the
+    // only way to drop the stale roots (the previous loop called a method
+    // that does not exist and threw, leaving the anchors stranded on their
+    // original parents). Records dropped by the disconnect cost nothing:
+    // this callback never reads the queue - every decision below is
+    // re-derived from live DOM state, which was just evaluated on this
+    // very call - and the next mutation lands on the re-observed roots.
+    this.#observer.disconnect();
+    this.#anchors.length = 0;
+    let anchor = this.#video.parentElement || this.#container;
+    for (let depth = 0; anchor && depth < this.#watchDepth; depth++, anchor = anchor.parentElement) {
+      this.#observer.observe(anchor, { childList: true });
+      this.#anchors.push(anchor);
+    }
+  }
+
+  /**
+   * Removal-grace tick: a scheduler.postTask handle on the kernel scope. It
+   * is pure deferral - nothing about it needs timer priority - and being
+   * signal-bound means pagehide (or any kernel abort) cancels every pending
+   * grace without the manual sweep loop racing the page.
+   */
+  #scheduleGrace(done) {
+    const handle = postTask(done, {
+      priority: "user-visible",
+      delay: FRAMEWORK_TUNING.removalGraceMs,
+      signal: this.#signal
+    });
+    return () => handle.abort();
+  }
+
+  #checkAnchors() {
+    const video = this.#video;
+    if (!video.isConnected) {
+      // One single-shot grace per disconnect; while it is pending the timer
+      // owns the re-check (further removal mutations are the same fact).
+      if (this.#graceCancel) {
+        return;
+      }
+      this.#graceCancel = this.#scheduleGrace(() => {
+        this.#graceCancel = null;
+        if (!video.isConnected) {
+          this.stop();
+          this.#onRemoved();
+        } else {
+          this.#reanchor();
+        }
+      });
+      return;
+    }
+    // Connected again: any pending grace is stale - the event that brought
+    // the video back (or moved it) replaces the time-based re-check, so the
+    // stale timer is cancelled instead of firing later against outdated
+    // state, and a fresh grace (if needed) is always measured from the
+    // CURRENT disconnect. Between settled events nothing is pending.
+    this.#graceCancel?.();
+    this.#graceCancel = null;
+    if (video.parentElement !== this.#anchors[0]) {
+      this.#reanchor();
+    }
+  }
+
+  stop() {
+    this.#observer.disconnect();
+    this.#graceCancel?.();
+    this.#graceCancel = null;
+    this.#onStop?.();
+    this.#onStop = null;
+  }
+}
 
 export class Kernel {
   /** The one live shell (one-shell-per-session; see ShellSlot). */
@@ -152,7 +269,6 @@ export class Kernel {
   // Weak: an adopted video orphaned by an untracked removal path must not
   // pin the element (and its whole subtree) for the page's lifetime.
   #seenVideos = new WeakSet();
-  #removalTimers = new Map();
   /** The live discovery tap (createDiscoveryTap); dropped at pagehide. */
   #discoveryTap = null;
   /** True once the full-document discovery tap has been downgraded. */
@@ -446,92 +562,19 @@ export class Kernel {
     this.#downgradeDiscoveryTap();
   }
 
+  /** Hand per-video removal watching to its one stateful owner. */
   #watchVideoRemoval(video, container, hops) {
-    /** Adaptive watch depth: the matched anchor + a margin, never unbounded. */
-    const watchDepth = Number.isInteger(hops) && hops > 0
-      ? Math.min(hops + REMOVAL_DEPTH_MARGIN, MAX_REMOVAL_DEPTH)
-      : MAX_REMOVAL_DEPTH;
-
-    const anchors = [];
-
-    /**
-     * Removal-grace tick: a scheduler.postTask handle on the kernel scope. It
-     * is pure deferral - nothing about it needs timer priority - and being
-     * signal-bound means pagehide (or any kernel abort) cancels every pending
-     * grace without the manual sweep loop racing the page.
-     */
-    const scheduleGraceTimer = (done) => {
-      const handle = postTask(done, {
-        priority: "user-visible",
-        delay: FRAMEWORK_TUNING.removalGraceMs,
-        signal: this.#scope.signal
-      });
-      return () => handle.abort();
-    };
-
-    // Arrow fn keeps the enclosing class-level `this` for timer/lifecycle access.
-    const checkAnchors = () => {
-      if (!video.isConnected) {
-        // One single-shot grace per disconnect; while it is pending the timer
-        // owns the re-check (further removal mutations are the same fact).
-        if (this.#removalTimers.has(video)) {
-          return;
-        }
-        this.#removalTimers.set(video, scheduleGraceTimer(() => {
-          this.#removalTimers.delete(video);
-          if (!video.isConnected) {
-            stopWatching();
-            this.#onVideoRemoved(video);
-          } else {
-            reanchorObservers();
-          }
-        }));
-        return;
-      }
-      // Connected again: any pending grace is stale - the event that brought
-      // the video back (or moved it) replaces the time-based re-check, so the
-      // stale timer is cancelled instead of firing later against outdated
-      // state, and a fresh grace (if needed) is always measured from the
-      // CURRENT disconnect. Between settled events nothing is pending.
-      this.#removalTimers.get(video)?.();
-      this.#removalTimers.delete(video);
-      if (video.parentElement !== anchors[0]) {
-        reanchorObservers();
-      }
-    };
-
-    /** Chromium-native single-target consolidation: `MutationObserver.observe()`
-     *  supports multiple root targets natively (childList filtered in C++), so
-     *  up to `watchDepth` per-video C++ wrappers collapse to one instance.
-     *  The kernel scope disconnects it at pagehide - no per-video bookkeeping. */
-    const observer = new MutationObserver(checkAnchors);
-    this.#scope.onDispose(() => observer.disconnect());
-
-    const reanchorObservers = () => {
-      // MutationObserver has no per-target unobserve(): disconnect() is the
-      // only way to drop the stale roots (the previous loop called a method
-      // that does not exist and threw, leaving the anchors stranded on their
-      // original parents). Records dropped by the disconnect cost nothing:
-      // this callback never reads the queue - every decision below is
-      // re-derived from live DOM state, which was just evaluated on this
-      // very call - and the next mutation lands on the re-observed roots.
-      observer.disconnect();
-      anchors.length = 0;
-      let anchor = video.parentElement || container;
-      for (let depth = 0; anchor && depth < watchDepth; depth++, anchor = anchor.parentElement) {
-        observer.observe(anchor, { childList: true });
-        anchors.push(anchor);
-      }
-    };
-
-    const stopWatching = () => {
-      observer.disconnect();
-      this.#removalTimers.get(video)?.();
-      this.#removalTimers.delete(video);
-      this.#seenVideos.delete(video);
-    };
-
-    reanchorObservers();
+    const watch = new RemovalWatch({
+      video,
+      container,
+      hops,
+      signal: this.#scope.signal,
+      onRemoved: () => this.#onVideoRemoved(video),
+      onStop: () => this.#seenVideos.delete(video)
+    });
+    // Chromium-native single-target consolidation and the timer are both
+    // handled inside the watch; the kernel scope is its pagehide backstop.
+    this.#scope.onDispose(() => watch.stop());
   }
 
   #createShell({ video, container, sdk }) {
@@ -565,4 +608,39 @@ export class Kernel {
       detail: { method: "menu" }
     }));
   }
+}
+
+/** GM menu wiring, owned at the kernel layer instead of inside the Kernel so
+ *  the debug command exists from script eval - not just after a video is
+ *  discovered. The debug toggle works fully without a kernel: it persists the
+ *  setting and flips the shared debug runtime (logger + LoAF diagnostic).
+ */
+export function installMenuCommands() {
+  let debugId = null;
+
+  const refreshDebug = () => {
+    if (debugId != null) {
+      gmUnregisterMenu(debugId);
+    }
+    const enabled = getConfigValue(DEBUG_LOGS_KEY, false);
+    debugId = gmRegisterMenu(
+      `\u{1F41B} Debug Logs:${enabled ? "On" : "Off"}`,
+      () => {
+        const next = !getConfigValue(DEBUG_LOGS_KEY, false);
+        setConfigValue(DEBUG_LOGS_KEY, next);
+        setDebugRuntime(next);
+        refreshDebug();
+      },
+      { autoClose: true }
+    );
+  };
+
+  refreshDebug();
+
+  return () => {
+    if (debugId != null) {
+      gmUnregisterMenu(debugId);
+      debugId = null;
+    }
+  };
 }

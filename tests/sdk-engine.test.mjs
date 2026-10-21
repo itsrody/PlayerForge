@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
+import { findSdkForVideo } from "../src/kernel/detection.js";
 import {
-  findSdkForVideo,
   videoFromEvent,
   meetsMinSize,
   createLayoutGate,
@@ -11,7 +11,7 @@ import {
   watchMediaEvents,
   MIN_VIDEO_WIDTH,
   MIN_VIDEO_HEIGHT
-} from "../src/kernel/sdk.js";
+} from "../src/kernel/discovery.js";
 
 const dom = (html) =>
   new JSDOM(`<!doctype html><html><body>${html}</body></html>`).window.document;

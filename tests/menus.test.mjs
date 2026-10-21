@@ -22,7 +22,7 @@ globalThis.GM_setValue = (key, value) => { stored[key] = value; };
 console.log = () => {};
 console.warn = () => {};
 
-const { installMenuCommands } = await import("../src/kernel/menus.js");
+const { installMenuCommands } = await import("../src/kernel/kernel.js");
 const { getConfigValue } = await import("../src/shared/store.js");
 const { logger } = await import("../src/shared/runtime.js");
 
