@@ -21,7 +21,7 @@
  *     `vibrate` returns on failure is false / a no-op).
  * Never throws.
  */
-import { getSetting } from "./config.js";
+import { getSetting, SETTING_KEYS } from "./config.js";
 
 /** Distinct pulse shapes per gesture, in milliseconds (vibrate / pause / ...). */
 const PATTERNS = {
@@ -42,7 +42,7 @@ const canVibrate =
 
 /** Fire the haptic pulse for `type` when armed (setting, motion, activation). */
 export function gestureHaptic(type) {
-  if (!canVibrate || !getSetting("gestures.haptics")) {
+  if (!canVibrate || !getSetting(SETTING_KEYS.haptics)) {
     return;
   }
   const pattern = PATTERNS[type];

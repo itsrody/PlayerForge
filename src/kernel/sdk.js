@@ -247,7 +247,7 @@ export function videoFromEvent(event) {
  * The NodeList is walked by index here, which is also the cheapest way to
  * drain it.
  */
-export function forEachVideoInMutations(mutations, visit) {
+function forEachVideoInMutations(mutations, visit) {
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
       // Cheap element guard: text/comment nodes and the subtree we already
@@ -542,15 +542,4 @@ export function createDiscoveryTap(onVideo, { mutations = true } = {}) {
       offMutations = null;
     }
   };
-}
-
-/**
- * Full discovery tap used by the kernel's permanent rider: media events plus
- * the shared dom-watch dispatcher. This is the heavier signal (it keeps a
- * full-document childList+subtree observer alive while subscribed); the boot
- * probe uses createDiscoveryTap(..., { mutations: false }) and escalates on
- * demand. Returns the unsubscribe function.
- */
-export function watchDocumentVideos(onVideo) {
-  return createDiscoveryTap(onVideo).stop;
 }

@@ -5,7 +5,7 @@ import { deepestActiveElement, subscribeFullscreen } from "../../shared/shadow.j
 import { clamp } from "../../shared/clamp.js";
 import { Scope } from "../../shared/scope.js";
 import { el } from "./elements.js";
-import { getSetting } from "./config.js";
+import { getSetting, SETTING_KEYS } from "./config.js";
 import { REDUCED_MOTION } from "../../shared/timing.js";
 
 const HOLD_DELAY_MS = 400;
@@ -285,7 +285,7 @@ export class SettingsPanel {
    * override still wins for the explicit (undirected) path.
    */
   #isCompactMode() {
-    const explicit = getSetting("ui.compact");
+    const explicit = getSetting(SETTING_KEYS.compact);
     if (explicit === true || explicit === false) return explicit;
     // Auto-detect: narrow touch viewport.
     return matchMedia(COMPACT_MEDIA_QUERY).matches;

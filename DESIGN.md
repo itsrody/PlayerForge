@@ -150,6 +150,16 @@ contrast between HUD foreground and the composited backdrop, and assert it.
 
 ## 5. Verification
 
+- **Hygiene pass.** The platform floor's remaining Chromium-154 references (the
+  banner description, the main and worker esbuild targets, the test-loader
+  comment) moved to 155 to match package.json. Four exports with no external
+  consumer were closed (`forEachVideoInMutations`, `gmGetValue`, `VOLUME_STEP`
+  de-exported; `watchDocumentVideos` deleted along with its stale
+  "used by the kernel" claim), the `POINTER_GESTURE_INTENTS` alias was inlined
+  onto `GESTURE_IDS`, and the non-gesture setting keys became a single frozen
+  vocabulary (`SETTING_KEYS` in `config.js`) that the schema and every consumer
+  (bindings, haptics gate, panel, shell) now derive from. No behavior change.
+
 - **`prefers-contrast: more`** must visibly change the HUD (R2, R8). Check the
   token actually moves, not just that the media query parses.
 - **Reduced-transparency and `data-pf-cpu-tier="low"`** must produce no
@@ -178,6 +188,15 @@ design for regression detection; the v1.0.0 target is preserved on its tag.
 
 ### Change log
 
+- **Hygiene pass.** The platform floor's remaining Chromium-154 references (the
+  banner description, the main and worker esbuild targets, the test-loader
+  comment) moved to 155 to match package.json. Four exports with no external
+  consumer were closed (`forEachVideoInMutations`, `gmGetValue`, `VOLUME_STEP`
+  de-exported; `watchDocumentVideos` deleted along with its stale
+  "used by the kernel" claim), the `POINTER_GESTURE_INTENTS` alias was inlined
+  onto `GESTURE_IDS`, and the non-gesture setting keys became a single frozen
+  vocabulary (`SETTING_KEYS` in `config.js`) that the schema and every consumer
+  (bindings, haptics gate, panel, shell) now derive from. No behavior change.
 - **Architecture step unification.** The ordered sequences that were spelled
   out as long method bodies are now single declarative lists behind shared
   helpers. `src/shared/steps.js` (`runSteps` / `runStepsAsync`) runs the shell

@@ -9,6 +9,21 @@ import { fmtSeconds } from "../../shared/formatters.js";
 
 const SETTINGS_PREFIX = "settings";
 
+/**
+ * The non-gesture setting-key vocabulary, written exactly once here: the
+ * schema entries and every consumer derive from these handles, so a key
+ * rename can never silently orphan a binding gate, haptic gate, or panel
+ * read. (The gesture-family keys stay on GESTURES[id].setting - the kernel
+ * contract owns that vocabulary.)
+ */
+export const SETTING_KEYS = Object.freeze({
+  stepSeek: "controller.stepSeek",
+  hotkeys: "gestures.hotkeys",
+  haptics: "gestures.haptics",
+  edgeToEdge: "fullscreen.edgeToEdge",
+  compact: "ui.compact"
+});
+
 /** Unique-id seed for option-group labels (one settings section per shell). */
 let optionsGroupCounter = 0;
 const ARROW_DIRECTIONS = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
@@ -28,7 +43,7 @@ const GESTURE_TOGGLES = GESTURE_IDS.map((id) => ({
 
 const SETTINGS_SCHEMA = [
   {
-    key: "controller.stepSeek",
+    key: SETTING_KEYS.stepSeek,
     type: "options",
     label: "Skip Step",
     options: [5, 10, 15],
@@ -37,7 +52,7 @@ const SETTINGS_SCHEMA = [
     group: "Playback"
   },
   {
-    key: "gestures.hotkeys",
+    key: SETTING_KEYS.hotkeys,
     type: "bool",
     label: "Hotkeys",
     default: true,
@@ -45,21 +60,21 @@ const SETTINGS_SCHEMA = [
   },
   ...GESTURE_TOGGLES,
   {
-    key: "gestures.haptics",
+    key: SETTING_KEYS.haptics,
     type: "bool",
     label: "Haptic Feedback",
     default: true,
     group: "Features"
   },
   {
-    key: "fullscreen.edgeToEdge",
+    key: SETTING_KEYS.edgeToEdge,
     type: "bool",
     label: "Edge-to-edge Fullscreen",
     default: true,
     group: "Features"
   },
   {
-    key: "ui.compact",
+    key: SETTING_KEYS.compact,
     type: "bool",
     label: "Compact Panel",
     default: false,

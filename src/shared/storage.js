@@ -6,7 +6,7 @@ export const KEYS = {
   resume: "pf:resume"
 };
 
-export function gmGetValue(key, fallback) {
+function gmGetValue(key, fallback) {
   return GM_getValue(key, fallback);
 }
 

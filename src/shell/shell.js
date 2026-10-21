@@ -6,7 +6,7 @@ import { ResumeTracker } from "./resume.js";
 import { SubtitlesSection } from "./subtitles/section.js";
 import { VideoFilter } from "./filter.js";
 import { SettingsPanel } from "./chrome/panel.js";
-import { addSettingsSection, getSetting } from "./chrome/config.js";
+import { addSettingsSection, getSetting, SETTING_KEYS } from "./chrome/config.js";
 import { TUNING } from "../shared/tuning.js";
 import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
@@ -329,7 +329,7 @@ export class Shell {
     // cutout edge-to-edge (see viewport.js). Gated by fullscreen.edgeToEdge:
     // when disabled we leave the iframe at the default (Chrome letterboxes to
     // the safe area itself) and fill simply covers the letterboxed frame.
-    if (getSetting("fullscreen.edgeToEdge") !== false) {
+    if (getSetting(SETTING_KEYS.edgeToEdge) !== false) {
       ensureViewportFitCover();
     }
     this.#shellDom = injectShell(this.container);

@@ -1,4 +1,4 @@
-import { getSetting, onSettingsChanged } from "../chrome/config.js";
+import { getSetting, onSettingsChanged, SETTING_KEYS } from "../chrome/config.js";
 import { TUNING } from "../../shared/tuning.js";
 import { formatTime } from "../../shared/time.js";
 import { fs, subscribeFullscreen } from "../../shared/shadow.js";
@@ -39,31 +39,31 @@ export const INPUT_BINDINGS = [
   // - Keyboard -
   {
     id: "key-skip-right", gesture: "key", code: "ArrowRight", emit: GESTURE_EVENTS.skip,
-    direction: "right", setting: "gestures.hotkeys", fs: false
+    direction: "right", setting: SETTING_KEYS.hotkeys, fs: false
   },
   {
     id: "key-skip-left", gesture: "key", code: "ArrowLeft", emit: GESTURE_EVENTS.skip,
-    direction: "left", setting: "gestures.hotkeys", fs: false
+    direction: "left", setting: SETTING_KEYS.hotkeys, fs: false
   },
   {
     id: "key-volume-up", gesture: "key", code: "ArrowUp", emit: GESTURE_EVENTS.volume,
-    direction: "up", setting: "gestures.hotkeys", fs: false
+    direction: "up", setting: SETTING_KEYS.hotkeys, fs: false
   },
   {
     id: "key-volume-down", gesture: "key", code: "ArrowDown", emit: GESTURE_EVENTS.volume,
-    direction: "down", setting: "gestures.hotkeys", fs: false
+    direction: "down", setting: SETTING_KEYS.hotkeys, fs: false
   },
   {
     id: "key-mute", gesture: "key", code: "KeyM", emit: GESTURE_EVENTS.mute,
-    setting: "gestures.hotkeys", fs: false
+    setting: SETTING_KEYS.hotkeys, fs: false
   },
   {
     id: "key-pip", gesture: "key", code: "KeyP", emit: GESTURE_EVENTS.pip,
-    setting: "gestures.hotkeys", fs: false
+    setting: SETTING_KEYS.hotkeys, fs: false
   },
   {
     id: "key-panel", gesture: "key", code: "KeyS", emit: GESTURE_EVENTS.panel,
-    setting: "gestures.hotkeys", fs: false, allowControlFocus: true
+    setting: SETTING_KEYS.hotkeys, fs: false, allowControlFocus: true
   }
 ];
 
@@ -107,10 +107,10 @@ let intentsArmedFs = false;
  * input the shell deliberately passes through (single click/tap, hover,
  * presses outside the gesture zone).
  */
-export const POINTER_GESTURE_INTENTS = GESTURE_IDS;
-/** Precomputed OR of POINTER_GESTURE_INTENTS over intentsArmed: pointerdown
- *  ownership checked it via a 5-iteration `.some(allowsIntent)` scan per
- *  press (and again from #dominatesPress); one boolean read replaces both. */
+/** Precomputed OR over GESTURE_IDS (all intents are pointer intents):
+ *  pointerdown ownership checked it via a 5-iteration `.some(allowsIntent)`
+ *  scan per press (and again from #dominatesPress); one boolean read
+ *  replaces both. */
 let anyPointerArmed = false;
 
 function refreshIntentGates() {
@@ -125,8 +125,8 @@ function refreshIntentGates() {
     intentsArmed.set(gesture, open);
   }
   let anyPointer = false;
-  for (let i = 0; i < POINTER_GESTURE_INTENTS.length; i++) {
-    if (intentsArmed.get(POINTER_GESTURE_INTENTS[i]) === true) {
+  for (let i = 0; i < GESTURE_IDS.length; i++) {
+    if (intentsArmed.get(GESTURE_IDS[i]) === true) {
       anyPointer = true;
       break;
     }
@@ -264,7 +264,7 @@ function performSkip(shell, state, direction) {
   }
   state.streakResetAt = now;
 
-  const step = getSetting("controller.stepSeek") * state.streakCount;
+  const step = getSetting(SETTING_KEYS.stepSeek) * state.streakCount;
   shell.media.skip(direction === "right" ? step : -step);
   shell.toastFlash(
     direction === "right" ? "right-arrows" : "left-arrows",
