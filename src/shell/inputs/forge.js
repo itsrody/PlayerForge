@@ -344,14 +344,13 @@ export class InputForge {
       // compat stream eaten until some later pointerup. A cancelled touch
       // reclaims every tracked pointer - the sweep is idempotent when the
       // paired pointercancel already ran (and vice versa).
-      for (const id of [...this.#pointers.keys()]) {
+      for (const id of this.#pointers.keys()) {
         this.#cancelTrackedPointer(id);
       }
     }, options);
     window.addEventListener("pointerup", (event) => this.#handlePointerUp(event), options);
     window.addEventListener("pointercancel", (event) => this.#handlePointerCancel(event), options);
-    document.addEventListener("keydown", (event) => this.#handleKeydown(event), { capture: true, signal });
-    document.addEventListener("keyup", (event) => this.#handleKeyup(event), { capture: true, signal });
+    document.addEventListener("keydown", (event) => this.#handleKeydown(event), { capture: true, signal });    document.addEventListener("keyup", (event) => this.#handleKeyup(event), { capture: true, signal });
     // A window blur, a hidden tab, or a Page Lifecycle freeze can each swallow
     // the matching Space keyup and/or pointerup; end every live session through
     // the normal release paths so no rate/scrub/hold stays latched.
@@ -1069,7 +1068,7 @@ export class InputForge {
    */
   #releaseSessions() {
     this.#finishKeyboardHold(false);
-    for (const id of [...this.#pointers.keys()]) {
+    for (const id of this.#pointers.keys()) {
       this.#cancelTrackedPointer(id);
     }
   }

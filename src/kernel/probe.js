@@ -34,12 +34,16 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
   // Re-checks candidates that failed the size gate when their box grows: the
   // observer-driven layout-presence gate re-reads the delivered box (no forced
   // reflow) and lands off the mutation batch, so a candidate that only reaches
-  // player size later would otherwise never fire onCandidate.
-  const layoutGate = createLayoutGate({ minWidth, minHeight });
+  // player size later would otherwise never fire onCandidate. The detached-
+  // target prune stays off: the probe's contract is that a video-less or
+  // hidden-only page never opens the document-wide mutation feed, and the
+  // probe's own gate stops at kernel boot (or pagehide), bounding any
+  // unqualified target to that window.
+  const layoutGate = createLayoutGate({ minWidth, minHeight, prune: false });
   // Defers a player-sized-but-off-screen candidate (a carousel of embeds) so a
   // full kernel boot is not paid for a video the user cannot see. The lookahead
-  // margin readies the shell just before it scrolls in.
-  const onScreenGate = createOnScreenGate();
+  // margin readies the shell just before it scrolls in. Same prune reasoning.
+  const onScreenGate = createOnScreenGate({ prune: false });
   // Starts as the cheap media-event tap; consider() escalates it to the full
   // document observer once a rendered candidate appears (see below).
   const tap = createDiscoveryTap(consider, { mutations: false });

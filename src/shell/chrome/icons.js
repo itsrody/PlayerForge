@@ -67,20 +67,26 @@ function canonicalName(name) {
 }
 
 /**
- * One cached entry per canonical icon: the SVG markup string AND a template
- * element parsed from it once, in the caller's document. iconMarkup and
- * createIconElement both read from this single store, so a repeated icon
- * never re-parses whether it is shipped as a string (toast) or a DOM element
- * (panel/history); the only cost for the element path after the first use is
- * a cheap cloneNode. The template is parsed in the document it is first
- * requested in, which is correct whether that is the top document or a shell
- * shadow-root document.
+ * One cached entry per canonical icon per document: the template element
+ * parsed from the static markup once, in the requesting document, inside a
+ * document-keyed WeakMap (so a document swap frees its whole map, and no doc
+ * pin lives on the store). iconMarkup and createIconElement both derive from
+ * this store, so a repeated icon never re-parses whether it is shipped as a
+ * string (toast) or a DOM element (panel/history); the only cost for the
+ * element path after the first use is a cheap cloneNode. Parsing happens in
+ * the document it is first requested in, which is correct whether that is the
+ * top document or a shell shadow-root document.
  */
-const cache = new Map();
+const cache = new WeakMap();
 
-function entryFor(canonical, doc) {
-  let entry = cache.get(canonical);
-  if (!entry || entry.doc !== doc) {
+function parsedIcon(canonical, doc) {
+  let perDoc = cache.get(doc);
+  if (!perDoc) {
+    perDoc = new Map();
+    cache.set(doc, perDoc);
+  }
+  let el = perDoc.get(canonical);
+  if (!el) {
     const markup = ICONS[canonical];
     // Parse the static SVG markup via DOMParser, never innerHTML: on MV3 /
     // strict-CSP sites that enforce Trusted Types, innerHTML would be blocked
@@ -89,20 +95,18 @@ function entryFor(canonical, doc) {
     // DOMParser is resolved from the target document's realm so the parsed
     // node comes back in the same world, regardless of which window first
     // requested the icon (top document or a shell shadow-root document).
-    let el = null;
     const Parser = doc.defaultView?.DOMParser;
     try {
       if (Parser) {
         const parsed = new Parser().parseFromString(markup, "image/svg+xml").documentElement;
         if (parsed) {
           el = doc.importNode(parsed, true);
+          perDoc.set(canonical, el);
         }
       }
     } catch {}
-    entry = { markup, el, doc };
-    cache.set(canonical, entry);
   }
-  return entry;
+  return el;
 }
 
 /**
@@ -118,14 +122,14 @@ export function iconMarkup(name) {
 
 /**
  * A detached, ready-to-append copy of the icon element, or null for an
- * unknown name. Clones the single parsed template per canonical name (and per
- * document); the clone is independent and safe to append wherever the caller
- * is targeting.
+ * unknown name (or an unparseable markup / DOMParser-less host). Clones the
+ * cached template per canonical name and document; the clone is independent
+ * and safe to append wherever the caller is targeting.
  */
 export function createIconElement(name, doc = document) {
   const canonical = canonicalName(name);
   if (!canonical) {
     return null;
   }
-  return entryFor(canonical, doc).el.cloneNode(true);
+  return parsedIcon(canonical, doc)?.cloneNode(true) ?? null;
 }

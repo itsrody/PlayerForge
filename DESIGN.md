@@ -175,6 +175,24 @@ design for regression detection; the v1.0.0 target is preserved on its tag.
 
 ### Change log
 
+- **Native allocation pass.** The subscription machinery census (129
+  addEventListener sites, 21 `once`, 13 observers, 9 timer families,
+  6 lazy debounce/retry engines) showed the shared-engine structure already in
+  place; the remaining wins landed. The two pointer-sweep
+  `[...Map.keys()]` spreads are gone (direct iteration tolerates the
+  mid-loop delete the sweep performs); `removeEventListener` no longer passes
+  the ignored `passive` key; the icon store is a document-keyed WeakMap of
+  per-icon parsed templates (a document swap frees its whole map and no doc
+  pin lives on the store); the presence gate's WeakMap pair gained the native
+  half it could not have before - a lazily-armed `onDomMutations` prune that
+  `unobserve()`s candidates removed from the document before qualifying, so
+  the observer's C++ target list no longer holds detached players for the
+  gate's lifetime (the probe's gates opt out to keep the two-phase
+  video-less-cheap-tap contract, and their pin window is bounded by
+  probe stop); and all three MessagePort listener pairs route their teardown
+  through signal options (`{ signal }` on this floor) - a settle or dropPipe
+  abort now tears listeners down natively with no per-path removal to forget.
+  353 -> 354 tests (one new: the prune).
 - **Method consolidation pass.** Same behavior, fewer and more shared
   methods. Deleted: the panel's unused `openSection`, the dormant resume
   clipboard pad (`exportData`/`importData` on the store and the

@@ -510,7 +510,6 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
         legacyChain = false;
       } else {
         try {
-          replyPort.removeEventListener("message", onReplyPort);
           replyPort.close();
         } catch {}
       }
@@ -519,6 +518,9 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   };
 
   // Private pipe: an ancestor that honored the transfer answers here directly.
+  // Scoped to the request's own signal: settle() aborts it first, so the
+  // port listener drops natively on EVERY settle path (broadcast answer,
+  // port answer, timeout) with no per-path removal to forget.
   const onReplyPort = (event) => {
     const data = event.data;
     if (data && typeof data === "object" && data.type === CTX_RESPONSE_TYPE
@@ -531,7 +533,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
       const mc = new MessageChannel();
       replyPort = mc.port1;
       transferPort = mc.port2;
-      replyPort.addEventListener("message", onReplyPort);
+      replyPort.addEventListener("message", onReplyPort, { signal: ac.signal });
       replyPort.start();
     } catch {
       replyPort = null;
@@ -658,8 +660,7 @@ export function createTopFrameResponder(resolveContext, ownOrigin = location.ori
       return;
     }
     pipeEntryByPort.delete(entry.port);
-    entry.port.removeEventListener("message", entry.handler);
-    entry.port.removeEventListener("messageerror", entry.onError);
+    entry.ac.abort();
     entry.port.close();
   };
 
@@ -711,13 +712,13 @@ export function createTopFrameResponder(resolveContext, ownOrigin = location.ori
       if (!entry) {
         // First contact on a fresh pipe: register the persistent handler so
         // repeat resolves over this port are answered without ever touching
-        // the window message channel again.
-        entry = { port, lastUsed: performance.now(), handler: null, onError: null };
-        entry.handler = onPipeRequest(entry);
-        entry.onError = () => dropPipe(entry);
-        port.addEventListener("message", entry.handler);
-        port.addEventListener("messageerror", entry.onError);
-        port.start();
+        // the window message channel again. Both listeners ride one
+        // entry-owned signal, so dropPipe's single abort() tears the pair
+        // down natively - there is no removal path that can forget one.
+        entry = { port, lastUsed: performance.now(), ac: new AbortController() };
+        entry.port.addEventListener("message", onPipeRequest(entry), { signal: entry.ac.signal });
+        entry.port.addEventListener("messageerror", () => dropPipe(entry), { signal: entry.ac.signal });
+        entry.port.start();
         pipeEntryByPort.set(port, entry);
         pipePorts.add(entry);
       }

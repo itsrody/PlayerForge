@@ -466,8 +466,41 @@ test("createLayoutGate ignores a reveal that is still undersized", () => {
   }
 });
 
-test("isOnScreen is permissive when no viewport size is resolvable", () => {
+test("kernel gate prunes a target that leaves the document via the shared feed", async () => {
   const doc = dom("");
+  const win = doc.defaultView;
+  const video = doc.createElement("video");
+  doc.body.appendChild(video);
+  video.getBoundingClientRect = () => ({ width: 10, height: 10 });
+  const fake = fakeResizeObserver();
+  const RealDoc = globalThis.document;
+  const realWindow = globalThis.window;
+  const RealMO = globalThis.MutationObserver;
+  globalThis.document = doc;
+  globalThis.window = win;
+  globalThis.MutationObserver = win.MutationObserver;
+  try {
+    let qualified = 0;
+    const gate = createLayoutGate({ minWidth: 100, minHeight: 60 });
+    gate.watch(video, () => qualified++);
+    assert.equal(fake.state.observed.has(video), true, "unqualified target is watched");
+
+    video.remove();
+    // The dom-watch feed coalesces and dispatches off a task boundary.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    assert.equal(fake.state.observed.has(video), false, "detached target unobserved through the shared feed");
+    assert.equal(qualified, 0, "a pruned target never qualifies");
+    gate.stop();
+  } finally {
+    fake.restore();
+    globalThis.document = RealDoc;
+    globalThis.window = realWindow;
+    globalThis.MutationObserver = RealMO;
+  }
+});
+
+test("isOnScreen is permissive when no viewport size is resolvable", () => {  const doc = dom("");
   const video = sizedVideo(doc, { top: 9000, bottom: 9020, left: 0, right: 300 });
   const realWindow = globalThis.window;
   globalThis.window = undefined;

@@ -339,22 +339,51 @@ function entryBoxSize(entry) {
  * observer entry is a pass. `extras(qualify)` may register a side-channel
  * listener and returns its teardown.
  */
-function createPresenceGate({ createObserver, qualifies, fallbackWatch, extras }) {
+function createPresenceGate({ createObserver, qualifies, fallbackWatch, extras, prune = true }) {
   if (!createObserver) {
     return { watch: fallbackWatch, stop() {} };
   }
   // WeakMap, not Map: neither observer notifies when an observed target is
   // removed from the DOM, so a detached candidate that never qualified would
-  // otherwise be pinned (and so would the observer's own target list) until
-  // stop() - a leak that matters for the long-lived kernel gate on an SPA that
-  // recycles players. stop() swaps in a fresh one instead of clear().
+  // otherwise be pinned (and so would the callback) until stop() - a leak
+  // that matters for the long-lived kernel gate on an SPA that recycles
+  // players. stop() swaps in a fresh one instead of clear().
   let waiting = new WeakMap();
+
+  // Native target-list hygiene. Browsers keep observed elements in the
+  // observer's own (C++) target list until an explicit unobserve, so a
+  // candidate that leaves the document while still player-unknown pins the
+  // gate even after the JS-side WeakMap entry is unreachable. The prune
+  // piggybacks on the shared dom-watch feed (one WeakMap.has per removal,
+  // zero steady-state cost) and arms lazily on the first watch, so a
+  // video-less document never opens the document observer. A candidate
+  // pruned this way loses its pending RO/IO callback, but a re-adoptable
+  // player re-enters adoption through the discovery/media taps, so
+  // re-armed watching happens on the same event that makes it qualifiable.
+  const pruneSupported = typeof MutationObserver === "function";
+  const pruneDetached = (records) => {
+    for (const record of records) {
+      const removed = record.removedNodes;
+      if (!removed) {
+        continue;
+      }
+      for (const node of removed) {
+        if (waiting.has(node)) {
+          observer.unobserve(node);
+          waiting.delete(node);
+        }
+      }
+    }
+  };
+  // Armed on first watch (see the comment above); also rearms after stop().
+  let offPrune = null;
+
   function qualify(target) {
     if (!waiting.has(target)) {
       return;
     }
-    observer.unobserve(target);
     const onQualify = waiting.get(target);
+    observer.unobserve(target);
     waiting.delete(target);
     onQualify?.();
   }
@@ -371,11 +400,16 @@ function createPresenceGate({ createObserver, qualifies, fallbackWatch, extras }
       if (waiting.has(target)) {
         return;
       }
+      if (!offPrune && pruneSupported && prune) {
+        offPrune = onDomMutations(pruneDetached);
+      }
       waiting.set(target, onQualify);
       observer.observe(target);
     },
     stop() {
       observer.disconnect();
+      offPrune?.();
+      offPrune = null;
       removeExtras?.();
       waiting = new WeakMap();
     }
@@ -398,7 +432,7 @@ function createPresenceGate({ createObserver, qualifies, fallbackWatch, extras }
  * jsdom has no real ResizeObserver, so the fallback reuses the synchronous
  * gate and still qualifies immediately.
  */
-export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_VIDEO_HEIGHT } = {}) {
+export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_VIDEO_HEIGHT, prune = true } = {}) {
   // content-visibility: auto subtrees report an unchanged placeholder box to
   // ResizeObserver when they flip back into rendering, so the delivered size
   // alone can never re-qualify one. The native autostatechange event is the
@@ -408,6 +442,7 @@ export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_V
   // document (the unit harness before it installs one) still constructs.
   const doc = typeof document !== "undefined" ? document : null;
   return createPresenceGate({
+    prune,
     createObserver: typeof ResizeObserver === "function"
       ? (cb) => new ResizeObserver(cb)
       : null,
@@ -471,8 +506,9 @@ export function isOnScreen(el, margin = ON_SCREEN_MARGIN_PX) {
  * Without an IntersectionObserver the gate is a pass-through that fires
  * immediately, so a host lacking the API keeps the previous eager behavior.
  */
-export function createOnScreenGate({ rootMargin = `${ON_SCREEN_MARGIN_PX}px` } = {}) {
+export function createOnScreenGate({ rootMargin = `${ON_SCREEN_MARGIN_PX}px`, prune = true } = {}) {
   return createPresenceGate({
+    prune,
     createObserver: typeof IntersectionObserver === "function"
       ? (cb) => new IntersectionObserver(cb, { rootMargin })
       : null,

@@ -95,8 +95,8 @@ function createStepper({
       const release = () => {
         stopRepeat();
         // No-ops once the signal already released them on destroy.
-        window.removeEventListener("pointerup", release, { passive: true });
-        window.removeEventListener("pointercancel", release, { passive: true });
+        window.removeEventListener("pointerup", release);
+        window.removeEventListener("pointercancel", release);
       };
       // Passive: the release handler only stops timers - it never cancels defaults.
       window.addEventListener("pointerup", release, { passive: true, signal });
