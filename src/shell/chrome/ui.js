@@ -1,3 +1,78 @@
+/**
+ * Shell UI kit: construction helpers, the icon factory, and the flash effect -
+ * everything every HUD/panel/toast/subtitle surface composes.
+ *
+ * Sections:
+ *   1. Construction  - el / button (createElement + attributes + append)
+ *   2. Icons         - SVG markup factory + per-document template cache
+ *   3. Effects       - flashElement (WAAPI accent flash)
+ *
+ * App-local (not shared/) since the framework never constructs UI: shared/
+ * stays limited to modules the framework and the app use together. These
+ * helpers stay plain module-scope functions - they run per element on shell
+ * boot, so V8 gets the hot callsites monomorphic.
+ */
+
+import { FLASH_MS, FLASH_EASING } from "../../shared/core.js";
+
+/* - 1. Construction - */
+
+/**
+ * Create an element, apply attribute map, and append to `parent` in one call.
+ * `style` values given as objects are merged into the element's style (not
+ * set as attributes). Returns the element; callers set textContent/children
+ * as needed.
+ */
+export function el(tag, attrs = {}, parent = null) {
+  const node = (parent?.ownerDocument ?? document).createElement(tag);
+  // for-in + hasOwn over Object.entries: attr maps are tiny (2-5 keys) and
+  // built per shell element, and Object.entries allocates a pair array plus a
+  // key/value array for every one - measured ~78 vs ~20 ns/op for a 3-key map.
+  for (const key in attrs) {
+    if (!Object.hasOwn(attrs, key)) {
+      continue;
+    }
+    const value = attrs[key];
+    if (key === "style" && typeof value === "object") {
+      Object.assign(node.style, value);
+    } else {
+      node.setAttribute(key, value);
+    }
+  }
+  parent?.appendChild(node);
+  return node;
+}
+
+/**
+ * Icon-button building block: a type=button element with a class, title and
+ * optional icon child. Returns the button for event wiring. Any extra
+ * attributes (`data-action`, off, disabled, ...) in the option map are
+ * forwarded verbatim - the icon buttons only destructure the presentation
+ * keys so the contract (data-action selectors) never silently drops.
+ */
+export function button({ class: cls = "", title = "", "aria-label": ariaLabel = "", icon = null, ...rest }, parent = null) {
+  // One attrs object built by mutation: the conditional-spread form allocated
+  // up to four throwaway objects (present/absent variants) per button.
+  const attrs = { type: "button" };
+  if (cls) {
+    attrs.class = cls;
+  }
+  if (title) {
+    attrs.title = title;
+  }
+  if (ariaLabel) {
+    attrs["aria-label"] = ariaLabel;
+  }
+  Object.assign(attrs, rest);
+  const node = el("button", attrs, parent);
+  if (icon) {
+    node.appendChild(icon);
+  }
+  return node;
+}
+
+/* - 2. Icons - */
+
 const svgIcon = (path, viewBox = "24 24") =>
   `<svg class="pf-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${viewBox}" aria-hidden="true" focusable="false" fill="currentColor"><path d="${path}"/></svg>`;
 
@@ -17,7 +92,7 @@ const ICONS = {
   "picture-in-picture": svgIcon("M19 7h-8v6h8V7zm2 4H3a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h18a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2zm-2-6H3v6h16V5zm-2 12h-6v4h6v-4zm8 2a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4z"),
   "fill-aspect": svgIcon("M17 15h-2q-.425 0-.713.288T14 16q0 .425.288.713T15 17h3q.425 0 .713-.288T19 16v-3q0-.425-.288-.713T18 12q-.425 0-.713.288T17 13v2ZM7 9h2q.425 0 .713-.288T10 8q0-.425-.288-.713T9 7H6q-.425 0-.713.288T5 8v3q0 .425.288.713T6 12q.425 0 .713-.288T7 11V9ZM4 20q-.825 0-1.413-.588T2 18V6q0-.825.588-1.413T4 4h16q.825 0 1.413.588T22 6v12q0 .825-.588 1.413T20 20H4Zm0-2h16V6H4v12Zm0 0V6v12Z"),
   captions: svgIcon("M21.3 1.3q1.1 0 1.9 0.8T24 4v16q0 1.1-0.8 1.9T21.3 22.7H2.7q-1.1 0-1.9-0.8T0 20V4q0-1.1 0.8-1.9T2.7 1.3h18.6zM10.7 10.7v-1.4q0-0.5-0.4-0.9T9.3 8H5.3q-0.5 0-0.9 0.4T4 9.3v5.4q0 0.5 0.4 0.9T5.3 16H9.3q0.6 0 1-0.4T10.7 14.6v-1.4H8.6v0.7H6v-4h2.6v0.7h2.1zm9.3 0v-1.4q0-0.5-0.4-0.9T18.7 8h-4q-0.6 0-1 0.4T13.3 9.3v5.4q0 0.5 0.4 0.9T14.7 16H18.7q0.5 0 0.9-0.4T20 14.6v-1.4h-2.1v0.7h-2.7v-4h2.7v0.7h2.1z"),
-  color: svgIcon("M3.839 5.858c2.94-3.916 9.03-5.055 13.364-2.36c4.28 2.66 5.854 7.777 4.1 12.577c-1.655 4.533-6.016 6.328-9.159 4.048c-1.177-.854-1.634-1.925-1.854-3.664l-.106-.987l-.045-.398c-.123-.934-.311-1.352-.705-1.572c-.535-.298-.892-.305-1.595-.033l-.351.146l-.179.078c-1.014.44-1.688.595-2.541.416l-.2-.047l-.164-.047c-2.789-.864-3.202-4.647-.565-8.157Zm12.928 4.722a1.25 1.25 0 1 0 2.415-.647a1.25 1.25 0 0 0-2.415.647Zm.495 3.488a1.25 1.25 0 1 0 2.414-.647a1.25 1.25 0 0 0-2.414.647Zm-2.474-6.491a1.25 1.25 0 1 0 2.415-.647a1.25 1.25 0 0 0-2.415.647Zm-.028 8.998a1.25 1.25 0 1 0 2.415-.647a1.25 1.25 0 0 0-2.415.647Zm-3.497-9.97a1.25 1.25 0 1 0 2.415-.646a1.25 1.25 0 0 0-2.415.646Z"),
+  color: svgIcon("M3.839 5.858c2.94-3.916 9.03-5.055 13.364-2.36c4.28 2.66 5.854 7.777 4.1 12.577c-1.655 4.533-6.016 6.328-9.159 4.048c-1.177-.854-1.634-1.925-1.854-3.664l-.106-.987l-.045-.398c-.123-.934-.311-1.352-.705-1.572c-.535-.298-.892-.305-1.595-.033l-.351.146l-.179.078c-1.014.44-1.688.595-2.541.416l-.2-.047l-.164-.047c-2.789-.864-3.202-4.647-.565-8.157Zm12.928 4.722a1.25 1.25 0 1 0 2.415-.647a1.25 1.25 0 0 0-2.415.647Zm.495 3.488a1.25 1.25 0 1 0 2.414-.647a1.25 1.25 0 0 0-2.414.647Zm-2.474-6.491a1.25 1.25 0 1 0 2.415-.647a1.25 1.25 0 0 0-2.415.647Zm-.028 8.998a1.25 1.25 0 1 0 2.415-.647a1.25 1.25 0 1 0 2.415.647Zm-3.497-9.97a1.25 1.25 0 1 0 2.415-.646a1.25 1.25 0 0 0-2.415.646Z"),
   reload: svgIcon("M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"),
   settings: svgIcon("M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54A.48.48 0 0 0 14.1 2h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.9 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.63-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z"),
   trash: svgIcon("M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"),
@@ -132,4 +207,50 @@ export function createIconElement(name, doc = document) {
     return null;
   }
   return parsedIcon(canonical, doc)?.cloneNode(true) ?? null;
+}
+
+/* - 3. Effects - */
+
+/**
+ * Restart the accent "flash" on an element natively via the Web Animations
+ * API (Element.animate). This replaces the classic
+ * remove-class -> void offsetWidth (forced reflow) -> re-add pattern: the
+ * WAAPI path hands the job to the compositor, needs no synchronous layout
+ * flush, and guarantees a clean restart by cancelling any prior background
+ * animation on the element. Mirrors the retired @keyframes pf-reset-flash
+ * rule (transparent -> accent -> transparent, 0.4s ease-out).
+ *
+ * Shell-owned UI effect; lives here (not in shared/) because every consumer
+ * is chrome/subtitles, so shared/ stays limited to modules the framework and
+ * the app use together.
+ */
+export function flashElement(el, { duration = FLASH_MS } = {}) {
+  if (!el || typeof el.animate !== "function") {
+    return;
+  }
+  // Single pass over the element's active animations: finished entries are
+  // always accumulated prior flashes (backgroundColor - this module is the
+  // only background animator on flash targets), so they cancel without a
+  // keyframe scan; running/pending animations are scanned so unrelated CSS /
+  // WAAPI animations (transforms, view-transitions) survive the restart.
+  for (const anim of el.getAnimations?.() ?? []) {
+    if (anim.playState === "finished") {
+      anim.cancel();
+      continue;
+    }
+    const keyframes = anim.effect && typeof anim.effect.getKeyframes === "function"
+      ? anim.effect.getKeyframes()
+      : [];
+    if (keyframes.some((kf) => "backgroundColor" in kf)) {
+      anim.cancel();
+    }
+  }
+  el.animate(
+    [
+      { backgroundColor: "transparent" },
+      { backgroundColor: "var(--pf-accent)" },
+      { backgroundColor: "transparent" }
+    ],
+    { duration, easing: FLASH_EASING }
+  );
 }

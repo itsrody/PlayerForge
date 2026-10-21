@@ -1,11 +1,13 @@
 import { logger } from "../../shared/runtime.js";
-import { createIconElement } from "./icons.js";
+import { DomPool } from "../../shared/dom.js";
+import { formatTime } from "../../shared/core.js";
+import { button, createIconElement, flashElement } from "./ui.js";
 import { GESTURE_EVENTS } from "../inputs/actions.js";
 import { deepestActiveElement, subscribeFullscreen } from "../../shared/dom.js";
 import { clamp } from "../../shared/core.js";
 import { Scope } from "../../shared/runtime.js";
-import { el } from "./elements.js";
-import { getSetting, SETTING_KEYS } from "./config.js";
+import { el } from "./ui.js";
+import { getSetting, onSettingsChanged, setSetting, SETTINGS_SCHEMA, SETTING_KEYS } from "./config.js";
 
 const HOLD_DELAY_MS = 400;
 const HOLD_REPEAT_MS = 75;
@@ -236,19 +238,26 @@ function createStepper({
 }
 
 /**
- * Tabbed settings panel hosted in the shell HUD, and the shell's open UI
- * API: features declare sections (addSection) and controls through
- * parameterized builders (addStepper/addButton/addCheckbox/...) instead of
- * assembling DOM. Sections populate lazily via setSectionBuilder on first
- * open, with a toast + builder-restore when a build fails.
+ * The tabbed settings panel hosted in the shell HUD, and the shell's open UI
+ * API. Three layers in one module:
  *
- * Open/close is a class flip wrapped in view transitions (pf-panel-open /
- * pf-panel-close); compact mode is an explicit setting with a narrow-touch
- * auto-detect re-applied live on breakpoint changes. Dismissal while open:
- * UA-owned Escape (CloseWatcher, Chromium 131+) plus our guarded document
- * listeners for outside click; close() hands focus back to the opener
- * (native showModal() semantics, tracked at open()). Arrow-key tab
- * navigation stays ours (roving tabindex over the section tablist).
+ *   - SettingsPanel: features declare sections (addSection) and controls
+ *     through parameterized builders (addStepper/addButton/addCheckbox/...)
+ *     instead of assembling DOM. Sections populate lazily via
+ *     setSectionBuilder on first open, with a toast + builder-restore when a
+ *     build fails. Open/close is a class flip wrapped in view transitions
+ *     (pf-panel-open / pf-panel-close); compact mode is an explicit setting
+ *     with a narrow-touch auto-detect re-applied live on breakpoint changes.
+ *     Dismissal while open: UA-owned Escape (CloseWatcher, Chromium 131+)
+ *     plus our guarded document listeners for outside click; close() hands
+ *     focus back to the opener (native showModal() semantics, tracked at
+ *     open()). Arrow-key tab navigation stays ours (roving tabindex over the
+ *     section tablist).
+ *   - createStepper: the parameterized spinbutton widget the panel renders.
+ *   - Product sections (addSettingsSection, addHistorySection): the concrete
+ *     panels the shell fills through that API, kept beside it because they
+ *     program the builder surface directly instead of reaching back up into
+ *     config.js state.
  */
 export class SettingsPanel {
   #hudLayer;
@@ -881,4 +890,320 @@ export class SettingsPanel {
       update();
     }
   }
+}
+
+/* - Panel sections - */
+
+/** Unique-id seed for option-group labels (one settings section per shell). */
+let optionsGroupCounter = 0;
+const ARROW_DIRECTIONS = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+
+/**
+ * Render the settings schema into the panel: one labeled section per group,
+ * toggles for bools, steppers for numbers. Pure function over the panel API -
+ * aside from the reactivity subscription below, no lifecycle of its own
+ * (`signal` ties that subscription to the caller, e.g. the shell).
+ */
+export function addSettingsSection(panel, signal) {
+  if (!panel?.body) {
+    return;
+  }
+  const sectionRoot = panel.addSection("Settings", "settings");
+  if (!sectionRoot) {
+    return;
+  }
+
+  /** key -> widget handle(s), so a change event can re-sync without queries. */
+  const controls = new Map();
+
+  let currentGroup = null;
+  let groupGrid = null;
+  for (const definition of SETTINGS_SCHEMA) {
+    if (definition.group !== currentGroup) {
+      currentGroup = definition.group;
+      const groupSection = panel.el("div", { class: "pf-panel-section" }, sectionRoot);
+      panel.addLabel(groupSection, definition.group);
+      groupGrid = panel.el("div", { class: "pf-panel-grid" }, groupSection);
+    }
+    if (definition.type === "bool") {
+      const cellAttrs = { class: "pf-panel-cell" };
+      const cell = panel.el("div", cellAttrs, groupGrid);
+      const toggleLabel = panel.el("label", { class: "pf-settings-toggle" }, cell);
+      const checkbox = panel.addControl(toggleLabel, {
+        type: "checkbox",
+        checked: getSetting(definition.key),
+        onChange: (checked) => {
+          setSetting(definition.key, checked);
+        }
+      });
+      checkbox.setAttribute("aria-label", definition.label);
+      panel.el("span", {}, toggleLabel).textContent = definition.label;
+      controls.set(definition.key, { type: "bool", el: checkbox });
+    } else if (definition.type === "options") {
+      const cell = panel.el("div", { class: "pf-panel-cell pf-options-cell" }, groupGrid);
+      const groupLabel = panel.addLabel(cell, definition.label);
+      const row = panel.el("div", { class: "pf-options-row" }, cell);
+      // Radio semantics: one roving stop per group, aria-checked mirrors the
+      // active button, arrows move + select like a native radio group.
+      groupLabel.id = `pf-options-group-${optionsGroupCounter++}`;
+      row.setAttribute("role", "radiogroup");
+      row.setAttribute("aria-labelledby", groupLabel.id);
+      const current = getSetting(definition.key);
+      const buttons = [];
+      const syncOptions = (active) => {
+        let checked = false;
+        for (const [opt, btn] of buttons) {
+          const on = opt === active;
+          checked = checked || on;
+          btn.classList.toggle("pf-options-active", on);
+          btn.setAttribute("aria-checked", on ? "true" : "false");
+          btn.tabIndex = on ? 0 : -1;
+        }
+        // A stale value outside the enum must not collapse the tab stops.
+        if (!checked && buttons.length) {
+          buttons[0][1].tabIndex = 0;
+        }
+      };
+      for (const opt of definition.options) {
+        const btn = panel.el("button", {
+          type: "button",
+          role: "radio",
+          class: "pf-btn pf-options-btn"
+        }, row);
+        btn.textContent = definition.fmt(opt);
+        btn.addEventListener("click", () => {
+          setSetting(definition.key, opt);
+          syncOptions(opt);
+        });
+        buttons.push([opt, btn]);
+      }
+      row.addEventListener("keydown", (event) => {
+        const direction = ARROW_DIRECTIONS[event.key];
+        if (!direction) {
+          return;
+        }
+        const index = buttons.findIndex(([, btn]) => btn === event.target);
+        if (index === -1) {
+          return;
+        }
+        event.preventDefault();
+        const next = (index + direction + buttons.length) % buttons.length;
+        const [opt, btn] = buttons[next];
+        setSetting(definition.key, opt);
+        syncOptions(opt);
+        btn.focus();
+      });
+      syncOptions(current);
+      controls.set(definition.key, { type: "options", sync: syncOptions });
+    } else {
+      const stepper = panel.addControl(groupGrid, {
+        type: "stepper",
+        label: definition.label,
+        min: definition.min,
+        max: definition.max,
+        step: definition.step,
+        value: getSetting(definition.key),
+        head: true,
+        format: definition.fmt,
+        // Typing stays local until blur/Enter - no GM_setValue per keystroke
+        // (subtitle steppers keep live output, so they stay immediate).
+        deferTextInput: true,
+        onChange: (parsed) => setSetting(definition.key, parsed)
+      });
+      if (stepper) {
+        controls.set(definition.key, { type: "stepper", el: stepper });
+      }
+    }
+  }
+
+  // Re-sync widgets when a setting changes elsewhere (another tab's write, or
+  // an in-page setSetting that did not originate from these controls). Values
+  // are assigned - never .click()/.dispatchEvent - so the sync cannot echo
+  // back into setSetting. A destroyed panel (body nulled) unsubscribes.
+  let off = () => {};
+  const syncFromCache = () => {
+    if (!panel?.body) {
+      off();
+      return;
+    }
+    for (const [key, rec] of controls) {
+      const fresh = getSetting(key);
+      if (rec.type === "bool") {
+        rec.el.checked = fresh;
+      } else if (rec.type === "options") {
+        rec.sync(fresh);
+      } else {
+        rec.el.setValue(fresh);
+      }
+    }
+  };
+  off = onSettingsChanged(syncFromCache, { signal });
+  logger.log("settings", "Settings section ready");
+}
+
+/**
+ * The resume-history section: pooled past-video cards for the shell's
+ * opening panel, one event-delegated listener for the whole list.
+ */
+function formatDomain(domain) {
+  if (!domain) return "";
+  return domain.charAt(0).toUpperCase() + domain.slice(1);
+}
+
+export function addHistorySection(panel, shell) {
+  const sectionRoot = panel.addSection("History", "resume");
+  if (!sectionRoot) {
+    return;
+  }
+
+  const list = panel.el("div", { class: "pf-history-list" }, sectionRoot);
+  const hint = panel.el("div", { class: "pf-panel-hint" }, sectionRoot);
+  hint.textContent = "No watch history yet";
+
+  /** Tracks which cards are currently in the DOM (acquired from pool). */
+  const activeCards = [];
+
+  /**
+   * Element refs captured when the pool builds a card. The card tree is
+   * fixed at factory time, so renderCard/reset re-read these instead of
+   * re-running two querySelector calls per card per render (a structural
+   * render walks every pooled card - 200 entries is 400 lookups saved).
+   */
+  const cardRefs = new WeakMap();
+
+  const refsFor = (card) => {
+    let refs = cardRefs.get(card);
+    if (!refs) {
+      const info = card.querySelector(".pf-history-info");
+      refs = {
+        title: info.querySelector(".pf-history-title"),
+        meta: info.querySelector(".pf-history-meta"),
+        resetBtn: card.querySelector('[data-action="reset"]'),
+        removeBtn: card.querySelector('[data-action="remove"]')
+      };
+      cardRefs.set(card, refs);
+    }
+    return refs;
+  };
+
+  /** Pool of reusable card elements. Factory builds the full tree;
+   *  reset clears text + buttons so renderCard() can repopulate. */
+  const cardPool = new DomPool({
+    factory: () => {
+      const card = panel.el("div", { class: "pf-history-card" });
+      const info = panel.el("div", { class: "pf-history-info" }, card);
+      const title = panel.el("div", { class: "pf-history-title" }, info);
+      const meta = panel.el("div", { class: "pf-history-meta" }, info);
+      const actions = panel.el("div", { class: "pf-history-actions" }, card);
+      const resetBtn = button({
+        class: "pf-btn pf-btn-icon pf-btn-ghost",
+        title: "Reset",
+        "aria-label": "Reset resume position",
+        "data-action": "reset",
+        icon: createIconElement("reload")
+      }, actions);
+      const removeBtn = button({
+        class: "pf-btn pf-btn-icon pf-btn-ghost",
+        title: "Remove",
+        "aria-label": "Remove from history",
+        "data-action": "remove",
+        icon: createIconElement("trash")
+      }, actions);
+      cardRefs.set(card, { title, meta, resetBtn, removeBtn });
+      return card;
+    },
+    reset: (card) => {
+      card.dataset.entryId = "";
+      const refs = refsFor(card);
+      refs.title.textContent = "";
+      refs.meta.textContent = "";
+      // Generic labels while pooled: a card must never announce its previous
+      // entry's name between renders.
+      refs.resetBtn.setAttribute("aria-label", "Reset resume position");
+      refs.removeBtn.setAttribute("aria-label", "Remove from history");
+      return card;
+    }
+  });
+
+  // Event delegation for the whole list: one static listener instead of one
+  // per pooled card. Card count is runtime-dynamic (watched entries, removals,
+  // cross-tab adds) and the pool shrinks, so listener lifetime must not ride
+  // the card/pool cycle - render() and shrink() never attach or detach a
+  // listener. Button clicks bubble up through the card to the list.
+  list.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-action]");
+    const card = event.target.closest(".pf-history-card");
+    if (!btn || !card) {
+      return;
+    }
+    if (btn.dataset.action === "reset") {
+      shell.resume?.resetEntry(card.dataset.entryId);
+      flashElement(btn);
+      shell.toastInfo("reload", "Resume Entry Reset", "history");
+    } else if (btn.dataset.action === "remove") {
+      // The store's #persist(true) fires onChange synchronously, so the
+      // structural render() below reconciles the list (pop the stale card,
+      // re-label the rest). Manual mutation here would double-release the
+      // clicked card into the pool — render() is the single mutator.
+      shell.resume?.removeEntry(card.dataset.entryId);
+      shell.toastInfo("trash", "Resume Entry Removed", "history");
+    }
+  });
+
+  function render() {
+    const entries = shell.resume?.getEntries() || [];
+    // Release cards that are no longer needed.
+    while (activeCards.length > entries.length) {
+      const card = activeCards.pop();
+      card.remove();
+      cardPool.release(card);
+    }
+    // Acquire or reuse cards for each entry.
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
+      let card = activeCards[i];
+      if (!card) {
+        card = cardPool.acquire();
+        activeCards.push(card);
+        list.appendChild(card);
+      }
+      renderCard(entry, card);
+    }
+    hint.hidden = entries.length > 0;
+    // Drop excess pooled cards when the list shrinks significantly.
+    if (cardPool.idle > entries.length * 2) {
+      cardPool.shrink(entries.length);
+    }
+  }
+
+  function renderCard(entry, card) {
+    card.dataset.entryId = entry.id;
+    const refs = refsFor(card);
+    const name = entry.title || formatDomain(entry.domain);
+    refs.title.textContent = name;
+    // Announce which entry each icon acts on (two identical buttons per card).
+    if (name) {
+      refs.resetBtn.setAttribute("aria-label", `Reset resume position for ${name}`);
+      refs.removeBtn.setAttribute("aria-label", `Remove ${name} from history`);
+    } else {
+      refs.resetBtn.setAttribute("aria-label", "Reset resume position");
+      refs.removeBtn.setAttribute("aria-label", "Remove from history");
+    }
+    const parts = [formatDomain(entry.domain)];
+    if (entry.duration > 0) {
+      parts.push(formatTime(entry.duration));
+    }
+    refs.meta.textContent = parts.join(" \u00b7 ");
+  }
+
+  render();
+  // The store gains entries throughout the session (new videos watched) and
+  // on cross-tab imports; re-render when the entry SET changes so the open
+  // History tab never shows a boot-time snapshot. Position-only persists are
+  // not structural and stay invisible - the cards don't display position.
+  shell.resume?.onChange?.((structural) => {
+    if (structural) {
+      render();
+    }
+  });
 }

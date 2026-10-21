@@ -11,7 +11,7 @@ globalThis.window = dom.window;
 globalThis.location = dom.window.location;
 globalThis.document = dom.window.document;
 
-const { addHistorySection } = await import("../src/shell/chrome/history.js");
+const { addHistorySection } = await import("../src/shell/chrome/panel.js");
 
 let sectionRoot = null;
 function makeFakePanel() {

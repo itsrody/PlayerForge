@@ -175,6 +175,22 @@ design for regression detection; the v1.0.0 target is preserved on its tag.
 
 ### Change log
 
+- **Chrome-layer unification pass.** `src/shell/chrome/` shrank from 8 modules
+  to 5 with a state/presentation split. `elements.js` + `icons.js` +
+  `animate.js` were one job spread over three files - the UI kit every chrome
+  surface composes - and merged into `ui.js` (construction `el`/`button`, the
+  SVG icon factory with its per-document template cache, and the WAAPI
+  `flashElement`), kept as plain functions because they run per element on
+  shell boot. `config.js`'s own docstring admitted the conflation ("settings
+  engine AND the generic panel renderer") and now holds state only
+  (SETTINGS_SCHEMA - now exported to its renderer along with
+  `getSetting`/`onSettingsChanged` - and the cross-tab live-reload cache);
+  `addSettingsSection` moved beside the panel API it programs, into
+  `panel.js`, which also absorbed `history.js` (`addHistorySection`) - both
+  are product sections drawn through the panel builder surface, so the
+  panel module is the one place that speaks the builder API. `inject.js`
+  (materialization) and `toast.js` (feedback, `ToastManager`) untouched.
+  356/356 tests unchanged, all behavior-preserving re-paths.
 - **Kernel-layer unification pass.** `src/kernel/` shrank from 5 modules to 4
   with a real seam repair: `sdk.js` was doing two unrelated jobs under one
   "SDK detection engine" title, so it split by data shape into `detection.js`

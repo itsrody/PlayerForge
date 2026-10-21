@@ -5,8 +5,8 @@ import { srtToVtt, ensureVttHeader } from "./forgevtt.js";
 import { parseSubtitlesAsync } from "./vtt-worker-loader.js";
 import { ForgeTrack } from "./forge-track.js";
 import { debounce } from "../../shared/runtime.js";
-import { flashElement } from "../chrome/animate.js";
-import { el } from "../chrome/elements.js";
+import { flashElement } from "../chrome/ui.js";
+import { el } from "../chrome/ui.js";
 import { logger } from "../../shared/runtime.js";
 import { Scope } from "../../shared/runtime.js";
 

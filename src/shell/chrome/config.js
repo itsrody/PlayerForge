@@ -1,6 +1,7 @@
 /**
- * User-settings engine: defaults, schema, cached accessors, and the generic
- * panel renderer for that schema.
+ * User-settings engine: defaults, schema, and cached accessors. State only -
+ * the panel renderer for this schema (addSettingsSection) lives in panel.js
+ * beside the panel API it programs against.
  */
 import { KEYS, getConfigValue, setConfigValue, invalidateConfigCache, watchStorageKey } from "../../shared/store.js";
 import { GESTURES, GESTURE_IDS } from "../../kernel/contract.js";
@@ -24,10 +25,6 @@ export const SETTING_KEYS = Object.freeze({
   compact: "ui.compact"
 });
 
-/** Unique-id seed for option-group labels (one settings section per shell). */
-let optionsGroupCounter = 0;
-const ARROW_DIRECTIONS = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
-
 /**
  * One bool toggle per gesture family, derived from the registry: the key is the
  * family's configs gate and the label is its panel text, so a new gesture is a
@@ -41,7 +38,8 @@ const GESTURE_TOGGLES = GESTURE_IDS.map((id) => ({
   group: "Features"
 }));
 
-const SETTINGS_SCHEMA = [
+/** The schema is consumed by its renderer (panel.js); state stays here. */
+export const SETTINGS_SCHEMA = [
   {
     key: SETTING_KEYS.stepSeek,
     type: "options",
@@ -177,146 +175,3 @@ function refreshSettingsCache() {
 
 // Cross-tab live reload via the storage-owned watch (shared echo contract).
 watchStorageKey(KEYS.configs, () => refreshSettingsCache());
-
-/**
- * Render SETTINGS_SCHEMA into the settings panel: one labeled section per
- * group, toggles for bools, steppers for numbers. Pure function over the
- * panel API - aside from the reactivity subscription below, no lifecycle of
- * its own (`signal` ties that subscription to the caller, e.g. the shell).
- */
-export function addSettingsSection(panel, signal) {
-  if (!panel?.body) {
-    return;
-  }
-  const sectionRoot = panel.addSection("Settings", "settings");
-  if (!sectionRoot) {
-    return;
-  }
-
-  /** key -> widget handle(s), so a change event can re-sync without queries. */
-  const controls = new Map();
-
-  let currentGroup = null;
-  let groupGrid = null;
-  for (const definition of SETTINGS_SCHEMA) {
-    if (definition.group !== currentGroup) {
-      currentGroup = definition.group;
-      const groupSection = panel.el("div", { class: "pf-panel-section" }, sectionRoot);
-      panel.addLabel(groupSection, definition.group);
-      groupGrid = panel.el("div", { class: "pf-panel-grid" }, groupSection);
-    }
-    if (definition.type === "bool") {
-      const cellAttrs = { class: "pf-panel-cell" };
-      const cell = panel.el("div", cellAttrs, groupGrid);
-      const toggleLabel = panel.el("label", { class: "pf-settings-toggle" }, cell);
-      const checkbox = panel.addControl(toggleLabel, {
-        type: "checkbox",
-        checked: getSetting(definition.key),
-        onChange: (checked) => {
-          setSetting(definition.key, checked);
-        }
-      });
-      checkbox.setAttribute("aria-label", definition.label);
-      panel.el("span", {}, toggleLabel).textContent = definition.label;
-      controls.set(definition.key, { type: "bool", el: checkbox });
-    } else if (definition.type === "options") {
-      const cell = panel.el("div", { class: "pf-panel-cell pf-options-cell" }, groupGrid);
-      const groupLabel = panel.addLabel(cell, definition.label);
-      const row = panel.el("div", { class: "pf-options-row" }, cell);
-      // Radio semantics: one roving stop per group, aria-checked mirrors the
-      // active button, arrows move + select like a native radio group.
-      groupLabel.id = `pf-options-group-${optionsGroupCounter++}`;
-      row.setAttribute("role", "radiogroup");
-      row.setAttribute("aria-labelledby", groupLabel.id);
-      const current = getSetting(definition.key);
-      const buttons = [];
-      const syncOptions = (active) => {
-        let checked = false;
-        for (const [opt, btn] of buttons) {
-          const on = opt === active;
-          checked = checked || on;
-          btn.classList.toggle("pf-options-active", on);
-          btn.setAttribute("aria-checked", on ? "true" : "false");
-          btn.tabIndex = on ? 0 : -1;
-        }
-        // A stale value outside the enum must not collapse the tab stops.
-        if (!checked && buttons.length) {
-          buttons[0][1].tabIndex = 0;
-        }
-      };
-      for (const opt of definition.options) {
-        const btn = panel.el("button", {
-          type: "button",
-          role: "radio",
-          class: "pf-btn pf-options-btn"
-        }, row);
-        btn.textContent = definition.fmt(opt);
-        btn.addEventListener("click", () => {
-          setSetting(definition.key, opt);
-          syncOptions(opt);
-        });
-        buttons.push([opt, btn]);
-      }
-      row.addEventListener("keydown", (event) => {
-        const direction = ARROW_DIRECTIONS[event.key];
-        if (!direction) {
-          return;
-        }
-        const index = buttons.findIndex(([, btn]) => btn === event.target);
-        if (index === -1) {
-          return;
-        }
-        event.preventDefault();
-        const next = (index + direction + buttons.length) % buttons.length;
-        const [opt, btn] = buttons[next];
-        setSetting(definition.key, opt);
-        syncOptions(opt);
-        btn.focus();
-      });
-      syncOptions(current);
-      controls.set(definition.key, { type: "options", sync: syncOptions });
-    } else {
-      const stepper = panel.addControl(groupGrid, {
-        type: "stepper",
-        label: definition.label,
-        min: definition.min,
-        max: definition.max,
-        step: definition.step,
-        value: getSetting(definition.key),
-        head: true,
-        format: definition.fmt,
-        // Typing stays local until blur/Enter - no GM_setValue per keystroke
-        // (subtitle steppers keep live output, so they stay immediate).
-        deferTextInput: true,
-        onChange: (parsed) => setSetting(definition.key, parsed)
-      });
-      if (stepper) {
-        controls.set(definition.key, { type: "stepper", el: stepper });
-      }
-    }
-  }
-
-  // Re-sync widgets when a setting changes elsewhere (another tab's write, or
-  // an in-page setSetting that did not originate from these controls). Values
-  // are assigned - never .click()/.dispatchEvent - so the sync cannot echo
-  // back into setSetting. A destroyed panel (body nulled) unsubscribes.
-  let off = () => {};
-  const syncFromCache = () => {
-    if (!panel?.body) {
-      off();
-      return;
-    }
-    for (const [key, rec] of controls) {
-      const fresh = getSetting(key);
-      if (rec.type === "bool") {
-        rec.el.checked = fresh;
-      } else if (rec.type === "options") {
-        rec.sync(fresh);
-      } else {
-        rec.el.setValue(fresh);
-      }
-    }
-  };
-  off = onSettingsChanged(syncFromCache, { signal });
-  logger.log("settings", "Settings section ready");
-}

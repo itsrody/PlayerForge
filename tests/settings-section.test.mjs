@@ -18,7 +18,8 @@ globalThis.GM_setValue = (key, value) => {
   configsListener?.(key, null, value, false);
 };
 
-const { addSettingsSection, getSetting, setSetting, onSettingsChanged } = await import("../src/shell/chrome/config.js");
+const { getSetting, setSetting, onSettingsChanged } = await import("../src/shell/chrome/config.js");
+const { addSettingsSection } = await import("../src/shell/chrome/panel.js");
 
 function makeFakePanel() {
   const calls = { sections: [], labels: [], checkboxes: [], steppers: [], buttons: [] };
