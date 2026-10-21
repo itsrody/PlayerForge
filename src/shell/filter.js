@@ -1,6 +1,6 @@
 import { getConfigValue, setConfigFields } from "../shared/storage.js";
 import { flashElement } from "./chrome/animate.js";
-import { debounce } from "../shared/time.js";
+import { debounce } from "../shared/scheduler.js";
 import { clamp } from "../shared/clamp.js";
 import { TUNING } from "../shared/tuning.js";
 import { fmtPercent, fmtSigned } from "../shared/formatters.js";

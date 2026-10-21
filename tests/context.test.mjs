@@ -2,10 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import {
-  getDomainKey,
-  domainsMatch,
-  domainScore,
-  hashEntry,
   ownPageContext,
   getPageContext,
   createTopFrameResponder,
@@ -20,6 +16,7 @@ import {
   CTX_REQUEST_TIMEOUT_MS,
   stopContextPipe
 } from "../src/shared/context.js";
+import { getDomainKey, domainsMatch, domainScore, hashEntry } from "../src/shared/domains.js";
 import { installVideoProbe } from "../src/kernel/probe.js";
 
 const dom = (html = "", url = "https://www.youtube.com/watch?v=1") => {
@@ -561,6 +558,63 @@ test("live iframe registry stays current under non-iframe churn", async () => {
   assert.equal(inner.hasAttribute("allowfullscreen"), false, "removed iframe is no longer vouched");
 
   stop();
+});
+
+test("iframe registry rides the shared mutation feed", async () => {
+  const { window: win } = dom();
+  globalThis.window = win;
+  globalThis.location = win.location;
+  globalThis.document = win.document;
+  globalThis.MutationObserver = win.MutationObserver;
+
+  // Count ALL document-level observers via the shared feed: with the registry
+  // folded into dom-watch, the whole page must run exactly ONE
+  // childList+subtree observer while the bridge serves bridged messages.
+  const RealMO = win.MutationObserver;
+  let documentObservers = 0;
+  class CountingMO extends RealMO {
+    constructor(cb) {
+      super(cb);
+      documentObservers++;
+    }
+  }
+  globalThis.MutationObserver = CountingMO;
+  win.MutationObserver = CountingMO;
+
+  const stop = installContextBridge();
+  const provision = (source) => {
+    win.dispatchEvent(new win.MessageEvent("message", {
+      data: { type: FS_REQUEST_TYPE },
+      source,
+      origin: "https://kid.test"
+    }));
+  };
+
+  // Arm: one subscription (and, via it, exactly one page-level observer).
+  const child = win.document.createElement("iframe");
+  win.document.body.append(child);
+  provision(child.contentWindow);
+  documentObservers = 0;
+  assert.equal(child.hasAttribute("allowfullscreen"), true, "armed registry vouches");
+
+  // Differential updates through the shared feed: a newly added subtree
+  // registers without any second observer ever being constructed.
+  const suite = win.document.createElement("div");
+  const inner = win.document.createElement("iframe");
+  suite.appendChild(inner);
+  win.document.body.append(suite);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  provision(inner.contentWindow);
+  assert.equal(inner.hasAttribute("allowfullscreen"), true, "shared-feed diff registers added-subtree iframes");
+  assert.equal(documentObservers, 0, "no page-level observer beyond the shared feed's own constructor already counted");
+
+  // Teardown drops the subscription; the shared feed goes idle with it.
+  documentObservers = 0;
+  stop();
+  globalThis.MutationObserver = RealMO;
+  win.MutationObserver = RealMO;
+  stopContextPipe();
+  assert.equal(documentObservers, 0, "teardown constructs nothing");
 });
 
 test("iframe registry arms lazily on the first bridged message", async () => {

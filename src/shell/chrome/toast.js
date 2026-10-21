@@ -1,5 +1,5 @@
 import { DomPool } from "../../shared/dom-pool.js";
-import { delay } from "../../shared/time.js";
+import { delay } from "../../shared/scheduler.js";
 import { flashElement } from "./animate.js";
 import { button } from "./elements.js";
 import { createIconElement } from "./icons.js";
@@ -19,7 +19,8 @@ import { createIconElement } from "./icons.js";
  * completed actions, info for status, action for toasts with buttons,
  * hint for onboarding); sticky gesture toasts pass 0 explicitly and are
  * hidden by their gesture's end. Every producer tags its family via
- * `group` (skip, hold, scrub, fs, volume, pinch, resume, data).
+ * `group` (skip, scrub, hold, fs, pip, volume, pinch, filter, subtitles,
+ * resume, panel).
  */
 export class ToastManager {
   #pool;

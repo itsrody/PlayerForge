@@ -1,12 +1,65 @@
 import { getSetting, onSettingsChanged, SETTING_KEYS } from "../chrome/config.js";
 import { TUNING } from "../../shared/tuning.js";
-import { formatTime } from "../../shared/time.js";
+import { formatTime } from "../../shared/formatters.js";
 import { fs, subscribeFullscreen } from "../../shared/shadow.js";
 import { GESTURE_EVENTS, GESTURES, GESTURE_IDS } from "../../kernel/contract.js";
-import { gestureHaptic } from "../chrome/haptics.js";
 import { EASE_SNAPPY_CURVE, EASE_SNAPPY_MS } from "../../shared/timing.js";
 
 export { GESTURE_EVENTS };
+
+/**
+ * Haptic feedback for gesture latches, via Chromium Android's Vibration API
+ * (navigator.vibrate). Chromium-based mobile browsers implement the Vibration
+ * API (the W3C spec note: "implemented in Chromium-based browsers"); desktop
+ * Chromium and hosts without a vibrator no-op it and iOS never implements it.
+ *
+ * The successor Web Haptics API (navigator.playHaptics) is still a WICG/MSEdge
+ * explainer and NOT shipped in any Chromium release, so navigator.vibrate plus
+ * short-pulse patterns is the only real, portable hook today.
+ *
+ * Patterns are deliberately SHORT: a gesture latch is a confirm pulse, not a
+ * notification (Android has the VIBRATE permission + Touch Feedback setting,
+ * and treats very short single pulses as haptic ticks while long ones read as
+ * alerts). Each gesture family gets a distinct shape (one tick, double tick,
+ * triple tick) so scrub-latch, pinch-fire, double-tap, and hold read
+ * differently to the hand.
+ *
+ * Gates:
+ *   - a user setting (gestures.haptics) so it can be turned off entirely;
+ *   - sticky-user-activation + hardware presence via feature detection (all
+ *     `vibrate` returns on failure is false / a no-op).
+ * Never throws.
+ */
+
+/** Distinct pulse shapes per gesture, in milliseconds (vibrate / pause / ...). */
+const HAPTIC_PATTERNS = {
+  /** Speed-up hold engaged. */
+  hold: 12,
+  /** Scrub session latched. */
+  scrub: [10, 24, 10],
+  /** Pinch-fill engaged or released. */
+  pinch: [8, 14, 8, 14, 8],
+  /** Fullscreen double-tap committed (skip/toggle). */
+  dbltap: [14, 40, 14],
+  /** Swipe gesture committed (exit fullscreen). */
+  swipe: [10, 30, 10]
+};
+
+const canVibrate =
+  typeof navigator !== "undefined" && typeof navigator.vibrate === "function";
+
+/** Fire the haptic pulse for `type` when armed (setting, motion, activation). */
+export function gestureHaptic(type) {
+  if (!canVibrate || !getSetting(SETTING_KEYS.haptics)) {
+    return;
+  }
+  const pattern = HAPTIC_PATTERNS[type];
+  if (pattern != null) {
+    try {
+      navigator.vibrate(pattern);
+    } catch {}
+  }
+}
 
 /**
  * Declarative input bindings - the single source of input policy.
@@ -325,13 +378,18 @@ export function easeTransformTo(video, transform) {
   }
 
   // WAAPI path (Chromium baseline): one compositor animation from the current
-  // computed transform to the target. On finish the final value is committed
-  // to an inline style and the animation is cancelled so its fill gives way;
-  // on cancel (via stop() or supersession) the layer is dropped immediately.
+  // transform to the target. On finish the final value is committed to an
+  // inline style and the animation is cancelled so its fill gives way; on
+  // cancel (via stop() or supersession) the layer is dropped immediately.
   if (typeof video.animate === "function") {
+    // Start frame: the inline style is already the committed truth after any
+    // of our own commits (and the swipe stroke's direct writes), so the
+    // computed-style read only pays off for videos a host stylesheet
+    // transforms. Prior cancellation above guarantees the inline value is
+    // the live visual even when an animation was in flight.
     const animation = video.animate(
       [
-        { transform: getComputedStyle(video).transform || "none" },
+        { transform: video.style.transform || getComputedStyle(video).transform || "none" },
         { transform: transform || "none" }
       ],
       { duration: EASE_MS, easing: EASE_STYLE, fill: "both" }

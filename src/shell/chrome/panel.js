@@ -237,12 +237,18 @@ function createStepper({
 
 /**
  * Tabbed settings panel hosted in the shell HUD, and the shell's open UI
- * API: features declare controls through parameterized builders
- * (addStepper/addButton/addCheckbox/...) instead of assembling DOM.
- * The root is a plain sheet in the HUD layer under the host's z-index
- * doctrine; open/close is a class flip on display, and Esc plus
- * outside-click dismissal are ours (guarded document listeners).
- * Arrow-key tab navigation likewise stays ours.
+ * API: features declare sections (addSection) and controls through
+ * parameterized builders (addStepper/addButton/addCheckbox/...) instead of
+ * assembling DOM. Sections populate lazily via setSectionBuilder on first
+ * open, with a toast + builder-restore when a build fails.
+ *
+ * Open/close is a class flip wrapped in view transitions (pf-panel-open /
+ * pf-panel-close); compact mode is an explicit setting with a narrow-touch
+ * auto-detect re-applied live on breakpoint changes. Dismissal while open:
+ * UA-owned Escape (CloseWatcher, Chromium 131+) plus our guarded document
+ * listeners for outside click; close() hands focus back to the opener
+ * (native showModal() semantics, tracked at open()). Arrow-key tab
+ * navigation stays ours (roving tabindex over the section tablist).
  */
 export class SettingsPanel {
   #hudLayer;
@@ -262,12 +268,17 @@ export class SettingsPanel {
   #closeWatcher = null;
   #backdrop = null;
   #sectionBuilder = null;
+  /** Live only across the lazy-section await: dedupes double open() races. */
+  #opening = false;
+  /** Shell toast hook, kept only for section-build failure reporting. */
+  #shellToast = null;
   /** Element focused at open(); close() hands focus back to it (A1). */
   #returnFocus = null;
 
   constructor(shell) {
     this.#hudLayer = shell.shellDom?.hudLayer;
     this.#shellHost = shell.shellHost;
+    this.#shellToast = shell.toastFlash?.bind(shell) ?? null;
     if (!this.#hudLayer || !this.#shellHost) {
       logger.error("panel", "Missing shell DOM - panel not available");
       return;
@@ -308,15 +319,28 @@ export class SettingsPanel {
   }
 
   async open() {
-    if (!this.#root || this.#scope.disposed || this.isOpen) {
+    if (!this.#root || this.#scope.disposed || this.isOpen || this.#opening) {
       return;
     }
     if (this.#sectionBuilder) {
       const build = this.#sectionBuilder;
       this.#sectionBuilder = null;
-      await build();
+      this.#opening = true;
+      try {
+        await build();
+      } catch (err) {
+        logger.error("panel", "Panel section build failed:", err);
+        // Hand the builder back (unless a newer one was registered mid-build)
+        // so the next open retries instead of facing an empty body forever.
+        if (!this.#sectionBuilder) {
+          this.#sectionBuilder = build;
+        }
+        this.#shellToast?.("reload", "Panel failed to load", "panel");
+      } finally {
+        this.#opening = false;
+      }
     }
-    if (!this.#body.childElementCount) {
+    if (!this.#body?.childElementCount || !this.#root || this.#scope.disposed) {
       return;
     }
     // Snapshot the opener before focus moves into the panel; close() hands

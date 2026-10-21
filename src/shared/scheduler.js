@@ -100,3 +100,46 @@ export const yield_ = firstAvailable([
       : null,
   () => () => Promise.resolve()
 ]);
+
+/** Cancellable delay: runs `fn` after `ms`, returned fn cancels the pending run.
+ *  Routed through postTask so the scheduler façade owns the timer (Chromium
+ *  task scheduler with the shared setTimeout fallback; same cancel contract). */
+export function delay(fn, ms) {
+  const handle = postTask(fn, { delay: ms });
+  return () => handle.abort();
+}
+
+/**
+ * Trailing-edge debounce. Re-calling within the window reschedules. The
+ * returned function carries `.flush()` (run a pending call now) and
+ * `.cancel()` (drop a pending call) for teardown paths - a trailing write
+ * must land before e.g. a filter section dies.
+ */
+export function debounce(fn, ms) {
+  let cancel = null;
+  let pendingArgs = null;
+  const debounced = (...args) => {
+    pendingArgs = args;
+    cancel?.();
+    cancel = delay(() => {
+      cancel = null;
+      fn(...pendingArgs);
+      pendingArgs = null;
+    }, ms);
+  };
+  debounced.flush = () => {
+    if (!cancel) {
+      return;
+    }
+    cancel();
+    cancel = null;
+    fn(...pendingArgs);
+    pendingArgs = null;
+  };
+  debounced.cancel = () => {
+    cancel?.();
+    cancel = null;
+    pendingArgs = null;
+  };
+  return debounced;
+}

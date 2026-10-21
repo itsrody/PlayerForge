@@ -7,7 +7,7 @@ globalThis.GM_addValueChangeListener = undefined;
 
 // loader.mjs (--import) stubs navigator.vibrate to record into
 // globalThis.__lastHapticPattern. Ensure the haptics module can see it.
-const { gestureHaptic } = await import("../src/shell/chrome/haptics.js");
+const { gestureHaptic } = await import("../src/shell/inputs/actions.js");
 const { getSetting, setSetting } = await import("../src/shell/chrome/config.js");
 
 test("gestureHaptic fires a distinct pulse pattern per gesture", () => {

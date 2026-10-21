@@ -314,7 +314,6 @@
       top: 12px;
       left: 50%;
       z-index: var(--pf-z-toast);
-      will-change: opacity, translate;
       /* Dedicated translate property (Chrome 104+) - keeps centering out of
          the transform property, so transform-based animations on the toast
          never clobber it. */
@@ -349,6 +348,10 @@
       &.pf-visible {
         opacity: calc(1 - 0.3 * var(--pf-media-paused, 0));
         transform: translateY(0);
+        /* Compositor hint only while visible - the hidden toast (opacity: 0,
+           still rendered) must not pin a composited layer for the shell's
+           whole lifetime. */
+        will-change: opacity, translate;
       }
 
       /* Icon inside toast */

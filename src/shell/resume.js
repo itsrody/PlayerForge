@@ -1,8 +1,9 @@
-import { getPageContext, domainsMatch, domainScore, hashEntry } from "../shared/context.js";
+import { getPageContext } from "../shared/context.js";
+import { domainsMatch, domainScore, hashEntry } from "../shared/domains.js";
 import { onNavigate } from "../shared/navigation.js";
 import { TUNING } from "../shared/tuning.js";
-import { KEYS, gmSetValue, loadJsonObject, gmAddValueChangeListener, gmRemoveValueChangeListener } from "../shared/storage.js";
-import { formatTime } from "../shared/time.js";
+import { KEYS, gmSetValue, loadJsonObject, watchStorageKey } from "../shared/storage.js";
+import { formatTime } from "../shared/formatters.js";
 import { logger } from "../shared/logger.js";
 import { Scope } from "../shared/scope.js";
 
@@ -68,7 +69,8 @@ function toFixedShape(incoming) {
 export class ResumeStore {
   #state = null;
   #loaded = false;
-  #listenerId = null;
+  /** storage watchStorageKey handle for the cross-tab change subscription. */
+  #watch = null;
   #listeners = new Set();
   /** Lazily built path -> entries buckets for findMatch; nulled at every
    *  structural mutation so a stale bucket can never serve a match. */
@@ -99,25 +101,20 @@ export class ResumeStore {
     // would land for free.
     //
     // Two costs are cut here without weakening the merge:
-    //  - `remote === false` marks OUR OWN write echoing back through the
-    //    manager. The in-memory store is by definition already that value, so
-    //    re-reading + re-merging it would be a pure duplicate parse per save.
-    //    Anything remote (or any implementation that omits the flag) still
-    //    adopts exactly as before.
+    //  - own writes echo back through the watch (remote === false); the
+    //    storage-owned filter drops them - the in-memory store is by
+    //    definition already that value, so re-reading + re-merging it would
+    //    be a pure duplicate parse per save. Anything remote (or any
+    //    implementation that omits the flag) still adopts exactly as before.
     //  - when the change does carry the new value, it is merged straight from
     //    the listener argument instead of paying a second GM read + parse.
-    this.#listenerId = gmAddValueChangeListener(KEYS.resume, (_name, _old, value, remote) => {
-      if (remote === false) {
-        return;
-      }
-      this.#adoptExternal(value);
-    });
+    this.#watch = watchStorageKey(KEYS.resume, (_name, _old, value) => this.#adoptExternal(value));
   }
 
   /** Release the cross-tab change subscription (SPA re-entry / shell teardown). */
   destroy() {
-    gmRemoveValueChangeListener(this.#listenerId);
-    this.#listenerId = null;
+    this.#watch.stop();
+    this.#watch = null;
     this.#listeners.clear();
   }
 
@@ -176,15 +173,7 @@ export class ResumeStore {
   }
 
   #buildByPath() {
-    const map = new Map();
-    for (const entry of this.#state.entries) {
-      const bucket = map.get(entry.path);
-      if (bucket) {
-        bucket.push(entry);
-      } else {
-        map.set(entry.path, [entry]);
-      }
-    }
+    const map = Map.groupBy(this.#state.entries, (entry) => entry.path);
     this.#byPath = map;
     return map;
   }

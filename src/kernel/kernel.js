@@ -4,14 +4,132 @@ import { setDebugRuntime } from "../shared/perf-diag.js";
 import { postTask } from "../shared/scheduler.js";
 import { Scope } from "../shared/scope.js";
 import { runSteps } from "../shared/steps.js";
-import { ShellSlot } from "./registry.js";
-import { LifecycleManager } from "./lifecycle.js";
 import { findSdkForVideo, meetsMinSize, createLayoutGate, createOnScreenGate, createDiscoveryTap, isOnScreen } from "./sdk.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, DEBUG_HASH_TAG, FRAMEWORK_TUNING } from "./contract.js";
 
 /**
+ * Resolve once the container's child list has been quiet for a run of
+ * consecutive quiet time, or when the cap expires - whichever comes first.
+ * SDKs build their player over several microtasks/frames after the
+ * <video> appears; injecting mid-build invites wholesale innerHTML wipes.
+ *
+ * Settle detection is a MutationObserver trailing quiet-period timer rather
+ * than an rAF quiet-frame counter, so the window is frame-rate independent
+ * (an 144 Hz display settles 2.4x faster than 60 Hz, and a missed frame or
+ * a throttled background tab still resolves on the quiet clock).
+ *
+ * Both timers are scheduler.postTask handles (background-tab throttling and
+ * pagehide abort are native), re-armed per mutation. An optional AbortSignal
+ * additionally resolves the wait immediately - so a video removed / page
+ * hidden mid-window never leaves the observer + its two timers running for
+ * the full cap.
+ */
+function whenDomSettled(container, { quietMs = 50, capMs = 150, signal } = {}) {
+  const { promise, resolve } = Promise.withResolvers();
+  let settled = false;
+  let settleHandle = null;
+  let capHandle = null;
+
+  const done = () => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    observer.disconnect();
+    settleHandle?.abort();
+    capHandle?.abort();
+    // Normal settle must release the abort listener too: with `{ once: true }`
+    // it only self-removes on abort, so a quiet-page settle would otherwise
+    // keep the kernel-scope signal subscribed for the whole page lifetime.
+    if (onAbort) {
+      signal?.removeEventListener("abort", onAbort);
+    }
+    resolve();
+  };
+
+  const observer = new MutationObserver(() => {
+    // Any mutation re-arms the trailing quiet window from scratch.
+    settleHandle?.abort();
+    settleHandle = postTask(done, { priority: "user-visible", delay: quietMs });
+  });
+
+  settleHandle = postTask(done, { priority: "user-visible", delay: quietMs });
+  capHandle = postTask(done, { priority: "user-visible", delay: capMs });
+
+  observer.observe(container, { childList: true });
+
+  const onAbort = () => done();
+  signal?.addEventListener("abort", onAbort, { once: true });
+
+  return promise;
+}
+
+/**
+ * Holds the single live shell. PlayerForge is one-shell-per-session by design.
+ *
+ * `onEmpty` (optional) fires when the last shell leaves through unregister -
+ * the DOM-status edge the kernel uses to re-arm discovery. It is not wired to
+ * destroyAll(): that is a page-teardown sweep, not a live page losing a player.
+ *
+ * Formerly registry.js; kept as a class (not collapsed into Kernel privates)
+ * because its displacement/onEmpty contract is pinned by dedicated unit tests.
+ */
+export class ShellSlot {
+  #current = null;
+  #onEmpty;
+
+  constructor(onEmpty) {
+    this.#onEmpty = onEmpty;
+  }
+
+  /**
+   * Install the session's shell. PlayerForge is one-shell-per-session, so a
+   * shell already live is destroyed here rather than silently dropped:
+   * otherwise adopting a second player orphans the first (still in the DOM and
+   * removal-watched, but unreachable from the registry and so never torn down).
+   * The slot is filled before destroying the displaced shell so its own
+   * onDestroy -> unregister() sees a different current and neither nulls the
+   * slot nor reports an empty registry.
+   */
+  register(shell) {
+    const previous = this.#current;
+    this.#current = shell;
+    if (previous && previous !== shell) {
+      previous.destroy();
+    }
+    logger.log("registry", `Shell registered: ${shell.sdk.name}`);
+  }
+
+  unregister(shell) {
+    if (this.#current === shell) {
+      this.#current = null;
+      this.#onEmpty?.();
+    }
+    logger.log("registry", `Shell unregistered: ${shell.sdk.name}`);
+  }
+
+  getByVideo(video) {
+    return this.#current?.video === video ? this.#current : null;
+  }
+
+  getAll() {
+    return this.#current ? [this.#current] : [];
+  }
+
+  destroyAll() {
+    const shell = this.#current;
+    this.#current = null;
+    if (shell) {
+      shell.destroy();
+      logger.log("registry", "Destroyed shell");
+    }
+  }
+}
+
+/**
  * Top-level orchestrator: watches for <video> elements, identifies the player
- * SDK, drives discovery, and owns the registry/lifecycle pair.
+ * SDK, drives discovery, and owns the shell slot plus the discovery-to-shell
+ * settle pipeline (former lifecycle.js, absorbed as privates).
  * Under @run-at document-start nothing pre-exists us: the kernel rides the
  * shared discovery tap (sdk.js), catching SDK-created players the moment
  * their <video> enters the DOM and readiness transitions on existing ones.
@@ -22,8 +140,12 @@ const MAX_REMOVAL_DEPTH = 8;
 const REMOVAL_DEPTH_MARGIN = 1;
 
 export class Kernel {
-  #registry;
-  #lifecycle;
+  /** The one live shell (one-shell-per-session; see ShellSlot). */
+  #registry = new ShellSlot(() => this.#onRegistryEmpty());
+  /** Videos with a settle wait in flight - dedups repeated discovery. */
+  #pending = new Set();
+  /** Abort source for in-flight settle waits; aborted at pagehide. */
+  #settleScope = new AbortController();
   /** Shell-ready listeners (direct callbacks, no bus). */
   #createdListeners = new Set();
   #initialized = false;
@@ -91,22 +213,16 @@ export class Kernel {
       },
       // Scope first: onDispose disconnects every removal observer, the
       // signal cancels pending removal-grace postTasks, and the page-level
-      // pageshow/pagehide listeners drop. Lifecycle/registry teardown below
-      // then runs with all watch machinery already dead.
+      // pageshow/pagehide listeners drop. Shell teardown below then runs
+      // with all watch machinery already dead.
       () => this.#scope.dispose(),
-      // Tear down in-flight settle waits so their observers + timers die
+      // Abort in-flight settle waits so their observers + timers die
       // immediately instead of running the full quiet/cap window on a page
       // that is already leaving.
-      () => this.#lifecycle.destroy(),
+      () => this.#settleScope.abort(),
       () => this.#registry.destroyAll()
     ]);
   };
-
-  constructor() {
-    this.#registry = new ShellSlot(() => this.#onRegistryEmpty());
-    this.#lifecycle = new LifecycleManager(this.#registry, (shell) => this.#notifyShellCreated(shell));
-    this.#lifecycle.setShellFactory((discovery) => this.#createShell(discovery));
-  }
 
   /**
    * The shell plugin registers its host provider here; the framework never
@@ -132,6 +248,60 @@ export class Kernel {
       } catch (err) {
         logger.error("kernel", "Shell-created listener threw:", err);
       }
+    }
+  }
+
+  /**
+   * Bridges video discovery to shell creation (former lifecycle.js): a settle
+   * wait defers creation until the SDK's DOM has quiesced (or the cap expires),
+   * with post-wait guards against videos that vanished or were adopted
+   * meanwhile. A ready shell is handed to #notifyShellCreated. Page-unload
+   * cleanup aborts in-flight waits via #settleScope.
+   */
+  async #onVideoFound({ video, container, sdk }) {
+    logger.log("lifecycle", `video:found - ${sdk.name}`);
+    if (this.#registry.getByVideo(video)) {
+      logger.log("lifecycle", "Video already has a shell, skipping");
+      return;
+    }
+    if (!this.#shellProvider) {
+      logger.error("lifecycle", "No shell factory set!");
+      return;
+    }
+    if (this.#pending.has(video)) {
+      return;
+    }
+    this.#pending.add(video);
+    await whenDomSettled(container, { signal: this.#settleScope.signal });
+    this.#pending.delete(video);
+    if (!video.isConnected || !container.isConnected) {
+      logger.log("lifecycle", `${sdk.name} video left the document before settle - skipping`);
+      return;
+    }
+    if (this.#registry.getByVideo(video)) {
+      return;
+    }
+    let shell = null;
+    try {
+      shell = this.#createShell({ video, container, sdk });
+      await shell?.ready;
+      this.#notifyShellCreated(shell);
+      logger.log("lifecycle", `Shell created for ${sdk.name}`);
+    } catch (err) {
+      logger.error("lifecycle", `Failed to create shell for ${sdk.name}:`, err);
+      // A shell that throws mid-boot (or rejects ready) may already have
+      // injected DOM, timers, and listeners. destroy() is scope-guarded and
+      // idempotent, so it reaps the partial state without double-freeing a
+      // shell that never got registered.
+      await shell?.destroy?.();
+    }
+  }
+
+  #onVideoRemoved(video) {
+    const shell = this.#registry.getByVideo(video);
+    if (shell) {
+      shell.destroy();
+      logger.log("lifecycle", `Shell destroyed: ${shell.sdk.name}`);
     }
   }
 
@@ -271,11 +441,7 @@ export class Kernel {
     if (logger.enabled) {
       logger.log("kernel", `${sdk.name} adopted (${video.videoWidth}x${video.videoHeight}, ${Math.round(video.duration)}s)`);
     }
-    this.#lifecycle.onVideoFound({
-      video,
-      container,
-      sdk
-    });
+    this.#onVideoFound({ video, container, sdk });
     this.#watchVideoRemoval(video, container, sdk.hops);
     this.#downgradeDiscoveryTap();
   }
@@ -315,7 +481,7 @@ export class Kernel {
           this.#removalTimers.delete(video);
           if (!video.isConnected) {
             stopWatching();
-            this.#lifecycle.onVideoRemoved({ video });
+            this.#onVideoRemoved(video);
           } else {
             reanchorObservers();
           }

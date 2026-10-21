@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 
-const { ensureViewportFitCover } = await import("../src/shell/chrome/viewport.js");
+const { ensureViewportFitCover } = await import("../src/shell/chrome/inject.js");
 
 function makeDom(headHtml = "") {
   const dom = new JSDOM(`<!doctype html><html><head>${headHtml}</head><body></body></html>`, {

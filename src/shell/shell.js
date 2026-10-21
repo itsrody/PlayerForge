@@ -11,8 +11,7 @@ import { TUNING } from "../shared/tuning.js";
 import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
-import { SHELL_MARKER, warmStyles, injectShell, watchShellHost } from "./chrome/inject.js";
-import { ensureViewportFitCover } from "./chrome/viewport.js";
+import { SHELL_MARKER, warmStyles, injectShell, watchShellHost, ensureViewportFitCover } from "./chrome/inject.js";
 import { requestFullscreenProvision } from "../shared/context.js";
 import { DOMManager } from "../shared/dom-manager.js";
 import { Scope } from "../shared/scope.js";
@@ -205,7 +204,7 @@ export class Shell {
    * Unified contextual reference box, per the PlayerForge geometry rule: in
    * inline mode the reference is the shell's own container (the SDK container).
    * Fullscreen reference box used for fill-mode cover scaling and scrub
-   * normalization. With the edge-to-edge bypass (see viewport.js) the
+   * normalization. With the edge-to-edge bypass (see inject.js) the
    * fullscreen iframe draws behind the cutout edge-to-edge, so the SDK's
    * rendered box IS the physical screen - `screen.width/height`. No env-based
    * safe-rect narrowing is needed (or possible: env(safe-area-inset-*) does
@@ -331,7 +330,7 @@ export class Shell {
     warmStyles();
     // Document-level (idempotent): make the SDK's own viewport report
     // viewport-fit=cover so the fullscreen frame can draw behind the Android
-    // cutout edge-to-edge (see viewport.js). Gated by fullscreen.edgeToEdge:
+    // cutout edge-to-edge (see inject.js). Gated by fullscreen.edgeToEdge:
     // when disabled we leave the iframe at the default (Chrome letterboxes to
     // the safe area itself) and fill simply covers the letterboxed frame.
     if (getSetting(SETTING_KEYS.edgeToEdge) !== false) {

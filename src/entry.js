@@ -1,18 +1,74 @@
 import { Kernel } from "./kernel/kernel.js";
 import { DEBUG_HASH_TAG } from "./kernel/contract.js";
-import { registerShell } from "./shell/register.js";
+import { Shell } from "./shell/shell.js";
 import { installMenuCommands } from "./kernel/menus.js";
 import { installContextBridge, requestFullscreenProvision } from "./shared/context.js";
 import { installVideoProbe } from "./kernel/probe.js";
 import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/sdk.js";
 import { logger } from "./shared/logger.js";
-import { shouldSkipUrl } from "./kernel/guard.js";
 import { getConfigValue, setConfigValue, deleteConfigField } from "./shared/storage.js";
 import { initFullscreenGate } from "./shared/shadow.js";
 
 // The version lives in the banner and is read from the installed script at
 // runtime via GM_info, so what the UI reports is always what the manager
 // actually runs - never a stale build-time constant.
+
+/**
+ * Any match skips the document entirely (ad/track/captcha frames host no
+ * players). Hostname-anchored on purpose: an ad domain may appear only in a
+ * path or query on a legitimate video page (`/doubleclick-interview/`,
+ * `?ref=taboola.com`), and substring-matching the whole href would silently
+ * skip a real player. Suffix match covers subdomains; captcha widget frames
+ * live on their own domains (hcaptcha.com, recaptcha.net), so dropping the
+ * path-style `recaptcha` probe costs only a harmless script eval in the
+ * occasional captcha iframe that hosts no video.
+ */
+const AD_HOST_SUFFIXES = [
+  "doubleclick.net",
+  "googlesyndication.com",
+  "googleadservices.com",
+  "adnxs.com",
+  "taboola.com",
+  "outbrain.com",
+  "hcaptcha.com",
+  "googletagmanager.com",
+  "recaptcha.net",
+  "facebook.net"
+];
+/** Prefix families: adservice.google and its subdomains. */
+const AD_HOST_PREFIXES = ["adservice.google."];
+
+function isAdHost(hostname) {
+  for (const suffix of AD_HOST_SUFFIXES) {
+    if (hostname === suffix || hostname.endsWith(`.${suffix}`)) {
+      return true;
+    }
+  }
+  for (const prefix of AD_HOST_PREFIXES) {
+    if (hostname.startsWith(prefix)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function shouldSkipUrl() {
+  try {
+    const href = location.href;
+    if (href === "about:blank" || href.startsWith("data:")) {
+      return true;
+    }
+    if (isAdHost(new URL(href).hostname)) {
+      return true;
+    }
+    if (window.top !== window && window.top?.location?.href) {
+      if (isAdHost(new URL(window.top.location.href).hostname)) {
+        return true;
+      }
+    }
+  } catch {}
+  return false;
+}
 
 function bootstrap() {
   "use strict";
@@ -44,7 +100,16 @@ function bootstrap() {
       return;
     }
     const kernel = new Kernel();
-    registerShell(kernel);
+    // The shell plugin's "main", inlined from its former register.js home:
+    // the kernel (framework) never imports the shell - it only calls the
+    // provider registered here at boot. Holding the Shell import down in the
+    // entry (and out of the kernel) is what keeps the shell a plug-in rather
+    // than something the framework constructs directly.
+    kernel.registerShellProvider({
+      create({ video, container, sdk, onDestroy }) {
+        return new Shell({ video, container, sdk, onDestroy });
+      }
+    });
     kernel.init();
 
     // One subscription serves both duties: readiness log always, first-run

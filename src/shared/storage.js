@@ -44,6 +44,26 @@ export function gmRemoveValueChangeListener(handle) {
   GM_removeValueChangeListener(handle);
 }
 
+/**
+ * Subscribe to cross-tab writes of one storage key (owned here so both cache
+ * consumers share one explanation of the echo contract instead of each
+ * restating it). GM change listeners fire for OUR OWN writes too, flagged
+ * `remote === false`: the writing tab's in-memory state is by definition
+ * already that value, so reacting would be a duplicate parse per save - own
+ * echoes are filtered. Implementations that omit the 4th listener arg behave
+ * as external writes (as before). Returns `{ stop() }`, safe to call on a
+ * failed install or twice.
+ */
+export function watchStorageKey(key, handler) {
+  const id = gmAddValueChangeListener(key, (...args) => {
+    if (args[3] === false) {
+      return;
+    }
+    handler(...args);
+  });
+  return { stop: () => gmRemoveValueChangeListener(id) };
+}
+
 export function gmGetResourceText(name) {
   if (typeof GM_getResourceText !== "function") {
     return null;

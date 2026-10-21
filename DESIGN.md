@@ -175,6 +175,41 @@ design for regression detection; the v1.0.0 target is preserved on its tag.
 
 ### Change log
 
+- **Module consolidation pass.** The tree shrank from 45 to 39 modules with
+  one timer backend, one storage-watch contract, one page-level observer, and
+  a focused context engine. Absorbed (single-importer boot/wiring/lifecycle
+  code with no contract of its own): guard and the shell provider
+  registration into `entry.js`; `lifecycle.js` into the kernel (the settle
+  engine `whenDomSettled` and the `#pending`/`#settleScope` state are kernel
+  privates; `ShellSlot` moved into kernel.js intact, kept as a class because
+  its displacement/`onEmpty` contract is unit-pinned); `time.js` dissolved -
+  `delay`/`debounce` live in scheduler.js (the confirmed single timer
+  backend), `formatTime` in formatters.js; `viewport.js` (`ensureViewportFitCover`)
+  into `inject.js`; `haptics.js` into `actions.js` (per-gesture policy beside
+  its gesture table). Storage now owns the cross-tab echo contract:
+  `watchStorageKey(key, handler)` filters own-write echoes (`remote ===
+  false`) in one place, and config/resume retargeted (the triple-documented
+  dance is one explanation). The iframe registry rides the shared mutation
+  feed (`onDomMutations`) instead of a second page-level MutationObserver -
+  differential added-node registration, hidden-tab deferral bounded by the
+  dispatcher's 500ms cap, and `iframeElementForWindow` falls back to an
+  inline scan on cache misses so a parked flush can never drop a vouch.
+  `context.js` split: the pure site-identity primitives (`getDomainKey`,
+  `domainsMatch`, `domainScore`, `hashEntry`) moved to `domains.js`
+  (~190 lines), the engine keeps page context + the frame bridge. Polish:
+  a failing shell boot now `destroy()`s its partially built shell (leaked
+  DOM/timers fix); a panel `open()` race gets an in-flight latch plus
+  builder-restoring failure recovery with a toast; the toast's
+  `will-change` moved to the visible state so a hidden toast stops pinning a
+  composited layer; `easeTransformTo` reads committed inline transforms
+  before falling back to a computed style; `Map.groupBy` replaces the
+  byPath bucket loop. Test-only seams kept deliberately: `stopContextPipe`,
+  `videoFromEvent`, `ensureStyles`, `installMenuCommands`. Two probed ideas
+  were rejected on inspection: re-adding `prefers-contrast` (retired in a
+  deliberate earlier pass) and reworking the volume icon scale (the glyphs
+  are internally coherent - loud maps to the most-wave `volume-1` - only the
+  names run backwards, and a rename is a visual-baseline task). 354 -> 355
+  tests (one new: the shared-feed iframe registry).
 - **Native allocation pass.** The subscription machinery census (129
   addEventListener sites, 21 `once`, 13 observers, 9 timer families,
   6 lazy debounce/retry engines) showed the shared-engine structure already in

@@ -30,7 +30,7 @@ const { logger } = await import("../src/shared/logger.js");
 logger.disable();
 
 const { Kernel } = await import("../src/kernel/kernel.js");
-const { ShellSlot } = await import("../src/kernel/registry.js");
+const { ShellSlot } = await import("../src/kernel/kernel.js");
 
 function makeShell(overrides = {}) {
   return {

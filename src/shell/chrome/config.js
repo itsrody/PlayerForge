@@ -2,7 +2,7 @@
  * User-settings engine: defaults, schema, cached accessors, and the generic
  * panel renderer for that schema.
  */
-import { KEYS, getConfigValue, setConfigValue, invalidateConfigCache, gmAddValueChangeListener } from "../../shared/storage.js";
+import { KEYS, getConfigValue, setConfigValue, invalidateConfigCache, watchStorageKey } from "../../shared/storage.js";
 import { GESTURES, GESTURE_IDS } from "../../kernel/contract.js";
 import { logger } from "../../shared/logger.js";
 import { fmtSeconds } from "../../shared/formatters.js";
@@ -175,16 +175,8 @@ function refreshSettingsCache() {
   }
 }
 
-// Own writes echo back too (remote === false): our cache was already updated
-// by setSetting before the write, so skip the invalidation + full-doc re-parse
-// it would trigger - the resume store applies the same guard (resume.js).
-// Implementations that omit the 4th arg behave exactly as before.
-gmAddValueChangeListener(KEYS.configs, (_name, _old, _value, remote) => {
-  if (remote === false) {
-    return;
-  }
-  refreshSettingsCache();
-});
+// Cross-tab live reload via the storage-owned watch (shared echo contract).
+watchStorageKey(KEYS.configs, () => refreshSettingsCache());
 
 /**
  * Render SETTINGS_SCHEMA into the settings panel: one labeled section per

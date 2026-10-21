@@ -2,15 +2,11 @@
  * Page context engine.
  *
  * One module answering everything about WHERE a PlayerForge instance runs:
- * which site it belongs to, how to compare sites, how embedded players learn
- * their top-page identity across origins, and whether this document hosts a
- * player at all.
- *
- * Sections:
- *   1. Domain identity   - registrable-domain keys and comparison
- *   2. Entry hashing     - deterministic ids for resume entries
- *   3. Page context      - resolving {domain, path, title} for this shell
- *   4. Frame bridge      - always-on top<->iframe message plumbing (context)
+ * how embedded players learn their top-page identity across origins, what
+ * {domain, path, title} this page carries, and the frame bridge that moves
+ * both context and fullscreen provisioning across iframe edges. The pure
+ * site-identity primitives (domain keys, similarity, entry hashing) live in
+ * domains.js; this module consumes them.
  *
  * The bridge MUST be installed in every frame at document-start: kernels boot
  * lazily, so a video-bearing iframe cannot assume its ancestors run anything
@@ -19,6 +15,8 @@
 /* - Window message types - */
 
 import { postTask } from "./scheduler.js";
+import { getDomainKey } from "./domains.js";
+import { onDomMutations } from "./dom-watch.js";
 
 /**
  * The postMessage types the frame bridge sends and receives across iframe
@@ -31,205 +29,7 @@ export const CTX_REQUEST_TYPE = `${BRIDGE_MSG_PREFIX}ctx-request`;
 export const CTX_RESPONSE_TYPE = `${BRIDGE_MSG_PREFIX}ctx`;
 export const FS_REQUEST_TYPE = `${BRIDGE_MSG_PREFIX}req-fullscreen`;
 
-/* - 1. Domain identity - */
-
-const DOMAIN_TLDS = {
-  multi: new Set(["co", "com", "org", "net", "gov", "edu", "ac", "mil"]),
-  single: new Set([
-    "biz", "info", "name", "mobi", "asia", "tel", "travel", "jobs", "museum", "coop", "aero",
-    "app", "blog", "dev", "fun", "game", "host", "live", "love", "new", "news", "one", "online",
-    "page", "park", "plus", "pro", "shop", "site", "store", "tech", "video", "work", "xyz",
-    "club", "life", "world", "today", "tools", "social", "beer", "email", "space", "cool",
-    "social", "games", "legal", "luxury", "fans", "buzz", "country", "kim", "pub", "rest"
-  ])
-};
-const IPV4_RE = /^(?:\d{1,3}\.){3}\d{1,3}$/;
-/** Memoized domain keys: pages resolve their hostname repeatedly (kernel +
- *  probe + responder), and the TLD walk is pure over hostname.
- *  Capped at 256 entries to prevent unbounded growth on SPAs with dynamic
- *  subdomains. Eviction clears the oldest half when the cap is hit.
- */
-const DOMAIN_KEY_CACHE_MAX = 256;
-const domainKeyCache = new Map();
-
-/**
- * Reduce a hostname to its registrable-domain key (best effort, no PSL).
- * IP addresses become dash-separated so they are safe as identifiers.
- * Pure over hostname, so identical inputs share one cached result.
- */
-export function getDomainKey(hostname) {
-  if (!hostname) {
-    return "";
-  }
-  // Single Map lookup - the cache never stores undefined, so a hit vs. miss
-  // is one get() instead of has() + get().
-  const hit = domainKeyCache.get(hostname);
-  if (hit !== undefined) {
-    return hit;
-  }
-  let key;
-  if (IPV4_RE.test(hostname)) {
-    key = hostname.replaceAll(".", "-");
-  } else if (hostname.includes(":")) {
-    // Bracketed IPv6 ([::1]) or bare forms - the TLD walk would mangle them
-    // into garbage keys, so collapse to one dash-safe identifier like IPv4.
-    key = hostname.replace(/[\\[\]:]+/g, "-").replace(/^-+|-+$/g, "") || "ipv6";
-  } else {
-    const parts = hostname.toLowerCase().replace(/^www\./, "").split(".");
-    const multiPartTlds = DOMAIN_TLDS.multi;
-    const singleLabelTlds = DOMAIN_TLDS.single;
-    let idx = parts.length - 1;
-    if (parts[idx] && (parts[idx].length <= 3 || singleLabelTlds.has(parts[idx]))) {
-      idx--;
-    }
-    if (parts[idx] && multiPartTlds.has(parts[idx])) {
-      idx--;
-    }
-    // Suffixes missing from the curated lists (e.g. .basketball) never moved
-    // `idx`, so without this the suffix LABEL itself would become the key -
-    // collapsing every registrable domain under one unlisted gTLD into a single
-    // entry. Assume the unclassified last label is a TLD and step up one more.
-    if (idx === parts.length - 1 && parts.length >= 2) {
-      idx--;
-    }
-    key = parts[Math.max(0, idx)] || "";
-  }
-  domainKeyCache.set(hostname, key);
-  if (domainKeyCache.size > DOMAIN_KEY_CACHE_MAX) {
-    const evict = Math.ceil(DOMAIN_KEY_CACHE_MAX / 4);
-    let i = 0;
-    for (const k of domainKeyCache.keys()) {
-      domainKeyCache.delete(k);
-      if (++i >= evict) break;
-    }
-  }
-  return key;
-}
-
-/** Label-boundary containment: subdomains count, substrings do not. */
-function boundaryContains(a, b) {
-  return a.startsWith(`${b}.`) || a.endsWith(`.${b}`)
-    || b.startsWith(`${a}.`) || b.endsWith(`.${a}`);
-}
-
-/** Reusable distance rows for the bounded Levenshtein below. Domain keys are
- *  short and ranking scans many candidates, so two scratch rows equal to the
- *  shorter operand avoid per-call allocation on the hot ranking path - and
- *  because operands are swapped to that axis, alternating candidate lengths
- *  reuse one small pair instead of reallocating per entry.
- */
-let distRows = null;
-let distRowLen = 0;
-
-function ensureDistRows(len) {
-  if (!distRows || distRowLen < len + 1) {
-    distRows = [new Int32Array(len + 1), new Int32Array(len + 1)];
-    distRowLen = len + 1;
-  }
-}
-
-function boundedLevenshtein(a, b, max = Infinity) {
-  const lenA = a.length;
-  const lenB = b.length;
-  if (Math.abs(lenA - lenB) > max) {
-    return max + 1;
-  }
-  // Levenshtein is symmetric in its operands: iterate the longer string on the
-  // row axis and keep the SHORTER one as the columns, so scratch-row sizing is
-  // bound by the shorter operand (and the early-exit band stays exact).
-  let rows = a;
-  let cols = b;
-  if (lenB > lenA) {
-    rows = b;
-    cols = a;
-  }
-  const m = cols.length;
-  ensureDistRows(m);
-  let prev = distRows[0];
-  let curr = distRows[1];
-  for (let j = 0; j <= m; j++) {
-    prev[j] = j;
-  }
-  for (let i = 1; i <= rows.length; i++) {
-    curr[0] = i;
-    let rowMin = i;
-    const ch = rows[i - 1];
-    for (let j = 1; j <= m; j++) {
-      const cost = ch === cols[j - 1] ? 0 : 1;
-      const v = cost === 0 ? prev[j - 1] : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
-      curr[j] = v;
-      if (v < rowMin) {
-        rowMin = v;
-      }
-    }
-    if (rowMin > max) {
-      return max + 1;
-    }
-    const tmp = prev;
-    prev = curr;
-    curr = tmp;
-  }
-  return prev[m];
-}
-
-/** Strict equality or label-boundary relation between two domain keys. */
-export function domainsMatch(a, b) {
-  if (!a || !b) {
-    return false;
-  }
-  return a === b || boundaryContains(a, b);
-}
-
-/**
- * Graded similarity for ranking: exact 3, boundary-related 2, otherwise
- * distance-based decay to 0. Fuzz never promotes to a match - it only orders
- * candidates once domainsMatch() has accepted them.
- */
-export function domainScore(a, b) {
-  if (!a || !b) {
-    return 0;
-  }
-  if (a === b) {
-    return 3;
-  }
-  if (boundaryContains(a, b)) {
-    return 2;
-  }
-  return Math.max(0, 3 - boundedLevenshtein(a, b, 3));
-}
-
-/* - 2. Entry hashing - */
-
-/**
- * Deterministic djb2-based id for a (domain, path, duration) triple. The
- * domain participates so identical paths on different sites can never
- * collide into one shared entry - /watch/1 on two hosts are different videos.
- *
- * Feeds column-separator char codes directly instead of concatenating a seed
- * string (`${domainKey}::${path}::${duration}`): the old shape allocated the
- * seed and hashed the same bytes - the produced id is byte-for-byte identical,
- * so persisted resume entries keep matching, but no seed string is built.
- */
-export function hashEntry(domainKey, path, duration) {
-  let hash = 5381;
-  for (let i = 0; i < domainKey.length; i++) {
-    hash = ((hash << 5) + hash + domainKey.charCodeAt(i)) | 0;
-  }
-  hash = ((hash << 5) + hash + 58) | 0;
-  hash = ((hash << 5) + hash + 58) | 0;
-  for (let i = 0; i < path.length; i++) {
-    hash = ((hash << 5) + hash + path.charCodeAt(i)) | 0;
-  }
-  hash = ((hash << 5) + hash + 58) | 0;
-  hash = ((hash << 5) + hash + 58) | 0;
-  const dur = String(Math.round(duration));
-  for (let i = 0; i < dur.length; i++) {
-    hash = ((hash << 5) + hash + dur.charCodeAt(i)) | 0;
-  }
-  return (hash < 0 ? -hash : hash).toString(36).substring(0, 8);
-}
-
-/* - 3. Page context - */
+/* - 1. Page context - */
 
 const TITLE_TAGS = /(?:^|[- ])(?:uncensored|uncut|leaked|censored|raw|bd|hdrip|dvdrip|webrip|bluray|remux|cam|reduc(?:ing)?\s*mosaic|english\s*subtitle)/gi;
 const RECORDING_CODE_RE = /^\[([A-Z]+-\d+)(?:-[^\]]*)?\]/;
@@ -622,7 +422,7 @@ export function stopContextPipe() {
   legacyChain = false;
 }
 
-/* - 4. Frame bridge - */
+/* - 2. Frame bridge - */
 
 const NONCE_TTL_MS = 5000;
 export const CTX_REQUEST_TIMEOUT_MS = 3000;
@@ -848,48 +648,48 @@ function isOwnFrame(source) {
   return scan(document, 0);
 }
 
-/* - 4a. Live iframe registry - */
+/* - 2a. Live iframe registry - */
 
 /**
- * Live map from <iframe> contentWindow -> element, refreshed by an observer
- * that lives only while the bridge is installed AND messages have been seen.
- * Without it, every relayed message rewound the full frame tree via
- * querySelectorAll - O(frametree) per message on iframe-heavy pages. Armed
- * lazily on the first bridged message (see installContextBridge), so the vast
- * majority of pages - which have no child frames to vouch - never pay for the
- * whole-document observer at all.
+ * Live map from <iframe> contentWindow -> element, refreshed by the shared
+ * document mutation feed (dom-watch onDomMutations). Without it, every relayed
+ * message rewound the full frame tree via querySelectorAll - O(frametree) per
+ * message on iframe-heavy pages. Armed lazily on the first bridged message
+ * (see installContextBridge), so the vast majority of pages - which have no
+ * child frames to vouch - never pay for a document-wide observer at all.
  *
- * This is self-contained to the shared layer (no dependency on the kernel's
- * dom-watch dispatcher, which is installed lazily and may not exist when the
- * bridge boots at document-start) and torn down by the bridge teardown, so a
- * top frame that never relays pays no ongoing cost. Cross-origin iframe
- * elements are still readable (contentWindow stays accessible across origins),
- * so a cross-origin child's element is resolvable here - which is exactly what
- * the fullscreen provisioner and frame relay need to vouch event.source.
+ * The subscription rides the shared dispatcher instead of its former private
+ * whole-document observer: one C++-level observer serves every document-wide
+ * interest instead of two. Two consequences, both bounded:
+ *   - dispatch defers while the tab is hidden (capped 500ms), so a frame
+ *     inserted while hidden lands in the cache up to that cap late; reads
+ *     reject detached entries via isConnected and fall back to an inline
+ *     scan, so a late list can never vouch a wrong frame.
+ *   - the dispatcher rebinds to a swapped document itself, so no rebinding
+ *     machinery lives here - a reseed at arm/swap time keeps the map current.
  *
- * WeakMap-keyed by contentWindow: dead frames release their entries with their
- * window instead of pinning a detached document, so removals need no sweep -
- * every read rejects a detached element via isConnected and drops it.
+ * WeakMap-keyed by contentWindow: dead frames release their entries with
+ * their window instead of pinning a detached document, so removals need no
+ * sweep - every read rejects a detached element via isConnected and drops it.
  */
 const iframeCache = new WeakMap();
 /** Document the cache currently describes. Tracked so a document swap (fresh
  *  page / test harness) reseeds instead of serving a stale map. */
 let iframeCacheDoc = null;
-/** True once the iframe registry observer is live. Armed lazily by
+/** True once the registry subscription is live. Armed lazily by
  *  installContextBridge on the first bridged message - pages with no child
- *  frames never arm it. Before that - e.g. handlers used directly -
+ *  frames never pay. Before that - e.g. handlers used directly -
  *  iframeElementForWindow scans inline so the vouch stays correct even
  *  unseeded. */
 let iframeCacheActive = false;
-/** Observer driving the cache; lifecycled by startIframeCache/stopIframeCache. */
-let iframeCacheObserver = null;
+/** Shared-feed subscription handle; lifecycled by startIframeCache/stopIframeCache. */
+let framesWatchOff = null;
 
 /** (Re)build the cache from the live <iframe> set. ContentWindow never throws,
- *  so this is safe across same- and cross-origin subtrees. Only used for the
- *  initial install and a document swap reseed - ongoing updates are
- *  differential (diffIframeCache). No clear(): the WeakMap releases entries
- *  with their windows on its own, and reads against old windows are rejected
- *  by the isConnected check anyway. */
+ *  so this is safe across same- and cross-origin subtrees. Used at arm/swap
+ *  time only - ongoing updates are differential (diffIframeCache). No clear():
+ *  the WeakMap releases entries with their windows on its own, and reads
+ *  against old windows are rejected by the isConnected check anyway. */
 function seedIframeCache() {
   for (const ifr of document.querySelectorAll("iframe")) {
     const win = ifr.contentWindow;
@@ -940,52 +740,35 @@ function diffIframeCache(records) {
   }
 }
 
-/** Install the cache observer bound to the current document. Returns an
- *  AbortSignal teardown. Degrades gracefully when MutationObserver is absent
- *  (jsdom without an explicit binding): the cache stays inactive and
- *  iframeElementForWindow falls back to a scan, so the bridge's message
- *  handling never depends on it.
+/**
+ * Arm the registry subscription on the shared feed. Degrades gracefully when
+ * there is no feed to serve us (no MutationObserver on this host): the cache
+ * stays inactive and iframeElementForWindow falls back to a scan, so the
+ * bridge's message handling never depends on it.
  *
- *  Idempotent: re-arming for the same document is a no-op, and a previous
- *  document's cache is discarded before rebind (browser/tab navigations hand
- *  the script a fresh document object).
- *
- *  The observe target falls back to `document` when the root element has not
- *  been parsed yet (fresh nested frames at document-start): observing the
- *  document node covers the same subtree and never throws on a missing
- *  documentElement - a throw here would abort entry.js's boot BEFORE the
- *  video probe, silently killing capture in that frame.
+ * A previous document's cache is discarded before reseed (browser/tab
+ * navigations hand the script a fresh document object).
  */
 function startIframeCache(ac) {
+  if (framesWatchOff) {
+    ensureIframeCacheCurrent();
+    return;
+  }
   if (typeof MutationObserver !== "function") {
+    // dom-watch has no observer to feed us on this host; keep the registry
+    // inactive so every read takes the inline-scan fallback below.
     return;
   }
-  if (iframeCacheActive && iframeCacheDoc === document) {
-    return;
-  }
-  if (iframeCacheActive) {
-    stopIframeCache();
-  }
-  seedIframeCache();
   iframeCacheDoc = document;
   iframeCacheActive = true;
-  iframeCacheObserver = new MutationObserver(diffIframeCache);
-  try {
-    iframeCacheObserver.observe(document.documentElement || document, { childList: true, subtree: true });
-  } catch {
-    // Root not available yet (or observer rejected): drop the cache instead of
-    // throwing out of the bridge install - scans remain the fallback vouch.
-    stopIframeCache();
-    return;
-  }
-  ac.signal.addEventListener("abort", () => {
-    stopIframeCache();
-  }, { once: true });
+  seedIframeCache();
+  framesWatchOff = onDomMutations(diffIframeCache, { signal: ac.signal });
+  ac.signal.addEventListener("abort", stopIframeCache, { once: true });
 }
 
 function stopIframeCache() {
-  iframeCacheObserver?.disconnect();
-  iframeCacheObserver = null;
+  framesWatchOff?.();
+  framesWatchOff = null;
   iframeCacheActive = false;
   iframeCacheDoc = null;
   // Entries need no clear: the WeakMap releases them with their windows, and
@@ -994,26 +777,16 @@ function stopIframeCache() {
   // inline scan is the fallback after teardown.
 }
 
-/** Ensure the cache describes the CURRENT document, reseeding and rebinding the
- *  observer if the document swapped underneath us (fresh jsdom/page). */
+/** Ensure the cache describes the CURRENT document, reseeding when the
+ *  document swapped underneath us (fresh jsdom/page). No observer rebinding
+ *  lives here: the shared feed rebinds to a swapped document itself, so only
+ *  the map needs the reseed. */
 function ensureIframeCacheCurrent() {
   if (!iframeCacheActive || iframeCacheDoc === document) {
     return;
   }
-  if (typeof MutationObserver !== "function") {
-    stopIframeCache();
-    return;
-  }
-  // Cache belongs to a previous document - rebind to the live one.
-  iframeCacheObserver?.disconnect();
   seedIframeCache();
   iframeCacheDoc = document;
-  try {
-    iframeCacheObserver = new MutationObserver(diffIframeCache);
-    iframeCacheObserver.observe(document.documentElement, { childList: true, subtree: true });
-  } catch {
-    stopIframeCache();
-  }
 }
 
 /** The direct <iframe> child of THIS document whose contentWindow is `win`, or null. */
@@ -1029,11 +802,14 @@ function iframeElementForWindow(win) {
         return hit;
       }
       iframeCache.delete(win);
+      // Removed entry dropped: a re-inserted frame's record may still be
+      // parked in the shared feed - the scan below covers that gap.
     }
-    return null;
   }
-  // Fallback before the bridge seeds the cache (or when handlers are used
-  // directly): scan inline so the vouch never silently drops.
+  // Fallback before the registry arms (or when handlers are used directly),
+  // and after a miss: the inline scan keeps the vouch exact even while a
+  // hidden-tab flush is parked, at an O(frametree) cost that only pays on
+  // genuine misses.
   for (const iframe of document.querySelectorAll("iframe")) {
     if (iframe.contentWindow === win) {
       return iframe;
@@ -1163,10 +939,10 @@ export function installContextBridge() {
     // The live iframe registry exists only to vouch incoming bridged messages
     // against this document's own <iframe> children - never for anything
     // message-free. On the vast majority of pages (no child frames) the
-    // whole-document MutationObserver therefore never needs to exist, so arm
-    // it lazily on the first bridged message: the seed registers live frames
+    // shared-feed subscription therefore never needs to exist, so arm it
+    // lazily on the first bridged message: the seed registers live frames
     // before any handler vouches, and the inline-scan fallback covers the
-    // pre-observer gap.
+    // pre-subscription gap.
     if (!iframeCacheActive || iframeCacheDoc !== document) {
       startIframeCache(ac);
     }
