@@ -1,9 +1,9 @@
-import { logger } from "../../shared/logger.js";
+import { logger } from "../../shared/runtime.js";
 import { createIconElement } from "./icons.js";
 import { GESTURE_EVENTS } from "../inputs/actions.js";
-import { deepestActiveElement, subscribeFullscreen } from "../../shared/shadow.js";
-import { clamp } from "../../shared/clamp.js";
-import { Scope } from "../../shared/scope.js";
+import { deepestActiveElement, subscribeFullscreen } from "../../shared/dom.js";
+import { clamp } from "../../shared/core.js";
+import { Scope } from "../../shared/runtime.js";
 import { el } from "./elements.js";
 import { getSetting, SETTING_KEYS } from "./config.js";
 

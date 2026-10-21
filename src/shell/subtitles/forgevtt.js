@@ -1,4 +1,4 @@
-import { yield_ } from "../../shared/scheduler.js";
+import { yield_ } from "../../shared/runtime.js";
 
 /** SRT timecode capture; global so srtToVtt rewrites every match in a line. */
 const SRT_TIMECODE_RE = /(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})/g;

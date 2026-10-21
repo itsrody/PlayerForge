@@ -10,7 +10,7 @@ globalThis.MutationObserver = window.MutationObserver;
 // class; the deferred-flush visibility listener must resolve to it too.
 globalThis.AbortController = window.AbortController;
 
-const { onDomMutations } = await import("../src/shared/dom-watch.js");
+const { onDomMutations } = await import("../src/shared/dom.js");
 
 function tick() {
   return new Promise((resolve) => queueMicrotask(() => setTimeout(resolve, 0)));

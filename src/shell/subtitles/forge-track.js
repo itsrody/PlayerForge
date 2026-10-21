@@ -1,5 +1,5 @@
-import { DOMManager } from "../../shared/dom-manager.js";
-import { Scope } from "../../shared/scope.js";
+import { DOMManager } from "../../shared/dom.js";
+import { Scope } from "../../shared/runtime.js";
 
 const STACK_OVERLAP_EM = 1.6;
 const MAX_SLOTS = 8;

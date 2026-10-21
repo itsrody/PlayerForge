@@ -2,10 +2,10 @@
  * User-settings engine: defaults, schema, cached accessors, and the generic
  * panel renderer for that schema.
  */
-import { KEYS, getConfigValue, setConfigValue, invalidateConfigCache, watchStorageKey } from "../../shared/storage.js";
+import { KEYS, getConfigValue, setConfigValue, invalidateConfigCache, watchStorageKey } from "../../shared/store.js";
 import { GESTURES, GESTURE_IDS } from "../../kernel/contract.js";
-import { logger } from "../../shared/logger.js";
-import { fmtSeconds } from "../../shared/formatters.js";
+import { logger } from "../../shared/runtime.js";
+import { fmtSeconds } from "../../shared/core.js";
 
 const SETTINGS_PREFIX = "settings";
 

@@ -15,8 +15,8 @@ import {
   CTX_RESPONSE_TYPE,
   CTX_REQUEST_TIMEOUT_MS,
   stopContextPipe
-} from "../src/shared/context.js";
-import { getDomainKey, domainsMatch, domainScore, hashEntry } from "../src/shared/domains.js";
+} from "../src/shared/page.js";
+import { getDomainKey, domainsMatch, domainScore, hashEntry } from "../src/shared/page.js";
 import { installVideoProbe } from "../src/kernel/probe.js";
 
 const dom = (html = "", url = "https://www.youtube.com/watch?v=1") => {

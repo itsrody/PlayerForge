@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { Scope } = await import("../src/shared/scope.js");
+const { Scope } = await import("../src/shared/runtime.js");
 
 test("dispose aborts the signal and runs disposers in reverse order", () => {
   const scope = new Scope();

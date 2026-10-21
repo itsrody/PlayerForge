@@ -1,4 +1,4 @@
-import { initFullscreenGate } from "../src/shared/shadow.js";
+import { initFullscreenGate } from "../src/shared/dom.js";
 
 /**
  * Test wiring for the shared `fs` gate (shadow.js). The gate is built on the

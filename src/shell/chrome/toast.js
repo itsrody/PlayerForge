@@ -1,5 +1,5 @@
-import { DomPool } from "../../shared/dom-pool.js";
-import { delay } from "../../shared/scheduler.js";
+import { DomPool } from "../../shared/dom.js";
+import { delay } from "../../shared/runtime.js";
 import { flashElement } from "./animate.js";
 import { button } from "./elements.js";
 import { createIconElement } from "./icons.js";

@@ -175,6 +175,33 @@ design for regression detection; the v1.0.0 target is preserved on its tag.
 
 ### Change log
 
+- **Shared-layer unification pass.** `src/shared/` collapsed from 20 modules
+  to 5 data-shaped planes plus the version harness: `core.js` (clamping,
+  tuning, timing, formatters, error typing, `firstAvailable` - no imports),
+  `runtime.js` (scheduling, step lists, `Scope`, the debug runtime), `dom.js`
+  (the mutation feed, pooling, the shell ledger, shadow traversal, the
+  fullscreen gate), `page.js` (domain identity, page context, the frame
+  bridge, navigation) and `store.js` (the storage data plane). The version
+  harness dissolved: its derivation (read-as-JSON, semver guard) moved into
+  `esbuild.config.mjs`, the one Node context that consumes the value, because
+  the module only ever served the build while the harness already derives the
+  same version from package.json itself - package.json is the single source,
+  and `src/shared/` is runtime code only. Two class moves complete the OOP pass:
+  `DebugRuntime` (runtime.js) owns the log flag AND the LoAF observer as
+  private fields of one instance - previously the flag lived in logger.js
+  and a second `enabled` shadow beside the diagnostic was kept in step by an
+  external sync, so the observer could drift from the flag it serves; the
+  logger façade and the `setDebugRuntime(on)` export are unchanged for
+  callers, and the two-tier split stays deliberate (`logger.enable()` flips
+  chatter alone, `setDebugRuntime` flips logs AND the diagnostic as one
+  unit). `ContextPipe` (page.js) encapsulates the pipe record, the
+  legacy-chain memo and the in-flight bridge memo - previously three
+  module-level `let` globals reset by hand at every settle/teardown path;
+  `establish()/dropIf()/markLegacy()/stop()/bridge()` carry the same
+  identity-check semantics (a stale request's timeout drops only its own
+  pipe, never one a newer resolve established), and `stopContextPipe()`
+  remains the exported test/teardown seam. All import sites outside shared/
+  re-pointed; no behavior change. 355 -> 355 tests.
 - **Module consolidation pass.** The tree shrank from 45 to 39 modules with
   one timer backend, one storage-watch contract, one page-level observer, and
   a focused context engine. Absorbed (single-importer boot/wiring/lifecycle

@@ -1,14 +1,14 @@
-import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/storage.js";
-import { TUNING } from "../../shared/tuning.js";
-import { fmtPercent, fmtEm, fmtPercentOrOff, signedSeconds } from "../../shared/formatters.js";
+import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/store.js";
+import { TUNING } from "../../shared/core.js";
+import { fmtPercent, fmtEm, fmtPercentOrOff, signedSeconds } from "../../shared/core.js";
 import { srtToVtt, ensureVttHeader } from "./forgevtt.js";
 import { parseSubtitlesAsync } from "./vtt-worker-loader.js";
 import { ForgeTrack } from "./forge-track.js";
-import { debounce } from "../../shared/scheduler.js";
+import { debounce } from "../../shared/runtime.js";
 import { flashElement } from "../chrome/animate.js";
 import { el } from "../chrome/elements.js";
-import { logger } from "../../shared/logger.js";
-import { Scope } from "../../shared/scope.js";
+import { logger } from "../../shared/runtime.js";
+import { Scope } from "../../shared/runtime.js";
 
 const SUBTITLE_FILE_ACCEPT = ".srt,.vtt";
 const SUBTITLE_EXT_RE = /\.(srt|vtt)$/i;

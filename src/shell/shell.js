@@ -1,5 +1,5 @@
-import { logger } from "../shared/logger.js";
-import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../shared/shadow.js";
+import { logger } from "../shared/runtime.js";
+import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../shared/dom.js";
 import { InputForge } from "./inputs/forge.js";
 import { attachInputActions } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
@@ -7,16 +7,16 @@ import { SubtitlesSection } from "./subtitles/section.js";
 import { VideoFilter } from "./filter.js";
 import { SettingsPanel } from "./chrome/panel.js";
 import { addSettingsSection, getSetting, SETTING_KEYS } from "./chrome/config.js";
-import { TUNING } from "../shared/tuning.js";
+import { TUNING } from "../shared/core.js";
 import { addHistorySection } from "./chrome/history.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
 import { SHELL_MARKER, warmStyles, injectShell, watchShellHost, ensureViewportFitCover } from "./chrome/inject.js";
-import { requestFullscreenProvision } from "../shared/context.js";
-import { DOMManager } from "../shared/dom-manager.js";
-import { Scope } from "../shared/scope.js";
-import { yield_ } from "../shared/scheduler.js";
-import { runSteps, runStepsAsync } from "../shared/steps.js";
+import { requestFullscreenProvision } from "../shared/page.js";
+import { DOMManager } from "../shared/dom.js";
+import { Scope } from "../shared/runtime.js";
+import { yield_ } from "../shared/runtime.js";
+import { runSteps, runStepsAsync } from "../shared/runtime.js";
 
 /**
  * Surfaces that legitimately own the native context menu inside the shell:

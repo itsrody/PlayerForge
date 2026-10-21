@@ -1,4 +1,235 @@
 /**
+ * Page identity and frames.
+ *
+ * One module answering everything about WHERE a PlayerForge instance runs:
+ *   1. Domain identity - registrable-domain keys, comparison, similarity
+ *   2. Entry hashing   - deterministic ids for resume entries
+ *   3. Page context    - resolving {domain, path, title} for this shell
+ *   4. Frame bridge    - always-on top<->iframe message plumbing + fullscreen
+ *                        provisioning; the live iframe registry
+ *   5. Navigation      - same-document URL change events
+ *
+ * The bridge MUST be installed in every frame at document-start: kernels boot
+ * lazily, so a video-bearing iframe cannot assume its ancestors run anything
+ * unless the relay chain is already listening.
+ */
+import { firstAvailable } from "./core.js";
+import { postTask } from "./runtime.js";
+import { onDomMutations } from "./dom.js";
+
+/* - 1. Domain identity - */
+
+/**
+ * Pure page-identity primitives.
+ *
+ * One module answering everything about WHICH SITE a PlayerForge instance
+ * belongs to and how sites compare: registrable-domain keys and comparison,
+ * graded similarity ranking, and deterministic resume-entry hashing.
+ *
+ * Formerly the first two sections of the context engine (context.js), split
+ * out because they are pure functions over their inputs with no window,
+ * document, or message plumbing - resume matching consumes them directly.
+ */
+
+/* - 1. Domain identity - */
+
+const DOMAIN_TLDS = {
+  multi: new Set(["co", "com", "org", "net", "gov", "edu", "ac", "mil"]),
+  single: new Set([
+    "biz", "info", "name", "mobi", "asia", "tel", "travel", "jobs", "museum", "coop", "aero",
+    "app", "blog", "dev", "fun", "game", "host", "live", "love", "new", "news", "one", "online",
+    "page", "park", "plus", "pro", "shop", "site", "store", "tech", "video", "work", "xyz",
+    "club", "life", "world", "today", "tools", "social", "beer", "email", "space", "cool",
+    "social", "games", "legal", "luxury", "fans", "buzz", "country", "kim", "pub", "rest"
+  ])
+};
+const IPV4_RE = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+/** Memoized domain keys: pages resolve their hostname repeatedly (kernel +
+ *  probe + responder), and the TLD walk is pure over hostname.
+ *  Capped at 256 entries to prevent unbounded growth on SPAs with dynamic
+ *  subdomains. Eviction clears the oldest half when the cap is hit.
+ */
+const DOMAIN_KEY_CACHE_MAX = 256;
+const domainKeyCache = new Map();
+
+/**
+ * Reduce a hostname to its registrable-domain key (best effort, no PSL).
+ * IP addresses become dash-separated so they are safe as identifiers.
+ * Pure over hostname, so identical inputs share one cached result.
+ */
+export function getDomainKey(hostname) {
+  if (!hostname) {
+    return "";
+  }
+  // Single Map lookup - the cache never stores undefined, so a hit vs. miss
+  // is one get() instead of has() + get().
+  const hit = domainKeyCache.get(hostname);
+  if (hit !== undefined) {
+    return hit;
+  }
+  let key;
+  if (IPV4_RE.test(hostname)) {
+    key = hostname.replaceAll(".", "-");
+  } else if (hostname.includes(":")) {
+    // Bracketed IPv6 ([::1]) or bare forms - the TLD walk would mangle them
+    // into garbage keys, so collapse to one dash-safe identifier like IPv4.
+    key = hostname.replace(/[\\[\]:]+/g, "-").replace(/^-+|-+$/g, "") || "ipv6";
+  } else {
+    const parts = hostname.toLowerCase().replace(/^www\./, "").split(".");
+    const multiPartTlds = DOMAIN_TLDS.multi;
+    const singleLabelTlds = DOMAIN_TLDS.single;
+    let idx = parts.length - 1;
+    if (parts[idx] && (parts[idx].length <= 3 || singleLabelTlds.has(parts[idx]))) {
+      idx--;
+    }
+    if (parts[idx] && multiPartTlds.has(parts[idx])) {
+      idx--;
+    }
+    // Suffixes missing from the curated lists (e.g. .basketball) never moved
+    // `idx`, so without this the suffix LABEL itself would become the key -
+    // collapsing every registrable domain under one unlisted gTLD into a single
+    // entry. Assume the unclassified last label is a TLD and step up one more.
+    if (idx === parts.length - 1 && parts.length >= 2) {
+      idx--;
+    }
+    key = parts[Math.max(0, idx)] || "";
+  }
+  domainKeyCache.set(hostname, key);
+  if (domainKeyCache.size > DOMAIN_KEY_CACHE_MAX) {
+    const evict = Math.ceil(DOMAIN_KEY_CACHE_MAX / 4);
+    let i = 0;
+    for (const k of domainKeyCache.keys()) {
+      domainKeyCache.delete(k);
+      if (++i >= evict) break;
+    }
+  }
+  return key;
+}
+
+/** Label-boundary containment: subdomains count, substrings do not. */
+function boundaryContains(a, b) {
+  return a.startsWith(`${b}.`) || a.endsWith(`.${b}`)
+    || b.startsWith(`${a}.`) || b.endsWith(`.${a}`);
+}
+
+/** Reusable distance rows for the bounded Levenshtein below. Domain keys are
+ *  short and ranking scans many candidates, so two scratch rows equal to the
+ *  shorter operand avoid per-call allocation on the hot ranking path - and
+ *  because operands are swapped to that axis, alternating candidate lengths
+ *  reuse one small pair instead of reallocating per entry.
+ */
+let distRows = null;
+let distRowLen = 0;
+
+function ensureDistRows(len) {
+  if (!distRows || distRowLen < len + 1) {
+    distRows = [new Int32Array(len + 1), new Int32Array(len + 1)];
+    distRowLen = len + 1;
+  }
+}
+
+function boundedLevenshtein(a, b, max = Infinity) {
+  const lenA = a.length;
+  const lenB = b.length;
+  if (Math.abs(lenA - lenB) > max) {
+    return max + 1;
+  }
+  // Levenshtein is symmetric in its operands: iterate the longer string on the
+  // row axis and keep the SHORTER one as the columns, so scratch-row sizing is
+  // bound by the shorter operand (and the early-exit band stays exact).
+  let rows = a;
+  let cols = b;
+  if (lenB > lenA) {
+    rows = b;
+    cols = a;
+  }
+  const m = cols.length;
+  ensureDistRows(m);
+  let prev = distRows[0];
+  let curr = distRows[1];
+  for (let j = 0; j <= m; j++) {
+    prev[j] = j;
+  }
+  for (let i = 1; i <= rows.length; i++) {
+    curr[0] = i;
+    let rowMin = i;
+    const ch = rows[i - 1];
+    for (let j = 1; j <= m; j++) {
+      const cost = ch === cols[j - 1] ? 0 : 1;
+      const v = cost === 0 ? prev[j - 1] : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
+      curr[j] = v;
+      if (v < rowMin) {
+        rowMin = v;
+      }
+    }
+    if (rowMin > max) {
+      return max + 1;
+    }
+    const tmp = prev;
+    prev = curr;
+    curr = tmp;
+  }
+  return prev[m];
+}
+
+/** Strict equality or label-boundary relation between two domain keys. */
+export function domainsMatch(a, b) {
+  if (!a || !b) {
+    return false;
+  }
+  return a === b || boundaryContains(a, b);
+}
+
+/**
+ * Graded similarity for ranking: exact 3, boundary-related 2, otherwise
+ * distance-based decay to 0. Fuzz never promotes to a match - it only orders
+ * candidates once domainsMatch() has accepted them.
+ */
+export function domainScore(a, b) {
+  if (!a || !b) {
+    return 0;
+  }
+  if (a === b) {
+    return 3;
+  }
+  if (boundaryContains(a, b)) {
+    return 2;
+  }
+  return Math.max(0, 3 - boundedLevenshtein(a, b, 3));
+}
+
+/* - 2. Entry hashing - */
+
+/**
+ * Deterministic djb2-based id for a (domain, path, duration) triple. The
+ * domain participates so identical paths on different sites can never
+ * collide into one shared entry - /watch/1 on two hosts are different videos.
+ *
+ * Feeds column-separator char codes directly instead of concatenating a seed
+ * string (`${domainKey}::${path}::${duration}`): the old shape allocated the
+ * seed and hashed the same bytes - the produced id is byte-for-byte identical,
+ * so persisted resume entries keep matching, but no seed string is built.
+ */
+export function hashEntry(domainKey, path, duration) {
+  let hash = 5381;
+  for (let i = 0; i < domainKey.length; i++) {
+    hash = ((hash << 5) + hash + domainKey.charCodeAt(i)) | 0;
+  }
+  hash = ((hash << 5) + hash + 58) | 0;
+  hash = ((hash << 5) + hash + 58) | 0;
+  for (let i = 0; i < path.length; i++) {
+    hash = ((hash << 5) + hash + path.charCodeAt(i)) | 0;
+  }
+  hash = ((hash << 5) + hash + 58) | 0;
+  hash = ((hash << 5) + hash + 58) | 0;
+  const dur = String(Math.round(duration));
+  for (let i = 0; i < dur.length; i++) {
+    hash = ((hash << 5) + hash + dur.charCodeAt(i)) | 0;
+  }
+  return (hash < 0 ? -hash : hash).toString(36).substring(0, 8);
+}
+/* - 3. Page context - */
+/**
  * Page context engine.
  *
  * One module answering everything about WHERE a PlayerForge instance runs:
@@ -14,9 +245,7 @@
  */
 /* - Window message types - */
 
-import { postTask } from "./scheduler.js";
-import { getDomainKey } from "./domains.js";
-import { onDomMutations } from "./dom-watch.js";
+
 
 /**
  * The postMessage types the frame bridge sends and receives across iframe
@@ -93,13 +322,6 @@ function mapContextPayload(data) {
   };
 }
 
-/** Reuse one in-flight bridge request across the shells sharing this frame
- *  (a page hosting several videos boots one shell per video, so without this
- *  each would round-trip the parent chain to resolve the same context). The
- *  memo is cleared on settle, never cached: SPA path changes re-resolve.
- */
-let frameContextBridge = null;
-
 /** Page context resolved from THIS window, without any bridge: the direct
  *  answer for a top frame, and the fallback for a frame with no reachable
  *  parent chain (also makes {domain, path, title} testable in isolation).
@@ -125,18 +347,7 @@ export async function getPageContext() {
   try {
     return ownPageContext(window.top);
   } catch {
-    if (!frameContextBridge) {
-      frameContextBridge = requestPageContextFromParent();
-      frameContextBridge.then(
-        () => {
-          frameContextBridge = null;
-        },
-        () => {
-          frameContextBridge = null;
-        }
-      );
-    }
-    const bridged = await frameContextBridge;
+    const bridged = await pipeState.bridge(() => requestPageContextFromParent());
     return bridged ?? ownPageContext();
   }
 }
@@ -155,20 +366,102 @@ const CTX_RETRY_BACKOFF = [60, 150, 320, 640];
 const CTX_RETRY_JITTER_MS = 250;
 
 /**
- * Established private context pipe to an ancestor responder. Set the FIRST time
- * a resolve is answered on a transferred port, then reused by every later
- * resolve so repeat requests never recreate/transfer a channel or touch the
- * broadcast channel again. Null when no ancestor honored a port (legacy chain)
- * or after the pipe dies (teardown/timeout) so a fresh one can be established.
+ * One owner of the context-pipe state. Previously three module-level `let`
+ * globals - the live pipe record, the legacy-chain memo, and the in-flight
+ * bridge memo looked after elsewhere - were kept in step by ad-hoc resets at
+ * every settle and teardown path. Here the pipe and its legacy memo are
+ * private fields of one instance with four verbs, so the established-pipe
+ * identity check - a stale request's timeout drops only ITS pipe, never one
+ * a newer resolve already established - and the legacy memo reset ride the
+ * same object instead of being replayed by hand at each site. The in-flight
+ * bridge memo rides the same object: a page hosting several videos boots one
+ * shell per video, so without the memo each shell would round-trip the
+ * parent chain to resolve the same context; it is cleared on settle, never
+ * cached, so SPA path changes re-resolve.
  */
-let contextPipe = null;
-/**
- * Remember a chain that only ever answers the broadcast (no port ever came
- * back). Later resolves skip creating + transferring a channel that the legacy
- * chain just drops, avoiding a wasted MessageChannel per resolve. Reset when a
- * port pipe is established (the chain may have been upgraded mid-session).
- */
-let legacyChain = false;
+class ContextPipe {
+  /** Live pipe record ({ port }), or null between establishes/drops. */
+  #pipe = null;
+  /** A chain that only ever answers the broadcast (no port ever came back). */
+  #legacy = false;
+  /** In-flight bridge promise, or null between resolves (never cached). */
+  #bridge = null;
+
+  get pipe() {
+    return this.#pipe;
+  }
+
+  get legacy() {
+    return this.#legacy;
+  }
+
+  /** Retain a responding port as the persistent pipe. Closes any pipe it
+   *  replaces (the chain may have been upgraded mid-session) and clears the
+   *  legacy memo. Per-request listeners attach transiently; nothing hangs off
+   *  the pipe between resolves. */
+  establish(port) {
+    if (this.#pipe) {
+      try {
+        this.#pipe.port.close();
+      } catch {}
+    }
+    this.#pipe = { port };
+    this.#legacy = false;
+  }
+
+  /** Drop the pipe only if it is still the live one: a stale request's
+   *  timeout must never kill a pipe a newer resolve established. */
+  dropIf(candidate) {
+    if (this.#pipe !== candidate) {
+      return;
+    }
+    this.#pipe = null;
+    try {
+      candidate.port.close();
+    } catch {}
+  }
+
+  /** Remember a chain that answers the broadcast only, so later resolves stop
+   *  creating + transferring a channel it will drop. */
+  markLegacy() {
+    this.#legacy = true;
+  }
+
+  /** Drop the pipe + legacy memo when the frame bridge is torn down. */
+  stop() {
+    if (this.#pipe) {
+      try {
+        this.#pipe.port.close();
+      } catch {}
+    }
+    this.#pipe = null;
+    this.#legacy = false;
+  }
+
+  /** Resolve through the parent chain, de-duplicated per frame: later shells
+   *  sharing this document await the memo instead of re-arming the chain. */
+  bridge(request) {
+    if (!this.#bridge) {
+      this.#bridge = request();
+      this.#bridge.then(
+        () => {
+          this.#bridge = null;
+        },
+        () => {
+          this.#bridge = null;
+        }
+      );
+    }
+    return this.#bridge;
+  }
+}
+
+const pipeState = new ContextPipe();
+
+/** Test + teardown seam: drop the persistent pipe and legacy memo. */
+export function stopContextPipe() {
+  pipeState.stop();
+}
 
 /** Private one-shot context request over an established pipe: no broadcast,
  *  no transfer, no retry - the pipe is live and dedicated. Times out (and
@@ -176,7 +469,7 @@ let legacyChain = false;
 function requestPageContextOverPipe(timeoutMs, deadline) {
   const { promise, resolve } = Promise.withResolvers();
   const ac = new AbortController();
-  const pipe = contextPipe;
+  const pipe = pipeState.pipe;
   let settled = false;
   let answered = false;
 
@@ -212,14 +505,7 @@ function requestPageContextOverPipe(timeoutMs, deadline) {
     signal = null;
   }
 
-  const dropDeadPipe = () => {
-    if (contextPipe === pipe) {
-      contextPipe = null;
-      try {
-        pipe.port.close();
-      } catch {}
-    }
-  };
+  const dropDeadPipe = () => pipeState.dropIf(pipe);
 
   if (signal) {
     signal.addEventListener("abort", () => {
@@ -268,7 +554,7 @@ function requestPageContextOverPipe(timeoutMs, deadline) {
  * such as jsdom) that drop transferred ports.
  */
 function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
-  if (contextPipe) {
+  if (pipeState.pipe) {
     return requestPageContextOverPipe(timeoutMs, Date.now() + timeoutMs);
   }
 
@@ -305,9 +591,9 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
     if (replyPort) {
       if (viaPort) {
         // A port answered: the chain supports a private pipe. Retain the pipe
-        // for repeat resolves instead of closing it with this one.
-        importMarshalPipe(replyPort);
-        legacyChain = false;
+        // for repeat resolves instead of closing it with this one (establish
+        // also clears the legacy memo - the chain may have been upgraded).
+        pipeState.establish(replyPort);
       } else {
         try {
           replyPort.close();
@@ -328,7 +614,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
       settle(mapContextPayload(data), true);
     }
   };
-  if (!legacyChain && typeof MessageChannel === "function") {
+  if (!pipeState.legacy && typeof MessageChannel === "function") {
     try {
       const mc = new MessageChannel();
       replyPort = mc.port1;
@@ -351,7 +637,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
     ) {
       // Broadcast answer: this chain does not honor ports - remember it so
       // later resolves stop allocating channels it will only drop.
-      legacyChain = true;
+      pipeState.markLegacy();
       settle(mapContextPayload(data), false);
     }
   };
@@ -399,28 +685,6 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   return promise;
 }
 
-/** Retain a responding port as the frame's persistent context pipe. Per-request
- *  listeners attach transiently (see requestPageContextOverPipe); nothing hangs
- *  off the pipe between resolves. Reset with the bridge teardown. */
-function importMarshalPipe(port) {
-  if (contextPipe) {
-    try {
-      contextPipe.port.close();
-    } catch {}
-  }
-  contextPipe = { port };
-}
-
-/** Drop the persistent pipe + legacy memo when the frame bridge is torn down. */
-export function stopContextPipe() {
-  if (contextPipe) {
-    try {
-      contextPipe.port.close();
-    } catch {}
-  }
-  contextPipe = null;
-  legacyChain = false;
-}
 
 /* - 2. Frame bridge - */
 
@@ -964,4 +1228,62 @@ export function installContextBridge() {
     ac.abort();
     stopContextPipe();
   };
+}
+/* - 5. Navigation - */
+/**
+ * Same-document URL change events.
+ *
+ * One event source so consumers never re-derive SPA navigation detection from
+ * pushState patching or location polling. Two backends, best first:
+ *
+ *   1. Navigation API (`navigation.currententrychange`) - native Chromium 102+,
+ *      covers pushState, replaceState, hash changes and history traversal, and
+ *      needs no Tampermonkey grant. Resolved per subscription (not at module
+ *      load) so the first subscriber decides, after document-start has had its
+ *      say about what this realm exposes.
+ *   2. `popstate` + `hashchange` - what the Navigation API-less harness (and
+ *      any runtime without it) can still deliver. pushState-only route changes
+ *      are invisible on this path, which is why the Navigation API is the
+ *      preferred backend.
+ *
+ * `window.onurlchange` (Tampermonkey `@grant window.onurlchange`) would be a
+ * third backend, but it costs a grant line for coverage the native Navigation
+ * API already provides on the Chromium 155 floor - the grant policy in
+ * shared/store.js reserves manager APIs for capabilities the page cannot
+ * supply, and URL change notification is not one of them.
+ *
+ * Returns an unsubscribe function; passing `signal` tears the subscription
+ * down the same way.
+ */
+
+
+/** Backend 1: the native Navigation API (any URL change, no grant). */
+function subscribeNavigationApi(listener, signal) {
+  const nav = globalThis.navigation;
+  if (!nav || typeof nav.addEventListener !== "function") {
+    return null;
+  }
+  nav.addEventListener("currententrychange", listener, { signal });
+  return () => nav.removeEventListener("currententrychange", listener);
+}
+
+/** Backend 2: popstate + hashchange (harness / API-less realms). */
+function subscribeWindowEvents(listener, signal) {
+  const win = globalThis.window;
+  if (!win || typeof win.addEventListener !== "function") {
+    return null;
+  }
+  win.addEventListener("popstate", listener, { signal });
+  win.addEventListener("hashchange", listener, { signal });
+  return () => {
+    win.removeEventListener("popstate", listener);
+    win.removeEventListener("hashchange", listener);
+  };
+}
+
+export function onNavigate(listener, { signal } = {}) {
+  return firstAvailable([
+    () => subscribeNavigationApi(listener, signal),
+    () => subscribeWindowEvents(listener, signal)
+  ]) ?? (() => {});
 }

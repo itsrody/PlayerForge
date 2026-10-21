@@ -1,10 +1,10 @@
-import { getConfigValue, setConfigFields } from "../shared/storage.js";
+import { getConfigValue, setConfigFields } from "../shared/store.js";
 import { flashElement } from "./chrome/animate.js";
-import { debounce } from "../shared/scheduler.js";
-import { clamp } from "../shared/clamp.js";
-import { TUNING } from "../shared/tuning.js";
-import { fmtPercent, fmtSigned } from "../shared/formatters.js";
-import { Scope } from "../shared/scope.js";
+import { debounce } from "../shared/runtime.js";
+import { clamp } from "../shared/core.js";
+import { TUNING } from "../shared/core.js";
+import { fmtPercent, fmtSigned } from "../shared/core.js";
+import { Scope } from "../shared/runtime.js";
 
 const CONFIG_PREFIX = "filter";
 

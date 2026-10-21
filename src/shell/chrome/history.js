@@ -1,5 +1,5 @@
-import { DomPool } from "../../shared/dom-pool.js";
-import { formatTime } from "../../shared/formatters.js";
+import { DomPool } from "../../shared/dom.js";
+import { formatTime } from "../../shared/core.js";
 import { flashElement } from "./animate.js";
 import { button } from "./elements.js";
 import { createIconElement } from "./icons.js";

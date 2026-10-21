@@ -1,10 +1,10 @@
 import { allowsIntent, allowsAnyIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo, cancelEase } from "./actions.js";
-import { TUNING } from "../../shared/tuning.js";
-import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../../shared/shadow.js";
-import { DOMManager } from "../../shared/dom-manager.js";
-import { logger } from "../../shared/logger.js";
-import { isBenignMediaPolicyError } from "../../shared/errors.js";
-import { Scope } from "../../shared/scope.js";
+import { TUNING } from "../../shared/core.js";
+import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../../shared/dom.js";
+import { DOMManager } from "../../shared/dom.js";
+import { logger } from "../../shared/runtime.js";
+import { isBenignMediaPolicyError } from "../../shared/core.js";
+import { Scope } from "../../shared/runtime.js";
 
 /**
  * Pointer handlers never preventDefault - native pan/scroll over the zone is

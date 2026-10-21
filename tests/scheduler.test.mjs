@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { postTask } = await import("../src/shared/scheduler.js");
+const { postTask } = await import("../src/shared/runtime.js");
 
 async function settle(ms = 10) {
   await new Promise((resolve) => setTimeout(resolve, ms));

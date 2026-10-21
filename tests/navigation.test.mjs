@@ -10,7 +10,7 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>", {
 });
 globalThis.window = dom.window;
 
-const { onNavigate } = await import("../src/shared/navigation.js");
+const { onNavigate } = await import("../src/shared/page.js");
 
 test("onNavigate falls back to popstate + hashchange and unsubscribes cleanly", () => {
   const seen = [];

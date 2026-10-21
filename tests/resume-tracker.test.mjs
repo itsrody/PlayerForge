@@ -8,9 +8,9 @@ globalThis.GM_setValue = (key, value) => {
   writes[key] = value;
 };
 
-const { KEYS } = await import("../src/shared/storage.js");
+const { KEYS } = await import("../src/shared/store.js");
 const { ResumeTracker } = await import("../src/shell/resume.js");
-const { TUNING } = await import("../src/shared/tuning.js");
+const { TUNING } = await import("../src/shared/core.js");
 const { createMediaControls } = await import("../src/shell/media.js");
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));

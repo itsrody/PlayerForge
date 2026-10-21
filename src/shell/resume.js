@@ -1,11 +1,11 @@
-import { getPageContext } from "../shared/context.js";
-import { domainsMatch, domainScore, hashEntry } from "../shared/domains.js";
-import { onNavigate } from "../shared/navigation.js";
-import { TUNING } from "../shared/tuning.js";
-import { KEYS, gmSetValue, loadJsonObject, watchStorageKey } from "../shared/storage.js";
-import { formatTime } from "../shared/formatters.js";
-import { logger } from "../shared/logger.js";
-import { Scope } from "../shared/scope.js";
+import { getPageContext } from "../shared/page.js";
+import { domainsMatch, domainScore, hashEntry } from "../shared/page.js";
+import { onNavigate } from "../shared/page.js";
+import { TUNING } from "../shared/core.js";
+import { KEYS, gmSetValue, loadJsonObject, watchStorageKey } from "../shared/store.js";
+import { formatTime } from "../shared/core.js";
+import { logger } from "../shared/runtime.js";
+import { Scope } from "../shared/runtime.js";
 
 /** Sort entries by updatedAt - ascending (oldest-first, for eviction) or
  *  descending (newest-first, for history display). */
@@ -521,7 +521,7 @@ export class ResumeTracker {
   }
 
   /**
-   * Follow same-document navigations (shared/navigation.js): flush the entry
+   * Follow same-document navigations (shared/page.js): flush the entry
    * we are leaving - if the player swaps resources before the next
    * timeupdate, that flush is the last write this route gets - then arm the
    * re-adoption the swap triggers. A hash/query-only change resolves to the

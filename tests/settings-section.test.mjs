@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { KEYS as CFG } from "../src/shared/storage.js";
+import { KEYS as CFG } from "../src/shared/store.js";
 
 const CFG_ROOT = CFG.configs;
 

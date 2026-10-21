@@ -5,7 +5,7 @@ let stored = {};
 globalThis.GM_getValue = (key, fallback) => (key in stored ? stored[key] : fallback);
 globalThis.GM_setValue = (key, value) => { stored[key] = value; };
 
-const { KEYS, getConfigValue, setConfigValue, setConfigFields, deleteConfigField, invalidateConfigCache } = await import("../src/shared/storage.js");
+const { KEYS, getConfigValue, setConfigValue, setConfigFields, deleteConfigField, invalidateConfigCache } = await import("../src/shared/store.js");
 
 beforeEach(() => invalidateConfigCache());
 

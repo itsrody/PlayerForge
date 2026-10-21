@@ -7,7 +7,7 @@ globalThis.GM_setValue = () => {};
 
 const { Shell } = await import("../src/shell/shell.js");
 const { initFsGate, setFullscreen } = await import("./fs-gate.mjs");
-const { subscribeFullscreen } = await import("../src/shared/shadow.js");
+const { subscribeFullscreen } = await import("../src/shared/dom.js");
 const { getSetting, setSetting } = await import("../src/shell/chrome/config.js");
 
 async function makeShell() {
@@ -132,7 +132,7 @@ test("an already-aborted fullscreen subscription never attaches", async () => {
 });
 
 test("initFullscreenGate binds at most one listener per document", async () => {
-  const { initFullscreenGate } = await import("../src/shared/shadow.js");
+  const { initFullscreenGate } = await import("../src/shared/dom.js");
   let bound = 0;
   const doc = {
     fullscreenElement: null,

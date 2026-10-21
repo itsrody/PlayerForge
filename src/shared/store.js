@@ -1,4 +1,17 @@
-import { logger } from "./logger.js";
+/**
+ * Storage data plane.
+ *
+ * One module for everything that persists or crosses tabs:
+ *   1. Manager API    - the GM wrappers (menu, value listeners, requests)
+ *   2. Configs doc    - the whole pf:configs doc, cached once
+ *   3. Cross-tab watch - watchStorageKey (the owned echo contract)
+ *
+ * TM-API policy: a manager API is used only where it uniquely supplies a
+ * page-impossible capability (multi-tab storage + change notification,
+ * CORS-bypassing XHR, menu, GM_info) - see the policy block inside.
+ */
+/* - 1. Manager API - */
+import { logger } from "./runtime.js";
 
 /** The whole GM storage namespace: every root key lives here. */
 export const KEYS = {

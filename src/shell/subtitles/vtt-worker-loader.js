@@ -30,7 +30,7 @@
  * the parser for.
  */
 import { parseSubtitlesAsync as parseInBand } from "./forgevtt.js";
-import { logger } from "../../shared/logger.js";
+import { logger } from "../../shared/runtime.js";
 
 const BUILTIN_WORKER_SOURCE =
   typeof __VTT_WORKER_SOURCE__ === "string" ? __VTT_WORKER_SOURCE__ : null;

@@ -7,7 +7,7 @@ globalThis.GM_setValue = (key, value) => { writes[key] = value; };
 globalThis.GM_addValueChangeListener = () => {};
 
 const { VideoFilter } = await import("../src/shell/filter.js");
-const { KEYS, invalidateConfigCache } = await import("../src/shared/storage.js");
+const { KEYS, invalidateConfigCache } = await import("../src/shared/store.js");
 
 const CFG_ROOT = KEYS.configs;
 

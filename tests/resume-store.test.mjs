@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { KEYS } from "../src/shared/storage.js";
+import { KEYS } from "../src/shared/store.js";
 
 globalThis.GM_getValue = (key, fallback) => fallback;
 globalThis.GM_setValue = () => {};

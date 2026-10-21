@@ -1,4 +1,4 @@
-import { FLASH_MS, FLASH_EASING } from "../../shared/timing.js";
+import { FLASH_MS, FLASH_EASING } from "../../shared/core.js";
 
 /**
  * Restart the accent "flash" on an element natively via the Web Animations

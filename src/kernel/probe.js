@@ -20,7 +20,7 @@
  * The first size-qualified candidate fires onCandidate exactly once;
  * documents without a usable player never boot a kernel.
  */
-import { logger } from "../shared/logger.js";
+import { logger } from "../shared/runtime.js";
 import { createDiscoveryTap, meetsMinSize, createLayoutGate, createOnScreenGate, isOnScreen, hasPresentBox } from "./sdk.js";
 
 /**

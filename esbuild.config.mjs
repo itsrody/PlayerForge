@@ -2,7 +2,30 @@ import { build, context } from "esbuild";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import process from "node:process";
-import { PACKAGE_VERSION } from "./src/shared/version.js";
+
+// The banner's @version is interpolated from package.json rather than typed
+// here. It was a literal next to a second copy in package.json under a comment
+// calling itself "the single version source" - which was not true, and which
+// had already drifted once in the harness (a hardcoded '0.7.1-test' beside a
+// project on 0.7.2, invisible because the assertions compared against that
+// same string). Deriving it here removes the class of bug; the harness keeps
+// its own derivation of the same source. Runtime reads the installed script's
+// real version through GM_info.script.version, so bumping package.json is all
+// a release takes. Read as JSON rather than imported so the value stays a
+// plain string and the build cannot pull in module caching or an accidental
+// code path from it.
+const PACKAGE_VERSION = JSON.parse(readFileSync("./package.json", "utf8")).version;
+
+// Semver-ish guard. Managers order @version numerically to decide whether to
+// offer an upgrade, so a malformed value is not cosmetic: it can make a release
+// unpublishable, or make an existing install silently un-upgradable. Throwing
+// at build time keeps a bad bump from ever reaching dist/.
+if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(PACKAGE_VERSION)) {
+  throw new Error(
+    `package.json version "${PACKAGE_VERSION}" is not MAJOR.MINOR.PATCH; ` +
+      `managers order @version numerically to decide upgrades`
+  );
+}
 
 // Minified is the only output. Minification is
 // V8/TurboFan-aware by construction: esbuild only does the safe transforms
@@ -14,12 +37,6 @@ import { PACKAGE_VERSION } from "./src/shared/version.js";
 // string); the CSS pass below is deliberately conservative so calc()/content
 // and selector whitespace survive intact.
 
-// The banner's @version is interpolated from package.json (src/shared/version.js)
-// rather than typed here. It was a literal next to a second copy in package.json
-// under a comment calling itself "the single version source" - which was not true,
-// and which had already drifted once in the harness (see version.js). Runtime
-// reads the installed script's real version through GM_info.script.version, so
-// bumping package.json is all a release takes.
 // Instant-injection note: @run-at document-start + @sandbox raw are what make
 // real document-start work under Tampermonkey 5.5+'s MV3 userScripts API. PF
 // never assumes the DOM is ready at eval, so it is safe under instant injection.

@@ -2,12 +2,12 @@ import { Kernel } from "./kernel/kernel.js";
 import { DEBUG_HASH_TAG } from "./kernel/contract.js";
 import { Shell } from "./shell/shell.js";
 import { installMenuCommands } from "./kernel/menus.js";
-import { installContextBridge, requestFullscreenProvision } from "./shared/context.js";
+import { installContextBridge, requestFullscreenProvision } from "./shared/page.js";
 import { installVideoProbe } from "./kernel/probe.js";
 import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/sdk.js";
-import { logger } from "./shared/logger.js";
-import { getConfigValue, setConfigValue, deleteConfigField } from "./shared/storage.js";
-import { initFullscreenGate } from "./shared/shadow.js";
+import { logger } from "./shared/runtime.js";
+import { getConfigValue, setConfigValue, deleteConfigField } from "./shared/store.js";
+import { initFullscreenGate } from "./shared/dom.js";
 
 // The version lives in the banner and is read from the installed script at
 // runtime via GM_info, so what the UI reports is always what the manager
@@ -77,7 +77,7 @@ function bootstrap() {
     return;
   }
 
-  // Build the single fullscreen gate (src/shared/shadow.js `fs`) off the
+  // Build the single fullscreen gate (src/shared/dom.js `fs`) off the
   // native fullscreenchange event. Runs before any shell exists so fs-gated
   // paths have a live boolean the moment they first query it.
   initFullscreenGate();

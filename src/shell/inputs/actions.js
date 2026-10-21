@@ -1,9 +1,9 @@
 import { getSetting, onSettingsChanged, SETTING_KEYS } from "../chrome/config.js";
-import { TUNING } from "../../shared/tuning.js";
-import { formatTime } from "../../shared/formatters.js";
-import { fs, subscribeFullscreen } from "../../shared/shadow.js";
+import { TUNING } from "../../shared/core.js";
+import { formatTime } from "../../shared/core.js";
+import { fs, subscribeFullscreen } from "../../shared/dom.js";
 import { GESTURE_EVENTS, GESTURES, GESTURE_IDS } from "../../kernel/contract.js";
-import { EASE_SNAPPY_CURVE, EASE_SNAPPY_MS } from "../../shared/timing.js";
+import { EASE_SNAPPY_CURVE, EASE_SNAPPY_MS } from "../../shared/core.js";
 
 export { GESTURE_EVENTS };
 
