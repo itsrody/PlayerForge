@@ -3,12 +3,10 @@ import { flashElement } from "./chrome/animate.js";
 import { debounce } from "../shared/time.js";
 import { clamp } from "../shared/clamp.js";
 import { TUNING } from "../shared/tuning.js";
-import { fmtPercent } from "../shared/formatters.js";
+import { fmtPercent, fmtSigned } from "../shared/formatters.js";
 import { Scope } from "../shared/scope.js";
 
 const CONFIG_PREFIX = "filter";
-
-const signed = (v) => `${v > 0 ? "+" : ""}${v}`;
 
 /**
  * The color-control schema - one entry per filter key and the single source for
@@ -24,8 +22,8 @@ const FILTER_SCHEMA = {
   grayscale: { label: "Grayscale", min: 0, max: 100, step: 5, fmt: fmtPercent, default: 0 },
   sepia: { label: "Sepia", min: 0, max: 100, step: 5, fmt: fmtPercent, default: 0 },
   invert: { label: "Invert", min: 0, max: 100, step: 5, fmt: fmtPercent, default: 0 },
-  temperature: { label: "Temp", min: -100, max: 100, step: 5, fmt: signed, default: 0 },
-  tint: { label: "Tint", min: -100, max: 100, step: 5, fmt: signed, default: 0 }
+  temperature: { label: "Temp", min: -100, max: 100, step: 5, fmt: fmtSigned, default: 0 },
+  tint: { label: "Tint", min: -100, max: 100, step: 5, fmt: fmtSigned, default: 0 }
 };
 const ALL_KEYS = Object.keys(FILTER_SCHEMA);
 
@@ -213,7 +211,7 @@ export class VideoFilter {
     this.#values[key] = value;
     this.#apply();
     this.#syncPresetMenu();
-    this.#persist();
+    this.#schedulePersist();
   }
 
   #onPresetChange(name) {
@@ -221,17 +219,8 @@ export class VideoFilter {
     if (!preset) {
       return;
     }
-    for (const key of ALL_KEYS) {
-      this.#values[key] = preset[key];
-      this.#steppers[key]?.setValue(preset[key]);
-    }
-    this.#apply();
-    this.#persist();
+    this.#applyValues(preset);
     this.#shell?.toastFlash("color", `Preset: ${name}`, "filter");
-  }
-
-  #persist() {
-    this.#schedulePersist();
   }
 
   #writePersist() {
@@ -243,17 +232,23 @@ export class VideoFilter {
   }
 
   reset() {
-    for (const key of ALL_KEYS) {
-      this.#values[key] = DEFAULTS[key];
-      this.#steppers[key]?.setValue(DEFAULTS[key]);
-    }
-    this.#apply();
-    this.#persist();
+    this.#applyValues(DEFAULTS);
     this.#syncPresetMenu();
     if (this.#resetBtn) {
       flashElement(this.#resetBtn);
     }
     this.#shell?.toastFlash("reload", "Color Reset", "filter");
+  }
+
+  /** Seed the working values from `source` (a preset or DEFAULTS) and push the
+   *  same numbers into the section's steppers so the UI shows what was applied. */
+  #applyValues(source) {
+    for (const key of ALL_KEYS) {
+      this.#values[key] = source[key];
+      this.#steppers[key]?.setValue(source[key]);
+    }
+    this.#apply();
+    this.#schedulePersist();
   }
 
   destroy() {

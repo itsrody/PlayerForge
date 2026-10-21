@@ -446,25 +446,6 @@ export class SettingsPanel {
     scope?.abort();
   }
 
-  async openSection(title) {
-    if (!this.#root || this.#scope.disposed) {
-      return false;
-    }
-    if (this.#sectionBuilder) {
-      const build = this.#sectionBuilder;
-      this.#sectionBuilder = null;
-      await build();
-    }
-    for (const [section, tab] of this.#sections) {
-      if (section.dataset.title === title) {
-        this.#activateSection(section, tab);
-        await this.open();
-        return true;
-      }
-    }
-    return false;
-  }
-
   /** Add a section; returns the section root (or null when unusable). */
   addSection(title, icon) {
     if (!this.#root || this.#scope.disposed) {

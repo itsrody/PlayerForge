@@ -249,20 +249,6 @@ test("cleanStale enforces the entry cap by evicting oldest", () => {
   assert.ok(kept.some((e) => e.id === "e0"));
 });
 
-test("importData merges, dedupes, and rejects invalid documents", () => {
-  installGm({ version: 1, entries: [] });
-  const store = new ResumeStore();
-  const doc = { version: 1, entries: [entry({ id: "a" }), entry({ id: "b" })] };
-  assert.deepEqual(store.importData(JSON.stringify(doc)), { added: 2, updated: 0 });
-  assert.deepEqual(store.importData(JSON.stringify(doc)), { added: 0, updated: 0 });
-  doc.entries[0].resume = 555;
-  doc.entries[0].updatedAt = Date.now() + 5000;
-  assert.deepEqual(store.importData(JSON.stringify(doc)), { added: 0, updated: 1 });
-  assert.equal(store.findMatch("youtube", "/watch", 600).resume, 555);
-  assert.equal(store.importData("not json"), null);
-  assert.equal(store.importData("{}"), null);
-});
-
 test("onChange flags structural vs position-only updates", () => {
   installGm({ version: 1, entries: [] });
   const store = new ResumeStore();
@@ -281,8 +267,8 @@ test("onChange flags structural vs position-only updates", () => {
   assert.deepEqual(seen, [true], "a removal is structural");
 
   seen.length = 0;
-  store.importData(JSON.stringify({ version: 1, entries: [{ ...entry(), id: "imp" }] }));
-  assert.deepEqual(seen, [true], "an import that changes the set is structural");
+  store.createEntry("example.com", "/other", "Other", 300);
+  assert.deepEqual(seen, [true], "a set-changing addition is structural");
 
   unsub();
   seen.length = 0;

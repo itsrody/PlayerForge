@@ -156,7 +156,12 @@ export class Shell {
       () => this.#watchOrientation(),
       () => this.#watchReferenceBoxSize(),
       () => this.#watchVisualViewport(),
-      () => this.#markManaged()
+      // The runSteps tail: once every watcher is armed, the videos are
+      // officially ours - stamp video and container as managed.
+      () => {
+        this.#dom.markAttribute(this.video, SHELL_MARKER, "");
+        this.#dom.markAttribute(this.container, SHELL_MARKER, "");
+      }
     ]);
     logger.log("shell", `Shell "${this.sdk.name}" constructed`);
   }
@@ -556,11 +561,6 @@ export class Shell {
     this.#dom.listen(vv, "resize", sync, { passive: true });
     this.#dom.listen(vv, "scroll", sync, { passive: true });
     sync();
-  }
-
-  #markManaged() {
-    this.#dom.markAttribute(this.video, SHELL_MARKER, "");
-    this.#dom.markAttribute(this.container, SHELL_MARKER, "");
   }
 
   destroy() {

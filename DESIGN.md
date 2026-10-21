@@ -175,6 +175,25 @@ design for regression detection; the v1.0.0 target is preserved on its tag.
 
 ### Change log
 
+- **Method consolidation pass.** Same behavior, fewer and more shared
+  methods. Deleted: the panel's unused `openSection`, the dormant resume
+  clipboard pad (`exportData`/`importData` on the store and the
+  `exportResume`/`importResume` passthroughs), and the media plane's
+  test-only `scrubTo`/`setVolume` (the scrub docstring's false claim moved to
+  `scrubToLatched`). Merged: the kernel's twin gate builders are one
+  `#ensureGate(kind, create)` over a `#gates` map; the filter's preset and
+  reset paths share `#applyValues(source)` with the persist throttle called
+  directly; forge gained `#clearKeyboardHoldTimer`, `#endPinch` and
+  `#fireRelease(zone, method, start)` (destroy routes teardown through the
+  timer helpers, `#armAwaitClick` is inlined at its single caller); the three
+  context settles share `mapContextPayload` and the two fullscreen
+  provisioners are one `createFullscreenProvisioner({ relay })`. Promoted to
+  `src/shared/formatters.js`: `fmtPercentOrOff`, `fmtSigned`,
+  `signedSeconds`; the style section's single-use `#toastFlash` is inlined;
+  the shell boot stamps managed markers inline as its final `runSteps` entry.
+  The history section's discarded render-return and the actions guards'
+  redundant `!shell.video` operand (settled once at construction, never
+  nulled) are dropped. No user-visible behavior change; 354 -> 353 tests.
 - **Contrast path retired.** The last accessibility honor is gone:
   `prefers-contrast: more` no longer moves `--pf-glass-contrast`; that token,
   its `@property` registration, and the `brightness(var(--pf-glass-contrast))`

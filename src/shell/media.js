@@ -13,9 +13,9 @@ const VOLUME_STEP = 0.1;
  * place. Commands execute immediately against the video; presentation (toasts)
  * lives at the interaction sites that own their context.
  *
- * `scrubTo` is deliberately silent: it serves continuous drag streams, not
- * discrete commands, and the resulting position is already broadcast through
- * the regular timeupdate path.
+ * The scrub paths are deliberately silent: they serve continuous drag
+ * streams, not discrete commands, and the resulting position is already
+ * broadcast through the regular timeupdate path.
  */
 export function createMediaControls({ video }) {
   /**
@@ -110,16 +110,12 @@ export function createMediaControls({ video }) {
       video.currentTime = clampTarget(time);
     },
 
-    /** Silent seek alias for scrub drags - same clamp, no command chatter. */
-    scrubTo(time) {
-      this.seekTo(time);
-    },
-
     /**
-     * Latched scrub seek for an in-progress drag session. Readiness was
-     * already verified and `duration` captured when the stroke latched, so
-     * this skips the per-move isReady() gate and re-reading video.duration
-     * (native getter) - the single most frequent user-facing path.
+     * Latched scrub seek for an in-progress drag session, silent (no command
+     * chatter). Readiness was already verified and `duration` captured when
+     * the stroke latched, so this skips the per-move isReady() gate and
+     * re-reading video.duration (native getter) - the single most frequent
+     * user-facing path.
      */
     scrubToLatched(time, duration) {
       video.currentTime = Number.isFinite(duration) && duration > 0
@@ -143,13 +139,6 @@ export function createMediaControls({ video }) {
       }
       const step = direction === "up" ? VOLUME_STEP : -VOLUME_STEP;
       video.volume = clamp(video.volume + step, 0, 1);
-    },
-
-    setVolume(value) {
-      if (!isReady()) {
-        return;
-      }
-      video.volume = clamp(value, 0, 1);
     },
 
     toggleMute() {

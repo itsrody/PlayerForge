@@ -26,11 +26,9 @@ test("every control is inert before metadata loads (readyState 0)", async () => 
 
   const before = snap();
   controls.seekTo(50);
-  controls.scrubTo(30);
   controls.skip(10);
   controls.stop();
   controls.toggleMute();
-  controls.setVolume(0.3);
   controls.nudgeVolume("up");
   controls.beginBoost(2);
   controls.endBoost(1);
@@ -57,9 +55,6 @@ test("controls engage once metadata is loaded (readyState 4)", async () => {
   Object.defineProperty(video, "duration", { value: 120, configurable: true });
   video.play = () => Promise.resolve();
 
-  controls.setVolume(0.5);
-  assert.equal(video.volume, 0.5);
-
   controls.toggleMute();
   assert.equal(video.muted, true);
 
@@ -68,9 +63,6 @@ test("controls engage once metadata is loaded (readyState 4)", async () => {
 
   controls.skip(10);
   assert.equal(video.currentTime, 70);
-
-  controls.scrubTo(90);
-  assert.equal(video.currentTime, 90);
 
   controls.beginBoost(2);
   assert.equal(video.playbackRate, 2);

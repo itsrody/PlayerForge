@@ -367,39 +367,6 @@ export class ResumeStore {
       logger.log("resume", `Pruned ${removed} resume entries`);
     }
   }
-
-  /**
-   * Whole-store JSON snapshot. Currently unreferenced outside tests - the
-   * clipboard bridge it was written for was never built, and no clipboard grant
-   * is requested (see storage.js), so this is dormant import/export plumbing
-   * rather than a shipped path.
-   */
-  exportData() {
-    this.ensureLoaded();
-    return JSON.stringify(this.#state);
-  }
-
-  /**
-   * Merge a previously exported JSON document via LWW. Returns
-   * {added, updated} counts, or null when the text is not a data document.
-   */
-  importData(text) {
-    this.ensureLoaded();
-    let raw;
-    try {
-      raw = JSON.parse(text);
-    } catch {
-      return null;
-    }
-    if (!isValidStore(raw)) {
-      return null;
-    }
-    const result = this.#mergeRaw(raw);
-    if (result.added || result.updated) {
-      this.#persist(true);
-    }
-    return result;
-  }
 }
 
 /**
@@ -771,19 +738,6 @@ export class ResumeTracker {
       return this.#lastFrameMediaTime;
     }
     return this.#shell?.currentTime ?? NaN;
-  }
-
-  /**
- * Clipboard bridge passthroughs (see ResumeStore exportData/importData). Also
- * currently unwired: no caller in src/, and the clipboard grant is deliberately
- * not requested. Kept as the coherent pair they are meant to be used as.
- */
-  exportResume() {
-    return this.#store.exportData();
-  }
-
-  importResume(text) {
-    return this.#store.importData(text);
   }
 
   getEntries() {

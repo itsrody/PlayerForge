@@ -425,10 +425,8 @@ export class InputForge {
     // while the scope signal is still live - dispose() lands at the end,
     // exactly where #scope.abort() used to.
     this.#endPointerSession();
-    clearTimeout(this.#holdTimer);
-    this.#holdTimer = null;
-    clearTimeout(this.#keyboardHoldTimer);
-    this.#keyboardHoldTimer = null;
+    this.#clearHoldTimer();
+    this.#clearKeyboardHoldTimer();
     this.#videoRect = null;
     this.#pointers.clear();
     this.#releasedCapture.clear();
@@ -462,15 +460,20 @@ export class InputForge {
     }
     this.#keyboardOwn = false;
     this.#ownedKeyCodes.clear();
-    clearTimeout(this.#keyboardHoldTimer);
-    this.#keyboardHoldTimer = null;
+    this.#clearKeyboardHoldTimer();
   }
 
   /** Keyboard-source release, shared by keyup, blur, reconcile and teardown. */
   #dispatchKeyboardRelease() {
-    releaseDetail.zone = "screen";
-    releaseDetail.method = "keyboard";
-    releaseDetail.duration = performance.now() - this.#keyboardHoldStart;
+    this.#fireRelease("screen", "keyboard", this.#keyboardHoldStart);
+  }
+
+  /** Fill the shared release detail and dispatch the GESTURE_EVENTS.release
+   *  command from `start` to now. */
+  #fireRelease(zone, method, start) {
+    releaseDetail.zone = zone;
+    releaseDetail.method = method;
+    releaseDetail.duration = performance.now() - start;
     this.#dispatch(GESTURE_EVENTS.release, releaseDetail);
   }
 
@@ -510,10 +513,7 @@ export class InputForge {
     this.#clearHoldTimer();
     if (this.#holding) {
       this.#holding = false;
-      releaseDetail.zone = this.#gestureZone;
-      releaseDetail.method = "pointer";
-      releaseDetail.duration = performance.now() - this.#startTime;
-      this.#dispatch(GESTURE_EVENTS.release, releaseDetail);
+      this.#fireRelease(this.#gestureZone, "pointer", this.#startTime);
     }
     if (this.#scrubbing) {
       this.#scrubbing = false;
@@ -540,6 +540,20 @@ export class InputForge {
       clearTimeout(this.#holdTimer);
     }
     this.#holdTimer = null;
+  }
+
+  #clearKeyboardHoldTimer() {
+    if (this.#keyboardHoldTimer !== null) {
+      clearTimeout(this.#keyboardHoldTimer);
+    }
+    this.#keyboardHoldTimer = null;
+  }
+
+  /** Tear down two-pointer pinch tracking once fewer than two pointers remain. */
+  #endPinch() {
+    this.#pinchStartDistance = 0;
+    this.#pinchFired = false;
+    this.#pinchZone = null;
   }
 
   #beginPinchTracking() {
@@ -957,12 +971,10 @@ export class InputForge {
       // the compat mouseup the UA fires between pointerup and click still
       // belongs to our stream - keep swallowing it briefly (#awaitClick).
       this.#pointerOwned = false;
-      this.#armAwaitClick();
+      this.#awaitClick = true;
     }
     if (this.#pinchZone !== null && this.#pointers.size < 2) {
-      this.#pinchStartDistance = 0;
-      this.#pinchFired = false;
-      this.#pinchZone = null;
+      this.#endPinch();
     }
     if (this.#primaryPointerId === null || event.pointerId !== this.#primaryPointerId) {
       return;
@@ -980,10 +992,7 @@ export class InputForge {
       this.#holding = false;
       this.#suppressNextActivations();
       event.stopImmediatePropagation();
-      releaseDetail.zone = this.#gestureZone;
-      releaseDetail.method = "pointer";
-      releaseDetail.duration = elapsed;
-      this.#dispatch(GESTURE_EVENTS.release, releaseDetail);
+      this.#fireRelease(this.#gestureZone, "pointer", this.#startTime);
     } else if (this.#scrubbing) {
       this.#scrubbing = false;
       this.#gestureFsActive = false;
@@ -1076,9 +1085,7 @@ export class InputForge {
       this.#clearAwaitClick();
     }
     if (this.#pinchZone !== null && this.#pointers.size < 2) {
-      this.#pinchStartDistance = 0;
-      this.#pinchFired = false;
-      this.#pinchZone = null;
+      this.#endPinch();
     }
     // A pointercancel means the browser reclaimed the pointer (system
     // gesture, hit-test fighting, lost capture) - the interaction was never a
@@ -1115,10 +1122,6 @@ export class InputForge {
       return false;
     }
     return this.#hitTestVideo(point);
-  }
-
-  #armAwaitClick() {
-    this.#awaitClick = true;
   }
 
   #clearAwaitClick() {
@@ -1300,7 +1303,7 @@ export class InputForge {
         this.#keyboardOwn = true;
         this.#ownedKeyCodes.add("Space");
         this.#keyboardHoldStart = performance.now();
-        clearTimeout(this.#keyboardHoldTimer);
+        this.#clearKeyboardHoldTimer();
         this.#keyboardHoldTimer = setTimeout(() => {
           this.#keyboardHoldTimer = null;
           if (!this.#video.paused && allowsIntent("hold")) {
@@ -1360,8 +1363,7 @@ export class InputForge {
     this.#keyboardOwn = false;
     this.#ownedKeyCodes.delete("Space");
     this.#keyboardHolding = false;
-    clearTimeout(this.#keyboardHoldTimer);
-    this.#keyboardHoldTimer = null;
+    this.#clearKeyboardHoldTimer();
     if (wasHolding) {
       this.#dispatchKeyboardRelease();
     } else if (allowToggle && owned && this.#shouldHandleKeys()) {

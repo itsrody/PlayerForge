@@ -483,7 +483,7 @@ export function attachInputActions(shell, host, signal) {
   }, signal);
 
   host.addEventListener(GESTURE_EVENTS.hold, ({ detail }) => {
-    if (!shell.video || !shell.media.ready) {
+    if (!shell.media.ready) {
       return;
     }
     const state = stateFor(shell);
@@ -682,7 +682,7 @@ export function attachInputActions(shell, host, signal) {
   }, { signal });
 
   host.addEventListener(GESTURE_EVENTS.volume, ({ detail }) => {
-    if (!shell.video || !shell.media.ready) {
+    if (!shell.media.ready) {
       return;
     }
     shell.media.nudgeVolume(detail.direction);
@@ -690,7 +690,7 @@ export function attachInputActions(shell, host, signal) {
   }, { signal });
 
   host.addEventListener(GESTURE_EVENTS.mute, () => {
-    if (!shell.video || !shell.media.ready) {
+    if (!shell.media.ready) {
       return;
     }
     shell.media.toggleMute();
@@ -701,7 +701,7 @@ export function attachInputActions(shell, host, signal) {
   // window lifecycle; we only flip the toggle. Unsupported hosts get a hint
   // instead of a silent no-op, mirroring the fs-block pattern.
   host.addEventListener(GESTURE_EVENTS.pip, () => {
-    if (!shell.video || !shell.media.ready) {
+    if (!shell.media.ready) {
       return;
     }
     if (!shell.media.pictureInPictureSupported()) {

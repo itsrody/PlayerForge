@@ -165,5 +165,4 @@ export function addHistorySection(panel, shell) {
       render();
     }
   });
-  return { render };
 }

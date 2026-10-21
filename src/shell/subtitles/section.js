@@ -1,6 +1,6 @@
 import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/storage.js";
 import { TUNING } from "../../shared/tuning.js";
-import { fmtPercent, fmtEm } from "../../shared/formatters.js";
+import { fmtPercent, fmtEm, fmtPercentOrOff, signedSeconds } from "../../shared/formatters.js";
 import { srtToVtt, ensureVttHeader } from "./forgevtt.js";
 import { parseSubtitlesAsync } from "./vtt-worker-loader.js";
 import { ForgeTrack } from "./forge-track.js";
@@ -218,7 +218,7 @@ export class SubtitlesSection {
       max: 100,
       step: 5,
       value: getConfigValue(SETTING_KEYS.shadow, 40),
-      format: (v) => v ? `${v}%` : "Off",
+      format: fmtPercentOrOff,
       onChange: (v) => {
         setConfigValue(SETTING_KEYS.shadow, v);
         applyCueShadow(v);
@@ -242,7 +242,7 @@ export class SubtitlesSection {
       max: 20,
       step: 0.25,
       value: this.#syncOffset,
-      format: (v) => v === 0 ? "0s" : `${v > 0 ? "+" : ""}${v}s`,
+      format: signedSeconds,
       onChange: (offset) => {
         this.#syncOffset = offset;
         this.#scheduleSyncOffset(offset);
@@ -295,7 +295,7 @@ export class SubtitlesSection {
         verticalStepper.setValue(85);
         horizontalStepper.setValue(50);
         flashElement(this.#resetBtn);
-        this.#toastFlash("reload", "Subtitle Style Reset", "subtitles");
+        this.#shell?.toastFlash("reload", "Subtitle Style Reset", "subtitles");
       }
     });
 
@@ -310,10 +310,6 @@ export class SubtitlesSection {
    *  track creation applies them at load time instead). */
   #applyPlacement() {
     this.#forgeTrack?.setPlacement({ line: this.#cueLine, position: this.#cuePosition });
-  }
-
-  #toastFlash(icon, text, group) {
-    this.#shell?.toastFlash(icon, text, group);
   }
 
   #toastInfo(icon, text, group) {

@@ -283,6 +283,16 @@ function stripNonAscii(raw) {
   return out;
 }
 
+/** Map a CTX_RESPONSE message into the {domain, path, title} payload shape
+ *  shared by every responder set (pipe replies, port replies, broadcasts). */
+function mapContextPayload(data) {
+  return {
+    domain: data.domain,
+    path: data.path,
+    title: stripNonAscii(typeof data.title === "string" ? data.title : "")
+  };
+}
+
 /** Reuse one in-flight bridge request across the shells sharing this frame
  *  (a page hosting several videos boots one shell per video, so without this
  *  each would round-trip the parent chain to resolve the same context). The
@@ -387,11 +397,7 @@ function requestPageContextOverPipe(timeoutMs, deadline) {
     if (data && typeof data === "object" && data.type === CTX_RESPONSE_TYPE
         && typeof data.domain === "string") {
       answered = true;
-      settle({
-        domain: data.domain,
-        path: data.path,
-        title: stripNonAscii(typeof data.title === "string" ? data.title : "")
-      });
+      settle(mapContextPayload(data));
     }
   };
 
@@ -517,11 +523,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
     const data = event.data;
     if (data && typeof data === "object" && data.type === CTX_RESPONSE_TYPE
         && typeof data.domain === "string") {
-      settle({
-        domain: data.domain,
-        path: data.path,
-        title: stripNonAscii(typeof data.title === "string" ? data.title : "")
-      }, true);
+      settle(mapContextPayload(data), true);
     }
   };
   if (!legacyChain && typeof MessageChannel === "function") {
@@ -548,11 +550,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
       // Broadcast answer: this chain does not honor ports - remember it so
       // later resolves stop allocating channels it will only drop.
       legacyChain = true;
-      settle({
-        domain: data.domain,
-        path: data.path,
-        title: stripNonAscii(typeof data.title === "string" ? data.title : "")
-      }, false);
+      settle(mapContextPayload(data), false);
     }
   };
 
@@ -1085,10 +1083,12 @@ export function requestFullscreenProvision() {
 }
 
 /**
- * Handler for the top frame: grant allowfullscreen on the direct child iframe
- * that asked, then stop (no parent). Vouched by an own-child match.
+ * Shared body of the fullscreen provisioners: vouch the sender as an
+ * own-iframe child, then grant allowfullscreen on the target frame. The
+ * optional relay (nested frames) forwards the original request upward so the
+ * chain continues to the top frame.
  */
-export function createTopFrameProvisioner() {
+function createFullscreenProvisioner({ relay = false } = {}) {
   return (event) => {
     const data = event && event.data;
     if (!data || typeof data !== "object" || data.type !== FS_REQUEST_TYPE) {
@@ -1097,8 +1097,19 @@ export function createTopFrameProvisioner() {
     const frameElement = iframeElementForWindow(event.source);
     if (frameElement) {
       grantFullscreen(frameElement);
+      if (relay) {
+        window.parent?.postMessage(data, "*");
+      }
     }
   };
+}
+
+/**
+ * Handler for the top frame: grant allowfullscreen on the direct child iframe
+ * that asked, then stop (no parent). Vouched by an own-child match.
+ */
+export function createTopFrameProvisioner() {
+  return createFullscreenProvisioner();
 }
 
 /**
@@ -1108,17 +1119,7 @@ export function createTopFrameProvisioner() {
  * its allowlist expanded.
  */
 export function createFrameProvisioner() {
-  return (event) => {
-    const data = event && event.data;
-    if (!data || typeof data !== "object" || data.type !== FS_REQUEST_TYPE) {
-      return;
-    }
-    const frameElement = iframeElementForWindow(event.source);
-    if (frameElement) {
-      grantFullscreen(frameElement);
-      window.parent?.postMessage(data, "*");
-    }
-  };
+  return createFullscreenProvisioner({ relay: true });
 }
 
 /**

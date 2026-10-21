@@ -35,12 +35,10 @@ export class Kernel {
   #discoveryTap = null;
   /** True once the full-document discovery tap has been downgraded. */
   #discoveryDowngraded = false;
-  /** Lazily built observer-driven layout-presence gate for videos that failed
-   *  meetsMinSize (see #adoptVideo); stopped with the kernel scope. */
-  #layoutGate = null;
-  /** Lazily built on-screen gate for player-sized-but-off-screen videos (see
-   *  #adoptVideo); stopped with the kernel scope. */
-  #onScreenGate = null;
+  /** Lazily built observer-driven presence gates ("layout"/"onScreen" ->
+   *  createLayoutGate/createOnScreenGate engines), stopped with the kernel
+   *  scope (see #ensureGate). */
+  #gates = new Map();
   /** Kernel lifecycle scope: removal observers disconnect via onDispose,
    *  grace timers cancel via the signal. */
   #scope = new Scope();
@@ -217,34 +215,22 @@ export class Kernel {
   }
 
   /**
-   * The kernel's single observer-driven layout-presence gate: built on first
-   * need and torn down with the kernel scope. Returns null once the scope is
-   * disposed, so a late adoption after pagehide has nothing to wait for.
+   * The kernel's observer-driven presence gates (layout, on-screen): each built
+   * on first need from its engine factory and torn down with the kernel scope.
+   * Returns the live gate, or null once the scope is disposed, so a late
+   * adoption after pagehide has nothing to wait for.
    */
-  #ensureLayoutGate() {
-    if (!this.#layoutGate && !this.#scope.disposed) {
-      this.#layoutGate = createLayoutGate();
+  #ensureGate(kind, create) {
+    let gate = this.#gates.get(kind);
+    if (!gate && !this.#scope.disposed) {
+      gate = create();
+      this.#gates.set(kind, gate);
       this.#scope.onDispose(() => {
-        this.#layoutGate?.stop();
-        this.#layoutGate = null;
+        gate.stop();
+        this.#gates.delete(kind);
       });
     }
-    return this.#layoutGate;
-  }
-
-  /**
-   * Companion gate for player-sized videos that are not yet on screen: built on
-   * first need, torn down with the kernel scope. Returns null once disposed.
-   */
-  #ensureOnScreenGate() {
-    if (!this.#onScreenGate && !this.#scope.disposed) {
-      this.#onScreenGate = createOnScreenGate();
-      this.#scope.onDispose(() => {
-        this.#onScreenGate?.stop();
-        this.#onScreenGate = null;
-      });
-    }
-    return this.#onScreenGate;
+    return gate ?? null;
   }
 
   /** Adopt the video, emit discovery and start removal watching. */
@@ -262,7 +248,7 @@ export class Kernel {
       // gate re-enters this method the moment the delivered box qualifies
       // (RO callbacks run off the mutation batch, with layout already fresh,
       // and the size is read from the observation rather than a fresh reflow).
-      this.#ensureLayoutGate()?.watch(video, () => this.#adoptVideo(video));
+      this.#ensureGate("layout", createLayoutGate)?.watch(video, () => this.#adoptVideo(video));
       return;
     }
     // Player-sized but off-screen (a carousel slide, a below-the-fold embed):
@@ -270,7 +256,7 @@ export class Kernel {
     // does not boot a full shell for a video the user cannot see. isOnScreen
     // reports true when the viewport is unknown, so this can only delay.
     if (!isOnScreen(video)) {
-      this.#ensureOnScreenGate()?.watch(video, () => this.#adoptVideo(video));
+      this.#ensureGate("onScreen", createOnScreenGate)?.watch(video, () => this.#adoptVideo(video));
       return;
     }
     const container = sdk.container;
