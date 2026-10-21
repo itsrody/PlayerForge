@@ -11,6 +11,32 @@ import { getSetting, onSettingsChanged, setSetting, SETTINGS_SCHEMA, SETTING_KEY
 
 const HOLD_DELAY_MS = 400;
 const HOLD_REPEAT_MS = 75;
+
+/**
+ * Press-and-hold repeat with the two-phase timing: first invocation fires on
+ * the press itself, then (after the delay) an interval repeats it until the
+ * pointer lifts or the panel dies. One owner of both timers so the release
+ * paths can't strand either - and the two timer fields live here instead of
+ * being loose variables of the arrow-button closure.
+ */
+class HoldRepeater {
+  #delayTimer = null;
+  #repeatTimer = null;
+  start(fn) {
+    this.stop();
+    fn();
+    this.#delayTimer = setTimeout(() => {
+      this.#delayTimer = null;
+      this.#repeatTimer = setInterval(fn, HOLD_REPEAT_MS);
+    }, HOLD_DELAY_MS);
+  }
+  stop() {
+    clearTimeout(this.#delayTimer);
+    clearInterval(this.#repeatTimer);
+    this.#delayTimer = null;
+    this.#repeatTimer = null;
+  }
+}
 const TAB_NAV_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End"]);
 /** Auto-detect compact: narrow touch viewport. matchMedia change re-applies live. */
 const COMPACT_MEDIA_QUERY = "(max-width: 480px) and (pointer: coarse)";
@@ -65,21 +91,15 @@ function createStepper({
   const arrows = document.createElement("span");
   arrows.className = "pf-stepper-arrows";
 
-  const makeButton = (name, dir, title) => {
+const makeButton = (name, dir, title) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "pf-stepper-btn";
     button.tabIndex = -1;
     button.appendChild(createIconElement(name));
     button.title = title;
-    let delayTimer = null;
-    let repeatTimer = null;
-    const stopRepeat = () => {
-      clearTimeout(delayTimer);
-      clearInterval(repeatTimer);
-      delayTimer = null;
-      repeatTimer = null;
-    };
+    const repeat = new HoldRepeater();
+    const stopRepeat = () => repeat.stop();
     // A hold can be pending or repeating when the panel is destroyed (video
     // swap / fullscreen change). Scope the release listeners to the panel
     // signal AND stop the timers on abort, so destroy never leaves the
@@ -90,10 +110,7 @@ function createStepper({
       if (input.disabled) {
         return;
       }
-      nudge(dir);
-      delayTimer = setTimeout(() => {
-        repeatTimer = setInterval(() => nudge(dir), HOLD_REPEAT_MS);
-      }, HOLD_DELAY_MS);
+      repeat.start(() => nudge(dir));
       const release = () => {
         stopRepeat();
         // No-ops once the signal already released them on destroy.

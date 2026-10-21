@@ -175,6 +175,45 @@ design for regression detection; the v1.0.0 target is preserved on its tag.
 
 ### Change log
 
+- **Single-backend pass.** Production code now ships exactly one
+  Chromium-native implementation per platform capability; the jsdom harness
+  owns the emulation of what Node lacks, with a real contract instead of a
+  duplicated fallback arm. The `postTask` façade lost its whole setTimeout
+  arm (a re-implementation of the native abort choreography that existed
+  only so tests could run - dead code on the Chromium 155 floor) and `yield_`
+  lost the scheduler.yield → rAF → noop ladder; `onNavigate` lost the
+  popstate + hashchange backend that could never see a pushState-only route
+  change; `firstAvailable` - the one capability-ladder helper those chains
+  fed through - left `core.js` entirely. `tests/loader.mjs` gained a
+  `HarnessScheduler` class (postTask with the native priority/delay/signal
+  semantics; yield on the microtask hand-back the tick helpers were built
+  against) and a duck-typed harness `navigation` event target that accepts
+  any realm's `{ signal }`, so tests dispatch real
+  `currententrychange` events and the scheduler tests exercise the same
+  façade code a Chromium tab runs. The one fallback that stays is
+  load-bearing verified: `AbortSignal.any`'s manual-deadline arm, because
+  jsdom and Node brand-check opposite worlds on signals (probed, not
+  assumed). Hand-rolled timers collapsed next: `forge.js`'s three raw
+  setTimeout/clearTimeout sites (pointer hold, tap-replay, keyboard hold)
+  became `delay()` handles, and the panel stepper's loose
+  `delayTimer`/`repeatTimer` closure dance became a `HoldRepeater` class -
+  one scheduling backend now serves boot steps, parse yields, input holds,
+  stepper repeat, debounces, and the worker watchdog. The census then drew
+  the line between redundant arms and semantic capability: the `LoAF`
+  installation checks (DebugRuntime and the worker chunk) collapsed to one
+  `supportedEntryTypes` decision - Node's own PerformanceObserver simply
+  answers it - and the pipe's `MessageChannel` probe, the iframe cache's
+  MutationObserver probe, the shell's window-resize fallback arm,
+  `isInputPending`'s and `vibrate`'s double typeofs all died as
+  harness-only. What stays is capability with real semantics, each pinned
+  by a test: the ResizeObserver/IntersectionObserver gate factories
+  (sdk-engine tests delete the globals to exercise the synchronous-rect and
+  inert-gate fallbacks), element-level probes (`requestVideoFrameCallback`,
+  `video.animate`, `requestPictureInPicture` - jsdom elements genuinely
+  lack them), the grant guards in store.js (manager policy, not platform),
+  `workerCapable()` (CSP/Worker presence is a runtime fact the loader tests
+  manipulate), and the documented-intentional per-instance MutationObserver
+  and down-ownership checks in kernel/discovery. 356/356 tests.
 - **Subtitles-layer unification pass.** `src/shell/subtitles/` shrank from 5
   modules to 3 along a build boundary rather than a job split. The module
   graph put them together by accident: `vtt-worker-loader.js` (the

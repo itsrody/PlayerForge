@@ -396,7 +396,7 @@ test("SPA route change flushes the leaving entry and adopts the new route's medi
   // Watch some progress, then let the SPA push a different route.
   shell.currentTime = 120;
   dom.window.history.pushState({}, "", "/shorts/xyz");
-  dom.window.dispatchEvent(new dom.window.Event("popstate"));
+  globalThis.navigation.dispatchEvent(new globalThis.Event("currententrychange"));
   await flush();
   await flush();
 
@@ -435,7 +435,7 @@ test("a hash-only navigation does not re-adopt - same path, same entry", async (
 
   // pathname is untouched by a fragment change; only the hash moves.
   dom.window.history.pushState({}, "", "/watch#chapter=2");
-  dom.window.dispatchEvent(new dom.window.Event("popstate"));
+  globalThis.navigation.dispatchEvent(new globalThis.Event("currententrychange"));
   await flush();
   await flush();
   // Arm would have happened only if the path differed; a loadstart here is a

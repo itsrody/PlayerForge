@@ -2,9 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 
-// Node has no Navigation API - exactly the fallback realm we need to cover.
-assert.equal(typeof globalThis.navigation, "undefined");
-
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
   url: "https://example.com/start"
 });
@@ -12,16 +9,21 @@ globalThis.window = dom.window;
 
 const { onNavigate } = await import("../src/shared/page.js");
 
-test("onNavigate falls back to popstate + hashchange and unsubscribes cleanly", () => {
+// The harness Navigation API (tests/loader.mjs) emulates the platform
+// surface: production's single-backend onNavigate subscribes to it exactly
+// as it does a real Chromium `navigation` object, and events arrive as
+// explicit `currententrychange` dispatches.
+
+test("onNavigate subscribes to currententrychange and unsubscribes cleanly", () => {
   const seen = [];
   const off = onNavigate((event) => seen.push(event.type));
-  dom.window.dispatchEvent(new dom.window.Event("popstate"));
-  dom.window.dispatchEvent(new dom.window.Event("hashchange"));
-  assert.deepEqual(seen, ["popstate", "hashchange"]);
+  globalThis.navigation.dispatchEvent({ type: "currententrychange" });
+  globalThis.navigation.dispatchEvent({ type: "currententrychange" });
+  assert.deepEqual(seen, ["currententrychange", "currententrychange"]);
 
   off();
-  dom.window.dispatchEvent(new dom.window.Event("popstate"));
-  assert.equal(seen.length, 2, "the unsubscribe detached both listeners");
+  globalThis.navigation.dispatchEvent({ type: "currententrychange" });
+  assert.equal(seen.length, 2, "the unsubscribe detached the listener");
 });
 
 test("onNavigate honors an abort signal as teardown", () => {
@@ -29,33 +31,24 @@ test("onNavigate honors an abort signal as teardown", () => {
   let calls = 0;
   onNavigate(() => { calls++; }, { signal: ac.signal });
   ac.abort();
-  dom.window.dispatchEvent(new dom.window.Event("popstate"));
+  globalThis.navigation.dispatchEvent({ type: "currententrychange" });
   assert.equal(calls, 0, "an aborted subscription never fires");
 });
 
-test("the Navigation API backend wins when the realm exposes it", () => {
-  const listeners = [];
-  const previous = globalThis.navigation;
-  globalThis.navigation = {
-    addEventListener(type, listener, options) {
-      listeners.push({ type, listener, options });
-    },
-    removeEventListener() {}
-  };
-  try {
-    const off = onNavigate(() => {});
-    assert.equal(listeners.length, 1);
-    assert.equal(listeners[0].type, "currententrychange");
-    assert.equal(typeof off, "function");
-    off();
-  } finally {
-    globalThis.navigation = previous;
-  }
+test("window events are not a backend - only currententrychange fires", () => {
+  let calls = 0;
+  const off = onNavigate(() => calls++);
+  dom.window.dispatchEvent(new dom.window.Event("popstate"));
+  dom.window.dispatchEvent(new dom.window.Event("hashchange"));
+  assert.equal(calls, 0, "popstate/hashchange never lie about a pushState-only route change");
+  globalThis.navigation.dispatchEvent({ type: "currententrychange" });
+  assert.equal(calls, 1);
+  off();
 });
 
-test("no navigation backend at all yields an inert unsubscribe", () => {
-  const previous = globalThis.window;
-  globalThis.window = undefined;
+test("realms with no Navigation API yield an inert unsubscribe", () => {
+  const previous = globalThis.navigation;
+  globalThis.navigation = undefined;
   try {
     const off = onNavigate(() => {
       throw new Error("an inert subscription must never fire");
@@ -63,6 +56,6 @@ test("no navigation backend at all yields an inert unsubscribe", () => {
     assert.equal(typeof off, "function");
     off();
   } finally {
-    globalThis.window = previous;
+    globalThis.navigation = previous;
   }
 });

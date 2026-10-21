@@ -7,35 +7,32 @@
  *   3. Scopes         - Scope (the one teardown primitive)
  *   4. Debug runtime  - logger chatter + the LoAF diagnostic
  *
+ * The scheduler façade is single-backend: it composes the platform's own
+ * primitives (scheduler.postTask / scheduler.yield, Chromium 95+/129+,
+ * including dedicated workers) and adds nothing else - no fallback arm, no
+ * capability ladder. What the jsdom harness lacks is emulated THERE
+ * (tests/loader.mjs), with the same contract, not here.
+ *
  * Hot-path exports stay plain functions at module scope (V8 inlines them
  * without hidden-class penalties); only stateful runtime behavior lives in
  * classes/examples below.
  */
-import { firstAvailable } from "./core.js";
 /* - 1. Scheduling - */
 /**
  * Chromium-native task scheduler.
  *
- * One façade over Chromium's scheduling primitives so consumers never
- * duplicate `typeof scheduler?.*` capability guards across the tree:
+ * One façade over the platform's scheduling primitives so consumers never
+ * duplicate the owner-signal abort choreography across the tree:
  *
  *   postTask(fn, { priority, delay, signal }) → { abort() }
- *     scheduler.postTask (Chromium 95+) → setTimeout fallback
+ *     scheduler.postTask (Chromium 95+)
  *
  *   yield_() → Promise
- *     scheduler.yield (Chromium 129+) → requestAnimationFrame → noop
+ *     scheduler.yield (Chromium 129+)
  *
- * Detection runs once at module load and every export is a plain function so
- * V8 can keep the fast path inline (Maglev/TurboFan-friendly, no hidden-class
- * penalty per call).
+ * Every export is a plain function so V8 can keep the fast path inline
+ * (Maglev/TurboFan-friendly, no hidden-class penalty per call).
  */
-
-
-const HAS_POST_TASK =
-  typeof globalThis.scheduler?.postTask === "function";
-
-const HAS_YIELD =
-  typeof globalThis.scheduler?.yield === "function";
 
 /**
  * Schedule `fn` to run after `delay` ms at the given priority.
@@ -56,26 +53,6 @@ export function postTask(fn, { priority = "user-visible", delay: ms = 0, signal 
   // task would still schedule (and run post-teardown); hand back a dead handle.
   if (signal?.aborted) {
     return { abort() {} };
-  }
-  if (!HAS_POST_TASK) {
-    // setTimeout fallback - dead code on the Chromium 155 floor, kept for the
-    // jsdom test harness. It honors the owner signal too, so the abort
-    // contract is identical on both backends. Natural completion must also
-    // drop the owner-signal listener: an owner signal outlives its tasks, so
-    // leaving it attached would accumulate one listener per postTask call.
-    let id = 0;
-    const onAbort = () => clearTimeout(id);
-    id = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      fn();
-    }, ms);
-    signal?.addEventListener("abort", onAbort, { once: true });
-    return {
-      abort: () => {
-        clearTimeout(id);
-        signal?.removeEventListener("abort", onAbort);
-      }
-    };
   }
   const ac = new AbortController();
   const dropOwnerSignal = () => signal?.removeEventListener("abort", onOwnerAbort);
@@ -101,23 +78,18 @@ export function postTask(fn, { priority = "user-visible", delay: ms = 0, signal 
 
 /**
  * Yield control to the browser so pending paint/input can interleave before
- * non-urgent work (mutation fan-out, large parses). Resolves on the next task
- * (postTask/rAF/microtask depending on runtime support).
+ * non-urgent work (mutation fan-out, large parses). Resolves on the next
+ * scheduler slot.
  *
  * @returns {Promise<void>}
  */
-export const yield_ = firstAvailable([
-  () => (HAS_YIELD ? () => globalThis.scheduler.yield() : null),
-  () =>
-    typeof globalThis.requestAnimationFrame === "function"
-      ? () => new Promise((r) => { globalThis.requestAnimationFrame(() => r()); })
-      : null,
-  () => () => Promise.resolve()
-]);
+export function yield_() {
+  return globalThis.scheduler.yield();
+}
 
 /** Cancellable delay: runs `fn` after `ms`, returned fn cancels the pending run.
- *  Routed through postTask so the scheduler façade owns the timer (Chromium
- *  task scheduler with the shared setTimeout fallback; same cancel contract). */
+ *  Routed through postTask so the scheduler façade owns the timer (the
+ *  platform task scheduler; same cancel contract). */
 export function delay(fn, ms) {
   const handle = postTask(fn, { delay: ms });
   return () => handle.abort();
@@ -374,13 +346,15 @@ class DebugRuntime {
   }
 
   #installPerf() {
-    if (this.#observer || typeof PerformanceObserver === "undefined") {
+    // Single-backend: the platform's PerformanceObserver decides (LoAF is an
+    // entry type) - a realm that lacks either exposes it through the same
+    // check. Node, for instance, ships PerformanceObserver without
+    // long-animation-frame.
+    if (this.#observer ||
+        !globalThis.PerformanceObserver?.supportedEntryTypes?.includes("long-animation-frame")) {
       return;
     }
     try {
-      if (!PerformanceObserver.supportedEntryTypes.includes("long-animation-frame")) {
-        return;
-      }
       this.#observer = new PerformanceObserver((entries) => this.#report(entries));
       this.#observer.observe({ type: "long-animation-frame", buffered: false });
     } catch {

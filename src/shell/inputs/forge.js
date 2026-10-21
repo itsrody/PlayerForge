@@ -2,9 +2,8 @@ import { allowsIntent, allowsAnyIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS
 import { TUNING } from "../../shared/core.js";
 import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../../shared/dom.js";
 import { DOMManager } from "../../shared/dom.js";
-import { logger } from "../../shared/runtime.js";
+import { logger, Scope, delay } from "../../shared/runtime.js";
 import { isBenignMediaPolicyError } from "../../shared/core.js";
-import { Scope } from "../../shared/runtime.js";
 
 /**
  * Pointer handlers never preventDefault - native pan/scroll over the zone is
@@ -533,17 +532,17 @@ export class InputForge {
 
   #clearHoldTimer() {
     // Almost every pointermove reaches here with no hold timer armed; the
-    // null check skips clearTimeout (and its timer-table lookup) on that hot
-    // path. The null assignment stays unconditional so the field is reset.
+    // null check skips the cancel invocation on that hot path. The null
+    // assignment stays unconditional so the field is reset.
     if (this.#holdTimer !== null) {
-      clearTimeout(this.#holdTimer);
+      this.#holdTimer();
     }
     this.#holdTimer = null;
   }
 
   #clearKeyboardHoldTimer() {
     if (this.#keyboardHoldTimer !== null) {
-      clearTimeout(this.#keyboardHoldTimer);
+      this.#keyboardHoldTimer();
     }
     this.#keyboardHoldTimer = null;
   }
@@ -769,7 +768,7 @@ export class InputForge {
       this.#lastSwipeTransform = "";
       this.#clearHoldTimer();
 
-      this.#holdTimer = setTimeout(() => {
+      this.#holdTimer = delay(() => {
         this.#holdTimer = null;
         if (this.#primaryPointerId !== null && !this.#video.paused && allowsIntent("hold")) {
           this.#holding = true;
@@ -1138,14 +1137,14 @@ export class InputForge {
     this.#tapReplayTarget = target;
     this.#tapReplayX = x;
     this.#tapReplayY = y;
-    this.#tapReplayTimer = setTimeout(() => {
+    this.#tapReplayTimer = delay(() => {
       this.#tapReplayTimer = null;
       this.#replayTapClick();
     }, DOUBLE_TAP_WINDOW_MS);
   }
 
   #cancelTapReplay() {
-    clearTimeout(this.#tapReplayTimer);
+    this.#tapReplayTimer?.();
     this.#tapReplayTimer = null;
     this.#tapReplayTarget = null;
   }
@@ -1303,7 +1302,7 @@ export class InputForge {
         this.#ownedKeyCodes.add("Space");
         this.#keyboardHoldStart = performance.now();
         this.#clearKeyboardHoldTimer();
-        this.#keyboardHoldTimer = setTimeout(() => {
+        this.#keyboardHoldTimer = delay(() => {
           this.#keyboardHoldTimer = null;
           if (!this.#video.paused && allowsIntent("hold")) {
             this.#keyboardHolding = true;

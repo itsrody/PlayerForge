@@ -28,13 +28,11 @@ const DECODER = new TextDecoder();
 
 /**
  * Report every long animation frame the worker produced. LoAF in workers
- * landed in Chromium 153, so it is always present on the 155 floor; the
- * observer costs nothing when the support is absent (jsdom test hosts).
+ * landed in Chromium 153, so it is always present on the 155 floor: the
+ * entry-type support decides installation, one check that also covers realms
+ * (like Node's PerformanceObserver) that ship the observer without LoAF.
  */
-if (
-  typeof PerformanceObserver !== "undefined" &&
-  PerformanceObserver.supportedEntryTypes?.includes("long-animation-frame")
-) {
+if (PerformanceObserver.supportedEntryTypes?.includes("long-animation-frame")) {
   new PerformanceObserver((list) => {
     for (const entry of list.getEntries()) {
       if (entry.duration < JANK_THRESHOLD_MS) {

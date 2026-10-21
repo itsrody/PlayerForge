@@ -13,7 +13,6 @@
  * lazily, so a video-bearing iframe cannot assume its ancestors run anything
  * unless the relay chain is already listening.
  */
-import { firstAvailable } from "./core.js";
 import { postTask } from "./runtime.js";
 import { onDomMutations } from "./dom.js";
 
@@ -614,7 +613,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
       settle(mapContextPayload(data), true);
     }
   };
-  if (!pipeState.legacy && typeof MessageChannel === "function") {
+  if (!pipeState.legacy) {
     try {
       const mc = new MessageChannel();
       replyPort = mc.port1;
@@ -1018,11 +1017,6 @@ function startIframeCache(ac) {
     ensureIframeCacheCurrent();
     return;
   }
-  if (typeof MutationObserver !== "function") {
-    // dom-watch has no observer to feed us on this host; keep the registry
-    // inactive so every read takes the inline-scan fallback below.
-    return;
-  }
   iframeCacheDoc = document;
   iframeCacheActive = true;
   seedIframeCache();
@@ -1234,56 +1228,27 @@ export function installContextBridge() {
  * Same-document URL change events.
  *
  * One event source so consumers never re-derive SPA navigation detection from
- * pushState patching or location polling. Two backends, best first:
+ * pushState patching or location polling: the native Navigation API
+ * (`navigation.currententrychange`, Chromium 102+) covers pushState,
+ * replaceState, hash changes and history traversal, and needs no Tampermonkey
+ * grant. Single-backend by the same contract as the scheduler: the platform
+ * is the backend (the harness supplies the event target), so no fallback arm
+ * ships in production.
  *
- *   1. Navigation API (`navigation.currententrychange`) - native Chromium 102+,
- *      covers pushState, replaceState, hash changes and history traversal, and
- *      needs no Tampermonkey grant. Resolved per subscription (not at module
- *      load) so the first subscriber decides, after document-start has had its
- *      say about what this realm exposes.
- *   2. `popstate` + `hashchange` - what the Navigation API-less harness (and
- *      any runtime without it) can still deliver. pushState-only route changes
- *      are invisible on this path, which is why the Navigation API is the
- *      preferred backend.
- *
- * `window.onurlchange` (Tampermonkey `@grant window.onurlchange`) would be a
- * third backend, but it costs a grant line for coverage the native Navigation
- * API already provides on the Chromium 155 floor - the grant policy in
- * shared/store.js reserves manager APIs for capabilities the page cannot
- * supply, and URL change notification is not one of them.
+ * `window.onurlchange` (Tampermonkey `@grant window.onurlchange`) would be
+ * another backend, but it costs a grant line for coverage the native
+ * Navigation API already provides on the Chromium 155 floor - the grant
+ * policy in shared/store.js reserves manager APIs for capabilities the page
+ * cannot supply, and URL change notification is not one of them.
  *
  * Returns an unsubscribe function; passing `signal` tears the subscription
- * down the same way.
+ * down the same way. Realms with no Navigation API keep the subscriber inert.
  */
-
-
-/** Backend 1: the native Navigation API (any URL change, no grant). */
-function subscribeNavigationApi(listener, signal) {
+export function onNavigate(listener, { signal } = {}) {
   const nav = globalThis.navigation;
   if (!nav || typeof nav.addEventListener !== "function") {
-    return null;
+    return () => {};
   }
   nav.addEventListener("currententrychange", listener, { signal });
   return () => nav.removeEventListener("currententrychange", listener);
-}
-
-/** Backend 2: popstate + hashchange (harness / API-less realms). */
-function subscribeWindowEvents(listener, signal) {
-  const win = globalThis.window;
-  if (!win || typeof win.addEventListener !== "function") {
-    return null;
-  }
-  win.addEventListener("popstate", listener, { signal });
-  win.addEventListener("hashchange", listener, { signal });
-  return () => {
-    win.removeEventListener("popstate", listener);
-    win.removeEventListener("hashchange", listener);
-  };
-}
-
-export function onNavigate(listener, { signal } = {}) {
-  return firstAvailable([
-    () => subscribeNavigationApi(listener, signal),
-    () => subscribeWindowEvents(listener, signal)
-  ]) ?? (() => {});
 }

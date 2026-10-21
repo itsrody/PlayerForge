@@ -35,12 +35,91 @@ if (typeof globalThis.IntersectionObserver === "undefined") {
   };
 }
 if (typeof globalThis.scheduler === "undefined") {
-  // Minimal cooperative scheduler shim so parseSubtitlesAsync's yield branch
-  // is reachable under Node. yield() resolves on a microtask, matching the
-  // real Chromium hand-back without needing a real task-dispatch scheduler.
-  globalThis.scheduler = {
-    yield: () => Promise.resolve()
-  };
+  // The harness scheduler: a real implementation of the scheduler.postTask /
+  // scheduler.yield contract production composes (Chromium 129+ everywhere on
+  // the floor). postTask honors priority/delay/signal exactly like the native
+  // backend - per-task AbortController, abort cancels the pending timer, task
+  // promise rejects (callers' façade catches) - so tests exercise the same
+  // semantics as a real Chromium tab instead of a duplicated fallback arm
+  // that production no longer carries. yield() hands back on the microtask
+  // queue: cooperative, no event-loop cross-phase dependency.
+  class HarnessScheduler {
+    postTask(fn, { delay = 0, signal } = {}) {
+      return new Promise((resolve, reject) => {
+        if (signal?.aborted) {
+          reject(new DOMException("task aborted", "AbortError"));
+          return;
+        }
+        const id = setTimeout(() => {
+          signal?.removeEventListener("abort", onAbort);
+          resolve(fn());
+        }, delay);
+        const onAbort = () => {
+          clearTimeout(id);
+          reject(new DOMException("task aborted", "AbortError"));
+        };
+        signal?.addEventListener("abort", onAbort, { once: true });
+      });
+    }
+    yield() {
+      // Microtask hand-back. A raw setImmediate/macrotask would lose the
+      // ordering race against the tick helpers' own setTimeout(0) (jsdom's
+      // MutationObserver checkpoint lands in between), where the microtask
+      // matches what the tests were built against; production never runs
+      // this shim - it composes the real scheduler.yield() on Chromium.
+      return Promise.resolve();
+    }
+  }
+  globalThis.scheduler = new HarnessScheduler();
+}
+if (typeof globalThis.navigation === "undefined") {
+  // The harness Navigation API: a duck-typed event target that accepts any
+  // realm's { signal } (jsdom or Node - each signal is itself an EventTarget
+  // in its own world), so tests dispatch real `currententrychange` events
+  // the way a Chromium tab delivers them and the same teardown question is
+  // exercised as production. Production's onNavigate subscribes here
+  // exactly as it does natively, and jsdom's history/pushState stays silent
+  // (the popstate/hashchange fallback production dropped), so a route
+  // change is always an explicit event the test itself dispatches.
+  class HarnessNavigation {
+    #listeners = new Map();
+    #entriesFor(type) {
+      let entries = this.#listeners.get(type);
+      if (!entries) {
+        entries = [];
+        this.#listeners.set(type, entries);
+      }
+      return entries;
+    }
+    addEventListener(type, listener, { signal } = {}) {
+      if (typeof listener !== "function" || signal?.aborted) {
+        return;
+      }
+      const entry = {
+        listener,
+        onAbort: () => this.removeEventListener(type, listener)
+      };
+      signal?.addEventListener("abort", entry.onAbort, { once: true });
+      this.#entriesFor(type).push(entry);
+    }
+    removeEventListener(type, listener) {
+      const entries = this.#listeners.get(type);
+      if (!entries) {
+        return;
+      }
+      for (let i = entries.length - 1; i >= 0; i--) {
+        if (entries[i].listener === listener) {
+          entries.splice(i, 1);
+        }
+      }
+    }
+    dispatchEvent(event) {
+      for (const { listener } of this.#entriesFor(event.type)) {
+        listener.call(this, event);
+      }
+    }
+  }
+  globalThis.navigation = new HarnessNavigation();
 }
 if (typeof globalThis.MediaMetadata === "undefined") {
   globalThis.MediaMetadata = class MediaMetadata {};

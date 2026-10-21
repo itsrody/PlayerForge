@@ -45,8 +45,7 @@ const HAPTIC_PATTERNS = {
   swipe: [10, 30, 10]
 };
 
-const canVibrate =
-  typeof navigator !== "undefined" && typeof navigator.vibrate === "function";
+const canVibrate = typeof navigator?.vibrate === "function";
 
 /** Fire the haptic pulse for `type` when armed (setting, motion, activation). */
 export function gestureHaptic(type) {

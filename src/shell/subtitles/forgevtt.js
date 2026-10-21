@@ -421,11 +421,10 @@ export async function parseSubtitlesAsync(text, offset = 0) {
   const blocks = cueText.split(/\n[ \t]*\n/);
   const cues = [];
   // Detected per call, not hoisted, so a host that lacks the API (or a harness
-  // that injects it) is honored at runtime; the closure keeps `scheduling` as
-  // the receiver.
-  const scheduling = typeof navigator !== "undefined" ? navigator.scheduling : null;
-  const inputPending = typeof scheduling?.isInputPending === "function"
-    ? () => scheduling.isInputPending()
+  // that injects it) is honored at runtime; a worker realm without
+  // navigator.scheduling simply yields on the parse budget alone.
+  const inputPending = navigator?.scheduling?.isInputPending
+    ? () => navigator.scheduling.isInputPending()
     : null;
   let last = performance.now();
   for (let i = 0; i < blocks.length; i++) {

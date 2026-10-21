@@ -516,15 +516,10 @@ export class Shell {
       this.#refBoxValid = false;
     };
     // Fullscreen flips re-read screen.* dims; the container RO covers every
-    // inline-mode layout change (zoom, URL bar, panel). window.resize is only
-    // a fallback for hosts without ResizeObserver - kept out of the default
-    // path so the page never pays a per-shell resize listener.
+    // inline-mode layout change (zoom, URL bar, panel) - the only backend,
+    // since ResizeObserver is Chromium 63+.
     subscribeFullscreen(invalidate, this.#scope.signal);
-    if (typeof ResizeObserver === "function") {
-      this.#dom.observeResize(this.container, invalidate);
-    } else {
-      this.#dom.listen(window, "resize", invalidate, { passive: true });
-    }
+    this.#dom.observeResize(this.container, invalidate);
     // Orientation flip changes the screen.* dims read in fullscreen, which the
     // container ResizeObserver cannot see (the iframe box may not change).
     const orientation = typeof screen !== "undefined" ? screen.orientation : null;
