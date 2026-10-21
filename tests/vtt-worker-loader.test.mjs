@@ -4,7 +4,7 @@ import { build } from "esbuild";
 import {
   parseSubtitlesAsync,
   workerParseAvailable
-} from "../src/shell/subtitles/vtt-worker-loader.js";
+} from "../src/shell/subtitles/subtitles.js";
 import { parseSubtitles } from "../src/shell/subtitles/forgevtt.js";
 
 const VTT = [

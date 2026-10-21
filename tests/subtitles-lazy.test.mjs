@@ -6,7 +6,7 @@ globalThis.GM_getValue = (key, fallback) => fallback;
 globalThis.GM_setValue = () => {};
 
 const { Shell } = await import("../src/shell/shell.js");
-const { ForgeTrack } = await import("../src/shell/subtitles/forge-track.js");
+const { ForgeTrack } = await import("../src/shell/subtitles/subtitles.js");
 
 async function makeShell() {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", {

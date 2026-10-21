@@ -175,6 +175,22 @@ design for regression detection; the v1.0.0 target is preserved on its tag.
 
 ### Change log
 
+- **Subtitles-layer unification pass.** `src/shell/subtitles/` shrank from 5
+  modules to 3 along a build boundary rather than a job split. The module
+  graph put them together by accident: `vtt-worker-loader.js` (the
+  threshold-gated ingest transport), `forge-track.js` (the `ForgeTrack`
+  renderer) and `section.js` (the `SubtitlesSection` panel UI) were three
+  import-light files that only ever run on the main thread, in a strict
+  transport -> renderer -> UI dependency order, with only `SubtitlesSection`
+  on the shared/exported path - the exact shape `sdk.js` used to have. They
+  merged into `subtitles.js` (~1030 lines), the whole main-thread surface of
+  the feature, under that one honest title. What stayed separate are the two
+  modules the build itself owns: `forgevtt.js` is the parse engine - the
+  module the worker chunk bundles straight in, which is what guarantees the
+  worker can never drift from the main-thread parser - and `vtt-worker.js`
+  is its own esbuild chunk (`__VTT_WORKER_SOURCE__` injection). Both are
+  untouched; the worker import graph still never crosses into DOM/render
+  code. 356/356 tests unchanged, pure re-paths plus section banners.
 - **Chrome-layer unification pass.** `src/shell/chrome/` shrank from 8 modules
   to 5 with a state/presentation split. `elements.js` + `icons.js` +
   `animate.js` were one job spread over three files - the UI kit every chrome

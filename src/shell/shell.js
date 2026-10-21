@@ -3,7 +3,7 @@ import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "..
 import { InputForge } from "./inputs/forge.js";
 import { attachInputActions } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
-import { SubtitlesSection } from "./subtitles/section.js";
+import { SubtitlesSection } from "./subtitles/subtitles.js";
 import { VideoFilter } from "./filter.js";
 import { SettingsPanel, addSettingsSection, addHistorySection } from "./chrome/panel.js";
 import { getSetting, SETTING_KEYS } from "./chrome/config.js";

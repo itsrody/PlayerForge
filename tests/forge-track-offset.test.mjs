@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { ForgeTrack } from "../src/shell/subtitles/forge-track.js";
+import { ForgeTrack } from "../src/shell/subtitles/subtitles.js";
 import { offsetCues } from "../src/shell/subtitles/forgevtt.js";
 
 /**
