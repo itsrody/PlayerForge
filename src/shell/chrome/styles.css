@@ -36,11 +36,6 @@
      saturates what is behind the glass, which keeps the tint see-through while
      light text stays legible over arbitrary video. */
   --pf-glass-tint: color-mix(in srgb, var(--pf-bg) 58%, transparent);
-  /* Focus raises the tint rather than only the rim: the material exists to
-     bring attention to the content beneath it, so an idle HUD should recede
-     and a focused one should assert. AGENTS.md R3 - the two states must be
-     legible in the token set, not implied. */
-  --pf-glass-tint-focus: color-mix(in srgb, var(--pf-bg) 76%, transparent);
   /* The panel's top rim is an inset shadow on the sheet; once the header
      paints its own tint over that region the rim has to move onto the header,
      or the topmost edge loses its highlight. */
@@ -580,11 +575,7 @@
         opacity var(--pf-ease-duration) var(--pf-ease-curve),
         translate var(--pf-ease-duration) var(--pf-ease-curve),
         scale var(--pf-ease-duration) var(--pf-ease-curve),
-        display var(--pf-ease-duration) allow-discrete,
-        /* R3: the focus tint rides this same list rather than a second
-           `transition` declaration, which would replace the open/close
-           animation above instead of extending it. */
-        background-color var(--pf-ease-duration) var(--pf-ease-curve);
+        display var(--pf-ease-duration) allow-discrete;
 
       &.pf-open {
         display: block;
@@ -594,18 +585,6 @@
         will-change: opacity, translate, scale;
         view-transition-name: pf-panel;
         pointer-events: auto;
-      }
-
-      /* R3: a focused HUD asserts. The selector is `&:focus-within` - the
-         panel itself - because the one shared sheet is adopted by the shadow
-         root: a `.pf-shell ... .pf-panel` ancestor selector cannot match across
-         the shadow boundary (the host is not in its own tree), so the earlier
-         form was dead in both realms. The focus state flips the one tint
-         variable rather than a second background-color declaration, so both
-         the sheet and its header re-derive from a single source. The
-         background-color transition above is what animates the flip. */
-      &:focus-within {
-        --pf-panel-tint: var(--pf-glass-tint-focus);
       }
 
       /* Single header row: [segmented tabs] [close]. It is the panel's control
@@ -1074,11 +1053,6 @@
       border-radius: var(--pf-radius-md);
       background: var(--pf-surface-soft);
       overflow: hidden;
-      transition: border-color var(--pf-ease-duration) ease;
-
-      &:focus-within {
-        border-color: var(--pf-accent);
-      }
 
       .pf-stepper-input {
         flex: 1;

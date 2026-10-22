@@ -129,6 +129,34 @@ export async function run({ session, baseUrl, boot }) {
     ms: null
   });
 
+  // The retired focus assertions, measured rather than trusted: the panel
+  // keeps ONE tint state (the resting 58%) even with focus inside it, and
+  // the numeric stepper's border stays the neutral hairline when its input
+  // is focused - no darkened sheet, no accent border.
+  const focusRest = await session.eval(function main() {
+    const host = document.querySelector(".pf-shell");
+    const panel = host?.shadowRoot?.querySelector(".pf-panel");
+    if (!panel) return null;
+    const stepper = panel.querySelector(".pf-stepper") || host.shadowRoot.querySelector(".pf-stepper");
+    if (!stepper) return null;
+    const before = {
+      tint: getComputedStyle(panel).backgroundColor,
+      border: getComputedStyle(stepper).borderColor
+    };
+    stepper.querySelector(".pf-stepper-input")?.focus();
+    const after = {
+      tint: getComputedStyle(panel).backgroundColor,
+      border: getComputedStyle(stepper).borderColor
+    };
+    return { before, after };
+  });
+  rows.push({
+    name: "focus rest: panel tint stays the resting state, stepper border stays neutral",
+    status: !!focusRest && focusRest.before.tint === focusRest.after.tint && focusRest.after.border === focusRest.before.border ? "pass" : "fail",
+    note: focusRest ? JSON.stringify(focusRest) : "panel/stepper missing",
+    ms: null
+  });
+
   // The compact engine is materially CSS now: the panel carries only the
   // setting's data-compact attribute, while auto-detect resolves in the style
   // pipeline (stage container query + pointer media). Rows read the hud bus

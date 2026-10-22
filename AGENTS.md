@@ -300,10 +300,11 @@ only surface, scales/tokens `@property`-typed, gradients banned in the HUD:
 
 - **R1 Glass budget: at most two `backdrop-filter` surfaces** — panel + toast.
   A third is a redesign decision with its own justification.
-- **R3 Two tint states: resting (`--pf-glass-tint`, 58%) vs focused
-  (`--pf-glass-tint-focus`, 76%)** — the material brings attention to the
-  content; a single state over-asserts. The difference must be legible in
-  tokens, not implied.
+- **R3 One resting tint (`--pf-glass-tint`, 58%), unchanged by focus** — the
+  material's two-state split (resting vs `--pf-glass-tint-focus`, 76%) was
+  retired by user direction: the panel keeps the same tint whether or not it
+  holds focus, and no control paints an accent border merely for focus
+  (keyboard `:focus-visible` outlines on controls stay).
 - **R4 Every scrollable glass surface needs a scroll edge** — content
   scrolling beneath a pinned control is obscured; not a blanket scrim.
   Realized scroll-driven (Chromium 155's scroll timelines register a
