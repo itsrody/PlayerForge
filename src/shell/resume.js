@@ -176,13 +176,23 @@ export class ResumeStore {
     // Set-spread rebuild ran on every cross-tab echo otherwise.
     if (added > 0) {
       this.#state.entries = [...byId.values()];
+      this.#invalidateLookupCaches();
+    } else {
+      // In-place adoption mutates updatedAt values only: the entry objects
+      // (and their id/path keys) are unchanged, so #byId/#byPath stay exact -
+      // but a cached sorted snapshot sorts on updatedAt and is stale now.
+      this.#sorted = null;
     }
-    this.#invalidateCaches();
     return { added, updated };
   }
 
-  /** Drop lazy lookup state; called after every structural entries change. */
-  #invalidateCaches() {
+  /**
+   * Drop the id/path lookup caches. Only a change to the entry SET invalidates
+   * these: they key on object identity plus immutable id/path, which in-place
+   * position/timestamp writes never touch. Rebuilding them per position-only
+   * persist was the pointless slice of the old invalidate-all helper.
+   */
+  #invalidateLookupCaches() {
     this.#byPath = null;
     this.#byId = null;
     this.#sorted = null;
@@ -288,7 +298,7 @@ export class ResumeStore {
       gmSetValue(KEYS.resume, this.#state);
       logger.log("resume", `Dropped ${stalePending} stale pending entries`);
     }
-    this.#invalidateCaches();
+    this.#invalidateLookupCaches();
     this.#loaded = true;
   }
 
@@ -320,8 +330,16 @@ export class ResumeStore {
       }
       // Bounds run AFTER the (cross-tab) merge so a stale disk copy can never
       // resurrect pruned entries - cleanup converges instead of oscillating.
+      const before = this.#state.entries;
       this.#state.entries = this.#enforceBounds();
-      this.#invalidateCaches();
+      if (this.#state.entries !== before) {
+        // An eviction changed the entry set: lookups must rebuild.
+        this.#invalidateLookupCaches();
+      } else {
+        // Position-only persist: updatedAt moved in place, so only the sorted
+        // snapshot is stale; the id/path lookups still describe the same set.
+        this.#sorted = null;
+      }
       const now = Date.now();
       this.#state.updatedAt = now;
       gmSetValue(KEYS.resume, this.#state);
@@ -388,7 +406,7 @@ export class ResumeStore {
       updatedAt: Date.now()
     });
     this.#state.entries.push(entry);
-    this.#invalidateCaches();
+    this.#invalidateLookupCaches();
     this.#persist(true);
     return entry;
   }
@@ -412,13 +430,13 @@ export class ResumeStore {
 
   getEntries() {
     this.ensureLoaded();
-    // Sorted snapshot cached until the next cache invalidation. Every
+    // Sorted snapshot cached until the next #sorted invalidation: every
     // updatedAt mutation flows through a persist (updateResume, merge
-    // adoption, pruning) and #persist invalidates the caches, so the cache
-    // can serve repeat fetches - History re-renders, exports - between
-    // writes without re-spreading + re-sorting per call. Consumers treat
-    // the array as read-only; re-sorting it in place would corrupt the
-    // cached order only until the next persist.
+    // adoption, pruning) which drops it, so it serves repeat fetches -
+    // History re-renders, exports - between writes without re-spreading +
+    // re-sorting per call. Consumers treat the array as read-only;
+    // re-sorting it in place would corrupt the cached order only until the
+    // next persist.
     if (!this.#sorted) {
       this.#sorted = sortByUpdatedAt(this.#state.entries, true);
     }
@@ -430,7 +448,7 @@ export class ResumeStore {
     const before = this.#state.entries.length;
     this.#state.entries = this.#state.entries.filter((entry) => entry.id !== id);
     if (this.#state.entries.length < before) {
-      this.#invalidateCaches();
+      this.#invalidateLookupCaches();
       this.#persist(true);
     }
   }
@@ -441,7 +459,7 @@ export class ResumeStore {
     this.#state.entries = this.#enforceBounds(days);
     const removed = before - this.#state.entries.length;
     if (removed > 0) {
-      this.#invalidateCaches();
+      this.#invalidateLookupCaches();
       this.#persist(true);
       logger.log("resume", `Pruned ${removed} resume entries`);
     }
