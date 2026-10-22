@@ -1,3 +1,4 @@
+/* - 1. Manager API - */
 /**
  * Storage data plane.
  *
@@ -10,7 +11,6 @@
  * page-impossible capability (multi-tab storage + change notification,
  * CORS-bypassing XHR, menu, GM_info) - see the policy block inside.
  */
-/* - 1. Manager API - */
 import { logger } from "./runtime.js";
 
 /** The whole GM storage namespace: every root key lives here. */

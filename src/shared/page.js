@@ -19,18 +19,12 @@ import { onDomMutations } from "./dom.js";
 /* - 1. Domain identity - */
 
 /**
- * Pure page-identity primitives.
- *
  * One module answering everything about WHICH SITE a PlayerForge instance
  * belongs to and how sites compare: registrable-domain keys and comparison,
- * graded similarity ranking, and deterministic resume-entry hashing.
- *
- * Formerly the first two sections of the context engine (context.js), split
- * out because they are pure functions over their inputs with no window,
- * document, or message plumbing - resume matching consumes them directly.
+ * graded similarity ranking, and deterministic resume-entry hashing - pure
+ * functions over their inputs with no window, document, or message plumbing;
+ * resume matching consumes them directly.
  */
-
-/* - 1. Domain identity - */
 
 const DOMAIN_TLDS = {
   multi: new Set(["co", "com", "org", "net", "gov", "edu", "ac", "mil"]),
@@ -231,16 +225,11 @@ export function hashEntry(domainKey, path, duration) {
 /**
  * Page context engine.
  *
- * One module answering everything about WHERE a PlayerForge instance runs:
- * how embedded players learn their top-page identity across origins, what
- * {domain, path, title} this page carries, and the frame bridge that moves
- * both context and fullscreen provisioning across iframe edges. The pure
- * site-identity primitives (domain keys, similarity, entry hashing) live in
- * domains.js; this module consumes them.
- *
- * The bridge MUST be installed in every frame at document-start: kernels boot
- * lazily, so a video-bearing iframe cannot assume its ancestors run anything
- * unless the relay chain is already listening.
+ * Resolves the {domain, path, title} payload a shell carries for resume - read
+ * directly in a top frame (ownPageContext), asked up the frame bridge in an
+ * embed. The title passes a sanitizer (stripNonAscii) before it rides the
+ * payload; playback pages of the sites this targets release-tag their titles
+ * and embed non-Latin noise that must not feed fuzzy resume matching.
  */
 /* - Window message types - */
 
@@ -252,12 +241,10 @@ export function hashEntry(domainKey, path, duration) {
  * namespace would just add indirection. Types and the dispatch gate below
  * derive from ONE prefix, so the gate can never drift from what it vets.
  */
-export const BRIDGE_MSG_PREFIX = "pf:";
+const BRIDGE_MSG_PREFIX = "pf:";
 export const CTX_REQUEST_TYPE = `${BRIDGE_MSG_PREFIX}ctx-request`;
 export const CTX_RESPONSE_TYPE = `${BRIDGE_MSG_PREFIX}ctx`;
 export const FS_REQUEST_TYPE = `${BRIDGE_MSG_PREFIX}req-fullscreen`;
-
-/* - 1. Page context - */
 
 const TITLE_TAGS = /(?:^|[- ])(?:uncensored|uncut|leaked|censored|raw|bd|hdrip|dvdrip|webrip|bluray|remux|cam|reduc(?:ing)?\s*mosaic|english\s*subtitle)/gi;
 const RECORDING_CODE_RE = /^\[([A-Z]+-\d+)(?:-[^\]]*)?\]/;
@@ -319,6 +306,15 @@ function mapContextPayload(data) {
     path: data.path,
     title: stripNonAscii(typeof data.title === "string" ? data.title : "")
   };
+}
+
+/** Admission gate for a CTX_RESPONSE message: the preconditions every
+ *  consumer re-derives before trusting the payload - an object carrying our
+ *  response type and a domain string. The nonce/source checks that narrow
+ *  individual consumers stay at their sites; title is sanitized later. */
+function looksLikeContextResponse(data) {
+  return data && typeof data === "object"
+    && data.type === CTX_RESPONSE_TYPE && typeof data.domain === "string";
 }
 
 /** Page context resolved from THIS window, without any bridge: the direct
@@ -394,15 +390,20 @@ class ContextPipe {
     return this.#legacy;
   }
 
+  /** Close a pipe record's port, tolerating a port that died already. */
+  #closePipe(record) {
+    try {
+      record.port.close();
+    } catch {}
+  }
+
   /** Retain a responding port as the persistent pipe. Closes any pipe it
    *  replaces (the chain may have been upgraded mid-session) and clears the
    *  legacy memo. Per-request listeners attach transiently; nothing hangs off
    *  the pipe between resolves. */
   establish(port) {
     if (this.#pipe) {
-      try {
-        this.#pipe.port.close();
-      } catch {}
+      this.#closePipe(this.#pipe);
     }
     this.#pipe = { port };
     this.#legacy = false;
@@ -415,9 +416,7 @@ class ContextPipe {
       return;
     }
     this.#pipe = null;
-    try {
-      candidate.port.close();
-    } catch {}
+    this.#closePipe(candidate);
   }
 
   /** Remember a chain that answers the broadcast only, so later resolves stop
@@ -429,9 +428,7 @@ class ContextPipe {
   /** Drop the pipe + legacy memo when the frame bridge is torn down. */
   stop() {
     if (this.#pipe) {
-      try {
-        this.#pipe.port.close();
-      } catch {}
+      this.#closePipe(this.#pipe);
     }
     this.#pipe = null;
     this.#legacy = false;
@@ -482,14 +479,12 @@ function requestPageContextOverPipe(timeoutMs) {
   };
 
   const onData = (event) => {
-    const data = event.data;
     if (answered) {
       return;
     }
-    if (data && typeof data === "object" && data.type === CTX_RESPONSE_TYPE
-        && typeof data.domain === "string") {
+    if (looksLikeContextResponse(event.data)) {
       answered = true;
-      settle(mapContextPayload(data));
+      settle(mapContextPayload(event.data));
     }
   };
 
@@ -584,10 +579,8 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   // port listener drops natively on EVERY settle path (broadcast answer,
   // port answer, timeout) with no per-path removal to forget.
   const onReplyPort = (event) => {
-    const data = event.data;
-    if (data && typeof data === "object" && data.type === CTX_RESPONSE_TYPE
-        && typeof data.domain === "string") {
-      settle(mapContextPayload(data), true);
+    if (looksLikeContextResponse(event.data)) {
+      settle(mapContextPayload(event.data), true);
     }
   };
   if (!pipeState.legacy) {
@@ -604,17 +597,15 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   }
 
   const onMessage = (event) => {
-    const data = event.data;
     if (
       event.source === window.parent
-      && data && typeof data === "object"
-      && data.type === CTX_RESPONSE_TYPE && data.nonce === nonce
-      && typeof data.domain === "string"
+      && looksLikeContextResponse(event.data)
+      && event.data.nonce === nonce
     ) {
       // Broadcast answer: this chain does not honor ports - remember it so
       // later resolves stop allocating channels it will only drop.
       pipeState.markLegacy();
-      settle(mapContextPayload(data), false);
+      settle(mapContextPayload(event.data), false);
     }
   };
 
@@ -655,7 +646,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
 }
 
 
-/* - 2. Frame bridge - */
+/* - 4. Frame bridge - */
 
 const NONCE_TTL_MS = 5000;
 export const CTX_REQUEST_TIMEOUT_MS = 3000;
@@ -681,18 +672,19 @@ export function createTopFrameResponder(resolveContext, ownOrigin = location.ori
   //
   // textTracks-style append-only leak guard: there is no close/removal
   // notification for a MessagePort, so an iframe that dies with its pipe open
-  // would otherwise pin the port (and its closures) here forever. Each port is
-  // tracked with an activity stamp: repeat resolves keep it warm while an idle
-  // port is dropped, unregistered, and closed. A transferred port also fires
-  // messageerror when its channel is torn down - that path drops it eagerly.
-  const pipePorts = new Set();
-  const pipeEntryByPort = new Map();
+  // would otherwise pin the port (and its closures) here forever. One map,
+  // port -> entry: lookups find the entry by port while the sweep iterates
+  // entries directly. Each entry carries an activity stamp: repeat resolves
+  // keep it warm while an idle port is dropped, unregistered, and closed. A
+  // transferred port also fires messageerror when its channel is torn down -
+  // that path drops it eagerly.
+  const pipes = new Map();
 
   const dropPipe = (entry) => {
-    if (!pipePorts.delete(entry)) {
+    if (pipes.get(entry.port) !== entry) {
       return;
     }
-    pipeEntryByPort.delete(entry.port);
+    pipes.delete(entry.port);
     entry.ac.abort();
     entry.port.close();
   };
@@ -701,7 +693,7 @@ export function createTopFrameResponder(resolveContext, ownOrigin = location.ori
   const touchPipe = (entry) => {
     entry.lastUsed = performance.now();
     const cutoff = entry.lastUsed - CTX_PIPE_IDLE_MS;
-    for (const candidate of pipePorts) {
+    for (const candidate of pipes.values()) {
       if (candidate.lastUsed < cutoff) {
         dropPipe(candidate);
       }
@@ -741,7 +733,7 @@ export function createTopFrameResponder(resolveContext, ownOrigin = location.ori
     const ports = event.ports || [];
     if (ports.length) {
       const port = ports[0];
-      let entry = pipeEntryByPort.get(port);
+      let entry = pipes.get(port);
       if (!entry) {
         // First contact on a fresh pipe: register the persistent handler so
         // repeat resolves over this port are answered without ever touching
@@ -752,8 +744,7 @@ export function createTopFrameResponder(resolveContext, ownOrigin = location.ori
         entry.port.addEventListener("message", onPipeRequest(entry), { signal: entry.ac.signal });
         entry.port.addEventListener("messageerror", () => dropPipe(entry), { signal: entry.ac.signal });
         entry.port.start();
-        pipeEntryByPort.set(port, entry);
-        pipePorts.add(entry);
+        pipes.set(port, entry);
       }
       // A transferred MessageChannel pipe rides the request up the relay
       // chain; answer directly on it - unforgeable, no broadcast echo. Fall
@@ -794,7 +785,7 @@ export function createFrameRelay() {
       // frames it spawned: anything else (sibling, parent, unhosted window)
       // gets dropped instead of being forwarded up the chain. contentWindow
       // stays readable across origins, so cross-origin children still pass.
-      if (!iframeElementForWindow(event.source)) {
+      if (!iframeRegistry.child(event.source)) {
         return;
       }
       // Remember who asked AND from which origin: the answer must travel back
@@ -843,22 +834,14 @@ function isOwnFrame(source) {
   if (!source) {
     return false;
   }
-  if (iframeCacheActive) {
-    ensureIframeCacheCurrent();
-    const hit = iframeCache.get(source);
-    if (hit) {
-      // Direct child registered by the live registry: O(1) instead of the
-      // frame-tree walk. A detached element is rejected and dropped here -
-      // matching the walk's connected-only querySelectorAll.
-      if (hit.isConnected) {
-        return true;
-      }
-      iframeCache.delete(source);
-      return false;
-    }
-    // Not a direct child of this document; it may still be a nested
-    // descendant behind readable same-origin layers - walk for those.
+  // Direct child registered by the live registry: O(1) instead of the walk.
+  // The read rejects and drops a detached element - matching the scan's
+  // connected-only querySelectorAll.
+  if (iframeRegistry.read(source)) {
+    return true;
   }
+  // Not a direct child of this document; it may still be a nested
+  // descendant behind readable same-origin layers - walk for those.
   const scan = (doc, depth) => {
     if (depth > 4) {
       return false;
@@ -881,7 +864,7 @@ function isOwnFrame(source) {
   return scan(document, 0);
 }
 
-/* - 2a. Live iframe registry - */
+/* - 4a. Live iframe registry - */
 
 /**
  * Live map from <iframe> contentWindow -> element, refreshed by the shared
@@ -905,146 +888,150 @@ function isOwnFrame(source) {
  * their window instead of pinning a detached document, so removals need no
  * sweep - every read rejects a detached element via isConnected and drops it.
  */
-const iframeCache = new WeakMap();
-/** Document the cache currently describes. Tracked so a document swap (fresh
- *  page / test harness) reseeds instead of serving a stale map. */
-let iframeCacheDoc = null;
-/** True once the registry subscription is live. Armed lazily by
- *  installContextBridge on the first bridged message - pages with no child
- *  frames never pay. Before that - e.g. handlers used directly -
- *  iframeElementForWindow scans inline so the vouch stays correct even
- *  unseeded. */
-let iframeCacheActive = false;
-/** Shared-feed subscription handle; lifecycled by startIframeCache/stopIframeCache. */
-let framesWatchOff = null;
+/** One owner of the live iframe registry. Previously four module-level lets
+ *  (the WeakMap, its document stamp, an "active" flag, and the shared-feed
+ *  subscription handle) kept in step by hand across seed/arm/stop; here the
+ *  state is private to one instance and every lifecycle verb is a method, so
+ *  there is no flag pair (doc/active) that can drift apart. */
+class IframeRegistry {
+  #cache = new WeakMap();
+  /** Document the cache currently describes - a document swap (fresh page /
+   *  test harness) reseeds instead of serving a stale map. */
+  #doc = null;
+  /** Shared-feed subscription handle; null until armed on the first bridged
+   *  message. Pages with no child frames to vouch never pay. */
+  #off = null;
 
-/** (Re)build the cache from the live <iframe> set. ContentWindow never throws,
- *  so this is safe across same- and cross-origin subtrees. Used at arm/swap
- *  time only - ongoing updates are differential (diffIframeCache). No clear():
- *  the WeakMap releases entries with their windows on its own, and reads
- *  against old windows are rejected by the isConnected check anyway. */
-function seedIframeCache() {
-  for (const ifr of document.querySelectorAll("iframe")) {
+  get armed() {
+    return this.#off != null;
+  }
+
+  /** Register one <iframe> element under its contentWindow. Idempotent: moved
+   *  or re-inserted frames just update the entry in place. */
+  #register(ifr) {
     const win = ifr.contentWindow;
     if (win) {
-      iframeCache.set(win, ifr);
+      this.#cache.set(win, ifr);
     }
   }
-}
 
-/** Register one <iframe> element under its contentWindow. Idempotent: moved or
- *  re-inserted frames just update the entry in place (Map keyed by window). */
-function registerIframe(ifr) {
-  const win = ifr.contentWindow;
-  if (win) {
-    iframeCache.set(win, ifr);
-  }
-}
-
-/** Register every <iframe> inside one added node (an `<iframe>` itself, or a
- *  container subtree). Scoped to the added node only - the old full reseed
- *  walked the whole document every batch even when nothing changed. */
-function collectIframes(node) {
-  if (!node || node.nodeType !== 1) {
-    return;
-  }
-  if (node.localName === "iframe") {
-    registerIframe(node);
-    return;
-  }
-  const set = node.querySelectorAll("iframe");
-  for (let i = 0; i < set.length; i++) {
-    registerIframe(set[i]);
-  }
-}
-
-/** Keep the cache diffed against one observer batch: added nodes register any
- *  iframes they carry (an `<iframe>` itself, or a container subtree). Removals
- *  need no sweep - the WeakMap drops dead windows with their documents and
- *  every read rejects a detached element via isConnected, so a frame removed
- *  anywhere (including inside a dropped ancestor subtree) stops vouching on
- *  its next message rather than on the next batch. */
-function diffIframeCache(records) {
-  for (const record of records) {
-    const added = record.addedNodes;
-    for (let i = 0; i < added.length; i++) {
-      collectIframes(added[i]);
+  /** (Re)build the cache from the live <iframe> set. ContentWindow never
+   *  throws, so this is safe across same- and cross-origin subtrees. Used at
+   *  arm/swap time only - ongoing updates are differential (#diff). No clear():
+   *  the WeakMap releases entries with their windows on its own, and reads
+   *  against old windows are rejected by the isConnected check anyway. */
+  #seed() {
+    for (const ifr of document.querySelectorAll("iframe")) {
+      this.#register(ifr);
     }
   }
-}
 
-/**
- * Arm the registry subscription on the shared feed. Degrades gracefully when
- * there is no feed to serve us (no MutationObserver on this host): the cache
- * stays inactive and iframeElementForWindow falls back to a scan, so the
- * bridge's message handling never depends on it.
- *
- * A previous document's cache is discarded before reseed (browser/tab
- * navigations hand the script a fresh document object).
- */
-function startIframeCache(ac) {
-  if (framesWatchOff) {
-    ensureIframeCacheCurrent();
-    return;
+  /** Keep the cache diffed against one observer batch: added nodes register
+   *  any iframes they carry (an `<iframe>` itself, or a container subtree),
+   *  scoped to the added node - the old full reseed walked the whole document
+   *  every batch even when nothing changed. Removals need no sweep - the
+   *  WeakMap drops dead windows with their documents and every read rejects
+   *  a detached element via isConnected, so a frame removed anywhere
+   *  (including inside a dropped ancestor subtree) stops vouching on its next
+   *  message rather than on the next batch. */
+  #diff(records) {
+    for (const record of records) {
+      const added = record.addedNodes;
+      for (let i = 0; i < added.length; i++) {
+        const node = added[i];
+        if (!node || node.nodeType !== 1) {
+          continue;
+        }
+        if (node.localName === "iframe") {
+          this.#register(node);
+          continue;
+        }
+        const set = node.querySelectorAll("iframe");
+        for (let i = 0; i < set.length; i++) {
+          this.#register(set[i]);
+        }
+      }
+    }
   }
-  iframeCacheDoc = document;
-  iframeCacheActive = true;
-  seedIframeCache();
-  framesWatchOff = onDomMutations(diffIframeCache, { signal: ac.signal });
-  ac.signal.addEventListener("abort", stopIframeCache, { once: true });
-}
 
-function stopIframeCache() {
-  framesWatchOff?.();
-  framesWatchOff = null;
-  iframeCacheActive = false;
-  iframeCacheDoc = null;
-  // Entries need no clear: the WeakMap releases them with their windows, and
-  // a stale (detached) element fails the isConnected read check - so neither
-  // the fullscreen provisioner nor the relay can vouch a dead frame. The
-  // inline scan is the fallback after teardown.
-}
-
-/** Ensure the cache describes the CURRENT document, reseeding when the
- *  document swapped underneath us (fresh jsdom/page). No observer rebinding
- *  lives here: the shared feed rebinds to a swapped document itself, so only
- *  the map needs the reseed. */
-function ensureIframeCacheCurrent() {
-  if (!iframeCacheActive || iframeCacheDoc === document) {
-    return;
+  /** Ensure the cache describes the CURRENT document, reseeding when the
+   *  document swapped underneath us (fresh jsdom/page). No observer rebinding
+   *  lives here: the shared feed rebinds to a swapped document itself, so
+   *  only the map needs the reseed. */
+  #ensureCurrent() {
+    if (this.#doc === document) {
+      return;
+    }
+    this.#seed();
+    this.#doc = document;
   }
-  seedIframeCache();
-  iframeCacheDoc = document;
-}
 
-/** The direct <iframe> child of THIS document whose contentWindow is `win`, or null. */
-function iframeElementForWindow(win) {
-  if (!win) {
+  /** Arm the registry subscription on the shared feed (idempotent - a repeat
+   *  arm after a document swap just reseeds). Degrades gracefully when there
+   *  is no feed to serve us (no MutationObserver on this host): the cache
+   *  stays unseeded going forward and reads fall back to a scan, so the
+   *  bridge's message handling never depends on it. */
+  arm(ac) {
+    if (this.#off) {
+      this.#ensureCurrent();
+      return;
+    }
+    this.#doc = document;
+    this.#seed();
+    this.#off = onDomMutations((records) => this.#diff(records), { signal: ac.signal });
+    ac.signal.addEventListener("abort", () => this.#stop(), { once: true });
+  }
+
+  #stop() {
+    this.#off?.();
+    this.#off = null;
+    this.#doc = null;
+    // Entries need no clear: the WeakMap releases them with their windows, and
+    // a stale (detached) element fails the isConnected read check - so neither
+    // the fullscreen provisioner nor the relay can vouch a dead frame. The
+    // inline scan is the fallback after teardown.
+  }
+
+  /** Validated read: the connected element the registry maps `win` to, or
+   *  null. A detached entry is rejected AND dropped, so a dead frame's
+   *  element stops being retained - each call site's fallback scan keeps the
+   *  vouch exact while a re-seed is parked (hidden-tab flush can be up to
+   *  500ms late). */
+  read(win) {
+    if (!this.armed) {
+      return null;
+    }
+    this.#ensureCurrent();
+    const hit = this.#cache.get(win);
+    if (!hit || !hit.isConnected) {
+      this.#cache.delete(win);
+      return null;
+    }
+    return hit;
+  }
+
+  /** The direct <iframe> child of THIS document whose contentWindow is `win`,
+   *  or null. Registry hit in O(1); the inline scan keeps the vouch exact
+   *  before the registry arms (or when handlers are used directly), at an
+   *  O(frametree) cost that only pays on genuine misses. */
+  child(win) {
+    if (!win) {
+      return null;
+    }
+    const hit = this.read(win);
+    if (hit) {
+      return hit;
+    }
+    for (const iframe of document.querySelectorAll("iframe")) {
+      if (iframe.contentWindow === win) {
+        return iframe;
+      }
+    }
     return null;
   }
-  if (iframeCacheActive) {
-    ensureIframeCacheCurrent();
-    const hit = iframeCache.get(win);
-    if (hit) {
-      if (hit.isConnected) {
-        return hit;
-      }
-      iframeCache.delete(win);
-      // Removed entry dropped: a re-inserted frame's record may still be
-      // parked in the shared feed - the scan below covers that gap.
-    }
-  }
-  // Fallback before the registry arms (or when handlers are used directly),
-  // and after a miss: the inline scan keeps the vouch exact even while a
-  // hidden-tab flush is parked, at an O(frametree) cost that only pays on
-  // genuine misses.
-  for (const iframe of document.querySelectorAll("iframe")) {
-    if (iframe.contentWindow === win) {
-      return iframe;
-    }
-  }
-  return null;
 }
+
+const iframeRegistry = new IframeRegistry();
 
 /**
  * Browsers require `allowfullscreen`/`allow="fullscreen"` on EVERY ancestor
@@ -1099,7 +1086,7 @@ function createFullscreenProvisioner({ relay = false } = {}) {
     if (!data || typeof data !== "object" || data.type !== FS_REQUEST_TYPE) {
       return;
     }
-    const frameElement = iframeElementForWindow(event.source);
+    const frameElement = iframeRegistry.child(event.source);
     if (frameElement) {
       grantFullscreen(frameElement);
       if (relay) {
@@ -1170,10 +1157,9 @@ export function installContextBridge() {
     // shared-feed subscription therefore never needs to exist, so arm it
     // lazily on the first bridged message: the seed registers live frames
     // before any handler vouches, and the inline-scan fallback covers the
-    // pre-subscription gap.
-    if (!iframeCacheActive || iframeCacheDoc !== document) {
-      startIframeCache(ac);
-    }
+    // pre-subscription gap. (arm() is idempotent; an already-armed registry
+    // reseeds itself when the document swapped underneath it.)
+    iframeRegistry.arm(ac);
     try {
       if (type === CTX_REQUEST_TYPE || type === CTX_RESPONSE_TYPE) {
         onContext(event);

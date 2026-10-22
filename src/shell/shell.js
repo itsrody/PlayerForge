@@ -421,7 +421,7 @@ export class Shell {
     //
     // NOTE: this is a no-op whenever a shell was created in a nested frame, and
     // that is the only case it guards. requestFullscreenProvision is latched
-    // one-shot (context.js), and entry.js already calls it from onShellCreated,
+    // one-shot (shared/page.js), and entry.js already calls it from onShellCreated,
     // so by the time a fullscreenerror can arrive the latch is long set. The
     // call is kept as defence in depth - if the latch is ever relaxed, or a
     // boot-time provision is skipped, this still tries - but it does not

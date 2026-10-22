@@ -128,7 +128,9 @@ export function debounce(fn, ms) {
     pendingArgs = null;
   };
   return debounced;
-}/* - 2. Step lists - */
+}
+
+/* - 2. Step lists - */
 /**
  * Ordered lifecycle step lists.
  *

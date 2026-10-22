@@ -270,7 +270,9 @@ export function onDomMutations(handler, { signal } = {}) {
   };
   signal?.addEventListener("abort", off, { once: true });
   return off;
-}/* - 2. Pooling - */
+}
+
+/* - 2. Pooling - */
 /**
  * Lightweight DOM element pool — acquire/release lifecycle for reusable
  * elements. Caller handles DOM attach/detach; the pool manages reuse and
