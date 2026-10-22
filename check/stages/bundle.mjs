@@ -41,6 +41,16 @@ export async function run() {
     if (/\b(export|import)\b\s*[({"']/.test(source.slice(source.indexOf("==/UserScript==")))) {
       fails.push({ name: "module syntax", note: "import/export statements leaked into the bundle body" });
     }
+    // Static drift: every GM_ name the bundle body calls must appear in the
+    // @grant list - at runtime an ungranted call is simply undefined (real TM
+    // semantics), so only this check makes the omission audible. GM_info is
+    // manager-provided, never granted.
+    const granted = new Set([...source.matchAll(/^\/\/\s*@grant\s+GM_\w+$/gm)].map((m) => m[0].match(/GM_\w+/)[0]));
+    const called = new Set([...source.slice(source.indexOf("==/UserScript==")).matchAll(/\bGM_[A-Za-z]+/g)].map((m) => m[0]));
+    const ungranted = [...called].filter((name) => name !== "GM_info" && !granted.has(name));
+    if (ungranted.length > 0) {
+      fails.push({ name: "grant coverage", note: `body calls ${ungranted.join(", ")} without a matching @grant` });
+    }
     const sizeKb = (source.length / 1024).toFixed(1);
     rows.push({ name: `bundle emitted (${sizeKb} KB), header + IIFE shape valid`, status: "pass", ms: null });
   }

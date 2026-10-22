@@ -13,18 +13,22 @@ import { fileURLToPath } from "node:url";
 import { readdirSync, existsSync } from "node:fs";
 import { ChromiumSession } from "../lib/driver.mjs";
 import { FIXTURE_PAGE, FALLBACK_PAGE, ensureVideoAsset } from "../lib/fixture.mjs";
+import { parseUserScriptHeader } from "../lib/gm-realm.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CASES_DIR = join(HERE, "..", "browser", "cases");
 const ROOT = join(HERE, "..", "..");
 
 /** Standard ceremony so every case starts from the same known page state. */
-async function bootCasePage(session, { pagePath, baseUrl, version, bundle, seed = {} }) {
+async function bootCasePage(session, { pagePath, baseUrl, version, bundle, seed = {}, persist = false, grants = null, resources = null, header = null }) {
   // A distinct query per boot forces a real document navigation: driver.get to
   // the identical URL can race as a same-URL reload and eat the injected
   // bundle mid-document.
+  if (persist) {
+    await session.harvestGm();
+  }
   await session.navigate(`${baseUrl}${pagePath}?boot=${Date.now()}`);
-  await session.injectGMRealm({ version, storage: seed });
+  await session.injectGMRealm({ version, storage: persist ? session.gmHeadSnapshot() : seed, grants, resources, header });
   await session.injectBundle(bundle);
   await session.wakeVideos();
   const shellSeen = await session.waitFor("return !!document.querySelector('.pf-shell');", 9000).then(() => true, () => false);
@@ -59,20 +63,37 @@ export async function run() {
     session.registerFixture("/check", FIXTURE_PAGE);
     session.registerFixture("/check/blank", FALLBACK_PAGE);
     session.registerAsset(videoRoute, await readFile(join(ROOT, "check", ".tmp", "check-video.mp4")), "video/mp4");
+    session.registerAsset("/check/xhr-ok", Buffer.from("PONG-OK"), "text/plain");
+    // Stalls well past the probe's timeout window - the server hanging is the
+    // precondition for ontimeout being a real deadline and not a fast 404.
+    session.registerDelayedRoute("/check/xhr-slow", { delayMs: 8000, body: "SLOW", contentType: "text/plain" });
 
     const bundle = await bundleSource();
     const version = await fixtureVersion();
+    const header = parseUserScriptHeader(bundle);
+    // @resource pfStyle -> the shipped css plus one marker rule: the kernel's
+    // resource-warm replaces the embedded css only when the resource differs,
+    // so the marker must be there before the first boot of every case.
+    let styleSource = "";
+    try {
+      styleSource = await readFile(join(ROOT, "dist", "playerforge.css"), "utf8");
+    } catch {}
+    const resources = { pfStyle: styleSource + "\n.pf-shell{--pf-check-probe:ok}\n" };
     const stepPage = (overrides = {}) => bootCasePage(session, {
       pagePath: overrides.pagePath ?? "/check",
       baseUrl,
       version,
       bundle,
-      seed: overrides.seed ?? {}
+      seed: overrides.seed ?? {},
+      persist: overrides.persist ?? false,
+      grants: header.grants,
+      resources,
+      header
     });
 
     for (const caseFile of readdirSync(CASES_DIR).filter((f) => f.endsWith(".mjs")).sort()) {
       const mod = await import(join(CASES_DIR, caseFile));
-      const caseRows = await mod.run({ session, baseUrl, bundle, boot: stepPage });
+      const caseRows = await mod.run({ session, baseUrl, bundle, boot: stepPage, header, version });
       // Uncaught page errors from this case's document realm fail the case
       // silently bypassing every row's own assertions.
       const pageErrors = await session.eval(function main() {
@@ -82,6 +103,12 @@ export async function run() {
       const consoleErrors = pageErrors.filter((e) => e.startsWith("console:"));
       caseRows.push(...realErrors.map((e) => ({ name: `uncaught error in ${caseFile}`, status: "fail", note: e, ms: null })));
       caseRows.push(...consoleErrors.slice(0, 2).map((e) => ({ name: `console.error in ${caseFile}`, status: "pass", note: e, ms: null })));
+      // GM surface census: which APIs the kernel actually called (and how
+      // many echo deliveries landed) from this case - informational.
+      const usage = await session.eval(function main() {
+        return window.__gmTest ? JSON.stringify(window.__gmTest.usage()) : null;
+      }).catch(() => null);
+      caseRows.push({ name: `GM usage audit ${caseFile}`, status: usage ? "pass" : "fail", note: usage ?? "realm missing", ms: null });
       // Forensics for every failing case before the session is torn down.
       if (caseRows.some((r) => r.status === "fail")) {
         const captured = await session.snapshot(caseFile);

@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
+import { installGMRealm } from "./gm-realm.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
@@ -168,6 +169,9 @@ export class ChromiumSession {
   #server;
   #fixturePort;
   #fixtureRoutes = new Map();
+  /** Session-level GM backing store: what `harvestGm()` last pulled off the
+   *  live page. Opt-in persistence for the realm (opt-out stays isolated). */
+  #gmHead = new Map();
 
   static async launch() {
     const browserBinary = BROWSERS[0];
@@ -266,11 +270,26 @@ export class ChromiumSession {
     this.#fixtureRoutes.set(path, { html: null, headers: { "Content-Type": contentType }, bytes });
   }
 
+  /** A route that stalls `delayMs` before answering - the GM_xmlhttpRequest
+   *  timeout probe needs a server that hangs exactly as long as it claims. */
+  registerDelayedRoute(path, { delayMs, body, contentType }) {
+    this.#fixtureRoutes.set(path, { html: null, headers: { "Content-Type": contentType }, bytes:Buffer.from(body), delayMs });
+  }
+
   async startFixtureServer() {
     if (this.#server) return this.baseUrl;
     this.#server = createServer((req, res) => {
       const path = (req.url ?? "/").split("?")[0];
       const route = this.#fixtureRoutes.get(path);
+      if (route && route.delayMs) {
+        setTimeout(() => {
+          if (!res.writableEnded) {
+            res.writeHead(200, route.headers);
+            res.end(route.bytes);
+          }
+        }, route.delayMs);
+        return;
+      }
       if (route && route.bytes) {
         // Byte-range support is not cosmetic: without it Chromium treats the
         // stream as non-seekable and silently discards currentTime seeks,
@@ -314,75 +333,26 @@ export class ChromiumSession {
     return `http://127.0.0.1:${this.#fixturePort}`;
   }
 
-  /** GM realm a fresh page needs before bundle injection. `storage` seeds the
-   * backing store so a reboot can play out with prior-session state in place. */
-  injectGMRealm({ version, storage = {} } = {}) {
-    return this.eval(function main(version, storage) {
-      const backing = Object.assign({}, storage ?? {});
-      const listeners = {};
-      let listenerId = 0;
-      const gm = {
-        info: { script: { version }, scriptHandler: "Tampermonkey", version: "6.0.0" },
-        getValue(key, fallback) {
-          return Object.hasOwn(backing, key) ? backing[key] : fallback;
-        },
-        setValue(key, value) {
-          const prior = backing[key];
-          backing[key] = value;
-          dispatchListeners(key, value, value, prior, "local");
-        },
-        deleteValue(key) {
-          const prior = backing[key];
-          delete backing[key];
-          dispatchListeners(key, undefined, undefined, prior, "local");
-        },
-        listValues() { return Object.keys(backing); },
-        addValueChangeListener(key, cb) {
-          const id = "listener-" + String(++listenerId);
-          listeners[id] = { key, cb };
-          return id;
-        },
-        removeValueChangeListener(id) { delete listeners[id]; },
-        registerMenuCommand(title, fn) {
-          listeners["menu:" + title] = fn;
-          return "menu:" + title;
-        },
-        unregisterMenuCommand(id) { delete listeners[id]; },
-        getResourceText() { return ""; },
-        xmlhttpRequest() {},
-        setClipboard() {},
-        openInTab() {}
-      };
-      function dispatchListeners(key, newValue, oldValue, remote, origin) {
-        for (const l of Object.values(listeners)) {
-          if (l.key !== key) continue;
-          l.cb(key, newValue, oldValue, remote, origin);
-        }
-      }
-      for (const [key, value] of Object.entries(gm)) {
-        window["GM_" + key] = value;
-      }
-      window.GM_info = gm.info;
-      window.__pfBacking = backing;
-      window.__pfMenu = listeners;
+  /** GM realm a fresh page needs before bundle injection. A full surface is
+   *  built from `grants` (+ GM_info); `storage` seeds the backing so a reboot
+   *  can play out with prior-session state in place. */
+  injectGMRealm({ version, storage = {}, grants = null, resources = null, header = null } = {}) {
+    return this.eval(installGMRealm, { version, storage, grants, resources, header });
+  }
 
-      // Forensics hooks: uncaught page errors fail the case; console.error
-      // chatter is recorded for the report note but never fails on its own
-      // (the kernel's own logger may legitimately complain while healing).
-      window.__pfErrors = [];
-      window.__pfConsole = [];
-      window.addEventListener("error", (e) => {
-        if (e instanceof ErrorEvent && e.message) window.__pfErrors.push(String(e.message).slice(0, 200));
-      });
-      window.addEventListener("unhandledrejection", (e) => {
-        window.__pfErrors.push("rejection: " + String(e.reason).slice(0, 200));
-      });
-      const origError = console.error;
-      console.error = (...parts) => {
-        window.__pfConsole.push(parts.map((p) => String(p?.message ?? p)).join(" ").slice(0, 200));
-        origError.apply(console, parts);
-      };
-    }, version, storage);
+  /** Pull the live page's GM backing into the session-level store. */
+  async harvestGm() {
+    const backing = await this.eval(function main() {
+      return { ...(window.__pfBacking ?? {}) };
+    }).catch(() => null);
+    if (backing) {
+      this.#gmHead = new Map(Object.entries(backing));
+    }
+    return backing;
+  }
+
+  gmHeadSnapshot() {
+    return Object.fromEntries(this.#gmHead);
   }
 
   /** Inject a bundled userscript after the GM realm exists. */
