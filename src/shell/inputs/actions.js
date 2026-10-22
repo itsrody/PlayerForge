@@ -248,6 +248,210 @@ const SCRUB_SENSITIVITY = TUNING.controller.scrubSensitivity / 150;
 const FILL_SCALE_EPSILON = 0.001;
 
 /**
+ * Skip streak state for one shell. Same-direction skips accumulate up to the
+ * streak cap and decay lazily by the reset window instead of a wake-up timer:
+ * the skip command runs once per tap, so no timer can outlive the taps and
+ * the common case (one tap) never schedules anything.
+ *
+ * This is the whole streak story - one class owns it, so the skip command in
+ * ShellActions reads as math on a returned step rather than state juggling.
+ */
+class SkipStreak {
+  #count = 0;
+  #lastDirection = null;
+  #resetAt = 0;
+
+  /** Record one skip: lazily decay, then accumulate (or restart) the streak.
+   *  Returns the step multiplier (1 = no streak). */
+  record(direction, now) {
+    if (now - this.#resetAt >= TUNING.gestures.streakResetMs) {
+      this.#count = 0;
+      this.#lastDirection = null;
+    }
+    if (direction === this.#lastDirection) {
+      this.#count = Math.min(this.#count + 1, TUNING.controller.streakMax);
+    } else {
+      this.#count = 1;
+      this.#lastDirection = direction;
+    }
+    this.#resetAt = now;
+    return this.#count;
+  }
+}
+
+/**
+ * One activated scrub session's state machine (the seek half of the scrub
+ * gesture - the recognition half lives in forge.js and arrives here as
+ * semantic scrub events). Owns the latch, the velocity-proportional gain
+ * setup, the presented-frame readout loop, and the toast cadence, so
+ * ShellActions only routes: scrub detail in, seek + display out.
+ *
+ * State notes:
+ *   - The gains lock at latch time (duration + box width are frozen for the
+ *     stroke) so each move skips media's readiness gate + duration re-read.
+ *   - The readout is rVFC-backed: mediaTime of the last frame actually
+ *     PRESENTED beats decoder currentTime, which can lead/lag the display
+ *     (same rationale as resume.js's pause flush). Drop is signal-scoped -
+ *     a mid-apply shell teardown would otherwise leave a re-arming callback.
+ *   - The toast payload is one pooled object refilled in place: the toast
+ *     manager destructures synchronously, so a 100ms display tick never
+ *     allocates (same discipline as the gesture detail objects).
+ */
+class ScrubSession {
+  #shell;
+  /** Latch: active while a stroke runs (recognizer events keep routing here). */
+  #active = false;
+  #duration = 0;
+  #slowGain = 0;
+  #fastGain = 0;
+  #sensitivity = 0;
+  /** Signed display momentum (-1 left .. +1 right), first-order smoothed; picks
+   *  the seek toast's icon from the stroke's average direction. */
+  #momentum = 0;
+  #lastToastAt = 0;
+  #toastText = null;
+  #toastSecDuration = NaN;
+  #toastSecCurrent = NaN;
+  // Presented-frame readout trio: mediaTime, the video the loop was armed on
+  // (SPA swap guard), and the pending rVFC callback handle.
+  #presentedTime = null;
+  #rvfcVideo = null;
+  #rvfcId = 0;
+  #toast = { icon: "left-arrows", text: "", group: "scrub" };
+
+  constructor(shell) {
+    this.#shell = shell;
+  }
+
+  get active() {
+    return this.#active;
+  }
+
+  /** Cancel the presented-frame loop if one is armed; safe to call any time. */
+  dropFrameLoop() {
+    if (this.#rvfcVideo) {
+      this.#rvfcVideo.cancelVideoFrameCallback?.(this.#rvfcId);
+      this.#rvfcVideo = null;
+      this.#rvfcId = 0;
+    }
+    this.#presentedTime = null;
+  }
+
+  /** One scrub move: latches on the first (bails before the timeline exists),
+   *  then seeks proportionally to real-time velocity and drives the toast. */
+  scrub(detail) {
+    const shell = this.#shell;
+    // The producer stamps the real pointer event's DOMHighResTimeStamp on the
+    // pooled detail (forge #advanceScrub), on the same timebase as
+    // performance.now() and already read - reuse it instead of taking a second
+    // clock reading per move. The fallback covers a synthetic producer that
+    // left the field unset.
+    const now = detail.timestamp || performance.now();
+    if (!this.#active) {
+      const duration = shell.duration;
+      if (!duration || !Number.isFinite(duration)) {
+        return;
+      }
+      // Velocity-proportional seek: gain (seconds per pixel) rises with the
+      // finger's real-time speed. Width-normalized so the feel is independent
+      // of container size; the fast ceiling scales with the playback DURATION
+      // so a fast stroke traverses a fraction of the runtime on any length,
+      // while the slow floor stays a deliberate ~1s. The reference is the
+      // unified `shell.referenceBox` (fs -> screen, inline -> container), so
+      // scrub always normalizes against the correct contextual box.
+      const width = shell.referenceBox.width || 640;
+      const fastCeiling = duration * SCRUB_FAST_FULL_WIDTH_FRACTION;
+      this.#active = true;
+      this.#duration = duration;
+      this.#slowGain = SCRUB_SLOW_FULL_WIDTH_SECONDS / width;
+      this.#fastGain = fastCeiling / width;
+      this.#sensitivity = SCRUB_SENSITIVITY;
+      this.#momentum = 0;
+      gestureHaptic("scrub");
+      // Frame-accurate readout for this scrub: a short-lived rVFC loop tracks
+      // the frame the user actually SAW (post-seek frames fire even while
+      // paused), falling back to currentTime until the first one lands.
+      const scrubVideo = shell.video;
+      if (typeof scrubVideo?.requestVideoFrameCallback === "function") {
+        this.#rvfcVideo = scrubVideo;
+        const onFrame = (_now, metadata) => {
+          if (!this.#active || this.#rvfcVideo !== scrubVideo) {
+            return;
+          }
+          this.#presentedTime = metadata.mediaTime;
+          this.#rvfcId = scrubVideo.requestVideoFrameCallback(onFrame);
+        };
+        this.#rvfcId = scrubVideo.requestVideoFrameCallback(onFrame);
+      }
+    }
+
+    if (Math.abs(detail.dx) < SCRUB_DEAD_ZONE_PX) {
+      return;
+    }
+
+    // Proportional velocity curve: t in [0,1] as |velocity| rises past the
+    // knee, so slow scrubbing stays near the 1s floor while fast scrubbing
+    // eases toward the duration-scaled ceiling (a fraction of the runtime).
+    // Sampled live each move, the seek amount tracks the hand's current
+    // velocity in real time and scales with content length.
+    //
+    // The configured exponent is 1.5, for which x**1.5 == x*sqrt(x); the
+    // sqrt form measures ~1.6x faster than the generic pow (4.12 vs 6.60
+    // ns/op). The two disagree by 1 ULP on roughly a quarter of inputs -
+    // orders of magnitude below the pixel/seek resolution t feeds - so the
+    // fast path is gated on the exact exponent and any other config value
+    // falls through to pow untouched.
+    const v = Math.abs(detail.velocity);
+    const ratio = v / SCRUB_KNEE_PX_PER_S;
+    const t = Math.min(1, SCRUB_EXPONENT === 1.5 ? ratio * Math.sqrt(ratio) : ratio ** SCRUB_EXPONENT);
+    const gain = this.#slowGain + (this.#fastGain - this.#slowGain) * t;
+    const deltaSeconds = detail.dx * gain * this.#sensitivity;
+    // The stroke latched above, so duration is stable - use the latched-seek
+    // path so each move skips media's readiness gate + duration re-read.
+    shell.media.scrubToLatched(shell.currentTime + deltaSeconds, this.#duration);
+    const instantDirection = detail.dx > 1 ? 1 : detail.dx < -1 ? -1 : 0;
+    this.#momentum = this.#momentum * 0.6 + instantDirection * 0.4;
+
+    if (now - this.#lastToastAt < 100) {
+      return;
+    }
+    this.#lastToastAt = now;
+    // Cache the formatted time string: rebuild only when the visible second
+    // changes, not every 100ms tick - avoids 3 string allocations per display
+    // tick during scrub. Value prefers the presented-frame mediaTime (screen
+    // truth); decoder currentTime only until the first post-seek frame lands
+    // or when an SPA swap replaced the element mid-scrub.
+    const shownTime = (this.#rvfcVideo === shell.video ? this.#presentedTime : null)
+      ?? shell.video.currentTime;
+    const secDuration = Math.floor(this.#duration);
+    const secCurrent = Math.floor(shownTime);
+    if (secDuration !== this.#toastSecDuration || secCurrent !== this.#toastSecCurrent) {
+      this.#toastText = `${formatTime(this.#duration)} / ${formatTime(shownTime)}`;
+      this.#toastSecDuration = secDuration;
+      this.#toastSecCurrent = secCurrent;
+    }
+    this.#toast.icon = this.#momentum >= 0 ? "right-arrows" : "left-arrows";
+    this.#toast.text = this.#toastText;
+    shell.toast(this.#toast);
+  }
+
+  /** End the stroke: everything below unwinds to the resting shape. */
+  end() {
+    this.dropFrameLoop();
+    this.#active = false;
+    this.#momentum = 0;
+    this.#duration = 0;
+    this.#slowGain = 0;
+    this.#fastGain = 0;
+    this.#sensitivity = 0;
+    this.#toastText = null;
+    this.#toastSecDuration = NaN;
+    this.#toastSecCurrent = NaN;
+    this.#shell.hideToast("scrub");
+  }
+}
+
+/**
  * Eased snap for inline video transforms: one curve, shared by fill-mode
  * exit, pinch fill, and swipe/pinch restore. A newer snap cancels the previous
  * in-flight animation so no cleanup can land mid-gesture.
@@ -424,42 +628,30 @@ function volumePercent(volume) {
 }
 
 /**
- * Per-shell action machine. The old `stateFor` WeakMap-of-literal factory
- * plus free functions taking `(shell, state, ...)` became one class: every
- * piece of per-shell action state is a private field (declared ONCE, in the
- * same order the literal used, so the shape never morphs to a second hidden
- * class), and every semantic gesture event runs one method on the instance.
+ * The viewership transform for one shell: fullscreen fill mode and the
+ * per-domain zoom/pan crop, composed as ONE inline transform on the video.
+ * These are the only reasons a PlayerForge shell ever writes
+ * video.style.transform, so the ownership boundary is exact: gesture handlers
+ * (pinch/scrub/swipe in ShellActions) describe INTENT, this class owns the
+ * state and every write.
+ *
+ * Composition is `scale(total) translate(ox%, oy%)` - transform functions
+ * apply left to right, so translate percentages stay relative to the
+ * VISUAL (already-scaled) box: a 10% translate moves the video a tenth of
+ * what is on screen, whatever the scale. `total` multiplies the fill cover
+ * scale and the zoom scale; both layers are independent (fill release keeps
+ * a live crop, a crop reset keeps fill) and recombine through the one
+ * compose path.
+ *
+ * Subscriptions (zoom state, fullscreen flips, wheel, intrinsic-size
+ * refills) ride the caller's signal, so teardown is one abort.
  */
-class ShellActions {
+export class ViewershipTransform {
   #shell;
-  #savedRate = 1;
-  #activeHolds = new Set();
-  #scrubbing = false;
-  #scrubDuration = 0;
-  #scrubSlowGain = 0;
-  #scrubFastGain = 0;
-  #scrubSensitivity = 0;
-  #scrubDirectionMomentum = 0;
-  #lastScrubToastAt = 0;
-  #scrubToastText = null;
-  #scrubToastSecDuration = NaN;
-  #scrubToastSecCurrent = NaN;
-  // rVFC-backed readout: mediaTime of the last frame actually presented
-  // this scrub (decoder currentTime can lead/lag the display - same
-  // rationale as resume.js's pause flush), the video the loop was armed
-  // on (SPA swap guard), and the pending callback handle.
-  #scrubPresentedTime = null;
-  #scrubRvfcVideo = null;
-  #scrubRvfcId = 0;
-  // Pooled payload for the 100ms scrub tick: the toast manager
-  // destructures it synchronously (it never retains the object), so the
-  // same 3-field object is refilled in place instead of re-allocated
-  // every tick of a drag - same mutate-in-place discipline as the
-  // gesture detail objects.
-  #scrubToast = { icon: "left-arrows", text: "", group: "scrub" };
-  #streakCount = 0;
-  #lastSkipDirection = null;
-  #streakResetAt = 0;
+  /** Zoom/pan state client (shell-owned ZoomState; session state + per-domain
+   *  persistence). Null on shells without the zoom machinery - every use
+   *  keeps its null guard, so a missing state degrades to fill-only. */
+  #zoom = null;
   #fillActive = false;
   // Cover scale currently applied to the video (1 = none). Re-derives
   // the fill transform when the video's intrinsic size changes mid-fill.
@@ -467,67 +659,65 @@ class ShellActions {
   // Captured on fill entry: the element box is handed back to the embed's
   // original object-fit once the transform is released.
   #priorObjectFit = "";
-  // Zoom/pan state (shell-owned; session state + per-domain persistence).
-  #zoom = null;
-  // Latched when a scrub stroke pans a zoomed crop instead of seeking - the
-  // whole session then pans, even if fullscreen was lost mid-stroke (the
-  // same one-decision-latch contract the seek scrub's #gestureFsActive uses).
-  #panning = false;
 
   constructor(shell) {
     this.#shell = shell;
   }
 
-  /** Cancel the scrub's frame loop if one is armed; safe to call any time. */
-  #cancelScrubFrameLoop() {
-    if (this.#scrubRvfcVideo) {
-      this.#scrubRvfcVideo.cancelVideoFrameCallback?.(this.#scrubRvfcId);
-      this.#scrubRvfcVideo = null;
-      this.#scrubRvfcId = 0;
-    }
-    this.#scrubPresentedTime = null;
+  /** The zoom/pan state machine (panel section + pinch reset path). */
+  get zoom() {
+    return this.#zoom;
+  }
+
+  /** A live crop shape (scale or pan off resting) - the scrub surface's pan arm. */
+  get zoomed() {
+    return this.#zoom?.zoomed ?? false;
+  }
+
+  get fillActive() {
+    return this.#fillActive;
   }
 
   /**
-   * Skip with the streak: same-direction hits accumulate up to the streak cap
-   * and decay lazily by the reset window instead of a wake-up timer.
+   * Wire this transform's environment: zoom state -> transform (fs-scoped),
+   * fs enter re-applies the persisted crop / fs exit drops the inline
+   * transform but keeps the state for the next entry, wheel-zoom over the
+   * video, and intrinsic-size refills of a live fill. The forge's capture
+   * handler already preventDefaults plain fullscreen wheels, so nothing here
+   * cancels - a passive listener both places stay cheap.
    */
-  #skip(direction) {
-    // The command plane no-ops a skip before the timeline exists; bail here too
-    // so the streak state and the "Ns" readout don't advance for a dead command.
-    if (!this.#shell.media.ready) {
-      return;
-    }
-    const now = performance.now();
-    const streakMax = TUNING.controller.streakMax;
-    // A streak decays lazily by its reset window instead of a wake-up timer.
-    if (now - this.#streakResetAt >= TUNING.gestures.streakResetMs) {
-      this.#streakCount = 0;
-      this.#lastSkipDirection = null;
-    }
-    if (direction === this.#lastSkipDirection) {
-      this.#streakCount = Math.min(this.#streakCount + 1, streakMax);
-    } else {
-      this.#streakCount = 1;
-      this.#lastSkipDirection = direction;
-    }
-    this.#streakResetAt = now;
+  attach(signal) {
+    const shell = this.#shell;
+    this.#zoom = shell.zoom ?? null;
 
-    const step = getSetting(SETTING_KEYS.stepSeek) * this.#streakCount;
-    this.#shell.media.skip(direction === "right" ? step : -step);
-    this.#shell.toastFlash(
-      direction === "right" ? "right-arrows" : "left-arrows",
-      `${step}s`,
-      "skip"
-    );
+    this.#zoom?.onState(() => {
+      if (fs) {
+        this.#applyCompose();
+      }
+    });
+    subscribeFullscreen((active) => {
+      this.#fsExit();
+      if (active) {
+        this.#applyCompose();
+      } else if (this.#zoom?.zoomed) {
+        const video = shell.video;
+        if (video) {
+          easer.cancel(video);
+          video.style.transform = "";
+        }
+      }
+    }, signal);
+    shell.container?.addEventListener("wheel", (event) => this.#wheelZoom(event), { signal, passive: true });
+
+    // Fill mode's scale is pure aspect math frozen at the moment of the pinch.
+    // Late-arriving or changed intrinsic sizes re-derive it.
+    shell.video?.addEventListener("resize", () => this.#refill(), { signal });
+    shell.video?.addEventListener("loadedmetadata", () => this.#refill(), { signal });
   }
 
   /**
-   * The composed video transform: fill-mode cover scale and the zoom/pan
-   * state multiplied into one shape. Transform functions compose left to
-   * right, so `scale(s) translate(x%, y%)` keeps pan percentages relative to
-   * the VISUAL (already-scaled) box: a 10% translate moves the video a tenth
-   * of what is on screen, whatever the scale. Empty string when at rest.
+   * The composed shape: fill-mode cover scale and the zoom/pan state
+   * multiplied into one string. Empty when at rest.
    */
   #composeTransform() {
     const zoom = this.#zoom;
@@ -555,7 +745,7 @@ class ShellActions {
    * of the same transform), so the clean-up clears fill, not the composition.
    * No-op when fill was never active.
    */
-  #clearFillMode(animate) {
+  exitFill(animate) {
     const shell = this.#shell;
     if (!this.#fillActive) {
       return;
@@ -588,8 +778,28 @@ class ShellActions {
   /** Fullscreen exit releases the fill - the one cross-feature rule. */
   #fsExit() {
     if (this.#fillActive) {
-      this.#clearFillMode(false);
+      this.exitFill(false);
     }
+  }
+
+  /**
+   * Pinch-out fill entry: normalize object-fit to 'contain' (computeCoverScale
+   * models the element content letterboxed by its own ratio), freeze the cover
+   * scale, compose. Returns false when the video needs no cover (0 scale), so
+   * the caller's haptic/toast stay silent on a no-op.
+   */
+  beginFill(video, box) {
+    const scale = computeCoverScale(video, box);
+    if (scale <= 1) {
+      return false;
+    }
+    this.#priorObjectFit = video.style.objectFit;
+    video.style.objectFit = "contain";
+    this.#fillActive = true;
+    this.#fillScale = scale;
+    // Composed with any live zoom crop - fill and zoom stack.
+    this.#applyCompose();
+    return true;
   }
 
   /**
@@ -600,10 +810,7 @@ class ShellActions {
    */
   #wheelZoom(event) {
     const zoom = this.#zoom;
-    if (!zoom || !fs || event.ctrlKey || event.momentum) {
-      return;
-    }
-    if (!event.deltaY) {
+    if (!zoom || !fs || event.ctrlKey || event.momentum || !event.deltaY) {
       return;
     }
     const path = event.composedPath?.() || [];
@@ -619,12 +826,12 @@ class ShellActions {
   }
 
   /**
-   * Pan the fullscreen crop with the scrub stroke: one horizontal-ish drag
+   * Pan the fullscreen crop along a scrub stroke: one horizontal-ish drag
    * slides the crop. Percent deltas divide by the composed scale, so the
    * amount of video moved per pixel stays 1:1 with the pointer speed and a
    * re-zoom later re-anchors the pan around the same visual focal point.
    */
-  #panScrub(detail) {
+  panCrop(detail) {
     const zoom = this.#zoom;
     const box = this.#shell.referenceBox;
     if (!zoom || !box.width || !box.height) {
@@ -635,6 +842,78 @@ class ShellActions {
       zoom.ox + (detail.dx * 100) / (totalScale * box.width),
       zoom.oy + (detail.dy * 100) / (totalScale * box.height)
     );
+  }
+
+  /**
+   * Re-derive fill mode's frozen cover scale when the video's intrinsic size
+   * arrives late (preload="none") or changes mid-fill (adaptive stream
+   * switch): when the new ratio no longer needs cover, release fill entirely.
+   * `resize` on a <video> is the native signal for an intrinsic-size change;
+   * loadedmetadata catches the ratio becoming known.
+   */
+  #refill() {
+    const shell = this.#shell;
+    const video = shell.video;
+    if (!video || !this.#fillActive) {
+      return;
+    }
+    const scale = computeCoverScale(video, shell.referenceBox);
+    if (!scale) {
+      return;
+    }
+    if (scale <= 1) {
+      this.exitFill(true);
+      return;
+    }
+    if (Math.abs(scale - this.#fillScale) > FILL_SCALE_EPSILON) {
+      this.#fillScale = scale;
+      // Composed: a live zoom crop rides the refreshed cover scale.
+      this.#applyCompose();
+    }
+  }
+}
+
+/**
+ * Per-shell action machine. The old `stateFor` WeakMap-of-literal factory
+ * plus free functions taking `(shell, state, ...)` became one class: every
+ * piece of per-shell action state is a private field (declared ONCE, in the
+ * same order the literal used, so the shape never morphs to a second hidden
+ * class), and every semantic gesture event runs one method on the instance.
+ */
+class ShellActions {
+  #shell;
+  /** Streak, scrub, and the viewership transform own themselves
+   *  (SkipStreak / ScrubSession / shell.view); the fields below are the
+   *  hold story only. */
+  #streak = new SkipStreak();
+  #scrubSess = null;
+  #view = null;
+  #activeHolds = new Set();
+  #savedRate = 1;
+  // Latched when a scrub stroke pans a zoomed crop instead of seeking - the
+  // whole session then pans, even if fullscreen was lost mid-stroke (the
+  // same one-decision-latch contract the seek scrub's #gestureFsActive uses).
+  #panning = false;
+
+  constructor(shell) {
+    this.#shell = shell;
+    this.#scrubSess = new ScrubSession(shell);
+  }
+
+  /**
+   * Skip with the streak: same-direction hits accumulate up to the streak cap
+   * and decay lazily by the reset window instead of a wake-up timer.
+   */
+  #skip(direction) {
+    // The command plane no-ops a skip before the timeline exists; bail here too
+    // so the streak state and the "Ns" readout don't advance for a dead command.
+    const shell = this.#shell;
+    if (!shell.media.ready) {
+      return;
+    }
+    const step = getSetting(SETTING_KEYS.stepSeek) * this.#streak.record(direction, performance.now());
+    shell.media.skip(direction === "right" ? step : -step);
+    shell.toastFlash(direction === "right" ? "right-arrows" : "left-arrows", `${step}s`, "skip");
   }
 
   /** Hold the pointer/keyboard boost: first source wins, later arrivals add
@@ -676,124 +955,23 @@ class ShellActions {
     // (one gesture surface, whichever state is live). The session latches on
     // the first pan move and survives a mid-stroke fs loss - the same
     // decision-free continuation the seek scrub's #gestureFsActive grants.
-    if (this.#panning || (!this.#scrubbing && fs && this.#zoom?.zoomed)) {
+    if (this.#panning || (!this.#scrubSess.active && fs && this.#view.zoomed)) {
       this.#panning = true;
-      this.#panScrub(detail);
+      this.#view.panCrop(detail);
       return;
     }
-    // The producer stamps the real pointer event's DOMHighResTimeStamp on the
-    // pooled detail (forge #advanceScrub), on the same timebase as
-    // performance.now() and already read - reuse it instead of taking a second
-    // clock reading per move. The fallback covers a synthetic producer that
-    // left the field unset.
-    const now = detail.timestamp || performance.now();
-    if (!this.#scrubbing) {
-      const duration = shell.duration;
-      if (!duration || !Number.isFinite(duration)) {
-        return;
-      }
-      // Velocity-proportional seek: gain (seconds per pixel) rises with the
-      // finger's real-time speed. Width-normalized so the feel is independent
-      // of container size; the fast ceiling scales with the playback DURATION
-      // so a fast stroke traverses a fraction of the runtime on any length,
-      // while the slow floor stays a deliberate ~1s. The reference is the
-      // unified `shell.referenceBox` (fs -> screen, inline -> container), so
-      // scrub always normalizes against the correct contextual box.
-      const width = shell.referenceBox.width || 640;
-      const fastCeiling = duration * SCRUB_FAST_FULL_WIDTH_FRACTION;
-      this.#scrubbing = true;
-      this.#scrubDuration = duration;
-      this.#scrubSlowGain = SCRUB_SLOW_FULL_WIDTH_SECONDS / width;
-      this.#scrubFastGain = fastCeiling / width;
-      this.#scrubSensitivity = SCRUB_SENSITIVITY;
-      this.#scrubDirectionMomentum = 0;
-      gestureHaptic("scrub");
-      // Frame-accurate readout for this scrub: a short-lived rVFC loop tracks
-      // the frame the user actually SAW (post-seek frames fire even while
-      // paused), falling back to currentTime until the first one lands.
-      this.#cancelScrubFrameLoop();
-      const scrubVideo = shell.video;
-      if (typeof scrubVideo.requestVideoFrameCallback === "function") {
-        this.#scrubRvfcVideo = scrubVideo;
-        const onFrame = (_now, metadata) => {
-          if (!this.#scrubbing || this.#scrubRvfcVideo !== scrubVideo) {
-            return;
-          }
-          this.#scrubPresentedTime = metadata.mediaTime;
-          this.#scrubRvfcId = scrubVideo.requestVideoFrameCallback(onFrame);
-        };
-        this.#scrubRvfcId = scrubVideo.requestVideoFrameCallback(onFrame);
-      }
-    }
-
-    if (Math.abs(detail.dx) < SCRUB_DEAD_ZONE_PX) {
-      return;
-    }
-
-    // Proportional velocity curve: t in [0,1] as |velocity| rises past the
-    // knee, so slow scrubbing stays near the 1s floor while fast scrubbing
-    // eases toward the duration-scaled ceiling (a fraction of the runtime).
-    // Sampled live each move, the seek amount tracks the hand's current
-    // velocity in real time and scales with content length.
-    //
-    // The configured exponent is 1.5, for which x**1.5 == x*sqrt(x); the
-    // sqrt form measures ~1.6x faster than the generic pow (4.12 vs 6.60
-    // ns/op). The two disagree by 1 ULP on roughly a quarter of inputs -
-    // orders of magnitude below the pixel/seek resolution t feeds - so the
-    // fast path is gated on the exact exponent and any other config value
-    // falls through to pow untouched.
-    const v = Math.abs(detail.velocity);
-    const ratio = v / SCRUB_KNEE_PX_PER_S;
-    const t = Math.min(1, SCRUB_EXPONENT === 1.5 ? ratio * Math.sqrt(ratio) : ratio ** SCRUB_EXPONENT);
-    const gain = this.#scrubSlowGain + (this.#scrubFastGain - this.#scrubSlowGain) * t;
-    const deltaSeconds = detail.dx * gain * this.#scrubSensitivity;
-    // The stroke latched above, so duration is stable - use the latched-seek
-    // path so each move skips media's readiness gate + duration re-read.
-    shell.media.scrubToLatched(shell.currentTime + deltaSeconds, this.#scrubDuration);
-    const instantDirection = detail.dx > 1 ? 1 : detail.dx < -1 ? -1 : 0;
-    this.#scrubDirectionMomentum = this.#scrubDirectionMomentum * 0.6 + instantDirection * 0.4;
-
-    if (now - this.#lastScrubToastAt < 100) {
-      return;
-    }
-    this.#lastScrubToastAt = now;
-    // Cache the formatted time string: rebuild only when the visible second
-    // changes, not every 100ms tick — avoids 3 string allocations per display
-    // tick during scrub. Value prefers the presented-frame mediaTime (screen
-    // truth); decoder currentTime only until the first post-seek frame lands
-    // or when an SPA swap replaced the element mid-scrub.
-    const shownTime = (this.#scrubRvfcVideo === shell.video ? this.#scrubPresentedTime : null)
-      ?? shell.video.currentTime;
-    const secDuration = Math.floor(this.#scrubDuration);
-    const secCurrent = Math.floor(shownTime);
-    if (secDuration !== this.#scrubToastSecDuration || secCurrent !== this.#scrubToastSecCurrent) {
-      this.#scrubToastText = `${formatTime(this.#scrubDuration)} / ${formatTime(shownTime)}`;
-      this.#scrubToastSecDuration = secDuration;
-      this.#scrubToastSecCurrent = secCurrent;
-    }
-    const toast = this.#scrubToast;
-    toast.icon = this.#scrubDirectionMomentum >= 0 ? "right-arrows" : "left-arrows";
-    toast.text = this.#scrubToastText;
-    shell.toast(toast);
+    // Latch, proportional seek, and the toast cadence are the ScrubSession's
+    // story; the router only owns the pan-arm decision above.
+    this.#scrubSess.scrub(detail);
   }
 
   #scrubEnd() {
-    if (!this.#scrubbing) {
+    if (!this.#scrubSess.active) {
       this.#panning = false;
       return;
     }
-    this.#scrubbing = false;
     this.#panning = false;
-    this.#cancelScrubFrameLoop();
-    this.#scrubDirectionMomentum = 0;
-    this.#scrubDuration = 0;
-    this.#scrubSlowGain = 0;
-    this.#scrubFastGain = 0;
-    this.#scrubSensitivity = 0;
-    this.#scrubToastText = null;
-    this.#scrubToastSecDuration = NaN;
-    this.#scrubToastSecCurrent = NaN;
-    this.#shell.hideToast("scrub");
+    this.#scrubSess.end();
   }
 
   #swipeStart(detail) {
@@ -813,7 +991,7 @@ class ShellActions {
     }
     if (detail.distance > TUNING.gestures.swipeExitMinPx) {
       gestureHaptic("swipe");
-      this.#clearFillMode(false);
+      this.#view.exitFill(false);
       shell.toastFlash("fs-exit", "Fullscreen Exited", "fs");
       shell.exitFullscreen();
     } else {
@@ -881,60 +1059,21 @@ class ShellActions {
     if (!shell.video) {
       return;
     }
-    const video = shell.video;
-    if (detail.direction === "out" && !this.#fillActive) {
-      const scale = computeCoverScale(video, shell.referenceBox);
-      if (scale <= 1) {
-        return;
+    if (detail.direction === "out") {
+      if (!this.#view.fillActive && this.#view.beginFill(shell.video, shell.referenceBox)) {
+        gestureHaptic("pinch");
+        shell.toastFlash("fill-aspect", "Fill Mode", "pinch");
       }
-      gestureHaptic("pinch");
-      // Own object-fit: computeCoverScale models the element content letterboxed
-      // by its own ratio (contain). The embed may use the UA default 'fill', so
-      // normalize to 'contain' here; #clearFillMode restores the prior value.
-      this.#priorObjectFit = video.style.objectFit;
-      video.style.objectFit = "contain";
-      this.#fillActive = true;
-      this.#fillScale = scale;
-      // Composed with any live zoom crop - fill and zoom stack.
-      this.#applyCompose();
-      shell.toastFlash("fill-aspect", "Fill Mode", "pinch");
     } else if (detail.direction === "in") {
-      if (this.#zoom?.zoomed) {
+      if (this.#view.zoomed) {
         // Pinch-in under a live crop reads "give the video back": session
         // transform AND the stored per-domain crop reset together - the
         // gesture that removes a preference must not remember it.
-        this.#zoom.resetForDomain();
+        this.#view.zoom.resetForDomain();
         shell.toastFlash("fill-aspect", "Zoom Reset", "pinch");
-      } else if (this.#fillActive) {
-        this.#clearFillMode(true);
+      } else if (this.#view.fillActive) {
+        this.#view.exitFill(true);
       }
-    }
-  }
-
-  /**
-   * Re-derive fill mode's frozen cover scale when the video's intrinsic size
-   * arrives late (preload="none") or changes mid-fill (adaptive stream
-   * switch): when the new ratio no longer needs cover, release fill entirely.
-   * `resize` on a <video> is the native signal for an intrinsic-size change;
-   * loadedmetadata catches the ratio becoming known.
-   */
-  #refill() {
-    const video = this.#shell.video;
-    if (!video || !this.#fillActive) {
-      return;
-    }
-    const scale = computeCoverScale(video, this.#shell.referenceBox);
-    if (!scale) {
-      return;
-    }
-    if (scale <= 1) {
-      this.#clearFillMode(true);
-      return;
-    }
-    if (Math.abs(scale - this.#fillScale) > FILL_SCALE_EPSILON) {
-      this.#fillScale = scale;
-      // Composed: a live zoom crop rides the refreshed cover scale.
-      this.#applyCompose();
     }
   }
 
@@ -942,39 +1081,14 @@ class ShellActions {
    * Wire the shell-facing side of the bindings onto the shell host: semantic
    * events dispatched by the engine run the handlers above. All listeners
    * share the engine's AbortSignal, so destroying the engine tears the
-   * actions down.
+   * actions down. The viewership transform's own environment (zoom state,
+   * fullscreen, wheel, intrinsic-size refills) arms first - it lives on the
+   * shell as shell.view and survives across action re-attach.
    */
   attach(host, signal) {
     const shell = this.#shell;
-    const zoom = shell.zoom ?? null;
-    this.#zoom = zoom;
-
-    // Zoom state -> transform, fullscreen-scoped. The wheel/panel/gesture
-    // writes all route through the state machine; fs entry re-applies the
-    // persisted crop, fs exit drops the inline transform but keeps the state
-    // (and its persistence) for the next entry.
-    zoom?.onState(() => {
-      if (fs) {
-        this.#applyCompose();
-      }
-    });
-    subscribeFullscreen((active) => {
-      this.#fsExit();
-      if (active) {
-        this.#applyCompose();
-      } else if (zoom?.zoomed) {
-        const video = shell.video;
-        if (video) {
-          easer.cancel(video);
-          video.style.transform = "";
-        }
-      }
-    }, signal);
-
-    // Plain-wheel zoom over the video in fullscreen; the forge's capture
-    // handler already preventDefaults plain fullscreen wheels, so nothing
-    // here cancels - a passive listener both places stay cheap.
-    shell.container?.addEventListener("wheel", (event) => this.#wheelZoom(event), { signal, passive: true });
+    this.#view = shell.view;
+    this.#view.attach(signal);
 
     host.addEventListener(GESTURE_EVENTS.hold, ({ detail }) => this.#hold(detail), { signal });
     host.addEventListener(GESTURE_EVENTS.release, ({ detail }) => this.#release(detail), { signal });
@@ -984,7 +1098,7 @@ class ShellActions {
     // rVFC ids aren't AbortSignal-cancellable: drop any live scrub frame loop
     // with the same scope signal these listeners die on (shell teardown can
     // land mid-scrub, and the re-arming callback would otherwise outlive us).
-    signal.addEventListener("abort", () => this.#cancelScrubFrameLoop(), { once: true });
+    signal.addEventListener("abort", () => this.#scrubSess.dropFrameLoop(), { once: true });
 
     host.addEventListener(GESTURE_EVENTS.swipeStart, ({ detail }) => this.#swipeStart(detail), { signal });
     host.addEventListener(GESTURE_EVENTS.swipe, ({ detail }) => this.#swipe(detail), { signal });
@@ -994,17 +1108,13 @@ class ShellActions {
     host.addEventListener(GESTURE_EVENTS.mute, () => this.#mute(), { signal });
     host.addEventListener(GESTURE_EVENTS.pip, () => this.#pip(), { signal });
     host.addEventListener(GESTURE_EVENTS.pinch, ({ detail }) => this.#pinch(detail), { signal });
-
-    // Fill mode's scale is pure aspect math frozen at the moment of the pinch.
-    // Late-arriving or changed intrinsic sizes re-derive it (#refill above).
-    shell.video?.addEventListener("resize", () => this.#refill(), { signal });
-    shell.video?.addEventListener("loadedmetadata", () => this.#refill(), { signal });
   }
 }
 
 /**
- * Wire the shell-facing side of the bindings onto the shell host. One
- * ShellActions instance per attach call owns the shell's action state.
+ * One ScrubSession per attach - scrub latch, seek gains, rVFC readout, and
+ * toast cadence all own themselves (the pan arm that shares the scrub surface
+ * routes around it in ShellActions).
  */
 export function attachInputActions(shell, host, signal) {
   new ShellActions(shell).attach(host, signal);

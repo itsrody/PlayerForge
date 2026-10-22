@@ -1,7 +1,7 @@
 import { logger, Scope, yield_, runSteps, runStepsAsync } from "../shared/runtime.js";
 import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen, DOMManager } from "../shared/dom.js";
 import { InputForge } from "./inputs/forge.js";
-import { attachInputActions } from "./inputs/actions.js";
+import { attachInputActions, ViewershipTransform } from "./inputs/actions.js";
 import { ZoomState, buildZoomSection } from "./inputs/zoom.js";
 import { ResumeTracker } from "./resume.js";
 import { SubtitleSession, SubtitlesSection, subtitleSync } from "./subtitles/subtitles.js";
@@ -75,6 +75,9 @@ export class Shell {
   #filters = null;
   /** Fullscreen crop state: gesture/panel state + per-domain persistence. */
   #zoom = new ZoomState();
+  /** Fullscreen fill + zoom-crop transform machine (per-shell, owns every
+   *  video.style.transform write), exposed as shell.view. */
+  #view = new ViewershipTransform(this);
   /** Lazy panel sections built on first open; torn down with the shell. */
   #panelSections = [];
   #panel;
@@ -277,6 +280,11 @@ export class Shell {
   /** Zoom & pan state, shared by the action layer and the panel section. */
   get zoom() {
     return this.#zoom;
+  }
+
+  /** The viewership transform machine (fill + zoom crop composition). */
+  get view() {
+    return this.#view;
   }
 
   /** The DOMManager — for sub-components that need lifecycle-tracked artifacts. */

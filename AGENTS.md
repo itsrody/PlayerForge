@@ -155,14 +155,18 @@ iframes, same-origin and cross-origin:
 - **inputs/zoom.js** — `ZoomState` (the per-domain zoom/pan state machine:
   wheel/steps, pan clamp, trailing persist, `resetForDomain` deletes the
   stored crop) + `buildZoomSection` (panel section over one shell's state).
-  State only: the transform write belongs to actions.js.
+  Pure state: the transform write belongs solely to `ViewershipTransform`.
 - **inputs/forge.js** — the pointer/keyboard session machine: hold, tap
   replay, pinch, swipe, scrub (detail carries `dx` and the mirrored `dy`
   the pan arm consumes), double-tap zones; `HoldRepeater`; all timers
-  ride the shared scheduler; **actions.js** — viewership transform machine
-  (fill mode cover scale, the zoom crop composed as `scale(s) translate(ox%,oy%)`,
-  fullscreen-scoped wheel zoom, pan-instead-of-seek scrub latch) +
-  the gesture table + per-gesture haptics policy.
+  ride the shared scheduler.
+- **inputs/actions.js** — the action layer: the binding table + `IntentGates`,
+  and the per-story state machines `SkipStreak`, `ScrubSession`, and
+  `ViewershipTransform` (fill-mode cover scale, the zoom crop composed as
+  `scale(s) translate(ox%,oy%)`, fullscreen-scoped wheel zoom,
+  pan-instead-of-seek scrub latch) — the one class allowed to write the
+  video transform, exposed on the shell as `shell.view` — plus the haptic
+  policy.
 - **subtitles/** — `forgevtt.js` = the parse engine (the module the worker
   chunk bundles in, which is what guarantees the worker can never drift from
   the main-thread parser; ~.srt→WEBVTT normalizing), `vtt-worker.js` — a
