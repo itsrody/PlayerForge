@@ -105,7 +105,8 @@ const swipeStartDetail = { zone: "", method: "pointer", direction: "" };
 const swipeDetail = { zone: "", method: "pointer", direction: "", distance: 0 };
 const dbltapDetail = { zone: "", method: "pointer" };
 const keyDetail = { method: "keyboard", direction: undefined };
-// Scrub's per-name detail payload, refilled in place by #advanceScrub (same
+// Scrub's per-name detail payload, refilled in place by ScrubStroke.advance
+// (same
 // mutate-in-place discipline as the other per-family payloads; actions.js
 // reads it synchronously within the scrub handler).
 const scrubDetail = { zone: "", method: "pointer", dx: 0, dy: 0, velocity: 0, timestamp: 0 };
@@ -179,10 +180,447 @@ function clickTime() {
 }
 
 /**
- * InputForge engine: pure recognition transport. Turns pointer/keyboard/
- * wheel physics into semantic GESTURE_EVENTS on the shell host; every policy
+ * Scrub recognizer: the pointer move-stream machine. Owns the stroke's
+ * sample anchors and the real-time velocity filter, and the per-move pooled
+ * dispatch. The engine owns the latch decision (axis thresholds + intent
+ * gate) and stream policy; once latched, every subsequent call into this
+ * machine rides the same decisions being fixed mid-session.
+ */
+class ScrubStroke {
+  #dispatch;
+  #zone;
+  #active = false;
+  #lastX = 0;
+  // Y mirror of #lastX: the pan arm of scrub (zoomed fullscreen) needs
+  // the vertical stroke delta the seek arm never consumed.
+  #lastY = 0;
+  #lastTime = 0;
+  #velocity = 0;
+
+  constructor(dispatch, zone) {
+    this.#dispatch = dispatch;
+    this.#zone = zone;
+  }
+
+  get active() {
+    return this.#active;
+  }
+
+  /** Fresh press: anchors re-init so a later latch starts from its origin. */
+  reset(x, y, time) {
+    this.#active = false;
+    this.#lastX = x;
+    this.#lastY = y;
+    this.#lastTime = time;
+    this.#velocity = 0;
+  }
+
+  latch(x, y, time) {
+    this.#active = true;
+    this.#lastX = x;
+    this.#lastY = y;
+    this.#lastTime = time;
+    this.#velocity = 0;
+  }
+
+  /**
+   * Consume every coalesced sample of the move so high-rate Chromium pointer
+   * streams scrub at full fidelity; one semantic event is emitted per move.
+   *
+   * Real-time velocity is measured at move granularity from true event
+   * timestamps (the live event's own DOMHighResTimeStamp, same epoch as
+   * performance.now()) and smoothed with a first-order time-based filter,
+   * alpha = 1 - exp(-dt/tau). Because alpha derives from the real interval
+   * between moves, the smoothing window is the same absolute time at any
+   * display rate - adaptive-refresh correct - while the small tau keeps the
+   * signal responsive enough to track speed changes mid-stroke, so the seek
+   * amount stays proportional to the hand in real time.
+   *
+   * Chromium's PointerEvent.getPredictedEvents() returns extrapolated FUTURE
+   * positions. We speculatively "draw ahead" with them, matching the drawing
+   * idiom in the Pointer Events spec (predict, then discard once real points
+   * arrive): predicted travel feeds the VELOCITY estimate only, never the
+   * confirmed seek delta (#lastX stays pinned to real samples). Because
+   * scrub's amount is a monotonic function of velocity, a fresher, higher
+   * velocity read makes the response feel ahead of the hand - lower perceived
+   * latency - while the absolute position stays grounded in real motion, so a
+   * prediction can never overshoot or drift a fast flick. Prediction is
+   * bounded: only the first predicted sample, capped to the confirmed travel.
+   */
+  advance(event) {
+    let totalStep = 0;
+    let totalStepY = 0;
+    const hasCoalesced = typeof event.getCoalescedEvents === "function";
+    const samples = hasCoalesced ? event.getCoalescedEvents() : null;
+    // Coalesced samples then the live event, without materializing a combined
+    // array: high-rate Chromium pointer streams land here every move, so a
+    // [[...samples, event]] spread per frame would allocate needlessly.
+    if (samples) {
+      const count = samples.length + 1;
+      let lastX = this.#lastX;
+      let lastY = this.#lastY;
+      for (let i = 0; i < count; i++) {
+        const sample = i < samples.length ? samples[i] : event;
+        totalStep += sample.clientX - lastX;
+        lastX = sample.clientX;
+        totalStepY += sample.clientY - lastY;
+        lastY = sample.clientY;
+      }
+      this.#lastX = lastX;
+      this.#lastY = lastY;
+    } else {
+      totalStep = event.clientX - this.#lastX;
+      this.#lastX = event.clientX;
+      totalStepY = event.clientY - this.#lastY;
+      this.#lastY = event.clientY;
+    }
+
+    // Speculative velocity wash: the first predicted pointer beats the live
+    // event just enough to pull the velocity estimate forward, but is clamped
+    // to a fraction of the confirmed step so it can never dominate or reverse
+    // against a correcting hand. Purely a velocity-shaping signal.
+    const hasPredicted = hasCoalesced && typeof event.getPredictedEvents === "function";
+    let velocityStep = totalStep;
+    // Sub-pixel gate: the additive term is clamped to the confirmed step
+    // (Math.min below), so a sub-pixel prediction contributes at most
+    // sub-pixel to the smoothed velocity - skip the browser's array alloc
+    // for the whole sub-pixel traffic high-rate pointers produce. Also covers
+    // the zero step (sign(0) term is 0 anyway; a NaN delta can no longer
+    // poison velocityStep at rest).
+    if (hasPredicted) {
+      // |totalStep| feeds both the sub-pixel gate and the clamp below, so read
+      // it once per move instead of twice.
+      const absStep = Math.abs(totalStep);
+      if (absStep >= 1) {
+        const predicted = event.getPredictedEvents();
+        if (predicted && predicted.length) {
+          velocityStep += Math.sign(totalStep) *
+            Math.min(Math.abs(predicted[0].clientX - event.clientX), absStep);
+        }
+      }
+    }
+
+    const now = event.timeStamp;
+    const dt = (now - this.#lastTime) / 1000;
+    this.#lastTime = now;
+    const instantVelocity = dt > 0.001 ? velocityStep / dt : 0;
+    const alpha = dt > 0 ? 1 - Math.exp(-dt / SCRUB_VELOCITY_TAU_S) : 0;
+    this.#velocity += alpha * (instantVelocity - this.#velocity);
+    // Emit via the pooled event: the payload and the Event both ride reused
+    // objects, so no per-move allocation (dispatchEvent runs synchronously and
+    // consumers read before the next move re-mutates them).
+    scrubDetail.zone = this.#zone() || "screen";
+    scrubDetail.method = "pointer";
+    scrubDetail.dx = totalStep;
+    scrubDetail.dy = totalStepY;
+    scrubDetail.velocity = this.#velocity;
+    scrubDetail.timestamp = now;
+    this.#dispatch(GESTURE_EVENTS.scrub, scrubDetail);
+  }
+
+  /** Stroke end: unlatch and emit the pooled scrub-end. Self-guarding -
+   *  the engine's session teardown runs unconditionally for all strokes. */
+  end() {
+    if (!this.#active) {
+      return;
+    }
+    this.#active = false;
+    scrubEndDetail.zone = this.#zone() || "screen";
+    scrubEndDetail.method = "pointer";
+    this.#dispatch(GESTURE_EVENTS.scrubEnd, scrubEndDetail);
+  }
+}
+
+/**
+ * Swipe recognizer: the vertical drag machine owns the video-transform side
+ * of a swipe stroke - the pre-stroke composition capture, the per-move
+ * translateY follow, and the eased restore. The engine owns the latch
+ * decision, stream policy (capture, suppression, swipeStart dispatch). Per
+ * shell law the zoom/fill crop is the one transform owner; this stroke
+ * deliberately rewrites the same property as legacy behavior - its base
+ * snapshot and the eased hand-back make it a scope of one, restored before
+ * the swipe event can be consumed.
+ */
+class SwipeStroke {
+  #video;
+  #active = false;
+  #direction = null;
+  #baseTransform = "";
+  #lastDrag = NaN;
+  #lastTransform = "";
+
+  constructor(video) {
+    this.#video = video;
+  }
+
+  get active() {
+    return this.#active;
+  }
+
+  get direction() {
+    return this.#direction;
+  }
+
+  /** Fresh press: the drag state dies with the press; the base snapshot
+   *  persists (it is only ever read by a stroke that re-captures it first). */
+  reset() {
+    this.#active = false;
+    this.#direction = null;
+    this.#lastDrag = NaN;
+    this.#lastTransform = "";
+  }
+
+  /** Latch: snapshot the idling composition before any write happens, and
+   *  promote the video to a compositor layer the moment a down-drag takes
+   *  the stroke so the per-move translateY tracks on the compositor
+   *  (pointer rate) instead of forcing a re-rasterizing style recalc every
+   *  move. Dropped again by the restore ease below. */
+  latch(direction) {
+    this.#active = true;
+    this.#direction = direction;
+    this.#baseTransform = this.#video.style.transform || "";
+    if (this.#direction === "down") {
+      this.#video.style.willChange = "transform";
+    }
+  }
+
+  /** Per-move follow: the engine derives the stroke delta (y relative to the
+   *  press origin); this machine deduplicates frame-identical writes. */
+  drag(drag) {
+    if (drag === this.#lastDrag) {
+      return;
+    }
+    const t = this.#baseTransform
+      ? this.#baseTransform + " translateY(" + drag + "px)"
+      : "translateY(" + drag + "px)";
+    if (t !== this.#lastTransform) {
+      this.#video.style.transform = t;
+      this.#lastTransform = t;
+    }
+    this.#lastDrag = drag;
+  }
+
+  /** Stroke end when still latched: drop the drag state and ease the video
+   *  back to the pre-stroke composition. Self-guarding, like ScrubStroke.end. */
+  end() {
+    if (!this.#active) {
+      return;
+    }
+    this.#active = false;
+    this.#direction = null;
+    this.#lastDrag = NaN;
+    this.#lastTransform = "";
+    easeTransformTo(this.#video, this.#baseTransform || "");
+  }
+}
+
+/**
+ * Tap-replay machine: a first tap of a possible double tap is held back for
+ * the dbltap window, expiring into a synthetic SDK click at the original
+ * coordinates - so a single tap still reaches the SDK while a double tap
+ * never leaks its first click. The window clock rides this machine so the
+ * first/second decision lives with the seed it cancels. Debouncing engages
+ * only the paths the engine guards (pointerup under an armed dbltap intent),
+ * so inline taps keep their native zero-latency click.
+ */
+class TapReplay {
+  /** -Infinity so the very first tap can never match against boot time. */
+  #lastTapTime = -Infinity;
+  #timer = null;
+  #target = null;
+  #x = 0;
+  #y = 0;
+
+  /** Whether a first-tap seed is armed - the click/dblclick capture handlers
+   *  consult this to keep the real click invisible until the window closes. */
+  get pending() {
+    return this.#target !== null;
+  }
+
+  /** A new press could still turn into a dbltap; a stale seed must not
+   *  outlive the press it seeded from. */
+  cancel() {
+    this.#timer?.();
+    this.#timer = null;
+    this.#target = null;
+  }
+
+  /** One pointerup tap visited. Returns "second" when this tap closes a
+   *  dbltap window (the pending seed dies, the engine dispatches dbltap,
+   *  suppresses activations), "first" when it opens one (the seed armed). */
+  tap(now, target, x, y) {
+    if (now - this.#lastTapTime < DOUBLE_TAP_WINDOW_MS) {
+      this.#lastTapTime = -Infinity;
+      this.cancel();
+      return "second";
+    }
+    this.#lastTapTime = now;
+    this.#arm(target, x, y);
+    return "first";
+  }
+
+  #arm(target, x, y) {
+    this.cancel();
+    this.#target = target;
+    this.#x = x;
+    this.#y = y;
+    this.#timer = delay(() => {
+      this.#timer = null;
+      this.#replay();
+    }, DOUBLE_TAP_WINDOW_MS);
+  }
+
+  #replay() {
+    const target = this.#target;
+    this.#target = null;
+    if (this.#target === null && target && target.isConnected) {
+      const win = target.ownerDocument && target.ownerDocument.defaultView;
+      const Ctor = (win && win.MouseEvent) || globalThis.MouseEvent;
+      if (Ctor) {
+        const event = new Ctor("click", {
+          bubbles: true,
+          cancelable: true,
+          composed: true,
+          view: win || null,
+          detail: 1,
+          clientX: this.#x,
+          clientY: this.#y
+        });
+        forgeRegistry.markReplay(event);
+        target.dispatchEvent(event);
+      }
+    }
+  }
+}
+
+/**
+ * Space key machine: hold-to-speed + bare-tap toggle. The engine keeps the
+ * keydown/keyup routing (binding-table dispatch, focus arbitration, the
+ * cross-code repeat shield set); this owns the press's hold timer, hold
+ * state, and its release/toggle decision, so an orphaned hold left latched
+ * by a swallowed keyup can be settled exactly by the next press.
+ */
+class SpaceSession {
+  #video;
+  #dispatch;
+  /** Liveness gate for the bare-tap toggle (focus may have moved between
+   *  keydown and keyup), borrowed from the engine at handoff time. */
+  #canToggle;
+  #timer = null;
+  #holding = false;
+  #holdStart = 0;
+  /** Whether the CURRENT Space press was captured by us. The keydown decision
+   *  (shouldHandleKeys) is latched here so keyup never toggles playback for a
+   *  press we did not own (focus moved between down and up), and always
+   *  releases a hold we did. */
+  #own = false;
+
+  constructor(video, dispatch, canToggle) {
+    this.#video = video;
+    this.#dispatch = dispatch;
+    this.#canToggle = canToggle;
+  }
+
+  /** A captured press begins (the engine already made the ownership and
+   *  shielding decisions): settle any orphaned hold, then re-arm from a
+   *  clean state - a swallowed keyup would otherwise poison every later
+   *  hold with a latched boost. */
+  press() {
+    if (this.#holding) {
+      this.#holding = false;
+      this.#dispatchRelease();
+    }
+    this.#own = true;
+    this.#holdStart = performance.now();
+    this.clearTimer();
+    this.#timer = delay(() => {
+      this.#timer = null;
+      if (!this.#video.paused && allowsIntent("hold")) {
+        this.#holding = true;
+        holdDetail.zone = "screen";
+        holdDetail.method = "keyboard";
+        holdDetail.duration = performance.now() - this.#holdStart;
+        this.#dispatch(GESTURE_EVENTS.hold, holdDetail);
+      }
+    }, HOLD_TIMEOUT_MS);
+  }
+
+  /** A press the page owned (text entry, foreign focus): its keyup must not
+   *  toggle playback for it. */
+  foreign() {
+    this.#own = false;
+  }
+
+  /**
+   * End a Space session: an active hold always releases (restoring playback
+   * rate via the action layer), a bare tap toggles play/pause - but only for
+   * a press keydown captured, never for a press that started in a text
+   * field. Blur finishes silently-with-release and never toggles.
+   */
+  release(allowToggle) {
+    const wasHolding = this.#holding;
+    const owned = this.#own;
+    this.#own = false;
+    this.#holding = false;
+    this.clearTimer();
+    if (wasHolding) {
+      this.#dispatchRelease();
+    } else if (allowToggle && owned && this.#canToggle()) {
+      if (this.#video.paused) {
+        // play() returns a promise on spec engines; guard so an odd host
+        // (test shims, minimal webviews) degrades to a silent no-op instead
+        // of a TypeError inside the keyup handler.
+        const played = this.#video.play();
+        if (played && typeof played.catch === "function") {
+          played.catch((err) => {
+            if (!isBenignMediaPolicyError(err)) {
+              logger.log("forge", "bare-tap play rejected:", err.name);
+            }
+          });
+        }
+      } else {
+        this.#video.pause();
+      }
+    }
+  }
+
+  /** Teardown-shaped finish: restore a latched hold's rate (release-only,
+   *  never toggles - used only where focus truth is unknowable, destroy). */
+  abort() {
+    if (this.#holding) {
+      this.#holding = false;
+      this.#dispatchRelease();
+    }
+    this.#own = false;
+  }
+
+  clearTimer() {
+    // Almost every landing reaches here with no hold timer armed; the
+    // null check skips the cancel invocation on that hot path. The null
+    // assignment stays unconditional so the field is reset.
+    if (this.#timer !== null) {
+      this.#timer();
+    }
+    this.#timer = null;
+  }
+
+  #dispatchRelease() {
+    releaseDetail.zone = "screen";
+    releaseDetail.method = "keyboard";
+    releaseDetail.duration = performance.now() - this.#holdStart;
+    this.#dispatch(GESTURE_EVENTS.release, releaseDetail);
+  }
+}
+
+/**
+ * InputForge engine: the gesture router. Turns pointer/keyboard/wheel
+ * physics into semantic GESTURE_EVENTS on the shell host; every policy
  * decision (settings gates, fullscreen requirement) is delegated to the
  * declarative INPUT_BINDINGS list, sampled live at each decision point.
+ * Per-story state machines own the recognizer state (ScrubStroke, SwipeStroke,
+ * TapReplay, SpaceSession) while the engine keeps the stream: press
+ * eligibility, pointer tracking, the shared session-latch flag, and the
+ * click/dblclick suppression decisions.
  *
  * Chromium 155+ native by design: one AbortSignal owns the entire listener
  * lifetime (destroy() === scope.abort()), all pointer listeners are passive,
@@ -213,8 +651,6 @@ export class InputForge {
   #startTime = 0;
   #holdTimer = null;
   #holding = false;
-  /** -Infinity so the very first tap can never match against boot time. */
-  #lastTapTime = -Infinity;
   #gestureZone = null;
 
   // Click/dblclick suppression after gestures: a deadline (time-based, not
@@ -226,30 +662,18 @@ export class InputForge {
   // eligible, so zone-capture stops its pointer/mouse/touch stream. #awaitClick:
   // latched at pointerup to swallow the compat mouseup before the click
   // decision; it clears on the arriving click, on cancel, or on the next
-  // pointerdown - no timer needed. #tapReplay*: a first tap held back (a
-  // dbltap may still form) that expires into a synthetic click for the SDK.
+  // pointerdown - no timer needed.
   #pointerOwned = false;
   #awaitClick = false;
-  #tapReplayTarget = null;
-  #tapReplayTimer = null;
-  #tapReplayX = 0;
-  #tapReplayY = 0;
 
-  // Scrub state.
-  #scrubbing = false;
-  #scrubLastX = 0;
-  // Y mirror of #scrubLastX: the pan arm of scrub (zoomed fullscreen) needs
-  // the vertical stroke delta the seek arm never consumed.
-  #scrubLastY = 0;
-  #scrubLastTime = 0;
-  #scrubVelocity = 0;
-
-  // Swipe state.
-  #swiping = false;
-  #swipeDirection = null;
-  #swipeBaseTransform = "";
-  #lastSwipeDrag = NaN;
-  #lastSwipeTransform = "";
+  /** Per-story machines, built in the constructor (each borrows the engine's
+   *  live gesture boundaries: video, dispatch, zone). Scrub: the move-stream
+   *  recognizer; Swipe: the translate-drag machine; TapReplay: the dbltap
+   *  click-window seed; SpaceSession: the keyboard hold/toggle press. */
+  #scrub;
+  #swipe;
+  #tap;
+  #space;
 
   /**
    * Once a scrub/swipe session latches, the gesture already started fullscreen
@@ -273,15 +697,8 @@ export class InputForge {
   // pointer. Cleared per fresh press so recycled ids stay honest.
   #releasedCapture = new Set();
 
-  // Keyboard hold state.
-  #keyboardHoldTimer = null;
-  #keyboardHolding = false;
-  #keyboardHoldStart = 0;
-  /** Whether the CURRENT Space press was captured by us. The keydown decision
-   *  (shouldHandleKeys) is latched here so keyup never toggles playback for a
-   *  press we did not own (focus moved between down and up), and always
-   *  releases a hold we did. */
-  #keyboardOwn = false;
+  // Keyboard: the Space press machine owns its own state below; only the
+  // cross-code repeat shield set stays engine-owned (bindings + repeats).
   /** Event.code values whose CURRENT press we own end-to-end: the first press
    *  took preventDefault + stopImmediatePropagation, so its auto-repeats must
    *  be shielded identically - otherwise the page's own handlers (platform
@@ -301,6 +718,14 @@ export class InputForge {
     this.#video = video;
     this.#zone = zone;
     this.#eventTarget = eventTarget;
+    // The recognizer set: borrowed closures over this engine's live gesture
+    // boundaries (video element for transform/toggle truth, dispatch for the
+    // pooled semantic events, the gesture-zone reader for session teardowns).
+    const dispatchGesture = (name, detail) => this.#dispatch(name, detail);
+    this.#scrub = new ScrubStroke(dispatchGesture, () => this.#gestureZone);
+    this.#swipe = new SwipeStroke(video);
+    this.#tap = new TapReplay();
+    this.#space = new SpaceSession(video, dispatchGesture, () => this.#shouldHandleKeys());
     const { signal } = this.#scope;
     // Track touch-action (kills scroll/pinch takeover) and user-select (kills
     // native selection highlight + its hit-testing while scrubbing over page
@@ -431,11 +856,6 @@ export class InputForge {
     }
   }
 
-  /** Snap any inline transform back with a short transition. */
-  #restoreTransform() {
-    easeTransformTo(this.#video, this.#swipeBaseTransform || "");
-  }
-
   destroy() {
     if (this.#scope.disposed) {
       return;
@@ -446,7 +866,6 @@ export class InputForge {
     // exactly where #scope.abort() used to.
     this.#endPointerSession();
     this.#clearHoldTimer();
-    this.#clearKeyboardHoldTimer();
     this.#videoRect = null;
     this.#pointers.clear();
     this.#releasedCapture.clear();
@@ -454,35 +873,18 @@ export class InputForge {
     // DOM lifecycle: disconnect observers, restore styles, remove elements.
     this.#dom.destroy();
     forgeRegistry.remove(this);
-    this.#resetKeyboardHold();
+    this.#space.abort();
+    this.#ownedKeyCodes.clear();
+    this.#space.clearTimer();
     this.#pointerOwned = false;
     this.#clearAwaitClick();
-    this.#cancelTapReplay();
+    this.#tap.cancel();
     this.#scope.dispose();
   }
 
   /** Suppress the click/dblclick that follows an interactive gesture. */
   #suppressNextActivations() {
     this.#suppressClickUntil = performance.now() + SUPPRESS_WINDOW_MS;
-  }
-
-  #resetKeyboardHold() {
-    if (this.#keyboardHolding) {
-      // Reset/teardown while Space is held must restore the boosted rate
-      // first - the pointer path releases through #endPointerSession, and
-      // the keyboard path used to drop the release here, leaving playback
-      // stuck at hold speed (e.g. destroy mid-hold on an SPA navigation).
-      this.#keyboardHolding = false;
-      this.#dispatchKeyboardRelease();
-    }
-    this.#keyboardOwn = false;
-    this.#ownedKeyCodes.clear();
-    this.#clearKeyboardHoldTimer();
-  }
-
-  /** Keyboard-source release, shared by keyup, blur, reconcile and teardown. */
-  #dispatchKeyboardRelease() {
-    this.#fireRelease("screen", "keyboard", this.#keyboardHoldStart);
   }
 
   /** Fill the shared release detail and dispatch the GESTURE_EVENTS.release
@@ -525,26 +927,17 @@ export class InputForge {
     }
   }
 
-  /** End the current pointer interaction: fire release/scrub-end/swipe-cancel. */
+  /** End the current pointer interaction: fire the hold release, the scrub
+   *  end, and (for a swipe) restore the eased transform. Stroke machines
+   *  self-guard, so the three teardown calls are unconditional. */
   #endPointerSession() {
     this.#clearHoldTimer();
     if (this.#holding) {
       this.#holding = false;
       this.#fireRelease(this.#gestureZone, "pointer", this.#startTime);
     }
-    if (this.#scrubbing) {
-      this.#scrubbing = false;
-      scrubEndDetail.zone = this.#gestureZone || "screen";
-      scrubEndDetail.method = "pointer";
-      this.#dispatch(GESTURE_EVENTS.scrubEnd, scrubEndDetail);
-    }
-    if (this.#swiping) {
-      this.#swiping = false;
-      this.#swipeDirection = null;
-      this.#lastSwipeDrag = NaN;
-      this.#lastSwipeTransform = "";
-      this.#restoreTransform();
-    }
+    this.#scrub.end();
+    this.#swipe.end();
     this.#gestureFsActive = false;
     this.#suppressNextActivations();
   }
@@ -557,13 +950,6 @@ export class InputForge {
       this.#holdTimer();
     }
     this.#holdTimer = null;
-  }
-
-  #clearKeyboardHoldTimer() {
-    if (this.#keyboardHoldTimer !== null) {
-      this.#keyboardHoldTimer();
-    }
-    this.#keyboardHoldTimer = null;
   }
 
   /** Tear down two-pointer pinch tracking once fewer than two pointers remain. */
@@ -758,7 +1144,7 @@ export class InputForge {
       // gesture, and the SDK must not be toggled mid-sequence.
       this.#pointerOwned = true;
       if (allowsIntent("dbltap")) {
-        this.#cancelTapReplay();
+        this.#tap.cancel();
       }
       event.stopImmediatePropagation();
     }
@@ -777,15 +1163,10 @@ export class InputForge {
       this.#holding = false;
       this.#suppressClickUntil = 0;
       this.#gestureZone = this.#zoneForPoint(event);
-      this.#scrubbing = false;
-      this.#scrubLastX = event.clientX;
-      this.#scrubLastY = event.clientY;
-      this.#scrubLastTime = this.#startTime;
-      this.#scrubVelocity = 0;
-      this.#swiping = false;
-      this.#swipeDirection = null;
-      this.#lastSwipeDrag = NaN;
-      this.#lastSwipeTransform = "";
+      // Anchors + latches re-init per press (machines own their fields; the
+      // swipe base snapshot deliberately persists - only a latch re-captures it).
+      this.#scrub.reset(event.clientX, event.clientY, this.#startTime);
+      this.#swipe.reset();
       this.#clearHoldTimer();
 
       this.#holdTimer = delay(() => {
@@ -834,156 +1215,35 @@ export class InputForge {
     // allowsIntent scans for the rest of the move stream - the same decisions
     // stay fixed mid-session.
     if ((this.#gestureFsActive || fs) && !this.#holding) {
-      if (!this.#scrubbing && !this.#swiping) {
+      if (!this.#scrub.active && !this.#swipe.active) {
         // Intent gates are sampled live: toggling a setting mid-session
         // applies to the very next move.
         if (allowsIntent("scrub") && dx > SCROLL_START_PX && dx > dy * AXIS_DOMINANCE_RATIO) {
-          this.#scrubbing = true;
+          this.#scrub.latch(x, y, event.timeStamp);
           this.#gestureFsActive = true;
           this.#pointerOp("setPointerCapture", this.#primaryPointerId);
-          this.#scrubLastX = x;
-          this.#scrubLastY = y;
           // event.timeStamp shares the timebase the per-move velocity filter
           // below already reads, so the whole move stream pays no clock read.
-          this.#scrubLastTime = event.timeStamp;
-          this.#scrubVelocity = 0;
         } else if (allowsIntent("swipe") && dy > SCROLL_START_PX && dy > dx * AXIS_DOMINANCE_RATIO) {
-          this.#swiping = true;
+          this.#swipe.latch(event.clientY > this.#startY ? "down" : "up");
           this.#gestureFsActive = true;
-          this.#swipeDirection = y > this.#startY ? "down" : "up";
-          this.#swipeBaseTransform = this.#video.style.transform || "";
-          // Promote the video to a compositor layer the moment a down-drag
-          // latches so the per-move translateY below tracks on the compositor
-          // (pointer rate) instead of forcing a re-rasterizing style recalc
-          // every move. Dropped again by easeTransformTo when the stroke's
-          // snap settles (down) or the restore eases back (up/cancel).
-          if (this.#swipeDirection === "down") {
-            this.#video.style.willChange = "transform";
-          }
           this.#pointerOp("setPointerCapture", this.#primaryPointerId);
           this.#suppressNextActivations();
           event.stopImmediatePropagation();
           swipeStartDetail.zone = this.#gestureZone || "screen";
           swipeStartDetail.method = "pointer";
-          swipeStartDetail.direction = this.#swipeDirection;
+          swipeStartDetail.direction = this.#swipe.direction;
           this.#dispatch(GESTURE_EVENTS.swipeStart, swipeStartDetail);
         }
       }
-      if (this.#scrubbing) {
+      if (this.#scrub.active) {
         event.stopImmediatePropagation();
-        this.#advanceScrub(event);
+        this.#scrub.advance(event);
       }
-      if (this.#swiping && this.#swipeDirection === "down") {
+      if (this.#swipe.active && this.#swipe.direction === "down") {
         event.stopImmediatePropagation();
-        const drag = y - this.#startY;
-        if (drag !== this.#lastSwipeDrag) {
-          const t = this.#swipeBaseTransform
-            ? this.#swipeBaseTransform + " translateY(" + drag + "px)"
-            : "translateY(" + drag + "px)";
-          if (t !== this.#lastSwipeTransform) {
-            this.#video.style.transform = t;
-            this.#lastSwipeTransform = t;
-          }
-          this.#lastSwipeDrag = drag;
-        }
+        this.#swipe.drag(y - this.#startY);
       }
-    }
-  }
-
-  /**
-   * Consume every coalesced sample of the move so high-rate Chromium pointer
-   * streams scrub at full fidelity; one semantic event is emitted per move.
-   *
-   * Real-time velocity is measured at move granularity from true event
-   * timestamps (the live event's own DOMHighResTimeStamp, same epoch as
-   * performance.now()) and smoothed with a first-order time-based filter,
-   * alpha = 1 - exp(-dt/tau). Because alpha derives from the real interval
-   * between moves, the smoothing window is the same absolute time at any
-   * display rate - adaptive-refresh correct - while the small tau keeps the
-   * signal responsive enough to track speed changes mid-stroke, so the seek
-   * amount stays proportional to the hand in real time.
-   *
-   * Chromium's PointerEvent.getPredictedEvents() returns extrapolated FUTURE
-   * positions. We speculatively "draw ahead" with them, matching the drawing
-   * idiom in the Pointer Events spec (predict, then discard once real points
-   * arrive): predicted travel feeds the VELOCITY estimate only, never the
-   * confirmed seek delta (#scrubLastX stays pinned to real samples). Because
-   * scrub's amount is a monotonic function of velocity, a fresher, higher
-   * velocity read makes the response feel ahead of the hand - lower perceived
-   * latency - while the absolute position stays grounded in real motion, so a
-   * prediction can never overshoot or drift a fast flick. Prediction is
-   * bounded: only the first predicted sample, capped to the confirmed travel.
-   */
-  #advanceScrub(event) {
-    let totalStep = 0;
-    let totalStepY = 0;
-    const hasCoalesced = typeof event.getCoalescedEvents === "function";
-    const samples = hasCoalesced ? event.getCoalescedEvents() : null;
-    // Coalesced samples then the live event, without materializing a combined
-    // array: high-rate Chromium pointer streams land here every move, so a
-    // [[...samples, event]] spread per frame would allocate needlessly.
-    if (samples) {
-      const count = samples.length + 1;
-      let lastX = this.#scrubLastX;
-      let lastY = this.#scrubLastY;
-      for (let i = 0; i < count; i++) {
-        const sample = i < samples.length ? samples[i] : event;
-        totalStep += sample.clientX - lastX;
-        lastX = sample.clientX;
-        totalStepY += sample.clientY - lastY;
-        lastY = sample.clientY;
-      }
-      this.#scrubLastX = lastX;
-      this.#scrubLastY = lastY;
-    } else {
-      totalStep = event.clientX - this.#scrubLastX;
-      this.#scrubLastX = event.clientX;
-      totalStepY = event.clientY - this.#scrubLastY;
-      this.#scrubLastY = event.clientY;
-    }
-
-    // Speculative velocity wash: the first predicted pointer beats the live
-    // event just enough to pull the velocity estimate forward, but is clamped
-    // to a fraction of the confirmed step so it can never dominate or reverse
-    // against a correcting hand. Purely a velocity-shaping signal.
-    const hasPredicted = hasCoalesced && typeof event.getPredictedEvents === "function";
-    let velocityStep = totalStep;
-    // Sub-pixel gate: the additive term is clamped to the confirmed step
-    // (Math.min below), so a sub-pixel prediction contributes at most
-    // sub-pixel to the smoothed velocity - skip the browser's array alloc
-    // for the whole sub-pixel traffic high-rate pointers produce. Also covers
-    // the zero step (sign(0) term is 0 anyway; a NaN delta can no longer
-    // poison velocityStep at rest).
-    if (hasPredicted) {
-      // |totalStep| feeds both the sub-pixel gate and the clamp below, so read
-      // it once per move instead of twice.
-      const absStep = Math.abs(totalStep);
-      if (absStep >= 1) {
-        const predicted = event.getPredictedEvents();
-        if (predicted && predicted.length) {
-          velocityStep += Math.sign(totalStep) *
-            Math.min(Math.abs(predicted[0].clientX - event.clientX), absStep);
-        }
-      }
-    }
-
-    const now = event.timeStamp;
-    const dt = (now - this.#scrubLastTime) / 1000;
-    this.#scrubLastTime = now;
-    const instantVelocity = dt > 0.001 ? velocityStep / dt : 0;
-    const alpha = dt > 0 ? 1 - Math.exp(-dt / SCRUB_VELOCITY_TAU_S) : 0;
-    this.#scrubVelocity += alpha * (instantVelocity - this.#scrubVelocity);
-    // Emit via the pooled event: the payload and the Event both ride reused
-    // objects, so no per-move allocation (dispatchEvent runs synchronously and
-    // consumers read before the next move re-mutates them).
-    scrubDetail.zone = this.#gestureZone || "screen";
-    scrubDetail.method = "pointer";
-    scrubDetail.dx = totalStep;
-    scrubDetail.dy = totalStepY;
-    scrubDetail.velocity = this.#scrubVelocity;
-    scrubDetail.timestamp = now;
-    if (!this.#scope.disposed && this.#eventTarget) {
-      this.#eventTarget.dispatchEvent(this.#channel.event(GESTURE_EVENTS.scrub, scrubDetail));
     }
   }
 
@@ -1015,7 +1275,7 @@ export class InputForge {
     const dy = event.clientY - this.#startY;
     const distance = Math.sqrt(dx * dx + dy * dy);
 
-    if (this.#holding || this.#scrubbing || this.#swiping) {
+    if (this.#holding || this.#scrub.active || this.#swipe.active) {
       // A latched session ends through the same #endPointerSession teardown
       // the cancel/destroy paths use: it fires the release, the scrub-end,
       // and (for a swipe) restores the video transform and clears the stroke
@@ -1024,8 +1284,8 @@ export class InputForge {
       // dispatched after restoration, which dispatchEvent (synchronous) makes
       // the semantically identical order to the old inline branch.
       event.stopImmediatePropagation();
-      const wasSwiping = this.#swiping;
-      const swipeDirection = this.#swipeDirection;
+      const wasSwiping = this.#swipe.active;
+      const swipeDirection = this.#swipe.direction;
       this.#endPointerSession();
       if (wasSwiping) {
         swipeDetail.zone = this.#gestureZone || "screen";
@@ -1039,19 +1299,11 @@ export class InputForge {
       this.#gestureZone !== null &&
       allowsIntent("dbltap")
     ) {
-      if (now - this.#lastTapTime < DOUBLE_TAP_WINDOW_MS) {
-        this.#lastTapTime = -Infinity;
-        this.#cancelTapReplay();
+      if (this.#tap.tap(now, event.target, event.clientX, event.clientY) === "second") {
         this.#suppressNextActivations();
         dbltapDetail.zone = this.#gestureZone;
         dbltapDetail.method = "pointer";
         this.#dispatch(GESTURE_EVENTS.dbltap, dbltapDetail);
-      } else {
-        // First tap: the real click (already swallowed at capture by the
-        // seed flag) may still belong to a future dbltap - hold it back and
-        // replay it for the SDK only if the dbltap window closes untouched.
-        this.#lastTapTime = now;
-        this.#armTapReplay(event.target, event.clientX, event.clientY);
       }
     }
     this.#primaryPointerId = null;
@@ -1087,7 +1339,10 @@ export class InputForge {
    * stay latched.
    */
   #releaseSessions() {
-    this.#finishKeyboardHold(false);
+    // The Space shield entry dies with the session; the machine's release
+    // covers the hold + toggle decision (never toggles on lifecycle loss).
+    this.#ownedKeyCodes.delete("Space");
+    this.#space.release(false);
     for (const id of this.#pointers.keys()) {
       this.#cancelTrackedPointer(id);
     }
@@ -1147,52 +1402,8 @@ export class InputForge {
     this.#awaitClick = false;
   }
 
-  /** Hold a first tap's click back for the dbltap window; on expiry (no
-   *  second tap completed the gesture) the SDK receives a synthetic click at
-   *  the original coordinates - so a single tap still reaches the SDK while
-   *  a double tap never leaks its first click. Debounce only engages when
-   *  the dbltap intent is armed (fullscreen), so inline taps keep their
-   *  native zero-latency click. */
-  #armTapReplay(target, x, y) {
-    this.#cancelTapReplay();
-    this.#tapReplayTarget = target;
-    this.#tapReplayX = x;
-    this.#tapReplayY = y;
-    this.#tapReplayTimer = delay(() => {
-      this.#tapReplayTimer = null;
-      this.#replayTapClick();
-    }, DOUBLE_TAP_WINDOW_MS);
-  }
-
-  #cancelTapReplay() {
-    this.#tapReplayTimer?.();
-    this.#tapReplayTimer = null;
-    this.#tapReplayTarget = null;
-  }
-
-  #replayTapClick() {
-    const target = this.#tapReplayTarget;
-    this.#tapReplayTarget = null;
-    if (this.#scope.disposed || !target || !target.isConnected) {
-      return;
-    }
-    const win = target.ownerDocument && target.ownerDocument.defaultView;
-    const Ctor = (win && win.MouseEvent) || globalThis.MouseEvent;
-    if (!Ctor) {
-      return;
-    }
-    const event = new Ctor("click", {
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-      view: win || null,
-      detail: 1,
-      clientX: this.#tapReplayX,
-      clientY: this.#tapReplayY
-    });
-    forgeRegistry.markReplay(event);
-    target.dispatchEvent(event);
-  }
+  /** Hold-a-first-tap's-click-back for the dbltap window is TapReplay's
+   *  story; the click capture below only consults it. */
 
   #handleClickCapture(event) {
     // Our own single-tap stand-in: pass it to the SDK untouched.
@@ -1200,7 +1411,7 @@ export class InputForge {
       this.#clearAwaitClick();
       return;
     }
-    const ownedPress = this.#awaitClick || this.#tapReplayTarget !== null;
+    const ownedPress = this.#awaitClick || this.#tap.pending;
     this.#clearAwaitClick();
     // Gesture window: every activation the shell consumed stays invisible -
     // the window is a deadline, consumed by time, so a dblclick arriving
@@ -1214,7 +1425,7 @@ export class InputForge {
       return; // Press the shell never took (SDK control, outside rect, right
       // button): native single click passes through as-is.
     }
-    if (this.#tapReplayTarget) {
+    if (this.#tap.pending) {
       // First tap of a possible dbltap - hold the real click back; the seed
       // replays it for the SDK if the window closes without a second tap.
       event.stopImmediatePropagation();
@@ -1234,7 +1445,7 @@ export class InputForge {
       event.preventDefault();
       return;
     }
-    if (this.#tapReplayTarget) {
+    if (this.#tap.pending) {
       // Two slow taps (outside the dbltap window): both clicks are managed
       // by their seeds, so the UA's dblclick stays invisible too.
       event.stopImmediatePropagation();
@@ -1315,28 +1526,12 @@ export class InputForge {
         // A swallowed keyup (focus slipped into an iframe, a page handler
         // ate it) would leave the boost latched and poison every later hold:
         // settle the orphaned session first, then re-arm from a clean state.
-        if (this.#keyboardHolding) {
-          this.#keyboardHolding = false;
-          this.#dispatchKeyboardRelease();
-        }
-        this.#keyboardOwn = true;
+        this.#space.press();
         this.#ownedKeyCodes.add("Space");
-        this.#keyboardHoldStart = performance.now();
-        this.#clearKeyboardHoldTimer();
-        this.#keyboardHoldTimer = delay(() => {
-          this.#keyboardHoldTimer = null;
-          if (!this.#video.paused && allowsIntent("hold")) {
-            this.#keyboardHolding = true;
-            holdDetail.zone = "screen";
-            holdDetail.method = "keyboard";
-            holdDetail.duration = performance.now() - this.#keyboardHoldStart;
-            this.#dispatch(GESTURE_EVENTS.hold, holdDetail);
-          }
-        }, HOLD_TIMEOUT_MS);
       } else {
         // Not ours (text entry, foreign focus): a later keyup must not
         // toggle playback for a press the page owned.
-        this.#keyboardOwn = false;
+        this.#space.foreign();
       }
       return;
     }
@@ -1366,41 +1561,8 @@ export class InputForge {
     if (event.code !== "Space") {
       return;
     }
-    this.#finishKeyboardHold(true);
-  }
-
-  /**
-   * End a Space session: an active hold always releases (restoring playback
-   * rate via the action layer), a bare tap toggles play/pause - but only on a
-   * real keyup for a press keydown captured (#keyboardOwn), never for a press
-   * that started in a text field. Blur finishes silently-with-release and
-   * never toggles.
-   */
-  #finishKeyboardHold(allowToggle) {
-    const wasHolding = this.#keyboardHolding;
-    const owned = this.#keyboardOwn;
-    this.#keyboardOwn = false;
-    this.#ownedKeyCodes.delete("Space");
-    this.#keyboardHolding = false;
-    this.#clearKeyboardHoldTimer();
-    if (wasHolding) {
-      this.#dispatchKeyboardRelease();
-    } else if (allowToggle && owned && this.#shouldHandleKeys()) {
-      if (this.#video.paused) {
-        // play() returns a promise on spec engines; guard so an odd host
-        // (test shims, minimal webviews) degrades to a silent no-op instead
-        // of a TypeError inside the keyup handler.
-        const played = this.#video.play();
-        if (played && typeof played.catch === "function") {
-          played.catch((err) => {
-            if (!isBenignMediaPolicyError(err)) {
-              logger.log("forge", "bare-tap play rejected:", err.name);
-            }
-          });
-        }
-      } else {
-        this.#video.pause();
-      }
-    }
+    // Space session end: hold release / bare-tap toggle - the press decision
+    // machine carries it.
+    this.#space.release(true);
   }
 }

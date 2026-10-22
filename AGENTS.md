@@ -156,10 +156,16 @@ iframes, same-origin and cross-origin:
   wheel/steps, pan clamp, trailing persist, `resetForDomain` deletes the
   stored crop) + `buildZoomSection` (panel section over one shell's state).
   Pure state: the transform write belongs solely to `ViewershipTransform`.
-- **inputs/forge.js** — the pointer/keyboard session machine: hold, tap
-  replay, pinch, swipe, scrub (detail carries `dx` and the mirrored `dy`
-  the pan arm consumes), double-tap zones; `HoldRepeater`; all timers
-  ride the shared scheduler.
+- **inputs/forge.js** — the pointer/keyboard gesture engine: the stream
+  router (press eligibility, pointer tracking, the session latch feeding the
+  shared `fs` gate, click/dblclick suppression) over per-story recognizer
+  machines: `ScrubStroke` (pointer move-stream scrub with coalesced samples,
+  the exp-smoothed velocity filter, and the bounded predicted-events wash),
+  `SwipeStroke` (the translate-drag transform writes and their eased
+  restore), `TapReplay` (the dbltap window's click seed), `SpaceSession`
+  (hold-to-speed + bare-tap toggle). Gesture detail carries `dx` and the
+  mirrored `dy` the pan arm consumes; pinch and trackpad-pinch handshake
+  stay engine-core; `HoldRepeater`-style timers ride the shared scheduler.
 - **inputs/actions.js** — the action layer: the binding table + `IntentGates`,
   and the per-story state machines `SkipStreak`, `ScrubSession`, and
   `ViewershipTransform` (fill-mode cover scale, the zoom crop composed as
