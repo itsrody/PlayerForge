@@ -46,48 +46,80 @@ function decimalsOf(step) {
 /**
  * Numeric spinbutton widget used by panel fields: text input with
  * hold-to-repeat chevron buttons and keyboard support. Programmatic
- * setValue() cascades through onChange like any user edit.
+ * setValue() cascades through onChange like any user edit. The committed
+ * value is a private field, so render + read + write ride one instance.
  */
-function createStepper({
-  min = 0,
-  max = 100,
-  step = 1,
-  value,
-  label,
-  onChange,
-  deferTextInput = false,
-  format,
-  signal
-} = {}) {
-  const lo = Number(min);
-  const hi = Number(max);
-  const by = Math.abs(Number(step)) || 1;
-  const decimals = Math.max(decimalsOf(by), 0);
-  // decimals is fixed per stepper, so the 10**decimals factor is computed once
-  // here instead of on every nudge/commit (hold-repeat fires it ~13x/s).
-  const roundFactor = 10 ** decimals;
-  const roundTo = (value) => Math.round(value * roundFactor) / roundFactor;
+class Stepper {
+  /** Public widget handles the documented addStepper shape exposes. */
+  root;
+  input;
 
-  let committed = roundTo(clamp(Number(value ?? min), lo, hi));
+  #lo;
+  #hi;
+  #by;
+  #roundTo;
+  #committed;
+  #format;
+  #deferTextInput;
+  #onChange;
+  #upButton;
+  #downButton;
 
-  const root = document.createElement("span");
-  root.className = "pf-stepper";
+  constructor({
+    min = 0,
+    max = 100,
+    step = 1,
+    value,
+    label,
+    onChange,
+    deferTextInput = false,
+    format,
+    signal
+  } = {}) {
+    const lo = this.#lo = Number(min);
+    const hi = this.#hi = Number(max);
+    const by = this.#by = Math.abs(Number(step)) || 1;
+    const decimals = Math.max(decimalsOf(by), 0);
+    // decimals is fixed per stepper, so the 10**decimals factor is computed once
+    // here instead of on every nudge/commit (hold-repeat fires it ~13x/s).
+    const roundFactor = 10 ** decimals;
+    this.#roundTo = (v) => Math.round(v * roundFactor) / roundFactor;
+    this.#committed = this.#roundTo(clamp(Number(value ?? min), lo, hi));
+    this.#format = format;
+    this.#deferTextInput = deferTextInput;
+    this.#onChange = onChange;
 
-  const input = document.createElement("input");
-  input.className = "pf-stepper-input";
-  input.type = "text";
-  input.setAttribute("inputmode", "decimal");
-  input.setAttribute("role", "spinbutton");
-  input.setAttribute("aria-valuemin", String(lo));
-  input.setAttribute("aria-valuemax", String(hi));
-  if (label) {
-    input.setAttribute("aria-label", label);
+    const input = this.input = document.createElement("input");
+    input.className = "pf-stepper-input";
+    input.type = "text";
+    input.setAttribute("inputmode", "decimal");
+    input.setAttribute("role", "spinbutton");
+    input.setAttribute("aria-valuemin", String(lo));
+    input.setAttribute("aria-valuemax", String(hi));
+    if (label) {
+      input.setAttribute("aria-label", label);
+    }
+
+    this.#upButton = this.#makeButton("chevron-up", 1, "Increase", signal);
+    this.#downButton = this.#makeButton("chevron-down", -1, "Decrease", signal);
+    const arrows = document.createElement("span");
+    arrows.className = "pf-stepper-arrows";
+    arrows.appendChild(this.#upButton);
+    arrows.appendChild(this.#downButton);
+
+    this.root = document.createElement("span");
+    this.root.className = "pf-stepper";
+    this.root.appendChild(this.input);
+    this.root.appendChild(arrows);
+
+    // Round-trip text for #commit()/#nudge() - always numeric so parseFloat
+    // parses it back. `format` (caller-provided) is display-only.
+    this.#showCommitted();
+    this.#syncAria();
   }
 
-  const arrows = document.createElement("span");
-  arrows.className = "pf-stepper-arrows";
-
-  const makeButton = (name, dir, title) => {
+  /** One hold-to-repeat chevron button wired to #nudge(dir). */
+  #makeButton(name, dir, title, signal) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "pf-stepper-btn";
@@ -103,10 +135,10 @@ function createStepper({
     signal?.addEventListener("abort", stopRepeat, { once: true });
     button.addEventListener("pointerdown", (event) => {
       event.preventDefault();
-      if (input.disabled) {
+      if (this.input.disabled) {
         return;
       }
-      repeat.start(() => nudge(dir));
+      repeat.start(() => this.#nudge(dir));
       const release = () => {
         stopRepeat();
         // No-ops once the signal already released them on destroy.
@@ -118,136 +150,138 @@ function createStepper({
       window.addEventListener("pointercancel", release, { passive: true, signal });
     });
     return button;
-  };
+  }
 
-  const upButton = makeButton("chevron-up", 1, "Increase");
-  const downButton = makeButton("chevron-down", -1, "Decrease");
-  arrows.appendChild(upButton);
-  arrows.appendChild(downButton);
+  #numText(v) {
+    return String(this.#roundTo(v));
+  }
 
-  // Round-trip text for commit()/nudge() - always numeric so parseFloat
-  // parses it back. `format` (caller-provided) is display-only.
-  const numText = (v) => String(roundTo(v));
-
-  const syncAria = () => {
-    input.setAttribute("aria-valuenow", String(committed));
-    if (format) {
-      input.setAttribute("aria-valuetext", format(committed));
+  #syncAria() {
+    this.input.setAttribute("aria-valuenow", String(this.#committed));
+    if (this.#format) {
+      this.input.setAttribute("aria-valuetext", this.#format(this.#committed));
     }
-  };
+  }
 
-  const showCommitted = () => {
-    input.value = format ? format(committed) : numText(committed);
-  };
+  #showCommitted() {
+    this.input.value = this.#format ? this.#format(this.#committed) : this.#numText(this.#committed);
+  }
 
-  const commit = (rawText) => {
+  #commit(rawText) {
     const parsed = Number.parseFloat(rawText);
     if (!Number.isFinite(parsed)) {
-      showCommitted();
-      return committed;
+      this.#showCommitted();
+      return this.#committed;
     }
-    const next = roundTo(clamp(parsed, lo, hi));
-    if (next !== committed) {
-      committed = next;
-      syncAria();
-      onChange?.(committed);
+    const next = this.#roundTo(clamp(parsed, this.#lo, this.#hi));
+    if (next !== this.#committed) {
+      this.#committed = next;
+      this.#syncAria();
+      this.#onChange?.(this.#committed);
     }
     // Render after the mutation: the old order painted the pre-commit value,
     // so blur/Enter/nudge flashed the previous number while state advanced.
-    showCommitted();
-    return committed;
-  };
-
-  function nudge(dir) {
-    commit(numText(committed + dir * by));
+    this.#showCommitted();
+    return this.#committed;
   }
 
-  input.addEventListener("input", () => {
-    // deferTextInput (settings steppers): typing stays local until blur or
-    // Enter commits, so every keystroke doesn't write GM storage and wake
-    // every other tab's live-reload. Arrow nudges still commit per click.
-    if (deferTextInput) {
-      return;
-    }
-    const text = input.value.trim();
-    if (!text) {
-      return;
-    }
-    const parsed = Number(text);
-    if (!Number.isFinite(parsed)) {
-      return;
-    }
-    const next = roundTo(clamp(parsed, lo, hi));
-    if (next !== committed) {
-      committed = next;
-      syncAria();
-      onChange?.(committed);
-    }
-  });
+  #nudge(dir) {
+    this.#commit(this.#numText(this.#committed + dir * this.#by));
+  }
 
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      nudge(1);
-    } else if (event.key === "ArrowDown") {
-      event.preventDefault();
-      nudge(-1);
-    } else if (event.key === "Enter") {
-      event.preventDefault();
-      commit(input.value);
-      // Commit but keep focus: Tab continues through the panel instead of
-      // dropping to <body> and restarting from the document.
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      showCommitted();
-      if (input.dataset.pfEscArmed) {
-        // Second Esc: the edit is already reverted - let this one reach the
-        // panel's document-level dismiss handler (and the CloseWatcher's
-        // close event, whose watcher consumed its free pass above).
-        delete input.dataset.pfEscArmed;
-      } else {
-        // First Esc: revert only. Swallow it here so it can't bubble to the
-        // panel's document keydown listener and close the whole panel.
-        input.dataset.pfEscArmed = "1";
-        event.stopPropagation();
+  getValue() {
+    return this.#committed;
+  }
+
+  setValue(next) {
+    const nextValue = this.#roundTo(clamp(Number(next), this.#lo, this.#hi));
+    if (nextValue === this.#committed) {
+      this.#showCommitted();
+      return this.#committed;
+    }
+    this.#committed = nextValue;
+    this.#showCommitted();
+    this.#syncAria();
+    this.#onChange?.(this.#committed);
+    return this.#committed;
+  }
+
+  setDisabled(disabled) {
+    this.input.disabled = disabled;
+    this.#upButton.disabled = disabled;
+    this.#downButton.disabled = disabled;
+    // Visual/pointer disabled state derives from :has(:disabled) in CSS -
+    // no class to mirror here.
+  }
+
+  wire() {
+    const input = this.input;
+    input.addEventListener("input", () => {
+      // deferTextInput (settings steppers): typing stays local until blur or
+      // Enter commits, so every keystroke doesn't write GM storage and wake
+      // every other tab's live-reload. Arrow nudges still commit per click.
+      if (this.#deferTextInput) {
+        return;
       }
-    }
-  });
-
-  input.addEventListener("blur", () => {
-    delete input.dataset.pfEscArmed;
-    commit(input.value);
-  });
-
-  root.appendChild(input);
-  root.appendChild(arrows);
-  showCommitted();
-  syncAria();
-
-  return {
-    root,
-    input,
-    getValue: () => committed,
-    setValue(next) {
-      const nextValue = roundTo(clamp(Number(next), lo, hi));
-      if (nextValue === committed) {
-        showCommitted();
-        return committed;
+      const text = input.value.trim();
+      if (!text) {
+        return;
       }
-      committed = nextValue;
-      showCommitted();
-      syncAria();
-      onChange?.(committed);
-      return committed;
-    },
-    setDisabled(disabled) {
-      input.disabled = disabled;
-      upButton.disabled = disabled;
-      downButton.disabled = disabled;
-      // Visual/pointer disabled state derives from :has(:disabled) in CSS -
-      // no class to mirror here.
-    }
-  };
+      const parsed = Number(text);
+      if (!Number.isFinite(parsed)) {
+        return;
+      }
+      const next = this.#roundTo(clamp(parsed, this.#lo, this.#hi));
+      if (next !== this.#committed) {
+        this.#committed = next;
+        this.#syncAria();
+        this.#onChange?.(this.#committed);
+      }
+    });
+
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        this.#nudge(1);
+      } else if (event.key === "ArrowDown") {
+        event.preventDefault();
+        this.#nudge(-1);
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        this.#commit(input.value);
+        // Commit but keep focus: Tab continues through the panel instead of
+        // dropping to <body> and restarting from the document.
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        this.#showCommitted();
+        if (input.dataset.pfEscArmed) {
+          // Second Esc: the edit is already reverted - let this one reach the
+          // panel's document-level dismiss handler (and the CloseWatcher's
+          // close event, whose watcher consumed its free pass above).
+          delete input.dataset.pfEscArmed;
+        } else {
+          // First Esc: revert only. Swallow it here so it can't bubble to the
+          // panel's document keydown listener and close the whole panel.
+          input.dataset.pfEscArmed = "1";
+          event.stopPropagation();
+        }
+      }
+    });
+
+    input.addEventListener("blur", () => {
+      delete input.dataset.pfEscArmed;
+      this.#commit(input.value);
+    });
+  }
+}
+
+/**
+ * Factory form kept as the public face; the widget state lives in Stepper.
+ */
+function createStepper(options) {
+  const stepper = new Stepper(options);
+  stepper.wire();
+  return stepper;
 }
 
 /**

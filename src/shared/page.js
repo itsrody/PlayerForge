@@ -105,66 +105,6 @@ function boundaryContains(a, b) {
     || b.startsWith(`${a}.`) || b.endsWith(`.${a}`);
 }
 
-/** Reusable distance rows for the bounded Levenshtein below. Domain keys are
- *  short and ranking scans many candidates, so two scratch rows equal to the
- *  shorter operand avoid per-call allocation on the hot ranking path - and
- *  because operands are swapped to that axis, alternating candidate lengths
- *  reuse one small pair instead of reallocating per entry.
- */
-let distRows = null;
-let distRowLen = 0;
-
-function ensureDistRows(len) {
-  if (!distRows || distRowLen < len + 1) {
-    distRows = [new Int32Array(len + 1), new Int32Array(len + 1)];
-    distRowLen = len + 1;
-  }
-}
-
-function boundedLevenshtein(a, b, max = Infinity) {
-  const lenA = a.length;
-  const lenB = b.length;
-  if (Math.abs(lenA - lenB) > max) {
-    return max + 1;
-  }
-  // Levenshtein is symmetric in its operands: iterate the longer string on the
-  // row axis and keep the SHORTER one as the columns, so scratch-row sizing is
-  // bound by the shorter operand (and the early-exit band stays exact).
-  let rows = a;
-  let cols = b;
-  if (lenB > lenA) {
-    rows = b;
-    cols = a;
-  }
-  const m = cols.length;
-  ensureDistRows(m);
-  let prev = distRows[0];
-  let curr = distRows[1];
-  for (let j = 0; j <= m; j++) {
-    prev[j] = j;
-  }
-  for (let i = 1; i <= rows.length; i++) {
-    curr[0] = i;
-    let rowMin = i;
-    const ch = rows[i - 1];
-    for (let j = 1; j <= m; j++) {
-      const cost = ch === cols[j - 1] ? 0 : 1;
-      const v = cost === 0 ? prev[j - 1] : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
-      curr[j] = v;
-      if (v < rowMin) {
-        rowMin = v;
-      }
-    }
-    if (rowMin > max) {
-      return max + 1;
-    }
-    const tmp = prev;
-    prev = curr;
-    curr = tmp;
-  }
-  return prev[m];
-}
-
 /** Strict equality or label-boundary relation between two domain keys. */
 export function domainsMatch(a, b) {
   if (!a || !b) {
@@ -174,21 +114,95 @@ export function domainsMatch(a, b) {
 }
 
 /**
- * Graded similarity for ranking: exact 3, boundary-related 2, otherwise
- * distance-based decay to 0. Fuzz never promotes to a match - it only orders
- * candidates once domainsMatch() has accepted them.
+ * The bounded-Levenshtein engine: its two scratch rows are private fields, so
+ * the hot ranking path reuses one small Int32 pair instead of reallocating per
+ * candidate. Module singleton; the exported domainScore wraps it.
  */
+class DomainMatcher {
+  /**
+   * Reusable distance rows. Domain keys are short and ranking scans many
+   * candidates, so two scratch rows equal to the shorter operand avoid
+   * per-call allocation on the hot ranking path - and because operands are
+   * swapped to that axis, alternating candidate lengths reuse one small pair
+   * instead of reallocating per entry.
+   */
+  #rows = null;
+  #rowLen = 0;
+
+  #ensureRows(len) {
+    if (!this.#rows || this.#rowLen < len + 1) {
+      this.#rows = [new Int32Array(len + 1), new Int32Array(len + 1)];
+      this.#rowLen = len + 1;
+    }
+  }
+
+  #boundedLevenshtein(a, b, max = Infinity) {
+    const lenA = a.length;
+    const lenB = b.length;
+    if (Math.abs(lenA - lenB) > max) {
+      return max + 1;
+    }
+    // Levenshtein is symmetric in its operands: iterate the longer string on the
+    // row axis and keep the SHORTER one as the columns, so scratch-row sizing is
+    // bound by the shorter operand (and the early-exit band stays exact).
+    let rows = a;
+    let cols = b;
+    if (lenB > lenA) {
+      rows = b;
+      cols = a;
+    }
+    const m = cols.length;
+    this.#ensureRows(m);
+    let prev = this.#rows[0];
+    let curr = this.#rows[1];
+    for (let j = 0; j <= m; j++) {
+      prev[j] = j;
+    }
+    for (let i = 1; i <= rows.length; i++) {
+      curr[0] = i;
+      let rowMin = i;
+      const ch = rows[i - 1];
+      for (let j = 1; j <= m; j++) {
+        const cost = ch === cols[j - 1] ? 0 : 1;
+        const v = cost === 0 ? prev[j - 1] : 1 + Math.min(prev[j], curr[j - 1], prev[j - 1]);
+        curr[j] = v;
+        if (v < rowMin) {
+          rowMin = v;
+        }
+      }
+      if (rowMin > max) {
+        return max + 1;
+      }
+      const tmp = prev;
+      prev = curr;
+      curr = tmp;
+    }
+    return prev[m];
+  }
+
+  /**
+   * Graded similarity for ranking: exact 3, boundary-related 2, otherwise
+   * distance-based decay to 0. Fuzz never promotes to a match - it only orders
+   * candidates once domainsMatch() has accepted them.
+   */
+  score(a, b) {
+    if (!a || !b) {
+      return 0;
+    }
+    if (a === b) {
+      return 3;
+    }
+    if (boundaryContains(a, b)) {
+      return 2;
+    }
+    return Math.max(0, 3 - this.#boundedLevenshtein(a, b, 3));
+  }
+}
+
+const domainMatcher = new DomainMatcher();
+
 export function domainScore(a, b) {
-  if (!a || !b) {
-    return 0;
-  }
-  if (a === b) {
-    return 3;
-  }
-  if (boundaryContains(a, b)) {
-    return 2;
-  }
-  return Math.max(0, 3 - boundedLevenshtein(a, b, 3));
+  return domainMatcher.score(a, b);
 }
 
 /* - 2. Entry hashing - */
@@ -256,46 +270,57 @@ const LEAD_PUNCT_RE = /^[\s\-–—|·:,/]+/;
 const TRAIL_PUNCT_RE = /[\s\-–—|·:,/]+$/;
 
 /**
+ * The title sanitizer: stripNonAscii runs ~8 regex passes per call, so one
+ * instance carries a single input->output memo slot (the hot shape is the
+ * same input repeating - the top-frame responder re-sanitizes document.title
+ * per incoming request, ownPageContext re-resolves on every navigation probe
+ * of an unchanged title). Pure function, so one slot is always correct -
+ * alternating inputs just miss, they never lie.
+ */
+class TitleSanitizer {
+  #input = null;
+  #output = "";
+
+  sanitize(raw) {
+    if (!raw) return "";
+    if (raw === this.#input) return this.#output;
+    const input = raw;
+    // Leading recording-code brackets are identifiers worth keeping, so pull
+    // them out whole first. A code is CAPS-NUMBER; anything after that in the
+    // same bracket is a qualifier (subtitle group, remux, ...) and is dropped:
+    // "[MIMK-278-SUBS] Repentance" -> "[MIMK-278] Repentance". A plain
+    // "[ABC-123]" is kept too; non-code brackets still go through the blanket
+    // strip below. The preserved [CODE] is reattached after that pass.
+    let code = "";
+    const codeMatch = raw.match(RECORDING_CODE_RE);
+    if (codeMatch) {
+      code = `[${codeMatch[1]}]`;
+      raw = raw.slice(codeMatch[0].length);
+    }
+    let s = raw;
+    s = s.replace(BRACKET_STRIP_RE, " ");
+    s = s.replace(TITLE_TAGS, " ");
+    s = s.replace(EN_DASH_RE, " ");
+    s = s.replace(NON_LATIN_RE, " ");
+    s = s.replace(WS_COLLAPSE_RE, " ").replace(LEAD_PUNCT_RE, "").replace(TRAIL_PUNCT_RE, "").trim();
+    const out = code ? `${code} ${s}`.trim() : (s || raw);
+    this.#input = input;
+    this.#output = out;
+    return out;
+  }
+}
+
+const titleSanitizer = new TitleSanitizer();
+
+/**
  * Strip non-Latin script characters and common video-title tags from a page
  * title, keeping only the show name and episode number.
  * Returns the original when the result would be empty (entirely non-Latin).
  * Trailing punctuation left behind by removed segments is cleaned up.
+ * Thin adapter over the sanitizer singleton (its memo slot is private state).
  */
-/** Single-slot memo for the title sanitizer. stripNonAscii runs ~8 regex
- *  passes per call; the hot shape is the same input repeating (the top-frame
- *  responder re-sanitizes document.title per incoming request, ownPageContext
- *  re-resolves on every navigation probe of an unchanged title). Pure
- *  function, so one input->output slot is always correct - alternating
- *  inputs just miss, they never lie. */
-let titleMemoInput = null;
-let titleMemoOutput = "";
-
 function stripNonAscii(raw) {
-  if (!raw) return "";
-  if (raw === titleMemoInput) return titleMemoOutput;
-  const input = raw;
-  // Leading recording-code brackets are identifiers worth keeping, so pull
-  // them out whole first. A code is CAPS-NUMBER; anything after that in the
-  // same bracket is a qualifier (subtitle group, remux, ...) and is dropped:
-  // "[MIMK-278-SUBS] Repentance" -> "[MIMK-278] Repentance". A plain
-  // "[ABC-123]" is kept too; non-code brackets still go through the blanket
-  // strip below. The preserved [CODE] is reattached after that pass.
-  let code = "";
-  const codeMatch = raw.match(RECORDING_CODE_RE);
-  if (codeMatch) {
-    code = `[${codeMatch[1]}]`;
-    raw = raw.slice(codeMatch[0].length);
-  }
-  let s = raw;
-  s = s.replace(BRACKET_STRIP_RE, " ");
-  s = s.replace(TITLE_TAGS, " ");
-  s = s.replace(EN_DASH_RE, " ");
-  s = s.replace(NON_LATIN_RE, " ");
-  s = s.replace(WS_COLLAPSE_RE, " ").replace(LEAD_PUNCT_RE, "").replace(TRAIL_PUNCT_RE, "").trim();
-  const out = code ? `${code} ${s}`.trim() : (s || raw);
-  titleMemoInput = input;
-  titleMemoOutput = out;
-  return out;
+  return titleSanitizer.sanitize(raw);
 }
 
 /** Map a CTX_RESPONSE message into the {domain, path, title} payload shape
@@ -1059,29 +1084,19 @@ function grantFullscreen(frameElement) {
 }
 
 /**
- * Sender side, called by a video-bearing frame: request fullscreen provisioning
- * (allowfullscreen + allow="fullscreen") on every ancestor iframe up the chain.
- * Granting is a one-shot, idempotent operation per frame (ancestors install
- * their provisioners at document start, well before the first request made
- * here), so further requests would only replay the same hops - latch it.
+ * One provisioner handler: vouch the sender as an own-iframe child, then grant
+ * allowfullscreen on the target frame. The relay flag (nested frames) forwards
+ * the original request upward so the chain continues to the top frame. Shared
+ * body of the top-frame and relay provisioners.
  */
-let fullscreenProvisionSent = false;
-export function requestFullscreenProvision() {
-  if (fullscreenProvisionSent) {
-    return;
-  }
-  fullscreenProvisionSent = true;
-  window.parent?.postMessage({ type: FS_REQUEST_TYPE }, "*");
-}
+class FullscreenProvisioner {
+  #relay = false;
 
-/**
- * Shared body of the fullscreen provisioners: vouch the sender as an
- * own-iframe child, then grant allowfullscreen on the target frame. The
- * optional relay (nested frames) forwards the original request upward so the
- * chain continues to the top frame.
- */
-function createFullscreenProvisioner({ relay = false } = {}) {
-  return (event) => {
+  constructor({ relay = false } = {}) {
+    this.#relay = relay;
+  }
+
+  handle(event) {
     const data = event && event.data;
     if (!data || typeof data !== "object" || data.type !== FS_REQUEST_TYPE) {
       return;
@@ -1089,11 +1104,19 @@ function createFullscreenProvisioner({ relay = false } = {}) {
     const frameElement = iframeRegistry.child(event.source);
     if (frameElement) {
       grantFullscreen(frameElement);
-      if (relay) {
+      if (this.#relay) {
         window.parent?.postMessage(data, "*");
       }
     }
-  };
+  }
+
+  static topFrame() {
+    return new FullscreenProvisioner();
+  }
+
+  static relay() {
+    return new FullscreenProvisioner({ relay: true });
+  }
 }
 
 /**
@@ -1101,7 +1124,8 @@ function createFullscreenProvisioner({ relay = false } = {}) {
  * that asked, then stop (no parent). Vouched by an own-child match.
  */
 export function createTopFrameProvisioner() {
-  return createFullscreenProvisioner();
+  const provisioner = FullscreenProvisioner.topFrame();
+  return (event) => provisioner.handle(event);
 }
 
 /**
@@ -1111,7 +1135,33 @@ export function createTopFrameProvisioner() {
  * its allowlist expanded.
  */
 export function createFrameProvisioner() {
-  return createFullscreenProvisioner({ relay: true });
+  const provisioner = FullscreenProvisioner.relay();
+  return (event) => provisioner.handle(event);
+}
+
+/**
+ * Sender-side latch: request fullscreen provisioning on every ancestor iframe
+ * up the chain. Granting is a one-shot, idempotent operation per frame
+ * (ancestors install their provisioners at document start, well before the
+ * first request made here), so further requests would only replay the same
+ * hops - latched by the instance field.
+ */
+class FullscreenProvisionRequest {
+  #sent = false;
+
+  send() {
+    if (this.#sent) {
+      return;
+    }
+    this.#sent = true;
+    window.parent?.postMessage({ type: FS_REQUEST_TYPE }, "*");
+  }
+}
+
+const provisionRequest = new FullscreenProvisionRequest();
+
+export function requestFullscreenProvision() {
+  provisionRequest.send();
 }
 
 /**

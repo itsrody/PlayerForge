@@ -8,14 +8,20 @@ const VOLUME_STEP = 0.1;
  * Media command plane. Every way of controlling playback - gestures, hotkeys,
  * panel widgets, OS media keys through MediaSession - funnels through these
  * primitives so clamping, guarding, and presentation stay in exactly one
- * place. Commands execute immediately against the video; presentation (toasts)
+ * place. Commands execute immediately against the #video; presentation (toasts)
  * lives at the interaction sites that own their context.
  *
  * The scrub paths are deliberately silent: they serve continuous drag
  * streams, not discrete commands, and the resulting position is already
  * broadcast through the regular timeupdate path.
  */
-export function createMediaControls({ video }) {
+export class MediaControls {
+  #video;
+
+  constructor(video) {
+    this.#video = video;
+  }
+
   /**
    * Gate: every control stays inert until metadata is loaded (readyState
    * HAVE_METADATA, the point where duration is known). Before that the video
@@ -24,7 +30,9 @@ export function createMediaControls({ video }) {
    * whole control surface - gestures, hotkeys, MediaSession OS keys - simply
    * does nothing until playback is ready.
    */
-  const isReady = () => video.readyState >= 1;
+  #isReady() {
+    return this.#video.readyState >= 1;
+  }
 
   /**
    * A seekable timeline exists when metadata loaded (readyState >= HAVE_METADATA)
@@ -35,164 +43,168 @@ export function createMediaControls({ video }) {
    * playback start position, which the browser honors when playback begins. So
    * a restore (resume) issued in the MSE window is never lost.
    */
-  const canSeek = () => isReady() || (Number.isFinite(video.duration) && video.duration > 0);
+  #canSeekNow() {
+    return this.#isReady() || (Number.isFinite(this.#video.duration) && this.#video.duration > 0);
+  }
 
   /** Canonical absolute-position clamp: inside duration when we know it. */
-  const clampTarget = (time) => {
+  #clampTarget(time) {
     if (!Number.isFinite(time)) {
       return 0;
     }
-    return Number.isFinite(video.duration) && video.duration > 0
-      ? clamp(time, 0, video.duration)
+    return Number.isFinite(this.#video.duration) && this.#video.duration > 0
+      ? clamp(time, 0, this.#video.duration)
       : Math.max(0, time);
-  };
+  }
 
-  return {
-    /** True once the media has an established timeline (HAVE_METADATA+).
-     *  Interaction layers consult this before emitting command feedback, so a
-     *  gesture the command plane would no-op never shows a misleading toast. */
-    get ready() {
-      return isReady();
-    },
+  /** True once the media has an established timeline (HAVE_METADATA+).
+   *  Interaction layers consult this before emitting command feedback, so a
+   *  gesture the command plane would no-op never shows a misleading toast. */
+  get ready() {
+    return this.#isReady();
+  }
 
-    /** True when a seek is legal (metadata, or an MSE-known duration). */
-    get canSeek() {
-      return canSeek();
-    },
+  /** True when a seek is legal (metadata, or an MSE-known duration). */
+  get canSeek() {
+    return this.#canSeekNow();
+  }
 
-    async play() {
-      if (!isReady()) {
-        return;
-      }
-      try {
-        await video.play();
-      } catch (err) {
-        // Interruptions by new loads and autoplay-policy rejections are
-        // ordinary; anything else is a real error worth surfacing.
-        if (!isBenignMediaPolicyError(err)) {
-          throw err;
-        }
-      }
-    },
-
-    pause() {
-      if (!isReady()) {
-        return;
-      }
-      video.pause();
-    },
-
-    togglePlay() {
-      if (!isReady()) {
-        return;
-      }
-      if (video.paused) {
-        return this.play();
-      }
-      this.pause();
-    },
-
-    stop() {
-      if (!canSeek()) {
-        return;
-      }
-      video.pause();
-      video.currentTime = 0;
-    },
-
-    /** Seek to an absolute position, clamped to the playable range. */
-    seekTo(time) {
-      if (!canSeek()) {
-        return;
-      }
-      video.currentTime = clampTarget(time);
-    },
-
-    /**
-     * Latched scrub seek for an in-progress drag session, silent (no command
-     * chatter). Readiness was already verified and `duration` captured when
-     * the stroke latched, so this skips the per-move isReady() gate and
-     * re-reading video.duration (native getter) - the single most frequent
-     * user-facing path.
-     */
-    scrubToLatched(time, duration) {
-      video.currentTime = Number.isFinite(duration) && duration > 0
-        ? clamp(time, 0, duration)
-        : Math.max(0, time);
-    },
-
-    skip(delta) {
-      // Skip is a seek: gate on the same canSeek() as seekTo so a known
-      // duration is a usable timeline even in the MSE window (readyState 0),
-      // matching the seekto MediaSession action instead of dropping it.
-      if (!canSeek()) {
-        return;
-      }
-      this.seekTo(video.currentTime + delta);
-    },
-
-    nudgeVolume(direction) {
-      if (!isReady()) {
-        return;
-      }
-      const step = direction === "up" ? VOLUME_STEP : -VOLUME_STEP;
-      video.volume = clamp(video.volume + step, 0, 1);
-    },
-
-    toggleMute() {
-      if (!isReady()) {
-        return;
-      }
-      video.muted = !video.muted;
-    },
-
-    /** Native PiP availability: the browser's own always-on-top surface. */
-    pictureInPictureSupported() {
-      return typeof video.requestPictureInPicture === "function" &&
-        typeof document.pictureInPictureEnabled === "boolean" &&
-        document.pictureInPictureEnabled;
-    },
-
-    /**
-     * Toggle the native picture-in-picture window. Entering needs a user
-     * gesture (hotkeys/panel qualify); the PiP window owns its own controls.
-     * Returns whether PiP is active afterwards. Rejects that are ordinary
-     * browser policy (AbortError/NotAllowedError) surface as `false`; real
-     * failures throw for the caller to present.
-     */
-    async togglePictureInPicture() {
-      if (!isReady() || !this.pictureInPictureSupported()) {
-        return false;
-      }
-      try {
-        if (document.pictureInPictureElement === video) {
-          await document.exitPictureInPicture();
-        } else {
-          await video.requestPictureInPicture();
-        }
-      } catch (err) {
-        if (!isBenignMediaPolicyError(err)) {
-          throw err;
-        }
-      }
-      return document.pictureInPictureElement === video;
-    },
-
-    /** Hold-to-fast-forward pair; `speed` is restored verbatim on release. */
-    beginBoost(speed) {
-      if (!isReady()) {
-        return;
-      }
-      video.playbackRate = speed;
-    },
-
-    endBoost(speed) {
-      // Never gated: releasing a hold must always restore the saved rate. If a
-      // source swap drops readiness mid-hold, an isReady() gate here would
-      // leave the element stuck at the boosted playbackRate forever.
-      video.playbackRate = speed;
+  async play() {
+    if (!this.#isReady()) {
+      return;
     }
-  };
+    try {
+      await this.#video.play();
+    } catch (err) {
+      // Interruptions by new loads and autoplay-policy rejections are
+      // ordinary; anything else is a real error worth surfacing.
+      if (!isBenignMediaPolicyError(err)) {
+        throw err;
+      }
+    }
+  }
+
+  pause() {
+    if (!this.#isReady()) {
+      return;
+    }
+    this.#video.pause();
+  }
+
+  togglePlay() {
+    if (!this.#isReady()) {
+      return;
+    }
+    if (this.#video.paused) {
+      return this.play();
+    }
+    this.pause();
+  }
+
+  stop() {
+    if (!this.#canSeekNow()) {
+      return;
+    }
+    this.#video.pause();
+    this.#video.currentTime = 0;
+  }
+
+  /** Seek to an absolute position, clamped to the playable range. */
+  seekTo(time) {
+    if (!this.#canSeekNow()) {
+      return;
+    }
+    this.#video.currentTime = this.#clampTarget(time);
+  }
+
+  /**
+   * Latched scrub seek for an in-progress drag session, silent (no command
+   * chatter). Readiness was already verified and `duration` captured when
+   * the stroke latched, so this skips the per-move #isReady() gate and
+   * re-reading video.duration (native getter) - the single most frequent
+   * user-facing path.
+   */
+  scrubToLatched(time, duration) {
+    this.#video.currentTime = Number.isFinite(duration) && duration > 0
+      ? clamp(time, 0, duration)
+      : Math.max(0, time);
+  }
+
+  skip(delta) {
+    // Skip is a seek: gate on the same #canSeekNow() as seekTo so a known
+    // duration is a usable timeline even in the MSE window (readyState 0),
+    // matching the seekto MediaSession action instead of dropping it.
+    if (!this.#canSeekNow()) {
+      return;
+    }
+    this.seekTo(this.#video.currentTime + delta);
+  }
+
+  nudgeVolume(direction) {
+    if (!this.#isReady()) {
+      return;
+    }
+    const step = direction === "up" ? VOLUME_STEP : -VOLUME_STEP;
+    this.#video.volume = clamp(this.#video.volume + step, 0, 1);
+  }
+
+  toggleMute() {
+    if (!this.#isReady()) {
+      return;
+    }
+    this.#video.muted = !this.#video.muted;
+  }
+
+  /** Native PiP availability: the browser's own always-on-top surface. */
+  pictureInPictureSupported() {
+    return typeof this.#video.requestPictureInPicture === "function" &&
+      typeof document.pictureInPictureEnabled === "boolean" &&
+      document.pictureInPictureEnabled;
+  }
+
+  /**
+   * Toggle the native picture-in-picture window. Entering needs a user
+   * gesture (hotkeys/panel qualify); the PiP window owns its own controls.
+   * Returns whether PiP is active afterwards. Rejects that are ordinary
+   * browser policy (AbortError/NotAllowedError) surface as `false`; real
+   * failures throw for the caller to present.
+   */
+  async togglePictureInPicture() {
+    if (!this.#isReady() || !this.pictureInPictureSupported()) {
+      return false;
+    }
+    try {
+      if (document.pictureInPictureElement === this.#video) {
+        await document.exitPictureInPicture();
+      } else {
+        await this.#video.requestPictureInPicture();
+      }
+    } catch (err) {
+      if (!isBenignMediaPolicyError(err)) {
+        throw err;
+      }
+    }
+    return document.pictureInPictureElement === this.#video;
+  }
+
+  /** Hold-to-fast-forward pair; `speed` is restored verbatim on release. */
+  beginBoost(speed) {
+    if (!this.#isReady()) {
+      return;
+    }
+    this.#video.playbackRate = speed;
+  }
+
+  endBoost(speed) {
+    // Never gated: releasing a hold must always restore the saved rate. If a
+    // source swap drops readiness mid-hold, an #isReady() gate here would
+    // leave the element stuck at the boosted playbackRate forever.
+    this.#video.playbackRate = speed;
+  }
+}
+
+export function createMediaControls({ video }) {
+  return new MediaControls(video);
 }
 
 /* - MediaSession facet - */

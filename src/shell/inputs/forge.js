@@ -30,13 +30,55 @@ const SUPPRESS_WINDOW_MS = TUNING.gestures.suppressWindowMs;
 const DOUBLE_TAP_WINDOW_MS = TUNING.gestures.doubleTapWindowMs;
 const SCRUB_VELOCITY_TAU_S = TUNING.scrub.velocityFilterMs / 1000;
 
-/** Synthetic single-tap replays this engine dispatched - lets the capture
- *  click handler recognize its own stand-in events and pass them through. */
-const replayedClicks = new WeakSet();
+/**
+ * Cross-forge arbitration registry: which engine owns playback keys, and the
+ * identity mark for the synthetic single-tap replays the capture click
+ * handler must pass through. One module singleton - the arbitration is
+ * inherently global across all live engines.
+ */
+class ForgeRegistry {
+  /** All live input engines, used for keyboard focus arbitration. */
+  #actives = new Set();
+  #last = null;
+  /** Synthetic single-tap replays this registry saw engines dispatch. */
+  #replayedClicks = new WeakSet();
 
-/** All live input engines, used for keyboard focus arbitration. */
-const activeForges = new Set();
-let lastActiveForge = null;
+  add(forge) {
+    this.#actives.add(forge);
+  }
+
+  /** Drop a destroyed engine; clears the "last active" marker when it owns it. */
+  remove(forge) {
+    this.#actives.delete(forge);
+    if (this.#last === forge) {
+      this.#last = null;
+    }
+  }
+
+  /** Live engines; iterated inside InputForge's keyboard arbitration. */
+  actives() {
+    return this.#actives;
+  }
+
+  isLast(forge) {
+    return this.#last === forge;
+  }
+
+  makeLast(forge) {
+    this.#last = forge;
+  }
+
+  /** Mark a replayed click so capture handlers recognize their own stand-in. */
+  markReplay(event) {
+    this.#replayedClicks.add(event);
+  }
+
+  isReplay(event) {
+    return this.#replayedClicks.has(event);
+  }
+}
+
+const forgeRegistry = new ForgeRegistry();
 
 /**
  * Reusable scratch for the first two live pointers. The pinch path runs on
@@ -48,12 +90,12 @@ let lastActiveForge = null;
 const firstTwoPointers = { x0: 0, y0: 0, x1: 0, y1: 0 };
 
 /**
- * Pooled per-family event payloads mirroring scrubDetail: every #dispatch site
- * mutates one fixed-shape object in place and re-dispatches one pooled Event,
- * so the gesture boundary allocates nothing per event. Same synchronous-read
- * contract - consumers read detail.* inside dispatchEvent and never retain the
- * object, so each dispatch site must rewrite EVERY field it owns (no stale
- * carries between events).
+ * Pooled per-family event payloads mirroring the scrub payload: every #dispatch
+ * site mutates one fixed-shape object in place and re-dispatches one pooled
+ * Event, so the gesture boundary allocates nothing per event. Same
+ * synchronous-read contract - consumers read detail.* inside dispatchEvent and
+ * never retain the object, so each dispatch site must rewrite EVERY field it
+ * owns (no stale carries between events).
  */
 const releaseDetail = { zone: "", method: "pointer", duration: 0 };
 const holdDetail = { zone: "", method: "pointer", duration: 0 };
@@ -63,6 +105,10 @@ const swipeStartDetail = { zone: "", method: "pointer", direction: "" };
 const swipeDetail = { zone: "", method: "pointer", direction: "", distance: 0 };
 const dbltapDetail = { zone: "", method: "pointer" };
 const keyDetail = { method: "keyboard", direction: undefined };
+// Scrub's per-name detail payload, refilled in place by #advanceScrub (same
+// mutate-in-place discipline as the other per-family payloads; actions.js
+// reads it synchronously within the scrub handler).
+const scrubDetail = { zone: "", method: "pointer", dx: 0, velocity: 0, timestamp: 0 };
 
 function captureFirstTwo(pointers, out) {
   let n = 0;
@@ -93,34 +139,34 @@ function captureFirstTwo(pointers, out) {
  * handler), so a re-dispatched instance is safe - nothing retains the object
  * past the caller that last read it. Lazy `globalThis.CustomEvent` resolution
  * keeps the pool realm-safe (built in the same realm as the surface it is
- * dispatched onto). One pool entry per name: only a single gesture per name
- * can be in flight at a time, so sharing is safe.
+ * dispatched onto). One pool entry per name; each engine instantiates its
+ * own channel, and only one gesture per name can be in flight at a time
+ * within an engine, so sharing is safe.
  */
-const dispatchPool = new Map();
-// Scrub's per-name detail payload, refilled in place by #advanceScrub (same
-// mutate-in-place discipline as the other per-family payloads; actions.js
-// reads it synchronously within the scrub handler).
-const scrubDetail = { zone: "", method: "pointer", dx: 0, velocity: 0, timestamp: 0 };
-function pooledDispatchEvent(name, detail) {
-  const Ctor = globalThis.CustomEvent;
-  const stale = dispatchPool.get(name);
-  if (stale && stale.Ctor === Ctor) {
-    // CustomEvent.detail is a prototype getter over an internal slot on
-    // spec engines (jsdom and Chromium alike) - plain assignment throws in
-    // strict mode and never updates the slot, which silently killed every
-    // gesture dispatch after the first per name. Callers pass one pooled
-    // detail object per name, so the usual path is the reference compare
-    // below (no write at all); a genuinely fresh object re-owns the
-    // property via defineProperty, whose own data property shadows the
-    // prototype getter on every engine.
-    if (stale.event.detail !== detail) {
-      Object.defineProperty(stale.event, "detail", { value: detail, configurable: true, writable: true });
+class GestureChannel {
+  #pool = new Map();
+
+  event(name, detail) {
+    const Ctor = globalThis.CustomEvent;
+    const stale = this.#pool.get(name);
+    if (stale && stale.Ctor === Ctor) {
+      // CustomEvent.detail is a prototype getter over an internal slot on
+      // spec engines (jsdom and Chromium alike) - plain assignment throws in
+      // strict mode and never updates the slot, which silently killed every
+      // gesture dispatch after the first per name. Callers pass one pooled
+      // detail object per name, so the usual path is the reference compare
+      // below (no write at all); a genuinely fresh object re-owns the
+      // property via defineProperty, whose own data property shadows the
+      // prototype getter on every engine.
+      if (stale.event.detail !== detail) {
+        Object.defineProperty(stale.event, "detail", { value: detail, configurable: true, writable: true });
+      }
+      return stale.event;
     }
-    return stale.event;
+    const event = new Ctor(name, { detail, bubbles: false, composed: false });
+    this.#pool.set(name, { Ctor, event });
+    return event;
   }
-  const event = new Ctor(name, { detail, bubbles: false, composed: false });
-  dispatchPool.set(name, { Ctor, event });
-  return event;
 }
 
 /** Deadline checks run on the performance.now() timebase the suppress
@@ -147,6 +193,8 @@ export class InputForge {
   #video;
   #zone;
   #eventTarget;
+  /** Pooled semantic-event channel owned by this engine instance. */
+  #channel = new GestureChannel();
 
   /** DOM lifecycle manager: listeners, observers, style rollbacks. */
   #dom = new DOMManager();
@@ -340,7 +388,7 @@ export class InputForge {
     // already fullscreen must get the wheel listener from frame one.
     this.setTrackpadPinchEnabled(fs);
 
-    activeForges.add(this);
+    forgeRegistry.add(this);
   }
 
   /** Engine lifetime signal - action wiring shares it and dies with it. */
@@ -402,10 +450,7 @@ export class InputForge {
     cancelEase(this.#video);
     // DOM lifecycle: disconnect observers, restore styles, remove elements.
     this.#dom.destroy();
-    activeForges.delete(this);
-    if (lastActiveForge === this) {
-      lastActiveForge = null;
-    }
+    forgeRegistry.remove(this);
     this.#resetKeyboardHold();
     this.#pointerOwned = false;
     this.#clearAwaitClick();
@@ -598,7 +643,7 @@ export class InputForge {
     }
     let candidates = 0;
     let includesThis = false;
-    for (const forge of activeForges) {
+    for (const forge of forgeRegistry.actives()) {
       if (this.#isActive(forge)) {
         candidates++;
         includesThis ||= forge === this;
@@ -607,7 +652,7 @@ export class InputForge {
     if (candidates === 1) {
       return includesThis;
     } else if (candidates > 1) {
-      return lastActiveForge === this;
+      return forgeRegistry.isLast(this);
     }
     return false;
   }
@@ -663,7 +708,7 @@ export class InputForge {
 
   #dispatch(eventName, detail) {
     if (!this.#scope.disposed && this.#eventTarget) {
-      this.#eventTarget.dispatchEvent(pooledDispatchEvent(eventName, detail));
+      this.#eventTarget.dispatchEvent(this.#channel.event(eventName, detail));
     }
   }
 
@@ -694,7 +739,7 @@ export class InputForge {
     ) {
       return;
     }
-    lastActiveForge = this;
+    forgeRegistry.makeLast(this);
     const existing = this.#pointers.get(event.pointerId);
     if (existing) {
       existing.x = event.clientX;
@@ -925,7 +970,7 @@ export class InputForge {
     scrubDetail.velocity = this.#scrubVelocity;
     scrubDetail.timestamp = now;
     if (!this.#scope.disposed && this.#eventTarget) {
-      this.#eventTarget.dispatchEvent(pooledDispatchEvent(GESTURE_EVENTS.scrub, scrubDetail));
+      this.#eventTarget.dispatchEvent(this.#channel.event(GESTURE_EVENTS.scrub, scrubDetail));
     }
   }
 
@@ -1132,13 +1177,13 @@ export class InputForge {
       clientX: this.#tapReplayX,
       clientY: this.#tapReplayY
     });
-    replayedClicks.add(event);
+    forgeRegistry.markReplay(event);
     target.dispatchEvent(event);
   }
 
   #handleClickCapture(event) {
     // Our own single-tap stand-in: pass it to the SDK untouched.
-    if (replayedClicks.has(event)) {
+    if (forgeRegistry.isReplay(event)) {
       this.#clearAwaitClick();
       return;
     }
@@ -1168,7 +1213,7 @@ export class InputForge {
   }
 
   #handleDblClickCapture(event) {
-    if (replayedClicks.has(event)) {
+    if (forgeRegistry.isReplay(event)) {
       return;
     }
     if (clickTime() < this.#suppressClickUntil) {
@@ -1244,7 +1289,7 @@ export class InputForge {
     this.#ownedKeyCodes.delete(event.code);
     if (event.code === "Space") {
       if (this.#shouldHandleKeys(false)) {
-        lastActiveForge = this;
+        forgeRegistry.makeLast(this);
         // Own the press end-to-end: preventDefault cancels the UA's
         // Space-activates-video default, and stopImmediatePropagation keeps
         // page-level handlers (a platform's own Space shortcut lives on
@@ -1292,7 +1337,7 @@ export class InputForge {
       if (!this.#shouldHandleKeys(!!binding.allowControlFocus)) {
         continue;
       }
-      lastActiveForge = this;
+      forgeRegistry.makeLast(this);
       event.preventDefault();
       event.stopImmediatePropagation();
       this.#ownedKeyCodes.add(event.code);

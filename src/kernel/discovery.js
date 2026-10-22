@@ -464,65 +464,95 @@ export function createDiscoveryTap(onVideo, { mutations = true } = {}) {
  * so documents that only carry non-player videos never open the subtree
  * observer either.
  *
- * The first size-qualified candidate fires onCandidate exactly once;
- * documents without a usable player never boot a kernel.
+ * The first size-qualified candidate fires the candidate callback exactly
+ * once; documents without a usable player never boot a kernel.
  */
-export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
-  let done = false;
+class VideoProbe {
+  #minWidth;
+  #minHeight;
+  #onCandidate;
+  /** Once true, every entry point (media event, later mutation, gate) is dead. */
+  #done = false;
   // Re-checks candidates that failed the size gate when their box grows: the
   // observer-driven layout-presence gate re-reads the delivered box (no forced
   // reflow) and lands off the mutation batch, so a candidate that only reaches
-  // player size later would otherwise never fire onCandidate. The detached-
+  // player size later would otherwise never fire. The detached-
   // target prune stays off: the probe's contract is that a video-less or
   // hidden-only page never opens the document-wide mutation feed, and the
   // probe's own gate stops at kernel boot (or pagehide), bounding any
   // unqualified target to that window.
-  const layoutGate = createLayoutGate({ minWidth, minHeight, prune: false });
+  #layoutGate;
   // Defers a player-sized-but-off-screen candidate (a carousel of embeds) so a
   // full kernel boot is not paid for a video the user cannot see. The lookahead
   // margin readies the shell just before it scrolls in. Same prune reasoning.
-  const onScreenGate = createOnScreenGate({ prune: false });
+  #onScreenGate;
   // Starts as the cheap media-event tap; consider() escalates it to the full
   // document observer once a rendered candidate appears (see below).
-  const tap = createDiscoveryTap(consider, { mutations: false });
+  #tap;
 
-  const detach = () => {
-    tap.stop();
-    layoutGate.stop();
-    onScreenGate.stop();
-  };
+  constructor({ minWidth, minHeight, onCandidate }) {
+    this.#minWidth = minWidth;
+    this.#minHeight = minHeight;
+    this.#onCandidate = onCandidate;
+    this.#layoutGate = createLayoutGate({ minWidth, minHeight, prune: false });
+    this.#onScreenGate = createOnScreenGate({ prune: false });
+    this.#tap = createDiscoveryTap((video) => this.#consider(video), { mutations: false });
 
-  const finish = () => {
-    if (done) {
+    // Cheap deferred check (atomic, no observer): videos already in the parsed
+    // DOM surface without any media event or mutation subscription.
+    const checkStatic = () => {
+      if (this.#done) {
+        return;
+      }
+      // #consider() owns the escalation decision per video (present-and-small
+      // escalates; hidden does not), so there is no blanket escalate() here -
+      // that would arm the observer for a page whose only videos are hidden.
+      forEachVideoInDocument((video) => this.#consider(video));
+    };
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", checkStatic, { once: true });
+    } else {
+      checkStatic();
+    }
+  }
+
+  #detach() {
+    this.#tap.stop();
+    this.#layoutGate.stop();
+    this.#onScreenGate.stop();
+  }
+
+  #finish() {
+    if (this.#done) {
       return;
     }
-    done = true;
-    detach();
+    this.#done = true;
+    this.#detach();
     logger.log("probe", "Video candidate found - booting kernel");
-    onCandidate();
-  };
+    this.#onCandidate();
+  }
 
   // A player-sized candidate that is not yet on screen (a carousel slide, a
   // below-the-fold embed) is deferred rather than booted: the lookahead margin
   // readies the shell just before it scrolls in. isOnScreen reports true when
   // the viewport is unknown, so this can only delay, never strand.
-  const tryFinish = (video) => {
-    if (done) {
+  #tryFinish(video) {
+    if (this.#done) {
       return;
     }
     if (isOnScreen(video)) {
-      finish();
+      this.#finish();
       return;
     }
-    onScreenGate.watch(video, () => tryFinish(video));
-  };
+    this.#onScreenGate.watch(video, () => this.#tryFinish(video));
+  }
 
-  function consider(video) {
-    if (done) {
+  #consider(video) {
+    if (this.#done) {
       return;
     }
-    if (meetsMinSize(video, minWidth, minHeight)) {
-      tryFinish(video);
+    if (meetsMinSize(video, this.#minWidth, this.#minHeight)) {
+      this.#tryFinish(video);
       return;
     }
     // Commit to the full-document observer only when the video is actually
@@ -535,36 +565,26 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
     // changes its box can qualify it, and a hidden-but-real player is caught
     // when it starts loading/playing (media events route back here).
     if (hasPresentBox(video)) {
-      tap.escalate();
+      this.#tap.escalate();
     }
-    layoutGate.watch(video, () => tryFinish(video));
+    this.#layoutGate.watch(video, () => this.#tryFinish(video));
   }
 
-  // Cheap deferred check (atomic, no observer): videos already in the parsed
-  // DOM surface without any media event or mutation subscription.
-  const checkStatic = () => {
-    if (done) {
-      return;
+  /**
+   * Idempotent teardown - cancels discovery when the kernel never boots. A
+   * no-op after a candidate fired (#finish already detached), so the caller
+   * owns the pagehide decision: keep discovery across a bfcache hide and
+   * release it on a real unload.
+   */
+  stop() {
+    if (!this.#done) {
+      this.#done = true;
+      this.#detach();
     }
-    // consider() owns the escalation decision per video (present-and-small
-    // escalates; hidden does not), so there is no blanket escalate() here -
-    // that would arm the observer for a page whose only videos are hidden.
-    forEachVideoInDocument(consider);
-  };
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", checkStatic, { once: true });
-  } else {
-    checkStatic();
   }
+}
 
-  // An idempotent stop() that cancels discovery when the kernel never boots.
-  // It is a no-op after onCandidate fires (finish() already detached), so the
-  // caller owns the pagehide decision: keep discovery across a bfcache hide
-  // and release it on a real unload.
-  return () => {
-    if (!done) {
-      done = true;
-      detach();
-    }
-  };
+export function installVideoProbe(options) {
+  const probe = new VideoProbe(options);
+  return () => probe.stop();
 }

@@ -5,6 +5,54 @@ import { findSdkForVideo } from "./detection.js";
 import { forEachVideoInDocument, meetsMinSize, createLayoutGate, createOnScreenGate, isOnScreen, createDiscoveryTap } from "./discovery.js";
 
 /**
+ * One settle wait: resolves once the container's child list has been quiet for
+ * a run of consecutive quiet time, or when the cap expires - whichever comes
+ * first. Owns its observer and both timer handles as private fields.
+ */
+class DomSettleWait {
+  #settled = false;
+  #settleHandle = null;
+  #capHandle = null;
+  #promise;
+
+  constructor(container, { quietMs = 50, capMs = 150, signal = null } = {}) {
+    const { promise, resolve } = Promise.withResolvers();
+    this.#promise = promise;
+    const observer = new MutationObserver(() => {
+      // Any mutation re-arms the trailing quiet window from scratch.
+      this.#settleHandle?.abort();
+      this.#settleHandle = postTask(done, { priority: "user-visible", delay: quietMs });
+    });
+
+    const done = () => {
+      if (this.#settled) {
+        return;
+      }
+      this.#settled = true;
+      observer.disconnect();
+      this.#settleHandle?.abort();
+      this.#capHandle?.abort();
+      // Normal settle must release the abort listener too: with `{ once: true }`
+      // it only self-removes on abort, so a quiet-page settle would otherwise
+      // keep the kernel-scope signal subscribed for the whole page lifetime.
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+
+    this.#settleHandle = postTask(done, { priority: "user-visible", delay: quietMs });
+    this.#capHandle = postTask(done, { priority: "user-visible", delay: capMs });
+
+    observer.observe(container, { childList: true });
+
+    signal?.addEventListener("abort", done, { once: true });
+  }
+
+  get promise() {
+    return this.#promise;
+  }
+}
+
+/**
  * Resolve once the container's child list has been quiet for a run of
  * consecutive quiet time, or when the cap expires - whichever comes first.
  * SDKs build their player over several microtasks/frames after the
@@ -21,44 +69,8 @@ import { forEachVideoInDocument, meetsMinSize, createLayoutGate, createOnScreenG
  * hidden mid-window never leaves the observer + its two timers running for
  * the full cap.
  */
-function whenDomSettled(container, { quietMs = 50, capMs = 150, signal } = {}) {
-  const { promise, resolve } = Promise.withResolvers();
-  let settled = false;
-  let settleHandle = null;
-  let capHandle = null;
-
-  const done = () => {
-    if (settled) {
-      return;
-    }
-    settled = true;
-    observer.disconnect();
-    settleHandle?.abort();
-    capHandle?.abort();
-    // Normal settle must release the abort listener too: with `{ once: true }`
-    // it only self-removes on abort, so a quiet-page settle would otherwise
-    // keep the kernel-scope signal subscribed for the whole page lifetime.
-    if (onAbort) {
-      signal?.removeEventListener("abort", onAbort);
-    }
-    resolve();
-  };
-
-  const observer = new MutationObserver(() => {
-    // Any mutation re-arms the trailing quiet window from scratch.
-    settleHandle?.abort();
-    settleHandle = postTask(done, { priority: "user-visible", delay: quietMs });
-  });
-
-  settleHandle = postTask(done, { priority: "user-visible", delay: quietMs });
-  capHandle = postTask(done, { priority: "user-visible", delay: capMs });
-
-  observer.observe(container, { childList: true });
-
-  const onAbort = () => done();
-  signal?.addEventListener("abort", onAbort, { once: true });
-
-  return promise;
+function whenDomSettled(container, options) {
+  return new DomSettleWait(container, options).promise;
 }
 
 /**
@@ -609,33 +621,39 @@ export class Kernel {
  *  the debug command exists from script eval - not just after a video is
  *  discovered. The debug toggle works fully without a kernel: it persists the
  *  setting and flips the shared debug runtime (logger + LoAF diagnostic).
- */
-export function installMenuCommands() {
-  let debugId = null;
+ *  One instance owns the debug command handle and re-registers on the flip. */
+class MenuCommands {
+  /** The live debug menu handle; null while unregistered. */
+  #debugId = null;
 
-  const refreshDebug = () => {
-    if (debugId != null) {
-      gmUnregisterMenu(debugId);
+  #refreshDebug() {
+    if (this.#debugId != null) {
+      gmUnregisterMenu(this.#debugId);
     }
     const enabled = getConfigValue(DEBUG_LOGS_KEY, false);
-    debugId = gmRegisterMenu(
+    this.#debugId = gmRegisterMenu(
       `\u{1F41B} Debug Logs:${enabled ? "On" : "Off"}`,
       () => {
         const next = !getConfigValue(DEBUG_LOGS_KEY, false);
         setConfigValue(DEBUG_LOGS_KEY, next);
         setDebugRuntime(next);
-        refreshDebug();
+        this.#refreshDebug();
       },
       { autoClose: true }
     );
-  };
+  }
 
-  refreshDebug();
+  install() {
+    this.#refreshDebug();
+    return () => {
+      if (this.#debugId != null) {
+        gmUnregisterMenu(this.#debugId);
+        this.#debugId = null;
+      }
+    };
+  }
+}
 
-  return () => {
-    if (debugId != null) {
-      gmUnregisterMenu(debugId);
-      debugId = null;
-    }
-  };
+export function installMenuCommands() {
+  return new MenuCommands().install();
 }

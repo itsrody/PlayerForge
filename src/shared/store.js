@@ -128,148 +128,173 @@ export function loadJsonObject(key, fallback) {
   return raw && typeof raw === "object" ? raw : fallback;
 }
 
-let configCache = null;
-
-/**
- * The whole configs document, parsed at most once and served from a module
- * cache afterwards. GM storage is a sync localStorage parse per call - the
- * hot read paths (repeated getConfigValue, the cross-tab refresh loop) were
- * re-parsing the entire doc every time. Writers refresh the cache in place;
- * external (cross-tab) writes invalidate it via invalidateConfigCache().
- */
-function readConfigDoc() {
-  if (configCache == null) {
-    configCache = loadJsonObject(KEYS.configs, { version: 1 });
-  }
-  return configCache;
-}
-
-/** Drop the cached configs doc after an external (cross-tab) write. */
-export function invalidateConfigCache() {
-  configCache = null;
-}
-
+/** Hostile segment guard: a stored doc must never enable prototype traversal. */
 function isSafeKeySegment(key) {
   return key !== "__proto__" && key !== "constructor" && key !== "prototype";
 }
 
-function persistConfig(doc) {
-  try {
-    gmSetValue(KEYS.configs, doc);
-  } catch (err) {
-    logger.error("storage", "Failed to persist config:", err);
-    return false;
-  }
-  configCache = doc;
-  return true;
-}
-
-export function getConfigValue(path, fallback) {
-  let node = readConfigDoc();
-  for (const segment of path.split(".")) {
-    // Same segment guard as writes - a hostile stored doc must not turn a
-    // read path into prototype traversal either.
-    if (!isSafeKeySegment(segment)) {
-      return fallback;
-    }
-    if (node == null || typeof node !== "object") {
-      return fallback;
-    }
-    node = node[segment];
-  }
-  return node === undefined ? fallback : node;
-}
-
-export function setConfigValue(path, value) {
-  setConfigFields({ [path]: value });
-}
-
 /**
- * Apply several dotted config fields (and their values) in one read-modify-
- * write of the configs document. Preset/flush paths that touch many fields at
- * once avoid N serialized gmSetValue round trips (each of which re-reads and
- * re-serializes the whole doc).
- *
- * Clone discipline: COPY-ON-WRITE along the touched paths instead of a full
- * `structuredClone` of the document. The whole-doc clone was the dominant CPU
- * cost of one write, and a stepper persists a single short path per step - so
- * only the nodes on those paths are minted fresh and every untouched branch is
- * shared with the cached doc. Sharing is safe because a shared branch is never
- * written through: each branch is replaced by its own copy before the walk
- * descends into it, and leaf writes land on those copies. A defensive
- * early-return therefore still cannot leak a partial mutation into the live
- * cache - `doc` (and every node it uniquely owns) is simply discarded.
+ * The whole configs-document engine as one class: the parse-once cache, the
+ * copy-on-write read-modify-write, and the deletion sweep are private fields
+ * and methods on the one instance. The module singleton wires the exported
+ * call surface below.
  */
-export function setConfigFields(fields) {
-  const doc = { ...readConfigDoc() };
-  // for-in + hasOwn over Object.entries: the common setConfigValue() call
-  // passes a single-field object, and Object.entries allocates a pair array
-  // for it on every write (measured ~78 vs ~20 ns/op for a 3-key map).
-  for (const path in fields) {
-    if (!Object.hasOwn(fields, path)) {
-      continue;
+class ConfigStore {
+  /**
+   * The whole configs document, parsed at most once and served from a module
+   * cache afterwards. GM storage is a sync localStorage parse per call - the
+   * hot read paths (repeated getConfigValue, the cross-tab refresh loop) were
+   * re-parsing the entire doc every time. Writers refresh the cache in place;
+   * external (cross-tab) writes invalidate it via invalidateConfigCache().
+   */
+  #cache = null;
+
+  #readDoc() {
+    if (this.#cache == null) {
+      this.#cache = loadJsonObject(KEYS.configs, { version: 1 });
     }
-    const value = fields[path];
+    return this.#cache;
+  }
+
+  /** Read one dotted path, or the fallback when missing/unsafe. */
+  get(path, fallback) {
+    let node = this.#readDoc();
+    for (const segment of path.split(".")) {
+      // Same segment guard as writes - a hostile stored doc must not turn a
+      // read path into prototype traversal either.
+      if (!isSafeKeySegment(segment)) {
+        return fallback;
+      }
+      if (node == null || typeof node !== "object") {
+        return fallback;
+      }
+      node = node[segment];
+    }
+    return node === undefined ? fallback : node;
+  }
+
+  /** Drop the cached configs doc after an external (cross-tab) write. */
+  invalidate() {
+    this.#cache = null;
+  }
+
+  #persist(doc) {
+    try {
+      gmSetValue(KEYS.configs, doc);
+    } catch (err) {
+      logger.error("storage", "Failed to persist config:", err);
+      return false;
+    }
+    this.#cache = doc;
+    return true;
+  }
+
+  /**
+   * Apply several dotted config fields (and their values) in one read-modify-
+   * write of the configs document. Preset/flush paths that touch many fields at
+   * once avoid N serialized gmSetValue round trips (each of which re-reads and
+   * re-serializes the whole doc).
+   *
+   * Clone discipline: COPY-ON-WRITE along the touched paths instead of a full
+   * `structuredClone` of the document. The whole-doc clone was the dominant CPU
+   * cost of one write, and a stepper persists a single short path per step - so
+   * only the nodes on those paths are minted fresh and every untouched branch is
+   * shared with the cached doc. Sharing is safe because a shared branch is never
+   * written through: each branch is replaced by its own copy before the walk
+   * descends into it, and leaf writes land on those copies. A defensive
+   * early-return therefore still cannot leak a partial mutation into the live
+   * cache - `doc` (and every node it uniquely owns) is simply discarded.
+   */
+  setFields(fields) {
+    const doc = { ...this.#readDoc() };
+    // for-in + hasOwn over Object.entries: the common setConfigValue() call
+    // passes a single-field object, and Object.entries allocates a pair array
+    // for it on every write (measured ~78 vs ~20 ns/op for a 3-key map).
+    for (const path in fields) {
+      if (!Object.hasOwn(fields, path)) {
+        continue;
+      }
+      const value = fields[path];
+      const segments = path.split(".");
+      let node = doc;
+      for (let i = 0; i < segments.length - 1; i++) {
+        const segment = segments[i];
+        if (!isSafeKeySegment(segment)) {
+          logger.warn("storage", `Unsafe config path segment "${segment}" in "${path}" — batch dropped`);
+          return;
+        }
+        const child = node[segment];
+        if (child == null) {
+          node[segment] = {};
+        } else if (typeof child !== "object" || Array.isArray(child)) {
+          logger.warn("storage", `Non-object intermediate at "${path}" — batch dropped`);
+          return;
+        } else {
+          // Re-parent a fresh copy before descending, so the write below can
+          // never reach the sub-object the cached doc still references.
+          node[segment] = { ...child };
+        }
+        node = node[segment];
+      }
+      const last = segments.at(-1);
+      if (!isSafeKeySegment(last)) {
+        logger.warn("storage", `Unsafe config leaf segment "${last}" in "${path}" — batch dropped`);
+        return;
+      }
+      node[last] = value;
+    }
+    this.#persist(doc);
+  }
+
+  /**
+   * Remove one dotted field from the configs document (migration sweeps).
+   * No-op when any intermediate segment or the leaf itself is missing.
+   */
+  deleteField(path) {
+    const doc = { ...this.#readDoc() };
     const segments = path.split(".");
     let node = doc;
     for (let i = 0; i < segments.length - 1; i++) {
       const segment = segments[i];
       if (!isSafeKeySegment(segment)) {
-        logger.warn("storage", `Unsafe config path segment "${segment}" in "${path}" — batch dropped`);
         return;
       }
-      const child = node[segment];
-      if (child == null) {
-        node[segment] = {};
-      } else if (typeof child !== "object" || Array.isArray(child)) {
-        logger.warn("storage", `Non-object intermediate at "${path}" — batch dropped`);
+      const child = node == null || typeof node !== "object" ? null : node[segment];
+      if (child == null || typeof child !== "object" || Array.isArray(child)) {
         return;
-      } else {
-        // Re-parent a fresh copy before descending, so the write below can
-        // never reach the sub-object the cached doc still references.
-        node[segment] = { ...child };
       }
+      // Copy-on-write: the delete below must never reach the cached sub-doc.
+      node[segment] = { ...child };
       node = node[segment];
     }
     const last = segments.at(-1);
-    if (!isSafeKeySegment(last)) {
-      logger.warn("storage", `Unsafe config leaf segment "${last}" in "${path}" — batch dropped`);
+    if (!isSafeKeySegment(last) || node == null || typeof node !== "object" || !Object.hasOwn(node, last)) {
       return;
     }
-    node[last] = value;
-  }
-  if (!persistConfig(doc)) {
-    return;
+    delete node[last];
+    this.#persist(doc);
   }
 }
 
-/**
- * Remove one dotted field from the configs document (migration sweeps).
- * No-op when any intermediate segment or the leaf itself is missing.
- */
+const configStore = new ConfigStore();
+
+/** Drop the cached configs doc after an external (cross-tab) write. */
+export function invalidateConfigCache() {
+  configStore.invalidate();
+}
+
+export function getConfigValue(path, fallback) {
+  return configStore.get(path, fallback);
+}
+
+export function setConfigValue(path, value) {
+  configStore.setFields({ [path]: value });
+}
+
+export function setConfigFields(fields) {
+  configStore.setFields(fields);
+}
+
 export function deleteConfigField(path) {
-  const doc = { ...readConfigDoc() };
-  const segments = path.split(".");
-  let node = doc;
-  for (let i = 0; i < segments.length - 1; i++) {
-    const segment = segments[i];
-    if (!isSafeKeySegment(segment)) {
-      return;
-    }
-    const child = node == null || typeof node !== "object" ? null : node[segment];
-    if (child == null || typeof child !== "object" || Array.isArray(child)) {
-      return;
-    }
-    // Copy-on-write: the delete below must never reach the cached sub-doc.
-    node[segment] = { ...child };
-    node = node[segment];
-  }
-  const last = segments.at(-1);
-  if (!isSafeKeySegment(last) || node == null || typeof node !== "object" || !Object.hasOwn(node, last)) {
-    return;
-  }
-  delete node[last];
-  if (!persistConfig(doc)) {
-    return;
-  }
+  configStore.deleteField(path);
 }
