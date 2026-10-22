@@ -1,26 +1,60 @@
 #!/usr/bin/env node
 /**
- * Unified platform runner.
+ * Unified platform runner - one interface for every gate the repo owns.
  *
- *   node platform/run.mjs test              # Node.js unit tests only
- *   node platform/run.mjs bench             # Pure-CPU benchmarks only
+ * Targets combine freely (space-separated args or `+`-joined in one arg):
+ *
+ *   node platform/run.mjs test              # Node.js unit tests
+ *   node platform/run.mjs bench             # Pure-CPU benchmarks (table)
+ *   node platform/run.mjs bench:compare     # CPU bench vs baseline (gates)
+ *   node platform/run.mjs bench:record      # overwrite bench/baseline.json
+ *   node platform/run.mjs build lint        # two targets in one process
  *   node platform/run.mjs integration       # ChromiumDriver integration tests
- *   node platform/run.mjs browser-bench     # ChromiumDriver browser benchmarks
- *   node platform/run.mjs all               # Everything in sequence
- *   node platform/run.mjs ci                # test + bench + integration (no browser-bench)
+ *   node platform/run.mjs browser-bench     # ChromiumDriver browser bench
+ *   node platform/run.mjs visual            # HUD glass material check
+ *   node platform/run.mjs all               # test bench integration browser-bench visual
+ *   node platform/run.mjs ci                # test bench integration
+ *   node platform/run.mjs verify            # lint test build bench:compare
+ *
+ * `--record`, `--compare`, `--repeat=N` are bench flags and apply to every
+ * bench-family target in the invocation. npm scripts (verify, ci, ...)
+ * remain thin aliases of exactly these targets, so the npm surface and this
+ * runner cannot drift apart again: the scripts call the runner, the runner
+ * implements the one policy in platform/regression.mjs.
  */
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
+import { REGRESSION_THRESHOLD, readBaseline, recordBaseline, compareBaseline } from "./regression.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(HERE, "..");
 const BENCH_BASELINE = join(HERE, "browser-bench", "baseline.json");
-const REGRESSION_THRESHOLD = 1.2; // +20%
 
-const modes = process.argv.slice(2);
-const mode = modes[0] || "all";
+const argv = process.argv.slice(2);
+// Flags belong to the bench-family targets; targets name the work.
+const flags = argv.filter((a) => a.startsWith("--"));
+const targets = argv.filter((a) => !a.startsWith("--")).flatMap((t) => t.split("+"));
+
+const BUNDLES = {
+  all: ["test", "bench", "integration", "browser-bench", "visual"],
+  ci: ["test", "bench", "integration"],
+  verify: ["lint", "test", "build", "bench:compare"]
+};
+
+/** Notices a bundle carries for the targets it deliberately leaves out. */
+const BUNDLE_NOTES = {
+  ci: [
+    "Skipping browser-bench (timing gate is not meaningful on a shared runner).",
+    "Skipping visual (needs a real browser and a stable renderer).",
+    "Run `npm run visual` locally before shipping a HUD change."
+  ]
+};
+
+const mode = targets[0] || "all";
+const bundleInvoked = targets.length === 1 && BUNDLES[mode] != null;
+const targets_ = bundleInvoked ? BUNDLES[mode] : targets;
 
 function log(msg) {
   console.log(`\n  ${msg}`);
@@ -47,44 +81,47 @@ function separator() {
   console.log("  " + "─".repeat(60));
 }
 
-// ── Node.js unit tests ──────────────────────────────────────────────
-async function runTests() {
-  log("Running Node.js unit tests...");
-  separator();
-  // Scoped to tests/*.test.mjs explicitly, matching the `test` npm script.
-  // Bare `node --test` recursively discovers the WHOLE repo, which sweeps in
-  // platform/integration/*.test.mjs too: 408 tests here against 352 for
-  // `npm test`. That puts 56 ChromiumDriver tests inside the "unit tests" step,
-  // where they run under node --test's default FILE parallelism - many browsers
-  // at once, the exact starvation documented in runIntegration below. It is
-  // also why `ci` paid for the browser suite twice: once here in parallel, then
-  // again serially in runIntegration.
-  const unitDir = join(HERE, "..", "tests");
-  const unitFiles = readdirSync(unitDir)
-    .filter((f) => f.endsWith(".test.mjs"))
-    .sort();
-  if (unitFiles.length === 0) {
-    log("No unit test files found.");
-    return;
-  }
+/** The npm script owns this gate's definition; the runner only runs it. */
+function runNpmScript(script, label) {
   try {
-    execSync(
-      `node --import ./tests/loader.mjs --test ${unitFiles.map((f) => join(unitDir, f)).join(" ")}`,
-      { cwd: PROJECT_ROOT, stdio: "inherit" }
-    );
-    log("Unit tests passed.");
+    execSync(`npm run ${script}`, { cwd: PROJECT_ROOT, stdio: "inherit" });
+    log(`${label} passed.`);
   } catch {
-    log("Unit tests FAILED.");
+    log(`${label} FAILED.`);
     process.exit(1);
   }
 }
 
+// ── npm-owned gates ──────────────────────────────────────────────────
+async function runLint() {
+  log("Linting src/...");
+  separator();
+  runNpmScript("lint", "Lint");
+}
+
+async function runTests() {
+  log("Running Node.js unit tests...");
+  separator();
+  // Delegated to the npm `test` script (the single definition: loader import
+  // + explicit tests/*.test.mjs list). A parallel re-derivation here drifted
+  // once already - a bare `node --test` sweep pulls platform/integration
+  // ChromiumDriver files in with file parallelism and starves real browsers.
+  runNpmScript("test", "Unit tests");
+}
+
+// ── build (the bundle gate) ──────────────────────────────────────────
+async function runBuild() {
+  log("Building min bundle...");
+  separator();
+  runNpmScript("build", "Build");
+}
+
 // ── Pure-CPU benchmarks ─────────────────────────────────────────────
-async function runBench() {
+async function runBench(extraFlags = []) {
   log("Running pure-CPU benchmarks...");
   separator();
   try {
-    execSync("node bench/run.mjs", {
+    execSync(["node", "bench/run.mjs", ...extraFlags].filter(Boolean).join(" "), {
       cwd: PROJECT_ROOT,
       stdio: "inherit",
     });
@@ -146,18 +183,15 @@ async function runBrowserBench(bundlePath) {
     return [];
   }
 
-  const record = modes.includes("--record");
-  const compare = modes.includes("--compare");
+  const record = flags.includes("--record") || targets_.includes("browser-bench:record");
+  const compare = flags.includes("--compare") || targets_.includes("browser-bench:compare");
 
   let baseline = null;
   if (compare || record) {
-    try {
-      baseline = JSON.parse(readFileSync(BENCH_BASELINE, "utf8"));
-    } catch {
-      if (compare) {
-        log("No baseline.json — run with --record first.");
-        process.exit(2);
-      }
+    baseline = readBaseline(BENCH_BASELINE);
+    if (!baseline && compare) {
+      log("No baseline.json — run with --record first.");
+      process.exit(2);
     }
   }
 
@@ -165,7 +199,7 @@ async function runBrowserBench(bundlePath) {
   // Recording defaults to 3 passes: a single pass is exactly the load-biased
   // sample this whole mechanism exists to avoid, so making it the default for
   // --record means the easy path is also the correct one.
-  const repeat = Number(modes.find((m) => m.startsWith("--repeat="))?.slice(9)) || (record ? 3 : 1);
+  const repeat = Number(flags.find((m) => m.startsWith("--repeat="))?.slice(9)) || (record ? 3 : 1);
 
   // Each bench file launches its own browser, so a "run" here is a full
   // suite pass. Taking the median across R passes is what makes a recorded
@@ -222,59 +256,21 @@ async function runBrowserBench(bundlePath) {
   }
 
   if (record) {
-    // Non-gateable rows keep whatever baseline they already have. Recording a
-    // median for a row too coarse to gate on would bake today's noise into
-    // the file and guarantee a future flake.
-    //
-    // Same rule for a row whose spread across passes exceeds the gate: if it
-    // moved more than the threshold we would flag on, a recorded median is
-    // not a reference, it is a coin flip. Leave its existing entry alone.
-    const baselineData = { ...baseline };
-    const skipped = [];
-    for (const r of allResults) {
-      if (r.gateable === false) {
-        skipped.push(r.name);
-        continue;
-      }
-      if (repeat > 1 && r.spread > REGRESSION_THRESHOLD - 1) {
-        skipped.push(`${r.name} (spread ±${(r.spread * 100).toFixed(0)}% over ${repeat} passes)`);
-        continue;
-      }
-      baselineData[r.name] = r.medianMsPerOp;
-    }
-    writeFileSync(BENCH_BASELINE, JSON.stringify(baselineData, null, 2));
+    // Record/compare go through the shared engine (platform/regression.mjs):
+    // non-gateable rows keep their existing entry, overlapping-spread rows are
+    // left unsealed when repeating, and one threshold governs both bench
+    // families.
+    const rows = allResults.map((r) => ({ name: r.name, value: r.medianMsPerOp, spread: r.spread, gateable: r.gateable }));
+    const skipped = recordBaseline(BENCH_BASELINE, rows, { threshold: REGRESSION_THRESHOLD, repeat });
     log(`Baseline recorded: ${BENCH_BASELINE}`);
     for (const s of skipped) {
       console.log(`    SKIPPED   ${s}`);
     }
   } else if (compare && baseline) {
-    log(`Comparison vs baseline (regression threshold +${((REGRESSION_THRESHOLD - 1) * 100).toFixed(0)}%):`);
-    let failed = false;
-    for (const r of allResults) {
-      if (r.gateable === false) {
-        console.log(`    INFO     ${r.name}  (too coarse to gate - reported only)`);
-        continue;
-      }
-      const base = baseline[r.name];
-      if (base === undefined) {
-        console.log(`    NEW       ${r.name}`);
-        continue;
-      }
-      if (!(base > 0)) {
-        // A recorded 0 is not a fast baseline, it is an unusable one - the row
-        // was below the clock when it was captured. Reporting it as NEW made
-        // these rows look unregistered forever while sitting in the file.
-        console.log(`    NO-BASE   ${r.name}  (baseline 0 - re-record with --record)`);
-        continue;
-      }
-      const ratio = r.medianMsPerOp / base;
-      const pct = ((ratio - 1) * 100).toFixed(1);
-      const mark = ratio > REGRESSION_THRESHOLD ? "REGRESSED" : ratio < 0.83 ? "improved" : "ok";
-      if (mark === "REGRESSED") failed = true;
-      console.log(`    ${mark.padEnd(9)} ${r.name}  (${pct > 0 ? "+" : ""}${pct}%)`);
+    const rows = allResults.map((r) => ({ name: r.name, value: r.medianMsPerOp, spread: r.spread, gateable: r.gateable }));
+    if (compareBaseline(baseline, rows, { threshold: REGRESSION_THRESHOLD })) {
+      process.exit(1);
     }
-    console.log();
-    if (failed) process.exit(1);
   }
 
   log("Browser benchmarks completed.");
@@ -312,43 +308,50 @@ async function runVisual() {
 }
 
 // ── Main ────────────────────────────────────────────────────────────
-log(`PlayerForge platform runner — mode: ${mode}`);
+log(`PlayerForge platform runner — targets: ${targets_.join(", ")}`);
 
-switch (mode) {
-  case "test":
-    await runTests();
-    break;
-  case "bench":
-    await runBench();
-    break;
-  case "integration":
-    await runIntegration();
-    break;
-  case "browser-bench":
-    await runBrowserBench();
-    break;
-  case "visual":
-    await runVisual();
-    break;
-  case "all":
-    await runTests();
-    await runBench();
-    await runIntegration();
-    await runBrowserBench();
-    await runVisual();
-    break;
-  case "ci":
-    await runTests();
-    await runBench();
-    await runIntegration();
-    log("Skipping browser-bench (timing gate is not meaningful on a shared runner).");
-    log("Skipping visual (needs a real browser and a stable renderer).");
-    log("Run `npm run visual` locally before shipping a HUD change.");
-    break;
-  default:
-    console.error(`\n  Unknown mode: ${mode}`);
-    console.error("  Usage: node platform/run.mjs [test|bench|integration|browser-bench|visual|all|ci]");
-    process.exit(1);
+for (const target of targets_) {
+  switch (target) {
+    case "lint":
+      await runLint();
+      break;
+    case "test":
+      await runTests();
+      break;
+    case "build":
+      await runBuild();
+      break;
+    case "bench":
+      await runBench(flags.filter((f) => !f.startsWith("--repeat=")));
+      break;
+    case "bench:record":
+      await runBench(flags.includes("--record") ? [...flags] : [...flags, "--record"]);
+      break;
+    case "bench:compare":
+      await runBench(flags.includes("--compare") ? [...flags] : [...flags, "--compare"]);
+      break;
+    case "integration":
+      await runIntegration();
+      break;
+    case "browser-bench":
+    case "browser-bench:record":
+    case "browser-bench:compare":
+      await runBrowserBench();
+      break;
+    case "visual":
+      await runVisual();
+      break;
+    default:
+      console.error(`\n  Unknown target: ${target}`);
+      console.error("  Usage: node platform/run.mjs [lint|test|build|bench|bench:record|bench:compare|integration|browser-bench|browser-bench:record|browser-bench:compare|visual|all|ci|verify]");
+      process.exit(1);
+  }
+}
+
+if (bundleInvoked) {
+  for (const note of BUNDLE_NOTES[mode] ?? []) {
+    log(note);
+  }
 }
 
 separator();
