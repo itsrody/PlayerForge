@@ -1,0 +1,85 @@
+/**
+ * Browser gate - everything the tool verifies about behavior happens here, in
+ * a real Chromium with the real bundle.
+ *
+ * One session per run; one fresh document per case (navigate → GM realm →
+ * inject bundle → wake videos), then the case file runs its probes in-page
+ * and reports rows. A case is a function receiving { session, baseUrl } and
+ * returning rows; the stage only owns the boot ceremony and bookkeeping.
+ */
+import { readFile, mkdir, writeFile } from "node:fs/promises";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { readdirSync, existsSync } from "node:fs";
+import { ChromiumSession } from "../lib/driver.mjs";
+import { FIXTURE_PAGE, FALLBACK_PAGE, ensureVideoAsset } from "../lib/fixture.mjs";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const CASES_DIR = join(HERE, "..", "browser", "cases");
+const ROOT = join(HERE, "..", "..");
+
+/** Standard ceremony so every case starts from the same known page state. */
+async function bootCasePage(session, { pagePath, baseUrl, version, bundle, seed = {} }) {
+  // A distinct query per boot forces a real document navigation: driver.get to
+  // the identical URL can race as a same-URL reload and eat the injected
+  // bundle mid-document.
+  await session.navigate(`${baseUrl}${pagePath}?boot=${Date.now()}`);
+  await session.injectGMRealm({ version, storage: seed });
+  await session.injectBundle(bundle);
+  await session.wakeVideos();
+  const shellSeen = await session.waitFor("return !!document.querySelector('.pf-shell');", 9000).then(() => true, () => false);
+  if (!shellSeen) {
+    const info = await session.eval(function main() { return { ready: document.readyState, shell: document.querySelectorAll(".pf-shell").length, video: !!document.querySelector("video"), pf: typeof window.PlayerForge, err: window.__lastInjectError ?? null }; }).catch((e) => ({ evalError: e.message.slice(0, 100) }));
+    throw new Error("shell never attached on " + pagePath + " - " + JSON.stringify(info));
+  }
+  return { shellHost: true };
+}
+
+async function bundleSource() {
+  const path = join(ROOT, "dist", "playerforge.user.js");
+  if (!existsSync(path)) {
+    throw new Error("dist/playerforge.user.js missing - run the bundle gate first");
+  }
+  return readFile(path, "utf8");
+}
+
+async function fixtureVersion() {
+  const packageJson = JSON.parse(await readFile(join(ROOT, "package.json"), "utf8"));
+  return packageJson.version;
+}
+
+export async function run() {
+  const start = Date.now();
+  const rows = [];
+  let session = null;
+  try {
+    session = await ChromiumSession.launch();
+    const baseUrl = await session.startFixtureServer();
+    const videoRoute = ensureVideoAsset();
+    session.registerFixture("/check", FIXTURE_PAGE);
+    session.registerFixture("/check/blank", FALLBACK_PAGE);
+    session.registerAsset(videoRoute, await readFile(join(ROOT, "check", ".tmp", "check-video.mp4")), "video/mp4");
+
+    const bundle = await bundleSource();
+    const version = await fixtureVersion();
+    const stepPage = (name) => bootCasePage(session, { pagePath: "/check", baseUrl, version, bundle, seed: {} });
+
+    for (const caseFile of readdirSync(CASES_DIR).filter((f) => f.endsWith(".mjs")).sort()) {
+      const mod = await import(join(CASES_DIR, caseFile));
+      const caseRows = await mod.run({ session, baseUrl, bundle, boot: stepPage });
+      rows.push(...caseRows);
+      for (const r of caseRows.filter((x) => x.status === "fail")) {
+        console.log(`    [${caseFile}] ${r.name}${r.note ? " — " + r.note : ""}`);
+      }
+    }
+  } catch (err) {
+    const aborted = { name: "browser gate aborted", status: "fail", note: err.message.slice(0, 160), ms: null };
+    rows.push(aborted);
+    console.log(`    stack: ${String(err.stack ?? "").split("\n").slice(1, 5).join(" ")}`);
+    await session?.destroy();
+    return { rows, ok: false };
+  }
+  await session.destroy();
+  const failures = rows.filter((r) => r.status === "fail").length;
+  return { rows, ok: failures === 0, totalMs: Date.now() - start };
+}
