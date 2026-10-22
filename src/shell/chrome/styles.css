@@ -68,13 +68,14 @@
      it holds the largest radius; everything nested inside is derived from it
      by subtracting its own inset padding, so a change to the container
      propagates instead of silently breaking concentricity.
-       panel 18 (outermost)  -> tab strip 18-8=10  -> tab 10-3=7  -> close 10
+       panel 18 (outermost)  -> tab 10-3=7 (strip pad)  -> close 10
      -xs was 7px, i.e. LARGER than -sm at 6px: the scale was not monotonic. */
-  --pf-radius-lg: 18px;   /* panel, toast sheet edge */
-  --pf-radius-md: 12px;   /* sections, rows */
-  --pf-radius-sm: 10px;   /* inset tab strip, close button */
-  --pf-radius-xs: 7px;    /* tab inside the strip */
+  --pf-radius-lg: 18px;   /* panel, toast sheet edge            */
+  --pf-radius-md: 12px;   /* sections, rows                     */
+  --pf-radius-sm: 10px;   /* close button (one ring in on -lg)  */
+  --pf-radius-xs: 7px;    /* tab inside the strip               */
 
+  --pf-font-2xs: 10px;
   --pf-font-xs: 11px;
   --pf-font-sm: 12px;
   --pf-font-md: 13px;
@@ -426,6 +427,16 @@
       container-name: pf-panel;
       contain: layout style;
 
+      /* Panel-local density tokens. The density blocks (container query,
+         coarse/landscape media) only override these, so their component
+         rules keep their base form; a future density retune is one
+         declaration per context instead of a selector-list rewrite. */
+      --pf-icon-btn: 28px;
+      --pf-icon-glyph: 16px;
+      --pf-history-title-size: var(--pf-font-sm);
+      --pf-history-meta-size: var(--pf-font-xs);
+      --pf-history-list-height: 168px;
+
       position: absolute;
       z-index: var(--pf-z-panel);
       padding: 0;
@@ -514,19 +525,15 @@
 
       /* Segmented tab strip - icon + label, active label accent-tinted. Tabs
          are content-sized (uniform internal padding, no equal-width stretch)
-         and the strip distributes them with space-evenly. */
+         and the strip distributes them with space-evenly. The strip carries no
+         fill or border of its own: it is part of the header's glass, one
+         continuous surface with the sheet behind it. */
       .pf-panel-tabs {
         flex: 1;
         min-width: 0;
         display: flex;
         justify-content: space-evenly;
         padding: 3px;
-        border: 1px solid var(--pf-border-soft);
-        /* R5: concentric with the panel it is inset in - the strip sits on the
-           header's 8px padding, so 18 - 8 = 10 = --pf-radius-sm (was a space
-           token that merely happened to equal it). */
-        border-radius: var(--pf-radius-sm);
-        background: var(--pf-surface-mid);
 
         .pf-panel-tab {
           flex: 0 1 auto;
@@ -704,13 +711,15 @@
         }
       }
 
-      /* Icon-only action buttons - square, centered glyph, tooltip via title. */
+      /* Icon-only action buttons - square, centered glyph, tooltip via title.
+         Sized by --pf-icon-btn/--pf-icon-glyph (see the panel's local token
+         preamble); the density blocks only retoken those. */
       .pf-panel-actions .pf-btn.pf-btn-icon,
       .pf-panel-section-head .pf-btn.pf-btn-icon,
       .pf-history-actions .pf-btn.pf-btn-icon {
         flex: none;
-        width: 28px;
-        height: 28px;
+        width: var(--pf-icon-btn);
+        height: var(--pf-icon-btn);
         padding: 0;
         margin-bottom: 0;
         display: inline-flex;
@@ -721,8 +730,8 @@
       .pf-panel-actions .pf-btn.pf-btn-icon svg,
       .pf-panel-section-head .pf-btn.pf-btn-icon svg,
       .pf-history-actions .pf-btn.pf-btn-icon svg {
-        width: 16px;
-        height: 16px;
+        width: var(--pf-icon-glyph);
+        height: var(--pf-icon-glyph);
       }
 
       /* Compact 2-column grid (Colors / Subtitles tabs) - minmax(0, 1fr)
@@ -1124,7 +1133,7 @@
       display: flex;
       flex-direction: column;
       gap: var(--pf-space-xs);
-      max-height: 168px;
+      max-height: var(--pf-history-list-height);
       /* One-axis scroll container: horizontal overflow is clipped, never
          turned into a second scroller. The two-value scroll+clip form shipped
          in Chromium 155 (probe-verified: `overflow: clip auto` maps x=clip,
@@ -1164,7 +1173,7 @@
     }
 
     .pf-history-title {
-      font-size: var(--pf-font-sm);
+      font-size: var(--pf-history-title-size);
       line-height: 1.3;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -1172,7 +1181,7 @@
     }
 
     .pf-history-meta {
-      font-size: var(--pf-font-xs);
+      font-size: var(--pf-history-meta-size);
       opacity: 0.6;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -1193,9 +1202,9 @@
       .pf-panel-body { padding: var(--pf-space-sm); }
       .pf-panel-grid { grid-template-columns: minmax(0, 1fr); }
       .pf-history-card { padding: 5px var(--pf-space-sm); gap: var(--pf-space-sm); }
-      .pf-history-title { font-size: var(--pf-font-xs); }
-      .pf-history-meta { font-size: 10px; }
-      .pf-history-list { max-height: 152px; }
+      .pf-history-title { --pf-history-title-size: var(--pf-font-xs); }
+      .pf-history-meta { --pf-history-meta-size: var(--pf-font-2xs); }
+      .pf-history-list { --pf-history-list-height: 152px; }
     }
 
     /* - Mobile & touch - */
@@ -1219,22 +1228,11 @@
       .pf-panel input[type="checkbox"]:checked::before { translate: 18px 0; }
       .pf-settings-toggle { padding: 9px 10px; font-size: var(--pf-font-md); }
       .pf-panel select.pf-select { padding: 9px 8px; font-size: var(--pf-font-lg); }
-      .pf-panel-actions .pf-btn.pf-btn-icon,
-      .pf-panel-section-head .pf-btn.pf-btn-icon,
-      .pf-history-actions .pf-btn.pf-btn-icon {
-        width: 36px;
-        height: 36px;
-      }
-      .pf-panel-actions .pf-btn.pf-btn-icon svg,
-      .pf-panel-section-head .pf-btn.pf-btn-icon svg,
-      .pf-history-actions .pf-btn.pf-btn-icon svg {
-        width: 18px;
-        height: 18px;
-      }
+      .pf-panel { --pf-icon-btn: 36px; --pf-icon-glyph: 18px; }
       .pf-history-card { padding: var(--pf-space-md) var(--pf-space-lg); gap: var(--pf-space-md); }
-      .pf-history-title { font-size: var(--pf-font-md); }
-      .pf-history-meta { font-size: var(--pf-font-sm); }
-      .pf-history-list { max-height: 184px; }
+      .pf-history-title { --pf-history-title-size: var(--pf-font-md); }
+      .pf-history-meta { --pf-history-meta-size: var(--pf-font-sm); }
+      .pf-history-list { --pf-history-list-height: 184px; }
     }
 
     /* Narrow screens (portrait phones): a fixed 344px panel would swallow the
@@ -1272,7 +1270,7 @@
         border-right: none;
         border-bottom: none;
       }
-      .pf-history-list { max-height: 220px; }
+      .pf-history-list { --pf-history-list-height: 220px; }
     }
 
     /* Landscape phones (touch): the viewport is short and wide, so the
@@ -1290,22 +1288,10 @@
       }
       .pf-tab-label { display: none; }
       .pf-panel-tab { padding: var(--pf-space-md) var(--pf-space-lg); }
-      .pf-history-card { padding: var(--pf-space-sm) var(--pf-space-md); gap: var(--pf-space-sm); }
-      .pf-history-title { font-size: var(--pf-font-xs); }
-      .pf-history-meta { font-size: 10px; }
-      .pf-history-list { max-height: 144px; }
-      .pf-panel-actions .pf-btn.pf-btn-icon,
-      .pf-panel-section-head .pf-btn.pf-btn-icon,
-      .pf-history-actions .pf-btn.pf-btn-icon {
-        width: 32px;
-        height: 32px;
-      }
-      .pf-panel-actions .pf-btn.pf-btn-icon svg,
-      .pf-panel-section-head .pf-btn.pf-btn-icon svg,
-      .pf-history-actions .pf-btn.pf-btn-icon svg {
-        width: 16px;
-        height: 16px;
-      }
+      .pf-history-title { --pf-history-title-size: var(--pf-font-xs); }
+      .pf-history-meta { --pf-history-meta-size: var(--pf-font-2xs); }
+      .pf-history-list { --pf-history-list-height: 144px; }
+      .pf-panel { --pf-icon-btn: 32px; --pf-icon-glyph: 16px; }
     }
 
     /* Responsive options label/buttons spacing for narrow screens. */
@@ -1367,15 +1353,15 @@
       }
 
       .pf-history-title {
-        font-size: var(--pf-font-xs);
+        --pf-history-title-size: var(--pf-font-xs);
       }
 
       .pf-history-meta {
-        font-size: 10px;
+        --pf-history-meta-size: var(--pf-font-2xs);
       }
 
       .pf-history-list {
-        max-height: 152px;
+        --pf-history-list-height: 152px;
       }
 
       .pf-stepper {

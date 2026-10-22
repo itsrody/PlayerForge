@@ -175,6 +175,55 @@ design for regression detection; the v1.0.0 target is preserved on its tag.
 
 ### Change log
 
+- **Density token pass.** The chrome stylesheet's last repeated selector
+  machinery collapsed. The three-context icon-button block (`panel actions` /
+  `section head` / `history actions` + its `svg` twin, restated verbatim at
+  base / coarse / landscape scales) became one triple-selector write sized by
+  `--pf-icon-btn` / `--pf-icon-glyph` tokens the density blocks retoken; the
+  history row's four restatements (container query, coarse, landscape,
+  compact) became `--pf-history-title-size` / `-meta-size` / `-list-height`
+  overrides, carried by a new scale rung - `--pf-font-2xs: 10px` - that
+  absorbed the three hardcoded 10px metas. All sizes are declared as a
+  panel-local token preamble, per the density-blocks-override-only doctrine;
+  visually neutral throughout (gates: 356/356, deterministic build).
+- **Chrome-layer token hygiene.** The `54ed29c` cleanup removed the dead
+  `--pf-surface` token (zero uses; its "opaque fallback" comment described a
+  fallback deleted with the last accessibility retirements), inlined the
+  single-use `--pf-toast-color` / `--pf-toast-radius` indirections, repeated
+  the "R7 capitalization" comment once instead of twice, deduped the
+  `input[type="color"]` cell rule down to `width: 100%`, swapped the
+  `.pf-drop-active` hardcoded accent for
+  `color-mix(in srgb, var(--pf-accent) 6%, transparent)` (bit-identical on
+  the default theme, theme-aware otherwise), normalised ~30 off-scale
+  spacing literals onto the `--pf-space-*` rungs (tuned values were left
+  alone - the 3px concentric rings, the 5px paddings, the thumb-floor coarse
+  sizes), and merged the three adjacent `.pf-panel.pf-compact` blocks into
+  one with nested media queries.
+- **Flat glass HUD.** The `29e10a6` restyle dropped the last gradient paint:
+  the specular `--pf-glass-sheen` (toast, panel sheet, header), R4's
+  scroll-edge fade (`--pf-scroll-edge` + the header's `::after`), and the rim
+  tokens went out - then the rim highlights came back within the same commit
+  at the follow-up request, so the sheets keep their inset top-edge
+  highlight and the header carries `--pf-header-rim`. The surface set is
+  tint + blur + hairline border + rim shadows with zero `linear-gradient`s
+  in the HUD. R3's two tint states and both blur layers are untouched.
+- **Shell-layer review.** The `d080a55` pass over all 14 shell modules
+  collapsed forge.js' three pointer-session-end branches (hold, scrub, swipe)
+  into one `#endPointerSession()` exit with swipe direction pre-captured and
+  restore-then-dispatch order kept - `stopImmediatePropagation()` fires once.
+  Thirteen duplicate imports across 8 modules collapsed to one-per-realm-form
+  per the repo convention; the dropped `EASE_STYLE`/`EASE_MS` aliases left
+  two direct `EASE_SNAPPY_*` uses, resume.js' bounds cutoff hoisted above the
+  branch (one `Date.now()` read), `#activateSection(~531/535/870)` went
+  single-param, and stale `(shadow.js)` attribution comments corrected to
+  `(shared/dom.js)`. Behavior verified equivalent pre-edit; 356/356.
+- **Shared-layer review.** The `f59ecad` pass landed one registry owner, one
+  response gate, one close path across the shared planes - same
+  findings-then-scope workflow (lint clean, 356/356, deterministic build,
+  pushed as `f59ecad`).
+- **Kernel-layer review.** The `3adf3dc` seed pass - one detection cache,
+  one provider check, one seeding walk - opened the per-layer review program
+  that every subsequent bullet here rides on.
 - **Single-backend pass.** Production code now ships exactly one
   Chromium-native implementation per platform capability; the jsdom harness
   owns the emulation of what Node lacks, with a real contract instead of a
