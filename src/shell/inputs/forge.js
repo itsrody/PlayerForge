@@ -108,7 +108,7 @@ const keyDetail = { method: "keyboard", direction: undefined };
 // Scrub's per-name detail payload, refilled in place by #advanceScrub (same
 // mutate-in-place discipline as the other per-family payloads; actions.js
 // reads it synchronously within the scrub handler).
-const scrubDetail = { zone: "", method: "pointer", dx: 0, velocity: 0, timestamp: 0 };
+const scrubDetail = { zone: "", method: "pointer", dx: 0, dy: 0, velocity: 0, timestamp: 0 };
 
 function captureFirstTwo(pointers, out) {
   let n = 0;
@@ -238,6 +238,9 @@ export class InputForge {
   // Scrub state.
   #scrubbing = false;
   #scrubLastX = 0;
+  // Y mirror of #scrubLastX: the pan arm of scrub (zoomed fullscreen) needs
+  // the vertical stroke delta the seek arm never consumed.
+  #scrubLastY = 0;
   #scrubLastTime = 0;
   #scrubVelocity = 0;
 
@@ -776,6 +779,7 @@ export class InputForge {
       this.#gestureZone = this.#zoneForPoint(event);
       this.#scrubbing = false;
       this.#scrubLastX = event.clientX;
+      this.#scrubLastY = event.clientY;
       this.#scrubLastTime = this.#startTime;
       this.#scrubVelocity = 0;
       this.#swiping = false;
@@ -838,6 +842,7 @@ export class InputForge {
           this.#gestureFsActive = true;
           this.#pointerOp("setPointerCapture", this.#primaryPointerId);
           this.#scrubLastX = x;
+          this.#scrubLastY = y;
           // event.timeStamp shares the timebase the per-move velocity filter
           // below already reads, so the whole move stream pays no clock read.
           this.#scrubLastTime = event.timeStamp;
@@ -911,6 +916,7 @@ export class InputForge {
    */
   #advanceScrub(event) {
     let totalStep = 0;
+    let totalStepY = 0;
     const hasCoalesced = typeof event.getCoalescedEvents === "function";
     const samples = hasCoalesced ? event.getCoalescedEvents() : null;
     // Coalesced samples then the live event, without materializing a combined
@@ -919,15 +925,21 @@ export class InputForge {
     if (samples) {
       const count = samples.length + 1;
       let lastX = this.#scrubLastX;
+      let lastY = this.#scrubLastY;
       for (let i = 0; i < count; i++) {
         const sample = i < samples.length ? samples[i] : event;
         totalStep += sample.clientX - lastX;
         lastX = sample.clientX;
+        totalStepY += sample.clientY - lastY;
+        lastY = sample.clientY;
       }
       this.#scrubLastX = lastX;
+      this.#scrubLastY = lastY;
     } else {
       totalStep = event.clientX - this.#scrubLastX;
       this.#scrubLastX = event.clientX;
+      totalStepY = event.clientY - this.#scrubLastY;
+      this.#scrubLastY = event.clientY;
     }
 
     // Speculative velocity wash: the first predicted pointer beats the live
@@ -967,6 +979,7 @@ export class InputForge {
     scrubDetail.zone = this.#gestureZone || "screen";
     scrubDetail.method = "pointer";
     scrubDetail.dx = totalStep;
+    scrubDetail.dy = totalStepY;
     scrubDetail.velocity = this.#scrubVelocity;
     scrubDetail.timestamp = now;
     if (!this.#scope.disposed && this.#eventTarget) {

@@ -235,10 +235,13 @@ export async function run({ session, boot, header, version: bundleVersion }) {
       done({
         ok: (stats1.GM_registerMenuCommand ?? 0) - (stats0.GM_registerMenuCommand ?? 0) === 1
           && (stats1.GM_unregisterMenuCommand ?? 0) - (stats0.GM_unregisterMenuCommand ?? 0) === 1
-          && ids1.length === 1
-          && ids0.length === 1
-          && ids0[0] !== ids1[0]
-          && Object.keys(window.__pfMenu).some((k) => k.startsWith("menu:") && k.includes("Debug")),
+          // Three live commands: the re-registered debug toggle plus the two
+          // one-shot resets (color filter, subtitle sync).
+          && ids1.length === 3
+          && ids0.length === 3
+          && Object.keys(window.__pfMenu).some((k) => k.startsWith("menu:") && k.includes("Debug"))
+          && Object.keys(window.__pfMenu).some((k) => k.startsWith("menu:") && k.includes("Color"))
+          && Object.keys(window.__pfMenu).some((k) => k.startsWith("menu:") && k.includes("Subtitle")),
         why: `reg=${stats1.GM_registerMenuCommand - stats0.GM_registerMenuCommand} unreg=${stats1.GM_unregisterMenuCommand - stats0.GM_unregisterMenuCommand} ids0=${ids0} ids1=${ids1}`
       });
     }, 500);

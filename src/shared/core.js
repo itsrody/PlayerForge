@@ -114,7 +114,19 @@ export const TUNING = {
     persistDebounceMs: 300
   },
   subtitles: {
-    syncDebounceMs: 150
+    syncDebounceMs: 150,
+    /** Keyboard sync nudge: step seconds and the offset bounds (the panel
+     *  stepper ranges ride the same bounds). */
+    nudgeStepSeconds: 0.25,
+    syncMaxOffset: 20
+  },
+  zoom: {
+    /** Wheel-zoom multiplicative step; 1.15 reads as a step, not a jump. */
+    wheelFactor: 1.15,
+    /** Hard zoom ceiling (scale) - beyond this pan control degrades. */
+    max: 3,
+    /** Trailing persist for wheel/panel-driven zoom state. */
+    persistDebounceMs: 500
   },
   toast: {
     /** Completed-action feedback: skip, volume, fullscreen exit, fill. */

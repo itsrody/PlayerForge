@@ -78,15 +78,30 @@ export async function run({ session, baseUrl, boot }) {
     await actions.perform();
   };
 
-  // Skip via arrow keys.
-  await pressUp();
-  await singleTap();
-  await recordGestureEvents(session);
+  // Skip via arrow keys, deterministically: pause + seek first, so the step's
+  // SIGN carries the assertion - a backward skip from 0 clamps to 0, which the
+  // old `> 0` check confused with playback drift.
+  await session.eval(function main() {
+    const v = document.querySelector("#check-video");
+    v.pause();
+    v.currentTime = 2;
+  });
   await fireKeys(["ArrowRight"]);
   await new Promise((r) => setTimeout(r, 400));
-  status(rows, "ArrowRight drives the video forward (skip)", await session.eval(function main() {
-    return window.__pfEvents.includes("skip") && document.querySelector("#check-video").currentTime > 0;
-  }), "no pf:gesture-skip or currentTime stayed 0");
+  status(rows, "ArrowRight skips forward (+5s)", await session.eval(function main() {
+    const t = document.querySelector("#check-video").currentTime;
+    return window.__pfEvents.includes("skip") && t > 5 && t < 10;
+  }), "skip event or forward step missing");
+
+  await session.eval(function main() {
+    document.querySelector("#check-video").currentTime = 7;
+  });
+  await fireKeys(["ArrowLeft"]);
+  await new Promise((r) => setTimeout(r, 400));
+  status(rows, "ArrowLeft skips backward (-5s)", await session.eval(function main() {
+    const t = document.querySelector("#check-video").currentTime;
+    return window.__pfEvents.includes("skip") && t > 0 && t < 4;
+  }), "skip event or backward step missing");
 
   await fireKeys(["KeyM"]);
   await new Promise((r) => setTimeout(r, 350));

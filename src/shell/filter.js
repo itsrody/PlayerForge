@@ -2,6 +2,7 @@ import { getConfigValue, setConfigFields } from "../shared/store.js";
 import { flashElement } from "./chrome/ui.js";
 import { debounce, Scope } from "../shared/runtime.js";
 import { clamp, TUNING, fmtPercent, fmtSigned } from "../shared/core.js";
+import { GESTURE_EVENTS } from "../kernel/contract.js";
 
 const CONFIG_PREFIX = "filter";
 
@@ -103,26 +104,155 @@ function buildFilterString(values) {
   return parts.join(" ") || "none";
 }
 
-export class VideoFilter {
-  #video;
+/**
+ * Color-filter state for one shell, constructed at boot - not with the
+ * panel. The stored filter has to be ON the video the moment it plays (a
+ * reopened page resuming into Sepia shows Sepia), and the menu's reset
+ * command fires against the shell host whether or not a panel was ever
+ * opened, so the values+apply machine must live where both are true. The
+ * section is UI over this session.
+ */
+export class FilterSession {
   #shell;
+  #video;
   #values = { ...DEFAULTS };
-  #presetSelect = null;
-  #resetBtn = null;
-  #steppers = {};
-  /** Disposal flag: guards #apply after teardown, home of future disposers. */
-  #scope = new Scope();
   /** Trailing persist: preview applies instantly, storage lands once the drag
    *  settles (a slider drag otherwise fires a full config write + cross-tab
    *  live-reload echo per step). Flushed on destroy. */
   #schedulePersist = debounce(() => this.#writePersist(), TUNING.filter.persistDebounceMs);
+  #scope = new Scope();
+  #listeners = new Set();
+
+  constructor(shell) {
+    this.#shell = shell;
+    this.#video = shell.video;
+    // Menu reset (kernel-dispatched filterReset on the shell host): the
+    // gesture surface that works without any panel.
+    shell.shellHost?.addEventListener(GESTURE_EVENTS.filterReset, () => this.reset(), {
+      signal: this.#scope.signal
+    });
+    this.#load();
+    this.#apply();
+  }
+
+  get values() {
+    return this.#values;
+  }
+
+  /** The preset whose values the section currently shows; "Custom" otherwise. */
+  get preset() {
+    return matchPreset(this.#values);
+  }
+
+  onState(listener) {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  /** Per-key state write (panel stepper): preview + trailing persist. */
+  set(key, value) {
+    this.#values[key] = value;
+    this.#apply();
+    this.#schedulePersist();
+    this.#notify();
+  }
+
+  applyPreset(name) {
+    const preset = PRESETS[name];
+    if (!preset) {
+      return;
+    }
+    for (const key of ALL_KEYS) {
+      this.#values[key] = preset[key];
+    }
+    this.#apply();
+    this.#schedulePersist();
+    this.#shell?.toastFlash("color", `Preset: ${name}`, "filter");
+    this.#notify();
+  }
+
+  reset() {
+    for (const key of ALL_KEYS) {
+      this.#values[key] = DEFAULTS[key];
+    }
+    this.#apply();
+    this.#schedulePersist();
+    this.#shell?.toastFlash("reload", "Color Reset", "filter");
+    this.#notify();
+  }
+
+  #load() {
+    for (const key of ALL_KEYS) {
+      const def = DEFAULTS[key];
+      const raw = getConfigValue(`${CONFIG_PREFIX}.${key}`, def);
+      if (typeof def === "number") {
+        const num = Number(raw);
+        // A saved 0 is a real value (brightness/contrast/saturate allow it):
+        // the old `Number(raw) || def` treated it as absent and silently
+        // reset those to their default on the next load. Only a missing or
+        // non-finite value falls back now.
+        this.#values[key] = raw == null || raw === "" || !Number.isFinite(num) ? def : num;
+      } else {
+        this.#values[key] = raw ?? def;
+      }
+    }
+  }
+
+  #writePersist() {
+    const fields = {};
+    for (const key of ALL_KEYS) {
+      fields[`${CONFIG_PREFIX}.${key}`] = this.#values[key];
+    }
+    setConfigFields(fields);
+  }
+
+  #apply() {
+    if (this.#scope.disposed || !this.#video) {
+      return;
+    }
+    this.#video.style.filter = buildFilterString(this.#values);
+  }
+
+  #notify() {
+    for (const listener of this.#listeners) {
+      listener(this.#values);
+    }
+  }
+
+  destroy() {
+    if (this.#scope.disposed) {
+      return;
+    }
+    this.#scope.dispose();
+    this.#listeners.clear();
+    // Land any trailing persist before the section dies - the last slider
+    // value must not be the one that never got written.
+    this.#schedulePersist.flush();
+    if (this.#video) {
+      this.#video.style.filter = "";
+    }
+  }
+}
+
+/**
+ * Color section (panel): preset menu, per-key steppers, reset. State lives
+ * in the shell's FilterSession (this section builds lazily with the panel);
+ * a gesture-driven state change flows back through onState so the open
+ * section never shows stale numbers.
+ */
+export class VideoFilter {
+  #session;
+  #presetSelect = null;
+  #resetBtn = null;
+  #steppers = {};
+  #scope = new Scope();
 
   constructor(shell, panel) {
-    this.#video = shell.video;
-    this.#shell = shell;
+    this.#session = shell.filters;
     this.#buildSection(panel);
-    this.#loadFromConfig();
-    this.#apply();
+    const unsub = this.#session?.onState(() => this.#syncFromSession());
+    this.#scope.onDispose(() => unsub?.());
+    this.#syncFromSession();
   }
 
   #buildSection(panel) {
@@ -137,7 +267,7 @@ export class VideoFilter {
       type: "select",
       options: PRESET_OPTIONS,
       value: "Default",
-      onChange: (name) => this.#onPresetChange(name)
+      onChange: (name) => this.#session?.applyPreset(name)
     });
     this.#presetSelect.style.marginLeft = "auto";
 
@@ -147,7 +277,10 @@ export class VideoFilter {
       title: "Reset all",
       ariaLabel: "Reset all",
       ghost: true,
-      onClick: () => this.reset()
+      onClick: () => {
+        flashElement(this.#resetBtn);
+        this.#session?.reset();
+      }
     });
 
     const grid = panel.el("div", { class: "pf-panel-grid pf-panel-grid-compact" }, sectionRoot);
@@ -164,100 +297,27 @@ export class VideoFilter {
         head: true,
         format: fmt,
         deferTextInput: true,
-        onChange: (v) => this.#onStepperChange(key, v)
+        onChange: (v) => this.#session?.set(key, v)
       });
       this.#steppers[key] = stepper;
     }
   }
 
-  #loadFromConfig() {
-    for (const key of ALL_KEYS) {
-      const def = DEFAULTS[key];
-      const raw = getConfigValue(`${CONFIG_PREFIX}.${key}`, def);
-      if (typeof def === "number") {
-        const num = Number(raw);
-        // A saved 0 is a real value (brightness/contrast/saturate allow it):
-        // the old `Number(raw) || def` treated it as absent and silently
-        // reset those to their default on the next load. Only a missing or
-        // non-finite value falls back now.
-        this.#values[key] = raw == null || raw === "" || !Number.isFinite(num) ? def : num;
-      } else {
-        this.#values[key] = raw ?? def;
-      }
-    }
-    for (const key of ALL_KEYS) {
-      this.#steppers[key]?.setValue(this.#values[key]);
-    }
-    this.#syncPresetMenu();
-  }
-
-  #apply() {
-    if (this.#scope.disposed || !this.#video) {
+  #syncFromSession() {
+    const values = this.#session?.values;
+    if (!values) {
       return;
     }
-    this.#video.style.filter = buildFilterString(this.#values);
-  }
-
-  #syncPresetMenu() {
-    if (this.#presetSelect) {
-      this.#presetSelect.value = matchPreset(this.#values);
-    }
-  }
-
-  #onStepperChange(key, value) {
-    this.#values[key] = value;
-    this.#apply();
-    this.#syncPresetMenu();
-    this.#schedulePersist();
-  }
-
-  #onPresetChange(name) {
-    const preset = PRESETS[name];
-    if (!preset) {
-      return;
-    }
-    this.#applyValues(preset);
-    this.#shell?.toastFlash("color", `Preset: ${name}`, "filter");
-  }
-
-  #writePersist() {
-    const fields = {};
     for (const key of ALL_KEYS) {
-      fields[`${CONFIG_PREFIX}.${key}`] = this.#values[key];
+      this.#steppers[key]?.setValue(values[key]);
     }
-    setConfigFields(fields);
-  }
-
-  reset() {
-    this.#applyValues(DEFAULTS);
-    this.#syncPresetMenu();
-    if (this.#resetBtn) {
-      flashElement(this.#resetBtn);
+    const preset = this.#session.preset;
+    if (this.#presetSelect && this.#presetSelect.value !== preset) {
+      this.#presetSelect.value = preset;
     }
-    this.#shell?.toastFlash("reload", "Color Reset", "filter");
-  }
-
-  /** Seed the working values from `source` (a preset or DEFAULTS) and push the
-   *  same numbers into the section's steppers so the UI shows what was applied. */
-  #applyValues(source) {
-    for (const key of ALL_KEYS) {
-      this.#values[key] = source[key];
-      this.#steppers[key]?.setValue(source[key]);
-    }
-    this.#apply();
-    this.#schedulePersist();
   }
 
   destroy() {
-    if (this.#scope.disposed) {
-      return;
-    }
     this.#scope.dispose();
-    // Land any trailing persist before the section dies - the last slider
-    // value must not be the one that never got written.
-    this.#schedulePersist.flush();
-    if (this.#video) {
-      this.#video.style.filter = "";
-    }
   }
 }

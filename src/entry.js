@@ -90,9 +90,12 @@ function bootstrap() {
 
   // GM menu commands exist from script eval - not from first video
   // discovery. Registration used to live inside kernel.init(), so pages
-  // without a supported player showed NO menu entries at all.
+  // without a supported player showed NO menu entries at all. The kernel
+  // (which the reset commands resolve their shell host through) boots after
+  // this call, so the commands read it through a resolver hook at click time.
+  const menuKernelRef = { current: null };
   if (window.top === window) {
-    installMenuCommands();
+    installMenuCommands(() => menuKernelRef.current);
   }
   const boot = () => {
     if (window.PlayerForge) {
@@ -100,6 +103,7 @@ function bootstrap() {
       return;
     }
     const kernel = new Kernel();
+    menuKernelRef.current = kernel;
     // The shell plugin's "main", inlined from its former register.js home:
     // the kernel (framework) never imports the shell - it only calls the
     // provider registered here at boot. Holding the Shell import down in the

@@ -334,6 +334,10 @@
       --pf-cue-font-weight: 500;
       --pf-cue-line-height: 1.4;
       --pf-cue-text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.9);
+      /* Outline stroke, px (subtitles.js stroke key). -webkit-text-stroke paints
+         centered on the glyph edge, so a 0 width is a true no-op - no default
+         fallback split between here and .pf-cue. */
+      --pf-cue-stroke: 0px;
       /* --pf-cue-top/left/x are not declared here: they are @property-registered
          above with these exact values as initial-values, and are set per slot
          by forge-track.js. */
@@ -364,6 +368,7 @@
       font-size: var(--pf-cue-font-size, 1.2em);
       font-weight: var(--pf-cue-font-weight, 500);
       line-height: var(--pf-cue-line-height, 1.4);
+      -webkit-text-stroke: var(--pf-cue-stroke, 0px);
       text-shadow: var(--pf-cue-text-shadow, 1px 1px 3px rgba(0, 0, 0, 0.9));
       white-space: pre-wrap;
       text-align: center;

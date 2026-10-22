@@ -13,7 +13,8 @@ import { parseSubtitlesAsync as parseInBand, srtToVtt, ensureVttHeader } from ".
 import { logger, Scope, debounce } from "../../shared/runtime.js";
 import { DOMManager } from "../../shared/dom.js";
 import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/store.js";
-import { TUNING, fmtPercent, fmtEm, fmtPercentOrOff, signedSeconds } from "../../shared/core.js";
+import { TUNING, clamp, fmtPercent, fmtEm, fmtPercentOrOff, signedSeconds } from "../../shared/core.js";
+import { GESTURE_EVENTS } from "../../kernel/contract.js";
 import { flashElement, el } from "../chrome/ui.js";
 
 /* - Ingest transport - */
@@ -300,6 +301,47 @@ const STACK_OVERLAP_EM = 1.6;
 const MAX_SLOTS = 8;
 /** The native TextTrack label this renderer owns; reuse, never append. */
 const TRACK_LABEL = "PlayerForge Subtitles";
+
+/* - Parse memo - */
+/** Parsed-track cap (by track count): one cue array is small (strings only),
+ *  eight covers a session of thumb-loading without any eviction math. */
+const PARSE_MEMO_LIMIT = 8;
+/** contentHash -> parsed cues, so a reload of the same subtitle text (panel
+ *  re-open, SPA re-adopt, URL subs again after boot) skips the parse entirely. */
+const parseMemo = new Map();
+
+/** FNV-1a over the normalized text - collision risk is far below the
+ *  wrong-cue-set threshold for subtitle-sized inputs, and the hash is one
+ *  pass (no crypto latency) on the ingest path. */
+function textHash(text) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash;
+}
+
+/** Parse with a content-hash memo: identical normalized text resolves to the
+ *  cached cue array (the same frozen array ForgeTrack read once - cues are
+ *  treated as immutable by the load path, which only copies them into
+ *  VTTCue objects). */
+function memoizedParse(text) {
+  const hash = textHash(text);
+  const hit = parseMemo.get(hash);
+  if (hit) {
+    return Promise.resolve(hit);
+  }
+  return parseSubtitlesAsync(text, 0).then((cues) => {
+    if (cues.length) {
+      if (parseMemo.size >= PARSE_MEMO_LIMIT) {
+        parseMemo.delete(parseMemo.keys().next().value);
+      }
+      parseMemo.set(hash, cues);
+    }
+    return cues;
+  });
+}
 
 /**
  * Shift a base cue time by a sync offset, clamped at t=0 - the exact time the
@@ -609,28 +651,378 @@ const SETTING_KEYS = {
   size: "subtitles.style.size",
   color: "subtitles.style.color",
   shadow: "subtitles.style.shadow",
+  font: "subtitles.style.font",
+  stroke: "subtitles.style.stroke",
   line: "subtitles.position.line",
   horizontal: "subtitles.position.horizontal",
   syncOffset: "subtitles.sync.offset"
 };
 
+/** Curated caption family stacks; "" keeps the embed's own family. */
+const CUE_FONT_OPTIONS = [
+  ["Inherit", ""],
+  ["System", "ui-sans-serif, system-ui, sans-serif"],
+  ["Serif", "ui-serif, serif"],
+  ["Mono", "ui-monospace, monospace"],
+  ["Rounded", "ui-rounded, system-ui"]
+];
+
+const SYNC_STEP = TUNING.subtitles.nudgeStepSeconds;
+const SYNC_BOUNDS = TUNING.subtitles.syncMaxOffset;
+
 /**
- * Shell-owned subtitles section: loads .srt/.vtt files onto a video and renders
- * cues through the shell's cue layer, with caption styling, manual positioning,
- * and sync offset.
+ * The sync-offset state machine as a per-frame singleton.
+ *
+ * The offset has TWO persistence grains: per-entry (the resume tracker's
+ * `subOffset` field - remembering the offset the video that needed it) and
+ * the legacy global key (the only available grain until a resume entry
+ * adopts, which also keeps pre-tracker sessions working unchanged). The
+ * section, the keyboard nudge, and the menu reset all drive this one object:
+ * the section may not even be built when a nudge arrives (panel sections are
+ * lazy), so the state cannot live in the section.
+ *
+ * A user commit marks the state dirty, which freezes the auto-resolution:
+ * a late entry adoption must not overwrite a nudge the user already made
+ * against the fallback grain - their nudge was directed at the video in
+ * front of them, and a subsequent set() migrates it to the entry grain.
  */
-export class SubtitlesSection {
+class SubtitleSyncState {
+  /** Resolved current value; null until first resolution or bind attempt. */
+  #value = Number(getConfigValue(SETTING_KEYS.syncOffset, 0)) || 0;
+  #identity = false;
+  #dirty = false;
+  #tracker = null;
+  #listeners = new Set();
+  #schedulePersist = debounce(() => this.#write(), TUNING.subtitles.syncDebounceMs);
+
+  get offset() {
+    return this.#value;
+  }
+
+  /**
+   * Bind the sync state to the shell: the tracker (entry grain) and the
+   * shell's toast surface (nudge feedback), plus the host gesture listeners
+   * (keyboard nudge, menu reset) so they work before - and without - the
+   * panel section. `signal` is the shell's lifecycle signal; the listeners
+   * die with it.
+   */
+  bindShell(shell, signal) {
+    const host = shell.shellHost;
+    if (!host) {
+      return;
+    }
+    this.#tracker = shell.resume ?? null;
+    // Every adoption announcement resolves the grain (one resolution succeeds
+    // iff the entry changed): the store's own-echo filter swallows our own
+    // save notifications, which means the findMatch adoption path - silent,
+    // it persists nothing - only reaches us through the tracker's announce().
+    const tracker = this.#tracker;
+    if (tracker) {
+      this.#resolve();
+      const unsub = tracker.onChange(() => this.#resolve());
+      signal?.addEventListener("abort", () => unsub(), { once: true });
+    }
+    host.addEventListener(GESTURE_EVENTS.subSync, ({ detail }) => {
+      this.set(this.#value + (detail?.direction === "left" ? -SYNC_STEP : SYNC_STEP));
+      shell.toastFlash("captions", `Sync ${signedSeconds(this.#value)}`, "sync");
+    }, { signal });
+    host.addEventListener(GESTURE_EVENTS.syncReset, () => {
+      this.set(0);
+      shell.toastFlash("captions", "Sync Reset", "sync");
+    }, { signal });
+  }
+
+  /** One resolution: read the best available grain into #value. */
+  #resolve() {
+    const tracker = this.#tracker;
+    this.#identity = !!tracker?.entryId;
+    const target = this.#identity
+      ? tracker.subOffset
+      : (Number(getConfigValue(SETTING_KEYS.syncOffset, 0)) || 0);
+    if (!this.#dirty && target !== this.#value) {
+      this.#value = target;
+      this.#emit();
+    }
+  }
+
+  set(offset) {
+    const next = clamp(offset, -SYNC_BOUNDS, SYNC_BOUNDS);
+    if (next === this.#value) {
+      return;
+    }
+    this.#value = next;
+    this.#dirty = true;
+    this.#schedulePersist(next);
+    this.#emit();
+  }
+
+  onState(listener) {
+    this.#listeners.add(listener);
+    return () => this.#listeners.delete(listener);
+  }
+
+  #write() {
+    this.#schedulePersist.cancel();
+    if (this.#identity && this.#tracker) {
+      this.#tracker.setSubOffset(this.#value);
+    } else {
+      setConfigValue(SETTING_KEYS.syncOffset, this.#value);
+    }
+  }
+
+  #emit() {
+    for (const listener of this.#listeners) {
+      listener(this.#value);
+    }
+  }
+}
+
+/** The per-frame sync singleton: bound by shell.js before the section builds. */
+export const subtitleSync = new SubtitleSyncState();
+
+/**
+ * Subtitle track state for one shell, constructed at boot - not with the
+ * panel. Track ownership and the ingest paths (file, URL) must be live before
+ * the user ever opens a panel, because a video whose entry remembers a
+ * subtitle URL has to bring the track back silently on the next playthrough,
+ * and the sync keyboard nudge applies without any panel open.
+ *
+ * Cue presentation is style-on-the-cue-layer: the vars live on the layer the
+ * shell injected once (which survives track create/remove cycles), so setVar
+ * is a plain style write whether or not a track exists yet.
+ */
+export class SubtitleSession {
   #shell;
   #forgeTrack = null;
   #trackMeta = null;
-  /** Cue layer the shell owns; ForgeTrack renders its slots here. */
   #cueLayer = null;
-  /** Sync offset currently in effect; applied by ForgeTrack at load time. */
-  #syncOffset = 0;
-  /** Stored V/H placement overrides (0-100) or null until first customized;
+  /** Stored placement overrides (0-100) or null until first customized;
    *  applied to the track on load and on every stepper change. */
   #cueLine = null;
   #cuePosition = null;
+  /** The last URL a restore attempted to load. The store notifies on every
+   *  save, so without this dedupe a failed (or looping) fetch would be
+   *  re-armed on each progress persist. */
+  #restoreAttemptedUrl = "";
+  #scope = new Scope();
+  #stateListeners = new Set();
+
+  constructor(shell) {
+    this.#shell = shell;
+    this.#cueLayer = shell.shellDom?.cueLayer ?? null;
+    const storedLine = Number(getConfigValue(SETTING_KEYS.line, null));
+    const storedPos = Number(getConfigValue(SETTING_KEYS.horizontal, null));
+    this.#cueLine = Number.isFinite(storedLine) ? storedLine : null;
+    this.#cuePosition = Number.isFinite(storedPos) ? storedPos : null;
+    // Sync offset rides its own singleton state: every commit shifts the
+    // live cues in place (setOffset), load-time application reads the
+    // current offset in the same build pass over the base cues.
+    const unsubSync = subtitleSync.onState((offset) => this.#applySyncOffset(offset));
+    this.#scope.onDispose(() => unsubSync());
+    // The restore watch: the store announces only on adoption, so the
+    // subscription fires once per entry identity (not per save).
+    const tracker = shell.resume;
+    const unsubRestore = tracker?.onChange?.(() => this.#tryRestore());
+    this.#scope.onDispose(() => unsubRestore?.());
+    // Stored cue style applies at boot: a saved font/stroke must be on the
+    // cue layer before any track renders with it - the panel section (its
+    // other applier) builds lazily, so a resume playthrough would otherwise
+    // show the embed default look until a panel opens.
+    const storedFont = String(getConfigValue(SETTING_KEYS.font, "") || "");
+    if (storedFont) {
+      this.setVar("--pf-cue-font-family", storedFont);
+    }
+    const storedStroke = Number(getConfigValue(SETTING_KEYS.stroke, 0));
+    if (Number.isFinite(storedStroke) && storedStroke > 0) {
+      this.setVar("--pf-cue-stroke", `${storedStroke}px`);
+    }
+    this.#tryRestore();
+    // Off-screen cue job: captions end with the content they belong to.
+    shell.video?.addEventListener("ended", () => this.#forgeTrack?.clear(), {
+      signal: this.#scope.signal,
+      passive: true
+    });
+    logger.log("subtitles", `Session ready (${shell.sdk.name})`);
+  }
+
+  /** Name of the loaded track, or null with none. */
+  get trackName() {
+    return this.#trackMeta?.name ?? null;
+  }
+
+  /** True while a track owns the cue layer. */
+  get active() {
+    return !!this.#trackMeta;
+  }
+
+  onState(listener) {
+    this.#stateListeners.add(listener);
+    return () => this.#stateListeners.delete(listener);
+  }
+
+  /** Cue-layer presentation var; safe with no track (steppers stay disabled
+   *  until one loads, so nothing writes early). */
+  setVar(prop, value) {
+    this.#cueLayer?.style.setProperty(prop, value);
+  }
+
+  /** Panel placement override (0-100 or null to keep cue-authored values);
+   *  stored so a later track creation inherits it. */
+  setPlacement({ line = null, position = null } = {}) {
+    this.#cueLine = line;
+    this.#cuePosition = position;
+    this.#forgeTrack?.setPlacement({ line, position });
+  }
+
+  async load(file) {
+    if (this.#scope.disposed) {
+      return;
+    }
+    try {
+      const rawText = await file.text();
+      // A file load does not remove the entry's saved URL (still useful next
+      // playthrough), but a file TRACK feeds no URL-restore loop either.
+      await this.#ingest(file.name, rawText, "");
+    } catch (err) {
+      this.#fail("load", file.name, err);
+    }
+  }
+
+  /** Fetch a subtitle file from the web through the manager's xhr. */
+  async loadFromUrl(rawUrl) {
+    if (this.#scope.disposed) {
+      return;
+    }
+    const url = String(rawUrl || "").trim();
+    if (!url) {
+      return;
+    }
+    let response;
+    try {
+      response = await gmRequestText(url);
+    } catch (err) {
+      this.#fail("fetch", url, err);
+      return;
+    }
+    try {
+      await this.#ingest(this.#nameFromUrl(response.finalUrl || url), response.responseText, url);
+    } catch (err) {
+      this.#fail("parse", url, err);
+    }
+  }
+
+  remove() {
+    if (this.#scope.disposed) {
+      return;
+    }
+    this.#forgeTrack?.destroy();
+    this.#forgeTrack = null;
+    this.#trackMeta = null;
+    this.#setSubsUrl("");
+    // Allow a future identical URL to restore again.
+    this.#restoreAttemptedUrl = "";
+    this.#notifyListeners();
+  }
+
+  async #ingest(name, rawText, savedUrl) {
+    if (this.#scope.disposed) {
+      return;
+    }
+    const normalizedText = /\.srt$/i.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
+    // Content-hash memo: a re-ingest of the same text (rebooted entry's URL,
+    // panel re-attach) skips the parse and reuses the same cue array; big
+    // multi-megabyte tracks first offload to the worker (see memoizedParse).
+    const cues = await memoizedParse(normalizedText);
+    // Parsing yields; the session may be destroyed mid-await.
+    if (this.#scope.disposed) {
+      return;
+    }
+    if (!cues.length) {
+      this.#shell?.toastInfo("captions", "No cues found", "subtitles");
+      return;
+    }
+    if (!this.#forgeTrack) {
+      this.#forgeTrack = new ForgeTrack(this.#shell.video, this.#cueLayer);
+      this.#forgeTrack.setPlacement({ line: this.#cueLine, position: this.#cuePosition });
+    }
+    this.#trackMeta = { name };
+    this.#forgeTrack.load(cues, subtitleSync.offset);
+    if (savedUrl !== undefined) {
+      this.#setSubsUrl(savedUrl);
+    }
+    this.#notifyListeners();
+    this.#shell?.toastInfo("captions", name, "subtitles");
+    logger.log("subtitles", `Loaded ${name}`);
+  }
+
+  /** Delivery the watch guard defers to: silence after one attempt per URL. */
+  #tryRestore() {
+    if (this.#trackMeta) {
+      return;
+    }
+    const url = this.#shell.resume?.subsUrl;
+    if (!url || url === this.#restoreAttemptedUrl) {
+      return;
+    }
+    this.#restoreAttemptedUrl = url;
+    this.loadFromUrl(url);
+  }
+
+  /** Last path segment as a display name, defaulted to .vtt when unknown. */
+  #nameFromUrl(url) {
+    if (!URL.canParse(url)) {
+      return "subtitles.vtt";
+    }
+    const last = decodeURIComponent(new URL(url).pathname.split("/").pop() || "");
+    if (!last) {
+      return "subtitles.vtt";
+    }
+    return SUBTITLE_EXT_RE.test(last) ? last : `${last}.vtt`;
+  }
+
+  #setSubsUrl(url) {
+    // Skip-identical in the store: a same-URL loop from the drop-file button
+    // would otherwise rewrite the entry (and bump LWW timestamps) per load.
+    this.#shell.resume?.setSubsUrl(url);
+  }
+
+  #applySyncOffset(offset) {
+    if (!this.#scope.disposed) {
+      this.#forgeTrack?.setOffset(offset);
+    }
+  }
+
+  #fail(verb, target, err) {
+    logger.error("subtitles", `Failed to ${verb} ${target}:`, err);
+    this.#shell?.toastInfo("captions", `Failed to ${verb} subtitles`, "subtitles");
+  }
+
+  #notifyListeners() {
+    for (const listener of this.#stateListeners) {
+      listener(this);
+    }
+  }
+
+  destroy() {
+    if (this.#scope.disposed) {
+      return;
+    }
+    this.#scope.dispose();
+    this.#forgeTrack?.destroy();
+    this.#forgeTrack = null;
+    this.#trackMeta = null;
+    this.#cueLayer = null;
+  }
+}
+
+/**
+ * Shell-owned subtitles section (panel): the load buttons, drag-drop target,
+ * and the style grids. Track and ingest state lives in SubtitleSession,
+ * constructed with the shell; every control here drives it.
+ */
+export class SubtitlesSection {
+  #shell;
+  #session;
   #fileInput = null;
   #hintEl = null;
   #loadButton = null;
@@ -639,22 +1031,22 @@ export class SubtitlesSection {
   #styleControls = null;
   #positionControls = null;
   #resetBtn = null;
-  /** Debounced sync-offset apply; cancelled on destroy so no trailing write lands. */
-  #scheduleSyncOffset = null;
+  #cueLine = null;
+  #cuePosition = null;
   #scope = new Scope();
 
   constructor(shell) {
     this.#shell = shell;
-    this.#syncOffset = Number(getConfigValue(SETTING_KEYS.syncOffset, 0)) || 0;
+    this.#session = shell.subtitles;
     const storedLine = Number(getConfigValue(SETTING_KEYS.line, null));
     const storedPos = Number(getConfigValue(SETTING_KEYS.horizontal, null));
     this.#cueLine = Number.isFinite(storedLine) ? storedLine : null;
     this.#cuePosition = Number.isFinite(storedPos) ? storedPos : null;
-    this.#cueLayer = shell.shellDom?.cueLayer || null;
     this.#fileInput = this.#createFileInput(shell);
     this.#buildPanelUi(shell);
-    this.#startListening();
-    logger.log("subtitles", `Ready (${shell.sdk.name})`);
+    const unsub = this.#session?.onState(() => this.#refreshHint());
+    this.#scope.onDispose(() => unsub?.());
+    this.#refreshHint();
   }
 
   destroy() {
@@ -662,10 +1054,6 @@ export class SubtitlesSection {
       return;
     }
     this.#scope.dispose();
-    this.#scheduleSyncOffset?.cancel();
-    this.#scheduleSyncOffset = null;
-    this.#forgeTrack?.destroy();
-    this.#forgeTrack = null;
     this.#fileInput?.remove();
     this.#fileInput = null;
     this.#hintEl = null;
@@ -675,14 +1063,7 @@ export class SubtitlesSection {
     this.#styleControls = null;
     this.#positionControls = null;
     this.#resetBtn = null;
-    this.#trackMeta = null;
-    this.#cueLayer = null;
-  }
-
-  #startListening() {
-    const { signal } = this.#scope;
-    const video = this.#shell.video;
-    video?.addEventListener("ended", () => this.#forgeTrack?.clear(), { signal, passive: true });
+    this.#session = null;
   }
 
   #buildPanelUi(shell) {
@@ -693,6 +1074,7 @@ export class SubtitlesSection {
     }
     const sectionRoot = panel.addSection("Subtitles", "captions");
     if (!sectionRoot) {
+      this.#refreshHint();
       return;
     }
     const dragCounter = { count: 0 };
@@ -726,11 +1108,11 @@ export class SubtitlesSection {
       sectionRoot.classList.remove("pf-drop-active");
       const files = [...(event.dataTransfer?.files || [])].filter(isSubtitleFile);
       if (!files.length) {
-        this.#toastInfo("captions", "Drop a .srt or .vtt file", "subtitles");
+        shell.toastInfo("captions", "Drop a .srt or .vtt file", "subtitles");
         return;
       }
       for (const file of files) {
-        this.load(file);
+        this.#session?.load(file);
       }
     }, { signal });
 
@@ -762,15 +1144,15 @@ export class SubtitlesSection {
       title: "Remove subtitles",
       ariaLabel: "Remove subtitles",
       ghost: true,
-      onClick: () => this.#removeTrack()
+      onClick: () => this.#session?.remove()
     });
 
     this.#hintEl = panel.addHint(loadRow, "Upload your file");
 
-    // Caption style + position grid: size / color / shadow / sync / V / H.
+    // Load + Style grid: size / color / shadow / font / stroke / sync.
     const styleSection = panel.el("div", { class: "pf-panel-section" }, sectionRoot);
     const styleHead = panel.el("div", { class: "pf-panel-section-head" }, styleSection);
-    panel.addLabel(styleHead, "Style & Position");
+    panel.addLabel(styleHead, "Style & Sync");
     const styleGrid = panel.el("div", { class: "pf-panel-grid pf-panel-grid-compact" }, styleSection);
 
     const applyCueSize = (v) => this.#setCueVar("--pf-cue-font-size", `${v}em`);
@@ -818,30 +1200,58 @@ export class SubtitlesSection {
     });
     applyCueShadow(shadowStepper.getValue());
 
-    this.#scheduleSyncOffset = debounce((offset) => {
-      if (this.#trackMeta) {
-        // Re-offset the loaded cues in place: two property writes per native
-        // cue instead of a full re-offset (n plain objects) plus a drain and
-        // rebuild of the track's VTTCue list.
-        this.#forgeTrack?.setOffset(offset);
+    const applyCueFont = (font) => this.#setCueVar("--pf-cue-font-family", font);
+    const fontSelect = panel.addControl(styleGrid, {
+      type: "select",
+      label: "Font",
+      options: CUE_FONT_OPTIONS,
+      value: getConfigValue(SETTING_KEYS.font, ""),
+      onChange: (font) => {
+        setConfigValue(SETTING_KEYS.font, font);
+        applyCueFont(font);
       }
-      setConfigValue(SETTING_KEYS.syncOffset, offset);
-    }, TUNING.subtitles.syncDebounceMs);
+    });
+    applyCueFont(fontSelect.value || "");
+
+    const applyCueStroke = (v) => this.#setCueVar("--pf-cue-stroke", `${v}px`);
+    const strokeStepper = panel.addControl(styleGrid, {
+      type: "stepper",
+      label: "Stroke",
+      min: 0,
+      max: 4,
+      step: 0.5,
+      value: getConfigValue(SETTING_KEYS.stroke, 0),
+      format: (v) => v ? `${v}px` : "Off",
+      onChange: (v) => {
+        setConfigValue(SETTING_KEYS.stroke, v);
+        applyCueStroke(v);
+      }
+    });
+    applyCueStroke(strokeStepper.getValue());
+
     const syncStepper = panel.addControl(styleGrid, {
       type: "stepper",
       label: "Sync",
-      min: -20,
-      max: 20,
-      step: 0.25,
-      value: this.#syncOffset,
+      min: -SYNC_BOUNDS,
+      max: SYNC_BOUNDS,
+      step: SYNC_STEP,
+      value: subtitleSync.offset,
       format: signedSeconds,
       onChange: (offset) => {
-        this.#syncOffset = offset;
-        this.#scheduleSyncOffset(offset);
+        subtitleSync.set(offset);
       }
     });
+    // Nudges that arrive through the keyboard or a menu propagate here - the
+    // stepper shows the state even when it was not its own edit that moved it.
+    const unsubSync = subtitleSync.onState((offset) => syncStepper.setValue(offset));
+    this.#scope.onDispose(() => unsubSync());
 
-    const verticalStepper = panel.addControl(styleGrid, {
+    // Caption placement grid: V / H.
+    const positionHead = panel.el("div", { class: "pf-panel-section-head" }, sectionRoot);
+    panel.addLabel(positionHead, "Position");
+    const positionGrid = panel.el("div", { class: "pf-panel-grid pf-panel-grid-compact" }, sectionRoot);
+
+    const verticalStepper = panel.addControl(positionGrid, {
       type: "stepper",
       label: "V",
       min: 0,
@@ -855,7 +1265,7 @@ export class SubtitlesSection {
         this.#applyPlacement();
       }
     });
-    const horizontalStepper = panel.addControl(styleGrid, {
+    const horizontalStepper = panel.addControl(positionGrid, {
       type: "stepper",
       label: "H",
       min: 0,
@@ -870,19 +1280,27 @@ export class SubtitlesSection {
       }
     });
 
-    this.#styleControls = { size: sizeStepper, color: colorField, shadow: shadowStepper, sync: syncStepper };
+    this.#styleControls = { size: sizeStepper, color: colorField, shadow: shadowStepper, font: fontSelect, stroke: strokeStepper, sync: syncStepper };
     this.#positionControls = { vertical: verticalStepper, horizontal: horizontalStepper };
 
     this.#resetBtn = panel.addControl(styleHead, {
       type: "button",
       icon: "reload",
-      title: "Reset all",
-      ariaLabel: "Reset all",
+      title: "Reset style & sync",
+      ariaLabel: "Reset style & sync",
       ghost: true,
       onClick: () => {
         sizeStepper.setValue(1.2);
         colorField.setValue("#ffffff");
         shadowStepper.setValue(40);
+        // Stepper cascades drive the state; the select is plain DOM, so the
+        // font application is explicit here.
+        if (fontSelect.value) {
+          fontSelect.value = "";
+          applyCueFont("");
+          setConfigValue(SETTING_KEYS.font, "");
+        }
+        strokeStepper.setValue(0);
         syncStepper.setValue(0);
         verticalStepper.setValue(85);
         horizontalStepper.setValue(50);
@@ -895,17 +1313,13 @@ export class SubtitlesSection {
   }
 
   #setCueVar(prop, value) {
-    this.#forgeTrack?.setVar(prop, value);
+    this.#session?.setVar(prop, value);
   }
 
-  /** Push the stored V/H overrides onto the live track (no-op without one -
-   *  track creation applies them at load time instead). */
+  /** Push the stored V/H overrides onto the session (no-op without a track -
+   *  track creation in the session applies them at load time instead). */
   #applyPlacement() {
-    this.#forgeTrack?.setPlacement({ line: this.#cueLine, position: this.#cuePosition });
-  }
-
-  #toastInfo(icon, text, group) {
-    this.#shell?.toastInfo(icon, text, group);
+    this.#session?.setPlacement({ line: this.#cueLine, position: this.#cuePosition });
   }
 
   #createFileInput(shell) {
@@ -917,51 +1331,11 @@ export class SubtitlesSection {
     input.addEventListener("change", () => {
       const file = input.files?.[0];
       if (file) {
-        this.load(file);
+        this.#session?.load(file);
       }
       input.value = "";
     }, { signal: this.#scope.signal });
     return input;
-  }
-
-  async load(file) {
-    if (this.#scope.disposed) {
-      return;
-    }
-    try {
-      const rawText = await file.text();
-      await this.#ingest(file.name, rawText);
-    } catch (err) {
-      this.#handleLoadError("load", file.name, err);
-    }
-  }
-
-  /** Fetch a subtitle file from the web through the manager's xhr. */
-  async loadFromUrl(rawUrl) {
-    if (this.#scope.disposed) {
-      return;
-    }
-    const url = String(rawUrl || "").trim();
-    if (!url) {
-      return;
-    }
-    let response;
-    try {
-      response = await gmRequestText(url);
-    } catch (err) {
-      this.#handleLoadError("fetch", url, err);
-      return;
-    }
-    try {
-      await this.#ingest(this.#nameFromUrl(response.finalUrl || url), response.responseText);
-    } catch (err) {
-      this.#handleLoadError("parse", url, err);
-    }
-  }
-
-  #handleLoadError(verb, target, err) {
-    logger.error("subtitles", `Failed to ${verb} ${target}:`, err);
-    this.#toastInfo("captions", `Failed to ${verb} subtitles`, "subtitles");
   }
 
   #promptForUrl() {
@@ -969,58 +1343,15 @@ export class SubtitlesSection {
     // in which case the dialog misbehaves and file loading stays untouched.
     const url = window.prompt("Subtitle URL (.srt / .vtt)");
     if (url) {
-      this.loadFromUrl(url);
+      this.#session?.loadFromUrl(url);
     }
-  }
-
-  /** Last path segment as a display name, defaulted to .vtt when unknown. */
-  #nameFromUrl(url) {
-    if (!URL.canParse(url)) {
-      return "subtitles.vtt";
-    }
-    const last = decodeURIComponent(new URL(url).pathname.split("/").pop() || "");
-    if (!last) {
-      return "subtitles.vtt";
-    }
-    return SUBTITLE_EXT_RE.test(last) ? last : `${last}.vtt`;
-  }
-
-  async #ingest(name, rawText) {
-    if (this.#scope.disposed) {
-      return;
-    }
-    const normalizedText = /\.srt$/i.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
-    // Cooperative parse: yields to the browser on large tracks so ingesting a
-    // big VTT never blocks playback (see forgevtt.parseSubtitlesAsync), and
-    // offloads multi-megabyte tracks to a dedicated Worker. The cues are
-    // loaded at the current sync offset in a single build pass; later sync
-    // nudges shift the native cues in place (ForgeTrack.setOffset).
-    const cues = await parseSubtitlesAsync(normalizedText, 0);
-    // Cooperative parse yields to the browser; the section may have been torn
-    // down mid-await, so re-check before touching the track/slots.
-    if (this.#scope.disposed) {
-      return;
-    }
-    if (!cues.length) {
-      this.#toastInfo("captions", "No cues found", "subtitles");
-      return;
-    }
-    if (!this.#forgeTrack) {
-      this.#forgeTrack = new ForgeTrack(this.#shell.video, this.#cueLayer);
-      this.#applyPlacement();
-    }
-    this.#trackMeta = { name };
-    this.#forgeTrack.load(cues, this.#syncOffset);
-    this.#refreshHint();
-    this.#toastInfo("captions", name, "subtitles");
-    logger.log("subtitles", `Loaded ${name}`);
   }
 
   #refreshHint() {
+    const hasTrack = !!this.#session?.active;
     if (this.#hintEl) {
-      this.#hintEl.textContent = this.#trackMeta ? this.#trackMeta.name : "Upload your file";
+      this.#hintEl.textContent = hasTrack ? this.#session.trackName : "Upload your file";
     }
-    const hasTrack = !!this.#trackMeta;
     if (this.#loadButton) {
       this.#loadButton.disabled = hasTrack;
     }
@@ -1035,6 +1366,8 @@ export class SubtitlesSection {
       this.#styleControls.size.setDisabled(disabled);
       this.#styleControls.color.input.disabled = disabled;
       this.#styleControls.shadow.setDisabled(disabled);
+      this.#styleControls.font.disabled = disabled;
+      this.#styleControls.stroke.setDisabled(disabled);
       this.#styleControls.sync.setDisabled(disabled);
     }
     if (this.#positionControls) {
@@ -1044,12 +1377,5 @@ export class SubtitlesSection {
     if (this.#resetBtn) {
       this.#resetBtn.disabled = !hasTrack;
     }
-  }
-
-  #removeTrack() {
-    this.#forgeTrack?.destroy();
-    this.#forgeTrack = null;
-    this.#trackMeta = null;
-    this.#refreshHint();
   }
 }

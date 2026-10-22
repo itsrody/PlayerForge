@@ -1,4 +1,4 @@
-import { getPageContext, domainsMatch, domainScore, hashEntry, onNavigate } from "../shared/page.js";
+import { getPageContext, domainsMatch, domainScore, getDomainKey, hashEntry, onNavigate } from "../shared/page.js";
 import { TUNING, formatTime } from "../shared/core.js";
 import { KEYS, gmSetValue, loadJsonObject, watchStorageKey } from "../shared/store.js";
 import { logger, Scope } from "../shared/runtime.js";
@@ -35,6 +35,7 @@ const RESUME_COMPLETION_RATIO = TUNING.resume.completionRatio;
  */
 const RESUME_ENTRY_FIELDS = new Set([
   "id", "domain", "path", "title", "duration", "resume",
+  "subOffset", "subsUrl",
   "createdAt", "updatedAt", "pending"
 ]);
 
@@ -428,6 +429,43 @@ export class ResumeStore {
     }
   }
 
+  /** Per-entry subtitle sync offset (seconds, clamped by the caller). Same
+   *  LWW/no-op contract as updateResume: a bump is what carries the new
+   *  value through cross-tab merges. */
+  updateSubOffset(id, offset) {
+    this.ensureLoaded();
+    const entry = this.#entriesById().get(id);
+    if (entry && entry.subOffset !== offset) {
+      entry.subOffset = offset;
+      entry.updatedAt = Date.now();
+      this.#persist();
+    }
+  }
+
+  /** Per-entry subtitle source URL (or "" to detach). "" == "no subtitles
+   *  remembered"; a string is the restore fetch (the session owns fetch
+   *  dedupe). Restoring the same URL twice must not bump the LWW clock. */
+  setSubsUrl(id, url) {
+    this.ensureLoaded();
+    const entry = this.#entriesById().get(id);
+    if (entry && entry.subsUrl !== url) {
+      entry.subsUrl = url;
+      entry.updatedAt = Date.now();
+      this.#persist();
+    }
+  }
+
+  /**
+   * Publish the current entry identity to listeners without awaiting a save:
+   * adoption bookkeeping consumers (sync-grain resolution, zoom domain bind,
+   * subtitle URL restore) subscribe to onChange but a matched adoption - the
+   * findMatch path - persists nothing, so without an announce they would never
+   * learn their grain/entry is live. Position-only `structural=false`.
+   */
+  announce() {
+    this.#notify(false);
+  }
+
   getEntries() {
     this.ensureLoaded();
     // Sorted snapshot cached until the next #sorted invalidation: every
@@ -601,6 +639,11 @@ export class ResumeTracker {
         logger.log("resume", `Created ${this.#entry.id} for ${context.domain}${context.path}`);
       }
     }
+
+    // One notify for both adoption paths: bookkeeping consumers (subtitle
+    // sync grain, zoom domain, subs URL restore) read the entry off this
+    // tracker's accessors, including the silent findMatch adoption.
+    this.#store.announce();
 
     // A resource swap reuses the element, so the previous resource's last
     // presented frame is meaningless here; wait for this one's first frame/seek.
@@ -852,6 +895,43 @@ export class ResumeTracker {
   /** Subscribe to store changes (see ResumeStore#onChange). */
   onChange(cb) {
     return this.#store.onChange(cb);
+  }
+
+  /* - Entry accessors for boot-time bookkeeping consumers (the sync state
+   *  machine, the zoom domain, the subtitle restorer) - the entry adopted
+   *  later than the shell, so the getters read live at notify time. */
+
+  /** The adopted entry id, or null before the first adoption. */
+  get entryId() {
+    return this.#entry?.id ?? null;
+  }
+
+  /** Top-document domain key of the current entry (null before adoption). */
+  get domainKey() {
+    return this.#entry ? getDomainKey(this.#entry.domain) : null;
+  }
+
+  /** Per-entry subtitle sync offset in seconds (0 with none). */
+  get subOffset() {
+    const offset = Number(this.#entry?.subOffset);
+    return Number.isFinite(offset) ? offset : 0;
+  }
+
+  setSubOffset(offset) {
+    if (this.#entry) {
+      this.#store.updateSubOffset(this.#entry.id, offset);
+    }
+  }
+
+  /** Per-entry subtitle source URL ("" = none remembered). */
+  get subsUrl() {
+    return typeof this.#entry?.subsUrl === "string" ? this.#entry.subsUrl : "";
+  }
+
+  setSubsUrl(url) {
+    if (this.#entry) {
+      this.#store.setSubsUrl(this.#entry.id, url);
+    }
   }
 
   destroy() {

@@ -467,6 +467,12 @@ class ShellActions {
   // Captured on fill entry: the element box is handed back to the embed's
   // original object-fit once the transform is released.
   #priorObjectFit = "";
+  // Zoom/pan state (shell-owned; session state + per-domain persistence).
+  #zoom = null;
+  // Latched when a scrub stroke pans a zoomed crop instead of seeking - the
+  // whole session then pans, even if fullscreen was lost mid-stroke (the
+  // same one-decision-latch contract the seek scrub's #gestureFsActive uses).
+  #panning = false;
 
   constructor(shell) {
     this.#shell = shell;
@@ -517,11 +523,37 @@ class ShellActions {
   }
 
   /**
+   * The composed video transform: fill-mode cover scale and the zoom/pan
+   * state multiplied into one shape. Transform functions compose left to
+   * right, so `scale(s) translate(x%, y%)` keeps pan percentages relative to
+   * the VISUAL (already-scaled) box: a 10% translate moves the video a tenth
+   * of what is on screen, whatever the scale. Empty string when at rest.
+   */
+  #composeTransform() {
+    const zoom = this.#zoom;
+    const totalScale = (this.#fillActive ? this.#fillScale : 1) * (zoom?.scale ?? 1);
+    if (totalScale === 1 && (!zoom || (zoom.ox === 0 && zoom.oy === 0))) {
+      return "";
+    }
+    return `scale(${totalScale}) translate(${zoom.ox}%, ${zoom.oy}%)`;
+  }
+
+  /** Eased re-composition - every fill and zoom state change lands here. */
+  #applyCompose() {
+    const video = this.#shell.video;
+    if (video) {
+      easeTransformTo(video, this.#composeTransform());
+    }
+  }
+
+  /**
    * Release pinch/fill scale: flips the fill state off, eases the transform
    * back to none (or snaps it, when `animate` is false - the instant path
    * also cancels any in-flight WAAPI ease and clears will-change), then hands
-   * object-fit back to what the embed had before fill mode claimed it. No-op
-   * when fill was never active.
+   * object-fit back to what the embed had before fill mode claimed it. The
+   * zoom crop survives a fill release (fill and zoom are independent layers
+   * of the same transform), so the clean-up clears fill, not the composition.
+   * No-op when fill was never active.
    */
   #clearFillMode(animate) {
     const shell = this.#shell;
@@ -532,14 +564,16 @@ class ShellActions {
     const video = shell.video;
     if (video) {
       this.#fillScale = 1;
+      // Composed now that fill is off: a live zoom crop keeps its shape.
+      const composed = this.#composeTransform();
       if (animate) {
-        easeTransformTo(video, "");
+        easeTransformTo(video, composed);
       } else {
         // Cancel any in-flight WAAPI ease first: its fill:'both' would otherwise
         // keep re-applying a scale after the inline style is cleared below.
         easer.cancel(video);
         video.style.transition = "none";
-        video.style.transform = "";
+        video.style.transform = composed;
         video.style.willChange = "";
         video.style.transition = "";
       }
@@ -551,11 +585,56 @@ class ShellActions {
     }
   }
 
-  /** Fullscreen exit also collapses fill mode - the one cross-feature rule. */
+  /** Fullscreen exit releases the fill - the one cross-feature rule. */
   #fsExit() {
     if (this.#fillActive) {
       this.#clearFillMode(false);
     }
+  }
+
+  /**
+   * Wheel-zoom over the video in fullscreen: multiplicative steps with the
+   * same shape as the panel stepper's scale. The trackpad pinch arm
+   * (ctrl+wheel) is the forge's pinch recognizer - zoom here would fire both
+   * recognizers per gesture. Over the panel, the wheel scrolls the panel.
+   */
+  #wheelZoom(event) {
+    const zoom = this.#zoom;
+    if (!zoom || !fs || event.ctrlKey || event.momentum) {
+      return;
+    }
+    if (!event.deltaY) {
+      return;
+    }
+    const path = event.composedPath?.() || [];
+    for (let i = 0; i < path.length; i++) {
+      if (path[i].classList?.contains("pf-panel")) {
+        return;
+      }
+    }
+    const factor = event.deltaY < 0 ? TUNING.zoom.wheelFactor : 1 / TUNING.zoom.wheelFactor;
+    if (zoom.zoomBy(factor)) {
+      this.#shell.toastFlash("fill-aspect", `${Math.round(zoom.scale * 100) / 100}x`, "zoom");
+    }
+  }
+
+  /**
+   * Pan the fullscreen crop with the scrub stroke: one horizontal-ish drag
+   * slides the crop. Percent deltas divide by the composed scale, so the
+   * amount of video moved per pixel stays 1:1 with the pointer speed and a
+   * re-zoom later re-anchors the pan around the same visual focal point.
+   */
+  #panScrub(detail) {
+    const zoom = this.#zoom;
+    const box = this.#shell.referenceBox;
+    if (!zoom || !box.width || !box.height) {
+      return;
+    }
+    const totalScale = (this.#fillActive ? this.#fillScale : 1) * (zoom.scale || 1);
+    zoom.setPan(
+      zoom.ox + (detail.dx * 100) / (totalScale * box.width),
+      zoom.oy + (detail.dy * 100) / (totalScale * box.height)
+    );
   }
 
   /** Hold the pointer/keyboard boost: first source wins, later arrivals add
@@ -591,6 +670,15 @@ class ShellActions {
   #scrub(detail) {
     const shell = this.#shell;
     if (!shell.video) {
+      return;
+    }
+    // Zoomed fullscreen: the scrub stroke pans the crop instead of seeking
+    // (one gesture surface, whichever state is live). The session latches on
+    // the first pan move and survives a mid-stroke fs loss - the same
+    // decision-free continuation the seek scrub's #gestureFsActive grants.
+    if (this.#panning || (!this.#scrubbing && fs && this.#zoom?.zoomed)) {
+      this.#panning = true;
+      this.#panScrub(detail);
       return;
     }
     // The producer stamps the real pointer event's DOMHighResTimeStamp on the
@@ -691,9 +779,11 @@ class ShellActions {
 
   #scrubEnd() {
     if (!this.#scrubbing) {
+      this.#panning = false;
       return;
     }
     this.#scrubbing = false;
+    this.#panning = false;
     this.#cancelScrubFrameLoop();
     this.#scrubDirectionMomentum = 0;
     this.#scrubDuration = 0;
@@ -803,12 +893,21 @@ class ShellActions {
       // normalize to 'contain' here; #clearFillMode restores the prior value.
       this.#priorObjectFit = video.style.objectFit;
       video.style.objectFit = "contain";
-      easeTransformTo(video, `scale(${scale})`);
       this.#fillActive = true;
       this.#fillScale = scale;
+      // Composed with any live zoom crop - fill and zoom stack.
+      this.#applyCompose();
       shell.toastFlash("fill-aspect", "Fill Mode", "pinch");
-    } else if (detail.direction === "in" && this.#fillActive) {
-      this.#clearFillMode(true);
+    } else if (detail.direction === "in") {
+      if (this.#zoom?.zoomed) {
+        // Pinch-in under a live crop reads "give the video back": session
+        // transform AND the stored per-domain crop reset together - the
+        // gesture that removes a preference must not remember it.
+        this.#zoom.resetForDomain();
+        shell.toastFlash("fill-aspect", "Zoom Reset", "pinch");
+      } else if (this.#fillActive) {
+        this.#clearFillMode(true);
+      }
     }
   }
 
@@ -834,7 +933,8 @@ class ShellActions {
     }
     if (Math.abs(scale - this.#fillScale) > FILL_SCALE_EPSILON) {
       this.#fillScale = scale;
-      easeTransformTo(video, `scale(${scale})`);
+      // Composed: a live zoom crop rides the refreshed cover scale.
+      this.#applyCompose();
     }
   }
 
@@ -846,8 +946,35 @@ class ShellActions {
    */
   attach(host, signal) {
     const shell = this.#shell;
+    const zoom = shell.zoom ?? null;
+    this.#zoom = zoom;
 
-    subscribeFullscreen(() => this.#fsExit(), signal);
+    // Zoom state -> transform, fullscreen-scoped. The wheel/panel/gesture
+    // writes all route through the state machine; fs entry re-applies the
+    // persisted crop, fs exit drops the inline transform but keeps the state
+    // (and its persistence) for the next entry.
+    zoom?.onState(() => {
+      if (fs) {
+        this.#applyCompose();
+      }
+    });
+    subscribeFullscreen((active) => {
+      this.#fsExit();
+      if (active) {
+        this.#applyCompose();
+      } else if (zoom?.zoomed) {
+        const video = shell.video;
+        if (video) {
+          easer.cancel(video);
+          video.style.transform = "";
+        }
+      }
+    }, signal);
+
+    // Plain-wheel zoom over the video in fullscreen; the forge's capture
+    // handler already preventDefaults plain fullscreen wheels, so nothing
+    // here cancels - a passive listener both places stay cheap.
+    shell.container?.addEventListener("wheel", (event) => this.#wheelZoom(event), { signal, passive: true });
 
     host.addEventListener(GESTURE_EVENTS.hold, ({ detail }) => this.#hold(detail), { signal });
     host.addEventListener(GESTURE_EVENTS.release, ({ detail }) => this.#release(detail), { signal });
@@ -862,7 +989,7 @@ class ShellActions {
     host.addEventListener(GESTURE_EVENTS.swipeStart, ({ detail }) => this.#swipeStart(detail), { signal });
     host.addEventListener(GESTURE_EVENTS.swipe, ({ detail }) => this.#swipe(detail), { signal });
     host.addEventListener(GESTURE_EVENTS.dbltap, ({ detail }) => this.#dbltap(detail), { signal });
-    host.addEventListener(GESTURE_EVENTS.skip, ({ detail }) => this.#skip(detail), { signal });
+    host.addEventListener(GESTURE_EVENTS.skip, ({ detail }) => this.#skip(detail.direction), { signal });
     host.addEventListener(GESTURE_EVENTS.volume, ({ detail }) => this.#volume(detail), { signal });
     host.addEventListener(GESTURE_EVENTS.mute, () => this.#mute(), { signal });
     host.addEventListener(GESTURE_EVENTS.pip, () => this.#pip(), { signal });

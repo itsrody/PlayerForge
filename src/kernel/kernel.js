@@ -600,13 +600,22 @@ export class Kernel {
   }
 
   /**
-   * Toggle the most recently created shell's panel from outside the input
-   * stack (GM menu). Warns unconditionally when nothing can host a panel -
-   * the user clicked something and must know why nothing happened.
+   * The shell host one-shot menu commands act on: the most recently created
+   * shell (the same precedence the panel toggle follows - the user works with
+   * the newest player they opened). Null when no shell is live here.
+   */
+  menuShellHost() {
+    const shells = this.#registry.getAll();
+    return shells.length ? shells.at(-1).shellHost : null;
+  }
+
+  /**
+   * Toggle the active shell's panel from outside the input stack (GM menu).
+   * Warns unconditionally when nothing can host a panel - the user clicked
+   * something and must know why nothing happened.
    */
   togglePanel() {
-    const shells = this.#registry.getAll();
-    const host = shells.length ? shells.at(-1).shellHost : null;
+    const host = this.menuShellHost();
     if (!host) {
       logger.warn("kernel", "Panel toggle requested but no player is active on this page");
       return;
@@ -618,13 +627,42 @@ export class Kernel {
 }
 
 /** GM menu wiring, owned at the kernel layer instead of inside the Kernel so
- *  the debug command exists from script eval - not just after a video is
+ *  the commands exist from script eval - not just after a video is
  *  discovered. The debug toggle works fully without a kernel: it persists the
- *  setting and flips the shared debug runtime (logger + LoAF diagnostic).
- *  One instance owns the debug command handle and re-registers on the flip. */
+ *  setting and flips the shared debug runtime (logger + LoAF diagnostic). The
+ *  one-shot reset commands need a live shell, resolved lazily through the
+ *  entry's kernel reference at click time (the kernel boots after eval).
+ *  One instance owns the handles and re-registers the debug command on the
+ *  flip. */
 class MenuCommands {
-  /** The live debug menu handle; null while unregistered. */
   #debugId = null;
+  #filterId = null;
+  #syncId = null;
+  /** () -> kernel: the entry keeps the kernel reference for commands to
+   *  resolve their target shell host at click time. */
+  #resolveKernel = null;
+
+  constructor(resolveKernel = null) {
+    this.#resolveKernel = resolveKernel ?? null;
+  }
+
+  #hostFor(label) {
+    const kernel = this.#resolveKernel?.();
+    const host = kernel?.menuShellHost?.() ?? null;
+    if (!host) {
+      logger.warn("kernel", `${label} requested but no player is active on this page`);
+    }
+    return host;
+  }
+
+  #resetEvent(eventKey, label) {
+    const host = this.#hostFor(label);
+    if (host) {
+      host.dispatchEvent(new CustomEvent(GESTURE_EVENTS[eventKey], {
+        detail: { method: "menu" }
+      }));
+    }
+  }
 
   #refreshDebug() {
     if (this.#debugId != null) {
@@ -645,15 +683,27 @@ class MenuCommands {
 
   install() {
     this.#refreshDebug();
+    this.#filterId = gmRegisterMenu(
+      "\u{1FAA8} Reset Color Filter",
+      () => this.#resetEvent("filterReset", "Color filter reset"),
+      { autoClose: true }
+    );
+    this.#syncId = gmRegisterMenu(
+      "\u{1F4AC} Reset Subtitle Sync",
+      () => this.#resetEvent("syncReset", "Subtitle sync reset"),
+      { autoClose: true }
+    );
     return () => {
-      if (this.#debugId != null) {
-        gmUnregisterMenu(this.#debugId);
-        this.#debugId = null;
+      for (const id of [this.#debugId, this.#filterId, this.#syncId]) {
+        if (id != null) {
+          gmUnregisterMenu(id);
+        }
       }
+      this.#debugId = this.#filterId = this.#syncId = null;
     };
   }
 }
 
-export function installMenuCommands() {
-  return new MenuCommands().install();
+export function installMenuCommands(resolveKernel = null) {
+  return new MenuCommands(resolveKernel).install();
 }

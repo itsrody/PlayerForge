@@ -61,7 +61,8 @@ export const GESTURES = Object.freeze(Object.fromEntries(
 /** One-shot action event handles: no settings gate of their own, each derived
  *  `pf:gesture-<kebab(handle)>` like the family events (scrubEnd -> -scrub-end). */
 const GESTURE_ACTIONS = Object.freeze([
-  "release", "scrubEnd", "swipeStart", "skip", "volume", "mute", "pip", "panel"
+  "release", "scrubEnd", "swipeStart", "skip", "volume", "mute", "pip", "panel",
+  "subSync", "syncReset", "filterReset"
 ]);
 
 const kebab = (id) => id.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);

@@ -7,7 +7,10 @@
  */
 export async function run({ session, boot }) {
   const rows = [];
-  await boot();
+  // Brightness 150 seeded before the first boot: the reset command below is
+  // proven against a non-default stored state, not a no-op write over
+  // defaults.
+  await boot({ seed: { "pf:configs": { version: 1, filter: { brightness: 150 } } } });
 
   const effects = await session.evalAsync(function main(done) {
     const menu = window.__pfMenu ?? {};
@@ -46,6 +49,41 @@ export async function run({ session, boot }) {
     note: drove
       ? (effects.panelEver ? "panel opened by a command" : "kernel persisted in response")
       : "no observable effect from any command",
+    ms: null
+  });
+
+  // The targeted reset: a seeded brightness 150 must come back to the Default
+  // value through the menu command alone (no panel, no steppers), and the
+  // filter must leave the video's inline style. The generic row above already
+  // invoked every command once, so this row re-seeds the leaf (the forensics
+  // write path a foreign tab would use) before driving the reset.
+  const reset = await session.evalAsync(function main(done) {
+    const menu = window.__pfMenu ?? {};
+    const colorKey = Object.keys(menu)
+      .filter((k) => k.startsWith("menu:"))
+      .find((k) => k.includes("Color"));
+    if (!colorKey) { done({ ok: false, why: "no Color menu key", keys: Object.keys(menu).join("|") }); return; }
+    if (!window.__gmTest) { done({ ok: false, why: "no __gmTest write path" }); return; }
+    const doc = window.__pfBacking["pf:configs"] ?? { version: 1 };
+    doc.filter = { ...(doc.filter ?? {}), brightness: 150 };
+    window.__gmTest.remoteWrite("pf:configs", doc);
+    setTimeout(() => {
+      const before = window.__pfBacking["pf:configs"]?.filter?.brightness ?? null;
+      menu[colorKey]();
+      setTimeout(() => {
+        const afterLeaf = window.__pfBacking["pf:configs"]?.filter?.brightness ?? null;
+        const inline = document.querySelector("video")?.style?.filter ?? "";
+        done({
+          ok: before === 150 && afterLeaf === 100 && !inline.includes("1.5"),
+          why: `brightness ${before}->${afterLeaf}, inline="${inline.slice(0, 60)}"`
+        });
+      }, 500);
+    }, 400);
+  });
+  rows.push({
+    name: "menu reset restores the seeded color filter",
+    status: reset.ok === true ? "pass" : "fail",
+    note: reset.why ?? null,
     ms: null
   });
 

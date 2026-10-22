@@ -48,6 +48,29 @@ export async function run({ session, boot }) {
     ms: null
   });
 
+  // The sync nudge persists into the per-entry grain: one gesture nudge lands
+  // in the tracker's entry (subOffset, 0.25s step; persist debounce <= 150ms)
+  // instead of only touching the global fallback key - the grain a reboot
+  // reloads.
+  const nudge = await session.evalAsync(function main(done) {
+    const host = document.querySelector(".pf-shell");
+    if (!host) { done({ ok: false, why: "no shell to host the gesture" }); return; }
+    host.dispatchEvent(new CustomEvent("pf:gesture-sub-sync", {
+      detail: { direction: "right", method: "pointer" }
+    }));
+    setTimeout(() => {
+      const entries = window.__pfBacking["pf:resume"]?.entries ?? [];
+      const entry = entries.find((e) => typeof e.subOffset === "number" && e.subOffset !== 0);
+      done({ ok: !!entry, why: entry ? `${entry.id} subOffset=${entry.subOffset}` : `entries=${entries.length} none carried subOffset` });
+    }, 600);
+  });
+  rows.push({
+    name: "subtitle sync nudge lands in the resume entry grain",
+    status: nudge.ok === true && nudge.why.endsWith("subOffset=0.25") ? "pass" : "fail",
+    note: nudge.why ?? null,
+    ms: null
+  });
+
   // Reboot the page seeded with everything session one wrote; the store must
   // hand the same state back out and the resume tracker must apply it.
   const priorState = await session.eval(function main() {

@@ -2,9 +2,10 @@ import { logger, Scope, yield_, runSteps, runStepsAsync } from "../shared/runtim
 import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen, DOMManager } from "../shared/dom.js";
 import { InputForge } from "./inputs/forge.js";
 import { attachInputActions } from "./inputs/actions.js";
+import { ZoomState, buildZoomSection } from "./inputs/zoom.js";
 import { ResumeTracker } from "./resume.js";
-import { SubtitlesSection } from "./subtitles/subtitles.js";
-import { VideoFilter } from "./filter.js";
+import { SubtitleSession, SubtitlesSection, subtitleSync } from "./subtitles/subtitles.js";
+import { VideoFilter, FilterSession } from "./filter.js";
 import { SettingsPanel, addSettingsSection, addHistorySection } from "./chrome/panel.js";
 import { getSetting, SETTING_KEYS } from "./chrome/config.js";
 import { TUNING } from "../shared/core.js";
@@ -43,6 +44,9 @@ const MEDIA_ERROR_LABELS = {
 const PANEL_SECTIONS = [
   ({ shell }) => new SubtitlesSection(shell),
   ({ shell, panel }) => new VideoFilter(shell, panel),
+  ({ shell, panel, signal }) => {
+    buildZoomSection(panel, shell.zoom, signal);
+  },
   ({ shell, panel }) => {
     addHistorySection(panel, shell);
   },
@@ -65,6 +69,12 @@ export class Shell {
   #shellDom = null;
   #inputs = null;
   #resume = null;
+  /** Eager subtitle session: track ownership + ingest live before the panel. */
+  #subtitles = null;
+  /** Eager filter session: stored filter applies at play, menu resets work. */
+  #filters = null;
+  /** Fullscreen crop state: gesture/panel state + per-domain persistence. */
+  #zoom = new ZoomState();
   /** Lazy panel sections built on first open; torn down with the shell. */
   #panelSections = [];
   #panel;
@@ -115,6 +125,8 @@ export class Shell {
     this.#inputs = new InputForge(this.video, this.container, this.shellHost);
     attachInputActions(this, this.shellHost, this.#inputs.signal);
     this.#resume = new ResumeTracker(this);
+    this.#subtitles = new SubtitleSession(this);
+    this.#filters = new FilterSession(this);
 
     // Lazy section builder: panel sections are constructed on first open to
     // keep boot fast. The table is the single source of truth for the section
@@ -134,6 +146,22 @@ export class Shell {
     });
 
     runSteps([
+      // Sync-state and zoom bindings before any watcher: the nudge/reset
+      // gestures and the per-domain crop must be live from frame one, panel
+      // sections included. The tracker announces each adoption once; the
+      // zoom re-binds to the entry's domain and the sync state re-resolves
+      // its grain through their own subscriptions.
+      () => {
+        subtitleSync.bindShell(this, this.#scope.signal);
+        const bindZoomDomain = () => {
+          const key = this.#resume?.domainKey;
+          if (key) {
+            this.#zoom.bindDomain(key);
+          }
+        };
+        bindZoomDomain();
+        this.#resume.onChange(bindZoomDomain);
+      },
       () => this.#setupFocusManagement(),
       () => this.#suppressContextMenu(),
       () => this.#forwardMediaEvents(),
@@ -235,6 +263,20 @@ export class Shell {
 
   get resume() {
     return this.#resume;
+  }
+
+  get subtitles() {
+    return this.#subtitles;
+  }
+
+  /** Color-filter state, shared by the panel section and the menu reset. */
+  get filters() {
+    return this.#filters;
+  }
+
+  /** Zoom & pan state, shared by the action layer and the panel section. */
+  get zoom() {
+    return this.#zoom;
   }
 
   /** The DOMManager — for sub-components that need lifecycle-tracked artifacts. */
@@ -567,6 +609,18 @@ export class Shell {
         this.#resume?.destroy();
         this.#resume = null;
       },
+      () => {
+        this.#subtitles?.destroy();
+        this.#subtitles = null;
+      },
+      () => {
+        this.#filters?.destroy();
+        this.#filters = null;
+      },
+      // Land the zoom's trailing per-domain persist before everything else
+      // dies - the last gesture-landed crop must not be the one that never
+      // got written.
+      () => this.#zoom.flush(),
       () => {
         for (const section of this.#panelSections) {
           section.destroy();

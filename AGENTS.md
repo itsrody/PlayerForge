@@ -16,20 +16,21 @@ A Userscript-exclusive HTML5 video player enhancer for two fork browsers:
 - **Helium** (macOS desktop), **Titanium** (Android)
 - Chromium **155+** platform floor, **Tampermonkey 5.5+ (MV3)** manager
 - Features: pointer/keyboard gestures, hotkeys, progress resume, watch
-  history, subtitles (.srt/.vtt with per-cue placement), color filters with
-  presets, in-player settings panel, toasts, extensible shell surface
+  history, subtitles (.srt/.vtt with per-cue placement, per-entry sync
+  offset, URL/file restore), color filters with presets, per-domain
+  zoom/pan crop, in-player settings panel, toasts, extensible shell surface
 - Not a general browser tool: ad-heavy hosts and player platforms are
   excluded in the header (YouTube, Vimeo, Netflix, streams, socials…), and
   `entry.js` keeps a runtime skip list above that.
 
-**Repo shape (24 source modules, ~6.8k LOC):**
+**Repo shape (25 source modules, ~14k LOC):**
 
 ```
 src/
   entry.js            install-time contract: which frames run the script
   kernel/  (4)        contract, detection, discovery, kernel orchestrator
   shared/  (5)        core, runtime, dom, page, store — the data planes
-  shell/   (14)       shell, media, resume, filter, forge+actions,
+  shell/   (15)       shell, media, resume, filter, forge+actions+zoom,
                       subtitles(3), chrome(5 + styles.css)
 check/                the one testing tool (see §7)
 dist/                 generated, not the review target
@@ -128,8 +129,10 @@ iframes, same-origin and cross-origin:
   aware).
 - **kernel.js** — the orchestrator: `whenDomSettled` boot sequencing, the
   `ShellSlot` (one shell per session; a displaced shell is **destroyed**,
-  never orphaned), `MenuCommands` (debug toggle + panel toggle, works even
-  kernel-less), pagehide teardown, freeze/pageshow recovery, per-boot
+  never orphaned), `MenuCommands` (debug toggle + the two one-shot reset
+  commands, installed from script eval and resolving their shell host
+  through the entry's kernel reference — works even kernel-less),
+  pagehide teardown, freeze/pageshow recovery, per-boot
   manage-ability downgrades.
 
 ### shell/ — the feature layer
@@ -141,22 +144,34 @@ iframes, same-origin and cross-origin:
 - **resume.js** — the resume tracker: store warm → context resolve → entry
   match/create → restore → progress drive. Save cadence = 10s checkpoint
   span; flushes on `seeked`, on pause, on visibility loss, on freeze;
-  `RESUME_MIN_POSITION` (5s) floor; bounds cutoff; cross-tab merges arrive
+  `RESUME_MIN_POSITION` (5s) floor; bounds cutoff; the entry carries
+  per-viewing extras (`subOffset`, `subsUrl`); cross-tab merges arrive
   through `watchStorageKey` and require the tracker's `#loaded` latch
-  (`#adoptExternal`).
-- **filter.js** — `ColorFilters` (9 fields, 8 presets, custom
-  temperature/tint composition) pinned to the video's `style.filter`.
+  (`#adoptExternal`, which announces so grain consumers re-resolve).
+- **filter.js** — `FilterSession` (eager state machine: values, apply,
+  trailing persist, the menu reset gesture) + `VideoFilter` (the lazy panel
+  section over it). The filter lives on the video from first play — a
+  stored preset needs no panel open — and reset works with none.
+- **inputs/zoom.js** — `ZoomState` (the per-domain zoom/pan state machine:
+  wheel/steps, pan clamp, trailing persist, `resetForDomain` deletes the
+  stored crop) + `buildZoomSection` (panel section over one shell's state).
+  State only: the transform write belongs to actions.js.
 - **inputs/forge.js** — the pointer/keyboard session machine: hold, tap
-  replay, pinch, swipe, scrub, double-tap zones; `HoldRepeater`; all timers
-  ride the shared scheduler; `actions.js` — the gesture table + per-gesture
-  haptics policy.
+  replay, pinch, swipe, scrub (detail carries `dx` and the mirrored `dy`
+  the pan arm consumes), double-tap zones; `HoldRepeater`; all timers
+  ride the shared scheduler; **actions.js** — viewership transform machine
+  (fill mode cover scale, the zoom crop composed as `scale(s) translate(ox%,oy%)`,
+  fullscreen-scoped wheel zoom, pan-instead-of-seek scrub latch) +
+  the gesture table + per-gesture haptics policy.
 - **subtitles/** — `forgevtt.js` = the parse engine (the module the worker
   chunk bundles in, which is what guarantees the worker can never drift from
   the main-thread parser; ~.srt→WEBVTT normalizing), `vtt-worker.js` — a
   standalone esbuild chunk injected as `__VTT_WORKER_SOURCE__` blob, CSP-gated
   with in-band fallback (`WorkerTransport` owns spawn/sequence/watchdog as one
-  class), `subtitles.js` — the main-thread surface (ForgeTrack renderer 8
-  concurrent cue slots, drag-drop loader, panel section).
+  class), `subtitles.js` — the main-thread surface: eager `SubtitleSession`
+  (ForgeTrack renderer 8 concurrent cue slots, drag-drop/URL ingest with
+  per-entry restore, parsing memoized, cue-style vars applied at boot, the
+  `SubtitleSyncState` grain singleton) + lazy `SubtitlesSection` (panel UI).
 - **chrome/** — `config.js` (state: `SETTINGS_SCHEMA`, `getSetting`,
   `onSettingsChanged`, `SETTING_KEYS`, cross-tab live-reload cache),
   `panel.js` (the `Panel` builder + settings/history section renderers),
@@ -336,7 +351,7 @@ stop at the first failure:
    artifact shape validation (header fields, IIFE shape, css companion).
 4. **browser** — real Helium Chromium 156 + real bundle in a GM realm:
    boot, gesture contract, media semantics, resume, menus, GM env, frame
-   scenarios, edge robustness. ~28–33s.
+   scenarios, edge robustness. ~28–36s.
 
 ### Browser gate mechanics
 - Launch ladder: version-matched disk chromedriver → Selenium Manager, with
@@ -382,8 +397,11 @@ stop at the first failure:
   adoption surviving a seeked-flush save, xhr shape + `ontimeout` on a
   held route, pfStyle resource warmth, menu-handle census, harvest-seeded
   reboot), `media` (stream, gesture events, kernel re-anchoring onto a
-  replacement video), `menus` (menu command → panel effect),
-  `persist` (storage seeding, resume restore across reboot), `robust`
+  replacement video), `menus` (menu command → panel effect; the targeted
+  reset row seeds a non-default color filter and proves the bare command
+  restores it — no panel involved),
+  `persist` (storage seeding, resume restore across reboot, the sync-grain
+  row: one nudge gesture lands `subOffset` in the tracker's entry), `robust`
   (freeze-flush without user pause, rVFC frame crank on 156, 1000-echo
   < 400ms, 400 remote-adoption merges < 800ms).
 - **Per-case audit rows** follow every case file: uncaught page errors
