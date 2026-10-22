@@ -5,16 +5,11 @@ import { register } from "node:module";
 // Node has no CSS module support; the esbuild bundle inlines styles.css, but
 // forge.js -> inject.js imports it. Short-circuit it the same way tests do.
 register("file:///Users/itsrody/Documents/Projects/PlayerForge/tests/css-hook.mjs", import.meta.url);
-
-// jsdom lacks several platform APIs the Gecko-only production code uses
-// unconditionally; shim the bare globals the forge's constructor touches.
-if (typeof globalThis.ResizeObserver === "undefined") {
-  globalThis.ResizeObserver = class ResizeObserver {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  };
-}
+// The same platform-global shim set the test harness installs (scheduler,
+// observers, navigation, ...). Without it the measured scrub stroke crashes
+// at the first pointerdown (scheduler.postTask is undefined) and the case
+// benches fallback wreckage, not the real path.
+import "../../tests/shims.mjs";
 
 // The forge builds its gesture events against the ambient global CustomEvent
 // (and stores pooled events at module scope), so bridge the jsdom realm BEFORE
@@ -31,7 +26,7 @@ globalThis.AbortController = shared.window.AbortController;
 // Wire the shared `fs` gate to this realm, then latch it open: the forge now
 // reads `fs` (shadow.js), not document.fullscreenElement, so the scrub path
 // needs the gate driven through the real fullscreenchange event.
-const { initFullscreenGate } = await import("../../src/shared/shadow.js");
+const { initFullscreenGate } = await import("../../src/shared/dom.js");
 initFullscreenGate(shared.window.document);
 Object.defineProperty(shared.window.document, "fullscreenElement", {
   value: { __fullscreen: true }, configurable: true

@@ -1,5 +1,5 @@
 import { measure } from "../lib.mjs";
-import { formatTime } from "../../src/shared/time.js";
+import { formatTime } from "../../src/shared/core.js";
 import { timecodeToSeconds, parseSubtitles, offsetCues } from "../../src/shell/subtitles/forgevtt.js";
 
 /** Build a realistic ~500-cue VTT document once per process. */

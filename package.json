@@ -11,6 +11,8 @@
     "test": "node --import ./tests/loader.mjs --test tests/*.test.mjs",
     "bench": "node bench/run.mjs",
     "bench:record": "node bench/run.mjs --record",
+    "bench:compare": "node bench/run.mjs --compare",
+    "verify": "npm run lint && npm test && npm run build && npm run bench:compare",
     "integration": "node platform/run.mjs integration",
     "browser-bench": "node platform/run.mjs browser-bench",
     "browser-bench:record": "node platform/run.mjs browser-bench --record",

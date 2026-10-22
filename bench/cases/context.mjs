@@ -1,5 +1,5 @@
 import { measure } from "../lib.mjs";
-import { hashEntry, getDomainKey, domainsMatch } from "../../src/shared/context.js";
+import { hashEntry, getDomainKey, domainsMatch } from "../../src/shared/page.js";
 
 const paths = [];
 for (let i = 0; i < 64; i++) {
