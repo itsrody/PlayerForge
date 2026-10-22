@@ -9,37 +9,45 @@ import { gmGetResourceText } from "../../shared/store.js";
 // it from here - one source of truth, no mirrored literal to drift.
 export { SHELL_MARKER };
 
-let sharedSheet = null;
-let adopted = false;
-let styleLoad = null;
-
-function adopt() {
-  if (adopted) {
-    return;
-  }
-  adopted = true;
-  document.adoptedStyleSheets = [...document.adoptedStyleSheets, sharedSheet];
-}
-
 /**
- * Apply the shell stylesheet as early as possible - ideally from document-start
- * under Tampermonkey instant injection - so first-video dimming never waits on
- * a network round trip. The embedded string is applied synchronously first
- * (it is always available), then the @resource text is fetched in the
- * background and the SAME sheet is upgraded in place via replaceSync, which
- * propagates to every already-adopted reference (document + shadow roots).
- * Synchronous; returns the live sheet immediately. Idempotent; safe to call
- * from bootstrap() and again from shells.
+ * One owner of the shell stylesheet lifecycle: the embedded sheet applied
+ * synchronously at document-start, the @resource upgrade in the background
+ * (replaceSync in place, propagating to every adopted reference), and its
+ * adoption into the document. The three loose variables it replaced are
+ * private fields so "adopted once, upgraded monotonically" is one object's
+ * story; warmStyles()/ensureStyles()/injectShell() stay plain-call façades.
  */
-export function warmStyles() {
-  if (sharedSheet) {
-    return sharedSheet;
-  }
-  sharedSheet = new CSSStyleSheet();
-  sharedSheet.replaceSync(SHELL_CSS);
-  adopt();
+class ShellStyle {
+  #sheet = null;
+  #adopted = false;
+  #load = null;
 
-  styleLoad = (async () => {
+  /** The live sheet - attached to every shadow root inject() creates. */
+  get sheet() {
+    return this.#sheet;
+  }
+
+  /** Apply now (synchronously available CSS), arm the @resource upgrade. */
+  warm() {
+    if (this.#sheet) {
+      return this.#sheet;
+    }
+    this.#sheet = new CSSStyleSheet();
+    this.#sheet.replaceSync(SHELL_CSS);
+    if (!this.#adopted) {
+      this.#adopted = true;
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, this.#sheet];
+    }
+    this.#load = this.#warmFromResource();
+    return this.#sheet;
+  }
+
+  /** Resolve the authoritative (post-@resource) stylesheet. Never rejects. */
+  settled() {
+    return this.#load;
+  }
+
+  async #warmFromResource() {
     let css = null;
     try {
       css = await gmGetResourceText("pfStyle");
@@ -58,14 +66,29 @@ export function warmStyles() {
     if (css && css !== SHELL_CSS && css.trim().length > 0) {
       try {
         // Replace in place: adopted sheets everywhere see the upgrade.
-        sharedSheet.replaceSync(css);
+        this.#sheet.replaceSync(css);
       } catch (err) {
         logger.error("inject", "Rejected malformed @resource stylesheet:", err);
       }
     }
-    return sharedSheet;
-  })();
-  return sharedSheet;
+    return this.#sheet;
+  }
+}
+
+const style = new ShellStyle();
+
+/**
+ * Apply the shell stylesheet as early as possible - ideally from document-start
+ * under Tampermonkey instant injection - so first-video dimming never waits on
+ * a network round trip. The embedded string is applied synchronously first
+ * (it is always available), then the @resource text is fetched in the
+ * background and the SAME sheet is upgraded in place via replaceSync, which
+ * propagates to every already-adopted reference (document + shadow roots).
+ * Synchronous; returns the live sheet immediately. Idempotent; safe to call
+ * from bootstrap() and again from shells.
+ */
+export function warmStyles() {
+  return style.warm();
 }
 
 /**
@@ -75,7 +98,7 @@ export function warmStyles() {
  */
 export function ensureStyles() {
   warmStyles();
-  return styleLoad;
+  return style.settled();
 }
 
 /**
@@ -93,8 +116,8 @@ export function injectShell(container) {
   const host = el("div", { class: "pf-shell", tabindex: "-1" }, container);
 
   const shadow = host.attachShadow({ mode: "open" });
-  if (sharedSheet) {
-    shadow.adoptedStyleSheets = [sharedSheet];
+  if (style.sheet) {
+    shadow.adoptedStyleSheets = [style.sheet];
   }
 
   const hudLayer = el("div", { class: "pf-hud-layer" }, shadow);

@@ -465,7 +465,7 @@ export function stopContextPipe() {
 /** Private one-shot context request over an established pipe: no broadcast,
  *  no transfer, no retry - the pipe is live and dedicated. Times out (and
  *  drops the dead pipe) instead of queueing, so the caller can fall back. */
-function requestPageContextOverPipe(timeoutMs, deadline) {
+function requestPageContextOverPipe(timeoutMs) {
   const { promise, resolve } = Promise.withResolvers();
   const ac = new AbortController();
   const pipe = pipeState.pipe;
@@ -493,40 +493,20 @@ function requestPageContextOverPipe(timeoutMs, deadline) {
     }
   };
 
-  // AbortSignal.any() is native on the Chromium floor, but the test harness
-  // binds AbortController to jsdom's class (jsdom validates { signal } on its
-  // own targets) and Node's brand check rejects jsdom signals in any() - so
-  // the manual-deadline fallback below is load-bearing for tests, not dead.
-  let signal;
-  try {
-    signal = AbortSignal.any([ac.signal, AbortSignal.timeout(timeoutMs)]);
-  } catch {
-    signal = null;
-  }
-
+  // Two independent abort sources, each native, no merged signal: the
+  // request's own AbortController tears down the data listener, and an
+  // AbortSignal.timeout watchdog declares the pipe dead when nothing
+  // answers. jsdom and Node brand-check opposite worlds on signals (the
+  // probes proved a merged any() cannot exist across them), so the merge is
+  // what cannot ship - not the individual backends.
   const dropDeadPipe = () => pipeState.dropIf(pipe);
-
-  if (signal) {
-    signal.addEventListener("abort", () => {
-      // The abort fires both on the timeout AND on settle()'s own ac.abort()
-      // after a response. Only a timeout (no answer) means the pipe is dead.
-      if (answered) {
-        return;
-      }
-      dropDeadPipe();
-      settle(null);
-    }, { once: true });
-  } else {
-    const timer = setTimeout(() => {
-      if (answered) {
-        return;
-      }
-      dropDeadPipe();
-      ac.abort();
-      settle(null);
-    }, Math.max(0, deadline - Date.now()));
-    ac.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
-  }
+  AbortSignal.timeout(timeoutMs).addEventListener("abort", () => {
+    if (answered) {
+      return;
+    }
+    dropDeadPipe();
+    settle(null);
+  }, { once: true });
 
   pipe.port.addEventListener("message", onData, { signal: ac.signal });
   try {
@@ -554,7 +534,7 @@ function requestPageContextOverPipe(timeoutMs, deadline) {
  */
 function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   if (pipeState.pipe) {
-    return requestPageContextOverPipe(timeoutMs, Date.now() + timeoutMs);
+    return requestPageContextOverPipe(timeoutMs);
   }
 
   const { promise, resolve } = Promise.withResolvers();
@@ -566,19 +546,16 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   let transferPort = null;
   let settled = false;
 
-  // AbortSignal.any() + AbortSignal.timeout() on the Chromium floor - but the
-  // test harness binds AbortController to jsdom's class, and Node's brand
-  // check rejects those signals in any(). Feature-detect and fall back to
-  // manual deadline tracking so both runtimes keep working.
-  let signal;
-  let useSignalAny = false;
-  try {
-    signal = AbortSignal.any([ac.signal, AbortSignal.timeout(timeoutMs)]);
-    useSignalAny = true;
-  } catch {
-    signal = ac.signal;
-  }
-  const deadline = useSignalAny ? 0 : Date.now() + timeoutMs;
+  // Single-backend: two independent native abort sources. The request's own
+  // AbortController tears down the listeners on every settle path; an
+  // AbortSignal.timeout watchdog ends the attempt budget (the retry loop
+  // re-enters until then). No merged any() signal: jsdom and Node
+  // brand-check opposite worlds on signals - the probes proved the merge
+  // cannot exist across realms, while each individual backend can.
+  const watchdog = AbortSignal.timeout(timeoutMs);
+  watchdog.addEventListener("abort", () => {
+    settle(null, false);
+  }, { once: true });
 
   const settle = (context, viaPort) => {
     if (settled) {
@@ -641,13 +618,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
     }
   };
 
-  if (useSignalAny) {
-    signal.addEventListener("abort", () => {
-      settle(null, false);
-    }, { once: true });
-  }
-
-  window.addEventListener("message", onMessage, { signal });
+  window.addEventListener("message", onMessage, { signal: ac.signal });
 
   let portAttached = false;
   const sendRequest = () => {
@@ -667,8 +638,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
     window.parent.postMessage(msg, "*");
   };
   const attempt = () => {
-    if (useSignalAny ? signal.aborted : Date.now() >= deadline) {
-      if (!useSignalAny) ac.abort();
+    if (watchdog.aborted) {
       settle(null, false);
       return;
     }

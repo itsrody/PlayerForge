@@ -212,8 +212,26 @@ design for regression detection; the v1.0.0 target is preserved on its tag.
   `video.animate`, `requestPictureInPicture` - jsdom elements genuinely
   lack them), the grant guards in store.js (manager policy, not platform),
   `workerCapable()` (CSP/Worker presence is a runtime fact the loader tests
-  manipulate), and the documented-intentional per-instance MutationObserver
-  and down-ownership checks in kernel/discovery. 356/356 tests.
+   manipulate), and the documented-intentional per-instance MutationObserver
+   and down-ownership checks in kernel/discovery. The last big manual arm
+   followed in the same sweep: `AbortSignal.any` - the probes proved a
+   merged jsdom/Node signal can never exist (each world brand-checks the
+   other), so the merge is exactly what cannot ship - and both context
+   request paths now run two independent native abort sources instead: the
+   request's own AbortController tears the listeners down on every settle
+   path, and an AbortSignal.timeout watchdog ends the pipe-timeout or
+   retry-attempt budget, which retired the manual `Date.now()` deadline
+    math entirely. The lone remaining `Date.now()` is the top-frame
+    responder's nonce TTL housekeeping - bookkeeping, not a backend.
+    Following the same ownership census: the worker-parse transport's five
+    loose module variables (worker, blob url, CSP latch, request sequence,
+    in-flight map) became a `WorkerTransport` class owning spawn/latch/
+    watchdog/settle as one object's story, with the plain-function
+    `parseSubtitlesAsync` façade unchanged; and `inject.js`'s stylesheet
+    lifecycle (adopt-once sheet, monotonic @resource upgrade, upgrade
+    promise) became a `ShellStyle` class behind the same
+    `warmStyles()`/`ensureStyles()` seams. Both leave every contract and
+    every test intact. 356/356 tests.
 - **Subtitles-layer unification pass.** `src/shell/subtitles/` shrank from 5
   modules to 3 along a build boundary rather than a job split. The module
   graph put them together by accident: `vtt-worker-loader.js` (the

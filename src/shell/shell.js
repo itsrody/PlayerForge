@@ -253,7 +253,7 @@ export class Shell {
       // native-feel field editing. Everything else stays suppressed so the
       // page's menu never covers the shell.
       const deep = event.composedPath?.()[0];
-      if (deep && typeof deep.closest === "function" && deep.closest(EDITABLE_SELECTOR)) {
+      if (deep?.closest?.(EDITABLE_SELECTOR)) {
         return;
       }
       event.preventDefault();
