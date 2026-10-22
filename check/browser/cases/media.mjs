@@ -112,6 +112,23 @@ export async function run({ session, baseUrl, boot }) {
     ms: null
   });
 
+  // The softened glass scale ships as decided, asserted off the real sheet:
+  // concentric chain R5 (16 outermost, tab one ring in twice) and the blur
+  // pair - measured computed values, per the measured-not-screenshotted law.
+  const glassScale = await session.eval(function main() {
+    const host = document.querySelector(".pf-shell");
+    const panel = host?.shadowRoot?.querySelector(".pf-panel");
+    if (!panel) return null;
+    const cs = getComputedStyle(panel);
+    return { panelRadius: cs.borderRadius, blur: cs.backdropFilter };
+  });
+  rows.push({
+    name: "glass scale: softened radii + blur land as declared",
+    status: !!glassScale && glassScale.panelRadius === "16px" && /blur\(24px\)/.test(glassScale.blur) ? "pass" : "fail",
+    note: glassScale ? JSON.stringify(glassScale) : "panel missing",
+    ms: null
+  });
+
   // The shell contract must survive a full teardown: drop the current anchor,
   // append a fresh video, and require the kernel to re-anchor onto it - the
   // new video node must carry the shell marker (the old markers on container

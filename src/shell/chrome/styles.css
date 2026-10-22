@@ -67,13 +67,13 @@
   /* Concentric scale (AGENTS.md R5/R6). The panel is the outermost surface so
      it holds the largest radius; everything nested inside is derived from it
      by subtracting its own inset padding, so a change to the container
-     propagates instead of silently breaking concentricity.
-       panel 18 (outermost)  -> tab 10-3=7 (strip pad)  -> close 10
-     -xs was 7px, i.e. LARGER than -sm at 6px: the scale was not monotonic. */
-  --pf-radius-lg: 18px;   /* panel, toast sheet edge            */
+     propagates instead of silently breaking concentricity. Reduced one notch
+     from the original 18/10/7 land: the relations carry, the values soften.
+       panel 16 (outermost)  -> close/strip 16-8=8  -> tab 8-3=5 */
+  --pf-radius-lg: 16px;   /* panel, toast sheet edge            */
   --pf-radius-md: 12px;   /* sections, rows                     */
-  --pf-radius-sm: 10px;   /* close button (one ring in on -lg)  */
-  --pf-radius-xs: 7px;    /* tab inside the strip               */
+  --pf-radius-sm: 8px;    /* close button (one ring in on -lg)  */
+  --pf-radius-xs: 5px;    /* tab inside the strip               */
 
   --pf-font-2xs: 10px;
   --pf-font-xs: 11px;
@@ -86,8 +86,8 @@
   --pf-ease-bounce: 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
   --pf-ease-out: 0.2s cubic-bezier(0.4, 0, 1, 1);
 
-  --pf-blur-sm: blur(20px) saturate(1.7);
-  --pf-blur-lg: blur(30px) saturate(1.8);
+  --pf-blur-sm: blur(16px) saturate(1.7);
+  --pf-blur-lg: blur(24px) saturate(1.8);
 
   --pf-space-xs: 4px;
   --pf-space-sm: 6px;
@@ -574,7 +574,7 @@
           padding: 6px 7px;
           border: none;
           /* R5: the last ring in - inset on the strip's 3px padding, so
-             10 - 3 = 7 = --pf-radius-xs. */
+             8 - 3 = 5 = --pf-radius-xs. */
           border-radius: var(--pf-radius-xs);
           background: transparent;
           color: var(--pf-text-mid);
@@ -620,7 +620,7 @@
         line-height: 1;
         cursor: pointer;
         padding: 5px 8px;
-        /* R5: also inset on the header's 8px padding, so the same 18 - 8 = 10
+        /* R5: also inset on the header's 8px padding, so the same 16 - 8 = 8
            as the tab strip - the token comment already groups "tab strip,
            close button" under --pf-radius-sm. */
         border-radius: var(--pf-radius-sm);

@@ -312,17 +312,17 @@ only surface, scales/tokens `@property`-typed, gradients banned in the HUD:
   sheet's tint stays the one glass layer and the resting header cannot go
   darker than the body.
 - **R5 Nested radii are concentric and derived:** container radius R with
-  inset padding P → inset elements use R − P (panel 18 → strip/close 10 →
-  tab 7). Derived, not chosen, so container changes stay correct.
-- **R6 The panel (sheet) has the largest radius in the HUD (18px).**
+  inset padding P → inset elements use R − P (panel 16 → strip/close 8 →
+  tab 5). Derived, not chosen, so container changes stay correct.
+- **R6 The panel (sheet) has the largest radius in the HUD (16px).**
 - **R7 Section headers are title case** (no uppercase transform).
 - **R9 Every HUD change needs a measured contrast assertion**, not a
   screenshot. Geometry (resting radii, control positions) may not move as a
   side effect of appearance work.
 - The current set is tint + blur + hairline border + rim shadows, **zero
   linear-gradients**, rim highlights present (`--pf-header-rim`, inset
-  highlights), two blur layers (`--pf-blur-sm/lg` = `blur(20px)
-  saturate(1.7)` / `blur(30px) saturate(1.8)`).
+  highlights), two blur layers (`--pf-blur-sm/lg` = `blur(16px)
+  saturate(1.7)` / `blur(24px) saturate(1.8)`).
 
 ## 7. check/ — the testing tool
 
