@@ -81,49 +81,26 @@ function captureFirstTwo(pointers, out) {
 }
 
 /**
- * Pooled scrub event + detail payload. Scrub fires once per coalesced pointer
- * move (up to display rate), so allocating a fresh CustomEvent plus a fresh
- * detail object per move - the old #dispatch shape - churns the young
- * generation for the whole drag. Same philosophy as firstTwoPointers: mutate
- * one fixed-shape detail in place and re-dispatch one reused Event.
- * dispatchEvent runs listeners synchronously and every consumer (actions.js
- * reads detail.dx/velocity within the scrub handler) observes the payload
- * before the next move re-mutates it, so a re-dispatched instance is safe -
- * nothing retains the object past the caller that last read it.
- *
- * The pooled Event is built lazily (not at module load) so it is constructed
- * in the same realm as the surface it is dispatched onto: the bare
- * `globalThis.CustomEvent` is resolved at first use, which keeps it valid
- * across jsdom's realm bridging in tests and identical to the page realm in
- * the browser. One pool services the whole engine; only a single scrub can be
- * in flight at a time, so sharing is safe.
- */
-const scrubDetail = { zone: "", method: "pointer", dx: 0, velocity: 0, timestamp: 0 };
-let scrubPool = null;
-function pooledScrubEvent() {
-  const Ctor = globalThis.CustomEvent;
-  if (scrubPool && scrubPool.Ctor === Ctor) {
-    return scrubPool.event;
-  }
-  scrubPool = {
-    Ctor,
-    event: new Ctor(GESTURE_EVENTS.scrub, {
-      detail: scrubDetail,
-      bubbles: false,
-      composed: false
-    })
-  };
-  return scrubPool.event;
-}
-
-/**
- * Pooled per-name CustomEvents so the gesture boundary never allocates. Each
- * instance gets a fresh own `detail` assigned before every dispatch (own
- * properties shadow the prototype getter), and the consumers read it
- * synchronously without retaining it - same contract as the scrub pool above.
- * Lazy `globalThis.CustomEvent` resolution keeps the pool realm-safe.
+ * Pooled per-name CustomEvents so the gesture boundary never allocates - one
+ * mechanism for every semantic event, including scrub. Scrub fires once per
+ * coalesced pointer move (up to display rate), so allocating a fresh
+ * CustomEvent per move - the old pre-pool shape - churned the young
+ * generation for the whole drag; the pooled Event plus its pooled detail
+ * payload ride the same path as every other event. Each instance gets a
+ * fresh own `detail` assigned before every dispatch (own properties shadow
+ * the prototype getter), and consumers read it synchronously without
+ * retaining it (actions.js reads detail.dx/velocity within the scrub
+ * handler), so a re-dispatched instance is safe - nothing retains the object
+ * past the caller that last read it. Lazy `globalThis.CustomEvent` resolution
+ * keeps the pool realm-safe (built in the same realm as the surface it is
+ * dispatched onto). One pool entry per name: only a single gesture per name
+ * can be in flight at a time, so sharing is safe.
  */
 const dispatchPool = new Map();
+// Scrub's per-name detail payload, refilled in place by #advanceScrub (same
+// mutate-in-place discipline as the other per-family payloads; actions.js
+// reads it synchronously within the scrub handler).
+const scrubDetail = { zone: "", method: "pointer", dx: 0, velocity: 0, timestamp: 0 };
 function pooledDispatchEvent(name, detail) {
   const Ctor = globalThis.CustomEvent;
   const stale = dispatchPool.get(name);
@@ -299,48 +276,43 @@ export class InputForge {
     zone.addEventListener("lostpointercapture", (event) => this.#handleLostCapture(event), options);
     zone.addEventListener("click", (event) => this.#handleClickCapture(event), { capture: true, signal });
     zone.addEventListener("dblclick", (event) => this.#handleDblClickCapture(event), { capture: true, signal });
-    // SDK stream dominance: the compat mouse/touch streams mirror the pointer
-    // stream, so while a press is owned they stop at this capture as well -
-    // the SDK never observes a partial sequence. touchstart/mousedown can
-    // precede (or arrive without) a tracked pointerdown, so they also probe
-    // prospective eligibility directly. Plain hover input (#pointerOwned
-    // false, no session) always passes through untouched.
-    const swallowOwned = (event) => {
-      if (this.#pointerOwned) {
-        event.stopImmediatePropagation();
-      }
+    // SDK stream dominance - ONE policy table for the compat mouse/touch
+    // streams instead of seven hand-rolled closures. Each stream event gets
+    // its single guard predicate, wired by one loop:
+    //   openers (mousedown/touchstart) may precede (or arrive without) the
+    //     tracked pointerdown, so they probe prospective eligibility directly;
+    //     mousedown additionally requires button 0.
+    //   move tails die while the press stays owned.
+    //   end tails swallow owned presses and the pending click decision;
+    //     the mouse arm additionally requires button 0.
+    // Plain hover input (#pointerOwned false, no session) always passes
+    // through untouched.
+    const STREAM_GUARDS = {
+      mousedown: (event) => (event.button === 0 && this.#pointerOwned) ||
+        this.#dominatesPress(event),
+      touchstart: (event) => this.#pointerOwned || this.#dominatesPress(event),
+      mousemove: () => this.#pointerOwned,
+      touchmove: () => this.#pointerOwned,
+      mouseup: (event) => event.button === 0 && (this.#pointerOwned || this.#awaitClick),
+      touchend: () => this.#pointerOwned || this.#awaitClick
     };
-    zone.addEventListener("mousedown", (event) => {
-      if ((event.button === 0 && this.#pointerOwned) || this.#dominatesPress(event)) {
-        event.stopImmediatePropagation();
-      }
-    }, options);
-    zone.addEventListener("mousemove", swallowOwned, options);
-    zone.addEventListener("mouseup", (event) => {
-      if (event.button === 0 && (this.#pointerOwned || this.#awaitClick)) {
-        event.stopImmediatePropagation();
-      }
-    }, options);
-    zone.addEventListener("touchstart", (event) => {
-      if (this.#pointerOwned || this.#dominatesPress(event)) {
-        event.stopImmediatePropagation();
-      }
-    }, options);
-    zone.addEventListener("touchmove", swallowOwned, options);
-    zone.addEventListener("touchend", (event) => {
-      if (this.#pointerOwned || this.#awaitClick) {
-        event.stopImmediatePropagation();
-      }
-    }, options);
+    for (const [type, guard] of Object.entries(STREAM_GUARDS)) {
+      zone.addEventListener(type, (event) => {
+        if (guard(event)) {
+          event.stopImmediatePropagation();
+        }
+      }, options);
+    }
+    // touchcancel shares the touchend guard and adds the pointer sweep: a
+    // host can deliver it without the paired pointercancel, and the swallow
+    // alone would leave #pointerOwned/#awaitClick latched and the compat
+    // stream eaten until some later pointerup. A cancelled touch reclaims
+    // every tracked pointer - the sweep is idempotent when the paired
+    // pointercancel already ran (and vice versa).
     zone.addEventListener("touchcancel", (event) => {
-      if (this.#pointerOwned || this.#awaitClick) {
+      if (STREAM_GUARDS.touchend()) {
         event.stopImmediatePropagation();
       }
-      // A host can deliver touchcancel without its pointercancel pair; the
-      // swallow alone would leave #pointerOwned/#awaitClick latched and the
-      // compat stream eaten until some later pointerup. A cancelled touch
-      // reclaims every tracked pointer - the sweep is idempotent when the
-      // paired pointercancel already ran (and vice versa).
       for (const id of this.#pointers.keys()) {
         this.#cancelTrackedPointer(id);
       }
@@ -953,7 +925,7 @@ export class InputForge {
     scrubDetail.velocity = this.#scrubVelocity;
     scrubDetail.timestamp = now;
     if (!this.#scope.disposed && this.#eventTarget) {
-      this.#eventTarget.dispatchEvent(pooledScrubEvent());
+      this.#eventTarget.dispatchEvent(pooledDispatchEvent(GESTURE_EVENTS.scrub, scrubDetail));
     }
   }
 

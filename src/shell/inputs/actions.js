@@ -123,97 +123,111 @@ function gateOpen(binding) {
     (!binding.fs || fs);
 }
 
-/** Bindings pre-bucketed by gesture so decision-point scans skip the mass of
- *  unrelated records. Keys stay in table order. Gate sampling stays live. */
-const BY_GESTURE = new Map();
-for (const binding of INPUT_BINDINGS) {
-  let list = BY_GESTURE.get(binding.gesture);
-  if (!list) {
-    list = [];
-    BY_GESTURE.set(binding.gesture, list);
+/**
+ * The unified gate table. One class owns the whole gate dimension - settings
+ * x fullscreen x gesture family - that used to live as module-level `let`s
+ * and free functions:
+ *   - the table buckets INPUT_BINDINGS by gesture family natively
+ *     (`Map.groupBy`, Chromium 117+), so decision-point scans skip the mass
+ *     of unrelated records; entries keep table order;
+ *   - a per-family snapshot re-samples on the settings bus, so pointer-intent
+ *     decision points read flat map entries instead of walking the binding
+ *     tables at display rate. The two inputs gateOpen folds (a settings key
+ *     and the fullscreen latch) only ever change on their buses (settings) or
+ *     the shared fs binding (fullscreen), so sampling them at change time
+ *     instead of at pointer-move time is exactly as fresh;
+ *   - the snapshot revalidates against the live `fs` read on every query:
+ *     the gate's initFullscreenGate rebind resyncs `fs` silently (no
+ *     subscriber fan-out), and a snapshot that missed such a resync would arm
+ *     fullscreen-only intents on an inline page.
+ * Key bindings stay live-sampled per keystroke (keyArmed) - once per
+ * keypress is not a hot path.
+ */
+class IntentGates {
+  #bindings = Map.groupBy(INPUT_BINDINGS, (binding) => binding.gesture);
+  /** gesture family -> any binding armed. */
+  #armed = new Map();
+  /** Precomputed OR over GESTURE_IDS (all of which are pointer intents):
+   *  pointerdown ownership checked this via a 5-entry `.some(allowsIntent)`
+   *  scan per press (and again from #dominatesPress); one boolean read
+   *  replaces both. */
+  #anyPointer = false;
+  /** Fullscreen value the snapshot was taken against. */
+  #fsStamp = false;
+
+  constructor() {
+    this.#recompute();
+    onSettingsChanged(() => this.#recompute());
   }
-  list.push(binding);
-}
 
-/**
- * Per-gesture gate snapshot for the pointer-intent decision points. The two
- * inputs gateOpen folds - a settings key and the fullscreen latch - only ever
- * change on their buses (settings) or the shared fs binding (fullscreen), so
- * sampling them at change time instead of at pointer-move time is exactly as
- * fresh while removing the settings-path lookup from the display-rate
- * scrub/swipe decision loop. Key bindings keep sampling live per keystroke
- * (isKeyArmed) - once per keypress is not a hot path.
- */
-const intentsArmed = new Map();
-/** Fullscreen value the snapshot was taken against. allowsIntent revalidates
- *  the live `fs` binding on every read: the gate's initFullscreenGate rebind
- *  resyncs `fs` silently (no subscriber fan-out), and a snapshot that missed
- *  such a resync would arm fullscreen-only intents on an inline page. */
-let intentsArmedFs = false;
-/**
- * Pointer gestures whose activation the shell must hide from the SDK. While
- * ANY of these is armed, an owned press stops its whole pointer/mouse/touch
- * stream at the zone's capture listeners - the SDK only ever sees native
- * input the shell deliberately passes through (single click/tap, hover,
- * presses outside the gesture zone).
- */
-/** Precomputed OR over GESTURE_IDS (all intents are pointer intents):
- *  pointerdown ownership checked it via a 5-iteration `.some(allowsIntent)`
- *  scan per press (and again from #dominatesPress); one boolean read
- *  replaces both. */
-let anyPointerArmed = false;
-
-function refreshIntentGates() {
-  for (const [gesture, bindings] of BY_GESTURE) {
-    let open = false;
-    for (let i = 0; i < bindings.length; i++) {
-      if (gateOpen(bindings[i])) {
-        open = true;
+  /** Re-sample every family's gate snapshot against live settings + fs. */
+  #recompute() {
+    let anyPointer = false;
+    for (const [gesture, bindings] of this.#bindings) {
+      let open = false;
+      for (let i = 0; i < bindings.length; i++) {
+        if (gateOpen(bindings[i])) {
+          open = true;
+          break;
+        }
+      }
+      this.#armed.set(gesture, open);
+    }
+    for (let i = 0; i < GESTURE_IDS.length; i++) {
+      if (this.#armed.get(GESTURE_IDS[i]) === true) {
+        anyPointer = true;
         break;
       }
     }
-    intentsArmed.set(gesture, open);
+    this.#anyPointer = anyPointer;
+    this.#fsStamp = fs;
   }
-  let anyPointer = false;
-  for (let i = 0; i < GESTURE_IDS.length; i++) {
-    if (intentsArmed.get(GESTURE_IDS[i]) === true) {
-      anyPointer = true;
-      break;
+
+  /** Key bindings for a family, in table order. */
+  forGesture(gesture) {
+    return this.#bindings.get(gesture);
+  }
+
+  /** True when at least one binding for the pointer-intent family is armed.
+   *  Mid-session toggles still apply at the next decision via the fs-validity
+   *  recheck. */
+  allows(gesture) {
+    if (fs !== this.#fsStamp) {
+      this.#recompute();
     }
+    return this.#armed.get(gesture) === true;
   }
-  anyPointerArmed = anyPointer;
-  intentsArmedFs = fs;
-}
-refreshIntentGates();
-onSettingsChanged(refreshIntentGates);
 
-/**
- * True when at least one binding for the pointer-intent family is armed.
- * Reads the precomputed snapshot (revalidated against live fs, refreshed via
- * the settings bus), so mid-session toggles still apply at the next decision.
- */
-export function allowsIntent(gesture) {
-  if (fs !== intentsArmedFs) {
-    refreshIntentGates();
+  /** Any pointer-intent family member armed - the press-ownership gate. Same
+   *  snapshot revalidation as allows(), without the per-call scan. */
+  anyPointer() {
+    if (fs !== this.#fsStamp) {
+      this.#recompute();
+    }
+    return this.#anyPointer;
   }
-  return intentsArmed.get(gesture) === true;
+
+  /** Whether a key binding's gates are open right now (live per read). */
+  keyArmed(binding) {
+    return gateOpen(binding);
+  }
 }
 
-/** Any pointer-intent family member armed - the press-ownership gate. Same
- *  snapshot revalidation as allowsIntent, without the per-call scan. */
-export function allowsAnyIntent() {
-  if (fs !== intentsArmedFs) {
-    refreshIntentGates();
-  }
-  return anyPointerArmed;
-}
+const gates = new IntentGates();
 
 /** Armed key bindings, in table order - sampled live per keystroke. */
-export const KEY_BINDINGS = BY_GESTURE.get("key");
+export const KEY_BINDINGS = gates.forGesture("key");
 
-/** Whether a key binding's gates are open right now (live per read). */
+export function allowsIntent(gesture) {
+  return gates.allows(gesture);
+}
+
+export function allowsAnyIntent() {
+  return gates.anyPointer();
+}
+
 export function isKeyArmed(binding) {
-  return gateOpen(binding);
+  return gates.keyArmed(binding);
 }
 
 /*
@@ -232,96 +246,6 @@ const SCRUB_FAST_FULL_WIDTH_FRACTION = TUNING.scrub.velocity.fastFullWidthFracti
 const SCRUB_SENSITIVITY = TUNING.controller.scrubSensitivity / 150;
 /** Ignore cover-scale changes below this fraction of a scale step (sub-pixel). */
 const FILL_SCALE_EPSILON = 0.001;
-
-/* - Per-shell action state - */
-
-const stateFor = (() => {
-  const states = new WeakMap();
-  return (shell) => {
-    let state = states.get(shell);
-    if (!state) {
-      state = {
-        savedRate: 1,
-        activeHolds: new Set(),
-        scrubbing: false,
-        scrubDuration: 0,
-        scrubSlowGain: 0,
-        scrubFastGain: 0,
-        scrubSensitivity: 0,
-        scrubDirectionMomentum: 0,
-        lastScrubToastAt: 0,
-        scrubToastText: null,
-        scrubToastSecDuration: NaN,
-        scrubToastSecCurrent: NaN,
-        // rVFC-backed readout: mediaTime of the last frame actually presented
-        // this scrub (decoder currentTime can lead/lag the display - same
-        // rationale as resume.js's pause flush), the video the loop was armed
-        // on (SPA swap guard), and the pending callback handle.
-        scrubPresentedTime: null,
-        scrubRvfcVideo: null,
-        scrubRvfcId: 0,
-        // Pooled payload for the 100ms scrub tick: the toast manager
-        // destructures it synchronously (it never retains the object), so the
-        // same 3-field object is refilled in place instead of re-allocated
-        // every tick of a drag - same mutate-in-place discipline as the
-        // gesture detail objects.
-        scrubToast: { icon: "left-arrows", text: "", group: "scrub" },
-        streakCount: 0,
-        lastSkipDirection: null,
-        streakResetAt: 0,
-        fillActive: false,
-        // Cover scale currently applied to the video (1 = none). Re-derives
-        // the fill transform when the video's intrinsic size changes mid-fill.
-        fillScale: 1,
-        // Declared here because fillFrame writes it: same key order from the
-        // start means the state object never morphs to a second hidden class.
-        priorObjectFit: ""
-      };
-      states.set(shell, state);
-    }
-    return state;
-  };
-})();
-
-/** Cancel the scrub's frame loop if one is armed; safe to call any time. */
-function cancelScrubFrameLoop(state) {
-  if (state.scrubRvfcVideo) {
-    state.scrubRvfcVideo.cancelVideoFrameCallback?.(state.scrubRvfcId);
-    state.scrubRvfcVideo = null;
-    state.scrubRvfcId = 0;
-  }
-  state.scrubPresentedTime = null;
-}
-
-function performSkip(shell, state, direction) {
-  // The command plane no-ops a skip before the timeline exists; bail here too
-  // so the streak state and the "Ns" readout don't advance for a dead command.
-  if (!shell.media.ready) {
-    return;
-  }
-  const now = performance.now();
-  const streakMax = TUNING.controller.streakMax;
-  // A streak decays lazily by its reset window instead of a wake-up timer.
-  if (now - state.streakResetAt >= TUNING.gestures.streakResetMs) {
-    state.streakCount = 0;
-    state.lastSkipDirection = null;
-  }
-  if (direction === state.lastSkipDirection) {
-    state.streakCount = Math.min(state.streakCount + 1, streakMax);
-  } else {
-    state.streakCount = 1;
-    state.lastSkipDirection = direction;
-  }
-  state.streakResetAt = now;
-
-  const step = getSetting(SETTING_KEYS.stepSeek) * state.streakCount;
-  shell.media.skip(direction === "right" ? step : -step);
-  shell.toastFlash(
-    direction === "right" ? "right-arrows" : "left-arrows",
-    `${step}s`,
-    "skip"
-  );
-}
 
 /**
  * Eased snap for inline video transforms: one curve, shared by fill-mode
@@ -444,42 +368,6 @@ export function easeTransformTo(video, transform) {
 }
 
 /**
- * Release pinch/fill scale on a shell's video: flips the fill state off,
- * eases the transform back to none (or snaps it, when `animate` is false -
- * the instant path also cancels any in-flight WAAPI ease and clears
- * will-change), then hands object-fit back to what the embed had before
- * fill mode claimed it. No-op when fill was never active.
- */
-function clearFillMode(shell, state, animate = true) {
-  if (!state.fillActive) {
-    return;
-  }
-  state.fillActive = false;
-  const video = shell.video;
-  if (video) {
-    state.fillScale = 1;
-    if (animate) {
-      easeTransformTo(video, "");
-    } else {
-      // Cancel any in-flight WAAPI ease first: its fill:'both' would otherwise
-      // keep re-applying a scale after the inline style is cleared below.
-      const prior = pendingEase.get(video);
-      if (prior) {
-        prior();
-      }
-      video.style.transition = "none";
-      video.style.transform = "";
-      video.style.willChange = "";
-      video.style.transition = "";
-    }
-    // Owned on fill entry (see the pinch binding): hand the element box back to
-    // the embed's original object-fit once the transform is released.
-    video.style.objectFit = state.priorObjectFit || "";
-    state.priorObjectFit = "";
-  }
-}
-
-/**
  * Scale factor needed for the video to cover the given reference box.
  * Fill mode is fullscreen-only (pinch binding is fs-gated), and the reference
  * (passed from `shell.referenceBox`) is the device screen in fs - the video's
@@ -520,61 +408,185 @@ function volumePercent(volume) {
 }
 
 /**
- * Wire the shell-facing side of the bindings onto the shell host: semantic
- * events dispatched by the engine run these handlers. All listeners share
- * the engine's AbortSignal, so destroying the engine tears the actions down.
+ * Per-shell action machine. The old `stateFor` WeakMap-of-literal factory
+ * plus free functions taking `(shell, state, ...)` became one class: every
+ * piece of per-shell action state is a private field (declared ONCE, in the
+ * same order the literal used, so the shape never morphs to a second hidden
+ * class), and every semantic gesture event runs one method on the instance.
  */
-export function attachInputActions(shell, host, signal) {
-  /** Fullscreen exit also collapses fill mode - the one cross-feature rule. */
-  subscribeFullscreen((active) => {
-    if (!active) {
-      const state = stateFor(shell);
-      if (state.fillActive) {
-        clearFillMode(shell, state, false);
-      }
-    }
-  }, signal);
+class ShellActions {
+  #shell;
+  #savedRate = 1;
+  #activeHolds = new Set();
+  #scrubbing = false;
+  #scrubDuration = 0;
+  #scrubSlowGain = 0;
+  #scrubFastGain = 0;
+  #scrubSensitivity = 0;
+  #scrubDirectionMomentum = 0;
+  #lastScrubToastAt = 0;
+  #scrubToastText = null;
+  #scrubToastSecDuration = NaN;
+  #scrubToastSecCurrent = NaN;
+  // rVFC-backed readout: mediaTime of the last frame actually presented
+  // this scrub (decoder currentTime can lead/lag the display - same
+  // rationale as resume.js's pause flush), the video the loop was armed
+  // on (SPA swap guard), and the pending callback handle.
+  #scrubPresentedTime = null;
+  #scrubRvfcVideo = null;
+  #scrubRvfcId = 0;
+  // Pooled payload for the 100ms scrub tick: the toast manager
+  // destructures it synchronously (it never retains the object), so the
+  // same 3-field object is refilled in place instead of re-allocated
+  // every tick of a drag - same mutate-in-place discipline as the
+  // gesture detail objects.
+  #scrubToast = { icon: "left-arrows", text: "", group: "scrub" };
+  #streakCount = 0;
+  #lastSkipDirection = null;
+  #streakResetAt = 0;
+  #fillActive = false;
+  // Cover scale currently applied to the video (1 = none). Re-derives
+  // the fill transform when the video's intrinsic size changes mid-fill.
+  #fillScale = 1;
+  // Captured on fill entry: the element box is handed back to the embed's
+  // original object-fit once the transform is released.
+  #priorObjectFit = "";
 
-  host.addEventListener(GESTURE_EVENTS.hold, ({ detail }) => {
+  constructor(shell) {
+    this.#shell = shell;
+  }
+
+  /** Cancel the scrub's frame loop if one is armed; safe to call any time. */
+  #cancelScrubFrameLoop() {
+    if (this.#scrubRvfcVideo) {
+      this.#scrubRvfcVideo.cancelVideoFrameCallback?.(this.#scrubRvfcId);
+      this.#scrubRvfcVideo = null;
+      this.#scrubRvfcId = 0;
+    }
+    this.#scrubPresentedTime = null;
+  }
+
+  /**
+   * Skip with the streak: same-direction hits accumulate up to the streak cap
+   * and decay lazily by the reset window instead of a wake-up timer.
+   */
+  #skip(direction) {
+    // The command plane no-ops a skip before the timeline exists; bail here too
+    // so the streak state and the "Ns" readout don't advance for a dead command.
+    if (!this.#shell.media.ready) {
+      return;
+    }
+    const now = performance.now();
+    const streakMax = TUNING.controller.streakMax;
+    // A streak decays lazily by its reset window instead of a wake-up timer.
+    if (now - this.#streakResetAt >= TUNING.gestures.streakResetMs) {
+      this.#streakCount = 0;
+      this.#lastSkipDirection = null;
+    }
+    if (direction === this.#lastSkipDirection) {
+      this.#streakCount = Math.min(this.#streakCount + 1, streakMax);
+    } else {
+      this.#streakCount = 1;
+      this.#lastSkipDirection = direction;
+    }
+    this.#streakResetAt = now;
+
+    const step = getSetting(SETTING_KEYS.stepSeek) * this.#streakCount;
+    this.#shell.media.skip(direction === "right" ? step : -step);
+    this.#shell.toastFlash(
+      direction === "right" ? "right-arrows" : "left-arrows",
+      `${step}s`,
+      "skip"
+    );
+  }
+
+  /**
+   * Release pinch/fill scale: flips the fill state off, eases the transform
+   * back to none (or snaps it, when `animate` is false - the instant path
+   * also cancels any in-flight WAAPI ease and clears will-change), then hands
+   * object-fit back to what the embed had before fill mode claimed it. No-op
+   * when fill was never active.
+   */
+  #clearFillMode(animate) {
+    const shell = this.#shell;
+    if (!this.#fillActive) {
+      return;
+    }
+    this.#fillActive = false;
+    const video = shell.video;
+    if (video) {
+      this.#fillScale = 1;
+      if (animate) {
+        easeTransformTo(video, "");
+      } else {
+        // Cancel any in-flight WAAPI ease first: its fill:'both' would otherwise
+        // keep re-applying a scale after the inline style is cleared below.
+        const prior = pendingEase.get(video);
+        if (prior) {
+          prior();
+        }
+        video.style.transition = "none";
+        video.style.transform = "";
+        video.style.willChange = "";
+        video.style.transition = "";
+      }
+      // Owned on fill entry (see the pinch handler below): hand the element
+      // box back to the embed's original object-fit once the transform is
+      // released.
+      video.style.objectFit = this.#priorObjectFit || "";
+      this.#priorObjectFit = "";
+    }
+  }
+
+  /** Fullscreen exit also collapses fill mode - the one cross-feature rule. */
+  #fsExit() {
+    if (this.#fillActive) {
+      this.#clearFillMode(false);
+    }
+  }
+
+  /** Hold the pointer/keyboard boost: first source wins, later arrivals add
+   *  nothing until the first releases. */
+  #hold(detail) {
+    const shell = this.#shell;
     if (!shell.media.ready) {
       return;
     }
-    const state = stateFor(shell);
     const source = detail.method || "pointer";
-    if (state.activeHolds.has(source) || (state.activeHolds.add(source), state.activeHolds.size > 1)) {
+    if (this.#activeHolds.has(source) || (this.#activeHolds.add(source), this.#activeHolds.size > 1)) {
       return;
     }
     const speed = TUNING.controller.holdSpeed;
-    state.savedRate = shell.playbackRate;
+    this.#savedRate = shell.playbackRate;
     shell.media.beginBoost(speed);
     gestureHaptic("hold");
     shell.toast({ icon: "right-arrows", text: `${speed}x`, group: "hold" });
-  }, { signal });
+  }
 
-  host.addEventListener(GESTURE_EVENTS.release, ({ detail }) => {
-    const state = stateFor(shell);
+  #release(detail) {
+    const shell = this.#shell;
     const source = detail.method || "pointer";
-    if (!state.activeHolds.delete(source) || state.activeHolds.size > 0) {
+    if (!this.#activeHolds.delete(source) || this.#activeHolds.size > 0) {
       return;
     }
     if (shell.video) {
-      shell.media.endBoost(state.savedRate);
+      shell.media.endBoost(this.#savedRate);
     }
     shell.hideToast("hold");
-  }, { signal });
+  }
 
-  host.addEventListener(GESTURE_EVENTS.scrub, ({ detail }) => {
+  #scrub(detail) {
+    const shell = this.#shell;
     if (!shell.video) {
       return;
     }
-    const state = stateFor(shell);
     // The producer stamps the real pointer event's DOMHighResTimeStamp on the
     // pooled detail (forge #advanceScrub), on the same timebase as
     // performance.now() and already read - reuse it instead of taking a second
     // clock reading per move. The fallback covers a synthetic producer that
     // left the field unset.
     const now = detail.timestamp || performance.now();
-    if (!state.scrubbing) {
+    if (!this.#scrubbing) {
       const duration = shell.duration;
       if (!duration || !Number.isFinite(duration)) {
         return;
@@ -588,28 +600,28 @@ export function attachInputActions(shell, host, signal) {
       // scrub always normalizes against the correct contextual box.
       const width = shell.referenceBox.width || 640;
       const fastCeiling = duration * SCRUB_FAST_FULL_WIDTH_FRACTION;
-      state.scrubbing = true;
-      state.scrubDuration = duration;
-      state.scrubSlowGain = SCRUB_SLOW_FULL_WIDTH_SECONDS / width;
-      state.scrubFastGain = fastCeiling / width;
-      state.scrubSensitivity = SCRUB_SENSITIVITY;
-      state.scrubDirectionMomentum = 0;
+      this.#scrubbing = true;
+      this.#scrubDuration = duration;
+      this.#scrubSlowGain = SCRUB_SLOW_FULL_WIDTH_SECONDS / width;
+      this.#scrubFastGain = fastCeiling / width;
+      this.#scrubSensitivity = SCRUB_SENSITIVITY;
+      this.#scrubDirectionMomentum = 0;
       gestureHaptic("scrub");
       // Frame-accurate readout for this scrub: a short-lived rVFC loop tracks
       // the frame the user actually SAW (post-seek frames fire even while
       // paused), falling back to currentTime until the first one lands.
-      cancelScrubFrameLoop(state);
+      this.#cancelScrubFrameLoop();
       const scrubVideo = shell.video;
       if (typeof scrubVideo.requestVideoFrameCallback === "function") {
-        state.scrubRvfcVideo = scrubVideo;
+        this.#scrubRvfcVideo = scrubVideo;
         const onFrame = (_now, metadata) => {
-          if (!state.scrubbing || state.scrubRvfcVideo !== scrubVideo) {
+          if (!this.#scrubbing || this.#scrubRvfcVideo !== scrubVideo) {
             return;
           }
-          state.scrubPresentedTime = metadata.mediaTime;
-          state.scrubRvfcId = scrubVideo.requestVideoFrameCallback(onFrame);
+          this.#scrubPresentedTime = metadata.mediaTime;
+          this.#scrubRvfcId = scrubVideo.requestVideoFrameCallback(onFrame);
         };
-        state.scrubRvfcId = scrubVideo.requestVideoFrameCallback(onFrame);
+        this.#scrubRvfcId = scrubVideo.requestVideoFrameCallback(onFrame);
       }
     }
 
@@ -632,128 +644,121 @@ export function attachInputActions(shell, host, signal) {
     const v = Math.abs(detail.velocity);
     const ratio = v / SCRUB_KNEE_PX_PER_S;
     const t = Math.min(1, SCRUB_EXPONENT === 1.5 ? ratio * Math.sqrt(ratio) : ratio ** SCRUB_EXPONENT);
-    const gain = state.scrubSlowGain + (state.scrubFastGain - state.scrubSlowGain) * t;
-    const deltaSeconds = detail.dx * gain * state.scrubSensitivity;
+    const gain = this.#scrubSlowGain + (this.#scrubFastGain - this.#scrubSlowGain) * t;
+    const deltaSeconds = detail.dx * gain * this.#scrubSensitivity;
     // The stroke latched above, so duration is stable - use the latched-seek
     // path so each move skips media's readiness gate + duration re-read.
-    shell.media.scrubToLatched(shell.currentTime + deltaSeconds, state.scrubDuration);
+    shell.media.scrubToLatched(shell.currentTime + deltaSeconds, this.#scrubDuration);
     const instantDirection = detail.dx > 1 ? 1 : detail.dx < -1 ? -1 : 0;
-    state.scrubDirectionMomentum = state.scrubDirectionMomentum * 0.6 + instantDirection * 0.4;
+    this.#scrubDirectionMomentum = this.#scrubDirectionMomentum * 0.6 + instantDirection * 0.4;
 
-    if (now - state.lastScrubToastAt < 100) {
+    if (now - this.#lastScrubToastAt < 100) {
       return;
     }
-    state.lastScrubToastAt = now;
+    this.#lastScrubToastAt = now;
     // Cache the formatted time string: rebuild only when the visible second
     // changes, not every 100ms tick — avoids 3 string allocations per display
     // tick during scrub. Value prefers the presented-frame mediaTime (screen
     // truth); decoder currentTime only until the first post-seek frame lands
     // or when an SPA swap replaced the element mid-scrub.
-    const shownTime = (state.scrubRvfcVideo === shell.video ? state.scrubPresentedTime : null)
+    const shownTime = (this.#scrubRvfcVideo === shell.video ? this.#scrubPresentedTime : null)
       ?? shell.video.currentTime;
-    const secDuration = Math.floor(state.scrubDuration);
+    const secDuration = Math.floor(this.#scrubDuration);
     const secCurrent = Math.floor(shownTime);
-    if (secDuration !== state.scrubToastSecDuration || secCurrent !== state.scrubToastSecCurrent) {
-      state.scrubToastText = `${formatTime(state.scrubDuration)} / ${formatTime(shownTime)}`;
-      state.scrubToastSecDuration = secDuration;
-      state.scrubToastSecCurrent = secCurrent;
+    if (secDuration !== this.#scrubToastSecDuration || secCurrent !== this.#scrubToastSecCurrent) {
+      this.#scrubToastText = `${formatTime(this.#scrubDuration)} / ${formatTime(shownTime)}`;
+      this.#scrubToastSecDuration = secDuration;
+      this.#scrubToastSecCurrent = secCurrent;
     }
-    const toast = state.scrubToast;
-    toast.icon = state.scrubDirectionMomentum >= 0 ? "right-arrows" : "left-arrows";
-    toast.text = state.scrubToastText;
+    const toast = this.#scrubToast;
+    toast.icon = this.#scrubDirectionMomentum >= 0 ? "right-arrows" : "left-arrows";
+    toast.text = this.#scrubToastText;
     shell.toast(toast);
-  }, { signal });
+  }
 
-  host.addEventListener(GESTURE_EVENTS.scrubEnd, () => {
-    const state = stateFor(shell);
-    if (!state.scrubbing) {
+  #scrubEnd() {
+    if (!this.#scrubbing) {
       return;
     }
-    state.scrubbing = false;
-    cancelScrubFrameLoop(state);
-    state.scrubDirectionMomentum = 0;
-    state.scrubDuration = 0;
-    state.scrubSlowGain = 0;
-    state.scrubFastGain = 0;
-    state.scrubSensitivity = 0;
-    state.scrubToastText = null;
-    state.scrubToastSecDuration = NaN;
-    state.scrubToastSecCurrent = NaN;
-    shell.hideToast("scrub");
-  }, { signal });
+    this.#scrubbing = false;
+    this.#cancelScrubFrameLoop();
+    this.#scrubDirectionMomentum = 0;
+    this.#scrubDuration = 0;
+    this.#scrubSlowGain = 0;
+    this.#scrubFastGain = 0;
+    this.#scrubSensitivity = 0;
+    this.#scrubToastText = null;
+    this.#scrubToastSecDuration = NaN;
+    this.#scrubToastSecCurrent = NaN;
+    this.#shell.hideToast("scrub");
+  }
 
-  // rVFC ids aren't AbortSignal-cancellable: drop any live scrub frame loop
-  // with the same scope signal these listeners die on (shell teardown can
-  // land mid-scrub, and the re-arming callback would otherwise outlive us).
-  signal.addEventListener("abort", () => cancelScrubFrameLoop(stateFor(shell)), { once: true });
-
-  host.addEventListener(GESTURE_EVENTS.swipeStart, ({ detail }) => {
+  #swipeStart(detail) {
     if (detail.direction === "down") {
-      shell.toast({
+      this.#shell.toast({
         icon: "fs-exiting",
         text: "Exiting Fullscreen",
         group: "fs"
       });
     }
-  }, { signal });
+  }
 
-  host.addEventListener(GESTURE_EVENTS.swipe, ({ detail }) => {
-    const state = stateFor(shell);
+  #swipe(detail) {
+    const shell = this.#shell;
     if (detail.direction !== "down") {
       return;
     }
     if (detail.distance > TUNING.gestures.swipeExitMinPx) {
       gestureHaptic("swipe");
-      clearFillMode(shell, state, false);
+      this.#clearFillMode(false);
       shell.toastFlash("fs-exit", "Fullscreen Exited", "fs");
       shell.exitFullscreen();
     } else {
       shell.hideToast("fs");
     }
-  }, { signal });
+  }
 
   /**
    * Fullscreen-only double-tap semantics: edges skip, center toggles
    * playback. Inline double-taps belong to the browser/player natively.
    */
-  host.addEventListener(GESTURE_EVENTS.dbltap, ({ detail }) => {
+  #dbltap(detail) {
     // Both edge-skip and center-play are inert before the timeline exists; gate
     // the shared haptic too so an unready double-tap is fully silent.
-    if (!shell.media.ready) {
+    if (!this.#shell.media.ready) {
       return;
     }
     gestureHaptic("dbltap");
     if (detail.zone === "left-edge" || detail.zone === "right-edge") {
-      performSkip(shell, stateFor(shell), detail.zone === "left-edge" ? "left" : "right");
+      this.#skip(detail.zone === "left-edge" ? "left" : "right");
     } else if (detail.zone === "screen") {
-      shell.media.togglePlay();
+      this.#shell.media.togglePlay();
     }
-  }, { signal });
+  }
 
-  host.addEventListener(GESTURE_EVENTS.skip, ({ detail }) => {
-    performSkip(shell, stateFor(shell), detail.direction);
-  }, { signal });
-
-  host.addEventListener(GESTURE_EVENTS.volume, ({ detail }) => {
+  #volume(detail) {
+    const shell = this.#shell;
     if (!shell.media.ready) {
       return;
     }
     shell.media.nudgeVolume(detail.direction);
     shell.toastFlash(volumeIcon(shell.volume, false), volumePercent(shell.volume), "volume");
-  }, { signal });
+  }
 
-  host.addEventListener(GESTURE_EVENTS.mute, () => {
+  #mute() {
+    const shell = this.#shell;
     if (!shell.media.ready) {
       return;
     }
     shell.media.toggleMute();
     shell.toastFlash(volumeIcon(shell.volume, shell.muted), shell.muted ? "Muted" : volumePercent(shell.volume), "volume");
-  }, { signal });
+  }
 
   // Picture-in-Picture: native always-on-top surface. The browser owns the
   // window lifecycle; we only flip the toggle. Unsupported hosts get a hint
   // instead of a silent no-op, mirroring the fs-block pattern.
-  host.addEventListener(GESTURE_EVENTS.pip, () => {
+  #pip() {
+    const shell = this.#shell;
     if (!shell.media.ready) {
       return;
     }
@@ -766,15 +771,15 @@ export function attachInputActions(shell, host, signal) {
     }).catch(() => {
       shell.toastInfo("pip", "Picture-in-Picture unavailable", "pip");
     });
-  }, { signal });
+  }
 
-  host.addEventListener(GESTURE_EVENTS.pinch, ({ detail }) => {
+  #pinch(detail) {
+    const shell = this.#shell;
     if (!shell.video) {
       return;
     }
-    const state = stateFor(shell);
     const video = shell.video;
-    if (detail.direction === "out" && !state.fillActive) {
+    if (detail.direction === "out" && !this.#fillActive) {
       const scale = computeCoverScale(video, shell.referenceBox);
       if (scale <= 1) {
         return;
@@ -782,45 +787,85 @@ export function attachInputActions(shell, host, signal) {
       gestureHaptic("pinch");
       // Own object-fit: computeCoverScale models the element content letterboxed
       // by its own ratio (contain). The embed may use the UA default 'fill', so
-      // normalize to 'contain' here; clearFillMode restores the prior value.
-      state.priorObjectFit = video.style.objectFit;
+      // normalize to 'contain' here; #clearFillMode restores the prior value.
+      this.#priorObjectFit = video.style.objectFit;
       video.style.objectFit = "contain";
       easeTransformTo(video, `scale(${scale})`);
-      state.fillActive = true;
-      state.fillScale = scale;
+      this.#fillActive = true;
+      this.#fillScale = scale;
       shell.toastFlash("fill-aspect", "Fill Mode", "pinch");
-    } else if (detail.direction === "in" && state.fillActive) {
-      clearFillMode(shell, state);
+    } else if (detail.direction === "in" && this.#fillActive) {
+      this.#clearFillMode(true);
     }
-  }, { signal });
+  }
 
-  // Fill mode's scale is pure aspect math frozen at the moment of the pinch.
-  // If the intrinsic size arrives later (preload="none") or changes (adaptive
-  // stream switch), re-derive it; when the new ratio no longer needs cover,
-  // release fill entirely. `resize` on a <video> is the native signal for an
-  // intrinsic-size change; loadedmetadata catches the ratio becoming known.
-  const refill = () => {
-    const video = shell.video;
-    if (!video) {
+  /**
+   * Re-derive fill mode's frozen cover scale when the video's intrinsic size
+   * arrives late (preload="none") or changes mid-fill (adaptive stream
+   * switch): when the new ratio no longer needs cover, release fill entirely.
+   * `resize` on a <video> is the native signal for an intrinsic-size change;
+   * loadedmetadata catches the ratio becoming known.
+   */
+  #refill() {
+    const video = this.#shell.video;
+    if (!video || !this.#fillActive) {
       return;
     }
-    const state = stateFor(shell);
-    if (!state.fillActive) {
-      return;
-    }
-    const scale = computeCoverScale(video, shell.referenceBox);
+    const scale = computeCoverScale(video, this.#shell.referenceBox);
     if (!scale) {
       return;
     }
     if (scale <= 1) {
-      clearFillMode(shell, state);
+      this.#clearFillMode(true);
       return;
     }
-    if (Math.abs(scale - state.fillScale) > FILL_SCALE_EPSILON) {
-      state.fillScale = scale;
+    if (Math.abs(scale - this.#fillScale) > FILL_SCALE_EPSILON) {
+      this.#fillScale = scale;
       easeTransformTo(video, `scale(${scale})`);
     }
-  };
-  shell.video?.addEventListener("resize", refill, { signal });
-  shell.video?.addEventListener("loadedmetadata", refill, { signal });
+  }
+
+  /**
+   * Wire the shell-facing side of the bindings onto the shell host: semantic
+   * events dispatched by the engine run the handlers above. All listeners
+   * share the engine's AbortSignal, so destroying the engine tears the
+   * actions down.
+   */
+  attach(host, signal) {
+    const shell = this.#shell;
+
+    subscribeFullscreen(() => this.#fsExit(), signal);
+
+    host.addEventListener(GESTURE_EVENTS.hold, ({ detail }) => this.#hold(detail), { signal });
+    host.addEventListener(GESTURE_EVENTS.release, ({ detail }) => this.#release(detail), { signal });
+    host.addEventListener(GESTURE_EVENTS.scrub, ({ detail }) => this.#scrub(detail), { signal });
+    host.addEventListener(GESTURE_EVENTS.scrubEnd, () => this.#scrubEnd(), { signal });
+
+    // rVFC ids aren't AbortSignal-cancellable: drop any live scrub frame loop
+    // with the same scope signal these listeners die on (shell teardown can
+    // land mid-scrub, and the re-arming callback would otherwise outlive us).
+    signal.addEventListener("abort", () => this.#cancelScrubFrameLoop(), { once: true });
+
+    host.addEventListener(GESTURE_EVENTS.swipeStart, ({ detail }) => this.#swipeStart(detail), { signal });
+    host.addEventListener(GESTURE_EVENTS.swipe, ({ detail }) => this.#swipe(detail), { signal });
+    host.addEventListener(GESTURE_EVENTS.dbltap, ({ detail }) => this.#dbltap(detail), { signal });
+    host.addEventListener(GESTURE_EVENTS.skip, ({ detail }) => this.#skip(detail), { signal });
+    host.addEventListener(GESTURE_EVENTS.volume, ({ detail }) => this.#volume(detail), { signal });
+    host.addEventListener(GESTURE_EVENTS.mute, () => this.#mute(), { signal });
+    host.addEventListener(GESTURE_EVENTS.pip, () => this.#pip(), { signal });
+    host.addEventListener(GESTURE_EVENTS.pinch, ({ detail }) => this.#pinch(detail), { signal });
+
+    // Fill mode's scale is pure aspect math frozen at the moment of the pinch.
+    // Late-arriving or changed intrinsic sizes re-derive it (#refill above).
+    shell.video?.addEventListener("resize", () => this.#refill(), { signal });
+    shell.video?.addEventListener("loadedmetadata", () => this.#refill(), { signal });
+  }
+}
+
+/**
+ * Wire the shell-facing side of the bindings onto the shell host. One
+ * ShellActions instance per attach call owns the shell's action state.
+ */
+export function attachInputActions(shell, host, signal) {
+  new ShellActions(shell).attach(host, signal);
 }
