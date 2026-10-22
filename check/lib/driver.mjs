@@ -126,6 +126,21 @@ function serviceFor(chromeMod, browserVersion) {
 
 function basename(p) { return p.slice(p.lastIndexOf("/") + 1); }
 
+function urlSlice(u) {
+  try {
+    const url = new URL(u);
+    return url.origin + url.pathname;
+  } catch {
+    return String(u).slice(0, 80);
+  }
+}
+
+/** Same-document check ignores the noise query (?boot=...) - only scheme,
+ *  host and path must agree. */
+function sameDocument(requested, landed) {
+  return urlSlice(requested) === urlSlice(landed);
+}
+
 function brewReinstallChromedriver() {
   console.log("  brew reinstall chromedriver (heal attempt)...");
   try {
@@ -136,26 +151,96 @@ function brewReinstallChromedriver() {
 }
 
 /**
- * Fail-fast driver probe for the runner: scan the disk fresh (a mid-run brew
- * heal must be visible), reinstall via brew when nothing reports a sane
- * version, and re-scan again before giving up. Best-effort: launch falls back
- * to Selenium Manager when this returns null.
+ * Launch-failure classifier: a chromedriver session death reads as its raw
+ * stack + a protocol blob, so the runner needs the one-line decision out of
+ * it. Version refusals get their exact shape (the single most common boot
+ * failure after a fork-browser update); handshake failures / port collisions
+ * so on - anything else stays "refused session".
+ */
+function classifyDriverFailure(err) {
+  const text = String(err?.message ?? err);
+  if (/session not created/i.test(text)) {
+    if (/version|only supports/i.test(text)) return "chromedriver/browser version mismatch";
+    return "session refused by chromedriver";
+  }
+  if (/DevToolsActivePort|refused to connect|ECONNREFUSED/i.test(text)) return "handshake failed (no DevTools port)";
+  if (/TIMEDOUT|timeout/i.test(text)) return "handshake timed out";
+  if (/not executable|cannot be opened|exec/i.test(text)) return "driver binary not runnable";
+  return "launch refused";
+}
+
+function serviceLabel(service) {
+  const exe = typeof service?.getExecutable === "function" ? service.getExecutable() : null;
+  return exe ? basename(String(exe)) : "Selenium Manager (auto)";
+}
+
+/**
+ * Order the launch candidates and keep them honest: a local disk driver is
+ * only a candidate while its major matches the browser (a stale brew driver
+ * 154 in front of Chromium 155 would guarantee a session refusal); the Selenium
+ * Manager candidate always trails so a whole-ladder failure needs something
+ * new on disk before any retry could matter.
+ */
+function serviceCandidates(chromeMod, browserVersion) {
+  const list = [];
+  const local = localDriverFor(browserVersion);
+  if (local) {
+    console.log(`  driver candidate: ${basename(local)} (${nativeBinaryVersion(local) ?? "unknown version"})`);
+    list.push(new chromeMod.ServiceBuilder(local));
+  } else {
+    const stale = scanDrivers().find((p) => {
+      const v = nativeBinaryVersion(p);
+      return v !== null && majorOf(v) !== majorOf(browserVersion);
+    });
+    if (stale) {
+      console.log(`  driver: ${basename(stale)} on disk is stale for chromium ${browserVersion} - Selenium Manager downloads the matching major`);
+    }
+  }
+  list.push(new chromeMod.ServiceBuilder());
+  return list;
+}
+
+/**
+ * Fail-fast driver probe for the runner, browser-aware: it knows the
+ * embedded Chromium major the launch will target, so "chromedriver 154 vs
+ * chromium 155" is surfaced here (the browser-preference path is the actual
+ * plan: launch falls back to Selenium Manager for the matching major) instead
+ * of one loud session-refusal launch later. When the disk can supply the
+ * matching major it is preferred over a merely reporting driver. Best-effort:
+ * launch falls back to Selenium Manager when this returns null.
  */
 export function ensureChromeDriver() {
+  const browserBinary = BROWSERS[0];
+  const browserVersion = browserBinary ? (embeddedChromiumVersion(browserBinary) ?? nativeBinaryVersion(browserBinary)) : null;
+  const neededMajor = majorOf(browserVersion);
+
   let drivers = scanDrivers();
   if (drivers.length === 0) {
     console.log("  no chromedriver on disk - brew reinstalling...");
     brewReinstallChromedriver();
     drivers = scanDrivers();
   }
+  const sane = [];
   for (const bin of drivers) {
     const version = nativeBinaryVersion(bin);
-    if (version !== null) {
-      console.log(`  driver probe: ${basename(bin)} (${version})`);
-      return bin;
+    if (version === null) {
+      console.log(`  driver probe: ${basename(bin)} failed to report a version - skipped`);
+      continue;
     }
+    const matches = majorOf(version) === neededMajor;
+    sane.push({ bin, version, matches });
   }
-  console.log("  driver probe: no usable chromedriver on disk - Selenium Manager resolves at launch");
+  if (sane.length === 0) {
+    console.log("  driver probe: no usable chromedriver on disk - Selenium Manager resolves at launch");
+    return null;
+  }
+  const matching = sane.find((d) => d.matches);
+  if (matching) {
+    console.log(`  driver probe: ${basename(matching.bin)} (${matching.version}) matches chromium ${browserVersion}`);
+    return matching.bin;
+  }
+  const stale = sane[0];
+  console.log(`  driver probe: ${basename(stale.bin)} (${stale.version}) is stale for chromium ${browserVersion} - launch will prefer Selenium Manager's matching major`);
   return null;
 }
 
@@ -186,54 +271,119 @@ export class ChromiumSession {
 
     const profileDir = mkdtempSync(join(tmpdir(), "check-driver-"));
     const { Builder } = await import("selenium-webdriver");
+    const chromeMod = await import("selenium-webdriver/chrome.js");
+    const options = new chromeMod.Options()
+      .setChromeBinaryPath(shimBrowser(browserBinary, profileDir))
+      .setAcceptInsecureCerts(true)
+      .addArguments(
+        `--user-data-dir=${profileDir}`,
+        "--headless=new",
+        "--no-sandbox",
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
+        "--disable-extensions",
+        "--disable-background-networking",
+        "--no-first-run",
+        "--window-size=1440,900"
+      );
 
-    const createDriver = async (shim) => {
-      const chromeMod = await import("selenium-webdriver/chrome.js");
-      const options = new chromeMod.Options()
-        .setChromeBinaryPath(shim)
-        .setAcceptInsecureCerts(true)
-        .addArguments(
-          `--user-data-dir=${profileDir}`,
-          "--headless=new",
-          "--no-sandbox",
-          "--disable-gpu",
-          "--disable-dev-shm-usage",
-          "--disable-extensions",
-          "--disable-background-networking",
-          "--no-first-run",
-          "--window-size=1440,900"
-        );
-      return new Builder()
-        .forBrowser("chrome")
-        .setChromeOptions(options)
-        .setChromeService(serviceFor(chromeMod, browserVersion))
-        .build();
-    };
-
-    let driver;
-    try {
-      driver = await createDriver(shimBrowser(browserBinary, profileDir));
-    } catch (err) {
-      brewReinstallChromedriver();
+    // Candidate ladder: a version-matched local driver first, Selenium
+    // Manager always behind it. A mid-fork-update disk (brew driver 154 vs
+    // Chromium 155) therefore never guarantees a brew-heal round trip that
+    // reinstalls the same stale version.
+    const tried = [];
+    const serviceAndAttempt = async (service) => {
+      const label = serviceLabel(service);
       try {
-        driver = await createDriver(shimBrowser(browserBinary, profileDir));
-      } catch (err2) {
-        throw new Error(`chromedriver handshake failed after brew heal: ${err2.message}`);
+        const built = await new Builder()
+          .forBrowser("chrome")
+          .setChromeOptions(options)
+          .setChromeService(service)
+          .build();
+        tried.push({ label, ok: true });
+        return built;
+      } catch (err) {
+        tried.push({ label, ok: false, reason: classifyDriverFailure(err), raw: String(err.message ?? err).split("\n")[0].slice(0, 140) });
+        throw err;
+      }
+    };
+    let driver = null;
+    for (const service of serviceCandidates(chromeMod, browserVersion)) {
+      try {
+        driver = await serviceAndAttempt(service);
+        break;
+      } catch {}
+    }
+    if (driver === null) {
+      // A brew reinstall only helps launch when it can either restore a
+      // corrupted binary we never reached, or bring a NEW major onto the
+      // disk. If a local driver was already tried, or a matching one still
+      // exists but failed, the reinstall replays the identical bytes.
+      const wantsHeal = !tried.some((t) => t.ok === false && t.label !== "Selenium Manager (auto)")
+        && localDriverFor(browserVersion) === null;
+      if (wantsHeal) {
+        brewReinstallChromedriver();
+        driver = await new Builder()
+          .forBrowser("chrome")
+          .setChromeOptions(options)
+          .setChromeService(serviceFor(chromeMod, browserVersion))
+          .build()
+          .catch((err) => {
+            tried.push({ label: "brew heal", ok: false, reason: classifyDriverFailure(err), raw: String(err.message ?? err).split("\n")[0].slice(0, 140) });
+            return null;
+          });
+      }
+      if (driver === null) {
+        throw new Error(
+          `chromedriver launch failed for chromium ${browserVersion}; attempts:\n  ` +
+          tried.map((t) => `${t.label} -> ${t.ok ? "ok" : (t.reason ?? "?") + " (" + (t.raw ?? "") + ")"}`).join("\n  ")
+        );
       }
     }
 
-    // Wait out the session's own initial about:blank navigation: a mid-flight
-    // startup navigation replaces the injected document and silently eats the
-    // already-loaded bundle.
+    // Wait out the session's own initial about:blank navigation, and fail
+    // loudly when the browser never became responsive - a phantom session
+    // would surface later as baffling mid-gate navigation races. The window
+    // is generous (first boot after a browser update runs cold caches).
     await driver.get("about:blank");
     await driver.executeScript("window.__checkReady = true");
-    const deadline = Date.now() + 5000;
+    const deadline = Date.now() + 12000;
+    let responsive = false;
+    let lastPollError = null;
     while ((Date.now() < deadline)) {
-      await new Promise((r) => setTimeout(r, 300));
-      let alive = false;
-      try { alive = await driver.executeScript("window.__checkReady === true"); } catch {}
-      if (alive) break;
+      await new Promise((r) => setTimeout(r, 250));
+      // The check must be a `return`-ing script body (Selenium string quirk):
+      // an expression-only body returns undefined and the sentinel would
+      // never observe the flag the assignment just set.
+      try { responsive = await driver.executeScript("return window.__checkReady === true"); } catch (err) { lastPollError = String(err.message ?? err).split("\n")[0].slice(0, 140); }
+      if (responsive) break;
       await driver.executeScript("window.__checkReady = true");
+    }
+    if (!responsive) {
+      const state = await driver.executeScript(function main() {
+        return { url: String(location.href), ready: document.readyState, sent: window.__checkReady ?? null };
+      }).catch((err) => ({ probeError: String(err.message ?? err).slice(0, 100) }));
+      try { await driver.quit(); } catch {}
+      await new Promise((r) => setTimeout(r, 200));
+      rmSync(profileDir, { recursive: true, force: true });
+      throw new Error(`browser never became responsive after launch (about:blank sentinel) - ${JSON.stringify(state)} lastPollError=${lastPollError}`);
+    }
+
+    // Startup-tab hygiene: a fork-browser update often spawns its own
+    // welcome/startup tab ahead of the driver's about:blank; commands would
+    // then keep talking to whichever tab is current while the fixture boots
+    // land somewhere invisible. Everything but the tab the sentinel just
+    // validated is closed.
+    await new Promise((r) => setTimeout(r, 200));
+    const handles = await driver.getAllWindowHandles().catch(() => []);
+    if (handles.length > 1) {
+      const current = await driver.getWindowHandle();
+      for (const h of handles) {
+        if (h === current) continue;
+        await driver.switchTo().window(h).then(() => driver.close()).catch(() => {});
+      }
+      await driver.switchTo().window(current);
+      console.log(`  tab hygiene: closed ${handles.length - 1} startup tab(s)`);
     }
 
     const session = new ChromiumSession(driver, profileDir);
@@ -260,6 +410,19 @@ export class ChromiumSession {
 
   async navigate(url) {
     await this.#driver.get(url);
+    // Verify the landing: a get() that resolves while the browser stays on
+    // the pre-navigation document (startup navigation race on a freshly
+    // updated fork browser) would otherwise plant every later probe on a
+    // page without its fixture.
+    let landed = await this.#driver.getCurrentUrl().catch(() => null);
+    if (landed !== null && !sameDocument(url, landed)) {
+      await new Promise((r) => setTimeout(r, 400));
+      await this.#driver.get(url);
+      landed = await this.#driver.getCurrentUrl().catch(() => null);
+      if (landed !== null && !sameDocument(url, landed)) {
+        throw new Error(`navigation did not land: requested ${urlSlice(url)} current ${landed ? urlSlice(landed) : "unknown"}`);
+      }
+    }
   }
 
   registerFixture(path, html, headers = {}) {
@@ -273,7 +436,7 @@ export class ChromiumSession {
   /** A route that stalls `delayMs` before answering - the GM_xmlhttpRequest
    *  timeout probe needs a server that hangs exactly as long as it claims. */
   registerDelayedRoute(path, { delayMs, body, contentType }) {
-    this.#fixtureRoutes.set(path, { html: null, headers: { "Content-Type": contentType }, bytes:Buffer.from(body), delayMs });
+    this.#fixtureRoutes.set(path, { html: null, headers: { "Content-Type": contentType }, bytes: Buffer.from(body), delayMs });
   }
 
   async startFixtureServer() {
