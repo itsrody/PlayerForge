@@ -71,6 +71,17 @@ export class ResumeStore {
   /** Lazily built path -> entries buckets for findMatch; nulled at every
    *  structural mutation so a stale bucket can never serve a match. */
   #byPath = null;
+  /** Lazily built id -> entry map for direct lookups (createEntry/updateResume),
+   *  same invalidation contract as #byPath. */
+  #byId = null;
+  /** Cached sorted snapshot for getEntries; refreshed whenever the caches
+   *  above are invalidated (which is every persist). */
+  #sorted = null;
+  /** Signature of the disk copy our own last write produced. Persist skips
+   *  the merge walk when the freshly parsed disk doc matches it exactly -
+   *  by construction that is our own write echoing back. Never trusts a
+   *  foreign doc: any writer we did not produce leaves a mismatch. */
+  #diskEcho = null;
 
   /**
    * Subscribe to store changes. The callback receives a `structural` flag -
@@ -116,7 +127,9 @@ export class ResumeStore {
 
   /** Merge an external store. `value` is the listener's own new value when it
    *  supplied one (saves a GM read + parse); falling back to a direct read
-   *  keeps implementations that pass nothing working unchanged. */
+   *  keeps implementations that pass nothing working unchanged. A successful
+   *  adoption leaves the disk still holding the foreign doc, so the echo can
+   *  no longer attest to it - cleared, the next persist re-merges. */
   #adoptExternal(value) {
     if (!this.#loaded) {
       return;
@@ -125,6 +138,7 @@ export class ResumeStore {
     if (isValidStore(raw)) {
       const { added, updated } = this.#mergeRaw(raw);
       if (added || updated) {
+        this.#diskEcho = null;
         this.#notify(true);
       }
     }
@@ -133,10 +147,9 @@ export class ResumeStore {
   #mergeRaw(raw) {
     let added = 0;
     let updated = 0;
-    const byId = new Map();
-    for (const entry of this.#state.entries) {
-      byId.set(entry.id, entry);
-    }
+    // The same lazy map createEntry/updateResume use; entries referenced here
+    // are the live in-memory objects, so the adoption walk never forks.
+    const byId = this.#entriesById();
     for (const incoming of raw.entries) {
       if (!incoming || typeof incoming !== "object" || typeof incoming.id !== "string") {
         continue;
@@ -158,7 +171,12 @@ export class ResumeStore {
     if (added === 0 && updated === 0) {
       return { added, updated };
     }
-    this.#state.entries = [...byId.values()];
+    // The entries array holds the exact same objects byId maps: in-place-only
+    // merges (every known id, LWW-adopted newer timestamps) reshare it - the
+    // Set-spread rebuild ran on every cross-tab echo otherwise.
+    if (added > 0) {
+      this.#state.entries = [...byId.values()];
+    }
     this.#invalidateCaches();
     return { added, updated };
   }
@@ -166,12 +184,74 @@ export class ResumeStore {
   /** Drop lazy lookup state; called after every structural entries change. */
   #invalidateCaches() {
     this.#byPath = null;
+    this.#byId = null;
+    this.#sorted = null;
   }
 
   #buildByPath() {
     const map = Map.groupBy(this.#state.entries, (entry) => entry.path);
     this.#byPath = map;
     return map;
+  }
+
+  /** Lazy id -> entry map; rebuilt only when the caches were invalidated. */
+  #entriesById() {
+    if (!this.#byId) {
+      const map = new Map();
+      for (const entry of this.#state.entries) {
+        map.set(entry.id, entry);
+      }
+      this.#byId = map;
+    }
+    return this.#byId;
+  }
+
+  /**
+   * True when the parsed disk doc is verifiably our own last write: same doc
+   * timestamp, version, entry count, and newest entry updatedAt. Any writer
+   * outside this store (another tab, a sync tool) bumps one of those, so this
+   * is a strict empowerment check, not a stamp guess - non-stamped foreign
+   * writers (cloud sync, imports) always take the full merge path. A foreign
+   * write that coincidentally matches all fields would land LWW-equal anyway
+   * and re-converge on the next persist. The scan is allocation-free numeric
+   * comparisons; the merge walk it replaces builds a Map over every id.
+   */
+  #diskEchoMatches(raw) {
+    const echo = this.#diskEcho;
+    if (echo == null || raw.version !== 1 || raw.entries.length !== echo.count) {
+      return false;
+    }
+    let maxUpdatedAt = 0;
+    for (const entry of raw.entries) {
+      const t = entry.updatedAt || 0;
+      if (t > maxUpdatedAt) {
+        maxUpdatedAt = t;
+      }
+    }
+    return raw.updatedAt === echo.docUpdatedAt && maxUpdatedAt === echo.maxUpdatedAt;
+  }
+
+  /**
+   * Certify the echo for the store JUST written: the doc timestamp is the
+   * write time we stamped into the doc, so any foreign writer that omits or
+   * rewrites that field can never match. maxUpdatedAt needs the scan only
+   * because cross-tab merges can carry entries stamped newer than our own
+   * doc timestamp.
+   */
+  #stampDiskEcho(now) {
+    let maxUpdatedAt = 0;
+    const entries = this.#state.entries;
+    for (let i = 0; i < entries.length; i++) {
+      const t = entries[i].updatedAt || 0;
+      if (t > maxUpdatedAt) {
+        maxUpdatedAt = t;
+      }
+    }
+    this.#diskEcho = {
+      docUpdatedAt: now,
+      count: entries.length,
+      maxUpdatedAt
+    };
   }
 
   ensureLoaded() {
@@ -193,6 +273,9 @@ export class ResumeStore {
         logger.warn("resume", `Dropped ${raw.entries.length - valid.length} malformed entries`);
       }
       this.#state = { ...raw, version: 1, entries: valid };
+      // NOT certified here: a doc read from disk is not a write of ours (it
+      // may carry foreign future-stamped revisions this store must keep
+      // conceding to, per LWW) - #diskEcho is minted only in write paths.
     } else {
       this.#state = { version: 1, entries: [] };
       gmSetValue(KEYS.resume, this.#state);
@@ -232,15 +315,17 @@ export class ResumeStore {
   #persist(structural = false) {
     try {
       const raw = loadJsonObject(KEYS.resume, null);
-      if (isValidStore(raw)) {
+      if (isValidStore(raw) && !this.#diskEchoMatches(raw)) {
         this.#mergeRaw(raw);
       }
       // Bounds run AFTER the (cross-tab) merge so a stale disk copy can never
       // resurrect pruned entries - cleanup converges instead of oscillating.
       this.#state.entries = this.#enforceBounds();
       this.#invalidateCaches();
-      this.#state.updatedAt = Date.now();
+      const now = Date.now();
+      this.#state.updatedAt = now;
       gmSetValue(KEYS.resume, this.#state);
+      this.#stampDiskEcho(now);
       this.#notify(structural);
     } catch (err) {
       logger.error("resume", "Failed to persist resume store:", err);
@@ -283,7 +368,7 @@ export class ResumeStore {
     // The id is only a cache key - trust it solely when the domain agrees.
     // Legacy ids (hashed without domain) and true collisions fall through to
     // findMatch, which is domain-aware, so old stores keep matching.
-    const existingById = this.#state.entries.find((entry) => entry.id === id);
+    const existingById = this.#entriesById().get(id);
     if (existingById && domainsMatch(existingById.domain, domainKey)) {
       return existingById;
     }
@@ -310,7 +395,7 @@ export class ResumeStore {
 
   updateResume(id, position) {
     this.ensureLoaded();
-    const entry = this.#state.entries.find((candidate) => candidate.id === id);
+    const entry = this.#entriesById().get(id);
     if (entry) {
       // No-op guard: an identical write (paused at the same position, a
       // completion-reset 0 again, resetEntry on an already-zero entry) skips
@@ -327,7 +412,17 @@ export class ResumeStore {
 
   getEntries() {
     this.ensureLoaded();
-    return sortByUpdatedAt(this.#state.entries, true);
+    // Sorted snapshot cached until the next cache invalidation. Every
+    // updatedAt mutation flows through a persist (updateResume, merge
+    // adoption, pruning) and #persist invalidates the caches, so the cache
+    // can serve repeat fetches - History re-renders, exports - between
+    // writes without re-spreading + re-sorting per call. Consumers treat
+    // the array as read-only; re-sorting it in place would corrupt the
+    // cached order only until the next persist.
+    if (!this.#sorted) {
+      this.#sorted = sortByUpdatedAt(this.#state.entries, true);
+    }
+    return this.#sorted;
   }
 
   removeEntry(id) {
