@@ -31,40 +31,21 @@
   --pf-bg: #000;                    /* base ink                */
   --pf-accent: #4a9eff;             /* interaction accent      */
 
-  /* Liquid-glass surface system: one translucent dark tint, a specular
-     top-of-sheet sheen, a rim-lit hairline edge, and a soft drop shadow - all
-     static paint, so each visible surface costs exactly one composited blur
-     layer. The backdrop-filter blurs + saturates what is behind the glass,
-     which keeps the tint see-through while light text stays legible over
-     arbitrary video. */
+  /* Flat glass surface system: one translucent dark tint, a rim-lit hairline
+     edge, and a soft drop shadow - all static paint, so each visible surface
+     costs exactly one composited blur layer. The backdrop-filter blurs +
+     saturates what is behind the glass, which keeps the tint see-through while
+     light text stays legible over arbitrary video. */
   --pf-glass-tint: color-mix(in srgb, var(--pf-bg) 58%, transparent);
   /* Focus raises the tint rather than only the rim: the material exists to
      bring attention to the content beneath it, so an idle HUD should recede
      and a focused one should assert. DESIGN.md R3 - the two states must be
      legible in the token set, not implied. */
   --pf-glass-tint-focus: color-mix(in srgb, var(--pf-bg) 76%, transparent);
-  /* R4: the panel scrolls, so content passing beneath the pinned header has to
-     be obscured at the scroll edge for it to stay legible. Apple's rule is a
-     short gradient - sized to the header, anchored to the scroll edge - not a
-     blanket scrim over the whole sheet. Kept out of the glass budget (R1): it
-     is paint, not a second backdrop-filter. */
-  --pf-scroll-edge-size: 16px;
-  --pf-scroll-edge: linear-gradient(
-    to bottom,
-    color-mix(in srgb, var(--pf-bg) 88%, transparent) 0%,
-    color-mix(in srgb, var(--pf-bg) 0%, transparent) 100%
-  );
-  /* The panel's specular top rim is an inset shadow on the sheet; once the
-     header paints its own tint over that region the rim has to move onto the
-     header, or the topmost edge loses its highlight. Collapsed with the rest
-     of the glass paint (R8). */
+  /* The panel's top rim is an inset shadow on the sheet; once the header
+     paints its own tint over that region the rim has to move onto the header,
+     or the topmost edge loses its highlight. */
   --pf-header-rim: inset 0 1px 0 rgba(255, 255, 255, 0.34);
-  --pf-glass-sheen: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.18) 0%,
-    rgba(255, 255, 255, 0.06) 30%,
-    rgba(255, 255, 255, 0) 62%
-  );
   --pf-glass-inner: inset 0 1px 0 rgba(255, 255, 255, 0.34),
     inset 0 0 0 1px rgba(255, 255, 255, 0.07);
   --pf-glass-shadow: var(--pf-glass-inner), 0 18px 48px rgba(0, 0, 0, 0.52);
@@ -318,10 +299,9 @@
          the transform property, so transform-based animations on the toast
          never clobber it. */
       translate: -50%;
-      /* Liquid glass: translucent tint + specular sheen over a blurred,
-         darkened backdrop, rim-lit edge and soft drop shadow. */
+      /* Flat glass: translucent tint + rim-lit edge over a blurred,
+         darkened backdrop, soft drop shadow. */
       background-color: var(--pf-glass-tint);
-      background-image: var(--pf-glass-sheen);
       border: var(--pf-glass-border);
       box-shadow: var(--pf-glass-shadow);
       backdrop-filter: var(--pf-blur-sm);
@@ -472,10 +452,9 @@
       scrollbar-width: thin;
       scrollbar-color: var(--pf-text-mid) transparent;
 
-      /* Liquid glass: same tint/sheen/edge/shadow system as the toast, at the
-         larger blur radius suited to the sheet's size. */
+      /* Flat glass: same tint/edge/shadow system as the toast, at the larger
+         blur radius suited to the sheet's size. */
       background-color: var(--pf-glass-tint);
-      background-image: var(--pf-glass-sheen);
       border: var(--pf-glass-border);
       box-shadow: var(--pf-glass-shadow);
       backdrop-filter: var(--pf-blur-lg);
@@ -525,9 +504,8 @@
       /* Single header row: [segmented tabs] [close]. It is the panel's control
          layer (principle 5), so it is pinned: body content scrolls beneath it
          rather than carrying the tabs and close button away. It repaints the
-         same tint + sheen + top rim so the material is continuous and the
-         specular highlight stays on the topmost edge; R4's scroll-edge gradient
-         hangs just below it. */
+         same tint so the material is continuous over the scrolling content,
+         and carries the top rim so the topmost edge keeps its highlight. */
       .pf-panel-header {
         position: sticky;
         top: 0;
@@ -537,25 +515,8 @@
         gap: var(--pf-space-md);
         padding: var(--pf-space-md);
         background-color: var(--pf-glass-tint);
-        background-image: var(--pf-glass-sheen);
         box-shadow: var(--pf-header-rim);
         border-bottom: 1px solid var(--pf-border-soft);
-
-        /* R4: a gradient anchored to the scroll edge, sized to the header, that
-           obscures content as it passes beneath the pinned header. This is
-           Apple's scroll edge effect - it obscures at the edge, not a blanket
-           scrim over the sheet - and it is paint, not a third backdrop-filter
-           (R1). Collapses to `none` wherever the glass does (R8). */
-        &::after {
-          content: "";
-          position: absolute;
-          left: 0;
-          right: 0;
-          top: 100%;
-          height: var(--pf-scroll-edge-size);
-          background-image: var(--pf-scroll-edge);
-          pointer-events: none;
-        }
       }
 
       /* Segmented tab strip - icon + label, active label accent-tinted. Tabs
