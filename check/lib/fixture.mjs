@@ -44,6 +44,90 @@ export const FALLBACK_PAGE = `<!DOCTYPE html>
 <body style="background:#000"></body>
 </html>`;
 
+/**
+ * Frame-lab host: exactly one iframe over the pass-in source (absolute URL),
+ * full window, and deliberately NO allowfullscreen/allow="fullscreen" - the
+ * kernel's fullscreen provisioner must add that attribute once a shell boots
+ * in the embedded page, which is what the nested-frames row asserts.
+ */
+export function embedHostPage(embedSrc, title = "pf embed host") {  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>${title}</title>
+<style>
+  * { margin: 0; padding: 0; }
+  body { background: #111; width: 1440px; height: 900px; overflow: hidden; }
+  iframe { width: 1280px; height: 720px; border: 0; }
+</style>
+</head>
+<body>
+  <iframe id="player-frame" src="${embedSrc}"></iframe>
+</body>
+</html>`;
+}
+
+/** Video.js-shaped stub: the kernel's registry anchors on `[data-vjs-player]`
+ *  / `.video-js` classes, so a bare wrapper div with the SDK's names is a
+ *  supported player with zero vendor script - same video the other pages run. */
+export const VIDEOJS_STUB_PAGE = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>pf videojs stub</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; width: 1280px; height: 720px; overflow: hidden; }
+  .video-js { position: relative; width: 1280px; height: 720px; }
+  video { width: 100%; height: 100%; object-fit: contain; display: block; }
+</style>
+</head>
+<body>
+  <div class="video-js" id="stub-player">
+    <video src="/check-video.mp4" preload="metadata" autoplay muted playsinline></video>
+  </div>
+</body>
+</html>`;
+
+/** DPlayer-shaped stub - registry anchor `.dplayer`. */
+export const DPLAYER_STUB_PAGE = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>pf dplayer stub</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; width: 1280px; height: 720px; overflow: hidden; }
+  .dplayer { position: relative; width: 1280px; height: 720px; }
+  video { width: 100%; height: 100%; object-fit: contain; display: block; }
+</style>
+</head>
+<body>
+  <div class="dplayer"><video src="/check-video.mp4" preload="metadata" autoplay muted playsinline></video></div>
+</body>
+</html>`;
+
+/**
+ * Switchboard host: one placeholder iframe whose document gets swapped
+ * between SDK stub pages via `swapBoard()` (driven from the harness). Every
+ * variant plays the same fixture video at the same route, so the rows that
+ * follow a swap can assert one-shell-at-a-time adoption across SDK records.
+ */
+export function switchboardPage(firstBoardSrc) {
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>pf switchboard</title>
+<style>
+  * { margin: 0; padding: 0; }
+  body { background: #111; width: 1440px; height: 900px; overflow: hidden; }
+  iframe { width: 1280px; height: 720px; border: 0; }
+</style>
+</head>
+<body>
+  <iframe id="board" src="${firstBoardSrc}"></iframe>
+  <script>
+    window.swapBoard = function (url) {
+      document.getElementById("board").src = url;
+    };
+  </script>
+</body>
+</html>`;
+}
+
 /** Build the fixture video once (idempotent) and return its route path. */
 export function ensureVideoAsset() {
   const out = join(FIXTURE_DIR, "check-video.mp4");

@@ -7,12 +7,13 @@
  * and reports rows. A case is a function receiving { session, baseUrl } and
  * returning rows; the stage only owns the boot ceremony and bookkeeping.
  */
-import { readFile, mkdir, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { Buffer } from "node:buffer";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readdirSync, existsSync } from "node:fs";
 import { ChromiumSession } from "../lib/driver.mjs";
-import { FIXTURE_PAGE, FALLBACK_PAGE, ensureVideoAsset } from "../lib/fixture.mjs";
+import { FIXTURE_PAGE, FALLBACK_PAGE, VIDEOJS_STUB_PAGE, DPLAYER_STUB_PAGE, embedHostPage, switchboardPage, ensureVideoAsset } from "../lib/fixture.mjs";
 import { parseUserScriptHeader } from "../lib/gm-realm.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -62,6 +63,21 @@ export async function run() {
     const videoRoute = ensureVideoAsset();
     session.registerFixture("/check", FIXTURE_PAGE);
     session.registerFixture("/check/blank", FALLBACK_PAGE);
+    // Frame lab: embed hosts carry no player themselves - the player lives in
+    // the iframe(s). /check (and /sdk/*) are the embeddable playback pages.
+    session.registerFixture("/check/frames-so", embedHostPage("/check", "pf same-origin embed"));
+    session.registerFixture("/check/frames-cross", embedHostPage(`${session.crossBaseUrl}/check`, "pf cross-origin embed"));
+    // Nested: top -> cross-origin mid host -> same-origin (to the mid) embed
+    // page. The mid's relative embed src stays on the cross origin, and only
+    // reading window.top is cross - exactly the bridge's designed case.
+    session.registerFixture("/check/nested-mid", embedHostPage("/check", "pf nested mid"));
+    session.registerFixture("/check/frames-nested", embedHostPage(`${session.crossBaseUrl}/check/nested-mid`, "pf nested host"));
+    // Switchboard: one placeholder iframe whose doc swaps between the SDK
+    // stub pages - each registry-adopted by its namespaced anchor classes.
+    session.registerFixture("/check/switchboard", switchboardPage("/sdk/plyr#pf-debug"));
+    session.registerFixture("/sdk/plyr", FIXTURE_PAGE);
+    session.registerFixture("/sdk/videojs", VIDEOJS_STUB_PAGE);
+    session.registerFixture("/sdk/dplayer", DPLAYER_STUB_PAGE);
     session.registerAsset(videoRoute, await readFile(join(ROOT, "check", ".tmp", "check-video.mp4")), "video/mp4");
     session.registerAsset("/check/xhr-ok", Buffer.from("PONG-OK"), "text/plain");
     // Stalls well past the probe's timeout window - the server hanging is the
@@ -93,7 +109,7 @@ export async function run() {
 
     for (const caseFile of readdirSync(CASES_DIR).filter((f) => f.endsWith(".mjs")).sort()) {
       const mod = await import(join(CASES_DIR, caseFile));
-      const caseRows = await mod.run({ session, baseUrl, bundle, boot: stepPage, header, version });
+      const caseRows = await mod.run({ session, baseUrl, crossBaseUrl: session.crossBaseUrl, bundle, boot: stepPage, header, version, resources });
       // Uncaught page errors from this case's document realm fail the case
       // silently bypassing every row's own assertions.
       const pageErrors = await session.eval(function main() {

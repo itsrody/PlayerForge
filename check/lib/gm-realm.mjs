@@ -225,6 +225,10 @@ export function installGMRealm({ version, grants, resources, storage, header }) 
   // Forensics hooks (same contract the browser stage reads).
   window.__pfErrors = [];
   window.__pfConsole = [];
+  // Debug-mode chatter (kernel logger) rides console.log - the frames case
+  // reads `Shell registered: <sdk>` lines from here to prove which SDK record
+  // adopted the video without touching kernel internals.
+  window.__pfConsoleLog = [];
   window.addEventListener("error", (e) => {
     if (e instanceof ErrorEvent && e.message) window.__pfErrors.push(String(e.message).slice(0, 200));
   });
@@ -235,5 +239,13 @@ export function installGMRealm({ version, grants, resources, storage, header }) 
   console.error = (...parts) => {
     window.__pfConsole.push(parts.map((p) => String(p?.message ?? p)).join(" ").slice(0, 200));
     origError.apply(console, parts);
+  };
+  const origLog = console.log;
+  console.log = (...parts) => {
+    // Capped: debug chatter can be voluminous and only the most recent lines
+    // ever matter for SDK attribution.
+    if (window.__pfConsoleLog.length >= 80) window.__pfConsoleLog.shift();
+    window.__pfConsoleLog.push(parts.map((p) => String(p?.message ?? p)).join(" ").slice(0, 160));
+    origLog.apply(console, parts);
   };
 }
