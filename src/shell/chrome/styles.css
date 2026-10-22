@@ -51,7 +51,6 @@
   --pf-glass-shadow: var(--pf-glass-inner), 0 18px 48px rgba(0, 0, 0, 0.52);
   --pf-glass-border: 1px solid rgba(255, 255, 255, 0.18);
 
-  --pf-surface: rgba(0, 0, 0, 0.8);              /* opaque fallback for glass  */
   --pf-surface-soft: rgba(255, 255, 255, 0.04);  /* cells, stepper, toggle bg   */
   --pf-surface-mid: rgba(255, 255, 255, 0.09);   /* ghost btn, hover cells      */
   --pf-surface-strong: rgba(255, 255, 255, 0.16);/* toast actions, ghost hover  */
@@ -285,9 +284,6 @@
        Rides the HUD layer under the host's z-index doctrine - above captions,
        below the panel. */
     pf-toast {
-      --pf-toast-color: var(--pf-fg);
-      --pf-toast-radius: var(--pf-radius-pill);
-
       display: inline-flex;
       align-items: center;
       gap: var(--pf-space-sm);
@@ -305,9 +301,9 @@
       border: var(--pf-glass-border);
       box-shadow: var(--pf-glass-shadow);
       backdrop-filter: var(--pf-blur-sm);
-      color: var(--pf-toast-color);
-      padding: 6px 16px;
-      border-radius: var(--pf-toast-radius);
+      color: var(--pf-fg);
+      padding: var(--pf-space-sm) 16px;
+      border-radius: var(--pf-radius-pill);
       font-size: var(--pf-font-lg);
       font-weight: 500;
       line-height: 1;
@@ -383,7 +379,7 @@
           font-size: var(--pf-font-sm);
           font-weight: 600;
           line-height: 1;
-          padding: 6px 10px;
+          padding: var(--pf-space-sm) var(--pf-space-lg);
           cursor: pointer;
 
           /* Hover effects are gated on a real hover device - a touch press
@@ -439,10 +435,7 @@
          animation is a pure opacity fade. Breakpoint modes override the
          inset placement directly. */
       display: none;
-      left: 0;
-      right: 0;
-      top: 0;
-      bottom: 0;
+      inset: 0;
       margin: auto;
       width: min(380px, calc(100% - 24px));
       height: fit-content;
@@ -633,7 +626,7 @@
           outline: 2px dashed var(--pf-accent);
           outline-offset: -4px;
           border-radius: var(--pf-radius-md);
-          background: rgba(74, 158, 255, 0.06);
+          background: color-mix(in srgb, var(--pf-accent) 6%, transparent);
         }
       }
 
@@ -671,7 +664,7 @@
       .pf-panel-load-row {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: var(--pf-space-md);
 
         .pf-panel-actions {
           flex: none;
@@ -692,8 +685,8 @@
       .pf-panel-actions {
         display: flex;
         align-items: stretch;
-        gap: 6px;
-        margin-bottom: 6px;
+        gap: var(--pf-space-sm);
+        margin-bottom: var(--pf-space-sm);
 
         .pf-btn {
           width: auto;
@@ -702,7 +695,7 @@
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          gap: 6px;
+          gap: var(--pf-space-sm);
         }
 
         .pf-btn svg {
@@ -753,14 +746,11 @@
         display: flex;
         align-items: baseline;
         justify-content: space-between;
-        gap: 6px;
+        gap: var(--pf-space-sm);
 
         .pf-panel-label {
           margin-bottom: 0;
           font-size: var(--pf-font-xs);
-          /* R7: title-style capitalization. Apple removed system-wide
-             ALL-CAPS section headers so they read as sentences; `uppercase`
-             overrode that convention. Labels ship in title case in markup. */
           color: var(--pf-text-soft);
         }
 
@@ -773,12 +763,12 @@
       /* Compact inline cells (Subtitles style grid) - label | control |
          value on one line. Long labels ellipsize before the control starves. */
       .pf-panel-grid-compact {
-        gap: 4px 8px;
+        gap: var(--pf-space-xs) var(--pf-space-md);
 
         .pf-panel-cell {
           flex-direction: row;
           align-items: center;
-          gap: 6px;
+          gap: var(--pf-space-sm);
 
           .pf-panel-label {
             flex: none;
@@ -865,7 +855,7 @@
 
       select.pf-select {
         flex: 1;
-        padding: 4px 6px;
+        padding: var(--pf-space-xs) var(--pf-space-sm);
         border: 1px solid var(--pf-border-input);
         border-radius: var(--pf-radius-sm);
         background: var(--pf-surface-soft);
@@ -885,14 +875,10 @@
         width: 100%;
       }
 
+      /* In cells the swatch stretches full-width; all other paint comes from
+         the base rule above. */
       .pf-panel-cell input[type="color"] {
         width: 100%;
-        height: 22px;
-        padding: 0;
-        border: 1px solid var(--pf-border-input);
-        border-radius: var(--pf-radius-sm);
-        background: transparent;
-        cursor: pointer;
       }
     }
 
@@ -900,8 +886,8 @@
     .pf-btn {
       display: block;
       width: 100%;
-      padding: 6px 10px;
-      margin-bottom: 6px;
+      padding: var(--pf-space-sm) var(--pf-space-lg);
+      margin-bottom: var(--pf-space-sm);
       border: none;
       border-radius: var(--pf-radius-md);
       background: var(--pf-accent);
@@ -977,7 +963,7 @@
         flex: 1;
         min-width: 0;
         width: 100%;
-        padding: 0 8px;
+        padding: 0 var(--pf-space-md);
         border: none;
         outline: none;
         background: transparent;
@@ -1051,9 +1037,9 @@
     .pf-settings-toggle {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: var(--pf-space-sm);
       min-width: 0;
-      padding: 6px 8px;
+      padding: var(--pf-space-sm) var(--pf-space-md);
       border: 1px solid var(--pf-border-soft);
       border-radius: var(--pf-radius-sm);
       background: var(--pf-surface-soft);
@@ -1088,7 +1074,7 @@
       flex-direction: row;
       align-items: center;
       justify-content: flex-start;
-      gap: 10px;
+      gap: var(--pf-space-lg);
       grid-column: 1 / -1;
 
       .pf-panel-label {
@@ -1102,7 +1088,7 @@
 
     .pf-options-row {
       display: flex;
-      gap: 6px;
+      gap: var(--pf-space-sm);
       flex-shrink: 0;
     }
 
@@ -1137,7 +1123,7 @@
     .pf-history-list {
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: var(--pf-space-xs);
       max-height: 168px;
       /* One-axis scroll container: horizontal overflow is clipped, never
          turned into a second scroller. The two-value scroll+clip form shipped
@@ -1154,8 +1140,8 @@
     .pf-history-card {
       display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 6px 8px;
+      gap: var(--pf-space-sm);
+      padding: var(--pf-space-sm) var(--pf-space-md);
       border: 1px solid var(--pf-border-soft);
       border-radius: var(--pf-radius-sm);
       background: var(--pf-surface-soft);
@@ -1245,7 +1231,7 @@
         width: 18px;
         height: 18px;
       }
-      .pf-history-card { padding: 8px 10px; gap: 8px; }
+      .pf-history-card { padding: var(--pf-space-md) var(--pf-space-lg); gap: var(--pf-space-md); }
       .pf-history-title { font-size: var(--pf-font-md); }
       .pf-history-meta { font-size: var(--pf-font-sm); }
       .pf-history-list { max-height: 184px; }
@@ -1296,18 +1282,15 @@
        icon-only tabs. */
     @media (orientation: landscape) and (pointer: coarse) and (max-height: 480px) {
       .pf-panel {
-        top: 0;
-        right: 0;
-        bottom: 0;
-        left: 0;
+        inset: 0;
         margin: auto;
         width: min(340px, 45vw);
         max-height: 70vh;
         border-radius: var(--pf-radius-lg);
       }
       .pf-tab-label { display: none; }
-      .pf-panel-tab { padding: 8px 10px; }
-      .pf-history-card { padding: 6px 8px; gap: 6px; }
+      .pf-panel-tab { padding: var(--pf-space-md) var(--pf-space-lg); }
+      .pf-history-card { padding: var(--pf-space-sm) var(--pf-space-md); gap: var(--pf-space-sm); }
       .pf-history-title { font-size: var(--pf-font-xs); }
       .pf-history-meta { font-size: 10px; }
       .pf-history-list { max-height: 144px; }
@@ -1327,7 +1310,7 @@
 
     /* Responsive options label/buttons spacing for narrow screens. */
     @media (max-width: 520px) {
-      .pf-options-cell { gap: 6px; }
+      .pf-options-cell { gap: var(--pf-space-sm); }
       .pf-options-row { flex-shrink: 0; }
     }
 
@@ -1364,23 +1347,23 @@
       }
 
       .pf-panel-close {
-        padding: 4px 6px;
+        padding: var(--pf-space-xs) var(--pf-space-sm);
         font-size: 14px;
       }
 
       .pf-btn {
-        padding: 8px 10px;
+        padding: var(--pf-space-md) var(--pf-space-lg);
         font-size: var(--pf-font-sm);
       }
 
       .pf-settings-toggle {
-        padding: 6px 8px;
+        padding: var(--pf-space-sm) var(--pf-space-md);
         font-size: var(--pf-font-sm);
       }
 
       .pf-history-card {
         padding: 5px 8px;
-        gap: 6px;
+        gap: var(--pf-space-sm);
       }
 
       .pf-history-title {
@@ -1398,20 +1381,16 @@
       .pf-stepper {
         height: 28px;
       }
-    }
 
-    /* Compact mode on touch devices: keep thumb-sized targets. */
-    .pf-panel.pf-compact {
+      /* Compact mode on touch devices: keep thumb-sized targets. */
       @media (pointer: coarse) {
         .pf-panel-tab { padding: 7px 8px; }
         .pf-btn { padding: 9px 10px; }
         .pf-settings-toggle { padding: 7px 8px; }
         .pf-stepper { height: 30px; }
       }
-    }
 
-    /* Compact mode bottom-sheet on portrait touch phones. */
-    .pf-panel.pf-compact {
+      /* Compact mode bottom-sheet on portrait touch phones. */
       @media (max-width: 520px) and (pointer: coarse) {
         width: auto;
         top: auto;
