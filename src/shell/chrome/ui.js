@@ -228,6 +228,10 @@ export function flashElement(el, { duration = FLASH_MS } = {}) {
   if (!el || typeof el.animate !== "function") {
     return;
   }
+  // Deliberately main-thread: color interpolation is not compositor-backed,
+  // and the flash is a one-shot, brief, non-repeating accent - swapping it for
+  // an opacity pulse to chase compositor frames would dim the content
+  // underneath, a visual change, not a smoothness one.
   // Single pass over the element's active animations: finished entries are
   // always accumulated prior flashes (backgroundColor - this module is the
   // only background animator on flash targets), so they cancel without a

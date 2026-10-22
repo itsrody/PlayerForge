@@ -346,8 +346,10 @@
         transform: translateY(0);
         /* Compositor hint only while visible - the hidden toast (opacity: 0,
            still rendered) must not pin a composited layer for the shell's
-           whole lifetime. */
-        will-change: opacity, translate;
+           whole lifetime. The animated axes are opacity + transform (the
+           4px drop); translate stays static (-50%) so naming it here would
+           hint an axis that never moves. */
+        will-change: opacity, transform;
       }
 
       /* Icon inside toast */
