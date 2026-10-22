@@ -27,12 +27,13 @@ export function row(rows, { width = 74 } = {}) {
   }
 }
 
-export function verdict(label, { failed, skipped }) {
+export function verdict(label, { failed, skipped }, totalMs) {
+  const tail = totalMs != null ? ` in ${(totalMs / 1000).toFixed(1)}s` : "";
   if (failed > 0) {
     console.log(`\n  ${RED}${failed} failed / ${skipped} skipped${RESET}`);
     return false;
   }
-  console.log(`\n  ${GREEN}${label}: all checks passed (${skipped} skipped)${RESET}`);
+  console.log(`\n  ${GREEN}${label}: all checks passed (${skipped} skipped)${tail}${RESET}`);
   return true;
 }
 

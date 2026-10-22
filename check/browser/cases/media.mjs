@@ -54,30 +54,38 @@ export async function run({ session, baseUrl, boot }) {
     ms: null
   });
 
-  // The video probe must survive a full teardown: drop the video node, wake
-  // the probe, boot into a second shell on a new media anchor.
-  await session.eval(function main() {
-    const v = document.querySelector("#check-video");
-    if (v) v.remove();
-  });
-  const secondShell = await session.evalAsync(function main(done) {
+  // The shell contract must survive a full teardown: drop the current anchor,
+  // append a fresh video, and require the kernel to re-anchor onto it - the
+  // new video node must carry the shell marker (the old markers on container
+  // garbage are not credit).
+  const reAnchor = await session.evalAsync(function main(done) {
+    document.querySelector("#check-video")?.remove();
     const wrapper = document.querySelector(".plyr__video-wrapper");
+    if (!wrapper) { done(null); return; }
     const v2 = document.createElement("video");
     v2.id = "check-video-2";
     v2.preload = "metadata";
     v2.muted = true;
+    v2.autoplay = true;
     v2.src = "/check-video.mp4";
     wrapper.appendChild(v2);
     v2.addEventListener("loadeddata", () => {
-      const probe = document.querySelector(".pf-shell");
-      done(document.querySelectorAll("[data-pf-shell]").length >= 1 ? "found" : "missing");
+      const deadline = Date.now() + 8000;
+      const tick = () => {
+        const stamped = v2.matches("[data-pf-shell]");
+        const shells = document.querySelectorAll(".pf-shell").length;
+        if (stamped || shells > 1) done({ stamped, shells });
+        else if (Date.now() < deadline) setTimeout(tick, 150);
+        else done(null);
+      };
+      tick();
     }, { once: true });
-    setTimeout(() => done("timeout"), 5000);
+    setTimeout(() => done(null), 11000);
   });
   rows.push({
-    name: "kernel discovers a re-anchored video after teardown",
-    status: secondShell === "found" ? "pass" : "fail",
-    note: secondShell,
+    name: "kernel re-anchors a shell onto the replacement video",
+    status: reAnchor ? "pass" : "fail",
+    note: reAnchor ? `stamped=${reAnchor.stamped} shells=${reAnchor.shells}` : "no re-anchor within 10s",
     ms: null
   });
 

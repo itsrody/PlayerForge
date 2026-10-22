@@ -27,6 +27,7 @@ async function recordGestureEvents(session) {
     host.addEventListener("pf:gesture-scrub-end", () => window.__pfEvents.push("scrub-end"));
     host.addEventListener("pf:gesture-release", () => window.__pfEvents.push("scrub-release"));
     host.addEventListener("pf:gesture-panel", () => window.__pfEvents.push("panel"));
+    host.addEventListener("pf:gesture-pip", () => window.__pfEvents.push("pip"));
     host.addEventListener("pf:gesture-dbltap", () => window.__pfEvents.push("dbltap"));
   });
 }
@@ -66,7 +67,8 @@ export async function run({ session, baseUrl, boot }) {
     ArrowUp: "\uE013",
     ArrowDown: "\uE015",
     KeyM: "m",
-    KeyS: "s"
+    KeyS: "s",
+    KeyP: "p"
   };
   const fireKeys = async (codes) => {
     const actions = acts();
@@ -116,6 +118,16 @@ export async function run({ session, baseUrl, boot }) {
     const panel = host !== null ? host.shadowRoot.querySelector(".pf-panel") : null;
     return panel === null || !panel.classList.contains("pf-open");
   }), "panel still open");
+
+  // KeyP asks for picture-in-picture through the kernel's semantic layer;
+  // pip-window creation may be blocked in headless Chromium, so the row
+  // asserts the contract, not the browser-side window.
+  await recordGestureEvents(session);
+  await fireKeys(["KeyP"]);
+  await new Promise((r) => setTimeout(r, 400));
+  status(rows, "KeyP asks for picture-in-picture", await session.eval(function main() {
+    return window.__pfEvents.includes("pip");
+  }), "no pf:gesture-pip");
 
   // Scrub/swipe/pinch are fs:true-binding intents (actions.js): the kernel's
   // fs gate reads `doc.fullscreenElement`, and headless Chromium refuses

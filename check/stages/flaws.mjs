@@ -18,6 +18,7 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
+import { inParallel } from "../lib/pool.mjs";
 
 const HERE = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SRC = join(HERE, "src");
@@ -45,9 +46,8 @@ function lint() {
   }
 }
 
-function importSmoke(files) {
-  const broken = [];
-  for (const file of files) {
+const importSmoke = (files) =>
+  inParallel(files, 8, (file) => {
     const url = pathToFileURL(file).href;
     try {
       execFileSync(
@@ -55,14 +55,16 @@ function importSmoke(files) {
         [join(HERE, "check", "lib", "node-realm.mjs"), url],
         { stdio: "pipe" }
       );
+      return null;
     } catch (err) {
       const text = `${err.stdout ?? ""}\n${err.stderr ?? ""}`;
       const line = text.split("\n").find((l) => /^[A-Z]\w*(Error|Exception)/.test(l.trim()) || /Error:/.test(l));
-      broken.push({ file, message: (line ?? text.split("\n").filter(Boolean).pop() ?? "unknown").slice(0, 200) });
+      return {
+        file,
+        message: (line ?? text.split("\n").filter(Boolean).pop() ?? "unknown").slice(0, 200)
+      };
     }
-  }
-  return broken;
-}
+  });
 
 export async function run() {
   const start = Date.now();
@@ -74,7 +76,7 @@ export async function run() {
     failures.push({ name: "eslint src/", note: lintOut.split("\n")[0].slice(0, 160) });
   }
 
-  for (const b of importSmoke(files)) {
+  for (const b of (await importSmoke(files)).filter((x) => x !== null)) {
     failures.push({ name: `import ${b.file.replace(HERE + "/", "")}`, note: b.message });
   }
 

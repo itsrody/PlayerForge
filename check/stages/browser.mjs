@@ -62,11 +62,33 @@ export async function run() {
 
     const bundle = await bundleSource();
     const version = await fixtureVersion();
-    const stepPage = (name) => bootCasePage(session, { pagePath: "/check", baseUrl, version, bundle, seed: {} });
+    const stepPage = (overrides = {}) => bootCasePage(session, {
+      pagePath: overrides.pagePath ?? "/check",
+      baseUrl,
+      version,
+      bundle,
+      seed: overrides.seed ?? {}
+    });
 
     for (const caseFile of readdirSync(CASES_DIR).filter((f) => f.endsWith(".mjs")).sort()) {
       const mod = await import(join(CASES_DIR, caseFile));
       const caseRows = await mod.run({ session, baseUrl, bundle, boot: stepPage });
+      // Uncaught page errors from this case's document realm fail the case
+      // silently bypassing every row's own assertions.
+      const pageErrors = await session.eval(function main() {
+        return [...(window.__pfErrors ?? []), ...(window.__pfConsole ?? []).map((m) => "console: " + m)];
+      }).catch(() => []);
+      const realErrors = pageErrors.filter((e) => !e.startsWith("console:"));
+      const consoleErrors = pageErrors.filter((e) => e.startsWith("console:"));
+      caseRows.push(...realErrors.map((e) => ({ name: `uncaught error in ${caseFile}`, status: "fail", note: e, ms: null })));
+      caseRows.push(...consoleErrors.slice(0, 2).map((e) => ({ name: `console.error in ${caseFile}`, status: "pass", note: e, ms: null })));
+      // Forensics for every failing case before the session is torn down.
+      if (caseRows.some((r) => r.status === "fail")) {
+        const captured = await session.snapshot(caseFile);
+        for (const r of caseRows.filter((x) => x.status === "fail")) {
+          if (captured) r.note = `${r.note ? r.note + " " : ""}[capture: ${captured}]`;
+        }
+      }
       rows.push(...caseRows);
       for (const r of caseRows.filter((x) => x.status === "fail")) {
         console.log(`    [${caseFile}] ${r.name}${r.note ? " — " + r.note : ""}`);
@@ -74,6 +96,8 @@ export async function run() {
     }
   } catch (err) {
     const aborted = { name: "browser gate aborted", status: "fail", note: err.message.slice(0, 160), ms: null };
+    const captured = await session?.snapshot?.("abort: " + err.message.slice(0, 40));
+    if (captured) aborted.note += ` [capture: ${captured}]`;
     rows.push(aborted);
     console.log(`    stack: ${String(err.stack ?? "").split("\n").slice(1, 5).join(" ")}`);
     await session?.destroy();

@@ -62,7 +62,13 @@ export function ensureVideoAsset() {
     "-y", "-loglevel", "error",
     "-f", "lavfi", "-i", "color=c=red:s=320x180:r=25",
     "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
-    "-t", "4", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+    // 12s on purpose: the resume restore contract only applies saved
+    // positions above RESUME_MIN_POSITION (5s), so a probe fixture must be
+    // able to hold and hand back a position past that floor. faststart puts
+    // the moov box first so the range-capable server below can honor seeks
+    // from the first byte.
+    "-t", "12", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+    "-movflags", "+faststart",
     out
   ]);
   return VIDEO_ROUTE;

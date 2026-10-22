@@ -31,20 +31,24 @@ function usage() {
 }
 
 const args = process.argv.slice(2);
-const steps = [];
+const requested = [];
 for (const arg of args.length > 0 ? args : ["all"]) {
   if (arg === "all") {
-    steps.push(...GATES.map((g) => g[0]));
+    requested.push(...GATES.map((g) => g[0]));
     continue;
   }
-  const gate = GATES.find(([name]) => name === arg);
-  if (gate === undefined) {
+  if (GATES.find(([name]) => name === arg) === undefined) {
     console.error(`Unknown gate: ${arg}`);
     usage();
     process.exit(1);
   }
-  if (!steps.includes(gate[0])) steps.push(gate[0]);
+  requested.push(arg);
 }
+
+// Canonical gate order: deduping and a stable sort turn "browser bundle" into
+// "bundle browser" instead of failing the precondition hunt in midstream.
+const order = (g) => GATES.findIndex(([name]) => name === g);
+const steps = [...new Set(requested)].sort((a, b) => order(a) - order(b));
 
 // browser evaluates the bundle artifact; make sure it exists no matter how
 // the gate was selected.
@@ -52,13 +56,11 @@ if (steps.includes("browser") && !steps.includes("bundle")) {
   steps.unshift("bundle");
 }
 
+const runStart = Date.now();
 for (const name of steps) {
-  const [, modulePath, prerequisite] = GATES.find(([g]) => g === name);
+  const [, modulePath] = GATES.find(([g]) => g === name);
   banner(`gate ${name}`);
   try {
-    if (prerequisite !== null && !steps.slice(0, steps.indexOf(name)).includes(prerequisite)) {
-      throw new Error(`gate ${name} requires gate ${prerequisite} in the same run`);
-    }
     if (name === "browser") {
       // Fail fast on a missing/stale (brew-side mismatch) chromedriver.
       ensureChromeDriver();
@@ -77,6 +79,6 @@ for (const name of steps) {
   }
 }
 
-if (!verdict(`${steps.join(" + ")}`, { failed: 0, skipped: 0 })) {
+if (!verdict(`${steps.join(" + ")}`, { failed: 0, skipped: 0 }, Date.now() - runStart)) {
   process.exit(1);
 }

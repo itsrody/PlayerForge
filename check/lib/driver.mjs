@@ -9,7 +9,7 @@
  * guard will not skip.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, readdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync, mkdirSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
@@ -98,17 +98,19 @@ function cachedDriver(version) {
   return p;
 }
 
-const DRIVER_PATHS = [
-  process.env.CHROMEDRIVER_PATH,
-  "/opt/homebrew/bin/chromedriver",
-  "/usr/local/bin/chromedriver"
-].filter((p) => p && existsSync(p));
+function scanDrivers() {
+  return [
+    process.env.CHROMEDRIVER_PATH,
+    "/opt/homebrew/bin/chromedriver",
+    "/usr/local/bin/chromedriver"
+  ].filter((p) => p && existsSync(p));
+}
 
 function localDriverFor(browserVersion) {
   const cached = cachedDriver(browserVersion);
   if (cached) return cached;
   const major = majorOf(browserVersion);
-  return DRIVER_PATHS.find((path) => majorOf(nativeBinaryVersion(path)) === major) ?? null;
+  return scanDrivers().find((path) => majorOf(nativeBinaryVersion(path)) === major) ?? null;
 }
 
 function serviceFor(chromeMod, browserVersion) {
@@ -133,21 +135,27 @@ function brewReinstallChromedriver() {
 }
 
 /**
- * Fail-fast driver probe for the runner: when nothing on disk reports a sane
- * ChromeDriver version, let brew reinstall it. Returns the driver path.
+ * Fail-fast driver probe for the runner: scan the disk fresh (a mid-run brew
+ * heal must be visible), reinstall via brew when nothing reports a sane
+ * version, and re-scan again before giving up. Best-effort: launch falls back
+ * to Selenium Manager when this returns null.
  */
 export function ensureChromeDriver() {
-  if (DRIVER_PATHS.length === 0) {
+  let drivers = scanDrivers();
+  if (drivers.length === 0) {
     console.log("  no chromedriver on disk - brew reinstalling...");
     brewReinstallChromedriver();
+    drivers = scanDrivers();
   }
-  const bin = DRIVER_PATHS[0];
-  const version = nativeBinaryVersion(bin);
-  if (version === null) {
-    console.log("  chromedriver unreadable - brew reinstalling...");
-    brewReinstallChromedriver();
+  for (const bin of drivers) {
+    const version = nativeBinaryVersion(bin);
+    if (version !== null) {
+      console.log(`  driver probe: ${basename(bin)} (${version})`);
+      return bin;
+    }
   }
-  return DRIVER_PATHS[0];
+  console.log("  driver probe: no usable chromedriver on disk - Selenium Manager resolves at launch");
+  return null;
 }
 
 /**
@@ -263,12 +271,33 @@ export class ChromiumSession {
     this.#server = createServer((req, res) => {
       const path = (req.url ?? "/").split("?")[0];
       const route = this.#fixtureRoutes.get(path);
-      if (route) {
-        if (route.bytes) {
-          res.writeHead(200, route.headers);
-          res.end(route.bytes);
-          return;
+      if (route && route.bytes) {
+        // Byte-range support is not cosmetic: without it Chromium treats the
+        // stream as non-seekable and silently discards currentTime seeks,
+        // which would falsify every media-state probe.
+        const total = route.bytes.length;
+        const match = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? "");
+        if (match) {
+          let start = match[1] === "" ? Math.max(0, total - Number(match[2])) : Number(match[1]);
+          let end = match[1] === "" ? total - 1 : (match[2] === "" ? total - 1 : Math.min(Number(match[2]), total - 1));
+          start = Math.min(start, total - 1);
+          if (end >= start) {
+            const chunk = route.bytes.subarray(start, end + 1);
+            res.writeHead(206, {
+              ...route.headers,
+              "Content-Range": `bytes ${start}-${end}/${total}`,
+              "Content-Length": chunk.length,
+              "Accept-Ranges": "bytes"
+            });
+            res.end(chunk);
+            return;
+          }
         }
+        res.writeHead(200, { ...route.headers, "Content-Length": total, "Accept-Ranges": "bytes" });
+        res.end(route.bytes);
+        return;
+      }
+      if (route) {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", ...route.headers });
         res.end(route.html);
         return;
@@ -285,10 +314,11 @@ export class ChromiumSession {
     return `http://127.0.0.1:${this.#fixturePort}`;
   }
 
-  /** GM realm a fresh page needs before bundle injection. */
-  injectGMRealm({ version } = {}) {
-    return this.eval(function main(version) {
-      const backing = {};
+  /** GM realm a fresh page needs before bundle injection. `storage` seeds the
+   * backing store so a reboot can play out with prior-session state in place. */
+  injectGMRealm({ version, storage = {} } = {}) {
+    return this.eval(function main(version, storage) {
+      const backing = Object.assign({}, storage ?? {});
       const listeners = {};
       let listenerId = 0;
       const gm = {
@@ -335,7 +365,24 @@ export class ChromiumSession {
       window.GM_info = gm.info;
       window.__pfBacking = backing;
       window.__pfMenu = listeners;
-    }, version);
+
+      // Forensics hooks: uncaught page errors fail the case; console.error
+      // chatter is recorded for the report note but never fails on its own
+      // (the kernel's own logger may legitimately complain while healing).
+      window.__pfErrors = [];
+      window.__pfConsole = [];
+      window.addEventListener("error", (e) => {
+        if (e instanceof ErrorEvent && e.message) window.__pfErrors.push(String(e.message).slice(0, 200));
+      });
+      window.addEventListener("unhandledrejection", (e) => {
+        window.__pfErrors.push("rejection: " + String(e.reason).slice(0, 200));
+      });
+      const origError = console.error;
+      console.error = (...parts) => {
+        window.__pfConsole.push(parts.map((p) => String(p?.message ?? p)).join(" ").slice(0, 200));
+        origError.apply(console, parts);
+      };
+    }, version, storage);
   }
 
   /** Inject a bundled userscript after the GM realm exists. */
@@ -362,6 +409,31 @@ export class ChromiumSession {
       await new Promise((r) => setTimeout(r, intervalMs));
     }
     throw new Error(`timeout after ${timeoutMs}ms - last=${JSON.stringify(last)}`);
+  }
+
+  /** Failure forensics: screenshot + page-state dump into check/.tmp/ for the
+   * report note. Best effort - never let capture itself fail the gate. */
+  async snapshot(label) {
+    try {
+      const outDir = join(ROOT, "check", ".tmp");
+      mkdirSync(outDir, { recursive: true });
+      const png = await this.#driver.takeScreenshot();
+      writeFileSync(join(outDir, "last-failure.png"), Buffer.from(png, "base64"));
+      const state = await this.#driver.executeScript(function main() {
+        return {
+          url: String(location.href),
+          errors: window.__pfErrors ?? [],
+          console: (window.__pfConsole ?? []).slice(-5),
+          videos: document.querySelectorAll("video").length,
+          shells: document.querySelectorAll(".pf-shell").length,
+          version: window.PlayerForge?.version ?? null
+        };
+      });
+      writeFileSync(join(outDir, "last-failure.json"), JSON.stringify({ label, at: new Date().toISOString(), ...state }, null, 2));
+      return "check/.tmp/last-failure.png + last-failure.json";
+    } catch {
+      return null;
+    }
   }
 
   async destroy() {

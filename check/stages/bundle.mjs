@@ -33,6 +33,11 @@ export async function run() {
     if (!source.startsWith("// ==UserScript==") || !source.includes("==/UserScript==")) {
       fails.push({ name: "userscript header", note: "==UserScript== header missing from top of bundle" });
     }
+    const headerVersion = source.match(/^\/\/ @version\s+(\S+)/m)?.[1] ?? null;
+    const pkgVersion = JSON.parse(readFileSync(join(HERE, "package.json"), "utf8")).version;
+    if (headerVersion !== pkgVersion) {
+      fails.push({ name: "header version", note: `bundle @version ${headerVersion ?? "missing"} != package.json ${pkgVersion}` });
+    }
     if (/\b(export|import)\b\s*[({"']/.test(source.slice(source.indexOf("==/UserScript==")))) {
       fails.push({ name: "module syntax", note: "import/export statements leaked into the bundle body" });
     }
