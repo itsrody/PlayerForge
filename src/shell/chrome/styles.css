@@ -39,7 +39,7 @@
   --pf-glass-tint: color-mix(in srgb, var(--pf-bg) 58%, transparent);
   /* Focus raises the tint rather than only the rim: the material exists to
      bring attention to the content beneath it, so an idle HUD should recede
-     and a focused one should assert. DESIGN.md R3 - the two states must be
+     and a focused one should assert. AGENTS.md R3 - the two states must be
      legible in the token set, not implied. */
   --pf-glass-tint-focus: color-mix(in srgb, var(--pf-bg) 76%, transparent);
   /* The panel's top rim is an inset shadow on the sheet; once the header
@@ -64,7 +64,7 @@
   --pf-text-soft: rgba(255, 255, 255, 0.65);     /* section labels              */
 
   --pf-radius-pill: 999px;
-  /* Concentric scale (DESIGN.md R5/R6). The panel is the outermost surface so
+  /* Concentric scale (AGENTS.md R5/R6). The panel is the outermost surface so
      it holds the largest radius; everything nested inside is derived from it
      by subtracting its own inset padding, so a change to the container
      propagates instead of silently breaking concentricity.
