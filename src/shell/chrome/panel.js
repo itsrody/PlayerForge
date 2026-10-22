@@ -1,12 +1,8 @@
-import { logger } from "../../shared/runtime.js";
-import { DomPool } from "../../shared/dom.js";
-import { formatTime } from "../../shared/core.js";
-import { button, createIconElement, flashElement } from "./ui.js";
+import { logger, Scope } from "../../shared/runtime.js";
+import { DomPool, deepestActiveElement, subscribeFullscreen } from "../../shared/dom.js";
+import { formatTime, clamp } from "../../shared/core.js";
+import { button, createIconElement, flashElement, el } from "./ui.js";
 import { GESTURE_EVENTS } from "../inputs/actions.js";
-import { deepestActiveElement, subscribeFullscreen } from "../../shared/dom.js";
-import { clamp } from "../../shared/core.js";
-import { Scope } from "../../shared/runtime.js";
-import { el } from "./ui.js";
 import { getSetting, onSettingsChanged, setSetting, SETTINGS_SCHEMA, SETTING_KEYS } from "./config.js";
 
 const HOLD_DELAY_MS = 400;
@@ -91,7 +87,7 @@ function createStepper({
   const arrows = document.createElement("span");
   arrows.className = "pf-stepper-arrows";
 
-const makeButton = (name, dir, title) => {
+  const makeButton = (name, dir, title) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "pf-stepper-btn";
@@ -532,11 +528,11 @@ export class SettingsPanel {
     label.textContent = title;
     tab.appendChild(label);
 
-    tab.addEventListener("click", () => this.#activateSection(section, tab), { signal: this.#scope.signal });
+    tab.addEventListener("click", () => this.#activateSection(section), { signal: this.#scope.signal });
     this.#tabList.appendChild(tab);
     this.#sections.set(section, tab);
     if (!this.#activeSection) {
-      this.#activateSection(section, tab);
+      this.#activateSection(section);
     }
     return section;
   }
@@ -822,7 +818,7 @@ export class SettingsPanel {
     }
 
     // Any fullscreen transition dismisses the panel; the shared transition
-    // source (shadow.js) drives it - no bus event needed.
+    // source (shared/dom.js) drives it - no bus event needed.
     subscribeFullscreen(() => this.close(), this.#scope.signal);
 
     // Dismissal is ours since the popover left: Esc closes, and a press
@@ -871,12 +867,12 @@ export class SettingsPanel {
       }
       nextTab.focus();
       if (targetSection) {
-        this.#activateSection(targetSection, nextTab);
+        this.#activateSection(targetSection);
       }
     }, { signal });
   }
 
-  #activateSection(targetSection, _targetTab) {
+  #activateSection(targetSection) {
     const prev = this.#activeSection;
     if (prev === targetSection) {
       return;

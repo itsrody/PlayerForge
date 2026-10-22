@@ -1,9 +1,7 @@
 import { getSetting, onSettingsChanged, SETTING_KEYS } from "../chrome/config.js";
-import { TUNING } from "../../shared/core.js";
-import { formatTime } from "../../shared/core.js";
+import { TUNING, formatTime, EASE_SNAPPY_CURVE, EASE_SNAPPY_MS } from "../../shared/core.js";
 import { fs, subscribeFullscreen } from "../../shared/dom.js";
 import { GESTURE_EVENTS, GESTURES, GESTURE_IDS } from "../../kernel/contract.js";
-import { EASE_SNAPPY_CURVE, EASE_SNAPPY_MS } from "../../shared/core.js";
 
 export { GESTURE_EVENTS };
 
@@ -340,8 +338,6 @@ function performSkip(shell, state, direction) {
  * scale/translate instead of re-rasterizing the media surface every frame;
  * the layer is released once the snap settles (or is cancelled).
  */
-const EASE_STYLE = EASE_SNAPPY_CURVE;
-const EASE_MS = EASE_SNAPPY_MS;
 
 /**
  * One eased snap per video is the invariant; the in-flight cancel handle lives
@@ -391,7 +387,7 @@ export function easeTransformTo(video, transform) {
         { transform: video.style.transform || getComputedStyle(video).transform || "none" },
         { transform: transform || "none" }
       ],
-      { duration: EASE_MS, easing: EASE_STYLE, fill: "both" }
+      { duration: EASE_SNAPPY_MS, easing: EASE_SNAPPY_CURVE, fill: "both" }
     );
     const stop = () => {
       if (pendingEase.get(video) !== stop) {
@@ -443,7 +439,7 @@ export function easeTransformTo(video, transform) {
   // Listeners first, styles second: no completion event can slip past us.
   video.addEventListener("transitionend", onEnd);
   video.addEventListener("transitioncancel", onCancel);
-  video.style.transition = `transform ${EASE_MS}ms ${EASE_STYLE}`;
+  video.style.transition = `transform ${EASE_SNAPPY_MS}ms ${EASE_SNAPPY_CURVE}`;
   video.style.transform = transform;
 }
 

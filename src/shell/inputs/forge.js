@@ -1,9 +1,7 @@
 import { allowsIntent, allowsAnyIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo, cancelEase } from "./actions.js";
-import { TUNING } from "../../shared/core.js";
-import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../../shared/dom.js";
-import { DOMManager } from "../../shared/dom.js";
+import { TUNING, isBenignMediaPolicyError } from "../../shared/core.js";
+import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen, DOMManager } from "../../shared/dom.js";
 import { logger, Scope, delay } from "../../shared/runtime.js";
-import { isBenignMediaPolicyError } from "../../shared/core.js";
 
 /**
  * Pointer handlers never preventDefault - native pan/scroll over the zone is
@@ -349,7 +347,8 @@ export class InputForge {
     }, options);
     window.addEventListener("pointerup", (event) => this.#handlePointerUp(event), options);
     window.addEventListener("pointercancel", (event) => this.#handlePointerCancel(event), options);
-    document.addEventListener("keydown", (event) => this.#handleKeydown(event), { capture: true, signal });    document.addEventListener("keyup", (event) => this.#handleKeyup(event), { capture: true, signal });
+    document.addEventListener("keydown", (event) => this.#handleKeydown(event), { capture: true, signal });
+    document.addEventListener("keyup", (event) => this.#handleKeyup(event), { capture: true, signal });
     // A window blur, a hidden tab, or a Page Lifecycle freeze can each swallow
     // the matching Space keyup and/or pointerup; end every live session through
     // the normal release paths so no rate/scrub/hold stays latched.
@@ -605,12 +604,12 @@ export class InputForge {
     }
   }
 
-    /**
-     * Decide whether keyboard shortcuts should apply: yes when focus sits
-     * on a target that cannot consume the keystroke itself - inside the
-     * container, or at page level (SPA roots park focus on app wrappers,
-     * not body) while this engine owns playback.
-     */
+  /**
+   * Decide whether keyboard shortcuts should apply: yes when focus sits
+   * on a target that cannot consume the keystroke itself - inside the
+   * container, or at page level (SPA roots park focus on app wrappers,
+   * not body) while this engine owns playback.
+   */
   #shouldHandleKeys(allowControlFocus = false) {
     const activeElement = deepestActiveElement(this.#eventTarget);
     if (!this.#zone) {
@@ -986,33 +985,25 @@ export class InputForge {
     const dy = event.clientY - this.#startY;
     const distance = Math.sqrt(dx * dx + dy * dy);
 
-    if (this.#holding) {
-      this.#holding = false;
-      this.#suppressNextActivations();
+    if (this.#holding || this.#scrubbing || this.#swiping) {
+      // A latched session ends through the same #endPointerSession teardown
+      // the cancel/destroy paths use: it fires the release, the scrub-end,
+      // and (for a swipe) restores the video transform and clears the stroke
+      // state. The stroke's direction is captured first - the session end
+      // clears it before the swipe event can read it - and the swipe event is
+      // dispatched after restoration, which dispatchEvent (synchronous) makes
+      // the semantically identical order to the old inline branch.
       event.stopImmediatePropagation();
-      this.#fireRelease(this.#gestureZone, "pointer", this.#startTime);
-    } else if (this.#scrubbing) {
-      this.#scrubbing = false;
-      this.#gestureFsActive = false;
-      this.#suppressNextActivations();
-      event.stopImmediatePropagation();
-      scrubEndDetail.zone = this.#gestureZone || "screen";
-      scrubEndDetail.method = "pointer";
-      this.#dispatch(GESTURE_EVENTS.scrubEnd, scrubEndDetail);
-    } else if (this.#swiping) {
-      this.#swiping = false;
-      this.#gestureFsActive = false;
-      this.#suppressNextActivations();
-      event.stopImmediatePropagation();
-      this.#restoreTransform();
-      swipeDetail.zone = this.#gestureZone || "screen";
-      swipeDetail.method = "pointer";
-      swipeDetail.direction = this.#swipeDirection;
-      swipeDetail.distance = distance;
-      this.#dispatch(GESTURE_EVENTS.swipe, swipeDetail);
-      this.#swipeDirection = null;
-      this.#lastSwipeDrag = NaN;
-      this.#lastSwipeTransform = "";
+      const wasSwiping = this.#swiping;
+      const swipeDirection = this.#swipeDirection;
+      this.#endPointerSession();
+      if (wasSwiping) {
+        swipeDetail.zone = this.#gestureZone || "screen";
+        swipeDetail.method = "pointer";
+        swipeDetail.direction = swipeDirection;
+        swipeDetail.distance = distance;
+        this.#dispatch(GESTURE_EVENTS.swipe, swipeDetail);
+      }
     } else if (
       elapsed < HOLD_TIMEOUT_MS &&
       this.#gestureZone !== null &&

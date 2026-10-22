@@ -1,8 +1,6 @@
 import { DomPool } from "../../shared/dom.js";
 import { delay } from "../../shared/runtime.js";
-import { flashElement } from "./ui.js";
-import { button } from "./ui.js";
-import { createIconElement } from "./ui.js";
+import { flashElement, button, createIconElement } from "./ui.js";
 
 /**
  * Single toast surface hosted in the shell HUD layer: icon + text +

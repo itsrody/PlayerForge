@@ -1,11 +1,7 @@
-import { getPageContext } from "../shared/page.js";
-import { domainsMatch, domainScore, hashEntry } from "../shared/page.js";
-import { onNavigate } from "../shared/page.js";
-import { TUNING } from "../shared/core.js";
+import { getPageContext, domainsMatch, domainScore, hashEntry, onNavigate } from "../shared/page.js";
+import { TUNING, formatTime } from "../shared/core.js";
 import { KEYS, gmSetValue, loadJsonObject, watchStorageKey } from "../shared/store.js";
-import { formatTime } from "../shared/core.js";
-import { logger } from "../shared/runtime.js";
-import { Scope } from "../shared/runtime.js";
+import { logger, Scope } from "../shared/runtime.js";
 
 /** Sort entries by updatedAt - ascending (oldest-first, for eviction) or
  *  descending (newest-first, for history display). */
@@ -134,38 +130,38 @@ export class ResumeStore {
     }
   }
 
-#mergeRaw(raw) {
-  let added = 0;
-  let updated = 0;
-  const byId = new Map();
-  for (const entry of this.#state.entries) {
-    byId.set(entry.id, entry);
-  }
-  for (const incoming of raw.entries) {
-    if (!incoming || typeof incoming !== "object" || typeof incoming.id !== "string") {
-      continue;
+  #mergeRaw(raw) {
+    let added = 0;
+    let updated = 0;
+    const byId = new Map();
+    for (const entry of this.#state.entries) {
+      byId.set(entry.id, entry);
     }
-    const known = byId.get(incoming.id);
-    if (!known) {
-      const shaped = toFixedShape(incoming);
-      byId.set(incoming.id, shaped);
-      added++;
-    } else if ((incoming.updatedAt || 0) > (known.updatedAt || 0)) {
-      for (const key of RESUME_ENTRY_FIELDS) {
-        if (key in incoming) {
-          known[key] = incoming[key];
-        }
+    for (const incoming of raw.entries) {
+      if (!incoming || typeof incoming !== "object" || typeof incoming.id !== "string") {
+        continue;
       }
-      updated++;
+      const known = byId.get(incoming.id);
+      if (!known) {
+        const shaped = toFixedShape(incoming);
+        byId.set(incoming.id, shaped);
+        added++;
+      } else if ((incoming.updatedAt || 0) > (known.updatedAt || 0)) {
+        for (const key of RESUME_ENTRY_FIELDS) {
+          if (key in incoming) {
+            known[key] = incoming[key];
+          }
+        }
+        updated++;
+      }
     }
-  }
-  if (added === 0 && updated === 0) {
+    if (added === 0 && updated === 0) {
+      return { added, updated };
+    }
+    this.#state.entries = [...byId.values()];
+    this.#invalidateCaches();
     return { added, updated };
   }
-  this.#state.entries = [...byId.values()];
-  this.#invalidateCaches();
-  return { added, updated };
-}
 
   /** Drop lazy lookup state; called after every structural entries change. */
   #invalidateCaches() {
@@ -219,8 +215,8 @@ export class ResumeStore {
    */
   #enforceBounds(days = RESUME_STALE_DAYS) {
     const entries = this.#state.entries;
+    const cutoff = Date.now() - days * 86400000;
     if (entries.length <= RESUME_MAX_ENTRIES) {
-      const cutoff = Date.now() - days * 86400000;
       for (let i = 0; i < entries.length; i++) {
         if (entries[i].updatedAt <= cutoff) {
           return entries.filter((e) => e.updatedAt > cutoff);
@@ -228,7 +224,6 @@ export class ResumeStore {
       }
       return entries;
     }
-    const cutoff = Date.now() - days * 86400000;
     const kept = entries.filter((entry) => entry.updatedAt > cutoff);
     kept.sort((a, b) => (a.updatedAt || 0) - (b.updatedAt || 0));
     return kept.slice(kept.length - RESUME_MAX_ENTRIES);

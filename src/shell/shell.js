@@ -1,5 +1,5 @@
-import { logger } from "../shared/runtime.js";
-import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen } from "../shared/dom.js";
+import { logger, Scope, yield_, runSteps, runStepsAsync } from "../shared/runtime.js";
+import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen, DOMManager } from "../shared/dom.js";
 import { InputForge } from "./inputs/forge.js";
 import { attachInputActions } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
@@ -12,10 +12,6 @@ import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
 import { SHELL_MARKER, warmStyles, injectShell, watchShellHost, ensureViewportFitCover } from "./chrome/inject.js";
 import { requestFullscreenProvision } from "../shared/page.js";
-import { DOMManager } from "../shared/dom.js";
-import { Scope } from "../shared/runtime.js";
-import { yield_ } from "../shared/runtime.js";
-import { runSteps, runStepsAsync } from "../shared/runtime.js";
 
 /**
  * Surfaces that legitimately own the native context menu inside the shell:
@@ -191,7 +187,7 @@ export class Shell {
 
   /**
    * Sole fullscreen condition, read straight off the shared `fs` gate
-   * (shadow.js) - built on the native fullscreen event by initFullscreenGate().
+   * (shared/dom.js) - built on the native fullscreen event by initFullscreenGate().
    * The shell lives inside the SDK's frame, so an SDK fullscreen IS a document
    * fullscreen; `fs` is the single boolean that gates fs features codebase-wide.
    */

@@ -1,7 +1,5 @@
-import { logger } from "../shared/runtime.js";
-import { clamp } from "../shared/core.js";
-import { isBenignMediaPolicyError } from "../shared/core.js";
-import { Scope } from "../shared/runtime.js";
+import { logger, Scope } from "../shared/runtime.js";
+import { clamp, isBenignMediaPolicyError } from "../shared/core.js";
 
 /** Volume delta applied by nudgeVolume. */
 const VOLUME_STEP = 0.1;

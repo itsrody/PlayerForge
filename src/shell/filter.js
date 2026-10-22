@@ -1,10 +1,7 @@
 import { getConfigValue, setConfigFields } from "../shared/store.js";
 import { flashElement } from "./chrome/ui.js";
-import { debounce } from "../shared/runtime.js";
-import { clamp } from "../shared/core.js";
-import { TUNING } from "../shared/core.js";
-import { fmtPercent, fmtSigned } from "../shared/core.js";
-import { Scope } from "../shared/runtime.js";
+import { debounce, Scope } from "../shared/runtime.js";
+import { clamp, TUNING, fmtPercent, fmtSigned } from "../shared/core.js";
 
 const CONFIG_PREFIX = "filter";
 
