@@ -10,8 +10,8 @@
  * The scheduler façade is single-backend: it composes the platform's own
  * primitives (scheduler.postTask / scheduler.yield, Chromium 95+/129+,
  * including dedicated workers) and adds nothing else - no fallback arm, no
- * capability ladder. What the jsdom harness lacks is emulated THERE
- * (tests/loader.mjs), with the same contract, not here.
+ * capability ladder. Behavioral parity is proven end-to-end via the check
+ * harness (check/), not here.
  *
  * Hot-path exports stay plain functions at module scope (V8 inlines them
  * without hidden-class penalties); only stateful runtime behavior lives in

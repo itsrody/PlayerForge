@@ -173,9 +173,7 @@ export default [
   {
     ignores: [
       "dist/**",
-      "node_modules/**",
-      "bench/**",
-      "platform/**"
+      "node_modules/**"
     ]
   }
 ];

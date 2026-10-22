@@ -8,18 +8,8 @@
     "build": "node esbuild.config.mjs",
     "dev": "node esbuild.config.mjs --watch",
     "lint": "eslint src/",
-    "test": "node --import ./tests/loader.mjs --test tests/*.test.mjs",
-    "bench": "node platform/run.mjs bench",
-    "bench:record": "node platform/run.mjs bench:record",
-    "bench:compare": "node platform/run.mjs bench:compare",
-    "verify": "node platform/run.mjs verify",
-    "integration": "node platform/run.mjs integration",
-    "browser-bench": "node platform/run.mjs browser-bench",
-    "browser-bench:record": "node platform/run.mjs browser-bench --record",
-    "visual": "node platform/run.mjs visual",
-    "visual:record": "node platform/visual/hud-glass.mjs --record",
-    "ci": "node platform/run.mjs ci",
-    "platform": "node platform/run.mjs all",
+    "test": "node check/run.mjs",
+    "verify": "node check/run.mjs",
     "check": "node check/run.mjs",
     "check:browser": "node check/run.mjs browser",
     "check:flaws": "node check/run.mjs syntax flaws"
@@ -28,7 +18,6 @@
     "@eslint/js": "^10.0.1",
     "esbuild": "^0.24.0",
     "eslint": "^10.9.1",
-    "jsdom": "^29.1.1",
     "selenium-webdriver": "^4.48.0"
   }
 }
