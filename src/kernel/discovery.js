@@ -86,6 +86,19 @@ function forEachVideoInMutations(mutations, visit) {
 }
 
 /**
+ * Static seeding walk: invoke `visit` for every <video> already in the
+ * parsed document, with no observer behind it. The same input shape as
+ * forEachVideoInMutations (videos surface without any event or batch) -
+ * probe.checkStatic and the kernel's tap arm share it.
+ */
+export function forEachVideoInDocument(visit) {
+  const present = document.querySelectorAll("video");
+  for (const video of present) {
+    visit(video);
+  }
+}
+
+/**
  * CSS-presence pre-gate shared by the synchronous size gate, the
  * observer-driven layout gate, and the probe's escalation decision: false when
  * the element (or a content-visibility:auto subtree it sits in) is not
@@ -533,13 +546,10 @@ export function installVideoProbe({ minWidth, minHeight, onCandidate }) {
     if (done) {
       return;
     }
-    const present = document.querySelectorAll("video");
-    for (const video of present) {
-      // consider() owns the escalation decision per video (present-and-small
-      // escalates; hidden does not), so there is no blanket escalate() here -
-      // that would arm the observer for a page whose only videos are hidden.
-      consider(video);
-    }
+    // consider() owns the escalation decision per video (present-and-small
+    // escalates; hidden does not), so there is no blanket escalate() here -
+    // that would arm the observer for a page whose only videos are hidden.
+    forEachVideoInDocument(consider);
   };
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", checkStatic, { once: true });

@@ -2,7 +2,7 @@ import { logger, setDebugRuntime, postTask, Scope, runSteps } from "../shared/ru
 import { getConfigValue, setConfigValue, gmRegisterMenu, gmUnregisterMenu } from "../shared/store.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, DEBUG_HASH_TAG, FRAMEWORK_TUNING } from "./contract.js";
 import { findSdkForVideo } from "./detection.js";
-import { meetsMinSize, createLayoutGate, createOnScreenGate, isOnScreen, createDiscoveryTap } from "./discovery.js";
+import { forEachVideoInDocument, meetsMinSize, createLayoutGate, createOnScreenGate, isOnScreen, createDiscoveryTap } from "./discovery.js";
 
 /**
  * Resolve once the container's child list has been quiet for a run of
@@ -461,9 +461,7 @@ export class Kernel {
     this.#discoveryDowngraded = false;
     // Mutations only report future changes: a rebuild (SPA route swap) can
     // leave a new player sitting in the tree with no pending record for us.
-    for (const video of document.querySelectorAll("video")) {
-      this.#adoptVideo(video);
-    }
+    forEachVideoInDocument((video) => this.#adoptVideo(video));
   }
 
   /**
@@ -578,12 +576,9 @@ export class Kernel {
   }
 
   #createShell({ video, container, sdk }) {
-    const provider = this.#shellProvider;
-    if (!provider) {
-      logger.error("kernel", "No shell provider registered");
-      return null;
-    }
-    const shell = provider.create({
+    // The provider is guaranteed present - #onVideoFound checks and reports
+    // before reaching here, and this is a private method with one caller.
+    const shell = this.#shellProvider.create({
       video,
       container,
       sdk,

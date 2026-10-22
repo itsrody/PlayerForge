@@ -31,6 +31,11 @@
  * the fewest composed ancestor hops from the video wins; ties break by
  * registry order, then anchor order.
  *
+ * Caching is single-tier: the descriptor cache (see findSdkForVideo) is the
+ * one repeat-query memo - its stamp (video.parentNode + registry) is the
+ * exact invalidation condition the scan itself would use, so no inner
+ * match-level cache can ever answer a query the descriptor cache missed.
+ *
  * Presence thresholds and the WHEN-is-it-ready machinery (size/on-screen
  * gates, media taps, the boot probe) live in discovery.js; this module only
  * answers WHICH SDK owns a video, and it imports nothing.
@@ -53,21 +58,6 @@ const REGISTRY = [
   { name: "Radiant Media Player", anchors: ["radiant-media-player"] },
   { name: "Laravel Video Embed", anchors: ["[data-page] > div:first-child", "#app[data-page]"] },
 ];
-
-/**
- * Repeat-query memo: matchSdk resolves both SDK identity and container
- * in one scan, is often asked about the same element back to back, and SPA
- * frameworks re-ask about surviving videos. WeakMap keys die with their videos
- * - session-only, never persisted.
- *
- * Each entry is stamped with the parent the scan saw, because the cache is
- * only valid while that ancestry holds: SDKs routinely take a bare <video>
- * already in the DOM and later wrap it in their own container (Video.js,
- * MediaElement, Plyr). Without a stamp, a video first seen before its wrap
- * would stay cached (including a negative null) forever. A re-parent is the
- * common, cheaply observable moment the ancestry changed, so it invalidates.
- */
-const matchCache = new WeakMap();
 
 /**
  * Reusable composed-ancestry scratch: the match loop is fully synchronous and
@@ -102,15 +92,11 @@ function fillComposedChain(start) {
 }
 
 function matchSdk(video, registry) {
-  const cached = matchCache.get(video);
-  if (cached && cached.parent === video.parentNode && cached.registry === registry) {
-    return cached.value;
-  }
-  // Single composed walk (uBO's one-pass-over-tokens shape): the old code
-  // re-walked ancestry once per anchor via composedClosest, then walked
-  // again per hit to count hops. Chain index IS the hop count, so one pass
-  // serves every anchor. Selection semantics unchanged: fewest hops wins,
-  // ties keep registry order then anchor order (strict < keeps the first).
+  // Single composed walk (uBO's one-pass-over-tokens shape): the rich-path
+  // ancestors re-walked once per anchor, then walked again per hit to count
+  // hops. Chain index IS the hop count, so one pass serves every anchor.
+  // Selection semantics: fewest hops wins, ties keep registry order then
+  // anchor order (strict < keeps the first).
   const len = fillComposedChain(video);
   let best = null;
   for (let r = 0; r < registry.length; r++) {
@@ -134,7 +120,6 @@ function matchSdk(video, registry) {
       }
     }
   }
-  matchCache.set(video, { value: best, parent: video.parentNode, registry });
   return best;
 }
 
@@ -145,7 +130,7 @@ function matchSdk(video, registry) {
  * "Fewer APIs, same facts": the scan already computes `el` and `hops`, so they
  * are surfaced at zero extra cost rather than recomputed downstream.
  *
- * Parent-stamped like matchCache: a descriptor names a specific container, so
+ * Parent-stamped: a descriptor names a specific container, so
  * it is only valid for the ancestry it resolved against. A re-parent (SDK
  * wrap, SPA re-render reusing the video node) invalidates it; the next query
  * re-scans and the container/anchor follow the new tree instead of pointing at
