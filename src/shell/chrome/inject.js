@@ -77,6 +77,142 @@ class ShellStyle {
 
 const style = new ShellStyle();
 
+/* The container pockets ride a real <style> element, not the adopted
+   constructable sheet: in this Chromium build, @container SIZE rules inside
+   an adoptedStyleSheets sheet never evaluate their conditions (a same-rule
+   <style> twin evaluates and tracks size live - established by the check
+   browser gate probes), nor do @container queries nested inside a size
+   @container. Both pockets style selectors that only exist in this shadow
+   (.pf-panel-slot, .pf-panel-*) so the document-realm adoption is inert:
+   - the stage band writer is --pf-compact-auto's only writer;
+   - the pocket also owns the panel's whole stage-true tail - the density
+     block (panel under 330px, its landscape token adjustment) and the
+     compact reader - moved here as one ordered unit. Cascade rank above
+     the sheet is the price; within the pocket, source order restates the
+     sheet's old tie order exactly (density, landscape adjustment, compact
+     LAST), so every value pair resolves as it did in the sheet. */
+const CONTAINER_POCKET_CSS = `
+  @container pf-stage (max-width: 480px) {
+    .pf-panel-slot:not(:has(> .pf-panel[data-compact="off"])) {
+      --pf-compact-auto: 1;
+    }
+  }
+  /* Stage-true density: the same trigger the sheet originally carried
+     (panel under 330px = stage under ~354px for the fixed panel width
+     formula). A nested @container inside a size @container does not resolve
+     in this build (gate probe), so no style() gate re-arms here - instead
+     the whole pocket resolves ties by source order, mirroring the sheet
+     order it replaced: density first, its landscape token adjustment, then
+     the compact reader LAST (compact outranks density on shared tokens,
+     exactly as it did in the sheet). */
+  @container pf-panel (max-width: 330px) {
+    .pf-panel-header { padding: var(--pf-space-sm); gap: var(--pf-space-sm); }
+    .pf-panel-body { padding: var(--pf-space-sm); }
+    .pf-panel-grid { grid-template-columns: minmax(0, 1fr); }
+    .pf-history-card { padding: 5px var(--pf-space-sm); gap: var(--pf-space-sm); }
+    .pf-history-title { --pf-history-title-size: var(--pf-font-xs); }
+    .pf-history-meta { --pf-history-meta-size: var(--pf-font-2xs); }
+    .pf-history-list { --pf-history-list-height: 152px; }
+    /* The sheet's landscape block kept the list at 144px at this size; the
+       pocket owns the tie now, so the value rides along. */
+    @media (orientation: landscape) and (pointer: coarse) and (max-height: 480px) {
+      .pf-history-list { --pf-history-list-height: 144px; }
+    }
+  }
+  /* Compact reader - moved with the density block so the one live <style>
+     keeps their tie order (compact last). Same style() engine the sheet
+     carried: registered numeric bus on the slot, attribute-driven explicit. */
+  @container pf-compact-bus style(--pf-compact: 1) {
+    .pf-panel {
+      width: min(300px, calc(100% - 16px));
+      font-size: var(--pf-font-sm);
+
+      .pf-panel-header {
+        padding: var(--pf-space-sm);
+        gap: var(--pf-space-sm);
+      }
+
+      .pf-panel-body {
+        padding: var(--pf-space-xs) var(--pf-space-sm) var(--pf-space-md);
+      }
+
+      .pf-panel-grid {
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--pf-space-xs);
+      }
+
+      .pf-panel-tab {
+        padding: 5px 6px;
+        font-size: var(--pf-font-xs);
+      }
+
+      .pf-panel-tab svg {
+        width: 12px;
+        height: 12px;
+      }
+
+      .pf-panel-close {
+        padding: var(--pf-space-xs) var(--pf-space-sm);
+        font-size: 14px;
+      }
+
+      .pf-btn {
+        padding: var(--pf-space-md) var(--pf-space-lg);
+        font-size: var(--pf-font-sm);
+      }
+
+      .pf-settings-toggle {
+        padding: var(--pf-space-sm) var(--pf-space-md);
+        font-size: var(--pf-font-sm);
+      }
+
+      .pf-history-card {
+        padding: 5px 8px;
+        gap: var(--pf-space-sm);
+      }
+
+      .pf-history-title {
+        --pf-history-title-size: var(--pf-font-xs);
+      }
+
+      .pf-history-meta {
+        --pf-history-meta-size: var(--pf-font-2xs);
+      }
+
+      .pf-history-list {
+        --pf-history-list-height: 152px;
+      }
+
+      .pf-stepper {
+        height: 28px;
+      }
+
+      /* Compact mode on touch devices: keep thumb-sized targets. */
+      @media (pointer: coarse) {
+        .pf-panel-tab { padding: 7px 8px; }
+        .pf-btn { padding: 9px 10px; }
+        .pf-settings-toggle { padding: 7px 8px; }
+        .pf-stepper { height: 30px; }
+      }
+
+      /* Compact mode bottom-sheet on portrait touch phones. */
+      @media (max-width: 520px) and (pointer: coarse) {
+        width: auto;
+        top: auto;
+        bottom: var(--pf-space-sm);
+        left: var(--pf-space-sm);
+        right: var(--pf-space-sm);
+        max-height: 56vh;
+        border-radius: 14px 14px 0 0;
+        border-left: none;
+        border-right: none;
+        border-bottom: none;
+        padding-bottom: env(safe-area-max-inset-bottom, 0px);
+      }
+    }
+  }
+`;
+
 /**
  * Apply the shell stylesheet as early as possible - ideally from document-start
  * under Tampermonkey instant injection - so first-video dimming never waits on
@@ -122,6 +258,11 @@ export function injectShell(container) {
 
   const hudLayer = el("div", { class: "pf-hud-layer" }, shadow);
   const cueLayer = el("div", { class: "pf-cue-layer", "aria-hidden": "true" }, hudLayer);
+  // The container-pocket carrier: style-element only (same adoption defect the
+  // compact pocket dodges), namespaced subject, zero cascade intersections.
+  const pocket = document.createElement("style");
+  pocket.textContent = CONTAINER_POCKET_CSS;
+  shadow.appendChild(pocket);
 
   logger.log("inject", `Shell DOM built inside ${container.tagName}#${container.id || container.className}`);
 

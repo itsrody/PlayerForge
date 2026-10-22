@@ -129,6 +129,214 @@ export async function run({ session, baseUrl, boot }) {
     ms: null
   });
 
+  // The compact engine is materially CSS now: the panel carries only the
+  // setting's data-compact attribute, while auto-detect resolves in the style
+  // pipeline (stage container query + pointer media). Rows read the hud bus
+  // (--pf-compact) plus the used panel width, so both the plumbing and the
+  // cascade through the style() reader are credited. The fixture stage is a
+  // fixed 1280px, which keeps every width deterministic. The browser-gate
+  // pointer is a mouse on a wide stage: default auto-detect resolves OFF.
+  const compactDashboard = await session.eval(function main() {
+    const host = document.querySelector(".pf-shell");
+    const hud = host?.shadowRoot?.querySelector(".pf-panel-slot");
+    const panel = host?.shadowRoot?.querySelector(".pf-panel");
+    if (!hud || !panel) return null;
+    const cs = getComputedStyle(panel);
+    return {
+      bus: getComputedStyle(hud).getPropertyValue("--pf-compact").trim(),
+      width: cs.width,
+      attr: panel.dataset.compact ?? null
+    };
+  });
+  rows.push({
+    name: "compact engine: wide stage + pointer fine stays uncompressed",
+    status: !!compactDashboard && compactDashboard.bus === "0" && compactDashboard.width === "380px" ? "pass" : "fail",
+    note: compactDashboard ? JSON.stringify(compactDashboard) : "hud/panel missing",
+    ms: null
+  });
+
+  // Explicit setting wins at any stage: data-compact="on" drives the merged
+  // bus and the compressed shape - no matchMedia, no class stamping.
+  await session.eval(function on() {
+    const panel = document.querySelector(".pf-shell")?.shadowRoot?.querySelector(".pf-panel");
+    if (panel) {
+      panel.dataset.compact = "on";
+    }
+  });
+  const forced = await session.eval(function main() {
+    const host = document.querySelector(".pf-shell");
+    const hud = host?.shadowRoot?.querySelector(".pf-panel-slot");
+    const panel = host?.shadowRoot?.querySelector(".pf-panel");
+    if (!hud || !panel) return null;
+    return {
+      bus: getComputedStyle(hud).getPropertyValue("--pf-compact").trim(),
+      width: getComputedStyle(panel).width
+    };
+  });
+  await session.eval(function off() {
+    const panel = document.querySelector(".pf-shell")?.shadowRoot?.querySelector(".pf-panel");
+    if (panel) {
+      delete panel.dataset.compact;
+    }
+  });
+  rows.push({
+    name: "compact engine: data-compact=on forces compressed at any stage",
+    status: !!forced && forced.bus === "1" && forced.width === "300px" ? "pass" : "fail",
+    note: forced ? JSON.stringify(forced) : "hud/panel missing",
+    ms: null
+  });
+
+  // The auto band, per engine half (see :scope comments in styles.css for
+  // why the halves are separate): shrink the STAGE inline - the fixture video
+  // container is a fixed 1280px - and the pf-stage container query must
+  // re-evaluate LIVE (the band var flips, no JS re-arm), while the device
+  // pointer form stays fine, so the merged bus correctly stays closed. Then
+  // assume the coarse device (inline var - pointer media is not emulable
+  // in this headless session, established by the probe fields) and the full
+  // auto semantics must light up: bus 1 + the compact bottom-sheet corner.
+  // The setting's explicit false must veto ONLY the auto band afterwards.
+  let auto = null;
+  let coarseAssumed = null;
+  let veto = null;
+  let densGate = null;
+  const cdp = await session.raw.createCDPConnection("page");
+  await cdp.send("Emulation.setDeviceMetricsOverride", { width: 400, height: 700, deviceScaleFactor: 1, mobile: true });
+  try {
+    await session.eval(function narrow() {
+      document.querySelector(".pf-shell")?.parentElement?.style.setProperty("width", "400px");
+    });
+    auto = await session.eval(function main() {
+      const host = document.querySelector(".pf-shell");
+      const slot = host?.shadowRoot?.querySelector(".pf-panel-slot");
+      const panel = host?.shadowRoot?.querySelector(".pf-panel");
+      if (!slot || !panel) return null;
+      return {
+        stage: host.getBoundingClientRect().width,
+        band: getComputedStyle(slot).getPropertyValue("--pf-compact-auto").trim(),
+        bus: getComputedStyle(slot).getPropertyValue("--pf-compact").trim(),
+        attr: panel.dataset.compact ?? null,
+        // Restoration ledger: the shell-true density engine - the 330px
+        // pocket rule fires (one-column collapse + tighter history tokens
+        // written on the list element) at a 280px stage. Compact outranks
+        // it by pocket source order; the densGate row below proves it.
+        ada: (() => {
+          const shadow = host.shadowRoot;
+          const mel = document.createElement("style");
+          mel.textContent = `
+            @container pf-panel (max-width: 330px) {
+              .pf-panel-header { --pf-dens-probe: 1; }
+            }`;
+          shadow.appendChild(mel);
+          const plyr = host.parentElement;
+          const heldWidth = plyr.style.getPropertyValue("width");
+          plyr.style.setProperty("width", "280px");
+          const panel2 = shadow.querySelector(".pf-panel");
+          const panelProbe = getComputedStyle(panel2.querySelector(".pf-panel-header")).getPropertyValue("--pf-dens-probe").trim();
+          mel.remove();
+          // The moved density rules write the token on .pf-history-list, a
+          // descendant: read there (the panel-level var stays 168px; vars do
+          // not inherit upward).
+          const density = panel2 ? getComputedStyle(panel2.querySelector(".pf-history-list")).getPropertyValue("--pf-history-list-height").trim() : "nil";
+          if (heldWidth === "") {
+            plyr.style.removeProperty("width");
+          } else {
+            plyr.style.setProperty("width", heldWidth);
+          }
+          return `probe=${panelProbe}|density@280px=${density}`;
+        })()
+      };
+    });
+    await session.eval(function coarse() {
+      document.querySelector(".pf-shell")?.shadowRoot?.querySelector(".pf-panel-slot")
+        ?.style.setProperty("--pf-is-coarse", "1");
+    });
+    coarseAssumed = await session.eval(function main() {
+      const host = document.querySelector(".pf-shell");
+      const hud = host?.shadowRoot?.querySelector(".pf-panel-slot");
+      const panel = host?.shadowRoot?.querySelector(".pf-panel");
+      if (!hud || !panel) return null;
+      return {
+        bus: getComputedStyle(hud).getPropertyValue("--pf-compact").trim(),
+        width: getComputedStyle(panel).width
+      };
+    });
+    await session.eval(function vetoIt() {
+      const panel = document.querySelector(".pf-shell")?.shadowRoot?.querySelector(".pf-panel");
+      if (panel) {
+        panel.dataset.compact = "off";
+      }
+    });
+    veto = await session.eval(function main() {
+      const host = document.querySelector(".pf-shell");
+      const hud = host?.shadowRoot?.querySelector(".pf-panel-slot");
+      const panel = host?.shadowRoot?.querySelector(".pf-panel");
+      if (!hud || !panel) return null;
+      return {
+        bus: getComputedStyle(hud).getPropertyValue("--pf-compact").trim(),
+        corner: getComputedStyle(panel).borderTopLeftRadius
+      };
+    });
+    // Compact-vs-density: at a stage both engines could paint (280px), the
+    // compact reader must win the panel shape. Width discriminates: density
+    // never sizes the panel, so 264px = min(300px, 100% - 16px) is reachable
+    // only through compact; shared tokens (density fired but outranked) can
+    // not move it.
+    await session.eval(function dens() {
+      const host = document.querySelector(".pf-shell");
+      host?.parentElement?.style.setProperty("width", "280px");
+      const panel = host?.shadowRoot?.querySelector(".pf-panel");
+      if (panel) {
+        panel.dataset.compact = "on";
+      }
+    });
+    densGate = await session.eval(function main() {
+      const host = document.querySelector(".pf-shell");
+      const slot = host?.shadowRoot?.querySelector(".pf-panel-slot");
+      const panel = host?.shadowRoot?.querySelector(".pf-panel");
+      if (!slot || !panel) return null;
+      return {
+        busy: getComputedStyle(slot).getPropertyValue("--pf-compact").trim(),
+        width: getComputedStyle(panel).width
+      };
+    });
+  } finally {
+    await cdp.send("Emulation.setEmulatedMedia", { features: [] });
+    await cdp.send("Emulation.clearDeviceMetricsOverride", {});
+    await session.eval(function restore() {
+      const host = document.querySelector(".pf-shell");
+      host?.parentElement?.style.removeProperty("width");
+      host?.shadowRoot?.querySelector(".pf-panel-slot")?.style.removeProperty("--pf-is-coarse");
+      const panel = host?.shadowRoot?.querySelector(".pf-panel");
+      if (panel) {
+        delete panel.dataset.compact;
+      }
+    });
+  }
+  rows.push({
+    name: "compact engine: stage band re-evaluates live, closed by pointer form",
+    status: !!auto && auto.stage === 400 && auto.band === "1" && auto.bus === "0" && auto.attr === null && auto.ada === "probe=1|density@280px=152px" ? "pass" : "fail",
+    note: auto ? JSON.stringify(auto) : "hud/panel missing",
+    ms: null
+  });
+  rows.push({
+    name: "compact engine: assumed-coarse stage lights the full auto bus",
+    status: !!coarseAssumed && coarseAssumed.bus === "1" && coarseAssumed.width === "300px" ? "pass" : "fail",
+    note: coarseAssumed ? JSON.stringify(coarseAssumed) : "hud/panel missing",
+    ms: null
+  });
+  rows.push({
+    name: "compact engine: data-compact=off vetoes only the auto band",
+    status: !!veto && veto.bus === "0" && veto.corner === "16px" ? "pass" : "fail",
+    note: veto ? JSON.stringify(veto) : "hud/panel missing",
+    ms: null
+  });
+  rows.push({
+    name: "density + compact: pocket order keeps compact ahead",
+    status: !!densGate && densGate.busy === "1" && densGate.width === "264px" ? "pass" : "fail",
+    note: densGate ? JSON.stringify(densGate) : "slot/panel missing",
+    ms: null
+  });
+
   // The shell contract must survive a full teardown: drop the current anchor,
   // append a fresh video, and require the kernel to re-anchor onto it - the
   // new video node must carry the shell marker (the old markers on container

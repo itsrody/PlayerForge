@@ -34,8 +34,12 @@ class HoldRepeater {
   }
 }
 const TAB_NAV_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End"]);
-/** Auto-detect compact: narrow touch viewport. matchMedia change re-applies live. */
-const COMPACT_MEDIA_QUERY = "(max-width: 480px) and (pointer: coarse)";
+/** Auto-detect compact lives in CSS: the stage container query + pointer media
+ *  query drive it through the hud layer's compact bus (styles.css compact
+ *  writers). The only JS state is the ui.compact setting's explicit value,
+ *  surfaced as the panel's data-compact attribute - "on"/"off"/-absent is
+ *  the whole contract. */
+const COMPACT_EXPLICIT = { true: "on", false: "off" };
 
 function decimalsOf(step) {
   const str = String(step);
@@ -308,6 +312,7 @@ function createStepper(options) {
  */
 export class SettingsPanel {
   #hudLayer;
+  #slot;
   #shellHost;
   #root = null;
   #body = null;
@@ -345,16 +350,19 @@ export class SettingsPanel {
   }
 
   /**
-   * Compact mode: explicit setting wins; otherwise auto-detect touch + narrow
-   * viewport (< 480px). A matchMedia change listener in #wireEvents re-applies
-   * the class live when the viewport crosses the breakpoint; the setting
-   * override still wins for the explicit (undirected) path.
+   * Compact mode: the setting override wins as the data-compact attribute
+   * ("on"/"off"); an unset setting clears the attribute and the stage
+   * container query auto-detects - live, in the style pipeline, with no
+   * listener (styles.css compact writers).
    */
-  #isCompactMode() {
+  #applyCompactSetting() {
     const explicit = getSetting(SETTING_KEYS.compact);
-    if (explicit === true || explicit === false) return explicit;
-    // Auto-detect: narrow touch viewport.
-    return matchMedia(COMPACT_MEDIA_QUERY).matches;
+    const state = COMPACT_EXPLICIT[explicit];
+    if (state === undefined) {
+      delete this.#root.dataset.compact;
+    } else {
+      this.#root.dataset.compact = state;
+    }
   }
 
   get element() {
@@ -404,7 +412,7 @@ export class SettingsPanel {
     this.#returnFocus = deepestActiveElement(this.#shellHost);
     this.#armDismissal();
     this.#runWithViewTransition("pf-panel-open", () => {
-      this.#root.classList.toggle("pf-compact", this.#isCompactMode());
+      this.#applyCompactSetting();
       this.#root.classList.add("pf-open");
       const activeTab = this.#root.querySelector(".pf-panel-tab-active") || this.#closeButton;
       if (activeTab && deepestActiveElement(this.#shellHost) !== activeTab) {
@@ -747,6 +755,8 @@ export class SettingsPanel {
     this.#teardownDismissal();
     this.#root?.remove();
     this.#root = null;
+    this.#slot?.remove();
+    this.#slot = null;
     this.#backdrop?.remove();
     this.#backdrop = null;
     this.#body = null;
@@ -780,11 +790,6 @@ export class SettingsPanel {
     root.setAttribute("aria-modal", "true");
     root.setAttribute("aria-label", "PlayerForge controls");
 
-    // Compact mode: apply class based on setting or auto-detect mobile viewport.
-    if (this.#isCompactMode()) {
-      root.classList.add("pf-compact");
-    }
-
     const header = document.createElement("div");
     header.className = "pf-panel-header";
 
@@ -808,26 +813,30 @@ export class SettingsPanel {
     body.className = "pf-panel-body";
     root.appendChild(header);
     root.appendChild(body);
-    this.#hudLayer.appendChild(root);
+    // The panel rides a stage-sized slot (inset:0, pointer-transparent) so
+    // the compact engine resolves wholly in-shadow: the slot is the stage
+    // container Pf-stage AND the compact bus holder; a container lookup from
+    // shadow content to the light-DOM host never resolves (the browser gate
+    // established that), so the slot must exist as the shadow-side stage.
+    this.#slot = document.createElement("div");
+    this.#slot.className = "pf-panel-slot";
+    this.#hudLayer.appendChild(this.#slot);
+    this.#slot.appendChild(root);
     this.#root = root;
     this.#body = body;
     this.#closeButton = closeButton;
+
+    // Compact mode: the setting override writes data-compact; the unset
+    // setting leaves the attribute absent so the stage container query
+    // auto-detects in the style pipeline. Runs after the root claims, since
+    // the write is to the panel's own dataset.
+    this.#applyCompactSetting();
 
     closeButton.addEventListener("click", () => this.close(), { signal: this.#scope.signal });
   }
 
   #wireEvents() {
     const { signal } = this.#scope;
-    // Live compact mode: Chromium re-fires matchMedia change on viewport
-    // crossings, so the panel tracks the breakpoint instead of a one-shot
-    // read at construction. The explicit ui.compact setting still wins - it
-    // is consulted first inside #isCompactMode and only the auto-detect path
-    // consults the query. Listener dies with the panel's scope signal.
-    matchMedia(COMPACT_MEDIA_QUERY).addEventListener("change", () => {
-      if (this.isOpen) {
-        this.#root.classList.toggle("pf-compact", this.#isCompactMode());
-      }
-    }, { signal });
     this.#shellHost.addEventListener(GESTURE_EVENTS.panel, (event) => {
       event.stopPropagation();
       this.toggle();

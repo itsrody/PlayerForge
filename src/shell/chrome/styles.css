@@ -23,8 +23,7 @@
 .pf-shell {
   /* The HUD paints its own dark palette; opting the shadow tree into dark
      rendering keeps UA form-control widgets (color wells, scrollbars, date
-     pickers) from flashing light against it. */
-  color-scheme: dark;
+     pickers) from flashing light against it. */  color-scheme: dark;
 
   /* -- Tokens: palette, borders, radii, type, motion, z-ladder -- */
   --pf-fg: #fff;                    /* primary text            */
@@ -119,6 +118,11 @@
   font-size: var(--pf-font-lg);
   color: var(--pf-fg);
   box-sizing: border-box;
+  /* No size container here on purpose: container lookups crossing the light
+     boundary (this host is the only light-DOM element the shadow can style)
+     do not resolve for @container rules declared in the shadow sheet - the
+     stage container lives on the panel slot inside the shadow instead (see
+     .pf-panel-slot), sized identically by inset:0. */
 
   *, *::before, *::after {
     box-sizing: border-box;
@@ -170,6 +174,32 @@
   initial-value: 0%;
 }
 
+/* Compact bus numbers (see the hud layer): registered so their computed
+   values are real numbers, not token streams - the style() reader compares
+   tokens, and an unregistered max(var(), var()) would compute to the literal
+   "max(0, 1)" and never match "1". Authored defaults are all 0; the merge
+   writes max() over them, so the computed value is a plain 0|1. */
+@property --pf-compact {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+@property --pf-compact-auto {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+@property --pf-compact-explicit {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+@property --pf-is-coarse {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
 @keyframes pf-scroll-edge {
   from {
     --pf-scroll-edge: 0%;
@@ -192,6 +222,15 @@
       pointer-events: none;
       z-index: var(--pf-z-hud);
       contain: layout style;
+      /* Stage size container: the hud is inset:0 of the host, so its inline
+         size IS the player region - the real responsive condition, not the
+         viewport (their relation flips tiny on embedded players). Declared
+         on this shadow element because container lookups cannot cross the
+         light boundary to the host (established by the check browser gate);
+         inset:0 keeps the geometry identical to the host box. Stage-true
+         rules query this under pf-stage; the compact band writer is the
+         consumer. */
+      container: pf-stage / inline-size;
 
       /* Re-enable pointer events on every HUD child - but keep the caption
          layer click-transparent via the more specific rule below. */
@@ -213,6 +252,47 @@
 
       > pf-toast.pf-visible:has(.pf-toast-actions:not([hidden])) {
         pointer-events: auto;
+      }
+
+      /* The panel slot hosts the compact bus in-shadow: stage-sized by
+         inset:0 so its inline size IS the player region, pointer-transparent
+         so it never caps gestures, and a container so the panel's style()
+         reader resolves against the same element the merge is computed on.
+         It does NOT carry the stage size container - the hud does (a size
+         container cannot rule its own element, so writing the band onto this
+         box must query an ancestor). */
+      > .pf-panel-slot {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        container: pf-compact-bus / inline-size;
+
+        /* Compact bus: the one variable the panel reads. `auto` comes from
+           the stage band writer (pf-stage on the hud) gated by the device
+           pointer form, `explicit` comes from the ui.compact setting through
+           the panel's data-compact attribute; all writers run in the style
+           pipeline, so the merge is a multiplication + max over the
+           registered defaults - no JS re-arm on stage/pointer changes. The
+           two auto halves are separate variables on purpose: media-based
+           pointer emulation is unavailable in headless (established by the
+           check browser gate), so a gate row that must fake coarse injects
+           --pf-is-coarse while the genuine @media path ships for devices. */
+        --pf-compact: max(var(--pf-compact-auto, 0) * var(--pf-is-coarse, 0), var(--pf-compact-explicit, 0));
+        --pf-is-coarse: 0;
+        @media (pointer: coarse) {
+          & {
+            --pf-is-coarse: 1;
+          }
+        }
+        /* The explicit path reads the panel's data-compact attribute: "on"
+           forces the compressed shape at any stage (the setting's explicit
+           true), "off" vetoes ONLY the auto path (the setting's explicit
+           false) - an absent attribute is the auto-detect state, which is
+           exactly how the old JS resolved "unset setting, consult the
+           query". */
+        &:has(> .pf-panel[data-compact="on"]) {
+          --pf-compact-explicit: 1;
+        }
       }
     }
 
@@ -442,7 +522,8 @@
        flips display via the pf-open class (allow-discrete) and fades opacity in
        place - a pure fade, no motion; Esc and outside-click dismissal are
        JS-owned in panel.js. Density adapts to the *shell* (not the viewport)
-       via the container query at the bottom of this block. */
+       via the 330px pocket rule (inject.js) - the size gate lives there
+       because @container size rules cannot evaluate in the adopted sheet. */
     .pf-panel {
       container-type: inline-size;
       container-name: pf-panel;
@@ -1227,16 +1308,11 @@
 
     /* - Shell-true density - the panel adapts to its own width (~ the video
          container), not the viewport: wide panels keep the two-column grid,
-         very narrow players collapse it to one column. */
-    @container pf-panel (max-width: 330px) {
-      .pf-panel-header { padding: var(--pf-space-sm); gap: var(--pf-space-sm); }
-      .pf-panel-body { padding: var(--pf-space-sm); }
-      .pf-panel-grid { grid-template-columns: minmax(0, 1fr); }
-      .pf-history-card { padding: 5px var(--pf-space-sm); gap: var(--pf-space-sm); }
-      .pf-history-title { --pf-history-title-size: var(--pf-font-xs); }
-      .pf-history-meta { --pf-history-meta-size: var(--pf-font-2xs); }
-      .pf-history-list { --pf-history-list-height: 152px; }
-    }
+         very narrow players collapse it to one column. The rules live in the
+         @container pocket (inject.js) - the adoptedSheets path cannot
+         evaluate a @container SIZE rule in this build; the pocket's copy is
+         gated on --pf-compact: 0 so compact always outranks it without the
+         block re-ranking against the sheet's cascade. */
 
     /* - Mobile & touch - */
     /* Touch devices (phones/tablets): enlarge hit targets toward
@@ -1331,97 +1407,13 @@
       .pf-options-row { flex-shrink: 0; }
     }
 
-    /* - Compact mode - narrower panel, reduced density, single-column grid.
-       Triggered by the ui.compact setting or auto-detected on narrow touch
-       viewports. Overrides the default sizing tokens inline so the existing
-       responsive breakpoints still cascade on top. */
-    .pf-panel.pf-compact {
-      width: min(300px, calc(100% - 16px));
-      font-size: var(--pf-font-sm);
-
-      .pf-panel-header {
-        padding: var(--pf-space-sm);
-        gap: var(--pf-space-sm);
-      }
-
-      .pf-panel-body {
-        padding: var(--pf-space-xs) var(--pf-space-sm) var(--pf-space-md);
-      }
-
-      .pf-panel-grid {
-        grid-template-columns: minmax(0, 1fr);
-        gap: var(--pf-space-xs);
-      }
-
-      .pf-panel-tab {
-        padding: 5px 6px;
-        font-size: var(--pf-font-xs);
-      }
-
-      .pf-panel-tab svg {
-        width: 12px;
-        height: 12px;
-      }
-
-      .pf-panel-close {
-        padding: var(--pf-space-xs) var(--pf-space-sm);
-        font-size: 14px;
-      }
-
-      .pf-btn {
-        padding: var(--pf-space-md) var(--pf-space-lg);
-        font-size: var(--pf-font-sm);
-      }
-
-      .pf-settings-toggle {
-        padding: var(--pf-space-sm) var(--pf-space-md);
-        font-size: var(--pf-font-sm);
-      }
-
-      .pf-history-card {
-        padding: 5px 8px;
-        gap: var(--pf-space-sm);
-      }
-
-      .pf-history-title {
-        --pf-history-title-size: var(--pf-font-xs);
-      }
-
-      .pf-history-meta {
-        --pf-history-meta-size: var(--pf-font-2xs);
-      }
-
-      .pf-history-list {
-        --pf-history-list-height: 152px;
-      }
-
-      .pf-stepper {
-        height: 28px;
-      }
-
-      /* Compact mode on touch devices: keep thumb-sized targets. */
-      @media (pointer: coarse) {
-        .pf-panel-tab { padding: 7px 8px; }
-        .pf-btn { padding: 9px 10px; }
-        .pf-settings-toggle { padding: 7px 8px; }
-        .pf-stepper { height: 30px; }
-      }
-
-      /* Compact mode bottom-sheet on portrait touch phones. */
-      @media (max-width: 520px) and (pointer: coarse) {
-        width: auto;
-        top: auto;
-        bottom: var(--pf-space-sm);
-        left: var(--pf-space-sm);
-        right: var(--pf-space-sm);
-        max-height: 56vh;
-        border-radius: 14px 14px 0 0;
-        border-left: none;
-        border-right: none;
-        border-bottom: none;
-        padding-bottom: env(safe-area-max-inset-bottom, 0px);
-      }
-    }
+    /* Compact mode: fired by the compact bus style() query, but the body
+       lives in the container pocket (inject.js) - the sheet's size-type
+       queries never evaluate in this build, and the pocket is where the
+       stage-true density block and the compact reader keep their mutual
+       tie order (compact outranks density on shared tokens) in one live
+       <style>. The JS side flips the data-compact attribute; the bus
+       merges the stage band and the setting on the slot. */
 
     /* @starting-style for the panel's open transition. Keyed separately so it
        parses cleanly whether the browser supports the display transition or not.
