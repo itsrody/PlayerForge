@@ -101,77 +101,96 @@ function coerceSetting(definition, value) {
   return value;
 }
 
-const cache = {};
-for (const definition of SETTINGS_SCHEMA) {
-  cache[definition.key] = coerceSetting(definition, getConfigValue(`${SETTINGS_PREFIX}.${definition.key}`, definition.default));
+/**
+ * The settings engine as one class: the typed cache, the reactivity bus, the
+ * cross-tab live reload - everything stateful here is a private field, and
+ * every public behavior is a method on the instance. The module-level
+ * singleton wires the exported call surface below.
+ */
+class Settings {
+  /** Typed cache keyed by SETTING_KEYS, seeded once from storage. */
+  #cache = {};
+  /** One EventTarget so every consumer learns about a change exactly once. */
+  #bus = new EventTarget();
+
+  constructor() {
+    for (const definition of SETTINGS_SCHEMA) {
+      this.#cache[definition.key] = coerceSetting(definition, getConfigValue(`${SETTINGS_PREFIX}.${definition.key}`, definition.default));
+    }
+    // Cross-tab live reload via the storage-owned watch (shared echo contract).
+    watchStorageKey(KEYS.configs, () => this.#refreshFromStorage());
+  }
+
+  get(key) {
+    return this.#cache[key];
+  }
+
+  #emit() {
+    this.#bus.dispatchEvent(new Event("settings"));
+  }
+
+  /**
+   * Subscribe to settings changes; the cache is already updated when the
+   * listener runs, so re-read getSetting() directly. Returns an unsubscribe;
+   * `signal` detaches it with the caller's lifecycle.
+   */
+  subscribe(listener, { signal } = {}) {
+    // Reading a setting is safe with an aborted signal, but subscribing is not:
+    // the platform never fires the teardown listener on an already-aborted
+    // signal, which would leak the handler. Treat it as a no-op subscription.
+    if (signal?.aborted) {
+      return () => {};
+    }
+    const handler = () => listener();
+    this.#bus.addEventListener("settings", handler, { signal });
+    return () => this.#bus.removeEventListener("settings", handler);
+  }
+
+  set(key, value) {
+    const changed = this.#cache[key] !== value;
+    this.#cache[key] = value;
+    setConfigValue(`${SETTINGS_PREFIX}.${key}`, value);
+    if (changed) {
+      this.#emit();
+    }
+  }
+
+  /**
+   * Live reload across tabs: pf:configs lives in shared manager storage,
+   * so a write from any other tab re-seeds this cache and every event-time
+   * getSetting() consumer picks it up on its next read. Our own writes echo
+   * back through the same path and land as no-ops.
+   */
+  #refreshFromStorage() {
+    // A cross-tab writer replaced pf:configs behind our back - drop the cached
+    // doc so the per-key re-reads below come from the fresh manager value.
+    invalidateConfigCache();
+    let changed = 0;
+    for (const definition of SETTINGS_SCHEMA) {
+      const key = definition.key;
+      const fresh = coerceSetting(definition, getConfigValue(`${SETTINGS_PREFIX}.${key}`, DEFAULT_SETTINGS[key]));
+      if (this.#cache[key] !== fresh) {
+        this.#cache[key] = fresh;
+        changed++;
+      }
+    }
+    if (changed > 0) {
+      logger.log("settings", `Live-reloaded ${changed} setting(s) from storage`);
+      this.#emit();
+    }
+  }
 }
+
+const settings = new Settings();
 
 export function getSetting(key) {
-  return cache[key];
+  return settings.get(key);
 }
 
-/**
- * Settings reactivity bus: one module-level EventTarget so every consumer
- * (settings section controls, and any future hot-read UI) learns about a
- * change exactly once - own write dispatches here, the cross-tab echo lands
- * as a no-op (changed 0) and never double-fires.
- */
-const settingsBus = new EventTarget();
-
-function emitSettingsChanged() {
-  settingsBus.dispatchEvent(new Event("settings"));
-}
-
-/**
- * Subscribe to settings changes; the cache is already updated when the
- * listener runs, so re-read getSetting() directly. Returns an unsubscribe;
- * `signal` detaches it with the caller's lifecycle.
- */
 export function onSettingsChanged(listener, { signal } = {}) {
-  // Reading a setting is safe with an aborted signal, but subscribing is not:
-  // the platform never fires the teardown listener on an already-aborted
-  // signal, which would leak the handler. Treat it as a no-op subscription.
-  if (signal?.aborted) {
-    return () => {};
-  }
-  const handler = () => listener();
-  settingsBus.addEventListener("settings", handler, { signal });
-  return () => settingsBus.removeEventListener("settings", handler);
+  return settings.subscribe(listener, { signal });
 }
 
 export function setSetting(key, value) {
-  const changed = cache[key] !== value;
-  cache[key] = value;
-  setConfigValue(`${SETTINGS_PREFIX}.${key}`, value);
-  if (changed) {
-    emitSettingsChanged();
-  }
+  settings.set(key, value);
 }
-
-/**
- * Live reload across tabs: pf:configs lives in shared manager storage,
- * so a write from any other tab re-seeds this cache and every event-time
- * getSetting() consumer picks it up on its next read. Our own writes echo
- * back through the same path and land as no-ops.
- */
-function refreshSettingsCache() {
-  // A cross-tab writer replaced pf:configs behind our back - drop the cached
-  // doc so the per-key re-reads below come from the fresh manager value.
-  invalidateConfigCache();
-  let changed = 0;
-  for (const definition of SETTINGS_SCHEMA) {
-    const key = definition.key;
-    const fresh = coerceSetting(definition, getConfigValue(`${SETTINGS_PREFIX}.${key}`, DEFAULT_SETTINGS[key]));
-    if (cache[key] !== fresh) {
-      cache[key] = fresh;
-      changed++;
-    }
-  }
-  if (changed > 0) {
-    logger.log("settings", `Live-reloaded ${changed} setting(s) from storage`);
-    emitSettingsChanged();
-  }
-}
-
-// Cross-tab live reload via the storage-owned watch (shared echo contract).
-watchStorageKey(KEYS.configs, () => refreshSettingsCache());

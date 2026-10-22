@@ -212,15 +212,52 @@ const SESSION_ACTIONS = ["play", "pause", "stop", "seekbackward", "seekforward",
  *  OS media controls on every shell teardown. */
 const CLEAR_ACTIONS = SESSION_ACTIONS;
 
-/** The bridge whose media currently owns navigator.mediaSession. */
-let sessionOwner = null;
+/**
+ * The claim registry as one class: it owns the "whose MediaSession is it"
+ * state, so a newest-claim-wins displacement and the disown-on-destroy dance
+ * live in exactly one place. The module singleton wires the exported call
+ * surface below.
+ */
+class MediaSessionOwner {
+  /** The bridge whose media currently owns navigator.mediaSession. */
+  #current = null;
+
+  /**
+   * Claim this window's MediaSession for one shell: action handlers ride the
+   * command plane, position state follows playback events via sync(), and rich
+   * metadata lands in OS controls. A newer claim displaces the previous owner;
+   * teardown runs once when `signal` aborts. No-op (returns null) without a
+   * MediaSession implementation.
+   */
+  claim({ controls, video, signal, session = navigator.mediaSession }) {
+    if (!session) {
+      return null;
+    }
+    this.#current?.destroy();
+    const bridge = new MediaSessionBridge(this, session, controls, video);
+    this.#current = bridge;
+    bridge.attach(signal);
+    return bridge;
+  }
+
+  /** Drop a released bridge from the registry; no-op if displaced first.
+   *  Module-internal handoff (the bridge has its own private field, so the
+   *  private-name rules bar a cross-class # method call). */
+  disown(bridge) {
+    if (this.#current === bridge) {
+      this.#current = null;
+    }
+  }
+}
+
+const sessionOwner = new MediaSessionOwner();
 
 /**
  * Rich metadata for OS media surfaces: page title, host as artist, poster as
  * artwork. Returns null when there is nothing to show or the poster URL is
  * malformed.
  */
-function buildSessionMetadata(video) {
+function metadataOf(video) {
   const artwork = video.poster && URL.canParse(video.poster, location.href)
     // sizes="any": OS artwork pickers (Android lock screen, desktop thumbnail
     // surfaces) select by declared dimensions; an entry without sizes is the
@@ -251,25 +288,12 @@ function metadataKeyOf(video) {
   }
 }
 
-/**
- * Claim this window's MediaSession for one shell: action handlers ride the
- * command plane, position state follows playback events via sync(), and rich
- * metadata lands in OS controls. A newer claim displaces the previous owner;
- * teardown runs once when `signal` aborts. No-op (returns null) without a
- * MediaSession implementation.
- */
-export function claimMediaSession({ controls, video, signal, session = navigator.mediaSession }) {
-  if (!session) {
-    return null;
-  }
-  sessionOwner?.destroy();
-  const bridge = new MediaSessionBridge(session, controls, video);
-  sessionOwner = bridge;
-  bridge.attach(signal);
-  return bridge;
+export function claimMediaSession(options) {
+  return sessionOwner.claim(options);
 }
 
 class MediaSessionBridge {
+  #owner;
   #session;
   #controls;
   #video;
@@ -282,7 +306,8 @@ class MediaSessionBridge {
    */
   #canSetPositionState = false;
 
-  constructor(session, controls, video) {
+  constructor(owner, session, controls, video) {
+    this.#owner = owner;
     this.#session = session;
     this.#controls = controls;
     this.#video = video;
@@ -398,9 +423,7 @@ class MediaSessionBridge {
       return;
     }
     this.#scope.dispose();
-    if (sessionOwner === this) {
-      sessionOwner = null;
-    }
+    this.#owner.disown(this);
     for (const action of CLEAR_ACTIONS) {
       try {
         this.#session.setActionHandler(action, null);
@@ -416,7 +439,7 @@ class MediaSessionBridge {
       return;
     }
     try {
-      this.#session.metadata = buildSessionMetadata(this.#video);
+      this.#session.metadata = metadataOf(this.#video);
     } catch {}
     this.#metadataKey = metadataKeyOf(this.#video);
   }

@@ -73,203 +73,213 @@ const PUSH_APPLY_LIMIT = 65536;
  * unsubscribe handle (a positional handle would write to a stale index after
  * compaction: no-op at best - leaking a zombie subscriber that keeps the
  * observer alive forever - or killing whichever subscriber now sits at that
- * index). `live` counts active slots so teardown stays automatic. This
+ * index). `#live` counts active slots so teardown stays automatic. This
  * replaces a Set-snapshot fan-out: the per-batch `[...subscribers]`
  * allocation is gone from the mutation hot path.
  */
-const slots = [];
-let live = 0;
+class DomWatch {
+  #slots = [];
+  #live = 0;
 
-let observer = null;
-/** Document the observer is currently bound to - see ensureObserver(). */
-let observedDoc = null;
-let queued = false;
-/** Pooled records buffers: flush swaps active/recycled instead of allocating. */
-let pendingRecords = [];
-let recycledRecords = [];
+  #observer = null;
+  /** Document the observer is currently bound to - see #ensureObserver(). */
+  #observedDoc = null;
+  #queued = false;
+  /** Pooled records buffers: flush swaps active/recycled instead of allocating. */
+  #pendingRecords = [];
+  #recycledRecords = [];
 
-/** Retained handle for the hidden-tab deferred flush; null when none pending. */
-let deferHandle = null;
-/** Abort scope for the visibilitychange resume listener: flush and idle
- *  teardown release it natively instead of pairing add/remove by hand. */
-let deferAc = null;
+  /** Retained handle for the hidden-tab deferred flush; null when none pending. */
+  #deferHandle = null;
+  /** Abort scope for the visibilitychange resume listener: flush and idle
+   *  teardown release it natively instead of pairing add/remove by hand. */
+  #deferAc = null;
 
-function flush() {
-  queued = false;
-  const records = pendingRecords;
-  // Double-buffer swap: hand the drained batch back as the recycled buffer
-  // instead of abandoning it for a fresh allocation (nothing longer references
-  // `records` once this synchronous fan-out completes, so reuse is safe).
-  pendingRecords = recycledRecords;
-  // Re-arm the incoming buffer EMPTY. The swap alone leaves the batch
-  // delivered two flushes ago inside it, and the observer only ever appends:
-  // without this, every flush from the third onward re-delivered stale
-  // records alongside the current batch (observed as [1,1,2,2,3] for five
-  // single-mutation rounds) - each one costing subscribers a redundant DOM
-  // walk over records they had already handled.
-  pendingRecords.length = 0;
-  recycledRecords = records;
-  // Dispatch from a length-hold: tombstones are skipped, and slots appended
-  // mid-batch (subscriptions landing during delivery) belong to the next
-  // batch - subscribe/unsubscribe can't skew the current audience.
-  const length = slots.length;
-  for (let i = 0; i < length; i++) {
-    const slot = slots[i];
-    if (!slot || !slot[0]) {
-      continue;
-    }
-    // uBO safeObserverHandler rule: one throwing consumer must never abort
-    // the fan-out to its peers in the same batch, nor escape into the page's
-    // unhandled-rejection path.
-    try {
-      slot[0](records);
-    } catch (err) {
-      logger.error("dom-watch", "A dom-watch subscriber threw during dispatch", err);
-    }
-  }
-
-  // uBO compaction rule: tombstoned slots are reindexed once they outnumber
-  // live slots 4:1 - a churny page can't grow the slot array without bound.
-  // Safe because unsubscribe tracks slot identity (see onDomMutations), not
-  // slot position.
-  if (live > 0 && slots.length > live * COMPACTION_RATIO) {
-    let write = 0;
-    for (let i = 0; i < slots.length; i++) {
+  #flush() {
+    this.#queued = false;
+    const records = this.#pendingRecords;
+    // Double-buffer swap: hand the drained batch back as the recycled buffer
+    // instead of abandoning it for a fresh allocation (nothing longer references
+    // `records` once this synchronous fan-out completes, so reuse is safe).
+    this.#pendingRecords = this.#recycledRecords;
+    // Re-arm the incoming buffer EMPTY. The swap alone leaves the batch
+    // delivered two flushes ago inside it, and the observer only ever appends:
+    // without this, every flush from the third onward re-delivered stale
+    // records alongside the current batch (observed as [1,1,2,2,3] for five
+    // single-mutation rounds) - each one costing subscribers a redundant DOM
+    // walk over records they had already handled.
+    this.#pendingRecords.length = 0;
+    this.#recycledRecords = records;
+    // Dispatch from a length-hold: tombstones are skipped, and slots appended
+    // mid-batch (subscriptions landing during delivery) belong to the next
+    // batch - subscribe/unsubscribe can't skew the current audience.
+    const slots = this.#slots;
+    const length = slots.length;
+    for (let i = 0; i < length; i++) {
       const slot = slots[i];
-      if (slot && slot[0]) {
-        slots[write++] = slot;
+      if (!slot || !slot[0]) {
+        continue;
+      }
+      // uBO safeObserverHandler rule: one throwing consumer must never abort
+      // the fan-out to its peers in the same batch, nor escape into the page's
+      // unhandled-rejection path.
+      try {
+        slot[0](records);
+      } catch (err) {
+        logger.error("dom-watch", "A dom-watch subscriber threw during dispatch", err);
       }
     }
-    slots.length = write;
-  }
-}
 
-const onVisibilityChange = () => {
-  if (document.visibilityState !== "hidden") {
-    flushPending();
-  }
-};
-
-function flushPending() {
-  deferAc?.abort();
-  deferAc = null;
-  deferHandle?.abort();
-  deferHandle = null;
-  flush();
-}
-
-/**
- * Park the pending batch while the document is hidden. A hidden tab's timer
- * and observer still tick; dispatching the (DOM-scanning) subscribers is what
- * should wait, so it is deferred to a background-priority postTask with a hard
- * cap - and resumed the moment the tab is visible again.
- */
-function deferFlushUntilVisible() {
-  if (deferHandle) {
-    return;
-  }
-  deferAc = new AbortController();
-  deferHandle = postTask(flushPending, { priority: "background", delay: DEFER_VISIBILITY_CAP_MS });
-  document.addEventListener("visibilitychange", onVisibilityChange, { signal: deferAc.signal });
-}
-
-/**
- * Chromium-native scheduling advantage: `scheduler.yield()` lets the browser
- * interleave input / paint between the mutation batch and the subscriber
- * dispatch. Falls back to flush() directly when the API is absent (jsdom
- * tests, non-Chromium hosts) so the test tick() helper stays compatible.
- */
-async function scheduleFlush() {
-  await yield_();
-  if (document.visibilityState === "hidden") {
-    deferFlushUntilVisible();
-    return;
-  }
-  flush();
-}
-
-function ensureObserver() {
-  const doc = globalThis.document;
-  if (!doc?.documentElement) {
-    return;
-  }
-  if (observer && observedDoc === doc) {
-    return;
-  }
-  // Re-bind when the active document changed underneath us. Never happens
-  // in a real page; happens constantly under jsdom test harnesses that
-  // install a fresh document per case.
-  observer?.disconnect();
-  queued = false;
-  pendingRecords = [];
-  recycledRecords = [];
-  observer = new MutationObserver((records) => {
-    // Coalesce the batch into the pooled buffer in one place; the browser
-    // already arrived with a pooled record list, so this is an append-only
-    // copy with no per-record allocation.
-    if (records.length < PUSH_APPLY_LIMIT) {
-      Array.prototype.push.apply(pendingRecords, records);
-    } else {
-      for (let i = 0; i < records.length; i++) {
-        pendingRecords.push(records[i]);
+    // uBO compaction rule: tombstoned slots are reindexed once they outnumber
+    // live slots 4:1 - a churny page can't grow the slot array without bound.
+    // Safe because unsubscribe tracks slot identity (see onDomMutations), not
+    // slot position.
+    if (this.#live > 0 && slots.length > this.#live * COMPACTION_RATIO) {
+      let write = 0;
+      for (let i = 0; i < slots.length; i++) {
+        const slot = slots[i];
+        if (slot && slot[0]) {
+          slots[write++] = slot;
+        }
       }
+      slots.length = write;
     }
-    if (!queued) {
-      queued = true;
-      // scheduleFlush() runs synchronously up to its yield_() await, so the
-      // extra queueMicrotask hop the original shape paid bought nothing -
-      // the yield already provides the task boundary before dispatch.
-      scheduleFlush().catch((err) => {
-        logger.error("dom-watch", "Flush scheduling failed:", err);
-      });
-    }
-  });
-  observer.observe(doc.documentElement, { childList: true, subtree: true });
-  observedDoc = doc;
-}
-
-/**
- * Drop the observer (and any parked defer) the moment the last subscriber
- * leaves. Idempotent no-op when already detached.
- */
-function stopIfIdle() {
-  if (live === 0 && observer) {
-    observer.disconnect();
-    observer = null;
-    observedDoc = null;
-    pendingRecords = [];
-    recycledRecords = [];
-    slots.length = 0;
-    deferAc?.abort();
-    deferAc = null;
-    deferHandle?.abort();
-    deferHandle = null;
   }
-}
 
-export function onDomMutations(handler, { signal } = {}) {
-  // An already-aborted signal never fires the teardown listener, so
-  // subscribing would pin this slot (and keep the document observer alive)
-  // forever. Treat it as a no-op subscription.
-  if (signal?.aborted) {
-    return () => {};
+  #flushPending() {
+    this.#deferAc?.abort();
+    this.#deferAc = null;
+    this.#deferHandle?.abort();
+    this.#deferHandle = null;
+    this.#flush();
   }
-  ensureObserver();
-  const slot = [handler];
-  slots.push(slot);
-  live += 1;
-  const off = () => {
-    if (slot[0]) {
-      slot[0] = null;
-      live -= 1;
-      // Release the abort listener on manual unsubscribe too - otherwise the
-      // signal retains this closure until it aborts (possibly never).
-      signal?.removeEventListener("abort", off);
+
+  #onVisibilityChange = () => {
+    if (document.visibilityState !== "hidden") {
+      this.#flushPending();
     }
-    stopIfIdle();
   };
-  signal?.addEventListener("abort", off, { once: true });
-  return off;
+
+  /**
+   * Park the pending batch while the document is hidden. A hidden tab's timer
+   * and observer still tick; dispatching the (DOM-scanning) subscribers is what
+   * should wait, so it is deferred to a background-priority postTask with a hard
+   * cap - and resumed the moment the tab is visible again.
+   */
+  #deferFlushUntilVisible() {
+    if (this.#deferHandle) {
+      return;
+    }
+    this.#deferAc = new AbortController();
+    this.#deferHandle = postTask(() => this.#flushPending(), { priority: "background", delay: DEFER_VISIBILITY_CAP_MS });
+    document.addEventListener("visibilitychange", this.#onVisibilityChange, { signal: this.#deferAc.signal });
+  }
+
+  /**
+   * Chromium-native scheduling advantage: `scheduler.yield()` lets the browser
+   * interleave input / paint between the mutation batch and the subscriber
+   * dispatch. Falls back to the direct flush when the API is absent (jsdom
+   * tests, non-Chromium hosts) so the test tick() helper stays compatible.
+   */
+  async #scheduleFlush() {
+    await yield_();
+    if (document.visibilityState === "hidden") {
+      this.#deferFlushUntilVisible();
+      return;
+    }
+    this.#flush();
+  }
+
+  #ensureObserver() {
+    const doc = globalThis.document;
+    if (!doc?.documentElement) {
+      return;
+    }
+    if (this.#observer && this.#observedDoc === doc) {
+      return;
+    }
+    // Re-bind when the active document changed underneath us. Never happens
+    // in a real page; happens constantly under jsdom test harnesses that
+    // install a fresh document per case.
+    this.#observer?.disconnect();
+    this.#queued = false;
+    this.#pendingRecords = [];
+    this.#recycledRecords = [];
+    this.#observer = new MutationObserver((records) => {
+      // Coalesce the batch into the pooled buffer in one place; the browser
+      // already arrived with a pooled record list, so this is an append-only
+      // copy with no per-record allocation.
+      if (records.length < PUSH_APPLY_LIMIT) {
+        Array.prototype.push.apply(this.#pendingRecords, records);
+      } else {
+        for (let i = 0; i < records.length; i++) {
+          this.#pendingRecords.push(records[i]);
+        }
+      }
+      if (!this.#queued) {
+        this.#queued = true;
+        // #scheduleFlush() runs synchronously up to its yield_() await, so the
+        // extra queueMicrotask hop the original shape paid bought nothing -
+        // the yield already provides the task boundary before dispatch.
+        this.#scheduleFlush().catch((err) => {
+          logger.error("dom-watch", "Flush scheduling failed:", err);
+        });
+      }
+    });
+    this.#observer.observe(doc.documentElement, { childList: true, subtree: true });
+    this.#observedDoc = doc;
+  }
+
+  /**
+   * Drop the observer (and any parked defer) the moment the last subscriber
+   * leaves. Idempotent no-op when already detached.
+   */
+  #stopIfIdle() {
+    if (this.#live === 0 && this.#observer) {
+      this.#observer.disconnect();
+      this.#observer = null;
+      this.#observedDoc = null;
+      this.#pendingRecords = [];
+      this.#recycledRecords = [];
+      this.#slots.length = 0;
+      this.#deferAc?.abort();
+      this.#deferAc = null;
+      this.#deferHandle?.abort();
+      this.#deferHandle = null;
+    }
+  }
+
+  subscribe(handler, { signal } = {}) {
+    // An already-aborted signal never fires the teardown listener, so
+    // subscribing would pin this slot (and keep the document observer alive)
+    // forever. Treat it as a no-op subscription.
+    if (signal?.aborted) {
+      return () => {};
+    }
+    this.#ensureObserver();
+    const slot = [handler];
+    this.#slots.push(slot);
+    this.#live += 1;
+    const off = () => {
+      if (slot[0]) {
+        slot[0] = null;
+        this.#live -= 1;
+        // Release the abort listener on manual unsubscribe too - otherwise the
+        // signal retains this closure until it aborts (possibly never).
+        signal?.removeEventListener("abort", off);
+      }
+      this.#stopIfIdle();
+    };
+    signal?.addEventListener("abort", off, { once: true });
+    return off;
+  }
+}
+
+const domWatch = new DomWatch();
+
+/** Subscribe to the document-wide mutation feed. See DomWatch. */
+export function onDomMutations(handler, { signal } = {}) {
+  return domWatch.subscribe(handler, { signal });
 }
 
 /* - 2. Pooling - */
@@ -554,57 +564,71 @@ export let fs = false;
 
 /** Subscribers notified on a fullscreen state transition (subscribed from a
  *  single underlying native listener; see initFullscreenGate). */
-const fsSubscribers = new Set();
+class FsGate {
+  #subscribers = new Set();
+  /** Document the gate is currently bound to, so a repeated init (e.g. double
+   *  script eval) re-seeds `fs` without stacking duplicate native listeners. */
+  #doc = null;
 
-/** Document the gate is currently bound to, so a repeated init (e.g. double
- *  script eval) re-seeds `fs` without stacking duplicate native listeners. */
-let fsGateDoc = null;
-
-/**
- * Build the `fs` gate off the native fullscreen event and fan out transitions.
- * Call once at startup. `doc` is injectable for jsdom tests so they drive the
- * real mechanism.
- *
- * This is the ONLY place that touches fullscreen: it owns the `fs` value AND
- * the single underlying `fullscreenchange` listener. Every other fs-conditioned
- * path reads `fs` directly or subscribes to transitions via subscribeFullscreen,
- * so there is one gate and one transition source regardless of shell count.
- */
-export function initFullscreenGate(doc = document) {
-  fs = !!doc.fullscreenElement;
-  // Re-seed `fs` above, but bind the transition listener once per document -
-  // a second init on the same doc would otherwise double-fire every flip.
-  if (fsGateDoc === doc) {
-    return;
-  }
-  fsGateDoc = doc;
-  const update = () => {
+  #update(doc) {
     const next = !!doc.fullscreenElement;
     if (next === fs) {
       return;
     }
+    // The exported live binding stays the one document-wide truth; the class
+    // writes it so every `import { fs }` reader observes the flip.
     fs = next;
-    for (const cb of fsSubscribers) {
+    for (const cb of this.#subscribers) {
       cb(next);
     }
-  };
-  doc.addEventListener("fullscreenchange", update);
+  }
+
+  /**
+   * Build the `fs` gate off the native fullscreen event and fan out transitions.
+   * Call once at startup. `doc` is injectable for jsdom tests so they drive the
+   * real mechanism.
+   *
+   * This is the ONLY place that touches fullscreen: it owns the `fs` value AND
+   * the single underlying `fullscreenchange` listener. Every other fs-conditioned
+   * path reads `fs` directly or subscribes to transitions via subscribeFullscreen,
+   * so there is one gate and one transition source regardless of shell count.
+   */
+  init(doc = document) {
+    fs = !!doc.fullscreenElement;
+    // Re-seed `fs` above, but bind the transition listener once per document -
+    // a second init on the same doc would otherwise double-fire every flip.
+    if (this.#doc === doc) {
+      return;
+    }
+    this.#doc = doc;
+    doc.addEventListener("fullscreenchange", () => this.#update(doc));
+  }
+
+  /**
+   * Subscribe to fullscreen state transitions (fires only on an actual flip,
+   * before the gates' consumers observe the new `fs`). Returns an unsubscribe
+   * function; pass `signal` to have it torn down automatically.
+   */
+  subscribe(cb, signal) {
+    // An aborted signal's teardown listener never fires - adding `cb` now would
+    // pin it in this.#subscribers forever (and keep firing post-teardown).
+    if (signal?.aborted) {
+      return () => {};
+    }
+    this.#subscribers.add(cb);
+    if (signal) {
+      signal.addEventListener("abort", () => this.#subscribers.delete(cb), { once: true });
+    }
+    return () => this.#subscribers.delete(cb);
+  }
 }
 
-/**
- * Subscribe to fullscreen state transitions (fires only on an actual flip,
- * before the gates' consumers observe the new `fs`). Returns an unsubscribe
- * function; pass `signal` to have it torn down automatically.
- */
+const fsGate = new FsGate();
+
+export function initFullscreenGate(doc = document) {
+  fsGate.init(doc);
+}
+
 export function subscribeFullscreen(cb, signal) {
-  // An aborted signal's teardown listener never fires - adding `cb` now would
-  // pin it in fsSubscribers forever (and keep firing post-teardown).
-  if (signal?.aborted) {
-    return () => {};
-  }
-  fsSubscribers.add(cb);
-  if (signal) {
-    signal.addEventListener("abort", () => fsSubscribers.delete(cb), { once: true });
-  }
-  return () => fsSubscribers.delete(cb);
+  return fsGate.subscribe(cb, signal);
 }

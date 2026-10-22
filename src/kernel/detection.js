@@ -60,138 +60,155 @@ const REGISTRY = [
 ];
 
 /**
- * Reusable composed-ancestry scratch: the match loop is fully synchronous and
- * never lets the array escape (callers keep only `el`/`record`/`hops`, never
- * the chain itself), so one array serves every full-scan instead of allocating
- * a fresh one per video. `len` is the filled length each pass.
+ * The whole identity engine as one class: the composed-ancestry scratch, the
+ * matcher, and the single-tier descriptor cache are all private fields on the
+ * one instance. The module singleton wires the exported call surface below.
  */
-const chain = [];
+class SdkMatcher {
+  /**
+   * Reusable composed-ancestry scratch: the match loop is fully synchronous and
+   * never lets the array escape (callers keep only `el`/`record`/`hops`, never
+   * the chain itself), so one array serves every full-scan instead of allocating
+   * a fresh one per video. `len` is the filled length each pass.
+   */
+  #chain = [];
 
-/**
- * The single composed-ancestry walk, shared by anchor matching and container
- * resolution. Fills the reusable `chain` with the element nodes from `start`
- * upwards (crossing shadow boundaries via `.host`), and returns the filled
- * length. Flat indexed loop, no closure per call - the JIT's most reliably
- * optimized shape for this one-pass discovery walk. Chain index doubles as the
- * hop count. Callers must keep only what they read from `chain[0..len)`; the
- * scratch buffer never escapes.
- */
-function fillComposedChain(start) {
-  let len = 0;
-  for (let node = start; node; ) {
-    if (node.nodeType === 1) {
-      chain[len++] = node;
+  /**
+   * Fully-resolved descriptor per video. Cached alongside the raw match so the
+   * hot re-query path (probe/kernel re-asking about surviving videos) returns
+   * the SAME object instead of re-wrapping + re-allocating every call.
+   * "Fewer APIs, same facts": the scan already computes `el` and `hops`, so they
+   * are surfaced at zero extra cost rather than recomputed downstream.
+   *
+   * Parent-stamped: a descriptor names a specific container, so
+   * it is only valid for the ancestry it resolved against. A re-parent (SDK
+   * wrap, SPA re-render reusing the video node) invalidates it; the next query
+   * re-scans and the container/anchor follow the new tree instead of pointing at
+   * a detached node.
+   */
+  #descriptorCache = new WeakMap();
+
+  /**
+   * The single composed-ancestry walk, shared by anchor matching and container
+   * resolution. Fills the reusable `#chain` with the element nodes from `start`
+   * upwards (crossing shadow boundaries via `.host`), and returns the filled
+   * length. Flat indexed loop, no closure per call - the JIT's most reliably
+   * optimized shape for this one-pass discovery walk. Chain index doubles as the
+   * hop count. Callers must keep only what they read from `#chain[0..len)`; the
+   * scratch buffer never escapes.
+   */
+  #fillComposedChain(start) {
+    const chain = this.#chain;
+    let len = 0;
+    for (let node = start; node; ) {
+      if (node.nodeType === 1) {
+        chain[len++] = node;
+      }
+      node = node.parentNode ?? node.host ?? null;
     }
-    node = node.parentNode ?? node.host ?? null;
+    // Truncate to the filled length: the buffer is instance-level and reused,
+    // so without this a prior deep walk leaves the tail pointing at nodes that
+    // may since have been detached - a strong reference held until the next
+    // scan.
+    chain.length = len;
+    return len;
   }
-  // Truncate to the filled length: the buffer is module-level and reused, so
-  // without this a prior deep walk leaves the tail pointing at nodes that may
-  // since have been detached - a strong reference held until the next scan.
-  chain.length = len;
-  return len;
-}
 
-function matchSdk(video, registry) {
-  // Single composed walk (uBO's one-pass-over-tokens shape): the rich-path
-  // ancestors re-walked once per anchor, then walked again per hit to count
-  // hops. Chain index IS the hop count, so one pass serves every anchor.
-  // Selection semantics: fewest hops wins, ties keep registry order then
-  // anchor order (strict < keeps the first).
-  const len = fillComposedChain(video);
-  let best = null;
-  for (let r = 0; r < registry.length; r++) {
-    const record = registry[r];
-    const anchors = record.anchors;
-    for (let a = 0; a < anchors.length; a++) {
-      const anchor = anchors[a];
-      // Bound the walk by the best hops so far: a match at or beyond that
-      // index cannot win (strict < keeps the earlier record/anchor), so the
-      // chain is only scanned as deep as a real improvement would need. A
-      // 0-hop best collapses the bound to 0 and the rest of the registry is
-      // walked with zero chain scans.
-      const limit = best ? best.hops : len;
-      for (let hop = 0; hop < limit; hop++) {
-        if (chain[hop].matches(anchor)) {
-          if (!best || hop < best.hops) {
-            best = { record, el: chain[hop], hops: hop };
+  #matchSdk(video, registry) {
+    // Single composed walk (uBO's one-pass-over-tokens shape): the rich-path
+    // ancestors re-walked once per anchor, then walked again per hit to count
+    // hops. Chain index IS the hop count, so one pass serves every anchor.
+    // Selection semantics: fewest hops wins, ties keep registry order then
+    // anchor order (strict < keeps the first).
+    const chain = this.#chain;
+    const len = this.#fillComposedChain(video);
+    let best = null;
+    for (let r = 0; r < registry.length; r++) {
+      const record = registry[r];
+      const anchors = record.anchors;
+      for (let a = 0; a < anchors.length; a++) {
+        const anchor = anchors[a];
+        // Bound the walk by the best hops so far: a match at or beyond that
+        // index cannot win (strict < keeps the earlier record/anchor), so the
+        // chain is only scanned as deep as a real improvement would need. A
+        // 0-hop best collapses the bound to 0 and the rest of the registry is
+        // walked with zero chain scans.
+        const limit = best ? best.hops : len;
+        for (let hop = 0; hop < limit; hop++) {
+          if (chain[hop].matches(anchor)) {
+            if (!best || hop < best.hops) {
+              best = { record, el: chain[hop], hops: hop };
+            }
+            break;
           }
-          break;
         }
       }
     }
+    return best;
   }
-  return best;
-}
 
-/**
- * Fully-resolved descriptor per video. Cached alongside the raw match so the
- * hot re-query path (probe/kernel re-asking about surviving videos) returns
- * the SAME object instead of re-wrapping + re-allocating every call.
- * "Fewer APIs, same facts": the scan already computes `el` and `hops`, so they
- * are surfaced at zero extra cost rather than recomputed downstream.
- *
- * Parent-stamped: a descriptor names a specific container, so
- * it is only valid for the ancestry it resolved against. A re-parent (SDK
- * wrap, SPA re-render reusing the video node) invalidates it; the next query
- * re-scans and the container/anchor follow the new tree instead of pointing at
- * a detached node.
- */
-const descriptorCache = new WeakMap();
-
-/**
- * Identify the SDK owning a video, or null when unregistered.
- *
- * Caches BOTH the positive descriptor and the negative null, so a page of
- * many non-SDK videos (ad grids, untracked embeds) never re-runs the full
- * ancestry scan per discovery pass. The WeakMap key dies with the video, so
- * entries are session-only. Detection is deterministic for a given composed
- * ancestry, but not across a re-parent: the entry is parent-stamped and
- * re-scanned the moment the video moves, so a bare <video> that a player SDK
- * later wraps is re-evaluated instead of staying cached as unrecognised.
- *
- * `registry` defaults to the production REGISTRY and is injectable so records
- * it does not exercise (currently `host`) stay testable without exporting
- * resolveContainer. The cache stamp carries the registry reference, so a
- * custom registry can never serve a production hit.
- */
-export function findSdkForVideo(video, registry = REGISTRY) {
-  const cached = descriptorCache.get(video);
-  if (cached !== undefined && cached.parent === video.parentNode && cached.registry === registry) {
-    return cached.descriptor;
-  }
-  const match = matchSdk(video, registry);
-  if (!match) {
-    descriptorCache.set(video, { descriptor: null, parent: video.parentNode, registry });
-    return null;
-  }
-  const descriptor = {
-    name: match.record.name,
-    host: match.record.host ?? null,
-    container: resolveContainer(match),
-    anchor: match.el,
-    hops: match.hops
-  };
-  descriptorCache.set(video, { descriptor, parent: video.parentNode, registry });
-  return descriptor;
-}
-
-/**
- * Resolve the element that hosts the shell DOM: the matched record's `host`
- * override, else the matched element itself. Private to the engine; the
- * host branch (unexercised by the current registry) is driven in tests by
- * passing a synthetic registry to findSdkForVideo.
- */
-function resolveContainer({ record, el }) {
-  if (!record.host) {
+  /**
+   * Resolve the element that hosts the shell DOM: the matched record's `host`
+   * override, else the matched element itself. Private to the engine; the
+   * host branch (unexercised by the current registry) is driven in tests by
+   * passing a synthetic registry to findSdkForVideo.
+   */
+  #resolveContainer({ record, el }) {
+    if (!record.host) {
+      return el;
+    }
+    // Composed-ancestry walk mirroring anchor matching: the host override may
+    // target an element above the matched anchor and across shadow boundaries.
+    const chain = this.#chain;
+    const len = this.#fillComposedChain(el);
+    for (let hop = 0; hop < len; hop++) {
+      if (chain[hop].matches(record.host)) {
+        return chain[hop];
+      }
+    }
     return el;
   }
-  // Composed-ancestry walk mirroring anchor matching: the host override may
-  // target an element above the matched anchor and across shadow boundaries.
-  const len = fillComposedChain(el);
-  for (let hop = 0; hop < len; hop++) {
-    if (chain[hop].matches(record.host)) {
-      return chain[hop];
+
+  /**
+   * Identify the SDK owning a video, or null when unregistered.
+   *
+   * Caches BOTH the positive descriptor and the negative null, so a page of
+   * many non-SDK videos (ad grids, untracked embeds) never re-runs the full
+   * ancestry scan per discovery pass. The WeakMap key dies with the video, so
+   * entries are session-only. Detection is deterministic for a given composed
+   * ancestry, but not across a re-parent: the entry is parent-stamped and
+   * re-scanned the moment the video moves, so a bare <video> that a player SDK
+   * later wraps is re-evaluated instead of staying cached as unrecognised.
+   *
+   * `registry` defaults to the production REGISTRY and is injectable so records
+   * it does not exercise (currently `host`) stay testable without exporting
+   * resolveContainer. The cache stamp carries the registry reference, so a
+   * custom registry can never serve a production hit.
+   */
+  find(video, registry = REGISTRY) {
+    const cached = this.#descriptorCache.get(video);
+    if (cached !== undefined && cached.parent === video.parentNode && cached.registry === registry) {
+      return cached.descriptor;
     }
+    const match = this.#matchSdk(video, registry);
+    if (!match) {
+      this.#descriptorCache.set(video, { descriptor: null, parent: video.parentNode, registry });
+      return null;
+    }
+    const descriptor = {
+      name: match.record.name,
+      host: match.record.host ?? null,
+      container: this.#resolveContainer(match),
+      anchor: match.el,
+      hops: match.hops
+    };
+    this.#descriptorCache.set(video, { descriptor, parent: video.parentNode, registry });
+    return descriptor;
   }
-  return el;
+}
+
+const matcher = new SdkMatcher();
+
+export function findSdkForVideo(video, registry) {
+  return matcher.find(video, registry);
 }
