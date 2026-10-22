@@ -160,6 +160,25 @@
   initial-value: -50%;
 }
 
+/* R4 scroll-edge drive: the panel header's tint share, ramped by a
+   scroll-driven timeline (0% at the top of the scroll, 100% once content
+   actually slides beneath the pinned bar). Registered so the custom
+   property is animatable at all. */
+@property --pf-scroll-edge {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 0%;
+}
+
+@keyframes pf-scroll-edge {
+  from {
+    --pf-scroll-edge: 0%;
+  }
+  to {
+    --pf-scroll-edge: 100%;
+  }
+}
+
 /* - Component surface (parasite chrome) ------------------------------------
    Cascade + reach are both contained: @layer pf-hud owns the whole surface's
    declarations, and @scope (.pf-hud-layer) limits every selector to the HUD
@@ -457,8 +476,12 @@
       scrollbar-color: var(--pf-text-mid) transparent;
 
       /* Flat glass: same tint/edge/shadow system as the toast, at the larger
-         blur radius suited to the sheet's size. */
-      background-color: var(--pf-glass-tint);
+         blur radius suited to the sheet's size. The tint is declared exactly
+         once, through --pf-panel-tint: the header derives from the same
+         variable instead of repainting its own layer, which used to stack a
+         second tint over the sheet's glass and read as a darker band. */
+      --pf-panel-tint: var(--pf-glass-tint);
+      background-color: var(--pf-panel-tint);
       border: var(--pf-glass-border);
       box-shadow: var(--pf-glass-shadow);
       backdrop-filter: var(--pf-blur-lg);
@@ -494,22 +517,25 @@
          panel itself - because the one shared sheet is adopted by the shadow
          root: a `.pf-shell ... .pf-panel` ancestor selector cannot match across
          the shadow boundary (the host is not in its own tree), so the earlier
-         form was dead in both realms. The panel is the element whose
-         :focus-within survives, and it wins the tie against the base tint by
-         living after it in the same rule. */
+         form was dead in both realms. The focus state flips the one tint
+         variable rather than a second background-color declaration, so both
+         the sheet and its header re-derive from a single source. The
+         background-color transition above is what animates the flip. */
       &:focus-within {
-        background-color: var(--pf-glass-tint-focus);
-
-        .pf-panel-header {
-          background-color: var(--pf-glass-tint-focus);
-        }
+        --pf-panel-tint: var(--pf-glass-tint-focus);
       }
 
       /* Single header row: [segmented tabs] [close]. It is the panel's control
          layer (principle 5), so it is pinned: body content scrolls beneath it
-         rather than carrying the tabs and close button away. It repaints the
-         same tint so the material is continuous over the scrolling content,
-         and carries the top rim so the topmost edge keeps its highlight. */
+         rather than carrying the tabs and close button away.
+         R4 scroll edge, single-owner edition: at rest the header is fully
+         transparent, so the sheet's own tint is the one glass layer and the
+         resting header renders exactly the same tint as the body beneath it
+         - the pinned double-paint dark band is gone. While content actually
+         scrolls underneath, a scroll-driven timeline (the panel is the
+         nearest scroll container) ramps --pf-scroll-edge from 0 to 100%,
+         fading the header's tint layer in only while something is passing
+         under it - legibility when it is needed, invisibility when it is not. */
       .pf-panel-header {
         position: sticky;
         top: 0;
@@ -518,7 +544,10 @@
         align-items: center;
         gap: var(--pf-space-md);
         padding: var(--pf-space-md);
-        background-color: var(--pf-glass-tint);
+        animation: pf-scroll-edge linear both;
+        animation-timeline: scroll(nearest);
+        animation-range: 0px 24px;
+        background-color: color-mix(in srgb, var(--pf-panel-tint) var(--pf-scroll-edge), transparent);
         box-shadow: var(--pf-header-rim);
         border-bottom: 1px solid var(--pf-border-soft);
       }

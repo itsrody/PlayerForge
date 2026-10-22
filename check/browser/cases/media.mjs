@@ -54,6 +54,64 @@ export async function run({ session, baseUrl, boot }) {
     ms: null
   });
 
+  // R4 scroll-edge law, measured on computed styles rather than screenshotted:
+  // at the top of the scroll the pinned header must be fully transparent (the
+  // sheet's own tint is the one glass layer - a second painted layer used to
+  // stack over it and read as a darker band), and once content actually
+  // scrolls beneath the bar the scroll-driven ramp must have engaged
+  // (--pf-scroll-edge off zero, header background no longer transparent).
+  const edge = await session.eval(function main() {
+    const host = document.querySelector(".pf-shell");
+    const panel = host?.shadowRoot?.querySelector(".pf-panel");
+    const header = panel?.querySelector(".pf-panel-header");
+    if (!panel || !header) return null;
+    const alphaOf = (bg) => {
+      const rgba = /rgba?\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*,\s*([\d.]+)\s*\)/.exec(String(bg));
+      if (rgba) return Number(rgba[1]);
+      const colorFn = /color\(\s*\S+\s*[-\d.]+\s+[-\d.]+\s+[-\d.]+\s*\/\s*([\d.]+)/.exec(String(bg));
+      return colorFn ? Number(colorFn[1]) : null;
+    };
+    const readEdge = () => {
+      const raw = getComputedStyle(header).getPropertyValue("--pf-scroll-edge");
+      const n = Number.parseFloat(raw);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const frames = (fn) => requestAnimationFrame(() => requestAnimationFrame(fn));
+    return new Promise((resolve) => {
+      frames(() => {
+        const atRest = { edge: readEdge(), alpha: alphaOf(getComputedStyle(header).backgroundColor), top: panel.scrollTop };
+        // The sheet sizes to its content and the fixture panel fits the
+        // viewport (measured: its content tops out well under 300px), so it
+        // would never overflow on its own - a 140px window guarantees the
+        // scroll range the edge treatment responds to (inline only, restored
+        // before the row resolves).
+        const priorHeight = panel.style.height;
+        panel.style.height = "140px";
+        frames(() => {
+          panel.scrollTop = 120;
+          frames(() => {
+            const scrolled = { edge: readEdge(), alpha: alphaOf(getComputedStyle(header).backgroundColor), top: panel.scrollTop };
+            panel.scrollTop = 0;
+            panel.style.height = priorHeight;
+            resolve({ atRest, scrolled });
+          });
+        });
+      });
+    });
+  });
+  rows.push({
+    name: "R4: pinned header is transparent at rest (no double tint)",
+    status: !!edge && edge.atRest.top === 0 && edge.atRest.edge === 0 && edge.atRest.alpha === 0 ? "pass" : "fail",
+    note: !edge ? "panel/header missing" : JSON.stringify(edge.atRest),
+    ms: null
+  });
+  rows.push({
+    name: "R4: scroll-driven header tint engages over passing content",
+    status: !!edge && edge.scrolled.top > 0 && edge.scrolled.edge > 0 && edge.scrolled.alpha > 0 ? "pass" : "fail",
+    note: !edge ? "panel/header missing" : JSON.stringify(edge.scrolled),
+    ms: null
+  });
+
   // The shell contract must survive a full teardown: drop the current anchor,
   // append a fresh video, and require the kernel to re-anchor onto it - the
   // new video node must carry the shell marker (the old markers on container

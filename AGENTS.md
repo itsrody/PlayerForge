@@ -306,6 +306,11 @@ only surface, scales/tokens `@property`-typed, gradients banned in the HUD:
   tokens, not implied.
 - **R4 Every scrollable glass surface needs a scroll edge** — content
   scrolling beneath a pinned control is obscured; not a blanket scrim.
+  Realized scroll-driven (Chromium 155's scroll timelines register a
+  `--pf-scroll-edge` share): the panel header is fully transparent at the
+  top of the scroll and ramps its tint in only over passing content, so the
+  sheet's tint stays the one glass layer and the resting header cannot go
+  darker than the body.
 - **R5 Nested radii are concentric and derived:** container radius R with
   inset padding P → inset elements use R − P (panel 18 → strip/close 10 →
   tab 7). Derived, not chosen, so container changes stay correct.
