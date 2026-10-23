@@ -303,44 +303,63 @@ const MAX_SLOTS = 8;
 const TRACK_LABEL = "PlayerForge Subtitles";
 
 /* - Parse memo - */
-/** Parsed-track cap (by track count): one cue array is small (strings only),
- *  eight covers a session of thumb-loading without any eviction math. */
-const PARSE_MEMO_LIMIT = 8;
-/** contentHash -> parsed cues, so a reload of the same subtitle text (panel
- *  re-open, SPA re-adopt, URL subs again after boot) skips the parse entirely. */
-const parseMemo = new Map();
+/**
+ * The content-hash parse memo as one class (the DomainKeyCache shape): the
+ * Map, the cap, and the FIFO eviction walk are private members of the
+ * instance, so the remember/evict steps ride one object instead of being
+ * replayed inline in every memo consumer. `memoizedParse()` stays the thin
+ * consumer function the load path calls.
+ */
+class ParseMemo {
+  /** Parsed-track cap (by track count): one cue array is small (strings only),
+   *  eight covers a session of thumb-loading without any eviction math. */
+  #limit = 8;
+  /** contentHash -> parsed cues, so a reload of the same subtitle text (panel
+   *  re-open, SPA re-adopt, URL subs again after boot) skips the parse entirely. */
+  #cues = new Map();
 
-/** FNV-1a over the normalized text - collision risk is far below the
- *  wrong-cue-set threshold for subtitle-sized inputs, and the hash is one
- *  pass (no crypto latency) on the ingest path. */
-function textHash(text) {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
+  /** FNV-1a over the normalized text - collision risk is far below the
+   *  wrong-cue-set threshold for subtitle-sized inputs, and the hash is one
+   *  pass (no crypto latency) on the ingest path. */
+  #hash(text) {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    return hash;
   }
-  return hash;
+
+  /**
+   * Parse with a content-hash memo: identical normalized text resolves to the
+   * cached cue array (the same frozen array ForgeTrack read once - cues are
+   * treated as immutable by the load path, which only copies them into
+   * VTTCue objects).
+   */
+  load(text) {
+    const hash = this.#hash(text);
+    const hit = this.#cues.get(hash);
+    if (hit) {
+      return Promise.resolve(hit);
+    }
+    return parseSubtitlesAsync(text, 0).then((cues) => {
+      if (cues.length) {
+        if (this.#cues.size >= this.#limit) {
+          this.#cues.delete(this.#cues.keys().next().value);
+        }
+        this.#cues.set(hash, cues);
+      }
+      return cues;
+    });
+  }
 }
 
+const parseMemo = new ParseMemo();
+
 /** Parse with a content-hash memo: identical normalized text resolves to the
- *  cached cue array (the same frozen array ForgeTrack read once - cues are
- *  treated as immutable by the load path, which only copies them into
- *  VTTCue objects). */
+ *  cached cue array (see ParseMemo). */
 function memoizedParse(text) {
-  const hash = textHash(text);
-  const hit = parseMemo.get(hash);
-  if (hit) {
-    return Promise.resolve(hit);
-  }
-  return parseSubtitlesAsync(text, 0).then((cues) => {
-    if (cues.length) {
-      if (parseMemo.size >= PARSE_MEMO_LIMIT) {
-        parseMemo.delete(parseMemo.keys().next().value);
-      }
-      parseMemo.set(hash, cues);
-    }
-    return cues;
-  });
+  return parseMemo.load(text);
 }
 
 /**
