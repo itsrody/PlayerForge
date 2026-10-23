@@ -335,7 +335,7 @@ only surface, scales/tokens `@property`-typed, gradients banned in the HUD:
 - **R3 One resting tint (`--pf-glass-tint`), unchanged by focus** — the
   material's two-state split (resting vs `--pf-glass-tint-focus`, 76%) was
   retired by user direction: the panel keeps the same tint whether or not it
-  holds focus, and no control paints an accent border merely for focus
+  holds focus, and no control paints a highlight border merely for focus
   (keyboard `:focus-visible` outlines on controls stay). Which tint rests is a
   *user choice*, not a state branch: the `ui.glassTint` setting rides three
   measured presets on `--pf-tint-alpha` (Clear 44% / Medium 58% / Opaque 72%,
@@ -345,9 +345,12 @@ only surface, scales/tokens `@property`-typed, gradients banned in the HUD:
   scrolling beneath a pinned control is obscured; not a blanket scrim.
   Realized scroll-driven (Chromium 155's scroll timelines register a
   `--pf-scroll-edge` share): the panel header is fully transparent at the
-  top of the scroll and ramps its solid-to-faded tint+blur band in only
-  over passing content, so the sheet's tint stays the one glass layer and
-  the resting header cannot go darker than the body.
+  top of the scroll and ramps its darker edge-ink band in only over passing
+  content — a solid-to-faded gradient of the sheet's ink at a per-preset
+  edge alpha (`--pf-edge-alpha`; GLASS_TINTS edge shares make the band over
+  the body composite land exactly one notch, +14pt, darker than the body
+  read) plus masked blur — so the resting header cannot go darker than the
+  body until content actually passes under it.
 - **R5 Nested radii are concentric and derived:** container radius R with
   inset padding P → inset elements use R − P (panel 16 → strip/close 8 →
   tab 5). Derived, not chosen, so container changes stay correct.

@@ -339,15 +339,18 @@ export class Shell {
   }
 
   /**
-   * Glass tint (the Clear/Medium/Opaque presets): one registered percentage
-   * written onto the host, which the shadow's color-mix consumes. Re-applied
-   * on any settings change - the cross-tab echo already dedupes own writes -
-   * and foreign or stale values ride the schema coerce to Medium.
+   * Glass tint (the Clear/Medium/Opaque presets): two registered percentages
+   * written onto the host, which the shadow's color-mix consumes - the body
+   * sheet's tint and the scroll-edge band's darker ink share (see
+   * GLASS_TINTS). Re-applied on any settings change - the cross-tab echo
+   * already dedupes own writes - and foreign or stale values ride the
+   * schema coerce to Medium.
    */
   #applyGlassTint() {
     const apply = () => {
       const definition = GLASS_TINTS[getSetting(SETTING_KEYS.glassTint)] ?? GLASS_TINTS.medium;
       this.shellHost.style.setProperty("--pf-tint-alpha", definition.alpha);
+      this.shellHost.style.setProperty("--pf-edge-alpha", definition.edge);
     };
     apply();
     onSettingsChanged(apply, { signal: this.#scope.signal });

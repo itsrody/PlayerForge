@@ -252,7 +252,7 @@ export function flashElement(el, { duration = FLASH_MS } = {}) {
   el.animate(
     [
       { backgroundColor: "transparent" },
-      { backgroundColor: "var(--pf-accent)" },
+      { backgroundColor: "var(--pf-fg)" },
       { backgroundColor: "transparent" }
     ],
     { duration, easing: FLASH_EASING }

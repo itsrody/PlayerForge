@@ -28,7 +28,6 @@
   /* -- Tokens: palette, borders, radii, type, motion, z-ladder -- */
   --pf-fg: #fff;                    /* primary text            */
   --pf-bg: #000;                    /* base ink                */
-  --pf-accent: #4a9eff;             /* interaction accent      */
 
   /* Flat glass surface system: one translucent dark tint, a rim-lit hairline
      edge, and a soft drop shadow - all static paint, so each visible surface
@@ -338,6 +337,16 @@
       syntax: "<percentage>";
       inherits: true;
       initial-value: 58%;
+    }
+    /* The scroll-edge band's darker ink share (GLASS_TINTS.edge): chosen so
+       the band composited over the body sheet lands one notch (+14 points)
+       darker than the body read at every tint level - the designed darkening
+       the same-tint stack used to produce by accident. Same channel rules as
+       --pf-tint-alpha. */
+    @property --pf-edge-alpha {
+      syntax: "<percentage>";
+      inherits: true;
+      initial-value: 33%;
     }
 
     /* - Panel backdrop - */
@@ -662,7 +671,13 @@
         inset: 0 0 -24px 0;
         z-index: -1;
         pointer-events: none;
-        background: linear-gradient(to bottom, var(--pf-panel-tint), transparent);
+        /* R4 scroll edge, darker-tinted edition (user direction): the band
+           paints its own ink share (--pf-edge-alpha, one notch darker than
+           the body composite - see GLASS_TINTS in config.js) solid at the
+           top, fading down the band's tail. It no longer reuses the sheet's
+           tint, whose same-color stack made the edge darkness an accident of
+           alpha arithmetic that jumped hardest for the clearest level. */
+        background: linear-gradient(to bottom, color-mix(in srgb, var(--pf-bg) var(--pf-edge-alpha), transparent), transparent);
         /* Blur rides the same band: content passing beneath the pinned bar
            washes through the mask - fully blurred across the header region,
            gone at the tail - so the blurred strip has no hard edge. The mask
@@ -735,7 +750,7 @@
              at all: keyboard/SR users arrow through the tabs blind. Match
              the close button's ring, keyboard-focus only. */
           &:focus-visible {
-            outline: 2px solid var(--pf-accent);
+            outline: 2px solid var(--pf-fg);
             outline-offset: -2px;
           }
 
@@ -785,7 +800,7 @@
         }
 
         &:focus-visible {
-          outline: 2px solid var(--pf-accent);
+          outline: 2px solid var(--pf-fg);
           outline-offset: -2px;
         }
       }
@@ -807,10 +822,10 @@
 
         /* Drag-and-drop target (Subtitles tab) */
         &.pf-drop-active {
-          outline: 2px dashed var(--pf-accent);
+          outline: 2px dashed var(--pf-fg);
           outline-offset: -4px;
           border-radius: var(--pf-radius-md);
-          background: color-mix(in srgb, var(--pf-accent) 6%, transparent);
+          background: color-mix(in srgb, var(--pf-fg) 6%, transparent);
         }
       }
 
@@ -1025,8 +1040,8 @@
         }
 
         &:checked {
-          background: var(--pf-accent);
-          border-color: var(--pf-accent);
+          background: var(--pf-fg);
+          border-color: var(--pf-fg);
 
           &::before {
             translate: 14px 0;
@@ -1034,7 +1049,7 @@
         }
 
         &:focus-visible {
-          outline: 2px solid var(--pf-accent);
+          outline: 2px solid var(--pf-fg);
           outline-offset: 2px;
         }
       }
@@ -1076,14 +1091,14 @@
       margin-bottom: var(--pf-space-sm);
       border: none;
       border-radius: var(--pf-radius-md);
-      background: var(--pf-accent);
+      background: var(--pf-surface-strong);
       color: var(--pf-fg);
       font-size: var(--pf-font-md);
       font-weight: 500;
       cursor: pointer;
 
       &:focus-visible {
-        outline: 2px solid var(--pf-accent);
+        outline: 2px solid var(--pf-fg);
         outline-offset: 2px;
       }
 
@@ -1097,7 +1112,7 @@
       &:disabled:hover {
         opacity: 0.35;
         cursor: not-allowed;
-        background: var(--pf-accent);
+        background: var(--pf-surface-strong);
       }
     }
 
@@ -1202,7 +1217,7 @@
        icon (fill: currentColor) light up in accent. */
     .pf-panel-tabs .pf-panel-tab.pf-panel-tab-active {
       background: transparent;
-      color: var(--pf-accent);
+      color: var(--pf-fg);
       font-weight: 600;
     }
 
@@ -1224,15 +1239,33 @@
       gap: var(--pf-space-sm);
     }
 
-    .pf-stage-labels {
+    .pf-stage-ticks {
       display: flex;
-      justify-content: space-between;
       font-size: var(--pf-font-xs);
       color: var(--pf-text-mid);
     }
 
-    .pf-stage-labels .pf-stage-active {
-      color: var(--pf-accent);
+    /* Equal flex widths center each label (and its dot) exactly at its step
+       fraction i/(n-1) - the ticks ride the slider's own geometry, no math
+       per option count. */
+    .pf-stage-ticks span {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .pf-stage-ticks span::before {
+      content: "";
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .pf-stage-ticks .pf-stage-active {
+      color: var(--pf-fg);
       font-weight: 600;
     }
 
@@ -1246,7 +1279,7 @@
     }
 
     input[type="range"].pf-slider:focus-visible {
-      outline: 2px solid var(--pf-accent);
+      outline: 2px solid var(--pf-fg);
       outline-offset: 2px;
     }
 
@@ -1263,7 +1296,7 @@
       margin-top: -6px;
       border-radius: 50%;
       border: none;
-      background: var(--pf-accent);
+      background: var(--pf-fg);
       box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
     }
 
@@ -1302,14 +1335,20 @@
       }
     }
 
-    /* - Options (Skip Step) segmented buttons - */
+    /* - Options (Skip Step, Glass Tint) staged slider rows - */
     .pf-options-cell {
       display: flex;
-      flex-direction: row;
-      align-items: center;
-      justify-content: flex-start;
-      gap: var(--pf-space-lg);
+      flex-direction: column;
+      gap: var(--pf-space-sm);
       grid-column: 1 / -1;
+    }
+
+    /* Label left, active value hint right - the settings-row grammar. */
+    .pf-options-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: var(--pf-space-md);
 
       .pf-panel-label {
         min-width: 0;
@@ -1320,31 +1359,11 @@
       }
     }
 
-    .pf-options-row {
-      display: flex;
-      gap: var(--pf-space-sm);
-      flex-shrink: 0;
-    }
-
-    .pf-options-btn {
-      padding: 5px 10px;
-      font-size: var(--pf-font-md);
-      font-weight: 600;
-      text-align: center;
-      background: var(--pf-surface-mid);
-      color: inherit;
-      border-radius: var(--pf-radius-sm);
-
-      @media (hover: hover) {
-        &:hover {
-          background: var(--pf-surface-strong);
-        }
-      }
-    }
-
-    .pf-options-active {
-      background: var(--pf-accent) !important;
-      color: #fff;
+    .pf-options-hint {
+      flex: none;
+      font-size: var(--pf-font-sm);
+      font-weight: 500;
+      color: var(--pf-fg);
     }
 
     /* - History tab - card rows */
@@ -1431,8 +1450,6 @@
     /* Touch devices (phones/tablets): enlarge hit targets toward
        thumb-sized (~40px) tap areas. */
     @media (pointer: coarse) {
-      .pf-options-btn { padding: 7px 14px; font-size: var(--pf-font-lg); }
-      .pf-options-row { gap: var(--pf-space-md); }
       .pf-panel-body { padding: 10px 12px 12px; }
       /* ~44px thumb floor: the base rules size for dense desktop panels. */
       .pf-panel-close { padding: 12px 14px; font-size: 18px; }
@@ -1514,10 +1531,9 @@
       .pf-panel { --pf-icon-btn: 32px; --pf-icon-glyph: 16px; }
     }
 
-    /* Responsive options label/buttons spacing for narrow screens. */
+    /* Responsive options spacing for narrow screens. */
     @media (max-width: 520px) {
       .pf-options-cell { gap: var(--pf-space-sm); }
-      .pf-options-row { flex-shrink: 0; }
     }
 
     /* Compact mode: fired by the compact bus style() query, but the body

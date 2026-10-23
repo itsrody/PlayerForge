@@ -27,18 +27,24 @@ export const SETTING_KEYS = Object.freeze({
 });
 
 /**
- * The glass-tint presets, one table: id -> panel label + color-mix alpha the
- * shell writes onto --pf-tint-alpha. Golden Gate alignment - macOS 27 gave
- * Liquid Glass a user-facing clear/tinted slider in place of Apple picking a
- * level; the HUD material keeps ONE resting tint in every state (R3's
- * uniformity is about state branches, not user choice), so which tint is a
- * setting. In-between levels are deliberately not offered: unmeasured
- * transparency would ride on R9's contrast assertions.
+ * The glass-tint presets, one table: id -> panel label, color-mix alpha the
+ * shell writes onto --pf-tint-alpha, and the scroll-edge band's own ink share
+ * (--pf-edge-alpha). The edge share is derived so the band composited over
+ * the body sheet lands exactly one notch (+14 points) darker than the body
+ * read at any level: composite = tint + edge * (1 - tint) -> 44+25*.56=58,
+ * 58+33*.42=72, 72+50*.28=86 - a designed darkening instead of the accidental
+ * same-tint stack, which produced 0.82/0.95/0.96 and jumped hardest for the
+ * clearest level. Golden Gate alignment - macOS 27 gave Liquid Glass a
+ * user-facing clear/tinted slider in place of Apple picking a level; the HUD
+ * material keeps ONE resting tint in every state (R3's uniformity is about
+ * state branches, not user choice), so which tint is a setting. In-between
+ * levels are deliberately not offered: unmeasured transparency would ride on
+ * R9's contrast assertions.
  */
 export const GLASS_TINTS = Object.freeze({
-  clear: { label: "Clear", alpha: "44%" },
-  medium: { label: "Medium", alpha: "58%" },
-  opaque: { label: "Opaque", alpha: "72%" }
+  clear: { label: "Clear", alpha: "44%", edge: "25%" },
+  medium: { label: "Medium", alpha: "58%", edge: "33%" },
+  opaque: { label: "Opaque", alpha: "72%", edge: "50%" }
 });
 
 /**

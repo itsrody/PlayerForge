@@ -72,9 +72,12 @@ export async function run({ session, baseUrl, boot }) {
     };
     const gradientOf = (element) => {
       const cs = getComputedStyle(element, "::before");
-      return String(cs.backgroundImage).includes("gradient")
-        && /blur\(16px\)/.test(String(cs.backdropFilter))
-        && String(cs.maskImage).includes("gradient");
+      return {
+        grad: String(cs.backgroundImage).includes("gradient"),
+        raw: String(cs.backgroundImage),
+        blur: /blur\(16px\)/.test(String(cs.backdropFilter)),
+        mask: String(cs.maskImage).includes("gradient")
+      };
     };
     const opacityOf = (element) => {
       const raw = getComputedStyle(element, "::before").opacity;
@@ -82,6 +85,7 @@ export async function run({ session, baseUrl, boot }) {
       return Number.isFinite(n) ? n : 0;
     };
     const frames = (fn) => requestAnimationFrame(() => requestAnimationFrame(fn));
+    let band = null;
     return new Promise((resolve) => {
       frames(() => {
         const atRest = { edge: readEdge(header), grad: gradientOf(header), alpha: opacityOf(header), top: panel.scrollTop };
@@ -96,9 +100,10 @@ export async function run({ session, baseUrl, boot }) {
           panel.scrollTop = 120;
           frames(() => {
             const scrolled = { edge: readEdge(header), alpha: opacityOf(header), top: panel.scrollTop };
+            band = gradientOf(header);
             panel.scrollTop = 0;
             panel.style.height = priorHeight;
-            resolve({ atRest, scrolled });
+            resolve({ atRest, scrolled, band });
           });
         });
       });
@@ -112,8 +117,9 @@ export async function run({ session, baseUrl, boot }) {
   });
   rows.push({
     name: "R4: scroll-driven solid-to-faded edge band engages over passing content",
-    status: !!edge && edge.scrolled.top > 0 && edge.scrolled.edge > 0 && edge.scrolled.alpha > 0 && edge.atRest.grad ? "pass" : "fail",
-    note: !edge ? "panel/header missing" : JSON.stringify({ atRest: edge.atRest, scrolled: edge.scrolled }),
+    status: !!edge && edge.scrolled.top > 0 && edge.scrolled.edge > 0 && edge.scrolled.alpha > 0
+      && edge.band.grad && edge.band.blur && edge.band.mask && edge.band.raw.includes("0.33") ? "pass" : "fail",
+    note: !edge ? "panel/header missing" : JSON.stringify({ atRest: edge.atRest, scrolled: edge.scrolled, band: edge.band }),
     ms: null
   });
 
@@ -152,7 +158,18 @@ export async function run({ session, baseUrl, boot }) {
     const clear = step(0);
     const opaque = step(2);
     const medium = step(1);
-    return { clear, opaque, medium };
+    // The options-row grammar rides the same slider: label left, active
+    // value hint right, one tick tip per stop (labels equal the raw names
+    // since this definition's fmt is identity).
+    const cell = slider.closest(".pf-options-cell");
+    const grammar = !cell ? null : {
+      label: cell.querySelector(".pf-options-head > .pf-panel-label")?.textContent,
+      hint: cell.querySelector(".pf-options-hint")?.textContent,
+      ticks: [...cell.querySelectorAll(".pf-stage-ticks span")].map((s) => String(s.textContent)),
+      active: cell.querySelector(".pf-stage-ticks .pf-stage-active")?.textContent,
+      dot: getComputedStyle(cell.querySelector(".pf-stage-ticks span"), "::before").width
+    };
+    return { clear, opaque, medium, grammar };
   });
   rows.push({
     name: "goldengate: glass tint presets land their declared alphas",
@@ -161,6 +178,17 @@ export async function run({ session, baseUrl, boot }) {
       && /\.?72/.test(String(tintPresets.opaque))
       && /\.?58/.test(String(tintPresets.medium)) ? "pass" : "fail",
     note: tintPresets ? JSON.stringify(tintPresets) : "panel missing",
+    ms: null
+  });
+  rows.push({
+    name: "goldengate: options rows read label left, hint right, tick per stop",
+    status: !!tintPresets?.grammar
+      && tintPresets.grammar.label === "Glass Tint"
+      && tintPresets.grammar.hint === "Medium"
+      && tintPresets.grammar.active === "Medium"
+      && String(tintPresets.grammar.ticks) === String(["Clear", "Medium", "Opaque"])
+      && tintPresets.grammar.dot === "3px" ? "pass" : "fail",
+    note: tintPresets?.grammar ? JSON.stringify(tintPresets.grammar) : "panel missing",
     ms: null
   });
 
