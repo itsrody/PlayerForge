@@ -317,6 +317,9 @@ export class SettingsPanel {
   #body = null;
   #tabList = null;
   #closeButton = null;
+  /** The sliding segmented capsule + its strip-box observer. */
+  #capsule = null;
+  #tabResize = null;
   #sections = new Map();
   #activeSection = null;
   #sectionCounter = 0;
@@ -424,6 +427,9 @@ export class SettingsPanel {
     this.#runWithViewTransition("pf-panel-open", () => {
       this.#applyCompactSetting();
       this.#root.classList.add("pf-open");
+      // Tab boxes resolve only after the display flip; doing it inside the
+      // transition update keeps the strip as the source of truth in the VT.
+      this.#moveCapsule();
       const activeTab = this.#root.querySelector(".pf-panel-tab-active") || this.#closeButton;
       if (activeTab && deepestActiveElement(this.#shellHost) !== activeTab) {
         activeTab.focus();
@@ -793,6 +799,9 @@ export class SettingsPanel {
     this.#backdrop = null;
     this.#body = null;
     this.#tabList = null;
+    this.#capsule = null;
+    this.#tabResize?.disconnect();
+    this.#tabResize = null;
     this.#sections.clear();
     this.#activeSection = null;
   }
@@ -829,6 +838,22 @@ export class SettingsPanel {
     tabList.className = "pf-panel-tabs";
     tabList.setAttribute("role", "tablist");
     tabList.setAttribute("aria-label", "PlayerForge sections");
+    // The segmented capsule rides under the labels (paints below later
+    // siblings); it never seeks events, never receives focus.
+    const capsule = document.createElement("div");
+    capsule.className = "pf-tab-capsule";
+    capsule.setAttribute("aria-hidden", "true");
+    tabList.appendChild(capsule);
+    this.#capsule = capsule;
+    // Density flips (compact setting mid-session) reshape the strip; the
+    // observer re-anchors the capsule whenever the tab boxes move while the
+    // panel is open. One observer, no timers.
+    this.#tabResize = new ResizeObserver(() => {
+      if (this.isOpen) {
+        this.#moveCapsule();
+      }
+    });
+    this.#tabResize.observe(tabList);
 
     const closeButton = document.createElement("button");
     closeButton.className = "pf-panel-close";
@@ -977,6 +1002,23 @@ export class SettingsPanel {
       targetTab.tabIndex = 0;
     }
     this.#activeSection = targetSection;
+    this.#moveCapsule();
+  }
+
+  /** Re-seat the capsule under the active tab; no-op while boxes are unknown. */
+  #moveCapsule() {
+    if (!this.#capsule) {
+      return;
+    }
+    const tab = this.#sections.get(this.#activeSection);
+    if (!tab || !tab.isConnected) {
+      return;
+    }
+    const width = tab.offsetWidth;
+    if (width > 0) {
+      this.#capsule.style.width = `${width}px`;
+      this.#capsule.style.translate = `${tab.offsetLeft}px 0`;
+    }
   }
 
   #runWithViewTransition(type, update) {

@@ -129,6 +129,62 @@ export async function run({ session, baseUrl, boot }) {
     ms: null
   });
 
+  // Golden Gate alignment, measured per the contrast law: the three glass
+  // tint presets are driven through the REAL settings radios (last one is
+  // re-clicked, so the case leaves Medium - the schema default - in place),
+  // and each must land its exact declared alpha on the panel sheet.
+  const tintPresets = await session.eval(function main() {
+    const host = document.querySelector(".pf-shell");
+    const panel = host?.shadowRoot?.querySelector(".pf-panel");
+    if (!panel) return null;
+    const buttons = [...panel.querySelectorAll(".pf-options-btn")];
+    const tintOf = (label) => {
+      const btn = buttons.find((b) => b.textContent === label);
+      if (!btn) return null;
+      btn.click();
+      return getComputedStyle(panel).backgroundColor;
+    };
+    const clear = tintOf("Clear");
+    const opaque = tintOf("Opaque");
+    const medium = tintOf("Medium");
+    return { clear, opaque, medium };
+  });
+  rows.push({
+    name: "goldengate: glass tint presets land their declared alphas",
+    status: !!tintPresets
+      && /\.?44/.test(String(tintPresets.clear).replace("color(srgb 0 0 0 / ", ""))
+      && /\.?72/.test(String(tintPresets.opaque))
+      && /\.?58/.test(String(tintPresets.medium)) ? "pass" : "fail",
+    note: tintPresets ? JSON.stringify(tintPresets) : "panel missing",
+    ms: null
+  });
+
+  // The segmented capsule re-seats under the active tab - slides between
+  // tabs on a real switch and restores the starting selection.
+  const tabCapsule = await session.eval(function main() {
+    const host = document.querySelector(".pf-shell");
+    const strip = host?.shadowRoot?.querySelector(".pf-panel-tabs");
+    if (!strip) return null;
+    const capsule = strip.querySelector(".pf-tab-capsule");
+    if (!capsule) return null;
+    const tabs = [...strip.querySelectorAll(".pf-panel-tab")];
+    if (tabs.length < 2) return null;
+    const first = tabs.findIndex((t) => t.classList.contains("pf-panel-tab-active"));
+    const start = { translate: capsule.style.translate, width: capsule.style.width };
+    tabs[(first + 1) % tabs.length].click();
+    const after = { translate: capsule.style.translate };
+    tabs[first].click();
+    return { start, after, duration: getComputedStyle(capsule).transitionDuration };
+  });
+  rows.push({
+    name: "goldengate: segmented capsule slides between tabs",
+    status: !!tabCapsule
+      && tabCapsule.start.width !== "" && tabCapsule.after.translate !== tabCapsule.start.translate
+      ? "pass" : "fail",
+    note: tabCapsule ? JSON.stringify(tabCapsule) : "tabs/capsule missing",
+    ms: null
+  });
+
   // The retired focus assertions, measured rather than trusted: the panel
   // keeps ONE tint state (the resting 58%) even with focus inside it, and
   // the numeric stepper's border stays the neutral hairline when its input

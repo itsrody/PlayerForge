@@ -22,7 +22,23 @@ export const SETTING_KEYS = Object.freeze({
   hotkeys: "gestures.hotkeys",
   haptics: "gestures.haptics",
   edgeToEdge: "fullscreen.edgeToEdge",
-  compact: "ui.compact"
+  compact: "ui.compact",
+  glassTint: "ui.glassTint"
+});
+
+/**
+ * The glass-tint presets, one table: id -> panel label + color-mix alpha the
+ * shell writes onto --pf-tint-alpha. Golden Gate alignment - macOS 27 gave
+ * Liquid Glass a user-facing clear/tinted slider in place of Apple picking a
+ * level; the HUD material keeps ONE resting tint in every state (R3's
+ * uniformity is about state branches, not user choice), so which tint is a
+ * setting. In-between levels are deliberately not offered: unmeasured
+ * transparency would ride on R9's contrast assertions.
+ */
+export const GLASS_TINTS = Object.freeze({
+  clear: { label: "Clear", alpha: "44%" },
+  medium: { label: "Medium", alpha: "58%" },
+  opaque: { label: "Opaque", alpha: "72%" }
 });
 
 /**
@@ -76,6 +92,15 @@ export const SETTINGS_SCHEMA = [
     type: "bool",
     label: "Compact Panel",
     default: false,
+    group: "Interface"
+  },
+  {
+    key: SETTING_KEYS.glassTint,
+    type: "options",
+    label: "Glass Tint",
+    options: Object.keys(GLASS_TINTS),
+    fmt: (id) => GLASS_TINTS[id].label,
+    default: "medium",
     group: "Interface"
   }
 ];

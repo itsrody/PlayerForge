@@ -35,7 +35,12 @@
      costs exactly one composited blur layer. The backdrop-filter blurs +
      saturates what is behind the glass, which keeps the tint see-through while
      light text stays legible over arbitrary video. */
-  --pf-glass-tint: color-mix(in srgb, var(--pf-bg) 58%, transparent);
+  --pf-glass-tint: color-mix(in srgb, var(--pf-bg) var(--pf-tint-alpha), transparent);
+  /* The tint share is a registered percentage the shell writes from the
+     glassTint setting (the Clear/Medium/Opaque presets ride GLASS_TINTS) -
+     a user-selected tint level, not a state branch: the material still
+     paints ONE value everywhere. Registered instead of a var fallback so a
+     stray foreign write cannot untype the mix. */
   /* The panel's top rim is an inset shadow on the sheet; once the header
      paints its own tint over that region the rim has to move onto the header,
      or the topmost edge loses its highlight. */
@@ -48,14 +53,14 @@
   --pf-surface-soft: rgba(255, 255, 255, 0.04);  /* cells, stepper, toggle bg   */
   --pf-surface-mid: rgba(255, 255, 255, 0.09);   /* ghost btn, hover cells      */
   --pf-surface-strong: rgba(255, 255, 255, 0.16);/* toast actions, ghost hover  */
-  --pf-border: rgba(255, 255, 255, 0.14);        /* strong outlines             */
-  --pf-border-soft: rgba(255, 255, 255, 0.1);    /* hairline dividers           */
-  --pf-border-control: rgba(255, 255, 255, 0.18);/* inputs, switches            */
-  --pf-border-input: rgba(255, 255, 255, 0.2);   /* color wells, selects        */
+  --pf-border: rgba(255, 255, 255, 0.16);        /* strong outlines             */
+  --pf-border-soft: rgba(255, 255, 255, 0.12);   /* hairline dividers           */
+  --pf-border-control: rgba(255, 255, 255, 0.2); /* inputs, switches            */
+  --pf-border-input: rgba(255, 255, 255, 0.22);  /* color wells, selects        */
 
-  --pf-text-dim: rgba(255, 255, 255, 0.6);       /* secondary text              */
-  --pf-text-mid: rgba(255, 255, 255, 0.7);       /* meta / hint emphasis        */
-  --pf-text-soft: rgba(255, 255, 255, 0.65);     /* section labels              */
+  --pf-text-dim: rgba(255, 255, 255, 0.64);      /* secondary text              */
+  --pf-text-mid: rgba(255, 255, 255, 0.73);      /* meta / hint emphasis        */
+  --pf-text-soft: rgba(255, 255, 255, 0.68);     /* section labels              */
 
   --pf-radius-pill: 999px;
   /* Concentric scale (AGENTS.md R5/R6). The panel is the outermost surface so
@@ -326,6 +331,13 @@
       syntax: "<number>";
       inherits: true;
       initial-value: 0;
+    }
+    /* The glass-tint share (see the token block note). Written on the host;
+       must inherit through the boundary into the shadow's color-mix. */
+    @property --pf-tint-alpha {
+      syntax: "<percentage>";
+      inherits: true;
+      initial-value: 58%;
     }
 
     /* - Panel backdrop - */
@@ -657,6 +669,26 @@
         display: flex;
         justify-content: space-evenly;
         padding: 3px;
+        /* The sliding capsule anchors here. */
+        position: relative;
+
+        /* Liquid segmented capsule (Golden Gate): the active tab's pod
+           slides between tabs instead of a per-tab state swap animating.
+           JS positions it from the active tab's box; the bounce ease is the
+           panel's motion language. It paints on its own layer below the
+           labels, no events, no focus - the active tab keeps its accent
+           text and keyboard ring exactly as today. */
+        .pf-tab-capsule {
+          position: absolute;
+          top: 0;
+          left: 0;
+          height: 100%;
+          width: 0;
+          transition: translate var(--pf-ease-bounce), width var(--pf-ease-bounce);
+          background: var(--pf-surface-mid);
+          border-radius: var(--pf-radius-xs);
+          pointer-events: none;
+        }
 
         .pf-panel-tab {
           flex: 0 1 auto;
