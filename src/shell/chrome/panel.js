@@ -1038,21 +1038,17 @@ export class SettingsPanel {
 
 /* - Panel sections - */
 
-const ARROW_DIRECTIONS = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
-
 /**
  * Render the settings schema into the panel: one labeled section per group,
- * toggles for bools, steppers for numbers. One instance per render; the
- * widget map, the option-group id seed, and the reactivity subscription are
- * private fields, so a change event re-syncs without any module-let state
- * (`signal` ties that subscription to the caller, e.g. the shell).
+ * toggles for bools, staged sliders for enum options, steppers for numbers.
+ * One instance per render; the widget map and the reactivity subscription
+ * are private fields, so a change event re-syncs without any module-let
+ * state (`signal` ties that subscription to the caller, e.g. the shell).
  */
 class SettingsSection {
   #panel;
   /** key -> widget handle(s), so a change event can re-sync without queries. */
   #controls = new Map();
-  /** Unique-id seed for option-group labels (one settings section per shell). */
-  #optionsGroupCounter = 0;
   /** The reactivity subscription; torn down when the panel body is nulled. */
   #off = () => {};
 
@@ -1131,59 +1127,46 @@ class SettingsSection {
     this.#controls.set(definition.key, { type: "bool", el: checkbox });
   }
 
+  /**
+   * Options-type settings render as staged sliders: a native range input
+   * snapped to one stop per option, labels beneath carrying the active
+   * state. The range's own value/step/arrow semantics replace the roving
+   * radio group entirely - one focusable stop, arrows step options, and the
+   * sync path stays the same set-only assignment (never echo).
+   */
   #addOptions(groupGrid, definition) {
     const panel = this.#panel;
     const cell = panel.el("div", { class: "pf-panel-cell pf-options-cell" }, groupGrid);
-    const groupLabel = panel.addLabel(cell, definition.label);
-    const row = panel.el("div", { class: "pf-options-row" }, cell);
-    // Radio semantics: one roving stop per group, aria-checked mirrors the
-    // active button, arrows move + select like a native radio group.
-    groupLabel.id = `pf-options-group-${this.#optionsGroupCounter++}`;
-    row.setAttribute("role", "radiogroup");
-    row.setAttribute("aria-labelledby", groupLabel.id);
-    const buttons = [];
+    panel.addLabel(cell, definition.label);
+    const stage = panel.el("div", { class: "pf-stage" }, cell);
+    const labels = panel.el("div", { class: "pf-stage-labels" }, stage);
+    const spans = definition.options.map((opt) => {
+      const span = panel.el("span", {}, labels);
+      span.textContent = definition.fmt(opt);
+      return span;
+    });
+    const slider = panel.el("input", {
+      class: "pf-slider",
+      type: "range",
+      min: 0,
+      max: definition.options.length - 1,
+      step: 1
+    }, stage);
+    slider.setAttribute("aria-label", definition.label);
     const syncOptions = (active) => {
-      let checked = false;
-      for (const [opt, btn] of buttons) {
-        const on = opt === active;
-        checked = checked || on;
-        btn.classList.toggle("pf-options-active", on);
-        btn.setAttribute("aria-checked", on ? "true" : "false");
-        btn.tabIndex = on ? 0 : -1;
-      }
-      // A stale value outside the enum must not collapse the tab stops.
-      if (!checked && buttons.length) {
-        buttons[0][1].tabIndex = 0;
+      const index = definition.options.indexOf(active);
+      const value = index === -1 ? 0 : index;
+      slider.value = value;
+      slider.setAttribute("aria-valuetext", definition.fmt(definition.options[value]));
+      for (let i = 0; i < spans.length; i++) {
+        spans[i].classList.toggle("pf-stage-active", i === value);
       }
     };
-    for (const opt of definition.options) {
-      const btn = panel.el("button", {
-        type: "button",
-        role: "radio",
-        class: "pf-btn pf-options-btn"
-      }, row);
-      btn.textContent = definition.fmt(opt);
-      btn.addEventListener("click", () => {
-        setSetting(definition.key, opt);
-        syncOptions(opt);
-      });
-      buttons.push([opt, btn]);
-    }
-    row.addEventListener("keydown", (event) => {
-      const direction = ARROW_DIRECTIONS[event.key];
-      if (!direction) {
-        return;
+    slider.addEventListener("input", () => {
+      const index = Number(slider.value) | 0;
+      if (index >= 0 && index < definition.options.length) {
+        setSetting(definition.key, definition.options[index]);
       }
-      const index = buttons.findIndex(([, btn]) => btn === event.target);
-      if (index === -1) {
-        return;
-      }
-      event.preventDefault();
-      const next = (index + direction + buttons.length) % buttons.length;
-      const [opt, btn] = buttons[next];
-      setSetting(definition.key, opt);
-      syncOptions(opt);
-      btn.focus();
     });
     syncOptions(getSetting(definition.key));
     this.#controls.set(definition.key, { type: "options", sync: syncOptions });

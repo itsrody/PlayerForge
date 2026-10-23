@@ -65,21 +65,26 @@ export async function run({ session, baseUrl, boot }) {
     const panel = host?.shadowRoot?.querySelector(".pf-panel");
     const header = panel?.querySelector(".pf-panel-header");
     if (!panel || !header) return null;
-    const alphaOf = (bg) => {
-      const rgba = /rgba?\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*,\s*([\d.]+)\s*\)/.exec(String(bg));
-      if (rgba) return Number(rgba[1]);
-      const colorFn = /color\(\s*\S+\s*[-\d.]+\s+[-\d.]+\s+[-\d.]+\s*\/\s*([\d.]+)/.exec(String(bg));
-      return colorFn ? Number(colorFn[1]) : null;
+    const readEdge = (element) => {
+      const raw = getComputedStyle(element, "::before").getPropertyValue("--pf-scroll-edge");
+      const n = Number.parseFloat(raw);
+      return Number.isFinite(n) ? n : 0;
     };
-    const readEdge = () => {
-      const raw = getComputedStyle(header).getPropertyValue("--pf-scroll-edge");
+    const gradientOf = (element) => {
+      const cs = getComputedStyle(element, "::before");
+      return String(cs.backgroundImage).includes("gradient")
+        && /blur\(16px\)/.test(String(cs.backdropFilter))
+        && String(cs.maskImage).includes("gradient");
+    };
+    const opacityOf = (element) => {
+      const raw = getComputedStyle(element, "::before").opacity;
       const n = Number.parseFloat(raw);
       return Number.isFinite(n) ? n : 0;
     };
     const frames = (fn) => requestAnimationFrame(() => requestAnimationFrame(fn));
     return new Promise((resolve) => {
       frames(() => {
-        const atRest = { edge: readEdge(), alpha: alphaOf(getComputedStyle(header).backgroundColor), top: panel.scrollTop };
+        const atRest = { edge: readEdge(header), grad: gradientOf(header), alpha: opacityOf(header), top: panel.scrollTop };
         // The sheet sizes to its content and the fixture panel fits the
         // viewport (measured: its content tops out well under 300px), so it
         // would never overflow on its own - a 140px window guarantees the
@@ -90,7 +95,7 @@ export async function run({ session, baseUrl, boot }) {
         frames(() => {
           panel.scrollTop = 120;
           frames(() => {
-            const scrolled = { edge: readEdge(), alpha: alphaOf(getComputedStyle(header).backgroundColor), top: panel.scrollTop };
+            const scrolled = { edge: readEdge(header), alpha: opacityOf(header), top: panel.scrollTop };
             panel.scrollTop = 0;
             panel.style.height = priorHeight;
             resolve({ atRest, scrolled });
@@ -100,15 +105,15 @@ export async function run({ session, baseUrl, boot }) {
     });
   });
   rows.push({
-    name: "R4: pinned header is transparent at rest (no double tint)",
+    name: "R4: pinned header edge band is unmarked at rest",
     status: !!edge && edge.atRest.top === 0 && edge.atRest.edge === 0 && edge.atRest.alpha === 0 ? "pass" : "fail",
     note: !edge ? "panel/header missing" : JSON.stringify(edge.atRest),
     ms: null
   });
   rows.push({
-    name: "R4: scroll-driven header tint engages over passing content",
-    status: !!edge && edge.scrolled.top > 0 && edge.scrolled.edge > 0 && edge.scrolled.alpha > 0 ? "pass" : "fail",
-    note: !edge ? "panel/header missing" : JSON.stringify(edge.scrolled),
+    name: "R4: scroll-driven solid-to-faded edge band engages over passing content",
+    status: !!edge && edge.scrolled.top > 0 && edge.scrolled.edge > 0 && edge.scrolled.alpha > 0 && edge.atRest.grad ? "pass" : "fail",
+    note: !edge ? "panel/header missing" : JSON.stringify({ atRest: edge.atRest, scrolled: edge.scrolled }),
     ms: null
   });
 
@@ -130,23 +135,23 @@ export async function run({ session, baseUrl, boot }) {
   });
 
   // Golden Gate alignment, measured per the contrast law: the three glass
-  // tint presets are driven through the REAL settings radios (last one is
-  // re-clicked, so the case leaves Medium - the schema default - in place),
-  // and each must land its exact declared alpha on the panel sheet.
+  // tint presets drive the REAL staged slider (the options widget) - the
+  // last step re-selects Medium, the schema default, so the case leaves the
+  // setting in place - and each must land its exact declared alpha.
   const tintPresets = await session.eval(function main() {
     const host = document.querySelector(".pf-shell");
     const panel = host?.shadowRoot?.querySelector(".pf-panel");
     if (!panel) return null;
-    const buttons = [...panel.querySelectorAll(".pf-options-btn")];
-    const tintOf = (label) => {
-      const btn = buttons.find((b) => b.textContent === label);
-      if (!btn) return null;
-      btn.click();
+    const slider = panel.querySelector('input[aria-label="Glass Tint"]');
+    if (!slider) return null;
+    const step = (index) => {
+      slider.value = index;
+      slider.dispatchEvent(new Event("input", { bubbles: true }));
       return getComputedStyle(panel).backgroundColor;
     };
-    const clear = tintOf("Clear");
-    const opaque = tintOf("Opaque");
-    const medium = tintOf("Medium");
+    const clear = step(0);
+    const opaque = step(2);
+    const medium = step(1);
     return { clear, opaque, medium };
   });
   rows.push({

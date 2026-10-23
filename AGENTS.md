@@ -327,8 +327,11 @@ launch (§8).
 Still in force from the design process; `src/shell/chrome/styles.css` is the
 only surface, scales/tokens `@property`-typed, gradients banned in the HUD:
 
-- **R1 Glass budget: at most two `backdrop-filter` surfaces** — panel + toast.
-  A third is a redesign decision with its own justification.
+- **R1 Glass budget: at most two `backdrop-filter` surfaces + one sanctioned
+  blur band** — panel + toast, plus the R4 scroll-edge band's masked blur
+  (user direction): the band fades in/out per R4, so it only costs while
+  content actually passes under the pinned header. A fourth surface is a
+  redesign decision with its own justification.
 - **R3 One resting tint (`--pf-glass-tint`), unchanged by focus** — the
   material's two-state split (resting vs `--pf-glass-tint-focus`, 76%) was
   retired by user direction: the panel keeps the same tint whether or not it
@@ -342,9 +345,9 @@ only surface, scales/tokens `@property`-typed, gradients banned in the HUD:
   scrolling beneath a pinned control is obscured; not a blanket scrim.
   Realized scroll-driven (Chromium 155's scroll timelines register a
   `--pf-scroll-edge` share): the panel header is fully transparent at the
-  top of the scroll and ramps its tint in only over passing content, so the
-  sheet's tint stays the one glass layer and the resting header cannot go
-  darker than the body.
+  top of the scroll and ramps its solid-to-faded tint+blur band in only
+  over passing content, so the sheet's tint stays the one glass layer and
+  the resting header cannot go darker than the body.
 - **R5 Nested radii are concentric and derived:** container radius R with
   inset padding P → inset elements use R − P (panel 16 → strip/close 8 →
   tab 5). Derived, not chosen, so container changes stay correct.
@@ -354,8 +357,10 @@ only surface, scales/tokens `@property`-typed, gradients banned in the HUD:
   screenshot. Geometry (resting radii, control positions) may not move as a
   side effect of appearance work.
 - The current set is tint + blur + hairline border + rim shadows, **zero
-  linear-gradients**, rim highlights present (`--pf-header-rim`, inset
-  highlights), two blur layers (`--pf-blur-sm/lg` = `blur(16px)
+  linear-gradients with one sanctioned exception**: the R4 scroll-edge band
+  is a single solid-to-faded linear-gradient (user direction) — the only
+  gradient permitted in the HUD — rim highlights present (`--pf-header-rim`,
+  inset highlights), two blur layers (`--pf-blur-sm/lg` = `blur(16px)
   saturate(1.7)` / `blur(24px) saturate(1.8)`).
 
 ## 7. check/ — the testing tool
