@@ -24,6 +24,25 @@ const HOLD_CANCEL_MOVE_PX = TUNING.gestures.holdCancelMovePx;
 const SCROLL_START_PX = TUNING.gestures.scrollStartPx;
 const AXIS_DOMINANCE_RATIO = TUNING.gestures.axisDominanceRatio;
 const PINCH_MIN_DISTANCE_PX = TUNING.gestures.pinchMinDistancePx;
+
+/**
+ * Interactive SDK controls the gesture engine must never claim: when a press's
+ * composed target resolves one of these, the native stream stays whole. This
+ * is the press-stream version of the DOM hit-test law (no pf surface may
+ * block): an up-front claim stopImmediatePropagation's pointerdown and, while
+ * owned, the whole compat mouse/touch tail - click-driven SDK UIs survive that
+ * (the owned plain tap passes its click natively), but controls driven by
+ * pointerdown/mousedown/touchend never get their activator events. SDK rails
+ * are the exact shape: buttons or role-bearing wrappers. Not listed: video
+ * itself (the gesture surface), tabindex'd wrappers (too coarse - an SDK
+ * div with a focus target is not a control), svg (same).
+ * Cost: one closest() climb per press attempt, only on flips of ownership -
+ * press is not a hot path and no layout is read.
+ */
+const SDK_CONTROLS_SELECTOR =
+  "button, a, input, textarea, select, label, summary, [contenteditable]," +
+  '[role="button"], [role="switch"], [role="checkbox"], [role="radio"],' +
+  '[role="menuitem"], [role="option"], [role="tab"], [role="slider"]';
 const PINCH_SCALE_THRESHOLD = TUNING.gestures.pinchScaleThreshold;
 const TRACKPAD_COOLDOWN_MS = TUNING.gestures.trackpadCooldownMs;
 const SUPPRESS_WINDOW_MS = TUNING.gestures.suppressWindowMs;
@@ -1124,7 +1143,8 @@ export class InputForge {
     if (
       event.button !== 0 ||
       this.#eventTarget && isInsideShell(this.#eventTarget, event.target) ||
-      this.#pointers.size === 0 && !this.#hitTestVideo(event)
+      this.#pointers.size === 0 && !this.#hitTestVideo(event) ||
+      this.#sdkTargetInteractive(event)
     ) {
       return;
     }
@@ -1388,6 +1408,9 @@ export class InputForge {
     if (this.#eventTarget && isInsideShell(this.#eventTarget, event.target)) {
       return false;
     }
+    if (this.#sdkTargetInteractive(event)) {
+      return false;
+    }
     if (this.#pointers.size > 0) {
       return true;
     }
@@ -1396,6 +1419,16 @@ export class InputForge {
       return false;
     }
     return this.#hitTestVideo(point);
+  }
+
+  /**
+   * Whether the press target resolves an interactive SDK control (see
+   * SDK_CONTROLS_SELECTOR). The composed-path head is used so shadow-tree
+   * press spread still resolves; text targets satisfy closest by tree walk.
+   */
+  #sdkTargetInteractive(event) {
+    const target = event.composedPath ? event.composedPath()[0] : event.target;
+    return typeof target?.closest === "function" && !!target.closest(SDK_CONTROLS_SELECTOR);
   }
 
   #clearAwaitClick() {

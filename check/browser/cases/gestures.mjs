@@ -175,5 +175,43 @@ export async function run({ session, baseUrl, boot }) {
         (window.__pfEvents.includes("scrub-end") || window.__pfEvents.includes("scrub-release"));
     }), `events=${JSON.stringify(await session.eval(function main() { return window.__pfEvents; }))}`);
 
+  // SDK-control passthrough, proven with real driver input while the
+  // fs-bound pointer intents are ARMED (the state that used to eat them):
+  // an overlay button inside the container - every SDK rail's shape - keeps
+  // its own pointerdown and click; their storage counters are read before
+  // the probe is removed.
+  await session.eval(function main() {
+    const video = document.querySelector("#check-video");
+    const sb = document.createElement("button");
+    sb.id = "pf-sdkprobe";
+    sb.textContent = "SDK";
+    sb.style.cssText = "position:absolute;left:8px;top:8px;width:72px;height:40px;z-index:2147483000;";
+    sb.__pfCounts = { down: 0, click: 0 };
+    sb.addEventListener("pointerdown", () => sb.__pfCounts.down++);
+    sb.addEventListener("click", () => sb.__pfCounts.click++);
+    video.parentElement.appendChild(sb);
+  });
+  const probePoint = await session.eval(function main() {
+    const r = document.querySelector("#pf-sdkprobe").getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  });
+  await raw.actions({ async: true })
+    .move({ origin: "viewport", x: probePoint.x, y: probePoint.y })
+    .press()
+    .release()
+    .pause(120)
+    .perform();
+  await new Promise((r) => setTimeout(r, 300));
+  status(rows, "sdk control passthrough: overlay button keeps pointerdown + click",
+    await session.eval(function main() {
+      const counts = document.querySelector("#pf-sdkprobe")?.__pfCounts;
+      return !!counts && counts.down === 1 && counts.click === 1;
+    }), `counts=${JSON.stringify(await session.eval(function main() {
+      return document.querySelector("#pf-sdkprobe")?.__pfCounts ?? null;
+    }))}`);
+  await session.eval(function main() {
+    document.querySelector("#pf-sdkprobe")?.remove();
+  });
+
   return rows;
 }

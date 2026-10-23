@@ -160,8 +160,9 @@ iframes, same-origin and cross-origin:
   in the Settings tab over the same shell's state).
   Pure state: the transform write belongs solely to `ViewershipTransform`.
 - **inputs/forge.js** — the pointer/keyboard gesture engine: the stream
-  router (press eligibility, pointer tracking, the session latch feeding the
-  shared `fs` gate, click/dblclick suppression) over per-story recognizer
+  router (press eligibility, the interactive-target exemption — SDK
+  controls keep their native press stream, pointer tracking, the session
+  latch feeding the shared `fs` gate, click/dblclick suppression) over per-story recognizer
   machines: `ScrubStroke` (pointer move-stream scrub with coalesced samples,
   the exp-smoothed velocity filter, and the bounded predicted-events wash),
   `SwipeStroke` (the translate-drag transform writes and their eased
