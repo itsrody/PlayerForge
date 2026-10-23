@@ -37,66 +37,85 @@ const DOMAIN_TLDS = {
   ])
 };
 const IPV4_RE = /^(?:\d{1,3}\.){3}\d{1,3}$/;
-/** Memoized domain keys: pages resolve their hostname repeatedly (kernel +
- *  probe + responder), and the TLD walk is pure over hostname.
- *  Capped at 256 entries to prevent unbounded growth on SPAs with dynamic
- *  subdomains. Eviction clears the oldest half when the cap is hit.
- */
+/** Memo cap: stops unbounded growth on SPAs with dynamic subdomains. */
 const DOMAIN_KEY_CACHE_MAX = 256;
-const domainKeyCache = new Map();
+
+/**
+ * The capped hostname->key memo as one class. Pages resolve their hostname
+ * repeatedly (kernel + probe + responder) and the TLD walk is pure over
+ * hostname, so identical inputs share one cached result; the Map, the cap,
+ * and the eviction walk are private to the instance (the same one-owner
+ * shape as the layer's other memos - DomainMatcher's scratch rows,
+ * TitleSanitizer's slot). The exported getDomainKey stays the thin wrapper.
+ */
+class DomainKeyCache {
+  #cache = new Map();
+
+  #store(hostname, key) {
+    this.#cache.set(hostname, key);
+    // Over-cap eviction clears the oldest quarter (ceil(count / 4)): one
+    // bounded walk instead of unbounded growth; a page that just visited
+    // 200+ hosts re-warms its fresh keys on the next resolves.
+    if (this.#cache.size > DOMAIN_KEY_CACHE_MAX) {
+      const evict = Math.ceil(DOMAIN_KEY_CACHE_MAX / 4);
+      let i = 0;
+      for (const k of this.#cache.keys()) {
+        this.#cache.delete(k);
+        if (++i >= evict) break;
+      }
+    }
+  }
+
+  compute(hostname) {
+    if (!hostname) {
+      return "";
+    }
+    // Single Map lookup - the cache never stores undefined, so a hit vs. miss
+    // is one get() instead of has() + get().
+    const hit = this.#cache.get(hostname);
+    if (hit !== undefined) {
+      return hit;
+    }
+    let key;
+    if (IPV4_RE.test(hostname)) {
+      key = hostname.replaceAll(".", "-");
+    } else if (hostname.includes(":")) {
+      // Bracketed IPv6 ([::1]) or bare forms - the TLD walk would mangle them
+      // into garbage keys, so collapse to one dash-safe identifier like IPv4.
+      key = hostname.replace(/[\\[\]:]+/g, "-").replace(/^-+|-+$/g, "") || "ipv6";
+    } else {
+      const parts = hostname.toLowerCase().replace(/^www\./, "").split(".");
+      const multiPartTlds = DOMAIN_TLDS.multi;
+      const singleLabelTlds = DOMAIN_TLDS.single;
+      let idx = parts.length - 1;
+      if (parts[idx] && (parts[idx].length <= 3 || singleLabelTlds.has(parts[idx]))) {
+        idx--;
+      }
+      if (parts[idx] && multiPartTlds.has(parts[idx])) {
+        idx--;
+      }
+      // Suffixes missing from the curated lists (e.g. .basketball) never moved
+      // `idx`, so without this the suffix LABEL itself would become the key -
+      // collapsing every registrable domain under one unlisted gTLD into a single
+      // entry. Assume the unclassified last label is a TLD and step up one more.
+      if (idx === parts.length - 1 && parts.length >= 2) {
+        idx--;
+      }
+      key = parts[Math.max(0, idx)] || "";
+    }
+    this.#store(hostname, key);
+    return key;
+  }
+}
+
+const domainKeyCache = new DomainKeyCache();
 
 /**
  * Reduce a hostname to its registrable-domain key (best effort, no PSL).
  * IP addresses become dash-separated so they are safe as identifiers.
- * Pure over hostname, so identical inputs share one cached result.
  */
 export function getDomainKey(hostname) {
-  if (!hostname) {
-    return "";
-  }
-  // Single Map lookup - the cache never stores undefined, so a hit vs. miss
-  // is one get() instead of has() + get().
-  const hit = domainKeyCache.get(hostname);
-  if (hit !== undefined) {
-    return hit;
-  }
-  let key;
-  if (IPV4_RE.test(hostname)) {
-    key = hostname.replaceAll(".", "-");
-  } else if (hostname.includes(":")) {
-    // Bracketed IPv6 ([::1]) or bare forms - the TLD walk would mangle them
-    // into garbage keys, so collapse to one dash-safe identifier like IPv4.
-    key = hostname.replace(/[\\[\]:]+/g, "-").replace(/^-+|-+$/g, "") || "ipv6";
-  } else {
-    const parts = hostname.toLowerCase().replace(/^www\./, "").split(".");
-    const multiPartTlds = DOMAIN_TLDS.multi;
-    const singleLabelTlds = DOMAIN_TLDS.single;
-    let idx = parts.length - 1;
-    if (parts[idx] && (parts[idx].length <= 3 || singleLabelTlds.has(parts[idx]))) {
-      idx--;
-    }
-    if (parts[idx] && multiPartTlds.has(parts[idx])) {
-      idx--;
-    }
-    // Suffixes missing from the curated lists (e.g. .basketball) never moved
-    // `idx`, so without this the suffix LABEL itself would become the key -
-    // collapsing every registrable domain under one unlisted gTLD into a single
-    // entry. Assume the unclassified last label is a TLD and step up one more.
-    if (idx === parts.length - 1 && parts.length >= 2) {
-      idx--;
-    }
-    key = parts[Math.max(0, idx)] || "";
-  }
-  domainKeyCache.set(hostname, key);
-  if (domainKeyCache.size > DOMAIN_KEY_CACHE_MAX) {
-    const evict = Math.ceil(DOMAIN_KEY_CACHE_MAX / 4);
-    let i = 0;
-    for (const k of domainKeyCache.keys()) {
-      domainKeyCache.delete(k);
-      if (++i >= evict) break;
-    }
-  }
-  return key;
+  return domainKeyCache.compute(hostname);
 }
 
 /** Label-boundary containment: subdomains count, substrings do not. */
@@ -245,10 +264,6 @@ export function hashEntry(domainKey, path, duration) {
  * payload; playback pages of the sites this targets release-tag their titles
  * and embed non-Latin noise that must not feed fuzzy resume matching.
  */
-/* - Window message types - */
-
-
-
 /**
  * The postMessage types the frame bridge sends and receives across iframe
  * edges. Inlined here - they are used only by this module, so a shared
@@ -679,6 +694,13 @@ export const CTX_REQUEST_TIMEOUT_MS = 3000;
 const CTX_PIPE_IDLE_MS = 60_000;
 
 /**
+ * One owner of the top-frame responder state. Previously a closure machine -
+ * a `pipes` Map plus drop/touch/answer verbs captured by the factory and
+ * reached from three event flows (the window message, per-pipe message and
+ * messageerror listeners, and the idle sweep). Here the Map and the verbs are
+ * private members of one instance (the FullscreenProvisioner shape), and the
+ * exported createTopFrameResponder stays the thin event-handler wrapper.
+ *
  * Handler for the top frame: answers validated context requests. Context is
  * resolved per request (not captured at install time) so late titles and SPA
  * route changes are reflected. Requests qualify when they originate from our
@@ -689,60 +711,58 @@ const CTX_PIPE_IDLE_MS = 60_000;
  * offer resume matching (domain + path + duration drive identity). Domain
  * and path stay because cross-origin players cannot function without them.
  */
-export function createTopFrameResponder(resolveContext, ownOrigin = location.origin, post = defaultPostToSource) {
-  // Ports that established a private pipe get a persistent handler: after the
-  // first contact, the requesting frame sends every later resolve straight
-  // over the pipe, and those messages arrive as MessagePort events (no window
-  // source/origin/ports), so the window responder alone would never see them.
-  //
-  // textTracks-style append-only leak guard: there is no close/removal
-  // notification for a MessagePort, so an iframe that dies with its pipe open
-  // would otherwise pin the port (and its closures) here forever. One map,
-  // port -> entry: lookups find the entry by port while the sweep iterates
-  // entries directly. Each entry carries an activity stamp: repeat resolves
-  // keep it warm while an idle port is dropped, unregistered, and closed. A
-  // transferred port also fires messageerror when its channel is torn down -
-  // that path drops it eagerly.
-  const pipes = new Map();
+class TopFrameResponder {
+  #resolveContext;
+  #ownOrigin;
+  #post;
+  #pipes = new Map();
 
-  const dropPipe = (entry) => {
-    if (pipes.get(entry.port) !== entry) {
+  constructor(resolveContext, ownOrigin = location.origin, post = defaultPostToSource) {
+    this.#resolveContext = resolveContext;
+    this.#ownOrigin = ownOrigin;
+    this.#post = post;
+  }
+
+  #dropPipe(entry) {
+    if (this.#pipes.get(entry.port) !== entry) {
       return;
     }
-    pipes.delete(entry.port);
+    this.#pipes.delete(entry.port);
     entry.ac.abort();
     entry.port.close();
-  };
+  }
 
   /** Live-pipe keepalive: refresh stamps on activity, evict idle ports. */
-  const touchPipe = (entry) => {
+  #touchPipe(entry) {
     entry.lastUsed = performance.now();
     const cutoff = entry.lastUsed - CTX_PIPE_IDLE_MS;
-    for (const candidate of pipes.values()) {
+    for (const candidate of this.#pipes.values()) {
       if (candidate.lastUsed < cutoff) {
-        dropPipe(candidate);
+        this.#dropPipe(candidate);
       }
     }
-  };
+  }
 
-  const onPipeRequest = (entry) => (event) => {
-    touchPipe(entry);
-    const data = event.data;
-    if (!data || typeof data !== "object" || data.type !== CTX_REQUEST_TYPE
-        || typeof data.nonce !== "string") {
-      return;
-    }
-    const { domain, path, title } = resolveContext();
-    try {
-      entry.port.postMessage({ type: CTX_RESPONSE_TYPE, domain, path, title });
-    } catch {
-      // Port closed under us; the next request on it won't arrive either. Drop
-      // now instead of waiting for the idle sweep.
-      dropPipe(entry);
-    }
-  };
+  #onPipeRequest(entry) {
+    return (event) => {
+      this.#touchPipe(entry);
+      const data = event.data;
+      if (!data || typeof data !== "object" || data.type !== CTX_REQUEST_TYPE
+          || typeof data.nonce !== "string") {
+        return;
+      }
+      const { domain, path, title } = this.#resolveContext();
+      try {
+        entry.port.postMessage({ type: CTX_RESPONSE_TYPE, domain, path, title });
+      } catch {
+        // Port closed under us; the next request on it won't arrive either. Drop
+        // now instead of waiting for the idle sweep.
+        this.#dropPipe(entry);
+      }
+    };
+  }
 
-  return (event) => {
+  handle(event) {
     const data = event && event.data;
     if (
       !data || typeof data !== "object"
@@ -751,25 +771,25 @@ export function createTopFrameResponder(resolveContext, ownOrigin = location.ori
     ) {
       return;
     }
-    if (event.origin !== ownOrigin && !isOwnFrame(event.source)) {
+    if (event.origin !== this.#ownOrigin && !isOwnFrame(event.source)) {
       return;
     }
-    const { domain, path, title } = resolveContext();
+    const { domain, path, title } = this.#resolveContext();
     const ports = event.ports || [];
     if (ports.length) {
       const port = ports[0];
-      let entry = pipes.get(port);
+      let entry = this.#pipes.get(port);
       if (!entry) {
         // First contact on a fresh pipe: register the persistent handler so
         // repeat resolves over this port are answered without ever touching
         // the window message channel again. Both listeners ride one
-        // entry-owned signal, so dropPipe's single abort() tears the pair
+        // entry-owned signal, so #dropPipe's single abort() tears the pair
         // down natively - there is no removal path that can forget one.
         entry = { port, lastUsed: performance.now(), ac: new AbortController() };
-        entry.port.addEventListener("message", onPipeRequest(entry), { signal: entry.ac.signal });
-        entry.port.addEventListener("messageerror", () => dropPipe(entry), { signal: entry.ac.signal });
+        entry.port.addEventListener("message", this.#onPipeRequest(entry), { signal: entry.ac.signal });
+        entry.port.addEventListener("messageerror", () => this.#dropPipe(entry), { signal: entry.ac.signal });
         entry.port.start();
-        pipes.set(port, entry);
+        this.#pipes.set(port, entry);
       }
       // A transferred MessageChannel pipe rides the request up the relay
       // chain; answer directly on it - unforgeable, no broadcast echo. Fall
@@ -779,27 +799,40 @@ export function createTopFrameResponder(resolveContext, ownOrigin = location.ori
         return;
       } catch {
         // Port neutered/closed: answer the requester by broadcast instead.
-        dropPipe(entry);
+        this.#dropPipe(entry);
       }
     }
-    post(event.source, {
+    this.#post(event.source, {
       type: CTX_RESPONSE_TYPE,
       nonce: data.nonce,
       domain,
       path,
       title
     }, event.origin || "*");
-  };
+  }
+}
+
+export function createTopFrameResponder(resolveContext, ownOrigin = location.origin, post = defaultPostToSource) {
+  const responder = new TopFrameResponder(resolveContext, ownOrigin, post);
+  return (event) => responder.handle(event);
 }
 
 function defaultPostToSource(source, message, origin) {
   source.postMessage(message, origin);
 }
 
-/** Handler for nested frames: relays requests upward and answers back down. */
-export function createFrameRelay() {
-  const pending = new Map();
-  return (event) => {
+/**
+ * One owner of the relay's nonce ledger (the responder-class shape for the
+ * nested-frame role). The pending map and its TTL sweep are private to the
+ * instance; the exported createFrameRelay stays the thin event-handler
+ * wrapper.
+ *
+ * Handler for nested frames: relays requests upward and answers back down.
+ */
+class FrameRelay {
+  #pending = new Map();
+
+  handle(event) {
     const data = event && event.data;
     if (!data || typeof data !== "object") {
       return;
@@ -819,12 +852,14 @@ export function createFrameRelay() {
       // legacy broadcast answer; a port request is also answered directly on
       // the pipe, but a mixed chain may still deliver down as a broadcast.
       const now = Date.now();
-      for (const [nonce, entry] of pending) {
+      // Expired nonces never enter the ledger - a TTL sweep instead of
+      // rehashing the map on every batch.
+      for (const [nonce, entry] of this.#pending) {
         if (entry.deadline < now) {
-          pending.delete(nonce);
+          this.#pending.delete(nonce);
         }
       }
-      pending.set(data.nonce, { source: event.source, origin: event.origin, deadline: now + NONCE_TTL_MS });
+      this.#pending.set(data.nonce, { source: event.source, origin: event.origin, deadline: now + NONCE_TTL_MS });
       // Requests carrying a transferred MessageChannel port are chained upward
       // by re-transferring the SAME port, so the top frame's answer travels
       // back down the private, unforgeable pipe straight to the requester.
@@ -836,17 +871,22 @@ export function createFrameRelay() {
       } catch {
         window.parent.postMessage(data, "*");
       }
-    } else if (data.type === CTX_RESPONSE_TYPE && pending.has(data.nonce)) {
+    } else if (data.type === CTX_RESPONSE_TYPE && this.#pending.has(data.nonce)) {
       // Answers may only come from the parent we relayed to - a sibling or
       // nested frame that guesses a live nonce must not inject context.
       if (event.source !== window.parent) {
         return;
       }
-      const requester = pending.get(data.nonce);
-      pending.delete(data.nonce);
+      const requester = this.#pending.get(data.nonce);
+      this.#pending.delete(data.nonce);
       requester.source?.postMessage(data, requester.origin || "*");
     }
-  };
+  }
+}
+
+export function createFrameRelay() {
+  const relay = new FrameRelay();
+  return (event) => relay.handle(event);
 }
 
 /**
