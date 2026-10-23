@@ -158,16 +158,15 @@ export async function run({ session, baseUrl, boot }) {
     const clear = step(0);
     const opaque = step(2);
     const medium = step(1);
-    // The options-row grammar rides the same slider: label left, active
-    // value hint right, one tick tip per stop (labels equal the raw names
-    // since this definition's fmt is identity).
+    // The options-row grammar rides the same slider: label left, bare
+    // snapped range, active value hint right - all three on one line, no
+    // tick tips on the slider itself.
     const cell = slider.closest(".pf-options-cell");
     const grammar = !cell ? null : {
-      label: cell.querySelector(".pf-options-head > .pf-panel-label")?.textContent,
+      line: getComputedStyle(cell).flexDirection,
+      label: cell.querySelector(":scope > .pf-panel-label")?.textContent,
       hint: cell.querySelector(".pf-options-hint")?.textContent,
-      ticks: [...cell.querySelectorAll(".pf-stage-ticks span")].map((s) => String(s.textContent)),
-      active: cell.querySelector(".pf-stage-ticks .pf-stage-active")?.textContent,
-      dot: getComputedStyle(cell.querySelector(".pf-stage-ticks span"), "::before").width
+      tips: cell.querySelectorAll(".pf-stage-ticks, .pf-stage-labels").length
     };
     return { clear, opaque, medium, grammar };
   });
@@ -181,13 +180,12 @@ export async function run({ session, baseUrl, boot }) {
     ms: null
   });
   rows.push({
-    name: "goldengate: options rows read label left, hint right, tick per stop",
+    name: "goldengate: options rows read label left, hint right, no tick tips",
     status: !!tintPresets?.grammar
+      && tintPresets.grammar.line === "row"
       && tintPresets.grammar.label === "Glass Tint"
       && tintPresets.grammar.hint === "Medium"
-      && tintPresets.grammar.active === "Medium"
-      && String(tintPresets.grammar.ticks) === String(["Clear", "Medium", "Opaque"])
-      && tintPresets.grammar.dot === "3px" ? "pass" : "fail",
+      && tintPresets.grammar.tips === 0 ? "pass" : "fail",
     note: tintPresets?.grammar ? JSON.stringify(tintPresets.grammar) : "panel missing",
     ms: null
   });

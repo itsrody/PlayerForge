@@ -1128,26 +1128,18 @@ class SettingsSection {
   }
 
   /**
-   * Options-type settings render as staged sliders: label on the left, the
-   * active option as a value hint on the right, then the native range input
-   * snapped one stop per option with a tick + label tip under every stop.
-   * The range's own value/step/arrow semantics replace the roving radio
-   * group entirely - one focusable stop, arrows step options, and the sync
-   * path stays the same set-only assignment (never echo).
+   * Options-type settings render as staged sliders: label on the left and
+   * the active option as a value hint on the right share the slider's line
+   * (the settings-row grammar, no tick tips on the slider itself). The
+   * range's own value/step/arrow semantics replace the roving radio group
+   * entirely - one focusable stop, arrows step options, and the sync path
+   * stays the same set-only assignment (never echo).
    */
   #addOptions(groupGrid, definition) {
     const panel = this.#panel;
     const cell = panel.el("div", { class: "pf-panel-cell pf-options-cell" }, groupGrid);
-    const head = panel.el("div", { class: "pf-options-head" }, cell);
-    panel.addLabel(head, definition.label);
-    const hint = panel.el("span", { class: "pf-options-hint" }, head);
+    panel.addLabel(cell, definition.label);
     const stage = panel.el("div", { class: "pf-stage" }, cell);
-    const ticks = panel.el("div", { class: "pf-stage-ticks" }, stage);
-    const spans = definition.options.map((opt) => {
-      const span = panel.el("span", {}, ticks);
-      span.textContent = definition.fmt(opt);
-      return span;
-    });
     const slider = panel.el("input", {
       class: "pf-slider",
       type: "range",
@@ -1156,15 +1148,13 @@ class SettingsSection {
       step: 1
     }, stage);
     slider.setAttribute("aria-label", definition.label);
+    const hint = panel.el("span", { class: "pf-options-hint" }, cell);
     const syncOptions = (active) => {
       const index = definition.options.indexOf(active);
       const value = index === -1 ? 0 : index;
       slider.value = value;
       hint.textContent = definition.fmt(definition.options[value]);
       slider.setAttribute("aria-valuetext", definition.fmt(definition.options[value]));
-      for (let i = 0; i < spans.length; i++) {
-        spans[i].classList.toggle("pf-stage-active", i === value);
-      }
     };
     slider.addEventListener("input", () => {
       const index = Number(slider.value) | 0;

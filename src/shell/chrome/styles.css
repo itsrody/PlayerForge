@@ -1239,36 +1239,6 @@
       gap: var(--pf-space-sm);
     }
 
-    .pf-stage-ticks {
-      display: flex;
-      font-size: var(--pf-font-xs);
-      color: var(--pf-text-mid);
-    }
-
-    /* Equal flex widths center each label (and its dot) exactly at its step
-       fraction i/(n-1) - the ticks ride the slider's own geometry, no math
-       per option count. */
-    .pf-stage-ticks span {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 2px;
-    }
-
-    .pf-stage-ticks span::before {
-      content: "";
-      width: 3px;
-      height: 3px;
-      border-radius: 50%;
-      background: currentColor;
-    }
-
-    .pf-stage-ticks .pf-stage-active {
-      color: var(--pf-fg);
-      font-weight: 600;
-    }
-
     input[type="range"].pf-slider {
       appearance: none;
       -webkit-appearance: none;
@@ -1335,20 +1305,15 @@
       }
     }
 
-    /* - Options (Skip Step, Glass Tint) staged slider rows - */
-    .pf-options-cell {
+    /* - Options (Skip Step, Glass Tint) staged slider rows -
+       Label, the snapped range, and the active value hint share one line;
+       the ticks + tips ride under the slider's own extent. */
+    .pf-panel-cell.pf-options-cell {
       display: flex;
-      flex-direction: column;
-      gap: var(--pf-space-sm);
-      grid-column: 1 / -1;
-    }
-
-    /* Label left, active value hint right - the settings-row grammar. */
-    .pf-options-head {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
+      flex-direction: row;
+      align-items: center;
       gap: var(--pf-space-md);
+      grid-column: 1 / -1;
 
       .pf-panel-label {
         min-width: 0;
@@ -1357,6 +1322,11 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+    }
+
+    .pf-options-cell .pf-stage {
+      flex: 1;
+      min-width: 0;
     }
 
     .pf-options-hint {
