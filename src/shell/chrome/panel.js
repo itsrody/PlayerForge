@@ -6,34 +6,8 @@ import { GESTURE_EVENTS } from "../inputs/actions.js";
 import { buildZoomGroup } from "../inputs/zoom.js";
 import { getSetting, onSettingsChanged, setSetting, SETTINGS_SCHEMA, SETTING_KEYS } from "./config.js";
 
-const HOLD_DELAY_MS = 400;
-const HOLD_REPEAT_MS = 75;
-
-/**
- * Press-and-hold repeat with the two-phase timing: first invocation fires on
- * the press itself, then (after the delay) an interval repeats it until the
- * pointer lifts or the panel dies. One owner of both timers so the release
- * paths can't strand either - and the two timer fields live here instead of
- * being loose variables of the arrow-button closure.
- */
-class HoldRepeater {
-  #delayTimer = null;
-  #repeatTimer = null;
-  start(fn) {
-    this.stop();
-    fn();
-    this.#delayTimer = setTimeout(() => {
-      this.#delayTimer = null;
-      this.#repeatTimer = setInterval(fn, HOLD_REPEAT_MS);
-    }, HOLD_DELAY_MS);
-  }
-  stop() {
-    clearTimeout(this.#delayTimer);
-    clearInterval(this.#repeatTimer);
-    this.#delayTimer = null;
-    this.#repeatTimer = null;
-  }
-}
+/** Stepper drag-follow: pointer travel that crosses one step of sweep. */
+const DRAG_STEP_PX = 14;
 const TAB_NAV_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End"]);
 /** Auto-detect compact lives in CSS: the stage container query + pointer media
  *  query drive it through the hud layer's compact bus (styles.css compact
@@ -123,7 +97,18 @@ class Stepper {
     this.#syncAria();
   }
 
-  /** One hold-to-repeat chevron button wired to #nudge(dir). */
+  /**
+   * One press-and-sweep chevron wired to #nudge(dir). The old hold-repeat
+   * loop (delay + interval timers) is gone: the pointer provides its own
+   * event stream, so the same press gesture covers the whole range. A press
+   * nudges once (the repeat's first tick); dragging from the press sweeps -
+   * every DRAG_STEP_PX of pointer travel lands one step, with fractional
+   * remainder carried so short strokes stay faithful. Drag is direction-less
+   * (up sweeps +, down -), so both chevrons share one mapping. Capture keeps
+   * the stream on the button past its bounds, touch-action: none keeps the
+   * panel from scrolling the touch away, and every listener rides the panel
+   * signal so destroy ends a mid-drag session natively.
+   */
   #makeButton(name, dir, title, signal) {
     const button = document.createElement("button");
     button.type = "button";
@@ -131,28 +116,41 @@ class Stepper {
     button.tabIndex = -1;
     button.appendChild(createIconElement(name));
     button.title = title;
-    const repeat = new HoldRepeater();
-    const stopRepeat = () => repeat.stop();
-    // A hold can be pending or repeating when the panel is destroyed (video
-    // swap / fullscreen change). Scope the release listeners to the panel
-    // signal AND stop the timers on abort, so destroy never leaves the
-    // interval nudging a detached panel until the pointer lifts.
-    signal?.addEventListener("abort", stopRepeat, { once: true });
+    // One drag session at a time; all listeners attach once.
+    let dragging = false;
+    let lastY = 0;
+    let remainder = 0;
+    button.addEventListener("pointermove", (event) => {
+      if (!dragging || this.input.disabled) {
+        return;
+      }
+      remainder += (lastY - event.clientY) / DRAG_STEP_PX;
+      lastY = event.clientY;
+      while (remainder >= 1) {
+        remainder -= 1;
+        this.#nudge(1);
+      }
+      while (remainder <= -1) {
+        remainder += 1;
+        this.#nudge(-1);
+      }
+    }, { signal });
+    button.addEventListener("pointerup", () => {
+      dragging = false;
+    }, { signal });
+    button.addEventListener("pointercancel", () => {
+      dragging = false;
+    }, { signal });
     button.addEventListener("pointerdown", (event) => {
       event.preventDefault();
       if (this.input.disabled) {
         return;
       }
-      repeat.start(() => this.#nudge(dir));
-      const release = () => {
-        stopRepeat();
-        // No-ops once the signal already released them on destroy.
-        window.removeEventListener("pointerup", release);
-        window.removeEventListener("pointercancel", release);
-      };
-      // Passive: the release handler only stops timers - it never cancels defaults.
-      window.addEventListener("pointerup", release, { passive: true, signal });
-      window.addEventListener("pointercancel", release, { passive: true, signal });
+      this.#nudge(dir);
+      dragging = true;
+      lastY = event.clientY;
+      remainder = 0;
+      button.setPointerCapture(event.pointerId);
     });
     return button;
   }
