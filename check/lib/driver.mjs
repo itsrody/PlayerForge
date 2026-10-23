@@ -4,10 +4,9 @@
  * Playwright owns the browser lifecycle — the version-pinned Firefox build
  * (installed with `npx playwright install firefox`, refreshed whenever
  * playwright moves its pin), an isolated persistent profile, and CDP-free
- * page-level driving. This replaces the `chromium` branch's chromedriver →
- * Selenium Manager ladder wholesale: there is no driver binary on disk to go
- * stale against an auto-updating fork browser, so the launch-failure class it
- * maintained (version refusals, handshake floods, brew heals) cannot recur.
+ * page-level driving. There is no driver binary on disk to go
+ * stale, so the launch-failure class the old ladder maintained (version
+ * refusals, handshake floods, heal round-trips) cannot recur.
  * Everything else the cases consume — the fixture server, the GM realm, the
  * screenshot forensics — keeps its contract.
  */
@@ -44,7 +43,7 @@ function sameDocument(requested, landed) {
  * Fail-fast install probe: playwright can tell exactly what it is missing,
  * which is friendlier than one confusing "Executable doesn't exist" launch
  * error later. `npx playwright install firefox` stays the single healing
- * action; nothing else is diffed against brew state.
+  * action; nothing else is diffed against disk state.
  */
 export async function ensureFirefox() {
   const { firefox } = await import("playwright");
@@ -72,9 +71,9 @@ export async function ensureFirefox() {
  * Boot a headless, isolated-profile Firefox session with the userscript realm
  * injected. Reused across cases; destroyed once per tool run.
  *
- * The page surface keeps the shape cases already know (`eval`, `navigate`,
- * `raw` for the input layer, `waitFor`), so the case files stay
- * driver-agnostic: playwright here, chromedriver on the `chromium` branch.
+  * The page surface keeps the shape cases already know (`eval`, `navigate`,
+  * `raw` for the input layer, `waitFor`), so the case files stay
+  * driver-agnostic and portable across engine branches.
  */
 export class BrowserSession {
   #context;
@@ -134,7 +133,7 @@ export class BrowserSession {
   }
 
   /**
-   * Selenium-parity script evaluation. Cases pass closures whose captured
+   * Driver-parity script evaluation. Cases pass closures whose captured
    * scope never crossed a driver boundary (as with executeScript) and single
    * plain-data arguments; the string body form (waitFor) carries a `return`
    * statement and rides the arrow-wrap. Evaluated via the same wrapping the

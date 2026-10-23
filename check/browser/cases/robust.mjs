@@ -1,8 +1,7 @@
 /**
- * Gecko build robustness: the same persistence stakes the kernel ran under
- * on the `chromium` branch raise here faster (Firefox bfcache/freeze
- * discipline of background pages) on everything PlayerForge persists through
- * SYNCHRONOUS GM storage at playback boundaries. Rows: the freeze flush must
+ * Gecko build robustness: everything PlayerForge persists through SYNCHRONOUS
+ * GM storage at playback boundaries rides the freeze/pagehide discipline
+ * Firefox keeps for background pages. Rows: the freeze flush must
  * land the played position with no user pause, the rVFC crank (the save
  * surface Firefox affords on presented frames) must be present on the
  * running video, and the storage echo/merge hot paths must stay inside a
