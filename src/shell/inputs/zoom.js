@@ -175,19 +175,21 @@ export function fmtZoomPan(v) {
 }
 
 /**
- * Panel section for zoom state: the same adaptors as Color (state-owning
- * class, steppers up-date it), driven by the per-shell ZoomState, plus an
- * explicit per-domain reset. Returned section owns nothing beyond the bus
- * subscription (the panel tree dies with the shell; the ZoomState singleton
- * outlives one shell by design).
+ * The zoom tools as one section inside the Settings tab (not its own tab):
+ * the group rides the same addSection root the schema groups render into,
+ * so the steppers + per-domain reset appear as one more labeled block at
+ * the bottom of the settings list. The same adaptors as Color (state-owning
+ * class, steppers up-date it), driven by the per-shell ZoomState. The
+ * returned group owns nothing beyond the bus subscription (the panel tree
+ * dies with the shell; the ZoomState singleton outlives one shell by design).
  */
-export function buildZoomSection(panel, zoom, signal) {
-  const sectionRoot = panel.addSection("Zoom & Pan", "fill-aspect");
+export function buildZoomGroup(panel, sectionRoot, zoom, signal) {
   if (!sectionRoot) {
     return null;
   }
-  const head = panel.el("div", { class: "pf-panel-section-head" }, sectionRoot);
-  panel.addLabel(head, "Fullscreen crop, saved per site");
+  const group = panel.el("div", { class: "pf-panel-section" }, sectionRoot);
+  const head = panel.el("div", { class: "pf-panel-section-head" }, group);
+  panel.addLabel(head, "Zoom & Pan");
   panel.addControl(head, {
     type: "button",
     icon: "reload",
@@ -196,8 +198,9 @@ export function buildZoomSection(panel, zoom, signal) {
     ghost: true,
     onClick: () => zoom.resetForDomain()
   });
+  panel.addHint(group, "Fullscreen crop, saved per site");
 
-  const grid = panel.el("div", { class: "pf-panel-grid pf-panel-grid-compact" }, sectionRoot);
+  const grid = panel.el("div", { class: "pf-panel-grid pf-panel-grid-compact" }, group);
   const initial = zoom.view;
   const scaleStepper = panel.addControl(grid, {
     type: "stepper",
@@ -239,4 +242,5 @@ export function buildZoomSection(panel, zoom, signal) {
     panYStepper?.setValue(oy);
   });
   signal?.addEventListener("abort", () => unsub(), { once: true });
+  return group;
 }

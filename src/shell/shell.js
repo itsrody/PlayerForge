@@ -2,7 +2,7 @@ import { logger, Scope, yield_, runSteps, runStepsAsync } from "../shared/runtim
 import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen, DOMManager } from "../shared/dom.js";
 import { InputForge } from "./inputs/forge.js";
 import { attachInputActions, ViewershipTransform } from "./inputs/actions.js";
-import { ZoomState, buildZoomSection } from "./inputs/zoom.js";
+import { ZoomState } from "./inputs/zoom.js";
 import { ResumeTracker } from "./resume.js";
 import { SubtitleSession, SubtitlesSection, subtitleSync } from "./subtitles/subtitles.js";
 import { VideoFilter, FilterSession } from "./filter.js";
@@ -44,14 +44,11 @@ const MEDIA_ERROR_LABELS = {
 const PANEL_SECTIONS = [
   ({ shell }) => new SubtitlesSection(shell),
   ({ shell, panel }) => new VideoFilter(shell, panel),
-  ({ shell, panel, signal }) => {
-    buildZoomSection(panel, shell.zoom, signal);
-  },
   ({ shell, panel }) => {
     addHistorySection(panel, shell);
   },
-  ({ panel, signal }) => {
-    addSettingsSection(panel, signal);
+  ({ shell, panel, signal }) => {
+    addSettingsSection(panel, shell.zoom, signal);
   }
 ];
 

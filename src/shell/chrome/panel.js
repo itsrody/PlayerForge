@@ -3,6 +3,7 @@ import { DomPool, deepestActiveElement, subscribeFullscreen } from "../../shared
 import { formatTime, clamp } from "../../shared/core.js";
 import { button, createIconElement, flashElement, el } from "./ui.js";
 import { GESTURE_EVENTS } from "../inputs/actions.js";
+import { buildZoomGroup } from "../inputs/zoom.js";
 import { getSetting, onSettingsChanged, setSetting, SETTINGS_SCHEMA, SETTING_KEYS } from "./config.js";
 
 const HOLD_DELAY_MS = 400;
@@ -1007,7 +1008,7 @@ class SettingsSection {
   /** The reactivity subscription; torn down when the panel body is nulled. */
   #off = () => {};
 
-  constructor(panel, signal) {
+  constructor(panel, zoom, signal) {
     this.#panel = panel;
     if (!panel?.body) {
       return;
@@ -1049,6 +1050,13 @@ class SettingsSection {
           this.#controls.set(definition.key, { type: "stepper", el: stepper });
         }
       }
+    }
+
+    // The zoom/pan tools inline as one more labeled group under the render
+    // loop (they read a state class, not the configs schema, so they cannot
+    // ride SETTINGS_SCHEMA).
+    if (zoom) {
+      buildZoomGroup(panel, sectionRoot, zoom, signal);
     }
 
     // Re-sync widgets when a setting changes elsewhere (another tab's write, or
@@ -1151,8 +1159,8 @@ class SettingsSection {
   }
 }
 
-export function addSettingsSection(panel, signal) {
-  new SettingsSection(panel, signal);
+export function addSettingsSection(panel, zoom, signal) {
+  new SettingsSection(panel, zoom, signal);
 }
 
 /**

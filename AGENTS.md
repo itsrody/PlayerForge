@@ -156,7 +156,8 @@ iframes, same-origin and cross-origin:
   stored preset needs no panel open — and reset works with none.
 - **inputs/zoom.js** — `ZoomState` (the per-domain zoom/pan state machine:
   wheel/steps, pan clamp, trailing persist, `resetForDomain` deletes the
-  stored crop) + `buildZoomSection` (panel section over one shell's state).
+  stored crop) + `buildZoomGroup` (the zoom/pan tools inlined as one group
+  in the Settings tab over the same shell's state).
   Pure state: the transform write belongs solely to `ViewershipTransform`.
 - **inputs/forge.js** — the pointer/keyboard gesture engine: the stream
   router (press eligibility, pointer tracking, the session latch feeding the
