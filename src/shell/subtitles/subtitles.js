@@ -229,37 +229,37 @@ class WorkerTransport {
 
   #runInWorker(worker, text) {
     const id = ++this.#requestSeq;
-    return new Promise((resolve) => {
-      this.#pending.set(id, {
-        resolve,
-        fallback: () => {
-          parseInBand(text).then(resolve);
-        }
-      });
-      // Failsafe for a wedged worker: drop it (settling every in-flight
-      // request in-band) so one hang can't stack up behind it. The listener
-      // becomes a no-op once the request settles any other way.
-      AbortSignal.timeout(WORKER_TIMEOUT_MS).addEventListener(
-        "abort",
-        () => {
-          if (this.#pending.has(id)) {
-            this.#killWorker();
-          }
-        },
-        { once: true }
-      );
-      try {
-        const bytes = ENCODER.encode(text);
-        worker.postMessage({ pfWorker: 1, id, bytes }, [bytes.buffer]);
-      } catch (err) {
-        const entry = this.#pending.get(id);
-        if (entry !== undefined) {
-          this.#pending.delete(id);
-          entry.fallback();
-        }
-        logger.warn("subtitles", "Worker postMessage failed, falling back in-band", err);
+    const { promise, resolve } = Promise.withResolvers();
+    this.#pending.set(id, {
+      resolve,
+      fallback: () => {
+        parseInBand(text).then(resolve);
       }
     });
+    // Failsafe for a wedged worker: drop it (settling every in-flight
+    // request in-band) so one hang can't stack up behind it. The listener
+    // becomes a no-op once the request settles any other way.
+    AbortSignal.timeout(WORKER_TIMEOUT_MS).addEventListener(
+      "abort",
+      () => {
+        if (this.#pending.has(id)) {
+          this.#killWorker();
+        }
+      },
+      { once: true }
+    );
+    try {
+      const bytes = ENCODER.encode(text);
+      worker.postMessage({ pfWorker: 1, id, bytes }, [bytes.buffer]);
+    } catch (err) {
+      const entry = this.#pending.get(id);
+      if (entry !== undefined) {
+        this.#pending.delete(id);
+        entry.fallback();
+      }
+      logger.warn("subtitles", "Worker postMessage failed, falling back in-band", err);
+    }
+    return promise;
   }
 
   /**

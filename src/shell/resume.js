@@ -813,7 +813,7 @@ export class ResumeTracker {
       return Math.abs(position - this.#lastSavedPosition) >= span;
     };
     const checkpointDue = (position) => {
-      if (this.#adopting || !this.#entry || !onScreen || document.hidden || shell.paused) {
+      if (this.#adopting || !this.#entry || !onScreen || document.visibilityState === "hidden" || shell.paused) {
         return false;
       }
       return positionDue(position);
