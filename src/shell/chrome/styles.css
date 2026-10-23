@@ -1013,11 +1013,15 @@
       }
 
       /* Toggle switch - appearance:none keeps real checkbox semantics. */
+      /* The panel-wide switch pill, one owner for every checkbox. Off =
+         the inked surface with a lit knob, on = the foreground ink carrying
+         the dark knob - the previous on-state left the knob white on the
+         white pill, visually erasing it. */
       input[type="checkbox"] {
         appearance: none;
         flex: none;
-        width: 34px;
-        height: 20px;
+        width: 40px;
+        height: 24px;
         margin: 0;
         padding: 0;
         border: 1px solid var(--pf-border-control);
@@ -1032,11 +1036,12 @@
           position: absolute;
           top: 2px;
           left: 2px;
-          width: 14px;
-          height: 14px;
+          width: 18px;
+          height: 18px;
           border-radius: 50%;
           background: var(--pf-fg);
-          transition: translate var(--pf-ease-bounce);
+          translate: 0 0;
+          transition: translate var(--pf-ease-bounce), background var(--pf-ease-duration) var(--pf-ease-curve);
         }
 
         &:checked {
@@ -1044,7 +1049,8 @@
           border-color: var(--pf-fg);
 
           &::before {
-            translate: 14px 0;
+            translate: 18px 0;
+            background: var(--pf-bg);
           }
         }
 
@@ -1270,7 +1276,10 @@
       box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
     }
 
-    /* - Settings tab - compact toggle cards (whole card is the label) */
+    /* - Settings tab - compact toggle cards (whole card is the label, the
+       checkbox rides as a monochrome switch pill on the right). One state
+       color pair, per R3: off = the inked surface with a lit knob, on = the
+       foreground ink carrying a dark knob - no accent, no tint branch. */
     .pf-settings-toggle {
       display: flex;
       align-items: center;
@@ -1291,9 +1300,10 @@
         }
       }
 
+      /* The shared panel switch (see input[type=checkbox]); the row only
+         orders it to the right of the label text. */
       input {
-        margin: 0;
-        flex: none;
+        order: 2;
       }
 
       span {
@@ -1430,9 +1440,6 @@
       .pf-toast-actions button { min-height: 44px; padding: 10px 14px; }
       .pf-toast-actions button:has(svg) { width: 44px; height: 44px; padding: 0; }
       .pf-panel input[type="color"] { height: 28px; }
-      .pf-panel input[type="checkbox"] { width: 40px; height: 24px; }
-      .pf-panel input[type="checkbox"]::before { width: 18px; height: 18px; }
-      .pf-panel input[type="checkbox"]:checked::before { translate: 18px 0; }
       .pf-settings-toggle { padding: 9px 10px; font-size: var(--pf-font-md); }
       .pf-panel select.pf-select { padding: 9px 8px; font-size: var(--pf-font-lg); }
       .pf-panel { --pf-icon-btn: 36px; --pf-icon-glyph: 18px; }

@@ -190,6 +190,52 @@ export async function run({ session, baseUrl, boot }) {
     ms: null
   });
 
+  // Bool toggle = the shared monochrome switch pill (one owner, the panel
+  // checkbox rule): 40x24 pill, 18px knob, a real click lights the ink and
+  // slides the dark knob on, clicking again restores; reads wait out the
+  // ease transitions so the snap-adjacent values are honest.
+  const pill = await session.eval(async function main() {
+    const host = document.querySelector(".pf-shell");
+    const panel = host?.shadowRoot?.querySelector(".pf-panel");
+    if (!panel) return null;
+    const input = panel.querySelector(".pf-settings-toggle input");
+    if (!input) return null;
+    const snapshot = () => {
+      const cs = getComputedStyle(input);
+      const knob = getComputedStyle(input, "::before");
+      return {
+        checked: input.checked,
+        bg: cs.backgroundColor,
+        knobBg: knob.backgroundColor,
+        knobTranslate: String(knob.translate),
+        width: cs.width,
+        knobWidth: knob.width
+      };
+    };
+    input.click();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const first = snapshot();
+    input.click();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const second = snapshot();
+    return { first, second };
+  });
+  const onState = [pill?.first, pill?.second].filter((s) => s?.checked)[0];
+  const offState = [pill?.first, pill?.second].filter((s) => s && !s.checked)[0];
+  rows.push({
+    name: "goldengate: bool toggles read as monochrome switch pills",
+    status: !!pill
+      && pill.first.checked !== pill.second.checked
+      && onState?.width === "40px"
+      && onState?.knobWidth === "18px"
+      && String(onState?.bg).includes("rgb(255, 255, 255)")
+      && String(onState?.knobBg).includes("rgb(0, 0, 0)")
+      && /^18px/.test(onState?.knobTranslate ?? "")
+      && offState?.knobBg !== onState?.knobBg ? "pass" : "fail",
+    note: pill ? JSON.stringify(pill) : "panel missing",
+    ms: null
+  });
+
   // The segmented capsule re-seats under the active tab - slides between
   // tabs on a real switch and restores the starting selection.
   const tabCapsule = await session.eval(function main() {
