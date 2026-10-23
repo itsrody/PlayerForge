@@ -1137,8 +1137,15 @@ export class InputForge {
     this.#videoRect = null;
     // Any new press invalidates a stale await latch from a drag that never
     // produced a click (no settle timer to expire it), and clears any stale
-    // intentional-capture-release marker for a recycled pointer id.
+    // intentional-capture-release marker for a recycled pointer id. The
+    // activation-suppression deadline resets HERE, before the eligibility
+    // early-return: the window only ever swallows the release click of the
+    // gesture that armed it, never the next interaction's click - an exempt
+    // SDK press must arrive with the previous gesture's deadline already
+    // gone (a press disposition can only start after that stream ended), so
+    // resetting at press start is exactly as strict.
     this.#clearAwaitClick();
+    this.#suppressClickUntil = 0;
     this.#releasedCapture.delete(event.pointerId);
     if (
       event.button !== 0 ||
@@ -1181,7 +1188,6 @@ export class InputForge {
       this.#startY = event.clientY;
       this.#startTime = performance.now();
       this.#holding = false;
-      this.#suppressClickUntil = 0;
       this.#gestureZone = this.#zoneForPoint(event);
       // Anchors + latches re-init per press (machines own their fields; the
       // swipe base snapshot deliberately persists - only a latch re-captures it).

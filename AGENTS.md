@@ -11,10 +11,19 @@ history that explains why those conventions exist.
 
 ## 1. What PlayerForge is
 
-A Userscript-exclusive HTML5 video player enhancer for two fork browsers:
+A Userscript-exclusive HTML5 video player enhancer. Two maintenance branches:
 
-- **Helium** (macOS desktop), **Titanium** (Android)
-- Chromium **155+** platform floor, **Tampermonkey 5.5+ (MV3)** manager
+- **`gecko`** (this branch, the default/viewing target): **Firefox**
+  (desktop + Firefox for Android), **Firefox 158+** platform floor,
+  **Tampermonkey 5.5+ (MV2)** manager; the check tool's browser gate drives
+  the **Playwright-pinned Firefox** build (157.0 as of the migration — the
+  pin's lag vs the FF release train is accepted; the platform's own feature
+  floor stays 158, and gate rows that need newer features probe
+  `CSS.supports` and skip with an honest note) instead of the Chromium
+  chromedriver ladder
+- **`chromium`**: the Helium (macOS desktop) / Titanium (Android) fork
+  browsers, Chromium **155+** platform floor, Tampermonkey **5.5+ (MV3)**
+  manager, Helium-Chromium-156 + chromedriver check gate
 - Features: pointer/keyboard gestures, hotkeys, progress resume, watch
   history, subtitles (.srt/.vtt with per-cue placement, per-entry sync
   offset, URL/file restore), color filters with presets, per-domain
@@ -162,7 +171,9 @@ iframes, same-origin and cross-origin:
 - **inputs/forge.js** — the pointer/keyboard gesture engine: the stream
   router (press eligibility, the interactive-target exemption — SDK
   controls keep their native press stream, pointer tracking, the session
-  latch feeding the shared `fs` gate, click/dblclick suppression) over per-story recognizer
+  latch feeding the shared `fs` gate, click/dblclick suppression whose
+  deactivate deadline resets at every press start — an exempt press must
+  arrive with the previous gesture's window already gone) over per-story recognizer
   machines: `ScrubStroke` (pointer move-stream scrub with coalesced samples,
   the exp-smoothed velocity filter, and the bounded predicted-events wash),
   `SwipeStroke` (the translate-drag transform writes and their eased
@@ -316,8 +327,9 @@ launch (§8).
 7. **No comments in check/ code beyond the why-docstrings it already
    carries; `installGMRealm` must stay a single self-contained function**
    (it ships as an executeScript payload — no closure references).
-8. **ES target floor: Chromium 155.** `?.` chains, top-level field syntax,
-   `data-transfer` file APIs, View Transitions, CloseWatcher — all in scope;
+8. **ES target floor: Firefox 158** (on this branch; `chromium` keeps
+   Chromium 155). `?.` chains, top-level field syntax, `data-transfer` file
+   APIs, View Transitions, CloseWatcher — all in scope for this floor;
    nothing below the floor, no polyfill arms.
 9. **Version is derived** (esbuild reads package.json). Header updates are
    interventions, not edits.
@@ -343,9 +355,14 @@ only surface, scales/tokens `@property`-typed, gradients banned in the HUD:
   unmeasured), and one tick in R1 applies.
 - **R4 Every scrollable glass surface needs a scroll edge** — content
   scrolling beneath a pinned control is obscured; not a blanket scrim.
-  Realized scroll-driven (Chromium 155's scroll timelines register a
-  `--pf-scroll-edge` share): the panel header is fully transparent at the
-  top of the scroll and ramps its darker edge-ink band in only over passing
+  Realized scroll-driven behind
+  `@supports (animation-timeline: scroll(nearest))`: without that guard the
+  band's animation mounts on the default time-based timeline in a
+  timeline-less build and, with `both` fill, parks the share at 100%
+  forever — a permanently darker resting header, the exact state R4
+  forbids. Where timelines exist the share (`--pf-scroll-edge`) registers
+  with the scroll and the panel header is fully transparent at the top,
+  ramping its darker edge-ink band in only over passing
   content — a solid-to-faded gradient of the sheet's ink at a per-preset
   edge alpha (`--pf-edge-alpha`; GLASS_TINTS edge shares make the band over
   the body composite land exactly one notch, +14pt, darker than the body
@@ -375,18 +392,23 @@ stop at the first failure:
 2. **flaws** — repo eslint + isolated module-import smoke per module.
 3. **bundle** — real esbuild build (version derivation, worker chunk) +
    artifact shape validation (header fields, IIFE shape, css companion).
-4. **browser** — real Helium Chromium 156 + real bundle in a GM realm:
+4. **browser** — real Firefox 158 + real bundle in a GM realm, driven
+   through **Playwright** (the gecko branch's driver model; the `chromium`
+   branch keeps Helium-Chromium-156 + chromedriver):
    boot, gesture contract, media semantics, resume, menus, GM env, frame
    scenarios, edge robustness. ~28–36s.
 
 ### Browser gate mechanics
-- Launch ladder: version-matched disk chromedriver → Selenium Manager, with
-  a flood-spill ledger, a browser-aware `ensureChromeDriver()` probe, a
-  selective `brew reinstall chromedriver` heal, and a real-session sentinel
-  (`window.__checkReady === true` via `return`-ing script — expression-only
-  bodies return `undefined`, the historical bug). Startup-tab hygiene closes
-  Chrome's welcome tabs; `navigate()` verifies the landing (origin+path,
-  one retry) because a `get()` that resolves before navigation can eat a
+- Launch model (this branch): Playwright owns the browser lifecycle — the
+  version-pinned Firefox download, context/page creation, and CDP-free
+  driving replace the `chromium` branch's version-matched disk chromedriver
+  → Selenium Manager ladder (its `ensureChromeDriver()` probe, flood-spill
+  ledger, and `brew reinstall chromedriver` heal stay on that branch). The
+  real-session sentinel carries over
+  (`window.__checkReady === true`; there is no expression-only-body quirk on
+  this driver). `navigate()` verifies the
+  landing (origin+path, one retry) because a `goto()` that resolves before
+  navigation can eat a
   whole case.
 - **Ceremony per case:** `navigate(page?boot=<ts>)` (query-bust, same-URL
   reload would eat the bundle) → GM realm → bundle (everything after
@@ -442,21 +464,20 @@ stop at the first failure:
    source, never to make a row green.
 3. Summarize results and **wait for an explicit "commit and push"** — never
    commit proactively; never amend a failed commit, create a new one.
-4. Development environment facts ride with the tool: Helium auto-updates
-   mid-flight (155→156 happened); do **not** adopt Chromium's IndexedDB→
-   SQLite backend backing for userscript storage; Chromium failed-module
-   retry policies are irrelevant (single-file bundle).
+4. Development environment facts ride with the tool: Playwright owns the
+   version-pinned Firefox build (`npx playwright install firefox` refreshes
+   it); do **not** adopt manager-internal storage backends for userscript
+   storage; single-file bundle, so browser failed-module retry policies are
+   irrelevant.
 
 ## 8. Quick diagnostics
 
 - **Gate fails at syntax/flaws:** run the concatenation of the isolated
   import child output; if a module brings a consumer it doesn't use, that's
   the import-graph smoke catching it.
-- **Browser gate launch refused:** `driver probe` prints which disk driver
-  is stale vs the embedded Chromium major; the ladder already prefers
-  Selenium Manager — a repeated `handshake failed (no DevTools port)` after a
-  browser update is the known mid-update shape; relaunch after the browser
-  finishes updating.
+- **Browser gate launch refused:** `npx playwright install firefox` re-seats
+  the version-pinned build — a stale or missing Firefox download is the
+  known mid-update shape; relaunch after the install finishes.
 - **A case's shell never attaches:** the boot ceremony dumps
   `{readyState, shell, video, pf, lastInjectError}` before throwing; the
   `.tmp/last-failure.png/json` capture adds `frame[0]`,

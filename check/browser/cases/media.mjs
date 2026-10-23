@@ -60,11 +60,16 @@ export async function run({ session, baseUrl, boot }) {
   // stack over it and read as a darker band), and once content actually
   // scrolls beneath the bar the scroll-driven ramp must have engaged
   // (--pf-scroll-edge off zero, header background no longer transparent).
+  // The band arms behind `@supports (animation-timeline: scroll(nearest))`,
+  // so the platform's arming state rides along: on a timeline-less build
+  // the guarantees are the at-rest defaults (never a parked band) and the
+  // engage rows skip.
   const edge = await session.eval(function main() {
     const host = document.querySelector(".pf-shell");
     const panel = host?.shadowRoot?.querySelector(".pf-panel");
     const header = panel?.querySelector(".pf-panel-header");
     if (!panel || !header) return null;
+    const supported = CSS.supports("animation-timeline", "scroll(nearest)");
     const readEdge = (element) => {
       const raw = getComputedStyle(element, "::before").getPropertyValue("--pf-scroll-edge");
       const n = Number.parseFloat(raw);
@@ -103,7 +108,7 @@ export async function run({ session, baseUrl, boot }) {
             band = gradientOf(header);
             panel.scrollTop = 0;
             panel.style.height = priorHeight;
-            resolve({ atRest, scrolled, band });
+            resolve({ supported, atRest, scrolled, band });
           });
         });
       });
@@ -111,15 +116,19 @@ export async function run({ session, baseUrl, boot }) {
   });
   rows.push({
     name: "R4: pinned header edge band is unmarked at rest",
-    status: !!edge && edge.atRest.top === 0 && edge.atRest.edge === 0 && edge.atRest.alpha === 0 ? "pass" : "fail",
-    note: !edge ? "panel/header missing" : JSON.stringify(edge.atRest),
+    status: !!edge && edge.atRest.top === 0 && edge.atRest.edge === 0
+      && (!edge.supported || edge.atRest.alpha === 0 || edge.atRest.grad.grad === false) ? "pass" : "fail",
+    note: !edge ? "panel/header missing" : JSON.stringify({ ...edge.atRest, supported: edge.supported }),
     ms: null
   });
   rows.push({
     name: "R4: scroll-driven solid-to-faded edge band engages over passing content",
-    status: !!edge && edge.scrolled.top > 0 && edge.scrolled.edge > 0 && edge.scrolled.alpha > 0
-      && edge.band.grad && edge.band.blur && edge.band.mask && edge.band.raw.includes("0.33") ? "pass" : "fail",
-    note: !edge ? "panel/header missing" : JSON.stringify({ atRest: edge.atRest, scrolled: edge.scrolled, band: edge.band }),
+    status: !!edge
+      && (!edge.supported
+        ? "skipped"
+        : edge.scrolled.top > 0 && edge.scrolled.edge > 0 && edge.scrolled.alpha > 0
+          && edge.band.grad && edge.band.blur && edge.band.mask && edge.band.raw.includes("0.33") ? "pass" : "fail"),
+    note: !edge ? "panel/header missing" : JSON.stringify(edge.supported ? { scrolled: edge.scrolled, band: edge.band } : { scrolled: edge.scrolled, skip: "no scroll-driven timelines on this browser build" }),
     ms: null
   });
 
@@ -360,8 +369,11 @@ export async function run({ session, baseUrl, boot }) {
   let coarseAssumed = null;
   let veto = null;
   let densGate = null;
-  const cdp = await session.raw.createCDPConnection("page");
-  await cdp.send("Emulation.setDeviceMetricsOverride", { width: 400, height: 700, deviceScaleFactor: 1, mobile: true });
+  // Viewport emulation, playwright-native: the pointer media form is not
+  // emulable in a headless session (the inline --pf-is-coarse var covers
+  // that half below), but the stage-shrink half only needs a real narrow
+  // viewport so the pf-stage container re-evaluates live.
+  await session.raw.setViewportSize({ width: 400, height: 700 });
   try {
     await session.eval(function narrow() {
       document.querySelector(".pf-shell")?.parentElement?.style.setProperty("width", "400px");
@@ -461,8 +473,7 @@ export async function run({ session, baseUrl, boot }) {
       };
     });
   } finally {
-    await cdp.send("Emulation.setEmulatedMedia", { features: [] });
-    await cdp.send("Emulation.clearDeviceMetricsOverride", {});
+    await session.raw.setViewportSize({ width: 1440, height: 900 });
     await session.eval(function restore() {
       const host = document.querySelector(".pf-shell");
       host?.parentElement?.style.removeProperty("width");

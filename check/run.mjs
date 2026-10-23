@@ -8,8 +8,9 @@
  *   1. syntax  - parse-only V8 check of every src module
  *   2. flaws   - repo ESLint + isolated module-import smoke
  *   3. bundle  - real esbuild build + artifact shape validation
- *   4. browser - real Chromium (Helium) running the real bundle: boot, the
- *                gesture contract, real playback, panel plumbing
+ *   4. browser - real Firefox (playwright-pinned build) running the real
+ *                bundle: boot, the gesture contract, real playback, panel
+ *                plumbing
  *
  * Usage:
  *   node check/run.mjs              # all gates, in order
@@ -17,7 +18,7 @@
  *   node check/run.mjs syntax flaws # an explicit combination
  */
 import { banner, row, verdict, fatal } from "./lib/report.mjs";
-import { ensureChromeDriver } from "./lib/driver.mjs";
+import { ensureFirefox } from "./lib/driver.mjs";
 
 const GATES = [
   ["syntax", "./stages/syntax.mjs", null],
@@ -62,8 +63,8 @@ for (const name of steps) {
   banner(`gate ${name}`);
   try {
     if (name === "browser") {
-      // Fail fast on a missing/stale (brew-side mismatch) chromedriver.
-      ensureChromeDriver();
+      // Fail fast on a missing/unrunnable playwright Firefox build.
+      await ensureFirefox();
     }
     const { run } = await import(modulePath);
     const { rows, ok } = await run();

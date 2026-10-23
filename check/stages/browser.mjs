@@ -1,6 +1,6 @@
 /**
  * Browser gate - everything the tool verifies about behavior happens here, in
- * a real Chromium with the real bundle.
+ * a real Firefox (playwright-pinned build) with the real bundle.
  *
  * One session per run; one fresh document per case (navigate → GM realm →
  * inject bundle → wake videos), then the case file runs its probes in-page
@@ -12,7 +12,7 @@ import { Buffer } from "node:buffer";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readdirSync, existsSync } from "node:fs";
-import { ChromiumSession } from "../lib/driver.mjs";
+import { BrowserSession } from "../lib/driver.mjs";
 import { FIXTURE_PAGE, FALLBACK_PAGE, VIDEOJS_STUB_PAGE, DPLAYER_STUB_PAGE, embedHostPage, switchboardPage, ensureVideoAsset } from "../lib/fixture.mjs";
 import { parseUserScriptHeader } from "../lib/gm-realm.mjs";
 
@@ -58,7 +58,7 @@ export async function run() {
   const rows = [];
   let session = null;
   try {
-    session = await ChromiumSession.launch();
+    session = await BrowserSession.launch();
     const baseUrl = await session.startFixtureServer();
     const videoRoute = ensureVideoAsset();
     session.registerFixture("/check", FIXTURE_PAGE);

@@ -663,36 +663,48 @@
         box-shadow: var(--pf-header-rim);
       }
 
-      .pf-panel-header::before {
-        content: "";
-        position: absolute;
-        /* The band is the header box plus one 24px tail below it - the
-           fade happens over the passing content, not inside the header. */
-        inset: 0 0 -24px 0;
-        z-index: -1;
-        pointer-events: none;
-        /* R4 scroll edge, darker-tinted edition (user direction): the band
-           paints its own ink share (--pf-edge-alpha, one notch darker than
-           the body composite - see GLASS_TINTS in config.js) solid at the
-           top, fading down the band's tail. It no longer reuses the sheet's
-           tint, whose same-color stack made the edge darkness an accident of
-           alpha arithmetic that jumped hardest for the clearest level. */
-        background: linear-gradient(to bottom, color-mix(in srgb, var(--pf-bg) var(--pf-edge-alpha), transparent), transparent);
-        /* Blur rides the same band: content passing beneath the pinned bar
-           washes through the mask - fully blurred across the header region,
-           gone at the tail - so the blurred strip has no hard edge. The mask
-           bounds backdrop-filter in Chromium along with the paint, so both
-           arms of the band share one fade geometry. */
-        backdrop-filter: var(--pf-blur-sm);
-        mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 24px), transparent);
-        border-bottom: 1px solid var(--pf-border-soft);
-        /* The scroll timeline still owns engagement: it writes
-           --pf-scroll-edge (0% at rest, 100% after 24px), and the whole band
-           fades by that share. One layer, one operand, no second timeline. */
-        opacity: calc(var(--pf-scroll-edge) / 1%);
-        animation: pf-scroll-edge linear both;
-        animation-timeline: scroll(nearest);
-        animation-range: 0px 24px;
+      /* R4 arms only where scroll-driven timelines exist. Without the
+         @supports, the band's animation still mounts on the default time-
+         based timeline, plays its keyframes once (0% -> 100%) and - with
+         `both` fill - parks --pf-scroll-edge at 100% forever: the resting
+         header would read permanently darker than the body, the exact state
+         R4 exists to forbid. Guarded off, a timeline-less build keeps the
+         bare sheet: no band, resting header identical at rest and on
+         scroll. */
+      @supports (animation-timeline: scroll(nearest)) {
+        .pf-panel-header::before {
+          content: "";
+          position: absolute;
+          /* The band is the header box plus one 24px tail below it - the
+             fade happens over the passing content, not inside the header. */
+          inset: 0 0 -24px 0;
+          z-index: -1;
+          pointer-events: none;
+          /* R4 scroll edge, darker-tinted edition (user direction): the band
+             paints its own ink share (--pf-edge-alpha, one notch darker than
+             the body composite - see GLASS_TINTS in config.js) solid at the
+             top, fading down the band's tail. It no longer reuses the
+             sheet's tint, whose same-color stack made the edge darkness an
+             accident of alpha arithmetic that jumped hardest for the
+             clearest level. */
+          background: linear-gradient(to bottom, color-mix(in srgb, var(--pf-bg) var(--pf-edge-alpha), transparent), transparent);
+          /* Blur rides the same band: content passing beneath the pinned bar
+             washes through the mask - fully blurred across the header region,
+             gone at the tail - so the blurred strip has no hard edge. The
+             mask bounds backdrop-filter in Chromium along with the paint, so
+             both arms of the band share one fade geometry. */
+          backdrop-filter: var(--pf-blur-sm);
+          mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 24px), transparent);
+          border-bottom: 1px solid var(--pf-border-soft);
+          /* The scroll timeline still owns engagement: it writes
+             --pf-scroll-edge (0% at rest, 100% after 24px), and the whole
+             band fades by that share. One layer, one operand, no second
+             timeline. */
+          opacity: calc(var(--pf-scroll-edge) / 1%);
+          animation: pf-scroll-edge linear both;
+          animation-timeline: scroll(nearest);
+          animation-range: 0px 24px;
+        }
       }
 
       /* Segmented tab strip - icon + label, active label accent-tinted. Tabs

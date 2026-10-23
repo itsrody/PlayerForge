@@ -1,6 +1,6 @@
 /**
- * The gesture contract, driven by REAL input events through chromedriver's
- * action layer (pointer streams and keystrokes sent to the headless browser),
+ * The gesture contract, driven by REAL input events through playwright's
+ * input layer (pointer streams and keystrokes sent to the headless browser),
  * with the semantic pf:gesture-* reactions recorded off the shell host.
  * Keyboard preconditions documented in inputs/forge.js: focus must not sit in
  * text entry, and the active engine arbitrates - so the pointer probes park a
@@ -47,35 +47,37 @@ export async function run({ session, baseUrl, boot }) {
     return rows;
   }
   const raw = session.raw;
-  // chromium driver actions: keyDown/keyUp consume Key constants (Key.ARROW,
-  // Key.UP, etc.) - press()/release()/move() drive the pointer device.
-  const acts = () => raw.actions({ async: true });
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const pressDown = async () => {
-    await acts().move({ origin: "viewport", x: Math.round(center.x), y: Math.round(center.y) }).press().pause(40).perform();
+    await raw.mouse.move(Math.round(center.x), Math.round(center.y));
+    await raw.mouse.down();
+    await sleep(40);
   };
   const pressUp = async () => {
-    await acts().move({ origin: "viewport", x: Math.round(center.x), y: Math.round(center.y) }).release().pause(40).perform();
+    await raw.mouse.move(Math.round(center.x), Math.round(center.y));
+    await raw.mouse.up();
+    await sleep(40);
   };
   const singleTap = async () => {
     await pressDown();
     await pressUp();
   };
 
+  // Named keys ride playwright's named-key surface; letters ride plain.
   const KEY_OF = {
-    ArrowRight: "\uE014",
-    ArrowLeft: "\uE012",
-    ArrowUp: "\uE013",
-    ArrowDown: "\uE015",
+    ArrowRight: "ArrowRight",
+    ArrowLeft: "ArrowLeft",
+    ArrowUp: "ArrowUp",
+    ArrowDown: "ArrowDown",
     KeyM: "m",
     KeyS: "s",
     KeyP: "p"
   };
   const fireKeys = async (codes) => {
-    const actions = acts();
     for (const code of codes) {
-      actions.keyDown(KEY_OF[code]).keyUp(KEY_OF[code]).pause(80);
+      await raw.keyboard.press(KEY_OF[code]);
+      await sleep(80);
     }
-    await actions.perform();
   };
 
   // Skip via arrow keys, deterministically: pause + seek first, so the step's
@@ -158,16 +160,16 @@ export async function run({ session, baseUrl, boot }) {
   });
   await new Promise((r) => setTimeout(r, 150));
 
-  // Horizontal drag = scrub family (fullscreen territory).
+  // Horizontal drag = scrub family (fullscreen territory). Step-rich moves
+  // give the stream router the intermediate pointermove samples the
+  // exp-smoothed velocity filter consumes.
   await recordGestureEvents(session);
-  await raw.actions({ async: true })
-    .move({ origin: "viewport", x: Math.round(center.x), y: Math.round(center.y) })
-    .press()
-    .move({ origin: "viewport", x: Math.round(center.x) + 60, y: Math.round(center.y) })
-    .move({ origin: "viewport", x: Math.round(center.x) + 140, y: Math.round(center.y) })
-    .release()
-    .pause(120)
-    .perform();
+  await raw.mouse.move(Math.round(center.x), Math.round(center.y));
+  await raw.mouse.down();
+  await raw.mouse.move(Math.round(center.x) + 60, Math.round(center.y), { steps: 8 });
+  await raw.mouse.move(Math.round(center.x) + 140, Math.round(center.y), { steps: 8 });
+  await raw.mouse.up();
+  await sleep(120);
   await new Promise((r) => setTimeout(r, 400));
   status(rows, "drag produces scrub stream + scrubEnd",
     await session.eval(function main() {
@@ -195,12 +197,10 @@ export async function run({ session, baseUrl, boot }) {
     const r = document.querySelector("#pf-sdkprobe").getBoundingClientRect();
     return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
   });
-  await raw.actions({ async: true })
-    .move({ origin: "viewport", x: probePoint.x, y: probePoint.y })
-    .press()
-    .release()
-    .pause(120)
-    .perform();
+  await raw.mouse.move(probePoint.x, probePoint.y);
+  await raw.mouse.down();
+  await raw.mouse.up();
+  await sleep(120);
   await new Promise((r) => setTimeout(r, 300));
   status(rows, "sdk control passthrough: overlay button keeps pointerdown + click",
     await session.eval(function main() {
