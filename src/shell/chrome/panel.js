@@ -390,12 +390,23 @@ export class SettingsPanel {
       const build = this.#sectionBuilder;
       this.#sectionBuilder = null;
       this.#opening = true;
+      // Marker for atomic-failure rollback: only sections THIS attempt added
+      // roll back, so a pre-attempt panel state never gets clobbered.
+      const attemptStart = this.#sections.size;
       try {
         await build();
       } catch (err) {
         logger.error("panel", "Panel section build failed:", err);
+        // Roll the attempt back before handing the builder over: a retry
+        // must start from the pre-attempt state, or addSection would stack
+        // duplicate tabs for every section the failed build already placed.
+        // (The section instances themselves die through the builder's own
+        // catch - the panel owns tab rows + section DOM, the shell owns the
+        // instance lifecycle.)
+        this.#rollbackTo(attemptStart);
         // Hand the builder back (unless a newer one was registered mid-build)
-        // so the next open retries instead of facing an empty body forever.
+        // so the next open retries against a clean body instead of facing
+        // an empty tab row forever.
         if (!this.#sectionBuilder) {
           this.#sectionBuilder = build;
         }
@@ -532,6 +543,28 @@ export class SettingsPanel {
     this.#dismissScope = null;
     watcher?.close();
     scope?.abort();
+  }
+
+  /**
+   * Undo a failed builder attempt: remove the tab rows + section DOM added
+   * after the attempt marker. #sections keeps insertion order, so a slice
+   * from the marker is exactly this attempt's registrations; the active
+   * section can only be lost when the whole panel was rolled back, and the
+   * next addSection activates its own - the pre-attempt state never held an
+   * active section without also holding it in #sections.
+   */
+  #rollbackTo(startSize) {
+    if (this.#sections.size <= startSize) {
+      return;
+    }
+    for (const section of [...this.#sections.keys()].slice(startSize)) {
+      this.#sections.get(section)?.remove();
+      section.remove();
+      this.#sections.delete(section);
+    }
+    if (this.#activeSection && !this.#sections.has(this.#activeSection)) {
+      this.#activeSection = null;
+    }
   }
 
   /** Add a section; returns the section root (or null when unusable). */

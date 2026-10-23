@@ -207,6 +207,77 @@ export function createMediaControls({ video }) {
   return new MediaControls(video);
 }
 
+/* - Wake-lock facet - */
+
+/**
+ * Screen wake-lock companion: keeps the display awake while the media plays
+ * and drops it on every stop (pause/ended/hidden), so a paused video parked
+ * on an idle page never pins the backlight. A newer acquire supersedes an
+ * in-flight one (last controller aborts the previous request), and teardown
+ * paths abort the active controller: the signal option hands lock lifecycle
+ * to the browser, so there is no manual lock.release() and no post-await
+ * re-check for pause/ended/destroy racing the request.
+ *
+ * Screen Wake Lock is optional and can be policed away by an embed: a missing
+ * API or a policy rejection is a silent no-op, and the (signal-scoped)
+ * listeners stay armed.
+ */
+export class WakeLockSession {
+  #video;
+  #scope = new Scope();
+  /** Active lock request's abort controller; null while nothing is held. */
+  #request = null;
+
+  constructor(video) {
+    this.#video = video;
+    const { signal } = this.#scope;
+    video.addEventListener("play", () => this.#acquire(), { passive: true, signal });
+    video.addEventListener("pause", () => this.#release(), { passive: true, signal });
+    video.addEventListener("ended", () => this.#release(), { passive: true, signal });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && !this.#video.paused && !this.#video.ended) {
+        this.#acquire();
+      }
+    }, { signal });
+    // A resource already playing before this shell adopted it never fires
+    // `play` again; acquire once here so the screen is still kept awake.
+    this.#acquire();
+  }
+
+  #acquire() {
+    const video = this.#video;
+    if (this.#scope.disposed || video.paused || video.ended) {
+      return;
+    }
+    if (typeof navigator.wakeLock?.request !== "function") {
+      return;
+    }
+    // A newer acquire supersedes an in-flight one: last signal wins.
+    this.#request?.abort();
+    const ac = new AbortController();
+    this.#request = ac;
+    navigator.wakeLock.request("screen", { signal: ac.signal }).catch(() => {
+      // Aborted (superseded/paused/hidden) or policy-denied: no lock formed.
+      if (this.#request === ac) {
+        this.#request = null;
+      }
+    });
+  }
+
+  #release() {
+    this.#request?.abort();
+    this.#request = null;
+  }
+
+  destroy() {
+    if (this.#scope.disposed) {
+      return;
+    }
+    this.#release();
+    this.#scope.dispose();
+  }
+}
+
 /* - MediaSession facet - */
 
 /** Media events that push position state to the OS surface. `timeupdate` is

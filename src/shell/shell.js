@@ -10,7 +10,7 @@ import { SettingsPanel, addSettingsSection, addHistorySection } from "./chrome/p
 import { getSetting, SETTING_KEYS } from "./chrome/config.js";
 import { TUNING } from "../shared/core.js";
 import { ToastManager } from "./chrome/toast.js";
-import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
+import { claimMediaSession, createMediaControls, WakeLockSession, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
 import { SHELL_MARKER, warmStyles, injectShell, watchShellHost, ensureViewportFitCover } from "./chrome/inject.js";
 import { requestFullscreenProvision } from "../shared/page.js";
 
@@ -85,8 +85,6 @@ export class Shell {
   /** Pooled reference-box result + validity flag (see the referenceBox getter). */
   #refBox = { width: 0, height: 0 };
   #refBoxValid = false;
-  /** Active wake-lock session's abort controller; the browser owns release. */
-  #wakeLockAbort = null;
   #onDestroy;
   /** DOM lifecycle manager: listeners, observers, elements, rollbacks. */
   #dom = new DOMManager();
@@ -97,6 +95,8 @@ export class Shell {
   #media;
   /** OS media-key facet, null without MediaSession support. */
   #mediaSession = null;
+  /** Screen wake-lock companion; owns its acquire/release lifecycle. */
+  #wakeLock = null;
 
   constructor({ video, container, sdk, onDestroy }) {
     this.video = video;
@@ -134,9 +134,15 @@ export class Shell {
     // Lazy section builder: panel sections are constructed on first open to
     // keep boot fast. The table is the single source of truth for the section
     // order; the step loop yields between entries so the first-open burst
-    // never wedges input handling.
+    // never wedges input handling. A failed attempt must undo both sides of
+    // the seam from your own artifact ownership: this catch destroys the
+    // section instances this attempt pushed and re-raises, so the panel's
+    // rollback removes the tab rows + section DOM before it hands the
+    // builder back - a retry then starts from the pre-attempt state instead
+    // of stacking duplicate tabs.
     this.#panel.setSectionBuilder(() => {
       const context = { shell: this, panel: this.#panel, signal: this.#scope.signal };
+      const attemptStart = this.#panelSections.length;
       return runStepsAsync(
         PANEL_SECTIONS.map((build) => () => {
           const section = build(context);
@@ -145,7 +151,12 @@ export class Shell {
           }
         }),
         { yieldBetween: true }
-      );
+      ).catch((err) => {
+        for (const section of this.#panelSections.splice(attemptStart)) {
+          section.destroy?.();
+        }
+        throw err;
+      });
     });
 
     runSteps([
@@ -177,7 +188,9 @@ export class Shell {
         });
       },
       () => this.#watchFullscreen(),
-      () => this.#watchWakeLock(),
+      () => {
+        this.#wakeLock = new WakeLockSession(this.video);
+      },
       () => this.#watchOrientation(),
       () => this.#watchReferenceBoxSize(),
       () => this.#watchVisualViewport(),
@@ -483,51 +496,6 @@ export class Shell {
     });
   }
 
-  /** Keep screen awake while video is playing; release on pause/ended/hidden. */
-  #watchWakeLock() {
-    const video = this.video;
-    const release = () => {
-      this.#wakeLockAbort?.abort();
-      this.#wakeLockAbort = null;
-    };
-    // The signal option hands lock lifecycle to the browser: aborting the
-    // controller drops an in-flight request (rejects with AbortError) or tears
-    // down a held lock - so there is no manual lock.release() and no post-await
-    // re-check for pause/ended/destroy racing the request.
-    const acquire = () => {
-      if (this.#scope.disposed || video.paused || video.ended) {
-        return;
-      }
-      // Screen Wake Lock is optional and can be policed away by an embed; a
-      // missing API must not throw straight out of the play/visibility
-      // listener (and keep the already-armed listeners alive).
-      if (typeof navigator.wakeLock?.request !== "function") {
-        return;
-      }
-      // A newer acquire supersedes an in-flight one: last signal wins.
-      this.#wakeLockAbort?.abort();
-      const ac = new AbortController();
-      this.#wakeLockAbort = ac;
-      navigator.wakeLock.request("screen", { signal: ac.signal }).catch(() => {
-        // Aborted (superseded/paused/hidden) or policy-denied: no lock formed.
-        if (this.#wakeLockAbort === ac) {
-          this.#wakeLockAbort = null;
-        }
-      });
-    };
-    this.#dom.listen(video, "play", acquire, { passive: true });
-    this.#dom.listen(video, "pause", release, { passive: true });
-    this.#dom.listen(video, "ended", release, { passive: true });
-    this.#dom.listen(document, "visibilitychange", () => {
-      if (document.visibilityState === "visible" && !video.paused && !video.ended) {
-        acquire();
-      }
-    });
-    // A resource already playing before this shell adopted it never fires
-    // `play` again; acquire once here so the screen is still kept awake.
-    acquire();
-  }
-
   /** Lock to landscape on fullscreen entry (Android); unlock on exit. */
   #watchOrientation() {
     const unsub = subscribeFullscreen(async (active) => {
@@ -636,8 +604,8 @@ export class Shell {
         this.#panelSections = [];
       },
       () => {
-        this.#wakeLockAbort?.abort();
-        this.#wakeLockAbort = null;
+        this.#wakeLock?.destroy();
+        this.#wakeLock = null;
       },
       () => {
         this.#inputs?.destroy();

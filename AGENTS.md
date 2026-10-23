@@ -140,7 +140,9 @@ iframes, same-origin and cross-origin:
   HUD wiring → media session → sections → markers), stamps managed markers,
   owns destroy and re-anchor paths.
 - **media.js** — `MediaControls` (play/pause/seek/scrub-latch/volume/rate/
-  boost/PiP/stop), `MediaSessionOwner` claim/lifecycle, wake-lock.
+  boost/PiP/stop), `MediaSessionOwner` claim/lifecycle, `WakeLockSession`
+  (screen wake-lock companion: acquire on play/visibility/boot, release on
+  pause/ended/destroy, browser-owned via an abort signal).
 - **resume.js** — the resume tracker: store warm → context resolve → entry
   match/create → restore → progress drive. Save cadence = 10s checkpoint
   span; flushes on `seeked`, on pause, on visibility loss, on freeze;
