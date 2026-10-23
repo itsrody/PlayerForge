@@ -315,8 +315,12 @@ export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_V
           qualify(target);
         }
       };
-      doc?.addEventListener("contentvisibilityautostatechange", onReveal, true);
-      return () => doc?.removeEventListener("contentvisibilityautostatechange", onReveal, true);
+      // The reveal listener rides its own abort signal: teardown is the
+      // controller's abort, the same native drop every other listener in the
+      // tree gets - no manual capture removeEventListener pairing.
+      const ac = new AbortController();
+      doc?.addEventListener("contentvisibilityautostatechange", onReveal, { capture: true, signal: ac.signal });
+      return () => ac.abort();
     }
   });
 }
