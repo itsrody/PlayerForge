@@ -23,6 +23,11 @@ import { requestFullscreenProvision } from "../shared/page.js";
 const EDITABLE_SELECTOR =
   "input, textarea, [contenteditable]:not([contenteditable='false'])";
 
+/* Window-vs-screen mismatch that counts as UA letterboxing in fullscreen.
+   Cutout/gesture-bar insets are tens of CSS px; the epsilon must clear
+   desktop window-manager rounding, where fullscreen agrees within a few. */
+const FS_BOX_GAP_PX = 16;
+
 /** Human labels for MediaError.code; an unknown code falls back at the call. */
 const MEDIA_ERROR_LABELS = {
   1: "Playback was aborted",
@@ -242,17 +247,32 @@ export class Shell {
    * Fullscreen reference box used for fill-mode cover scaling and scrub
    * normalization. With the edge-to-edge bypass (see inject.js) the
    * fullscreen iframe draws behind the cutout edge-to-edge, so the SDK's
-   * rendered box IS the physical screen - `screen.width/height`. No env-based
-   * safe-rect narrowing is needed (or possible: env(safe-area-inset-*) does
-   * not resolve inside iframes, Chromium #467970444) - the bypass already puts
-   * the frame at the screen. Returns { width, height }.
+   * rendered box IS the physical screen, exactly when the window box agrees;
+   * a letterboxed non-cover frame falls back inside the getter. Returns
+   * { width, height }.
    */
   get referenceBox() {
     if (!this.#refBoxValid) {
       const box = this.#refBox;
       if (fs) {
-        box.width = screen.width;
-        box.height = screen.height;
+        // Edge-to-edge (viewport-fit=cover merged on the active frame):
+        // the fullscreen element spans the physical screen, so screen.* IS
+        // the fill box and env-safe-rect narrowing is both unneeded and
+        // impossible (env(safe-area-inset-*) does not resolve inside
+        // iframes, Chromium #467970444). Without cover the UA letterboxes
+        // the frame to the safe rect below screen.* - filling to screen.*
+        // would spill the cover scale past the visible frame - so a real
+        // window-vs-screen mismatch falls back to the window box. The
+        // epsilon absorbs desktop rounding, where the two agree within a
+        // CSS px or two across window managers.
+        if (Math.abs(window.innerWidth - screen.width) >= FS_BOX_GAP_PX
+          || Math.abs(window.innerHeight - screen.height) >= FS_BOX_GAP_PX) {
+          box.width = window.innerWidth;
+          box.height = window.innerHeight;
+        } else {
+          box.width = screen.width;
+          box.height = screen.height;
+        }
       } else {
         box.width = this.container.clientWidth;
         box.height = this.container.clientHeight;
@@ -500,7 +520,11 @@ export class Shell {
         return;
       }
       try {
-        if (active && screen.orientation?.lock) {
+        // Lock only a portrait display: an already-landscape device gets a
+        // pointless lock churn (and a failed framing on tablets that reject
+        // the request). type is absent on older impls - keep the legacy lock.
+        const type = screen.orientation?.type;
+        if (active && screen.orientation?.lock && (!type || type.includes("portrait"))) {
           await screen.orientation.lock("landscape");
         } else if (!active && screen.orientation?.unlock) {
           screen.orientation.unlock();

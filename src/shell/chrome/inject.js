@@ -93,7 +93,9 @@ const style = new ShellStyle();
      LAST), so every value pair resolves as it did in the sheet. */
 const CONTAINER_POCKET_CSS = `
   @container pf-stage (max-width: 480px) {
-    .pf-panel-slot:not(:has(> .pf-panel[data-compact="off"])) {
+    /* Descendant has(): the panel rides the safe-box wrapper inside the
+       slot, so a direct-child has() would miss the off veto. */
+    .pf-panel-slot:not(:has(.pf-panel[data-compact="off"])) {
       --pf-compact-auto: 1;
     }
   }

@@ -850,10 +850,18 @@ export class SettingsPanel {
     // container Pf-stage AND the compact bus holder; a container lookup from
     // shadow content to the light-DOM host never resolves (the browser gate
     // established that), so the slot must exist as the shadow-side stage.
+    // Inside it a safe-box wrapper carries the env() safe-area inset - the
+    // slot itself cannot (its inline size IS the player region for the bus),
+    // and env() cannot enter calc()/min() here (compact row measured the
+    // width going invalid through both var-mediated and inline calc forms),
+    // so the wrapper uses exactly the proven bare-env inset primitive.
     this.#slot = document.createElement("div");
     this.#slot.className = "pf-panel-slot";
+    const safeBox = document.createElement("div");
+    safeBox.className = "pf-safe";
     this.#hudLayer.appendChild(this.#slot);
-    this.#slot.appendChild(root);
+    this.#slot.appendChild(safeBox);
+    safeBox.appendChild(root);
     this.#root = root;
     this.#body = body;
     this.#closeButton = closeButton;
