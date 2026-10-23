@@ -1,14 +1,18 @@
 /**
- * Gate 1 - syntax only.
+ * Gate 1 - syntax at the platform floor.
  *
- * Every src module is handed to `node --check`: a full V8 parse with zero
- * execution. Nothing here imports anything, so a broken file surfaces as a
- * pure syntax failure no matter what its dependencies would have done.
- * Children run 8-wide; failures keep the original file order.
+ * Every src module is handed to an esbuild transform with `target:
+ * firefox158`: a full parse (zero execution, nothing imports anything) that
+ * ALSO rejects syntax the target engine cannot run - esbuild's engine table
+ * errors on floor-down here, where a bare `node --check` (V8's superset)
+ * would happily accept syntax the floor will break on. The browser gate on
+ * real Firefox is the runtime half of the same floor.
+ * Failures surface as pure transform errors no matter what the file's
+ * dependencies would have done; children run 8-wide and keep the file order.
  */
-import { execFile } from "node:child_process";
-import { readdirSync, statSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { readdirSync, statSync, readFileSync } from "node:fs";
+import { transformSync } from "esbuild";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inParallel } from "../lib/pool.mjs";
 
@@ -27,19 +31,19 @@ function walk(dir, out = []) {
 export async function run() {
   const start = Date.now();
   const files = walk(SRC);
-  const maybeBroken = await inParallel(files, 8, async (file) => {
+  const maybeBroken = await inParallel(files, 8, (file) => {
     try {
-      await new Promise((resolve, reject) => {
-        execFile(process.execPath, ["--check", file], (err) => (err ? reject(err) : resolve()));
+      transformSync(readFileSync(file, "utf8"), {
+        loader: "js",
+        format: "esm",
+        target: ["firefox158"],
+        logLevel: "silent"
       });
       return null;
     } catch (err) {
-      const detail = String(err.stderr ?? "")
-        .split("\n")
-        .filter((l) => /^(SyntaxError|\^|.*:\d+|SyntaxError:.*)/.test(l.trim()) && !/^\^\s*$/.test(l));
       return {
         file: file.replace(HERE + "/", ""),
-        message: detail.slice(-3).join(" | ").slice(0, 160) || err.message
+        message: String(err.message ?? err).split("\n").slice(0, 2).join(" | ").slice(0, 160)
       };
     }
   });
@@ -47,5 +51,5 @@ export async function run() {
   if (broken.length > 0) {
     return { rows: broken.map((b) => ({ name: `parse ${b.file}`, status: "fail", note: b.message, ms: null })), ok: false };
   }
-  return { rows: [{ name: `${files.length} source files parse (node --check)`, status: "pass", ms: Date.now() - start }], ok: true };
+  return { rows: [{ name: `${files.length} source modules parse at the firefox158 floor (esbuild)`, status: "pass", ms: Date.now() - start }], ok: true };
 }

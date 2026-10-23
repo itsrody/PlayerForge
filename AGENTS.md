@@ -388,7 +388,9 @@ only surface, scales/tokens `@property`-typed, gradients banned in the HUD:
 `check/run.mjs` is the repo's one testing interface. Gates run in order and
 stop at the first failure:
 
-1. **syntax** — parse-only V8 check of every src module (parallel children).
+1. **syntax** — per-module parse + floor check (esbuild transform at
+   `target: firefox158`; a V8-only parse would be a superset that
+   green-lights syntax the floor breaks on).
 2. **flaws** — repo eslint + isolated module-import smoke per module.
 3. **bundle** — real esbuild build (version derivation, worker chunk) +
    artifact shape validation (header fields, IIFE shape, css companion).

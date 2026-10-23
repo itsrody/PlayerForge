@@ -137,7 +137,7 @@ export async function run({ session, baseUrl, boot }) {
   }), "panel still open");
 
   // KeyP asks for picture-in-picture through the kernel's semantic layer;
-  // pip-window creation may be blocked in headless Chromium, so the row
+  // pip-window creation may be blocked in a headless session, so the row
   // asserts the contract, not the browser-side window.
   await recordGestureEvents(session);
   await fireKeys(["KeyP"]);
@@ -147,7 +147,7 @@ export async function run({ session, baseUrl, boot }) {
   }), "no pf:gesture-pip");
 
   // Scrub/swipe/pinch are fs:true-binding intents (actions.js): the kernel's
-  // fs gate reads `doc.fullscreenElement`, and headless Chromium refuses
+  // fs gate reads `doc.fullscreenElement`, and a headless session refuses
   // real element fullscreen (Permissions check failed). The override below
   // points the same gate at the shell host; a synthetic fullscreenchange
   // then flips the kernel's fs latch the way a real fullscreen would.

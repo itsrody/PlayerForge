@@ -1,12 +1,13 @@
 /**
- * Chromium 156-era robustness: background/backend offloading (SQLite IndexedDB
- * backend, faster freeze/pagehide of background pages) raises the stakes on
- * everything PlayerForge persists through SYNCHRONOUS GM storage at playback
- * boundaries. Rows: the freeze flush must land the played position with no
- * user pause, the rVFC crank (the save surface Chromium actually affords) must
- * be present on the running video, and the storage echo/merge hot paths must
- * stay inside a tiering-era wall-clock budget (Maglev/TurboFan silently mask
- * regressions on dev hardware - this guard does not).
+ * Gecko build robustness: the same persistence stakes the kernel ran under
+ * on the `chromium` branch raise here faster (Firefox bfcache/freeze
+ * discipline of background pages) on everything PlayerForge persists through
+ * SYNCHRONOUS GM storage at playback boundaries. Rows: the freeze flush must
+ * land the played position with no user pause, the rVFC crank (the save
+ * surface Firefox affords on presented frames) must be present on the
+ * running video, and the storage echo/merge hot paths must stay inside a
+ * tiering-era wall-clock budget (JIT tiers silently mask regressions on dev
+ * hardware - this guard does not).
  */
 export async function run({ session, boot }) {
   const rows = [];
@@ -61,7 +62,7 @@ export async function run({ session, boot }) {
   );
 
   // rVFC presence: the save crank prefers requestVideoFrameCallback (fires
-  // only for presented frames); a Chromium that drops it silently downgrades
+  // only for presented frames); a build that drops it silently downgrades
   // to the timeupdate fallback - this row makes the downgrade audible.
   const rvfc = await session.eval(function main() {
     const v = document.querySelector("#check-video");
