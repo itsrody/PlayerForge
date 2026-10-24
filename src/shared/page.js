@@ -1275,7 +1275,7 @@ export function installContextBridge() {
  *
  * One event source so consumers never re-derive SPA navigation detection from
  * pushState patching or location polling: the native Navigation API
- * (`navigation.currententrychange`, Chromium 102+) covers pushState,
+ * (`navigation.currententrychange`, Firefox 147+ / Chromium 102+) covers pushState,
  * replaceState, hash changes and history traversal, and needs no Tampermonkey
  * grant. Single-backend by the same contract as the scheduler: the platform
  * is the backend (the harness supplies the event target), so no fallback arm
@@ -1283,7 +1283,7 @@ export function installContextBridge() {
  *
  * `window.onurlchange` (Tampermonkey `@grant window.onurlchange`) would be
  * another backend, but it costs a grant line for coverage the native
- * Navigation API already provides on the Chromium 155 floor - the grant
+ * Navigation API already provides on the Firefox 158 floor - the grant
  * policy in shared/store.js reserves manager APIs for capabilities the page
  * cannot supply, and URL change notification is not one of them.
  *

@@ -27,21 +27,29 @@ const JANK_THRESHOLD_MS = 150;
 const DECODER = new TextDecoder();
 
 /**
- * Report every long animation frame the worker produced. LoAF in workers
- * landed in Chromium 153, so it is always present on the 155 floor: the
- * entry-type support decides installation, one check that also covers realms
- * (like Node's PerformanceObserver) that ship the observer without LoAF.
+ * Report every long task or animation frame the worker produced. LoAF in
+ * workers is Chromium 153+; longtask is standard W3C. The entry-type
+ * support decides installation, so unsupported realms stay zero-cost.
  */
-if (PerformanceObserver.supportedEntryTypes?.includes("long-animation-frame")) {
+const supportedWorkerPerf = PerformanceObserver.supportedEntryTypes;
+const workerPerfType = supportedWorkerPerf?.includes("long-animation-frame")
+  ? "long-animation-frame"
+  : supportedWorkerPerf?.includes("longtask")
+    ? "longtask"
+    : null;
+
+if (workerPerfType) {
   new PerformanceObserver((list) => {
     for (const entry of list.getEntries()) {
       if (entry.duration < JANK_THRESHOLD_MS) {
         continue;
       }
-      const scripts = entry.scripts ?? [];
       let forced = 0;
-      for (const script of scripts) {
-        forced += script.forcedStyleAndLayoutDuration ?? 0;
+      if (workerPerfType === "long-animation-frame") {
+        const scripts = entry.scripts ?? [];
+        for (const script of scripts) {
+          forced += script.forcedStyleAndLayoutDuration ?? 0;
+        }
       }
       self.postMessage({
         pfWorker: 1,
@@ -50,7 +58,7 @@ if (PerformanceObserver.supportedEntryTypes?.includes("long-animation-frame")) {
         forcedMs: Math.round(forced * 10) / 10
       });
     }
-  }).observe({ type: "long-animation-frame", buffered: false });
+  }).observe({ type: workerPerfType, buffered: false });
 }
 
 /**

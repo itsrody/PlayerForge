@@ -8,30 +8,30 @@
  *   4. Debug runtime  - logger chatter + the LoAF diagnostic
  *
  * The scheduler façade is single-backend: it composes the platform's own
- * primitives (scheduler.postTask / scheduler.yield, Chromium 95+/129+,
- * including dedicated workers) and adds nothing else - no fallback arm, no
- * capability ladder. Behavioral parity is proven end-to-end via the check
- * harness (check/), not here.
+ * primitives (scheduler.postTask / scheduler.yield, Firefox 142+ / Chromium
+ * 95+/129+, including dedicated workers) and adds nothing else - no fallback
+ * arm, no capability ladder. Behavioral parity is proven end-to-end via the
+ * check harness (check/), not here.
  *
- * Hot-path exports stay plain functions at module scope (V8 inlines them
- * without hidden-class penalties); only stateful runtime behavior lives in
- * classes/examples below.
+ * Hot-path exports stay plain functions at module scope (inlined without
+ * hidden-class / shape penalties across SpiderMonkey and V8); only stateful
+ * runtime behavior lives in classes/examples below.
  */
 /* - 1. Scheduling - */
 /**
- * Chromium-native task scheduler.
+ * Prioritized task scheduler.
  *
  * One façade over the platform's scheduling primitives so consumers never
  * duplicate the owner-signal abort choreography across the tree:
  *
  *   postTask(fn, { priority, delay, signal }) → { abort() }
- *     scheduler.postTask (Chromium 95+)
+ *     scheduler.postTask (Firefox 142+)
  *
  *   yield_() → Promise
- *     scheduler.yield (Chromium 129+)
+ *     scheduler.yield (Firefox 142+)
  *
- * Every export is a plain function so V8 can keep the fast path inline
- * (Maglev/TurboFan-friendly, no hidden-class penalty per call).
+ * Every export is a plain function so the engine (SpiderMonkey / V8) can keep
+ * the fast path inline without shape or hidden-class penalties per call.
  */
 
 /**
@@ -321,14 +321,14 @@ function error(channel, ...args) {
  * without debug toggled pays exactly zero cost: no observer, no buffered
  * entries, no console I/O.
  *
- * The LoAF surface (Chromium 123+) reports frames delayed beyond 50ms
- * with script attribution, including forced-style/layout breakdowns, so
- * jank - ours or an SDK's - surfaces on the console instead of a
- * tracing session.
+ * The performance diagnostic surface (LoAF on Chromium, longtask on Gecko)
+ * reports tasks/frames delayed beyond 50ms with script attribution, so jank -
+ * ours or an SDK's - surfaces on the console instead of a tracing session.
  */
 class DebugRuntime {
   #logsEnabled = false;
   #observer = null;
+  #perfType = null;
 
   get logsEnabled() {
     return this.#logsEnabled;
@@ -348,19 +348,31 @@ class DebugRuntime {
   }
 
   #installPerf() {
-    // Single-backend: the platform's PerformanceObserver decides (LoAF is an
-    // entry type) - a realm that lacks either exposes it through the same
-    // check. Node, for instance, ships PerformanceObserver without
-    // long-animation-frame.
-    if (this.#observer ||
-        !globalThis.PerformanceObserver?.supportedEntryTypes?.includes("long-animation-frame")) {
+    if (this.#observer) {
       return;
     }
+    const supported = globalThis.PerformanceObserver?.supportedEntryTypes;
+    if (!supported) {
+      return;
+    }
+    // Probe the platform's diagnostic entry types: LoAF (Chromium) reports
+    // script attribution and style breakdowns; longtask (Gecko/Firefox) reports
+    // tasks delaying the main thread beyond 50ms. Single observer.
+    const type = supported.includes("long-animation-frame")
+      ? "long-animation-frame"
+      : supported.includes("longtask")
+        ? "longtask"
+        : null;
+    if (!type) {
+      return;
+    }
+    this.#perfType = type;
     try {
       this.#observer = new PerformanceObserver((entries) => this.#report(entries));
-      this.#observer.observe({ type: "long-animation-frame", buffered: false });
+      this.#observer.observe({ type, buffered: false });
     } catch {
       this.#observer = null;
+      this.#perfType = null;
     }
   }
 
@@ -370,6 +382,7 @@ class DebugRuntime {
     }
     this.#observer.disconnect();
     this.#observer = null;
+    this.#perfType = null;
   }
 
   /** Report only the worst few per flush so the console isn't flooded. */
@@ -379,18 +392,32 @@ class DebugRuntime {
       .sort((a, b) => b.duration - a.duration)
       .slice(0, MAX_REPORT);
     for (const entry of worst) {
-      const blocked = entry.blockingDuration ?? 0;
-      const forced = entry.scripts?.reduce((sum, s) => sum + (s.forcedStyleAndLayoutDuration ?? 0), 0) ?? 0;
-      logger.warn(
-        "perf",
-        `LoAF ${entry.duration.toFixed(0)}ms (blocking ${blocked.toFixed(0)}ms, forced style+layout ${forced.toFixed(1)}ms)`
-      );
-      for (const script of entry.scripts ?? []) {
-        if (script.name) {
-          logger.warn("perf", `  - ${script.name}`);
+      if (this.#perfType === "long-animation-frame") {
+        const blocked = entry.blockingDuration ?? 0;
+        const forced = entry.scripts?.reduce((sum, s) => sum + (s.forcedStyleAndLayoutDuration ?? 0), 0) ?? 0;
+        logger.warn(
+          "perf",
+          `LoAF ${entry.duration.toFixed(0)}ms (blocking ${blocked.toFixed(0)}ms, forced style+layout ${forced.toFixed(1)}ms)`
+        );
+        for (const script of entry.scripts ?? []) {
+          if (script.name) {
+            logger.warn("perf", `  - ${script.name}`);
+          }
+          if (script.forcedStyleAndLayoutDuration > 0) {
+            logger.warn("perf", `     forced style+layout ${script.forcedStyleAndLayoutDuration.toFixed(1)}ms`);
+          }
         }
-        if (script.forcedStyleAndLayoutDuration > 0) {
-          logger.warn("perf", `     forced style+layout ${script.forcedStyleAndLayoutDuration.toFixed(1)}ms`);
+      } else {
+        const name = entry.name || "self";
+        logger.warn(
+          "perf",
+          `longtask ${entry.duration.toFixed(0)}ms (${name})`
+        );
+        for (const attr of entry.attribution ?? []) {
+          const container = attr.containerType ? ` [${attr.containerType}:${attr.containerName || attr.containerSrc || ""}]` : "";
+          if (attr.name || container) {
+            logger.warn("perf", `  - ${attr.name || "task"}${container}`);
+          }
         }
       }
     }

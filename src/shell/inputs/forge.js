@@ -13,8 +13,8 @@ import { logger, Scope, delay } from "../../shared/runtime.js";
 const WHEEL_CAPTURE = { capture: true, passive: false };
 
 // Gesture calibration hoisted to module consts. TUNING is static (read-only
-// after load), so binding these at module scope lets V8 treat them as
-// invariant values and fold them - Maglev/TurboFan raise constants to load,
+// after load), so binding these at module scope lets the JIT engine
+// (SpiderMonkey Warp / V8) treat them as invariant values and fold them,
 // instead of re-running shape-guarded property loads on every high-frequency
 // pointer/keyboard event.
 const EDGE_ZONE_RATIO = TUNING.gestures.edgeZoneRatio;

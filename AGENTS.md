@@ -100,7 +100,7 @@ iframes, same-origin and cross-origin:
   backend), `runSteps`/`runStepsAsync` (ordered declarative step lists for
   every boot/teardown sequence), `Scope` (one destroy-root per feature, every
   listener/timer/observer routed through it), `DebugRuntime` (log chatter AND
-  the LoAF diagnostic flip as one unit), logger facade.
+  the performance diagnostic flip — LoAF / longtask — as one unit), logger facade.
 - **dom.js** — the shared mutation feed (`onDomMutations`: ONE page-level
   MutationObserver every consumer rides — element pooling, the shell ledger,
   shadow traversal, the fullscreen gate, the iframe registry), `PoolElement`
