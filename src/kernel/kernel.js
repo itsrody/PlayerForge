@@ -19,19 +19,34 @@ class DomSettleWait {
     const { promise, resolve } = Promise.withResolvers();
     this.#promise = promise;
     const observer = new MutationObserver(() => {
-      // Any mutation re-arms the trailing quiet window from scratch.
+      // Any mutation re-arms the trailing quiet window from scratch. Aborting
+      // the previous handle here is safe: its task never ran, so there is no
+      // running task to poison.
       this.#settleHandle?.abort();
-      this.#settleHandle = postTask(done, { priority: "user-visible", delay: quietMs });
+      this.#settleHandle = postTask(() => done("settle"), { priority: "user-visible", delay: quietMs });
     });
 
-    const done = () => {
+    // `source` names the twin whose task is running done() right now. A task
+    // aborted MID-RUN poisons its scheduler line on Firefox: anything
+    // synchronously born from this callback (the promise resolution and every
+    // await below it - shell boot's first `scheduler.yield()`) inherits the
+    // abort, so the firing twin must never abort itself (an already-finished
+    // task has nothing left to cancel); only the OTHER twin, whose wait is
+    // genuinely still pending, is a real cancel.
+    const done = (source) => {
       if (this.#settled) {
         return;
       }
       this.#settled = true;
       observer.disconnect();
-      this.#settleHandle?.abort();
-      this.#capHandle?.abort();
+      if (this.#settleHandle && source !== "settle") {
+        this.#settleHandle.abort();
+        this.#settleHandle = null;
+      }
+      if (this.#capHandle && source !== "cap") {
+        this.#capHandle.abort();
+        this.#capHandle = null;
+      }
       // Normal settle must release the abort listener too: with `{ once: true }`
       // it only self-removes on abort, so a quiet-page settle would otherwise
       // keep the kernel-scope signal subscribed for the whole page lifetime.
@@ -39,8 +54,8 @@ class DomSettleWait {
       resolve();
     };
 
-    this.#settleHandle = postTask(done, { priority: "user-visible", delay: quietMs });
-    this.#capHandle = postTask(done, { priority: "user-visible", delay: capMs });
+    this.#settleHandle = postTask(() => done("settle"), { priority: "user-visible", delay: quietMs });
+    this.#capHandle = postTask(() => done("cap"), { priority: "user-visible", delay: capMs });
 
     observer.observe(container, { childList: true });
 

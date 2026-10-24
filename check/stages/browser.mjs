@@ -1,6 +1,6 @@
 /**
  * Browser gate - everything the tool verifies about behavior happens here, in
- * a real Firefox (playwright-pinned build) with the real bundle.
+ * a real Firefox (device install) with the real bundle.
  *
  * One session per run; one fresh document per case (navigate → GM realm →
  * inject bundle → wake videos), then the case file runs its probes in-page

@@ -72,17 +72,11 @@ export async function run({ session, boot, header, version: bundleVersion }) {
     window.__gmTest.remoteWrite("pf:configs", doc);
   }, enabled);
   const raw = session.raw;
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   // Pointer park first - the same precondition the gesture case needs for
   // keystrokes to reach the kernel's document-level listener.
   const keyM = async () => {
-    await raw.mouse.move(center.x, center.y);
-    await raw.mouse.down();
-    await sleep(40);
-    await raw.mouse.up();
-    await sleep(40);
-    await raw.keyboard.press("m");
-    await sleep(120);
+    await raw.actions({ async: true }).move({ origin: "viewport", x: center.x, y: center.y }).press().pause(40).release().pause(40).perform();
+    await raw.actions({ async: true }).keyDown("m").keyUp("m").pause(120).perform();
   };
   await session.eval(function main() {
     window.__pfEvents = [];

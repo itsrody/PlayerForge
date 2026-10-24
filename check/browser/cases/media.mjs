@@ -369,11 +369,11 @@ export async function run({ session, baseUrl, boot }) {
   let coarseAssumed = null;
   let veto = null;
   let densGate = null;
-  // Viewport emulation, playwright-native: the pointer media form is not
-  // emulable in a headless session (the inline --pf-is-coarse var covers
+  // Viewport emulation, driver-native window rect: the pointer media form is
+  // not emulable in a headless session (the inline --pf-is-coarse var covers
   // that half below), but the stage-shrink half only needs a real narrow
   // viewport so the pf-stage container re-evaluates live.
-  await session.raw.setViewportSize({ width: 400, height: 700 });
+  await session.raw.manage().window().setRect({ width: 400, height: 700 });
   try {
     await session.eval(function narrow() {
       document.querySelector(".pf-shell")?.parentElement?.style.setProperty("width", "400px");
@@ -487,7 +487,7 @@ export async function run({ session, baseUrl, boot }) {
       ms: null
     });
   } finally {
-    await session.raw.setViewportSize({ width: 1440, height: 900 });
+    await session.raw.manage().window().setRect({ width: 1440, height: 900 });
     await session.eval(function restore() {
       const host = document.querySelector(".pf-shell");
       host?.parentElement?.style.removeProperty("width");

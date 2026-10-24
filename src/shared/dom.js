@@ -146,10 +146,20 @@ class DomWatch {
     }
   }
 
-  #flushPending() {
+  /**
+   * `source` marks the deferred task's own callback - the one caller that
+   * must NOT abort its running postTask: a task aborted mid-run poisons its
+   * scheduler line on Firefox, and everything synchronously born from this
+   * callback (#flush()'s subscriber dispatch and the yield_() hop between
+   * batches) would inherit the abort and reject. Any other caller is a real
+   * cancel of a pending wait.
+   */
+  #flushPending(source) {
     this.#deferAc?.abort();
     this.#deferAc = null;
-    this.#deferHandle?.abort();
+    if (this.#deferHandle && source !== "handle") {
+      this.#deferHandle.abort();
+    }
     this.#deferHandle = null;
     this.#flush();
   }
@@ -171,15 +181,13 @@ class DomWatch {
       return;
     }
     this.#deferAc = new AbortController();
-    this.#deferHandle = postTask(() => this.#flushPending(), { priority: "background", delay: DEFER_VISIBILITY_CAP_MS });
+    this.#deferHandle = postTask(() => this.#flushPending("handle"), { priority: "background", delay: DEFER_VISIBILITY_CAP_MS });
     document.addEventListener("visibilitychange", this.#onVisibilityChange, { signal: this.#deferAc.signal });
   }
 
   /**
-   * Chromium-native scheduling advantage: `scheduler.yield()` lets the browser
-   * interleave input / paint between the mutation batch and the subscriber
-   * dispatch. Falls back to the direct flush when the API is absent (jsdom
-   * tests, non-Chromium hosts) so the test tick() helper stays compatible.
+   * `scheduler.yield()` lets the browser interleave input / paint between the
+   * mutation batch and the subscriber dispatch (single backend, runtime.js).
    */
   async #scheduleFlush() {
     await yield_();

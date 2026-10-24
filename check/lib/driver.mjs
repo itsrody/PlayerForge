@@ -1,20 +1,23 @@
 /**
  * Firefox session boot for the check tool (gecko branch).
  *
- * Playwright owns the browser lifecycle — the version-pinned Firefox build
- * (installed with `npx playwright install firefox`, refreshed whenever
- * playwright moves its pin), an isolated persistent profile, and CDP-free
- * page-level driving. There is no driver binary on disk to go
- * stale, so the launch-failure class the old ladder maintained (version
- * refusals, handshake floods, heal round-trips) cannot recur.
- * Everything else the cases consume — the fixture server, the GM realm, the
- * screenshot forensics — keeps its contract.
+ * Owns everything between "run the gates" and "real page running the real
+ * bundle": device Firefox app discovery, the on-disk geckodriver (installed
+ * once — geckodriver serves a wide Firefox span, so unlike a per-major
+ * chromedriver ladder there is no version-lock disease to heal), an isolated
+ * persistent profile, and the dual-loopback fixture server the kernel's
+ * ad-host guard will not skip.
+ *
+ * Driving walks Marionette (built into release Firefox) through geckodriver —
+ * Playwright's firefox driver is not a candidate here: its protocol (juggler)
+ * exists only in the patched nightly builds, and this device's stock
+ * Firefox.app answers those launches by hanging through the PHI handshake.
  */
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import { installGMRealm } from "./gm-realm.mjs";
@@ -23,6 +26,57 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
 
 const SENTINEL_TIMEOUT_MS = 15000;
+
+/**
+ * Device Firefox discovery: env override first, then the standard install
+ * roots. Every candidate is probed with --version so a half-installed app
+ * never launches.
+ */
+const BROWSERS = [
+  process.env.PF_FIREFOX_PATH,
+  "/Applications/Firefox.app/Contents/MacOS/firefox",
+  join(homedir(), "Applications", "Firefox.app", "Contents", "MacOS", "firefox")
+].filter((p) => p && existsSync(p));
+
+function nativeBinaryVersion(binary) {
+  try {
+    return execFileSync(binary, ["--version"], { stdio: "pipe", timeout: 30000 }).toString().trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function scanDrivers() {
+  return [
+    process.env.GECKODRIVER_PATH,
+    "/opt/homebrew/bin/geckodriver",
+    "/usr/local/bin/geckodriver"
+  ].filter((p) => p && existsSync(p));
+}
+
+/**
+ * Fail-fast launch probe for the runner: the browser binary and the driver
+ * binary are read directly here so a missing piece surfaces with its exact
+ * name, not as one confusing "session not created" launch error later.
+ */
+export async function ensureFirefox() {
+  const browser = BROWSERS[0];
+  if (!browser) {
+    throw new Error("no Firefox browser found (set PF_FIREFOX_PATH or install /Applications/Firefox.app)");
+  }
+  const version = nativeBinaryVersion(browser);
+  if (!version) {
+    throw new Error(`firefox binary refused to report a version: ${browser}`);
+  }
+  console.log(`  firefox: ${version} (${browser})`);
+  let driver = scanDrivers()[0];
+  if (!driver) {
+    console.log("  no geckodriver on disk - Selenium Manager resolves one at launch");
+    return;
+  }
+  const driverVersion = nativeBinaryVersion(driver);
+  console.log(`  geckodriver: ${driverVersion ?? "unknown version"} (${driver})`);
+}
 
 function urlSlice(u) {
   try {
@@ -39,45 +93,32 @@ function sameDocument(requested, landed) {
   return urlSlice(requested) === urlSlice(landed);
 }
 
-/**
- * Fail-fast install probe: playwright can tell exactly what it is missing,
- * which is friendlier than one confusing "Executable doesn't exist" launch
- * error later. `npx playwright install firefox` stays the single healing
-  * action; nothing else is diffed against disk state.
- */
-export async function ensureFirefox() {
-  const { firefox } = await import("playwright");
-  let exe = null;
-  try { exe = firefox.executablePath(); } catch { exe = null; }
-  if (exe) {
-    try {
-      execFileSync(exe, ["--version"], { stdio: "pipe", timeout: 30000 });
-    } catch {
-      exe = null;
-    }
-  }
-  if (!exe) {
-    console.log("  firefox build missing - running `npx playwright install firefox`...");
-    try {
-      execFileSync("npx", ["playwright", "install", "firefox"], { stdio: "inherit", timeout: 420000 });
-    } catch (err) {
-      throw new Error(`playwright firefox install failed: ${err.message.slice(0, 160)}`);
-    }
-  }
-  return firefox;
+function classifyDriverFailure(err) {
+  const text = String(err?.message ?? err);
+  if (/session not created/i.test(text)) return "session refused by geckodriver";
+  if (/handshake|connection refused|ECONNREFUSED/i.test(text)) return "driver handshake failed";
+  if (/TIMEDOUT|timeout/i.test(text)) return "handshake timed out";
+  if (/not executable|cannot be opened|exec/i.test(text)) return "driver binary not runnable";
+  return "launch refused";
+}
+
+/** Selenium's selector utility, imported lazily once. */
+let byRef = null;
+async function byCss(selector) {
+  byRef ??= (await import("selenium-webdriver")).By;
+  return byRef.css(selector);
 }
 
 /**
  * Boot a headless, isolated-profile Firefox session with the userscript realm
  * injected. Reused across cases; destroyed once per tool run.
  *
-  * The page surface keeps the shape cases already know (`eval`, `navigate`,
-  * `raw` for the input layer, `waitFor`), so the case files stay
-  * driver-agnostic and portable across engine branches.
+ * The page surface keeps the shape cases already know (`eval`, `navigate`,
+ * `raw` for the input layer, `waitFor`), so the case files stay
+ * driver-agnostic and portable across engine branches.
  */
 export class BrowserSession {
-  #context;
-  #page;
+  #driver;
   #profileDir;
   #server;
   #crossServer;
@@ -88,101 +129,128 @@ export class BrowserSession {
   #gmHead = new Map();
 
   static async launch() {
-    const firefox = await ensureFirefox();
-    const tryExe = firefox.executablePath?.();
-    const exe = typeof tryExe === "string" ? tryExe : "";
-    const profileDir = mkdtempSync(join(tmpdir(), "check-firefox-"));
-    const context = await firefox.launchPersistentContext(profileDir, {
-      headless: true,
-      viewport: { width: 1440, height: 900 }
-    });
-    console.log(`  browser: playwright firefox${exe ? ` (${exe.slice(exe.lastIndexOf("/") + 1)})` : ""}`);
-    const page = context.pages()[0] ?? (await context.newPage());
-    await page.goto("about:blank");
+    const browserBinary = BROWSERS[0];
+    if (browserBinary === undefined) {
+      throw new Error("no Firefox browser found (set PF_FIREFOX_PATH or install /Applications/Firefox.app)");
+    }
+    console.log(`  browser: Firefox (${nativeBinaryVersion(browserBinary) ?? "unknown version"})`);
+
+    const { Builder } = await import("selenium-webdriver");
+    const fireMod = await import("selenium-webdriver/firefox.js");
+    const options = new fireMod.Options()
+      .setBinary(browserBinary)
+      .setAcceptInsecureCerts(true)
+      // The fixture's video must start on demand - the discovery probe and the
+      // gesture/media rows ride real playback, and Firefox's default autoplay
+      // policy would refuse it in a profile nothing is looking at.
+      .setPreference("media.autoplay.default", 0)
+      .addArguments("-headless")
+      // The media container rows drive a real narrow viewport, so the session
+      // opens at the fixed 1440x900 the panel family reads.
+      .windowSize({ width: 1440, height: 900 })
+      // No -profile argument: geckodriver mints its own throwaway profile,
+      // which fails to take user prefs (the Options class always sets them)
+      // and would collide into "Failed to set preferences" at handshake. The
+      // profile path rides back as the moz:profile capability for cleanup.
+      ;
+    const servicePath = scanDrivers()[0] ?? undefined;
+    const service = servicePath ? new fireMod.ServiceBuilder(servicePath) : new fireMod.ServiceBuilder();
+    let driver;
+    try {
+      driver = await new Builder()
+        .forBrowser("firefox")
+        .setFirefoxOptions(options)
+        .setFirefoxService(service)
+        .build();
+    } catch (err) {
+      throw new Error(`geckodriver launch failed: ${classifyDriverFailure(err)} (${String(err.message ?? err).split("\n")[0].slice(0, 140)})`);
+    }
+    const profileDir = String(await driver.getCapabilities().then((c) => c.get("moz:profile")) ?? "");
+    console.log(`  profile: ${profileDir ? profileDir.slice(profileDir.lastIndexOf("/") + 1) : "geckodriver-managed"}`);
+
+    // Wet-window size: the media container rows drive a real narrow viewport;
+    // windowSize() above opened at 1440x900, this validates it live.
+    const rect = await driver.manage().window().getRect().catch(() => null);
+    if (rect && (Math.abs(rect.width - 1440) > 2 || Math.abs(rect.height - 900) > 2)) {
+      console.log(`  browser window: ${rect.width}x${rect.height} (expected 1440x900)`);
+    }
+
     // Sentinel: the session must answer script probes before any case lands,
     // else a wedged launch would surface as baffling mid-gate navigation
-    // races. Poll - never assume one evaluate() proves responsiveness.
+    // races. Poll - never assume one executeScript() proves responsiveness.
+    // The check must be a `return`-ing script body (Selenium string quirk):
+    // an expression-only body returns undefined and the sentinel would
+    // never observe the flag the assignment just set.
+    await driver.get("about:blank");
+    await driver.executeScript("window.__checkReady = true");
     const deadline = Date.now() + SENTINEL_TIMEOUT_MS;
     let responsive = false;
     let lastPollError = null;
     while (Date.now() < deadline) {
-      try { responsive = await page.evaluate(() => window.__checkReady === true); } catch (err) { lastPollError = String(err.message ?? err).split("\n")[0].slice(0, 140); }
-      if (responsive) break;
-      await page.evaluate(() => { window.__checkReady = true; }).catch(() => {});
       await new Promise((r) => setTimeout(r, 250));
+      try { responsive = await driver.executeScript("return window.__checkReady === true"); } catch (err) { lastPollError = String(err.message ?? err).split("\n")[0].slice(0, 140); }
+      if (responsive) break;
+      await driver.executeScript("window.__checkReady = true");
     }
     if (!responsive) {
-      const state = await page.evaluate(() => ({ url: String(location.href), ready: document.readyState, sent: window.__checkReady ?? null })).catch((err) => ({ probeError: String(err.message ?? err).slice(0, 100) }));
-      await context.close().catch(() => {});
-      rmSync(profileDir, { recursive: true, force: true });
+      const state = await driver.executeScript(function main() {
+        return { url: String(location.href), ready: document.readyState, sent: window.__checkReady ?? null };
+      }).catch((err) => ({ probeError: String(err.message ?? err).slice(0, 100) }));
+      try { await driver.quit(); } catch {}
+      await new Promise((r) => setTimeout(r, 200));
+      if (profileDir) { rmSync(profileDir, { recursive: true, force: true }); }
       throw new Error(`browser never became responsive after launch (about:blank sentinel) - ${JSON.stringify(state)} lastPollError=${lastPollError}`);
     }
-    return new BrowserSession(context, page, profileDir);
+
+    // Startup-tab hygiene: session restore or a stale profile can answer
+    // with more than the driver's about:blank tab; commands would keep
+    // talking to whichever tab is current while the fixture boots land
+    // somewhere invisible. Everything but the tab the sentinel just
+    // validated is closed.
+    await new Promise((r) => setTimeout(r, 200));
+    const handles = await driver.getAllWindowHandles().catch(() => []);
+    if (handles.length > 1) {
+      const current = await driver.getWindowHandle();
+      for (const h of handles) {
+        if (h === current) continue;
+        await driver.switchTo().window(h).then(() => driver.close()).catch(() => {});
+      }
+      await driver.switchTo().window(current);
+      console.log(`  tab hygiene: closed ${handles.length - 1} startup tab(s)`);
+    }
+    return new BrowserSession(driver, profileDir);
   }
 
-  constructor(context, page, profileDir) {
-    this.#context = context;
-    this.#page = page;
+  constructor(driver, profileDir) {
+    this.#driver = driver;
     this.#profileDir = profileDir;
   }
 
-  /** The live page, for the cases' input-layer work (mouse/keyboard streams,
-   *  viewport emulation). TEST-ONLY surface. */
+  /** Raw Selenium WebDriver session for action-layer input (gestures). */
   get raw() {
-    return this.#page;
-  }
-
-  /**
-   * Driver-parity script evaluation. Cases pass closures whose captured
-   * scope never crossed a driver boundary (as with executeScript) and single
-   * plain-data arguments; the string body form (waitFor) carries a `return`
-   * statement and rides the arrow-wrap. Evaluated via the same wrapping the
-   * devtools channel uses, so page CSP never clips probes.
-   */
-  #run(fn, args, target = this.#page) {
-    if (typeof fn === "string") {
-      return target.evaluate(`(() => { ${fn.trim()} })()`);
-    }
-    if (args.length === 0) {
-      return target.evaluate(fn);
-    }
-    if (args.length === 1) {
-      return target.evaluate(fn, args[0]);
-    }
-    // Multi-arg closures: serialize through source. (No case payload travels
-    // here today; the path stays because the session owns the parity.)
-    return target.evaluate(({ src, rest }) => (0, eval(`(${src})`))(...rest), { src: fn.toString(), rest: args });
+    return this.#driver;
   }
 
   eval(fn, ...args) {
-    return this.#run(fn, args);
+    return this.#driver.executeScript(fn, ...args);
   }
 
-  /** Async-completion closures: `main(done)` style, awaited like the in-page
-   *  promises they resolve. */
   evalAsync(fn, ...args) {
-    const target = this.#page;
-    if (typeof fn !== "string" && args.length <= 1) {
-      return target.evaluate(async (payload) => await new Promise((done) => (0, eval(`(${payload.src})`))(...payload.rest, done)), {
-        src: fn.toString(),
-        rest: args
-      });
-    }
-    return this.#run(fn, args);
+    return this.#driver.executeAsyncScript(fn, ...args);
   }
 
   async navigate(url) {
-    await this.#page.goto(url);
-    // Verify the landing: a goto() that resolves while the browser stays on
+    await this.#driver.get(url);
+    // Verify the landing: a get() that resolves while the browser stays on
     // the pre-navigation document would otherwise plant every later probe on
     // a page without its fixture.
-    let landed = this.#page.url();
-    if (!sameDocument(url, landed)) {
+    let landed = await this.#driver.getCurrentUrl().catch(() => null);
+    if (landed !== null && !sameDocument(url, landed)) {
       await new Promise((r) => setTimeout(r, 400));
-      await this.#page.goto(url);
-      landed = this.#page.url();
-      if (!sameDocument(url, landed)) {
-        throw new Error(`navigation did not land: requested ${urlSlice(url)} current ${urlSlice(landed)}`);
+      await this.#driver.get(url);
+      landed = await this.#driver.getCurrentUrl().catch(() => null);
+      if (landed !== null && !sameDocument(url, landed)) {
+        throw new Error(`navigation did not land: requested ${urlSlice(url)} current ${landed ? urlSlice(landed) : "unknown"}`);
       }
     }
   }
@@ -252,9 +320,9 @@ export class BrowserSession {
     this.#server = createServer(handler);
     await new Promise((resolve) => this.#server.listen(0, "127.0.0.1", resolve));
     this.#fixturePort = this.#server.address().port;
-    // Second loopback listener, same handler: the localhost and 127.0.0.1
-    // origins are distinct, so cross-origin frame scenarios ride the same
-    // fixture routes without a second server. Same port across address
+    // Second loopback listener, same handler: Firefox treats localhost and
+    // 127.0.0.1 as distinct origins, so cross-origin frame scenarios ride the
+    // same fixture routes without a second server. Same port across address
     // families is no conflict - v4 and v6 binds are independent namespaces -
     // and the v6 bind covers whichever address localhost resolves to first
     // (::1 or the v4 map the main listener owns).
@@ -292,7 +360,9 @@ export class BrowserSession {
 
   /** Pull the live page's GM backing into the session-level store. */
   async harvestGm() {
-    const backing = await this.eval(() => ({ ...(window.__pfBacking ?? {}) })).catch(() => null);
+    const backing = await this.eval(function main() {
+      return { ...(window.__pfBacking ?? {}) };
+    }).catch(() => null);
     if (backing) {
       this.#gmHead = new Map(Object.entries(backing));
     }
@@ -322,60 +392,58 @@ export class BrowserSession {
     const deadline = Date.now() + timeoutMs;
     let last = null;
     while (Date.now() < deadline) {
-      try { last = await this.#run(checkFn, []); if (last) return last; }
+      try { last = await this.#driver.executeScript(checkFn); if (last) return last; }
       catch (err) { last = err.message; }
       await new Promise((r) => setTimeout(r, intervalMs));
     }
     throw new Error(`timeout after ${timeoutMs}ms - last=${JSON.stringify(last)}`);
   }
 
-  /** Resolve the Frame object for an index path ([0, 1] = first iframe of the
-   *  top document -> its second iframe). Playwright's frame tree mirrors the
-   *  DOM: each nesting level of the frames lab is a static static-hosted
-   *  chain, so discovery order == iframe order at every depth. Cross-origin
-   *  out-of-process frames need no special casing at this level - the Frame
-   *  object is the auto-switching script target. */
-  async #frameFor(path) {
-    let frame = this.#page.mainFrame();
+  /** Enter a chain of <iframe> elements from the default content by index path
+   *  ([0, 1] = first iframe of the top document -> its second iframe).
+   *  switchTo re-aims the script target even across out-of-process frames. */
+  async #enterFrames(path) {
+    await this.#driver.switchTo().defaultContent();
     for (let depth = 0; depth < path.length; depth++) {
+      const frames = await this.#driver.findElements(await byCss("iframe"));
       const idx = path[depth];
-      const kids = frame.childFrames();
-      if (idx < 0 || idx >= kids.length) {
-        throw new Error(`frame path [${path.join(",")}] broke: depth ${depth} has ${kids.length} iframe(s), index ${idx} wanted`);
+      if (idx < 0 || idx >= frames.length) {
+        throw new Error(`frame path [${path.join(",")}] broke: depth ${depth} has ${frames.length} iframe(s), index ${idx} wanted`);
       }
-      frame = kids[idx];
+      await this.#driver.switchTo().frame(frames[idx]);
     }
-    return frame;
   }
 
-  /** Execute a script inside a frame chain (indices, top-first). Playwright
-   *  holds no implicit driver frame cursor, so nothing can be poisoned by an
-   *  excursion; a frame whose document navigates simply invalidates its
-   *  object, which the waitForFrame re-entrance below handles. */
+  /** Execute a script inside a frame chain (indices, top-first). Restores the
+   *  driver to the default content afterward, even on script failure, so one
+   *  frame excursion cannot poison later probes. */
   async evalInFrame(path, fn, ...args) {
-    const frame = await this.#frameFor(path);
-    if (typeof fn === "string") {
-      return frame.evaluate(`(() => { ${fn.trim()} })()`);
+    await this.#enterFrames(path);
+    try {
+      return await this.#driver.executeScript(fn, ...args);
+    } finally {
+      await this.#driver.switchTo().defaultContent();
     }
-    if (args.length <= 1) {
-      return frame.evaluate(fn, args[0]);
-    }
-    return frame.evaluate(({ src, rest }) => (0, eval(`(${src})`))(...rest), { src: fn.toString(), rest: args });
   }
 
-  /** waitFor() inside a frame chain. Each poll re-resolves the frame - a
-   *  frame whose document navigated replaced its object anyway, and the
-   *  re-resolution absorbs partial loads. */
+  /** waitFor() inside a frame chain. Each poll re-enters the frames - a frame
+   *  whose document navigated resets the script target anyway, and rebooting
+   *  the chain per poll also absorbs partial loads. */
   async waitForFrame(path, checkFn, timeoutMs = 5000, intervalMs = 40) {
     const deadline = Date.now() + timeoutMs;
     let last = null;
     while (Date.now() < deadline) {
       try {
-        last = await this.evalInFrame(path, checkFn);
-        if (last) return last;
+        await this.#enterFrames(path);
+        last = await this.#driver.executeScript(checkFn);
+        if (last) {
+          await this.#driver.switchTo().defaultContent();
+          return last;
+        }
       } catch (err) {
         last = err.message;
       }
+      await this.#driver.switchTo().defaultContent();
       await new Promise((r) => setTimeout(r, intervalMs));
     }
     throw new Error(`frame timeout after ${timeoutMs}ms (path [${path.join(",")}]) - last=${JSON.stringify(last)}`);
@@ -405,9 +473,9 @@ export class BrowserSession {
     try {
       const outDir = join(ROOT, "check", ".tmp");
       mkdirSync(outDir, { recursive: true });
-      const png = await this.#page.screenshot({ path: join(outDir, "last-failure.png") });
-      void png;
-      const state = await this.#page.evaluate(function main() {
+      const png = await this.#driver.takeScreenshot();
+      writeFileSync(join(outDir, "last-failure.png"), Buffer.from(png, "base64"));
+      const state = await this.#driver.executeScript(function main() {
         return {
           url: String(location.href),
           errors: window.__pfErrors ?? [],
@@ -427,7 +495,7 @@ export class BrowserSession {
   async destroy() {
     try { await this.#server?.close(); } catch {}
     try { this.#crossServer?.removeAllListeners(); await this.#crossServer?.close(); } catch {}
-    try { await this.#context?.close(); } catch {}
+    try { await this.#driver?.quit(); } catch {}
     if (this.#profileDir) { try { rmSync(this.#profileDir, { recursive: true, force: true }); } catch {} }
   }
 }

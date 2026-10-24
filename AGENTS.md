@@ -16,10 +16,10 @@ A Userscript-exclusive HTML5 video player enhancer. Two maintenance branches:
 - **`gecko`** (this branch, the default/viewing target): **Firefox**
   (desktop + Firefox for Android), **Firefox 158+** platform floor,
   **Tampermonkey 5.5+ (MV2)** manager; the check tool's browser gate drives
-  the **Playwright-pinned Firefox** build (157.0 as of the migration — the
-  pin's lag vs the FF release train is accepted; the platform's own feature
-  floor stays 158, and gate rows that need newer features probe
-  `CSS.supports` and skip with an honest note) instead of the Chromium
+  the **device Firefox install** (`/Applications/Firefox.app` or
+  `PF_FIREFOX_PATH`, probed with `--version` at launch) through
+  **geckodriver** (Marionette is built into release Firefox; a stock build
+  cannot answer Playwright's juggler handshake) instead of the Chromium
   chromedriver ladder
 - **`chromium`**: the Helium (macOS desktop) / Titanium (Android) fork
   browsers, Chromium **155+** platform floor, Tampermonkey **5.5+ (MV3)**
@@ -403,22 +403,27 @@ stop at the first failure:
 2. **flaws** — repo eslint + isolated module-import smoke per module.
 3. **bundle** — real esbuild build (version derivation, worker chunk) +
    artifact shape validation (header fields, IIFE shape, css companion).
-4. **browser** — real Firefox 158 + real bundle in a GM realm, driven
-   through **Playwright** (the gecko branch's driver model; the `chromium`
-   branch keeps Helium-Chromium-156 + chromedriver):
+4. **browser** — real device Firefox + real bundle in a GM realm, driven
+   through **Selenium WebDriver / geckodriver** (the gecko branch's driver
+   model; the `chromium` branch keeps Helium-Chromium-156 + chromedriver):
    boot, gesture contract, media semantics, resume, menus, GM env, frame
-   scenarios, edge robustness. ~28–36s.
+   scenarios, edge robustness. ~39s.
 
 ### Browser gate mechanics
-- Launch model (this branch): Playwright owns the browser lifecycle — the
-  version-pinned Firefox download, context/page creation, and CDP-free
-  driving replace the `chromium` branch's version-matched disk chromedriver
-  → Selenium Manager ladder (its `ensureChromeDriver()` probe, flood-spill
-  ledger, and `brew reinstall chromedriver` heal stay on that branch). The
-  real-session sentinel carries over
-  (`window.__checkReady === true`; there is no expression-only-body quirk on
-  this driver). `navigate()` verifies the
-  landing (origin+path, one retry) because a `goto()` that resolves before
+- Launch model (this branch): the device Firefox install
+  (`PF_FIREFOX_PATH` override, `/Applications/Firefox.app` then
+  `~/Applications` probed with `--version`) plus the on-disk geckodriver
+  (`GECKODRIVER_PATH`, `/opt/homebrew/bin` then `/usr/local/bin`; Selenium
+  Manager behind it if neither exists — geckodriver serves a wide Firefox
+  span, so there is no per-major version ladder to heal). `muze:profile`
+  comes back as a capability after build (geckodriver mints the throwaway
+  profile; a `-profile` argument alongside user prefs fails the launch with
+  "Failed to set preferences" — that is why the harness never passes one).
+  The real-session sentinel carries over
+  (`window.__checkReady === true`; the *return*-ing script-body quirk applies
+  on this driver — an expression-only body answers undefined and the sentinel
+  would never see the flag). `navigate()` verifies the
+  landing (origin+path, one retry) because a `get()` that resolves before
   navigation can eat a
   whole case.
 - **Ceremony per case:** `navigate(page?boot=<ts>)` (query-bust, same-URL
@@ -493,20 +498,29 @@ stop at the first failure:
    source, never to make a row green.
 3. Summarize results and **wait for an explicit "commit and push"** — never
    commit proactively; never amend a failed commit, create a new one.
-4. Development environment facts ride with the tool: Playwright owns the
-   version-pinned Firefox build (`npx playwright install firefox` refreshes
-   it); do **not** adopt manager-internal storage backends for userscript
-   storage; single-file bundle, so browser failed-module retry policies are
-   irrelevant.
+4. Development environment facts ride with the tool: the device Firefox
+   install is the browser under test (geckodriver drives it; `PF_FIREFOX_PATH`
+   re-points a nonstandard install), the Selenium-webdriver npm dep is the
+   only driver dependency; do **not** adopt manager-internal storage
+   backends for userscript storage; single-file bundle, so browser
+   failed-module retry policies are irrelevant. Two engine facts probed on
+   this stack: a `-profile` CLI argument plus user prefs fails the geckodriver
+   launch ("Failed to set preferences" — the harness lets geckodriver mint the
+   profile and reads its path back from `moz:profile`), and a
+   `scheduler.postTask` aborted MID-RUN poisons its scheduler line —
+   continuations born from that callback inherit the abort, so
+   `DomSettleWait`/`#flushPending` never self-abort their running twin
+   (the kernel-side fix landed with this recalibration).
 
 ## 8. Quick diagnostics
 
 - **Gate fails at syntax/flaws:** run the concatenation of the isolated
   import child output; if a module brings a consumer it doesn't use, that's
   the import-graph smoke catching it.
-- **Browser gate launch refused:** `npx playwright install firefox` re-seats
-  the version-pinned build — a stale or missing Firefox download is the
-  known mid-update shape; relaunch after the install finishes.
+- **Browser gate launch refused:** the launch probe names the missing piece —
+  a Firefox binary that refuses `--version` (check `PF_FIREFOX_PATH` first),
+  or no geckodriver on disk (any 0.36+ serves the release train; Selenium
+  Manager downloads one behind the two scan paths when neither exists).
 - **A case's shell never attaches:** the boot ceremony dumps
   `{readyState, shell, video, pf, lastInjectError}` before throwing; the
   `.tmp/last-failure.png/json` capture adds `frame[0]`,
