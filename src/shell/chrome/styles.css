@@ -87,6 +87,13 @@
   --pf-blur-sm: blur(16px) saturate(1.7);
   --pf-blur-lg: blur(24px) saturate(1.8);
 
+  /* R4 scroll-edge band ramp: the scroll distance over which the pinned
+     header's edge treatment ramps in (0% -> full). One token feeds the band's
+     tail inset, the mask stop, the timeline arm's animation range, and the
+     JS share writer's map, so a retune stays one edit - derived, not
+     spelled per surface. */
+  --pf-edge-ramp: 24px;
+
   --pf-space-xs: 4px;
   --pf-space-sm: 6px;
   --pf-space-md: 8px;
@@ -168,13 +175,16 @@
   initial-value: -50%;
 }
 
-/* R4 scroll-edge drive: the panel header's tint share, ramped by a
-   scroll-driven timeline (0% at the top of the scroll, 100% once content
+/* R4 scroll-edge drive: the panel header's tint share, ramped over the
+   first --pf-edge-ramp of scroll (0% at the top, 100% once content
    actually slides beneath the pinned bar). Registered so the custom
-   property is animatable at all. */
+   property is animatable at all, and inheriting because the JS share
+   writer arm (builds without scroll-driven timelines) sets it inline on
+   the header element - a non-inheriting registration would strand the
+   value there and the header's ::before would read only the initial. */
 @property --pf-scroll-edge {
   syntax: "<percentage>";
-  inherits: false;
+  inherits: true;
   initial-value: 0%;
 }
 
@@ -688,11 +698,20 @@
          a pixel of edge treatment is painted - the sheet's own tint is the
          one glass layer. While content actually scrolls underneath, a
          scroll-driven timeline (the panel is the nearest scroll container)
-         ramps --pf-scroll-edge from 0 to 100% over the first 24px of scroll,
-         and the edge band fades IN as one unit: a solid tint at the top that
-         washes out to transparent over the band's tail - legibility when it
-         is needed, invisibility when it is not. The hairline rides the band,
-         so rest is fully unmarked. */
+         ramps --pf-scroll-edge from 0 to 100% over the first --pf-edge-ramp
+         of scroll, and the edge band fades IN as one unit: a solid tint at
+         the top that washes out to transparent over the band's tail -
+         legibility when it is needed, invisibility when it is not. The
+         hairline rides the band, so rest is fully unmarked. The band's
+         source share is intentionally unguarded: two engines arm it - a
+         timeline-capable build reads the share from the scroll()
+         registration on the ::before; a timeline-less build (FF 158-160,
+         before the feature's 161 landing) gets the JS share writer in
+         panel.js setting the same property inline on the header - and
+         exactly one is ever live per build. The former's whole-band guard
+         used to disarm R4 entirely on timeline-less builds, leaving
+         content passing under the pinned bar completely unwashed - the
+         state R4 exists to prevent. */
       .pf-panel-header {
         position: sticky;
         top: 0;
@@ -704,47 +723,49 @@
         box-shadow: var(--pf-header-rim);
       }
 
-      /* R4 arms only where scroll-driven timelines exist. Without the
-         @supports, the band's animation still mounts on the default time-
-         based timeline, plays its keyframes once (0% -> 100%) and - with
-         `both` fill - parks --pf-scroll-edge at 100% forever: the resting
-         header would read permanently darker than the body, the exact state
-         R4 exists to forbid. Guarded off, a timeline-less build keeps the
-         bare sheet: no band, resting header identical at rest and on
-         scroll. */
-      @supports (animation-timeline: scroll(nearest)) {
-        .pf-panel-header::before {
-          content: "";
-          position: absolute;
-          /* The band is the header box plus one 24px tail below it - the
-             fade happens over the passing content, not inside the header. */
-          inset: 0 0 -24px 0;
-          z-index: -1;
-          pointer-events: none;
-          /* R4 scroll edge, darker-tinted edition (user direction): the band
-             paints its own ink share (--pf-edge-alpha, one notch darker than
-             the body composite - see GLASS_TINTS in config.js) solid at the
-             top, fading down the band's tail. It no longer reuses the
-             sheet's tint, whose same-color stack made the edge darkness an
-             accident of alpha arithmetic that jumped hardest for the
-             clearest level. */
-          background: linear-gradient(to bottom, color-mix(in srgb, var(--pf-bg) var(--pf-edge-alpha), transparent), transparent);
-          /* Blur rides the same band: content passing beneath the pinned bar
-             washes through the mask - fully blurred across the header region,
-             gone at the tail - so the blurred strip has no hard edge. The
-             mask bounds backdrop-filter in Chromium along with the paint, so
-             both arms of the band share one fade geometry. */
-          backdrop-filter: var(--pf-blur-sm);
-          mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 24px), transparent);
-          border-bottom: 1px solid var(--pf-border-soft);
-          /* The scroll timeline still owns engagement: it writes
-             --pf-scroll-edge (0% at rest, 100% after 24px), and the whole
-             band fades by that share. One layer, one operand, no second
-             timeline. */
-          opacity: calc(var(--pf-scroll-edge) / 1%);
+      /* The band's paint lives unguarded (the header comment), so a build
+         without scroll-driven timelines still gets the edge band - only its
+         engagement moves to the share writer at boot. The registration is
+         inheriting, so the header-level inline value the writer sets
+         reaches the pseudo-element. */
+      .pf-panel-header::before {
+        content: "";
+        position: absolute;
+        /* The band is the header box plus the ramp tail below it - the
+           fade happens over the passing content, not inside the header. */
+        inset: 0 0 calc(-1 * var(--pf-edge-ramp)) 0;
+        z-index: -1;
+        pointer-events: none;
+        /* R4 scroll edge, darker-tinted edition (user direction): the band
+           paints its own ink share (--pf-edge-alpha, one notch darker than
+           the body composite - see GLASS_TINTS in config.js) solid at the
+           top, fading down the band's tail. It no longer reuses the
+           sheet's tint, whose same-color stack made the edge darkness an
+           accident of alpha arithmetic that jumped hardest for the
+           clearest level. */
+        background: linear-gradient(to bottom, color-mix(in srgb, var(--pf-bg) var(--pf-edge-alpha), transparent), transparent);
+        /* Blur rides the same band: content passing beneath the pinned bar
+           washes through the mask - fully blurred across the header region,
+           gone at the tail - so the blurred strip has no hard edge. The
+           mask bounds backdrop-filter in Chromium along with the paint, so
+           both arms of the band share one fade geometry. */
+        backdrop-filter: var(--pf-blur-sm);
+        mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - var(--pf-edge-ramp)), transparent);
+        border-bottom: 1px solid var(--pf-border-soft);
+        /* The share owns engagement: 0% at rest, 100% after the ramp. One
+           layer, one operand. */
+        opacity: calc(var(--pf-scroll-edge) / 1%);
+
+        /* The share's timeline source, guarded so the absence that arms the
+           JS writer can never mount this animation: on a timeline-less
+           build the keyframes would run once on the default time-based
+           timeline and - with `both` fill - park --pf-scroll-edge at 100%
+           forever: the resting header would read permanently darker than
+           the body, the exact state R4 exists to forbid. */
+        @supports (animation-timeline: scroll(nearest)) {
           animation: pf-scroll-edge linear both;
           animation-timeline: scroll(nearest);
-          animation-range: 0px 24px;
+          animation-range: 0px var(--pf-edge-ramp);
         }
       }
 

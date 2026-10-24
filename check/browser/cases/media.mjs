@@ -58,12 +58,12 @@ export async function run({ session, baseUrl, boot }) {
   // at the top of the scroll the pinned header must be fully transparent (the
   // sheet's own tint is the one glass layer - a second painted layer used to
   // stack over it and read as a darker band), and once content actually
-  // scrolls beneath the bar the scroll-driven ramp must have engaged
-  // (--pf-scroll-edge off zero, header background no longer transparent).
-  // The band arms behind `@supports (animation-timeline: scroll(nearest))`,
-  // so the platform's arming state rides along: on a timeline-less build
-  // the guarantees are the at-rest defaults (never a parked band) and the
-  // engage rows skip.
+  // scrolls beneath the bar the edge ramp must have engaged (--pf-scroll-edge
+  // off zero, band paint visible). The band's paint is unguarded; its share
+  // source is the scroll() registration on timeline-capable builds and the
+  // JS writer (panel.js ScrollEdgeShare) on timeline-less ones, so the
+  // engage assertions hold on both - this Firefox build proves the writer
+  // arm, a timeline build proves the registration arm, one live per build.
   const edge = await session.eval(function main() {
     const host = document.querySelector(".pf-shell");
     const panel = host?.shadowRoot?.querySelector(".pf-panel");
@@ -116,19 +116,16 @@ export async function run({ session, baseUrl, boot }) {
   });
   rows.push({
     name: "R4: pinned header edge band is unmarked at rest",
-    status: !!edge && edge.atRest.top === 0 && edge.atRest.edge === 0
-      && (!edge.supported || edge.atRest.alpha === 0 || edge.atRest.grad.grad === false) ? "pass" : "fail",
+    status: !!edge && edge.atRest.top === 0 && edge.atRest.edge === 0 && edge.atRest.alpha === 0 ? "pass" : "fail",
     note: !edge ? "panel/header missing" : JSON.stringify({ ...edge.atRest, supported: edge.supported }),
     ms: null
   });
   rows.push({
     name: "R4: scroll-driven solid-to-faded edge band engages over passing content",
     status: !!edge
-      && (!edge.supported
-        ? "skipped"
-        : edge.scrolled.top > 0 && edge.scrolled.edge > 0 && edge.scrolled.alpha > 0
-          && edge.band.grad && edge.band.blur && edge.band.mask && edge.band.raw.includes("0.33") ? "pass" : "fail"),
-    note: !edge ? "panel/header missing" : JSON.stringify(edge.supported ? { scrolled: edge.scrolled, band: edge.band } : { scrolled: edge.scrolled, skip: "no scroll-driven timelines on this browser build" }),
+      && edge.scrolled.top > 0 && edge.scrolled.edge > 0 && edge.scrolled.alpha > 0
+      && edge.band.grad && edge.band.blur && edge.band.mask && edge.band.raw.includes("0.33") ? "pass" : "fail",
+    note: !edge ? "panel/header missing" : JSON.stringify({ scrolled: edge.scrolled, band: edge.band, shareSource: edge.supported ? "scroll-driven-timeline" : "js-writer" }),
     ms: null
   });
 

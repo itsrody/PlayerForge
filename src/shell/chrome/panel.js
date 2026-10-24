@@ -23,6 +23,43 @@ function decimalsOf(step) {
 }
 
 /**
+ * R4 scroll-edge share, JS arm. A build without scroll-driven timelines
+ * (Firefox floors 158-160; the feature lands in 161) still owes the pinned
+ * sheet its edge band - R4's mandates ride the same ::before paint either
+ * way - but the CSS timeline source can't run there, so this writer drives
+ * the share instead: the scroller's first `--pf-edge-ramp` of scroll maps
+ * to the same 0%..100% the timeline registration produces, written inline
+ * on the header. The band's registration is inheriting, so the value
+ * reaches the header's ::before. The whole band rests at share 0, so a
+ * write only happens on actual change; the listener is passive and dies
+ * with the panel scope's signal. It is built only where the timeline arm
+ * is absent (checked in #buildDom via the same @supports query the sheet
+ * arms behind), so a build always carries exactly one share source.
+ */
+class ScrollEdgeShare {
+  #scroller;
+  #surface;
+  #ramp;
+  #share = -1;
+
+  constructor(scroller, surface, signal) {
+    this.#scroller = scroller;
+    this.#surface = surface;
+    this.#ramp = Number.parseFloat(getComputedStyle(surface).getPropertyValue("--pf-edge-ramp")) || 24;
+    scroller.addEventListener("scroll", () => this.#drive(), { signal, passive: true });
+  }
+
+  #drive() {
+    const share = Math.min(100, Math.round((this.#scroller.scrollTop / this.#ramp) * 100));
+    if (share === this.#share) {
+      return;
+    }
+    this.#share = share;
+    this.#surface.style.setProperty("--pf-scroll-edge", `${share}%`);
+  }
+}
+
+/**
  * Numeric spinbutton widget used by panel fields: text input with
  * hold-to-repeat chevron buttons and keyboard support. Programmatic
  * setValue() cascades through onChange like any user edit. The committed
@@ -887,6 +924,16 @@ export class SettingsPanel {
     this.#hudLayer.appendChild(this.#slot);
     this.#slot.appendChild(safeBox);
     safeBox.appendChild(root);
+    // R4 share writer arms only where the scroll-timeline arm is absent, the
+    // same engine question the sheet's @supports guard answers at paint
+    // time: a timeline-capable build reads the share from the scroll()
+    // registration and a timeline-less build reads it from the writer - one
+    // share source per build, never two. The instance is retained through
+    // its scroll listener and dies with the panel scope's signal; no field.
+    if (!CSS.supports("animation-timeline", "scroll(nearest)")) {
+      new ScrollEdgeShare(root, header, this.#scope.signal);
+    }
+
     this.#root = root;
     this.#body = body;
     this.#closeButton = closeButton;

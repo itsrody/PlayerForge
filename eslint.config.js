@@ -19,6 +19,7 @@ export default [
         // Browser globals not in default env
         scheduler: "readonly",
         screen: "readonly",
+        CSS: "readonly",
         requestAnimationFrame: "readonly",
         IntersectionObserver: "readonly",
         MutationObserver: "readonly",

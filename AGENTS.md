@@ -204,7 +204,9 @@ iframes, same-origin and cross-origin:
   `SubtitleSyncState` grain singleton) + lazy `SubtitlesSection` (panel UI).
 - **chrome/** — `config.js` (state: `SETTINGS_SCHEMA`, `getSetting`,
   `onSettingsChanged`, `SETTING_KEYS`, cross-tab live-reload cache),
-  `panel.js` (the `Panel` builder + settings/history section renderers),
+  `panel.js` (the `Panel` builder + settings/history section renderers,
+  plus the R4 `ScrollEdgeShare` — the timeline-less arm of the scroll-edge
+  band, §6),
   `ui.js` (`el`/`button` construction, the SVG icon factory, `flashElement`
   WAAPI), `inject.js` (`ShellStyle` sheet lifecycle: adopt-once, monotonic
   `@resource` upgrade; viewport-fit-cover; the container pocket — the one
@@ -364,16 +366,24 @@ only surface, scales/tokens `@property`-typed, gradients banned in the HUD:
   unmeasured), and one tick in R1 applies.
 - **R4 Every scrollable glass surface needs a scroll edge** — content
   scrolling beneath a pinned control is obscured; not a blanket scrim.
-  Realized scroll-driven behind
-  `@supports (animation-timeline: scroll(nearest))`: without that guard the
-  band's animation mounts on the default time-based timeline in a
-  timeline-less build and, with `both` fill, parks the share at 100%
-  forever — a permanently darker resting header, the exact state R4
-  forbids. Where timelines exist the share (`--pf-scroll-edge`) registers
-  with the scroll and the panel header is fully transparent at the top,
-  ramping its darker edge-ink band in only over passing
-  content — a solid-to-faded gradient of the sheet's ink at a per-preset
-  edge alpha (`--pf-edge-alpha`; GLASS_TINTS edge shares make the band over
+  Realized as two share sources, one band: the band's paint (edge-ink
+  gradient, masked blur, hairline) is unguarded, and only its engagement
+  share (`--pf-scroll-edge`, registered inheriting) is armed per build —
+  (a) on timeline-capable builds the share comes from the
+  `@supports (animation-timeline: scroll(nearest))`-guarded
+  scroll() registration (a timeline-less build must never mount that
+  animation: on the default time-based timeline it plays once and, with
+  `both` fill, parks the share at 100% forever — a permanently darker
+  resting header, the exact state R4 forbids), (b) on timeline-less
+  builds (Firefox 158–160; the feature lands in 161) the JS share writer
+  (`ScrollEdgeShare` in panel.js — `#edgeShare`-less, retained through
+  its passive scroll listener) writes the same property inline on the
+  header, its ramp read off the single `--pf-edge-ramp` token that also
+  feeds the band's tail inset, mask stop, and animation range. Exactly
+  one source is live per build; both land the header fully transparent at
+  the top, ramping its darker edge-ink band in only over passing content
+  — a solid-to-faded gradient of the sheet's ink at a per-preset edge
+  alpha (`--pf-edge-alpha`; GLASS_TINTS edge shares make the band over
   the body composite land exactly one notch, +14pt, darker than the body
   read) plus masked blur — so the resting header cannot go darker than the
   body until content actually passes under it.
@@ -465,7 +475,10 @@ stop at the first failure:
   `screen`/`screenX`/`screenY` deltas land as the four `--pf-fs-*` vars,
   a no-op flip writes nothing, and fs exit rests the band at 0px — and
   the inline container rows: a 400px stage at a 1440px window spans,
-  which the retired viewport `@media` family could never have fired),
+  which the retired viewport `@media` family could never have fired; the
+  R4 rows measure the band on computed styles and hold on both share
+  sources — this build proves the writer arm (share engages over a
+  140px-clamped scroll, rest unmarked), no skip row),
   `menus` (menu command → panel effect; the targeted
   reset row seeds a non-default color filter and proves the bare command
   restores it — no panel involved),
