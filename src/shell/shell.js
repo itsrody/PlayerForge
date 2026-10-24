@@ -87,6 +87,10 @@ export class Shell {
   /** Pooled reference-box result + validity flag (see the referenceBox getter). */
   #refBox = { width: 0, height: 0 };
   #refBoxValid = false;
+  /** Last screen-frame band the fullscreen hotpath wrote ("T R B L" px
+   *  signature); the guard makes fs flips and resizes paint-free when
+   *  nothing moved. */
+  #fsFrame = null;
   #onDestroy;
   /** DOM lifecycle manager: listeners, observers, elements, rollbacks. */
   #dom = new DOMManager();
@@ -560,14 +564,67 @@ export class Shell {
   }
 
   /**
+   * The fullscreen screen-frame hotpath: when a letterboxed fullscreen
+   * leaves system UI at the screen edges, derive the band from the
+   * window-vs-screen frame deltas and write the four --pf-fs-* custom
+   * properties in ONE guarded pass. Gecko exposes no cutout API and env()
+   * never resolves, so these deltas are the only honest safe-area surface
+   * this engine has; the same window-vs-screen mismatch (FS_BOX_GAP_PX)
+   * that referenceBox treats as "UA letterboxing" defines when there IS a
+   * band. Inline mode (and an edge-to-edge fs) the four rest at their
+   * registered 0px initials. Fires only on fs flips, orientation changes,
+   * and their resizes - never on the inline hot path - and skips the style
+   * write entirely when the band signature is unchanged.
+   */
+  #paintScreenFrame() {
+    const host = this.shellHost;
+    if (!host || this.#scope.disposed) {
+      return;
+    }
+    let top = 0;
+    let right = 0;
+    let bottom = 0;
+    let left = 0;
+    if (fs) {
+      const widthMismatch = Math.abs(window.innerWidth - screen.width) >= FS_BOX_GAP_PX;
+      const heightMismatch = Math.abs(window.innerHeight - screen.height) >= FS_BOX_GAP_PX;
+      if (widthMismatch || heightMismatch) {
+        // The UA letterboxes the fullscreen element to the safe rect: the
+        // frame deltas ARE the system-UI band. screenX/Y clamp at 0 (some
+        // window managers report negative origins for fs windows) and the
+        // far-side deltas clamp at 0 when the window exceeds its screen's
+        // logical box (mixed-DPR rounding).
+        const screenX = Math.max(window.screenX, 0);
+        const screenY = Math.max(window.screenY, 0);
+        left = screenX;
+        top = screenY;
+        right = Math.max(screen.width - screenX - window.innerWidth, 0);
+        bottom = Math.max(screen.height - screenY - window.innerHeight, 0);
+      }
+    }
+    const frame = `${top} ${right} ${bottom} ${left}`;
+    if (frame === this.#fsFrame) {
+      return;
+    }
+    this.#fsFrame = frame;
+    const style = host.style;
+    style.setProperty("--pf-fs-top", `${top}px`);
+    style.setProperty("--pf-fs-right", `${right}px`);
+    style.setProperty("--pf-fs-bottom", `${bottom}px`);
+    style.setProperty("--pf-fs-left", `${left}px`);
+  }
+
+  /**
    * Keep the pooled referenceBox honest: invalidate it on fullscreen flips
    * (fs -> screen.* dims), window resizes, and container resizes. The getter
    * stays allocation + layout-read free in the scrub/pinch hot path; only a
-   * change event forces the next read through the layout query.
+   * change event forces the next read through the layout query. The same
+   * changes drive the screen-frame hotpath, folded into one handler.
    */
   #watchReferenceBoxSize() {
     const invalidate = () => {
       this.#refBoxValid = false;
+      this.#paintScreenFrame();
     };
     // Fullscreen flips re-read screen.* dims; the container RO covers every
     // inline-mode layout change (zoom, URL bar, panel) - the only backend,

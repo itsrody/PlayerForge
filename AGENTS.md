@@ -147,7 +147,12 @@ iframes, same-origin and cross-origin:
 ### shell/ — the feature layer
 - **shell.js** — composes the boot step list (realm → settle → DOM layers →
   HUD wiring → media session → sections → markers), stamps managed markers,
-  owns destroy and re-anchor paths.
+  owns destroy and re-anchor paths, and owns the fullscreen screen-frame
+  hotpath: on fs flips it derives the four `--pf-fs-*` band insets from the
+  window-vs-screen frame deltas (the only honest safe-area surface on
+  Gecko — env() never resolves there) and writes them in one guarded pass;
+  inline mode they rest at 0px initials. The same letterbox mismatch that
+  `referenceBox` treats as UA letterboxing defines when a band exists.
 - **media.js** — `MediaControls` (play/pause/seek/scrub-latch/volume/rate/
   boost/PiP/stop), `MediaSessionOwner` claim/lifecycle, `WakeLockSession`
   (screen wake-lock companion: acquire on play/visibility/boot, release on
@@ -202,8 +207,12 @@ iframes, same-origin and cross-origin:
   `panel.js` (the `Panel` builder + settings/history section renderers),
   `ui.js` (`el`/`button` construction, the SVG icon factory, `flashElement`
   WAAPI), `inject.js` (`ShellStyle` sheet lifecycle: adopt-once, monotonic
-  `@resource` upgrade; viewport-fit-cover), `toast.js` (`ToastManager`,
-  pooled custom element), **styles.css** (the HUD — §6).
+  `@resource` upgrade; viewport-fit-cover; the container pocket — the one
+  live `<style>` where container conditions evaluate: stage band writer,
+  stage-true density, the max-width span/bottom-sheet family and the
+  landscape-phone sheet, all keyed to the stage's own box or the hud's one
+  `--pf-is-coarse` truth instead of the window), `toast.js`
+  (`ToastManager`, pooled custom element), **styles.css** (the HUD — §6).
 
 ## 4. The OOP development path (A→Z chronicle)
 
@@ -447,7 +456,12 @@ stop at the first failure:
   adoption surviving a seeked-flush save, xhr shape + `ontimeout` on a
   held route, pfStyle resource warmth, menu-handle census, harvest-seeded
   reboot), `media` (stream, gesture events, kernel re-anchoring onto a
-  replacement video), `menus` (menu command → panel effect; the targeted
+  replacement video, the fs screen-frame hotpath rows — stubbed
+  `screen`/`screenX`/`screenY` deltas land as the four `--pf-fs-*` vars,
+  a no-op flip writes nothing, and fs exit rests the band at 0px — and
+  the inline container rows: a 400px stage at a 1440px window spans,
+  which the retired viewport `@media` family could never have fired),
+  `menus` (menu command → panel effect; the targeted
   reset row seeds a non-default color filter and proves the bare command
   restores it — no panel involved),
   `persist` (storage seeding, resume restore across reboot, the sync-grain
@@ -458,6 +472,19 @@ stop at the first failure:
   become fails, `console.error` becomes informational rows, a GM-usage
   census row; failing cases get a screenshot + page-state dump into
   `check/.tmp/`.
+- **Measured engine facts (probed, do not re-derive):** `@property`
+  registration happens only in the document realm — a shadow-only adopted
+  sheet leaves style() queries matching authored tokens, so a distilled
+  repro must adopt the sheet on the document too; `container-type: size`
+  parses and drives height/orientation container conditions, but pairing
+  the slot with an explicit `contain: layout style size` line breaks the
+  height sensor while width keeps evaluating (left implied by
+  `container-type` is the one that works); `getComputedStyle().width`
+  reports the content-box used value under `border-box` sizing (1px panel
+  borders subtract 2) — layout assertions read `getBoundingClientRect`
+  or account for borders; `--pf-is-coarse` is hud-set (`@media (pointer:
+  coarse)` on `:scope`, registered `inherits: true`) and check rows
+  inject the fake on `.pf-hud-layer`, not the slot.
 
 ### The working cycle (this is the workflow law)
 1. Implement: all gates run; **≥2–3 consecutive all-green runs** before any

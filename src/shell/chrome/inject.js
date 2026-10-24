@@ -77,20 +77,22 @@ class ShellStyle {
 
 const style = new ShellStyle();
 
-/* The container pockets ride a real <style> element, not the adopted
-   constructable sheet: in this Chromium build, @container SIZE rules inside
-   an adoptedStyleSheets sheet never evaluate their conditions (a same-rule
+/* The container pocket rides a real <style> element, not the adopted
+   constructable sheet: in this build, @container SIZE rules inside an
+   adoptedStyleSheets sheet never evaluate their conditions (a same-rule
    <style> twin evaluates and tracks size live - established by the check
    browser gate probes), nor do @container queries nested inside a size
-   @container. Both pockets style selectors that only exist in this shadow
+   @container. It styles selectors that only exist in this shadow
    (.pf-panel-slot, .pf-panel-*) so the document-realm adoption is inert:
    - the stage band writer is --pf-compact-auto's only writer;
-   - the pocket also owns the panel's whole stage-true tail - the density
-     block (panel under 330px, its landscape token adjustment) and the
-     compact reader - moved here as one ordered unit. Cascade rank above
+   - the pocket owns the panel's whole stage-true tail - density, the coarse
+     density family, the narrow-stage span/bottom-sheet, the landscape-phone
+     sheet and the compact reader - as ONE ordered unit. Cascade rank above
      the sheet is the price; within the pocket, source order restates the
-     sheet's old tie order exactly (density, landscape adjustment, compact
-     LAST), so every value pair resolves as it did in the sheet. */
+     sheet's old @media tie order exactly (density, coarse density, span,
+     bottom sheet, landscape, compact LAST), so every value pair resolves
+     as it did in the sheet. All of it is stage-true by construction: the
+     containers resolve against the player region, never the window. */
 const CONTAINER_POCKET_CSS = `
   @container pf-stage (max-width: 480px) {
     /* Descendant has(): the panel rides the safe-box wrapper inside the
@@ -104,9 +106,7 @@ const CONTAINER_POCKET_CSS = `
      formula). A nested @container inside a size @container does not resolve
      in this build (gate probe), so no style() gate re-arms here - instead
      the whole pocket resolves ties by source order, mirroring the sheet
-     order it replaced: density first, its landscape token adjustment, then
-     the compact reader LAST (compact outranks density on shared tokens,
-     exactly as it did in the sheet). */
+     order it replaced. */
   @container pf-panel (max-width: 330px) {
     .pf-panel-header { padding: var(--pf-space-sm); gap: var(--pf-space-sm); }
     .pf-panel-body { padding: var(--pf-space-sm); }
@@ -115,11 +115,69 @@ const CONTAINER_POCKET_CSS = `
     .pf-history-title { --pf-history-title-size: var(--pf-font-xs); }
     .pf-history-meta { --pf-history-meta-size: var(--pf-font-2xs); }
     .pf-history-list { --pf-history-list-height: 152px; }
-    /* The sheet's landscape block kept the list at 144px at this size; the
-       pocket owns the tie now, so the value rides along. */
-    @media (orientation: landscape) and (pointer: coarse) and (max-height: 480px) {
-      .pf-history-list { --pf-history-list-height: 144px; }
+    /* The landscape block below keeps the list at 144px on short landscape
+       stages; that later pocket block owns the tie, as the sheet's did. */
+  }
+  /* Narrow stages (portrait phones): a fixed 344px panel would swallow the
+     whole player - span edge-to-edge instead. Same values the sheet's
+     max-width: 520px media carried, now keyed to the stage's inline size. */
+  @container pf-compact-bus (max-width: 520px) {
+    .pf-panel {
+      width: auto;
+      max-height: calc(100% - 16px);
+      top: var(--pf-space-md);
+      right: var(--pf-space-md);
+      left: var(--pf-space-md);
+      bottom: auto;
+      margin: 0;
     }
+    /* Responsive options spacing for narrow stages. */
+    .pf-options-cell { gap: var(--pf-space-sm); }
+  }
+  /* Narrow portrait touch stages: anchor the panel as a bottom sheet - it
+     sits within thumb reach and never covers the whole video.
+     --pf-vv-height/--pf-vv-inset-bottom (written on the host by shell.js
+     from window.visualViewport) keep the sheet inside the on-screen
+     keyboard's shrunken viewport; both fall back to layout values. The
+     --pf-fs-bottom band is the inline-mode stand-in the safe-area-max
+     env() spelling used to serve; it rests at 0px on gecko. */
+  @container pf-compact-bus ((max-width: 520px) and (style(--pf-is-coarse: 1))) {
+    .pf-panel {
+      top: auto;
+      bottom: calc(var(--pf-space-md) + var(--pf-vv-inset-bottom, 0px));
+      left: var(--pf-space-md);
+      right: var(--pf-space-md);
+      max-height: min(62vh, calc(var(--pf-vv-height, 100vh) - 2 * var(--pf-space-md)));
+      margin: 0;
+      padding-bottom: var(--pf-fs-bottom);
+      border-radius: 16px 16px 0 0;
+      border-left: none;
+      border-right: none;
+      border-bottom: none;
+    }
+    .pf-history-list { --pf-history-list-height: 220px; }
+  }
+  /* Landscape touch stages: short and wide, so the centered dialog would
+     swallow the height. Compact right-edge sheet instead - anchored to the
+     top, capped at 70vh so it never fills the short stage, narrow enough
+     to leave the video's center clear, with icon-only tabs. Height and
+     orientation are stage size conditions - they ride the hud's size-typed
+     pf-stage container - and coarse rides the style() half. */
+  @container pf-stage ((orientation: landscape) and (max-height: 480px) and (style(--pf-is-coarse: 1))) {
+    .pf-panel {
+      inset: 0;
+      margin: auto;
+      width: min(340px, 45vw);
+      max-height: 70vh;
+      border-radius: var(--pf-radius-lg);
+      --pf-icon-btn: 32px;
+      --pf-icon-glyph: 16px;
+    }
+    .pf-tab-label { display: none; }
+    .pf-panel-tab { padding: var(--pf-space-md) var(--pf-space-lg); }
+    .pf-history-title { --pf-history-title-size: var(--pf-font-xs); }
+    .pf-history-meta { --pf-history-meta-size: var(--pf-font-2xs); }
+    .pf-history-list { --pf-history-list-height: 144px; }
   }
   /* Compact reader - moved with the density block so the one live <style>
      keeps their tie order (compact last). Same style() engine the sheet
@@ -188,29 +246,37 @@ const CONTAINER_POCKET_CSS = `
       .pf-stepper {
         height: 28px;
       }
+    }
+  }
 
-      /* Compact mode on touch devices: keep thumb-sized targets. */
-      @media (pointer: coarse) {
-        .pf-panel-tab { padding: 7px 8px; }
-        .pf-btn { padding: 9px 10px; }
-        .pf-settings-toggle { padding: 7px 8px; }
-        .pf-stepper { height: 30px; }
-      }
+  /* Compact on touch: keep thumb-sized targets. The reader's coarse half is
+     its own sibling block (the tie: after plain compact, before compact
+     bottom-sheet), keyed to the device pointer var like the family above. */
+  @container pf-compact-bus ((style(--pf-compact: 1)) and (style(--pf-is-coarse: 1))) {
+    .pf-panel-tab { padding: 7px 8px; }
+    .pf-btn { padding: 9px 10px; }
+    .pf-settings-toggle { padding: 7px 8px; }
+    .pf-stepper { height: 30px; }
+  }
 
-      /* Compact mode bottom-sheet on portrait touch phones. */
-      @media (max-width: 520px) and (pointer: coarse) {
-        width: auto;
-        top: auto;
-        bottom: var(--pf-space-sm);
-        left: var(--pf-space-sm);
-        right: var(--pf-space-sm);
-        max-height: 56vh;
-        border-radius: 14px 14px 0 0;
-        border-left: none;
-        border-right: none;
-        border-bottom: none;
-        padding-bottom: env(safe-area-max-inset-bottom, 0px);
-      }
+  /* Compact bottom-sheet on narrow portrait touch stages. Fires only when
+     compact is ON (bus = 1), so an explicit-compact user gets the sheet
+     shape; the non-compact narrow+coarse block above governs the default
+     header. The --pf-fs-bottom band is the inline stand-in for the
+     safe-area-max env() spelling - rests at 0px on gecko. */
+  @container pf-compact-bus ((max-width: 520px) and (style(--pf-compact: 1)) and (style(--pf-is-coarse: 1))) {
+    .pf-panel {
+      width: auto;
+      top: auto;
+      bottom: var(--pf-space-sm);
+      left: var(--pf-space-sm);
+      right: var(--pf-space-sm);
+      max-height: 56vh;
+      border-radius: 14px 14px 0 0;
+      border-left: none;
+      border-right: none;
+      border-bottom: none;
+      padding-bottom: var(--pf-fs-bottom);
     }
   }
 `;

@@ -99,12 +99,11 @@
   --pf-z-hud: 2;
   --pf-z-toast: 3;
   --pf-z-panel: 4;
-  /* Safe-area insets are NOT tokenized on purpose: spelling env() through a
-     var()-mediated custom property does not substitute at computed-value time
-     here (the compact row measured the panel width going invalid, 380px ->
-     1278px, when width consumed --pf-inset-*). Every consumer spells env()
-     inline instead, matching the proven cue-stage (below) and
-     safe-area-max-inset-bottom (panel bottom) patterns. */
+  /* No env() safe-area token on this branch: Gecko never resolves
+     env(safe-area-inset-*) (no cutout API; browser chrome composes inside
+     the cutout), so the fullscreen screen-frame band (--pf-fs-*, written by
+     the hotpath in shell.js) IS the safe-area system - see the @property
+     block above and the .pf-safe/.pf-cue-layer/pf-toast consumers. */
 
   /* -- Reset + base -- */
   position: absolute;
@@ -201,8 +200,35 @@
 }
 @property --pf-is-coarse {
   syntax: "<number>";
-  inherits: false;
+  inherits: true;
   initial-value: 0;
+}
+/* Fullscreen screen-frame band: the fullscreen hotpath in shell.js derives
+   these from the window-vs-screen frame deltas (the system-UI band a
+   letterboxed fullscreen leaves at the edges) and writes them in ONE guarded
+   style pass per fs state change. Gecko has no cutout API and env() never
+   resolves - the browser composes itself inside the cutout, so these deltas
+   are the only honest safe-area surface this engine exposes. Registered
+   inherited so consumers deep in the shadow tree read them off the host. */
+@property --pf-fs-top {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+@property --pf-fs-right {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+@property --pf-fs-bottom {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+@property --pf-fs-left {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
 }
 
 @keyframes pf-scroll-edge {
@@ -226,16 +252,36 @@
       inset: 0;
       pointer-events: none;
       z-index: var(--pf-z-hud);
-      contain: layout style;
-      /* Stage size container: the hud is inset:0 of the host, so its inline
-         size IS the player region - the real responsive condition, not the
-         viewport (their relation flips tiny on embedded players). Declared
-         on this shadow element because container lookups cannot cross the
-         light boundary to the host (established by the check browser gate);
-         inset:0 keeps the geometry identical to the host box. Stage-true
-         rules query this under pf-stage; the compact band writer is the
-         consumer. */
-      container: pf-stage / inline-size;
+      /* Stage size container: the hud is inset:0 of the host, so its box
+         IS the player region - the real responsive condition, not the
+         viewport (their relation flips tiny on embedded players; the
+         max-width family moved to the container pocket, which is the one
+         place container conditions evaluate on this branch). Size-typed
+         (not just inline-size): the landscape-phone sheet needs height
+         size conditions; inline-size-only would zero the height sensor.
+         inset:0 maps the hud's box to the host geometry, unchanged by size
+         containment (container-type: size implies layout+style+size
+         containment already, so no explicit contain line here - an explicit
+         contain: size presence was probed to break height conditions in
+         this build's height sensor while width kept evaluating). Declared
+         on this
+         shadow element because container lookups cannot cross the light
+         boundary to the host (established by the check browser gate);
+         stage-true rules query this under pf-stage. */
+      container: pf-stage / size;
+
+      /* Device pointer form: set once, at the hud - the one truth every
+         consumer reads. The bus formula on the slot and the pocket's
+         style() conditions all resolve it through one @media line here; a
+         fake-coarse check row injects this var on the hud while the
+         genuine @media path ships for devices (pointer media cannot be
+         emulated in the headless session - established by the probes). */
+      --pf-is-coarse: 0;
+      @media (pointer: coarse) {
+        & {
+          --pf-is-coarse: 1;
+        }
+      }
 
       /* Re-enable pointer events on every HUD child - but keep the caption
          layer click-transparent via the more specific rule below. */
@@ -277,18 +323,10 @@
            pointer form, `explicit` comes from the ui.compact setting through
            the panel's data-compact attribute; all writers run in the style
            pipeline, so the merge is a multiplication + max over the
-           registered defaults - no JS re-arm on stage/pointer changes. The
-           two auto halves are separate variables on purpose: media-based
-           pointer emulation is unavailable in headless (established by the
-           check browser gate), so a gate row that must fake coarse injects
-           --pf-is-coarse while the genuine @media path ships for devices. */
+           registered defaults - no JS re-arm on stage/pointer changes.
+           --pf-is-coarse is inherited from the hud's one @media truth (above);
+           no authored value here, or it would override the inheritance. */
         --pf-compact: max(var(--pf-compact-auto, 0) * var(--pf-is-coarse, 0), var(--pf-compact-explicit, 0));
-        --pf-is-coarse: 0;
-        @media (pointer: coarse) {
-          & {
-            --pf-is-coarse: 1;
-          }
-        }
         /* The explicit path reads the panel's data-compact attribute: "on"
            forces the compressed shape at any stage (the setting's explicit
            true), "off" vetoes ONLY the auto path (the setting's explicit
@@ -300,18 +338,22 @@
           --pf-compact-explicit: 1;
         }
 
-        /* Safe-box: the wrapper that keeps the panel out of system UI in
-           edge-to-edge fullscreen. Bare four-value env() inset exactly like
-           the caption stage above - the proven substitution primitive
-           (env() inside calc()/min() or through var() tokens does not
-           substitute here; see the token block note atop the file). The
-           wrapper must not paint or catch events; the panel inside floats
-           within these bounds by auto margins. Desktop resolves all four
-           to 0: geometry identical. */
+        /* Safe-box: the wrapper that keeps the panel out of system UI in a
+           letterboxed fullscreen. The fullscreen hotpath in shell.js derives
+           the four band insets from the window-vs-screen frame deltas and
+           writes them in one guarded pass per fs state change; inline mode
+           they rest at their 0px initials, so desktop geometry is identical.
+           Gecko exposes no cutout API and its chrome composes inside the
+           cutout - these deltas are the only honest safe-area surface this
+           engine has (env(safe-area-inset-*) is permanently 0 on Firefox;
+           the env() machinery this branch previously spelled is retired and
+           `chromium` keeps its own arms).
+           The wrapper must not paint or catch events; the panel inside
+           floats within these bounds by auto margins. */
         > .pf-safe {
           position: absolute;
-          inset: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
-            env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+          inset: var(--pf-fs-top) var(--pf-fs-right) var(--pf-fs-bottom)
+            var(--pf-fs-left);
           pointer-events: none;
         }
       }
@@ -386,12 +428,12 @@
          by forge-track.js. */
 
       position: absolute;
-      /* Excludes notches and gesture bars: percentage-positioned cues
-         (.pf-cue top: 85%, line anchors) resolve against this padding box,
-         so captions never sit behind the Android 3-button/gesture bar or a
-         landscape camera cutout. env() falls back to 0 when unset. */
-      inset: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
-        env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+      /* Same screen-frame band as .pf-safe below: percentage-positioned cues
+         (.pf-cue top: 85%, line anchors) resolve against this padding box, so
+         captions never sit behind a letterboxed fullscreen's system-UI band.
+         Inline mode the band rests at 0px initials - geometry identical. */
+      inset: var(--pf-fs-top) var(--pf-fs-right) var(--pf-fs-bottom)
+        var(--pf-fs-left);
       overflow: hidden;
       pointer-events: none;
       z-index: var(--pf-z-hud);
@@ -431,12 +473,11 @@
       align-items: center;
       gap: var(--pf-space-sm);
       position: absolute;
-      /* The gesture-feedback pill rides below the cutout/status bar when the
-         frame draws edge-to-edge: top sets the margin edge, so a bare env()
-         margin-top (the proven primitive, no calc) adds the inset. 12px +
-         env when set, plain 12px on desktop. */
+      /* The gesture-feedback pill rides below a letterboxed fullscreen's
+         system-UI band the same way: 12px + the --pf-fs-top band (one var,
+         no calc needed). Plain 12px inline and on desktop. */
       top: 12px;
-      margin-top: env(safe-area-inset-top, 0px);
+      margin-top: var(--pf-fs-top);
       left: 50%;
       z-index: var(--pf-z-toast);
       /* Dedicated translate property (Chrome 104+) - keeps centering out of
@@ -1438,12 +1479,16 @@
          gated on --pf-compact: 0 so compact always outranks it without the
          block re-ranking against the sheet's cascade. */
 
-    /* - Mobile & touch - */
-    /* Touch devices (phones/tablets): enlarge hit targets toward
-       thumb-sized (~40px) tap areas. */
+    /* - Touch density (device pointer form) - - -
+       Touch devices (phones/tablets): enlarge hit targets toward ~44px
+       thumb-sized and thumb-reach paddings. Stays @media (pointer: coarse):
+       the pointer form is device truth (no viewport geometry), and staying
+       sheet-level keeps the ties the pocket's unlayered rank built - the
+       330px stage-true density block legitimately wins .pf-history-card
+       here, exactly as committed. The hud's --pf-is-coarse @media truth
+       (on :scope) feeds only the pocket's size-family style() halves. */
     @media (pointer: coarse) {
       .pf-panel-body { padding: 10px 12px 12px; }
-      /* ~44px thumb floor: the base rules size for dense desktop panels. */
       .pf-panel-close { padding: 12px 14px; font-size: 18px; }
       .pf-panel-tab { padding: 13px 12px; font-size: var(--pf-font-sm); }
       .pf-btn { padding: 11px 12px; font-size: var(--pf-font-lg); }
@@ -1461,71 +1506,7 @@
       .pf-history-list { --pf-history-list-height: 184px; }
     }
 
-    /* Narrow screens (portrait phones): a fixed 344px panel would swallow the
-       whole video - span edge-to-edge instead. */
-    @media (max-width: 520px) {
-      .pf-panel {
-        width: auto;
-        max-height: calc(100% - 16px);
-        top: var(--pf-space-md);
-        right: var(--pf-space-md);
-        left: var(--pf-space-md);
-        bottom: auto;
-        margin: 0;
-      }
-    }
-
-    /* Portrait phones (touch): anchor the panel as a bottom sheet - it sits
-       within thumb reach and never covers the whole video. safe-area-max-inset-
-       bottom (Chrome 135+) lifts the sheet above the Android gesture bar when
-       viewport-fit=cover is active; the env() falls back to 0 when unset.
-       --pf-vv-height/--pf-vv-inset-bottom (set on the host by shell.js from
-       window.visualViewport) keep the sheet inside the on-screen keyboard's
-       shrunken viewport; both fall back to layout-viewport values. */
-    @media (max-width: 520px) and (pointer: coarse) {
-      .pf-panel {
-        top: auto;
-        bottom: calc(var(--pf-space-md) + var(--pf-vv-inset-bottom, 0px));
-        left: var(--pf-space-md);
-        right: var(--pf-space-md);
-        max-height: min(62vh, calc(var(--pf-vv-height, 100vh) - 2 * var(--pf-space-md)));
-        margin: 0;
-        padding-bottom: env(safe-area-max-inset-bottom, 0px);
-        border-radius: 16px 16px 0 0;
-        border-left: none;
-        border-right: none;
-        border-bottom: none;
-      }
-      .pf-history-list { --pf-history-list-height: 220px; }
-    }
-
-    /* Landscape phones (touch): the viewport is short and wide, so the
-       centered dialog would swallow the height. Compact right-edge sheet
-       instead - anchored to the top, capped at 70vh so it never fills the
-       short viewport, narrow enough to leave the video's center clear, with
-       icon-only tabs. */
-    @media (orientation: landscape) and (pointer: coarse) and (max-height: 480px) {
-      .pf-panel {
-        inset: 0;
-        margin: auto;
-        width: min(340px, 45vw);
-        max-height: 70vh;
-        border-radius: var(--pf-radius-lg);
-      }
-      .pf-tab-label { display: none; }
-      .pf-panel-tab { padding: var(--pf-space-md) var(--pf-space-lg); }
-      .pf-history-title { --pf-history-title-size: var(--pf-font-xs); }
-      .pf-history-meta { --pf-history-meta-size: var(--pf-font-2xs); }
-      .pf-history-list { --pf-history-list-height: 144px; }
-      .pf-panel { --pf-icon-btn: 32px; --pf-icon-glyph: 16px; }
-    }
-
-    /* Responsive options spacing for narrow screens. */
-    @media (max-width: 520px) {
-      .pf-options-cell { gap: var(--pf-space-sm); }
-    }
-
-    /* Compact mode: fired by the compact bus style() query, but the body
+     /* Compact mode: fired by the compact bus style() query, but the body
        lives in the container pocket (inject.js) - the sheet's size-type
        queries never evaluate in this build, and the pocket is where the
        stage-true density block and the compact reader keep their mutual

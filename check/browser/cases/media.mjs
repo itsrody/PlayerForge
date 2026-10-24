@@ -420,7 +420,7 @@ export async function run({ session, baseUrl, boot }) {
       };
     });
     await session.eval(function coarse() {
-      document.querySelector(".pf-shell")?.shadowRoot?.querySelector(".pf-panel-slot")
+      document.querySelector(".pf-shell")?.shadowRoot?.querySelector(".pf-hud-layer")
         ?.style.setProperty("--pf-is-coarse", "1");
     });
     coarseAssumed = await session.eval(function main() {
@@ -428,9 +428,13 @@ export async function run({ session, baseUrl, boot }) {
       const hud = host?.shadowRoot?.querySelector(".pf-panel-slot");
       const panel = host?.shadowRoot?.querySelector(".pf-panel");
       if (!hud || !panel) return null;
+      const cs = getComputedStyle(panel);
       return {
         bus: getComputedStyle(hud).getPropertyValue("--pf-compact").trim(),
-        width: getComputedStyle(panel).width
+        width: cs.width,
+        left: cs.left,
+        right: cs.right,
+        corner: cs.borderTopLeftRadius
       };
     });
     await session.eval(function vetoIt() {
@@ -449,16 +453,15 @@ export async function run({ session, baseUrl, boot }) {
         corner: getComputedStyle(panel).borderTopLeftRadius
       };
     });
-    // Compact-vs-density: at a stage both engines could paint (280px), the
-    // compact reader must win the panel shape. Width discriminates: density
-    // never sizes the panel, so 264px = min(300px, 100% - 16px) is reachable
-    // only through compact; shared tokens (density fired but outranked) can
-    // not move it.
-    await session.eval(function dens() {
-      const host = document.querySelector(".pf-shell");
-      host?.parentElement?.style.setProperty("width", "280px");
-      const panel = host?.shadowRoot?.querySelector(".pf-panel");
-      if (panel) {
+  // Compact-vs-density: at a stage both engines could paint (280px), the
+  // compact family must win the panel shape. The bottom sheet's sm insets +
+  // 14px corner discriminate the sibling shape; density tokens (never
+  // sizing the panel) can not move any of them.
+  await session.eval(function dens() {
+    const host = document.querySelector(".pf-shell");
+    host?.parentElement?.style.setProperty("width", "280px");
+    const panel = host?.shadowRoot?.querySelector(".pf-panel");
+    if (panel) {
         panel.dataset.compact = "on";
       }
     });
@@ -467,17 +470,28 @@ export async function run({ session, baseUrl, boot }) {
       const slot = host?.shadowRoot?.querySelector(".pf-panel-slot");
       const panel = host?.shadowRoot?.querySelector(".pf-panel");
       if (!slot || !panel) return null;
+      const cs = getComputedStyle(panel);
       return {
         busy: getComputedStyle(slot).getPropertyValue("--pf-compact").trim(),
-        width: getComputedStyle(panel).width
+        width: cs.width,
+        left: cs.left,
+        right: cs.right,
+        corner: cs.borderTopLeftRadius
       };
+    });
+    rows.push({
+      name: "density + compact: pocket order keeps compact ahead",
+      status: !!densGate && densGate.busy === "1" && densGate.width === "268px" &&
+        densGate.left === "6px" && densGate.corner === "14px" ? "pass" : "fail",
+      note: densGate ? JSON.stringify(densGate) : "slot/panel missing",
+      ms: null
     });
   } finally {
     await session.raw.setViewportSize({ width: 1440, height: 900 });
     await session.eval(function restore() {
       const host = document.querySelector(".pf-shell");
       host?.parentElement?.style.removeProperty("width");
-      host?.shadowRoot?.querySelector(".pf-panel-slot")?.style.removeProperty("--pf-is-coarse");
+      host?.shadowRoot?.querySelector(".pf-hud-layer")?.style.removeProperty("--pf-is-coarse");
       const panel = host?.shadowRoot?.querySelector(".pf-panel");
       if (panel) {
         delete panel.dataset.compact;
@@ -491,8 +505,10 @@ export async function run({ session, baseUrl, boot }) {
     ms: null
   });
   rows.push({
-    name: "compact engine: assumed-coarse stage lights the full auto bus",
-    status: !!coarseAssumed && coarseAssumed.bus === "1" && coarseAssumed.width === "300px" ? "pass" : "fail",
+    name: "compact engine: assumed-coarse narrow stage engages the compact bottom-sheet",
+    status: !!coarseAssumed && coarseAssumed.bus === "1" && coarseAssumed.width === "388px" &&
+      coarseAssumed.left === "6px" && coarseAssumed.right === "6px" &&
+      coarseAssumed.corner === "14px" ? "pass" : "fail",
     note: coarseAssumed ? JSON.stringify(coarseAssumed) : "hud/panel missing",
     ms: null
   });
@@ -502,10 +518,153 @@ export async function run({ session, baseUrl, boot }) {
     note: veto ? JSON.stringify(veto) : "hud/panel missing",
     ms: null
   });
+
+  // Inline container semantics: with a WIDE window (1440px) and a NARROW
+  // stage (400px), the span block must fire from the container query - the
+  // old viewport @media family would never fire at a 1440px window, which
+  // is exactly the defect the container refactor retires. The panel must
+  // span the stage edge-to-edge (auto width + the md inline insets), with
+  // the coarse var still 0 (fine pointer): no bottom sheet shape.
+  let inlineSpan = null;
+  await session.eval(function narrowInline() {
+    document.querySelector(".pf-shell")?.parentElement?.style.setProperty("width", "400px");
+  });
+  inlineSpan = await session.eval(function main() {
+    const host = document.querySelector(".pf-shell");
+    const slot = host?.shadowRoot?.querySelector(".pf-panel-slot");
+    const safe = host?.shadowRoot?.querySelector(".pf-safe");
+    const panel = host?.shadowRoot?.querySelector(".pf-panel");
+    if (!host || !slot || !panel) return null;
+    const cs = getComputedStyle(panel);
+    const r = (el) => {
+      const b = el?.getBoundingClientRect();
+      return b ? `${Math.round(b.width)}x${Math.round(b.height)}` : "nil";
+    };
+    return {
+      window: window.innerWidth,
+      stage: Math.round(host.getBoundingClientRect().width),
+      slotBox: r(slot),
+      safeBox: r(safe),
+      panelLeft: cs.left,
+      panelRight: cs.right,
+      panelWidth: cs.width,
+      borderL: cs.borderLeftWidth,
+      borderR: cs.borderRightWidth,
+      coarse: getComputedStyle(slot).getPropertyValue("--pf-is-coarse").trim(),
+      corner: cs.borderTopLeftRadius
+    };
+  });
+  await session.eval(function restoreInline() {
+    document.querySelector(".pf-shell")?.parentElement?.style.removeProperty("width");
+  });
   rows.push({
-    name: "density + compact: pocket order keeps compact ahead",
-    status: !!densGate && densGate.busy === "1" && densGate.width === "264px" ? "pass" : "fail",
-    note: densGate ? JSON.stringify(densGate) : "slot/panel missing",
+    name: "inline container: narrow stage spans panel at a wide window (no coarse)",
+    status: !!inlineSpan && inlineSpan.stage === 400 && inlineSpan.window >= 1400 &&
+      inlineSpan.coarse === "0" && inlineSpan.panelWidth === "382px" &&
+      inlineSpan.panelLeft === "8px" && inlineSpan.corner !== "16px 16px 0 0"
+      ? "pass" : "fail",
+    note: inlineSpan ? JSON.stringify(inlineSpan) : "stage/panel missing",
+    ms: null
+  });
+
+  // Fullscreen screen-frame hotpath: a stubbed device frame SMALLER than
+  // the window plus the fullscreenElement override puts fs into the
+  // letterboxed shape; the shell must derive the four --pf-fs-* band vars
+  // from the window-vs-screen frame deltas and write them - and a second
+  // no-change fs flip must not write again (the guarded single pass, not
+  // assumed but spied).
+  const fsFrame = await session.eval(function main() {
+    const host = document.querySelector(".pf-shell");
+    if (!host) return null;
+    const decl = host.style;
+    const real = decl.setProperty;
+    host.__pfWrites = 0;
+    decl.setProperty = function (name, value) {
+      if (String(name).startsWith("--pf-fs-")) {
+        host.__pfWrites++;
+      }
+      return real.call(decl, name, value);
+    };
+    // A widescreen "device" whose frame sits 20px from the window's left
+    // edge and 60px from its top; right/bottom deltas fall past the screen
+    // far edge (window wider than the stubbed logical screen) and must
+    // clamp to 0.
+    Object.defineProperty(screen, "width", { configurable: true, get() { return 900; } });
+    Object.defineProperty(screen, "height", { configurable: true, get() { return 400; } });
+    Object.defineProperty(window, "screenX", { configurable: true, get() { return 20; } });
+    Object.defineProperty(window, "screenY", { configurable: true, get() { return 60; } });
+    Object.defineProperty(document, "fullscreenElement", {
+      configurable: true,
+      get() { return document.querySelector(".pf-shell"); }
+    });
+    document.dispatchEvent(new Event("fullscreenchange"));
+    return true;
+  });
+  await new Promise((r) => setTimeout(r, 250));
+  const fsFrameState = await session.eval(function main() {
+    const host = document.querySelector(".pf-shell");
+    if (!host) return null;
+    const cs = getComputedStyle(host);
+    return {
+      top: cs.getPropertyValue("--pf-fs-top").trim(),
+      right: cs.getPropertyValue("--pf-fs-right").trim(),
+      bottom: cs.getPropertyValue("--pf-fs-bottom").trim(),
+      left: cs.getPropertyValue("--pf-fs-left").trim(),
+      writes: host.__pfWrites
+    };
+  });
+  await session.eval(function noChange() {
+    document.dispatchEvent(new Event("fullscreenchange"));
+  });
+  await new Promise((r) => setTimeout(r, 120));
+  const fsGuard = await session.eval(function main() {
+    return document.querySelector(".pf-shell")?.__pfWrites;
+  });
+  rows.push({
+    name: "fs hotpath: letterboxed screen frame lands as the four band vars",
+    status: !!fsFrameState && fsFrameState.top === "60px" && fsFrameState.right === "0px" &&
+      fsFrameState.bottom === "0px" && fsFrameState.left === "20px" && fsFrameState.writes === 4
+      ? "pass" : "fail",
+    note: fsFrameState ? JSON.stringify(fsFrameState) : "shell missing",
+    ms: null
+  });
+  rows.push({
+    name: "fs hotpath: change-guard makes a no-op flip write-free",
+    status: fsGuard === 4 ? "pass" : "fail",
+    note: `writes=${fsGuard} (expect 4 from the single entry pass)`,
+    ms: null
+  });
+  // fs exit restores the real accessors and the band must fall back to the
+  // 0px initials in one guarded pass.
+  const fsExit = await session.eval(function main() {
+    const host = document.querySelector(".pf-shell");
+    delete document.fullscreenElement;
+    delete screen.width;
+    delete screen.height;
+    delete window.screenX;
+    delete window.screenY;
+    document.dispatchEvent(new Event("fullscreenchange"));
+    if (host) {
+      delete host.style.setProperty;
+    }
+    return true;
+  });
+  await new Promise((r) => setTimeout(r, 250));
+  const fsExitState = await session.eval(function main() {
+    const host = document.querySelector(".pf-shell");
+    if (!host) return null;
+    const cs = getComputedStyle(host);
+    return {
+      top: cs.getPropertyValue("--pf-fs-top").trim(),
+      bottom: cs.getPropertyValue("--pf-fs-bottom").trim(),
+      writes: host.__pfWrites
+    };
+  });
+  rows.push({
+    name: "fs hotpath: fs exit rests the band at 0px initials",
+    status: !!fsExit && !!fsExitState && fsExitState.top === "0px" && fsExitState.bottom === "0px" &&
+      fsExitState.writes === 8 ? "pass" : "fail",
+    note: fsExitState ? JSON.stringify(fsExitState) : "shell missing",
     ms: null
   });
 
