@@ -1557,7 +1557,12 @@ export class InputForge {
   }
 
   #handleWheelCapture(event) {
-    if (fs && event.ctrlKey && !event.momentum && allowsIntent("pinch")) {
+    // The repetition arm is the cooldown below, full stop: WheelEvent carries
+    // no momentum attribute on this platform (only the delta members), so a
+    // former `!event.momentum` tail filter was an always-true WebKit relic -
+    // Chromium's pinch momentum phase is not DOM-visible, and the cooldown is
+    // what keeps the tail's repeated ctrl+wheel events from re-firing.
+    if (fs && event.ctrlKey && allowsIntent("pinch")) {
       event.preventDefault();
       event.stopImmediatePropagation();
       if (performance.now() >= this.#trackpadPinchCooldownUntil) {

@@ -807,10 +807,13 @@ export class ViewershipTransform {
    * same shape as the panel stepper's scale. The trackpad pinch arm
    * (ctrl+wheel) is the forge's pinch recognizer - zoom here would fire both
    * recognizers per gesture. Over the panel, the wheel scrolls the panel.
+   * Repeat tail events need no filter: momentum phase is not DOM-visible on
+   * this platform (the collected delta members are the whole surface), and
+   * zoom steps are state-clamped by the zoom machine itself.
    */
   #wheelZoom(event) {
     const zoom = this.#zoom;
-    if (!zoom || !fs || event.ctrlKey || event.momentum || !event.deltaY) {
+    if (!zoom || !fs || event.ctrlKey || !event.deltaY) {
       return;
     }
     const path = event.composedPath?.() || [];
