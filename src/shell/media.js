@@ -252,6 +252,18 @@ export class WakeLockSession {
     if (typeof navigator.wakeLock?.request !== "function") {
       return;
     }
+    // The embed's Permissions Policy can ban screen-wake-lock outright
+    // (deny-all header, or a frame whose allowlist excludes it): every
+    // attempted request then paints a browser-side [Violation] console
+    // report before the handled NotAllowedError even lands, so procuring
+    // via featurePolicy.allowsFeature is the only path that honors the
+    // silent-no-op contract above. Probe is per-attempt (frame allowlists
+    // are mutable attributes), Chromium-native on the floor, and its
+    // absence (jsdom realms) degrades to the attempt - which jsdom denies
+    // at the navigator.wakeLock guard a line earlier.
+    if (document.featurePolicy?.allowsFeature?.("screen-wake-lock") === false) {
+      return;
+    }
     // A newer acquire supersedes an in-flight one: last signal wins.
     this.#request?.abort();
     const ac = new AbortController();
