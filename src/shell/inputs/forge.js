@@ -1187,12 +1187,21 @@ export class InputForge {
     // intentional-capture-release marker for a recycled pointer id.
     this.#clearAwaitClick();
     this.#releasedCapture.delete(event.pointerId);
-    if (
-      event.button !== 0 ||
-      this.#eventTarget && isInsideShell(this.#eventTarget, event.target) ||
-      this.#pointers.size === 0 && !this.#hitTestVideo(event) ||
-      this.#sdkTargetInteractive(event)
-    ) {
+    // One rejection verdict per press, short-circuiting in the same order the
+    // compound guard ran: the verdict string is the #pf-debug breadcrumb that
+    // tells a device run WHY the recognizer never saw the press.
+    let rejected = null;
+    if (event.button !== 0) {
+      rejected = "button";
+    } else if (this.#eventTarget && isInsideShell(this.#eventTarget, event.target)) {
+      rejected = "hud";
+    } else if (this.#pointers.size === 0 && !this.#hitTestVideo(event)) {
+      rejected = "rect";
+    } else if (this.#sdkTargetInteractive(event)) {
+      rejected = "sdk-target";
+    }
+    if (rejected) {
+      logger.log("forge", `press rejected: ${rejected} (${event.pointerType})`);
       return;
     }
     forgeRegistry.makeLast(this);
@@ -1218,6 +1227,17 @@ export class InputForge {
       if (event.pointerType !== "mouse") {
         event.preventDefault();
       }
+      // Natively anchor the pointer stream at ownership: a touch pointer is
+      // implicitly captured to THE TOUCHED NODE, often an SDK overlay whose
+      // tap-time re-render removes it - killing the implicit capture - and
+      // the pointercancel eats the whole stroke before any recognizer
+      // latches, the touch-device "no scrub, no swipe" signature. Explicit
+      // capture-at-press retargets the stream to the stable gesture zone for
+      // every session shape (hold, pinch, scrub, swipe) and both pointer
+      // types; the latch-time captures become same-element no-ops, and the
+      // pinch transition keeps its deliberate release-with-markers dance.
+      this.#pointerOp("setPointerCapture", event.pointerId);
+      logger.log("forge", `press owned: ${event.pointerType}, zone=${this.#gestureZone}`);
       if (allowsIntent("dbltap")) {
         this.#tap.cancel();
       }
@@ -1297,12 +1317,16 @@ export class InputForge {
           this.#scrub.latch(x, y, event.timeStamp);
           this.#gestureFsActive = true;
           this.#pointerOp("setPointerCapture", this.#primaryPointerId);
+          logger.log("forge", `scrub latch (dx=${dx}, dy=${dy})`);
+          // event.timeStamp shares the timebase the per-move velocity filter
+          // below already reads, so the whole move stream pays no clock read.
           // event.timeStamp shares the timebase the per-move velocity filter
           // below already reads, so the whole move stream pays no clock read.
         } else if (allowsIntent("swipe") && dy > SCROLL_START_PX && dy > dx * AXIS_DOMINANCE_RATIO) {
           this.#swipe.latch(event.clientY > this.#startY ? "down" : "up");
           this.#gestureFsActive = true;
           this.#pointerOp("setPointerCapture", this.#primaryPointerId);
+          logger.log("forge", `swipe latch (${this.#swipe.direction}, dy=${this.#swipe.direction === "down" ? "+" : "-"})`);
           this.#suppressNextActivations();
           event.stopImmediatePropagation();
           swipeStartDetail.zone = this.#gestureZone || "screen";
@@ -1389,6 +1413,9 @@ export class InputForge {
     if (this.#pointers.has(event.pointerId) && this.#pointerOwned) {
       event.stopImmediatePropagation();
     }
+    if (this.#pointers.has(event.pointerId)) {
+      logger.log("forge", `pointercancel reclaimed pointer ${event.pointerId} (${event.pointerType ?? "?"})`);
+    }
     this.#cancelTrackedPointer(event.pointerId);
   }
 
@@ -1403,6 +1430,7 @@ export class InputForge {
       return;
     }
     if (this.#pointers.has(event.pointerId)) {
+      logger.log("forge", `capture lost mid-session, reclaiming pointer ${event.pointerId}`);
       this.#cancelTrackedPointer(event.pointerId);
     }
   }
