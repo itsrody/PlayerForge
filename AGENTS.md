@@ -162,13 +162,22 @@ iframes, same-origin and cross-origin:
   in the Settings tab over the same shell's state).
   Pure state: the transform write belongs solely to `ViewershipTransform`.
 - **inputs/forge.js** — the pointer/keyboard gesture engine: the stream
-  router (press eligibility, the interactive-target exemption — SDK
-  controls keep their native press stream, pointer tracking, the session
+  router (press eligibility, the SDK-control exemption lattice — the
+  tag/role shape list plus the affordance-cursor clause (pointer/grab on a
+  small box outside the gesture-surface family), SDK controls keeping their
+  native press stream while everything still claimed costs SDK UIs only
+  real drags: claimed plain taps replay the full press tail
+  (pointerdown/touchstart/.../click, real Chromium tap order) at the
+  pressed element — the seed is owned-press-gated and anchored at the
+  pointerdown head, since capture-at-press retargets pointerup to the zone),
+  pointer tracking, the session
   latch feeding the shared `fs` gate, click/dblclick suppression) over per-story recognizer
   machines: `ScrubStroke` (pointer move-stream scrub with coalesced samples,
   the exp-smoothed velocity filter, and the bounded predicted-events wash),
   `SwipeStroke` (the translate-drag transform writes and their eased
-  restore), `TapReplay` (the dbltap window's click seed), `SpaceSession`
+  restore), `TapReplay` (the dbltap window's tap-tail seed + immediate
+  delivery for owned taps when the window is disarmed — mouse passes its
+  real click, touch carries one in the spine), `SpaceSession`
   (hold-to-speed + bare-tap toggle). Gesture detail carries `dx` and the
   mirrored `dy` the pan arm consumes; pinch and trackpad-pinch handshake
   stay engine-core; `HoldRepeater`-style timers ride the shared scheduler.

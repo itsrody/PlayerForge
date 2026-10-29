@@ -40,13 +40,31 @@ const PINCH_MIN_DISTANCE_PX = TUNING.gestures.pinchMinDistancePx;
  * is the press-stream version of the DOM hit-test law (no pf surface may
  * block): an up-front claim stopImmediatePropagation's pointerdown and, while
  * owned, the whole compat mouse/touch tail - click-driven SDK UIs survive that
- * (the owned plain tap passes its click natively), but controls driven by
- * pointerdown/mousedown/touchend never get their activator events. SDK rails
- * are the exact shape: buttons or role-bearing wrappers. Not listed: video
- * itself (the gesture surface), tabindex'd wrappers (too coarse - an SDK
- * div with a focus target is not a control), svg (same).
+ * (the owned plain tap replays its full press tail at the pressed element),
+ * but controls driven by pointer events only get their events back through
+ * the replay tail. SDK rails are the exact shape: buttons or role-bearing
+ * wrappers. Not listed: video itself (the gesture surface), tabindex'd
+ * wrappers (too coarse - an SDK div with a focus target is not a control),
+ * svg (same).
+ * Two native widenings past the shape list, both read per press (press is
+ * not a hot path and the rect read already forced layout):
+ *   1. The affordance cursor - role-less SDK chrome (menus, custom rails,
+ *      drag handles) declares its press affordance the one way the platform
+ *      lets it: `cursor: pointer|grab`. The head element honors it as an
+ *      interactive marker, but ONLY on a small box (here: <= half the
+ *      video's area) that is not the gesture-surface family (the video, or
+ *      an ancestor wrapping it): a click-to-pause wrapper styling
+ *      cursor:pointer over the whole player is the player surface, and
+ *      surrendering it wholesale would kill the gestures there.
+ *   2. The replay tail - whatever still falls under claim costs the SDK
+ *      nothing on a plain tap: the seeded replay re-delivers
+ *      pointerdown/touchstart/pointerup/touchend/mousedown/mouseup/click
+ *      in the real Chromium tap order at the pressed element, so SDK UIs
+ *      that never declared any affordance still receive their press for
+ *      taps. Only real drags (scrub, swipe, hold) stay ours alone.
  * Cost: one closest() climb per press attempt, only on flips of ownership -
- * press is not a hot path and no layout is read.
+ * press is not a hot path and no extra layout is read beyond the head rect
+ * the affordance clause needs (the video rect is already cached warm).
  */
 const SDK_CONTROLS_SELECTOR =
   "button, a, input, textarea, select, label, summary, [contenteditable]," +
@@ -452,18 +470,27 @@ class SwipeStroke {
 
 /**
  * Tap-replay machine: a first tap of a possible double tap is held back for
- * the dbltap window, expiring into a synthetic SDK click at the original
- * coordinates - so a single tap still reaches the SDK while a double tap
- * never leaks its first click. The window clock rides this machine so the
+ * the dbltap window, expiring into a synthetic tap tail at the PRESSED
+ * element - the head the pointerdown resolved (capture-at-press retargets
+ * the pointerup to the zone, so the seed cannot come from there), in the
+ * real Chromium tap order: mouse[] = pointerdown, mousedown, pointerup,
+ * mouseup, click; touch/pen[] = pointerdown, touchstart, pointerup,
+ * touchend, mousedown, mouseup, click (the compat mouse trio synthesized
+ * here exactly because the claim's preventDefault suppressed it natively).
+ * Every event carries the original coordinates and rides the marked-replay
+ * capture-pass, so the engine's own suppressors hand it straight through -
+ * a plain tap reaches the SDK shape-for-shape, while a double tap never
+ * leaks its first activation. The window clock rides this machine so the
  * first/second decision lives with the seed it cancels. Debouncing engages
- * only the paths the engine guards (pointerup under an armed dbltap intent),
- * so inline taps keep their native zero-latency click.
+ * only the paths the engine guards (pointerup under an armed dbltap
+ * intent), so inline taps keep their native zero-latency press.
  */
 class TapReplay {
   /** -Infinity so the very first tap can never match against boot time. */
   #lastTapTime = -Infinity;
   #timer = null;
   #target = null;
+  #pointerType = "mouse";
   #x = 0;
   #y = 0;
 
@@ -484,46 +511,119 @@ class TapReplay {
   /** One pointerup tap visited. Returns "second" when this tap closes a
    *  dbltap window (the pending seed dies, the engine dispatches dbltap,
    *  suppresses activations), "first" when it opens one (the seed armed). */
-  tap(now, target, x, y) {
+  tap(now, target, pointerType, x, y) {
     if (now - this.#lastTapTime < DOUBLE_TAP_WINDOW_MS) {
       this.#lastTapTime = -Infinity;
       this.cancel();
       return "second";
     }
     this.#lastTapTime = now;
-    this.#arm(target, x, y);
+    this.#arm(target, pointerType, x, y);
     return "first";
   }
 
-  #arm(target, x, y) {
+  /** Immediate tail delivery for owned taps whose dbltap window is
+   *  disarmed: the claim swallowed mousedown/mouseup natively (and on
+   *  touch/pen the whole press tail, preventDefault at the source), so the
+   *  replay fires without waiting a window. `withClick` splits delivery:
+   *  mouse taps pass their REAL click through the click-capture
+   *  pass-through, so the replay spine carries the click only for
+   *  touch/pen. */
+  replayNow(target, pointerType, x, y, withClick) {
+    this.#target = target;
+    this.#pointerType = pointerType;
+    this.#x = x;
+    this.#y = y;
+    this.#replay(withClick);
+  }
+
+  #arm(target, pointerType, x, y) {
     this.cancel();
     this.#target = target;
+    this.#pointerType = pointerType;
     this.#x = x;
     this.#y = y;
     this.#timer = delay(() => {
       this.#timer = null;
-      this.#replay();
+      this.#replay(true);
     }, DOUBLE_TAP_WINDOW_MS);
   }
 
-  #replay() {
+  #replay(withClick) {
     const target = this.#target;
+    const type = this.#pointerType;
+    const x = this.#x;
+    const y = this.#y;
     this.#target = null;
-    if (this.#target === null && target && target.isConnected) {
-      const win = target.ownerDocument && target.ownerDocument.defaultView;
-      const Ctor = (win && win.MouseEvent) || globalThis.MouseEvent;
-      if (Ctor) {
-        const event = new Ctor("click", {
-          bubbles: true,
-          cancelable: true,
-          composed: true,
-          view: win || null,
-          detail: 1,
-          clientX: this.#x,
-          clientY: this.#y
-        });
-        forgeRegistry.markReplay(event);
-        target.dispatchEvent(event);
+    if (!target || !target.isConnected) {
+      return;
+    }
+    const win = target.ownerDocument?.defaultView;
+    if (!win) {
+      return;
+    }
+    // The faithful tap order - pointer tail first, compat tail after, the
+    // UA's touch-target lists built for the touch replay (constructible in
+    // Chromium; jsdom hosts without the constructors skip that arm rather
+    // than die: the synthetic browser gate drives mouse pointers only).
+    const init = (extra) => ({
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: win,
+      clientX: x,
+      clientY: y,
+      ...extra
+    });
+    const fire = (name, Ctor, extra) => {
+      const event = new Ctor(name, init(extra));
+      forgeRegistry.markReplay(event);
+      target.dispatchEvent(event);
+    };
+    const mkTouch = () => new win.Touch({
+      target,
+      identifier: 0,
+      clientX: x,
+      clientY: y,
+      pageX: x + (win.scrollX ?? 0),
+      pageY: y + (win.scrollY ?? 0),
+      screenX: x,
+      screenY: y,
+      radiusX: 0,
+      radiusY: 0,
+      rotationAngle: 0,
+      force: 0
+    });
+    if (typeof win.PointerEvent === "function") {
+      fire("pointerdown", win.PointerEvent,
+        { pointerId: 0, pointerType: type, isPrimary: true, button: 0, buttons: 1 });
+    }
+    if (type === "touch" && typeof win.Touch === "function" && typeof win.TouchEvent === "function") {
+      // Single-touch replay: one Touch in all three lists, the seed's own
+      // coordinates. Faithful enough for tap handlers; drag tails by
+      // definition latched (this machine only replays plain taps).
+      const touch = mkTouch();
+      fire("touchstart", win.TouchEvent,
+        { touches: [touch], targetTouches: [touch], changedTouches: [touch] });
+    }
+    const MouseCtor = win.MouseEvent ?? globalThis.MouseEvent;
+    if (typeof MouseCtor === "function") {
+      fire("mousedown", MouseCtor, { button: 0, buttons: 1, detail: 1 });
+    }
+    if (typeof win.PointerEvent === "function") {
+      fire("pointerup", win.PointerEvent,
+        { pointerId: 0, pointerType: type, isPrimary: true, button: 0, buttons: 0 });
+    }
+    if (type === "touch" && typeof win.Touch === "function" && typeof win.TouchEvent === "function") {
+      fire("touchend", win.TouchEvent,
+        { touches: [], targetTouches: [], changedTouches: [mkTouch()] });
+    }
+    if (typeof MouseCtor === "function") {
+      fire("mouseup", MouseCtor, { button: 0, buttons: 0, detail: 1 });
+      if (withClick) {
+        // The click closes the tail - the payload the old click-only replay
+        // carried, now with the whole press tail ahead of it.
+        fire("click", MouseCtor, { button: 0, buttons: 0, detail: 1 });
       }
     }
   }
@@ -699,6 +799,14 @@ export class InputForge {
   // pointerdown - no timer needed.
   #pointerOwned = false;
   #awaitClick = false;
+  // The press's facts at pointerdown time: the composed-path head is the
+  // REAL hit-test element (capture-at-press retargets every later pointer
+  // event here, so a tap seed armed at pointerup would replay on the zone
+  // instead of the pressed SDK control - the pre-capture-era seed died
+  // silently with the anchoring). The pointerType tags the replay tail's
+  // order. Nulled at pointerup consumption, never kept across a press.
+  #pressTarget = null;
+  #pressPointerType = "mouse";
 
   /** Per-story machines, built in the constructor (each borrows the engine's
    *  live gesture boundaries: video, dispatch, zone). Scrub: the move-stream
@@ -819,6 +927,11 @@ export class InputForge {
     };
     for (const [type, guard] of Object.entries(STREAM_GUARDS)) {
       zone.addEventListener(type, (event) => {
+        // Our own tap-tail replay passes through untouched: it IS the SDK's
+        // press, marked in the registry so capture suppression un-covers it.
+        if (forgeRegistry.isReplay(event)) {
+          return;
+        }
         if (guard(event)) {
           event.stopImmediatePropagation();
         }
@@ -1155,6 +1268,11 @@ export class InputForge {
   }
 
   #handlePointerDown(event) {
+    // Our own tap-tail replay passes through untouched: it IS the SDK's
+    // press, and re-entering the claim lattice here would eat it.
+    if (forgeRegistry.isReplay(event)) {
+      return;
+    }
     // Fresh box per interaction: scroll/ancestor-transform shifts that
     // ResizeObserver and fullscreenchange never see are covered by dropping
     // the cached hit-test box at every tap (the old document-scroll capture
@@ -1235,6 +1353,11 @@ export class InputForge {
       this.#holding = false;
       this.#suppressClickUntil = 0;
       this.#gestureZone = this.#zoneForPoint(event);
+      // The press's real identity is the pointerdown's hit element - the
+      // only faithful seed source for a tap-tail replay (capture-at-press
+      // retargets everything after this event to the zone).
+      this.#pressTarget = (event.composedPath?.()[0]) ?? event.target;
+      this.#pressPointerType = event.pointerType;
       // Anchors + latches re-init per press (machines own their fields; the
       // swipe base snapshot deliberately persists - only a latch re-captures it).
       this.#scrub.reset(event.clientX, event.clientY, this.#startTime);
@@ -1327,12 +1450,14 @@ export class InputForge {
       event.stopImmediatePropagation();
     }
     this.#pointers.delete(event.pointerId);
+    let ownedTap = false;
     if (this.#pointers.size === 0 && this.#pointerOwned) {
       // Session over: the click decision follows in #handleClickCapture, but
       // the compat mouseup the UA fires between pointerup and click still
       // belongs to our stream - keep swallowing it briefly (#awaitClick).
       this.#pointerOwned = false;
       this.#awaitClick = true;
+      ownedTap = true;
     }
     if (this.#pinchZone !== null && this.#pointers.size < 2) {
       this.#endPinch();
@@ -1369,17 +1494,31 @@ export class InputForge {
         this.#dispatch(GESTURE_EVENTS.swipe, swipeDetail);
       }
     } else if (
+      ownedTap &&
       elapsed < HOLD_TIMEOUT_MS &&
       this.#gestureZone !== null &&
       allowsIntent("dbltap")
     ) {
-      if (this.#tap.tap(now, event.target, event.clientX, event.clientY) === "second") {
+      if (this.#tap.tap(now, this.#pressTarget ?? event.target,
+        this.#pressPointerType, event.clientX, event.clientY) === "second") {
         this.#suppressNextActivations();
         dbltapDetail.zone = this.#gestureZone;
         dbltapDetail.method = "pointer";
         this.#dispatch(GESTURE_EVENTS.dbltap, dbltapDetail);
       }
+    } else if (ownedTap && this.#pressTarget?.isConnected) {
+      // The dbltap window is disarmed (setting off): a plain owned tap still
+      // owes the SDK its press tail - the claim swallowed mousedown/mouseup
+      // natively and, on touch/pen, the whole tail via the source
+      // preventDefault. Click delivery splits: mouse taps pass their REAL
+      // click (the click-capture pass-through branch), touch taps carry it
+      // in the replay spine.
+      this.#tap.replayNow(this.#pressTarget, this.#pressPointerType,
+        event.clientX, event.clientY, this.#pressPointerType !== "mouse");
     }
+    // The press's identity is spent: only the armed seed (a machine-owned
+    // copy) survives.
+    this.#pressTarget = null;
     this.#primaryPointerId = null;
     this.#gestureZone = null;
   }
@@ -1475,14 +1614,40 @@ export class InputForge {
     return this.#hitTestVideo(point);
   }
 
-  /**
-   * Whether the press target resolves an interactive SDK control (see
-   * SDK_CONTROLS_SELECTOR). The composed-path head is used so shadow-tree
-   * press spread still resolves; text targets satisfy closest by tree walk.
-   */
+  /** Whether the press target resolves an interactive SDK control (see
+   *  SDK_CONTROLS_SELECTOR). The composed-path head is used so shadow-tree
+   *  press spread still resolves; text targets satisfy closest by tree walk.
+   *  Past the shape list, the affordance-cursor clause and the box gate
+   *  decide role-less chrome (the clause docstring holds the reasoning). */
   #sdkTargetInteractive(event) {
-    const target = event.composedPath ? event.composedPath()[0] : event.target;
-    return typeof target?.closest === "function" && !!target.closest(SDK_CONTROLS_SELECTOR);
+    const head = event.composedPath ? event.composedPath()[0] : event.target;
+    if (typeof head?.closest !== "function") {
+      return false;
+    }
+    if (head.closest(SDK_CONTROLS_SELECTOR)) {
+      return true;
+    }
+    // Role-less chrome: only elements OUTSIDE the gesture-surface family
+    // (the video itself, or an ancestor wrapping it) may claim the cursor.
+    // The box gate keeps full-cover affordance overlays (click-to-pause
+    // layers styling pointer over the whole player) claimed - they reach
+    // the SDK through the tap tail replay - while small crisp UIs (menus,
+    // rails, slider thumbs, icon buttons) are exempt outright.
+    if (head.nodeType !== 1 || head === this.#video ||
+        (head.contains?.(this.#video) ?? false)) {
+      return false;
+    }
+    // The mousedown/touchstart dominance probes can precede any pointerdown,
+    // so the video box may still be cold: fill it here exactly the way the
+    // hit-test does (per-press truth, invalidated at the next pointerdown).
+    const videoRect = this.#videoRect ??
+      (this.#videoRect = this.#video.getBoundingClientRect());
+    const box = head.getBoundingClientRect();
+    if (box.width * box.height > videoRect.width * videoRect.height / 2) {
+      return false;
+    }
+    const cursor = getComputedStyle(head).cursor;
+    return cursor === "pointer" || cursor === "grab";
   }
 
   #clearAwaitClick() {

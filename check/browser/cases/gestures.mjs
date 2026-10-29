@@ -276,6 +276,108 @@ export async function run({ session, baseUrl, boot }) {
     document.querySelector("#pf-sdkprobe")?.remove();
   });
 
+  // Role-less SDK chrome, the two shapes the shape-list exemption never
+  // covered (repair A + B, real driver input):
+  //   probe 1 - an affordance-declaring div (cursor:pointer, no role): the
+  //     stream is EXEMPT outright, so its pointerdown + click are the real
+  //     native ones, zero-latency.
+  //   probe 2 - an affordance-declaring NOTHING div (default cursor): the
+  //     press is claimed, but the plain tap replays the full press tail
+  //     (pointerdown..click in Chromium's tap order) AT the pressed element
+  //     inside the dbltap window - so its listeners still fire, once each.
+  const probeCenterFor = (id) => session.eval(function main(id) {
+    const l = document.querySelector(id)?.getBoundingClientRect();
+    return l ? { x: Math.round(l.left + l.width / 2), y: Math.round(l.top + l.height / 2) } : null;
+  }, id);
+  // Probe 1: affordance cursor -> exempt.
+  await session.eval(function main() {
+    const video = document.querySelector("#check-video");
+    const el = document.createElement("div");
+    el.id = "pf-sdkcursor";
+    el.textContent = "ctl";
+    el.__pfCounts = { down: 0, click: 0 };
+    el.style.cssText = "position:absolute;left:96px;top:8px;width:72px;height:40px;cursor:pointer;z-index:2147483000;";
+    el.addEventListener("pointerdown", () => el.__pfCounts.down++);
+    el.addEventListener("click", () => el.__pfCounts.click++);
+    video.parentElement.appendChild(el);
+  });
+  const cursorPoint = await probeCenterFor("#pf-sdkcursor");
+  await raw.actions({ async: true })
+    .move({ origin: "viewport", x: cursorPoint.x, y: cursorPoint.y })
+    .press()
+    .release()
+    .pause(120)
+    .perform();
+  await new Promise((r) => setTimeout(r, 300));
+  status(rows, "affordance-cursor roleless div keeps its REAL pointerdown + click",
+    await session.eval(function main() {
+      const counts = document.querySelector("#pf-sdkcursor")?.__pfCounts;
+      return !!counts && counts.down === 1 && counts.click === 1;
+    }), `counts=${JSON.stringify(await session.eval(function main() {
+      return document.querySelector("#pf-sdkcursor")?.__pfCounts ?? null;
+    }))}`);
+  // Probe 2: no affordance -> claimed press, replayed plain-tap tail at the
+  // pressed element (the window is 300ms; the click CAN no longer arrive
+  // before the pointer tail - the replay synthesizes the whole sequence).
+  await session.eval(function main() {
+    const video = document.querySelector("#check-video");
+    const el = document.createElement("div");
+    el.id = "pf-sdkbare";
+    el.textContent = "ctl";
+    el.__pfCounts = { down: 0, click: 0 };
+    el.style.cssText = "position:absolute;left:96px;top:56px;width:72px;height:40px;z-index:2147483000;";
+    el.addEventListener("pointerdown", () => el.__pfCounts.down++);
+    el.addEventListener("click", () => el.__pfCounts.click++);
+    video.parentElement.appendChild(el);
+  });
+  const barePoint = await probeCenterFor("#pf-sdkbare");
+  await raw.actions({ async: true })
+    .move({ origin: "viewport", x: barePoint.x, y: barePoint.y })
+    .press()
+    .release()
+    .pause(120)
+    .perform();
+  await new Promise((r) => setTimeout(r, 400));
+  status(rows, "roleless div under claim gets its tap tail replayed at the pressed element",
+    await session.eval(function main() {
+      const counts = document.querySelector("#pf-sdkbare")?.__pfCounts;
+      return !!counts && counts.down === 1 && counts.click === 1;
+    }), `counts=${JSON.stringify(await session.eval(function main() {
+      return document.querySelector("#pf-sdkbare")?.__pfCounts ?? null;
+    }))}`);
+  // Probe 3: a FULL-COVER affordance overlay (click-to-pause family) stays
+  // the gesture surface - the box gate declines the exemption - and its tap
+  // still reaches it through the replay tail. Proves the two-lattice split.
+  await session.eval(function main() {
+    const video = document.querySelector("#check-video");
+    const el = document.createElement("div");
+    el.id = "pf-sdkcover";
+    el.__pfCounts = { down: 0, click: 0 };
+    el.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;cursor:pointer;z-index:2147483100;";
+    el.addEventListener("pointerdown", () => el.__pfCounts.down++);
+    el.addEventListener("click", () => el.__pfCounts.click++);
+    video.parentElement.appendChild(el);
+  });
+  await raw.actions({ async: true })
+    .move({ origin: "viewport", x: Math.round(center.x), y: Math.round(center.y) })
+    .press()
+    .release()
+    .pause(120)
+    .perform();
+  await new Promise((r) => setTimeout(r, 400));
+  status(rows, "full-cover affordance overlay: gesture surface claimed, tap tail replayed",
+    await session.eval(function main() {
+      const counts = document.querySelector("#pf-sdkcover")?.__pfCounts;
+      return !!counts && counts.down === 1 && counts.click === 1;
+    }), `counts=${JSON.stringify(await session.eval(function main() {
+      return document.querySelector("#pf-sdkcover")?.__pfCounts ?? null;
+    }))}`);
+  await session.eval(function main() {
+    document.querySelector("#pf-sdkcursor")?.remove();
+    document.querySelector("#pf-sdkbare")?.remove();
+    document.querySelector("#pf-sdkcover")?.remove();
+  });
+
   // Touch pointer-type stream through the ENGINE claim (synthetic
   // PointerEvent dispatch - event listeners are pointer-type agnostic, and
   // untrusted events still traverse the capture path the engine listens on;
