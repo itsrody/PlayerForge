@@ -301,6 +301,44 @@ same retirement (its target state is recorded in §6 instead). The frames
 round added per-frame injection (§7), and chromedriver robustness hardened
 launch (§8).
 
+**Redesign-verdict ledger (final; closed).** The redesign-class questions the
+tool era left open are closed on evidence, in-repo. The canon that decided
+them (user direction, batch 19): a platform surface earns adoption only when
+it is BOTH native-backed AND universal across every topology the frame model
+serves (top-frame big page, same-origin, cross-origin embed) — native but
+context-scoped retires, the same test that killed the emulation arms in the
+single-backend contract. Reopening any of these needs new user direction AND
+new code-level evidence:
+- **`<dialog>` panel migration — rejected on modal scope, not stack doctrine.**
+  `showModal()`'s `::backdrop` is unconditionally document-modal: while the
+  panel is open the entire frame document goes inert. That happens to match the
+  iframe topology (embed document ≡ player region), but is fatal for the
+  top-frame/same-origin big-page topology — the panel must stay
+  *player-region* modal, where an outside press on the host page acts on the
+  site AND closes the panel (the shell-local shield's whole point); a
+  top-layer backdrop absorbs the press and hands the page to the dialog. No
+  API scopes `::backdrop` to a region. The earlier recorded ground (toast
+  3<4 repaint arithmetic) was incidental — the z tokens put panel(4) >
+  toast(3), so a top-layer panel *matches* the doctrine instead of fighting
+  it; the verdict stands on the weaker reason alone. Non-modal `show()` buys
+  nothing (no top layer, no close-request wiring). The dismissal machinery is
+  already native-honest: `CloseWatcher` is the close-request API on the floor,
+  per-open arming costs a never-opened panel zero document budget, and the
+  `pfEscArmed` revert-then-close lattice maps onto `cancel`.
+- **Native `<track>` VTT parser migration — rejected on ingest ownership.**
+  Subtitle ingest is `GM_xmlhttpRequest` (CORS bypass, `@connect *`); a native
+  `<track src>` fetch rides only the media element's own fetch path and can
+  bypass neither CORS nor the GM grant. The fallback (fetch text → blob-track)
+  is async and media-lifecycle-timed, which strands boot-restore behind a
+  fetch/parse round-trip and forces the sync-offset stepper off its
+  zero-await `parseSubtitles(text, offset)` reparse path — that sync path IS
+  the product; parsing costs were never the complaint the main-thread parser
+  fixes.
+- **Toast popover migration — rejected on top-layer push.** `popover` surfaces
+  render in the top layer, so a toast could then paint above the open panel,
+  inverting the documented z doctrine (`panel(4) > toast(3)`) the panel owns;
+  staying in the HUD layer keeps the order the tokens express.
+
 ## 5. Conventions (the change bar)
 
 1. **Comments explain WHY with reasoning** — the rejected alternatives and
