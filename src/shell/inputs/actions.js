@@ -457,14 +457,13 @@ class ScrubSession {
  * in-flight animation so no cleanup can land mid-gesture.
  *
  * Where Element.animate (Web Animations API) is available -
- * Chromium 69+, i.e. this fork's baseline - the snap runs a WAAPI animation
- * on the compositor: one deterministic compositor animation with a real
- * finish/cancel, replacing the will-change + CSS-transition + transitionend
- * listener puzzle that could race when the transition shorthand was flipped
- * off. The video is promoted to its own compositor layer while a transform is
- * live (fill-mode, swipe/pinch restore) so Chromium composites the
- * scale/translate instead of re-rasterizing the media surface every frame;
- * the layer is released once the snap settles (or is cancelled).
+ * Chromium 69+, i.e. this fork's floor guarantees it unconditionally - the
+ * snap runs a WAAPI animation on the compositor: one deterministic
+ * compositor animation with a real finish/cancel. The video is promoted to
+ * its own compositor layer while a transform is live (fill-mode, swipe/pinch
+ * restore) so Chromium composites the scale/translate instead of
+ * re-rasterizing the media surface every frame; the layer is released once
+ * the snap settles (or is cancelled).
  */
 
 /**
@@ -502,77 +501,52 @@ class TransformEase {
       video.style.willChange = "transform";
     }
 
-    // WAAPI path (Chromium baseline): one compositor animation from the current
-    // transform to the target. On finish the final value is committed to an
-    // inline style and the animation is cancelled so its fill gives way; on
-    // cancel (via stop() or supersession) the layer is dropped immediately.
-    if (typeof video.animate === "function") {
-      // Start frame: the inline style is already the committed truth after any
-      // of our own commits (and the swipe stroke's direct writes), so the
-      // computed-style read only pays off for videos a host stylesheet
-      // transforms. Prior cancellation above guarantees the inline value is
-      // the live visual even when an animation was in flight.
-      const animation = video.animate(
-        [
-          { transform: video.style.transform || getComputedStyle(video).transform || "none" },
-          { transform: transform || "none" }
-        ],
-        { duration: EASE_SNAPPY_MS, easing: EASE_SNAPPY_CURVE, fill: "both" }
-      );
-      const pending = this.#pending;
-      const stop = () => {
-        if (pending.get(video) !== stop) {
-          return;
-        }
-        pending.delete(video);
-        video.style.transition = "";
-        animation.cancel();
-      };
-      pending.set(video, stop);
-      animation.addEventListener("finish", () => {
-        if (pending.get(video) !== stop) {
-          return;
-        }
-        // Commit the final transform as inline style, then cancel the animation's
-        // fill so the committed style owns the element from here on.
-        video.style.transition = "";
-        video.style.transform = transform;
-        animation.cancel();
-        pending.delete(video);
-        this.#dropPromotion(video);
-      });
-      animation.addEventListener("cancel", () => {
-        if (pending.get(video) === stop) {
-          pending.delete(video);
-          this.#dropPromotion(video);
-        }
-      });
-      return;
-    }
-
-    // CSS transition fallback (hosts without WAAPI, e.g. jsdom): the eased style
-    // is stripped by the transition's own end/cancel event - never by a timer.
+    // One compositor animation from the current transform to the target.
+    // WAAPI out-animates the will-change + CSS-transition + transitionend
+    // puzzle it replaced (one owned cancel handle, real finish/cancel, no
+    // transitionend race) - and the floor guarantees the API, so no
+    // env-conditional arm lives next to it. On finish the final value is
+    // committed to an inline style and the animation is cancelled so its
+    // fill gives way; on cancel (via stop() or supersession) the layer is
+    // dropped immediately.
+    // Start frame: the inline style is already the committed truth after any
+    // of our own commits (and the swipe stroke's direct writes), so the
+    // computed-style read only pays off for videos a host stylesheet
+    // transforms. Prior cancellation above guarantees the inline value is
+    // the live visual even when an animation was in flight.
+    const animation = video.animate(
+      [
+        { transform: video.style.transform || getComputedStyle(video).transform || "none" },
+        { transform: transform || "none" }
+      ],
+      { duration: EASE_SNAPPY_MS, easing: EASE_SNAPPY_CURVE, fill: "both" }
+    );
     const pending = this.#pending;
-    const pendingStop = () => {
-      video.removeEventListener("transitionend", onEnd);
-      video.removeEventListener("transitioncancel", onCancel);
-      if (pending.get(video) === pendingStop) {
+    const stop = () => {
+      if (pending.get(video) !== stop) {
+        return;
+      }
+      pending.delete(video);
+      animation.cancel();
+    };
+    pending.set(video, stop);
+    animation.addEventListener("finish", () => {
+      if (pending.get(video) !== stop) {
+        return;
+      }
+      // Commit the final transform as inline style, then cancel the animation's
+      // fill so the committed style owns the element from here on.
+      video.style.transform = transform;
+      animation.cancel();
+      pending.delete(video);
+      this.#dropPromotion(video);
+    });
+    animation.addEventListener("cancel", () => {
+      if (pending.get(video) === stop) {
         pending.delete(video);
         this.#dropPromotion(video);
       }
-    };
-    const onEnd = (event) => {
-      if (event.propertyName === "transform") {
-        pendingStop();
-      }
-    };
-    const onCancel = () => pendingStop();
-    pending.set(video, pendingStop);
-    // Listeners first, styles second: no completion event can slip past us.
-    video.addEventListener("transitionend", onEnd);
-    video.addEventListener("transitioncancel", onCancel);
-    video.style.transition = `transform ${EASE_SNAPPY_MS}ms ${EASE_SNAPPY_CURVE}`;
-    video.style.transform = transform;
+    });
   }
 }
 

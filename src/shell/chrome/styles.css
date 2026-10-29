@@ -1247,7 +1247,6 @@
 
     input[type="range"].pf-slider {
       appearance: none;
-      -webkit-appearance: none;
       width: 100%;
       background: transparent;
       margin: 0;
@@ -1266,7 +1265,10 @@
     }
 
     input[type="range"].pf-slider::-webkit-slider-thumb {
-      -webkit-appearance: none;
+      /* The pseudo-elements themselves are the Chromium-only range surface
+         (no unprefixed equivalent ships), but the appearance property inside
+         them is standard since 84 - the legacy prefixed spelling died. */
+      appearance: none;
       width: 16px;
       height: 16px;
       margin-top: -6px;
