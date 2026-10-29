@@ -972,12 +972,12 @@ export class InputForge {
   #zoneForPoint(pointerEvent) {
     // Edge zones only steer fullscreen gestures (dbltap edge-skip, swipe-down
     // exit - both fs-gated), so the reference is the physical display. screen
-    // also sidesteps innerWidth's scrollbar-inclusive quirk on Chromium. Guard
-    // to the window when the screen reports no size (headless/test environs).
-    const screenWidth =
-      typeof screen !== "undefined" && screen.width > 0
-        ? screen.width
-        : window.innerWidth;
+    // also sidesteps innerWidth's scrollbar-inclusive quirk on Chromium. The
+    // window fallback answers the headless fact (screen.width 0), not a
+    // missing-global paranoia: `screen` is bound in every Chromium frame.
+    const screenWidth = screen.width > 0
+      ? screen.width
+      : window.innerWidth;
     if (pointerEvent.clientX < screenWidth * EDGE_ZONE_RATIO) {
       return "left-edge";
     } else if (pointerEvent.clientX > screenWidth * EDGE_ZONE_START) {

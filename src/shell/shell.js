@@ -574,14 +574,12 @@ export class Shell {
     // since ResizeObserver is Chromium 63+.
     subscribeFullscreen(invalidate, this.#scope.signal);
     this.#dom.observeResize(this.container, invalidate);
-    // Orientation flip changes the screen.* dims read in fullscreen, which the
-    // container ResizeObserver cannot see (the iframe box may not change).
-    const orientation = typeof screen !== "undefined" ? screen.orientation : null;
-    if (orientation) {
-      this.#dom.listen(orientation, "change", invalidate, { passive: true });
-    } else {
-      this.#dom.listen(window, "orientationchange", invalidate, { passive: true });
-    }
+    // Orientation flip changes the screen.* dims read in fullscreen, which
+    // the container ResizeObserver cannot see (the iframe box may not change).
+    // The Screen Orientation API is the only backend: `screen.orientation`
+    // is floor-guaranteed, and window's `orientationchange` is the legacy
+    // WebKit event Chromium only ships for compat - not a second arm here.
+    this.#dom.listen(screen.orientation, "change", invalidate, { passive: true });
   }
 
   /**

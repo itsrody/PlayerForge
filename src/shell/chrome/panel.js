@@ -1022,17 +1022,16 @@ export class SettingsPanel {
   }
 
   #runWithViewTransition(type, update) {
-    if (typeof document.startViewTransition === "function") {
-      const transition = document.startViewTransition({ types: [type], update });
-      // An overlapping open/close skips the older transition by design; the
-      // browser then rejects `ready` (and settles `finished`), and those
-      // rejections must not surface as unhandled promise errors in user
-      // consoles.
-      transition.ready.catch(() => {});
-      transition.finished.catch(() => {});
-    } else {
-      update();
-    }
+    // The floor guarantees startViewTransition (Chromium 111+): one arm, the
+    // UA clips the animation itself whenever it must (reduced motion,
+    // overlapping transitions) while `update` always drives the DOM flip.
+    const transition = document.startViewTransition({ types: [type], update });
+    // An overlapping open/close skips the older transition by design; the
+    // browser then rejects `ready` (and settles `finished`), and those
+    // rejections must not surface as unhandled promise errors in user
+    // consoles.
+    transition.ready.catch(() => {});
+    transition.finished.catch(() => {});
   }
 }
 

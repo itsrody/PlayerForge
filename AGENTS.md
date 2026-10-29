@@ -110,9 +110,11 @@ iframes, same-origin and cross-origin:
 ### kernel/ — policy layer
 - **contract.js** — the shared vocabulary both layers import in isolation:
   gesture registry (`GESTURES`/`GESTURE_IDS` are formula-derived from `{id:
-  label}` pairs), `GESTURE_EVENTS` (`pf:gesture-<id>`), `BRIDGE_MSG_PREFIX`,
-  `DEBUG_HASH_TAG = "pf-debug"`, media-key constants, tuning knobs. No
-  machine-facing string is hand-spelled anywhere else.
+  label}` pairs), `GESTURE_EVENTS` (`pf:gesture-<id>`), `DEBUG_HASH_TAG =
+  "pf-debug"`, tuning knobs. The frame bridge's message types derive from
+  their own single prefix inside `page.js` (module-local by documented
+  design); key bindings derive in `actions.js`. No machine-facing string is
+  hand-spelled anywhere else.
 - **detection.js** — the SDK identity engine, registry-driven, import-free.
   15 supported SDK records (JW Player, Video.js, Plyr, ArtPlayer, DPlayer,
   MediaElement.js, XGPlayer, Aliplayer, Fluid Player, Flowplayer, Clappr,
@@ -259,11 +261,12 @@ having genuine matching semantics elsewhere. What stayed vs died:
   fallbacks), element-level probes (`requestVideoFrameCallback`,
   `video.animate`, `requestPictureInPicture` — jsdom elements honestly lack
   them), grant guards in store.js (manager policy, not platform),
-  `workerCapable()` (CSP/Worker presence is a runtime fact), the per-instance
-  MutationObserver checks and down-ownership checks (deliberate, each pinned
-  by a test), and `AbortSignal.any`'s manual-deadline arm — because a probe
-  proved jsdom and Node brand-check opposite worlds on signals, so a merged
-  signal can never exist across them.
+  `workerCapable()` (CSP/Worker presence is a runtime fact), and the
+  per-instance MutationObserver checks and down-ownership checks (deliberate,
+  each pinned by a test). The signal plane ships one arm: every deadline and
+  composition rides native `AbortSignal.timeout`/`AbortSignal.any`
+  unconditionally (the manual-deadline arm this record once kept died with
+  the harness-only consumers).
 - Died: the `postTask` façade's whole setTimeout arm, `yield_`'s
   scheduler→rAF→noop ladder, `onNavigate`'s popstate/hashchange backend that
   could never see a pushState-only change, `MessageChannel`/MutationObserver/
