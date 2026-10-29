@@ -30,20 +30,14 @@
   --pf-bg: #000;                    /* base ink                */
 
   /* Ink surface system: every sheet paints ONE opaque charcoal fill with a
-     rim-lit hairline edge and a soft drop shadow - all static paint, zero
-     backdrop-filter anywhere. The ink is slightly lifted from pure #000 so
-     the rim highlight and hairline borders still read against video, and
-     being opaque, text legibility is a fixed material property, not a
-     composite that depends on what is playing behind the sheet. */
+     hairline edge - all static paint, zero backdrop-filter anywhere, zero
+     shadow layers. The ink is slightly lifted from pure #000 so the hairline
+     border still reads against video, and being opaque, text legibility is a
+     fixed material property, not a composite that depends on what is playing
+     behind the sheet. Shine-free and flat by direction: no inset white
+     highlights, no drop shadow - the hairline is the whole separation. */
   --pf-sheet: #0e0e10;              /* the one resting sheet ink            */
   --pf-panel-tint: var(--pf-sheet);
-  /* The panel's top rim is an inset shadow on the sheet; once the header
-     paints its own tint over that region the rim has to move onto the header,
-     or the topmost edge loses its highlight. */
-  --pf-header-rim: inset 0 1px 0 rgba(255, 255, 255, 0.34);
-  --pf-sheet-inner: inset 0 1px 0 rgba(255, 255, 255, 0.34),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.07);
-  --pf-sheet-shadow: var(--pf-sheet-inner), 0 8px 24px rgba(0, 0, 0, 0.52);
   --pf-sheet-border: 1px solid rgba(255, 255, 255, 0.18);
 
   --pf-surface-soft: rgba(255, 255, 255, 0.04);  /* cells, stepper, toggle bg   */
@@ -419,12 +413,9 @@
          the transform property, so transform-based animations on the toast
          never clobber it. */
       translate: -50%;
-      /* Ink sheet: opaque charcoal + rim-lit edge, soft drop shadow
-         (slimmed from the glass era's 48px blur - separation stays, the
-         shadow paint is now the cheap end of the budget). */
+      /* Ink sheet: opaque charcoal + hairline edge, nothing else. */
       background-color: var(--pf-sheet);
       border: var(--pf-sheet-border);
-      box-shadow: var(--pf-sheet-shadow);
       color: var(--pf-fg);
       padding: var(--pf-space-sm) 16px;
       border-radius: var(--pf-radius-pill);
@@ -590,7 +581,6 @@
       --pf-panel-tint: var(--pf-sheet);
       background-color: var(--pf-panel-tint);
       border: var(--pf-sheet-border);
-      box-shadow: var(--pf-sheet-shadow);
       color: var(--pf-fg);
       border-radius: var(--pf-radius-lg);
       font-size: var(--pf-font-md);
@@ -635,7 +625,6 @@
         align-items: center;
         gap: var(--pf-space-md);
         padding: var(--pf-space-md);
-        box-shadow: var(--pf-header-rim);
       }
 
       .pf-panel-header::before {

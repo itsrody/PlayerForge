@@ -410,13 +410,14 @@ Still in force from the design process — rewritten ink-style by user direction
   screenshot. The opaque ink makes the assertion content-independent (spectral
   ratios above); geometry (resting radii, control positions) may not move as a
   side effect of appearance work.
-- The current set is **opaque ink + hairline border + rim shadows + one soft
-  drop shadow** (`--pf-sheet-shadow`, slimmed from the glass era's 48px blur —
-  sheet separation over arbitrary video stays, the paint is now cheap),
-  **zero linear-gradients with one sanctioned exception**: the R4 scroll-edge
-  band is the single solid-to-faded linear-gradient — the only gradient
-  permitted in the HUD. Rim highlights present (`--pf-header-rim`, inset
-  highlights). Zero blur layers.
+- The current set is **opaque ink + hairline border, nothing else**
+  (separation from video is the `--pf-sheet-border` hairline alone — the rim
+  era and the soft drop shadow died by direction, the shadow's glass-era
+  48px ancestry with them), **zero linear-gradients with one sanctioned
+  exception**: the R4 scroll-edge band is the single solid-to-faded
+  linear-gradient — the only gradient permitted in the HUD. **No inset white
+  highlights anywhere** — the rim era (`--pf-header-rim`, `--pf-sheet-inner`'s
+  rim insets) retired by direction. Zero blur layers, zero shadow layers.
 
 ## 7. check/ — the testing tool
 

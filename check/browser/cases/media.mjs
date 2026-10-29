@@ -132,18 +132,28 @@ export async function run({ session, baseUrl, boot }) {
   // The ink scale ships as decided, asserted off the real sheet: the
   // concentric chain R5 (16 outermost, descendants derived) and R1's zero
   // backdrop-filter over the one opaque resting ink - measured computed
-  // values, per the measured-not-screenshotted law.
+  // values, per the measured-not-screenshotted law. The shadow is the flat
+  // shape: none - the rim era AND the soft drop shadow retired by direction,
+  // the hairline is the whole separation - so any box-shadow returning in
+  // the computed style is an era coming back through a token rename.
   const inkScale = await session.eval(function main() {
     const host = document.querySelector(".pf-shell");
     const panel = host?.shadowRoot?.querySelector(".pf-panel");
     if (!panel) return null;
     const cs = getComputedStyle(panel);
-    return { panelRadius: cs.borderRadius, blur: cs.backdropFilter, ink: cs.backgroundColor };
+    return {
+      panelRadius: cs.borderRadius,
+      blur: cs.backdropFilter,
+      ink: cs.backgroundColor,
+      shadow: cs.boxShadow
+    };
   });
   rows.push({
-    name: "ink scale: concentric radius + zero blur on the opaque sheet",
-    status: !!inkScale && inkScale.panelRadius === "16px" && inkScale.blur === "none"
-      && inkScale.ink === "rgb(14, 14, 16)" ? "pass" : "fail",
+    name: "ink scale: concentric radius + zero blur + flat shadow on the opaque sheet",
+    status: !!inkScale && inkScale.panelRadius === "16px"
+      && inkScale.blur === "none"
+      && inkScale.ink === "rgb(14, 14, 16)"
+      && inkScale.shadow === "none" ? "pass" : "fail",
     note: inkScale ? JSON.stringify(inkScale) : "panel missing",
     ms: null
   });
