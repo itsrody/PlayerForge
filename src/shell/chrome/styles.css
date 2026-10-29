@@ -29,25 +29,22 @@
   --pf-fg: #fff;                    /* primary text            */
   --pf-bg: #000;                    /* base ink                */
 
-  /* Flat glass surface system: one translucent dark tint, a rim-lit hairline
-     edge, and a soft drop shadow - all static paint, so each visible surface
-     costs exactly one composited blur layer. The backdrop-filter blurs +
-     saturates what is behind the glass, which keeps the tint see-through while
-     light text stays legible over arbitrary video. */
-  --pf-glass-tint: color-mix(in srgb, var(--pf-bg) var(--pf-tint-alpha), transparent);
-  /* The tint share is a registered percentage the shell writes from the
-     glassTint setting (the Clear/Medium/Opaque presets ride GLASS_TINTS) -
-     a user-selected tint level, not a state branch: the material still
-     paints ONE value everywhere. Registered instead of a var fallback so a
-     stray foreign write cannot untype the mix. */
+  /* Ink surface system: every sheet paints ONE opaque charcoal fill with a
+     rim-lit hairline edge and a soft drop shadow - all static paint, zero
+     backdrop-filter anywhere. The ink is slightly lifted from pure #000 so
+     the rim highlight and hairline borders still read against video, and
+     being opaque, text legibility is a fixed material property, not a
+     composite that depends on what is playing behind the sheet. */
+  --pf-sheet: #0e0e10;              /* the one resting sheet ink            */
+  --pf-panel-tint: var(--pf-sheet);
   /* The panel's top rim is an inset shadow on the sheet; once the header
      paints its own tint over that region the rim has to move onto the header,
      or the topmost edge loses its highlight. */
   --pf-header-rim: inset 0 1px 0 rgba(255, 255, 255, 0.34);
-  --pf-glass-inner: inset 0 1px 0 rgba(255, 255, 255, 0.34),
+  --pf-sheet-inner: inset 0 1px 0 rgba(255, 255, 255, 0.34),
     inset 0 0 0 1px rgba(255, 255, 255, 0.07);
-  --pf-glass-shadow: var(--pf-glass-inner), 0 18px 48px rgba(0, 0, 0, 0.52);
-  --pf-glass-border: 1px solid rgba(255, 255, 255, 0.18);
+  --pf-sheet-shadow: var(--pf-sheet-inner), 0 8px 24px rgba(0, 0, 0, 0.52);
+  --pf-sheet-border: 1px solid rgba(255, 255, 255, 0.18);
 
   --pf-surface-soft: rgba(255, 255, 255, 0.04);  /* cells, stepper, toggle bg   */
   --pf-surface-mid: rgba(255, 255, 255, 0.09);   /* ghost btn, hover cells      */
@@ -84,9 +81,6 @@
   --pf-ease-bounce: 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
   --pf-ease-out: 0.2s cubic-bezier(0.4, 0, 1, 1);
 
-  --pf-blur-sm: blur(16px) saturate(1.7);
-  --pf-blur-lg: blur(24px) saturate(1.8);
-
   --pf-space-xs: 4px;
   --pf-space-sm: 6px;
   --pf-space-md: 8px;
@@ -94,7 +88,7 @@
 
   /* In-panel controls (cells, steppers, ghost buttons) stay flat tinted
      surfaces - cheap to paint and never doubled against the sheet's own
-     backdrop. Only the two floating sheets compose the glass system. */
+     ink. Only the two floating sheets compose the ink system. */
 
   --pf-z-hud: 2;
   --pf-z-toast: 3;
@@ -331,24 +325,6 @@
       inherits: true;
       initial-value: 0;
     }
-    /* The glass-tint share (see the token block note). Written on the host;
-       must inherit through the boundary into the shadow's color-mix. */
-    @property --pf-tint-alpha {
-      syntax: "<percentage>";
-      inherits: true;
-      initial-value: 58%;
-    }
-    /* The scroll-edge band's darker ink share (GLASS_TINTS.edge): chosen so
-       the band composited over the body sheet lands one notch (+14 points)
-       darker than the body read at every tint level - the designed darkening
-       the same-tint stack used to produce by accident. Same channel rules as
-       --pf-tint-alpha. */
-    @property --pf-edge-alpha {
-      syntax: "<percentage>";
-      inherits: true;
-      initial-value: 33%;
-    }
-
     /* - Panel backdrop - */
     /* Transparent modal shield for the open settings panel. Covers the whole shell
        (inset 0) but sits below the panel, so the panel stays interactive while a
@@ -443,12 +419,12 @@
          the transform property, so transform-based animations on the toast
          never clobber it. */
       translate: -50%;
-      /* Flat glass: translucent tint + rim-lit edge over a blurred,
-         darkened backdrop, soft drop shadow. */
-      background-color: var(--pf-glass-tint);
-      border: var(--pf-glass-border);
-      box-shadow: var(--pf-glass-shadow);
-      backdrop-filter: var(--pf-blur-sm);
+      /* Ink sheet: opaque charcoal + rim-lit edge, soft drop shadow
+         (slimmed from the glass era's 48px blur - separation stays, the
+         shadow paint is now the cheap end of the budget). */
+      background-color: var(--pf-sheet);
+      border: var(--pf-sheet-border);
+      box-shadow: var(--pf-sheet-shadow);
       color: var(--pf-fg);
       padding: var(--pf-space-sm) 16px;
       border-radius: var(--pf-radius-pill);
@@ -606,16 +582,15 @@
       scrollbar-width: thin;
       scrollbar-color: var(--pf-text-mid) transparent;
 
-      /* Flat glass: same tint/edge/shadow system as the toast, at the larger
-         blur radius suited to the sheet's size. The tint is declared exactly
-         once, through --pf-panel-tint: the header derives from the same
-         variable instead of repainting its own layer, which used to stack a
-         second tint over the sheet's glass and read as a darker band. */
-      --pf-panel-tint: var(--pf-glass-tint);
+      /* Ink sheet: same ink/border/shadow system as the toast. The tint is
+         declared exactly once, through --pf-panel-tint: the header derives
+         from the same variable instead of repainting its own layer, which
+         used to stack a second value over the sheet and read as a darker
+         band. */
+      --pf-panel-tint: var(--pf-sheet);
       background-color: var(--pf-panel-tint);
-      border: var(--pf-glass-border);
-      box-shadow: var(--pf-glass-shadow);
-      backdrop-filter: var(--pf-blur-lg);
+      border: var(--pf-sheet-border);
+      box-shadow: var(--pf-sheet-shadow);
       color: var(--pf-fg);
       border-radius: var(--pf-radius-lg);
       font-size: var(--pf-font-md);
@@ -644,8 +619,8 @@
          layer (principle 5), so it is pinned: body content scrolls beneath it
          rather than carrying the tabs and close button away.
          R4 scroll edge, solid-to-faded edition (user direction): at rest not
-         a pixel of edge treatment is painted - the sheet's own tint is the
-         one glass layer. While content actually scrolls underneath, a
+         a pixel of edge treatment is painted - the sheet's own ink is the
+         one resting surface. While content actually scrolls underneath, a
          scroll-driven timeline (the panel is the nearest scroll container)
          ramps --pf-scroll-edge from 0 to 100% over the first 24px of scroll,
          and the edge band fades IN as one unit: a solid tint at the top that
@@ -671,20 +646,15 @@
         inset: 0 0 -24px 0;
         z-index: -1;
         pointer-events: none;
-        /* R4 scroll edge, darker-tinted edition (user direction): the band
-           paints its own ink share (--pf-edge-alpha, one notch darker than
-           the body composite - see GLASS_TINTS in config.js) solid at the
-           top, fading down the band's tail. It no longer reuses the sheet's
-           tint, whose same-color stack made the edge darkness an accident of
-           alpha arithmetic that jumped hardest for the clearest level. */
-        background: linear-gradient(to bottom, color-mix(in srgb, var(--pf-bg) var(--pf-edge-alpha), transparent), transparent);
-        /* Blur rides the same band: content passing beneath the pinned bar
-           washes through the mask - fully blurred across the header region,
-           gone at the tail - so the blurred strip has no hard edge. The mask
-           bounds backdrop-filter in Chromium along with the paint, so both
-           arms of the band share one fade geometry. */
-        backdrop-filter: var(--pf-blur-sm);
-        mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 24px), transparent);
+        /* R4 scroll edge, ink edition: the band paints the sheet's own ink
+           solid at the top, fading down the band's tail. Content passing
+           under the pinned bar is covered by real ink while it is actually
+           beneath the header, and the band costs nothing while resting -
+           opacity is pinned at 0% there. With the sheet opaque there is no
+           longer a blurred underlay to fade through, so the gradient alone
+           carries the fade (the glass era's mask image bounded that now-gone
+           backdrop-filter). */
+        background: linear-gradient(to bottom, var(--pf-panel-tint), transparent);
         border-bottom: 1px solid var(--pf-border-soft);
         /* The scroll timeline still owns engagement: it writes
            --pf-scroll-edge (0% at rest, 100% after 24px), and the whole band
@@ -698,7 +668,7 @@
       /* Segmented tab strip - icon + label, active label accent-tinted. Tabs
          are content-sized (uniform internal padding, no equal-width stretch)
          and the strip distributes them with space-evenly. The strip carries no
-         fill or border of its own: it is part of the header's glass, one
+         fill or border of its own: it is part of the header's ink, one
          continuous surface with the sheet behind it. */
       .pf-panel-tabs {
         flex: 1;
@@ -1306,7 +1276,7 @@
       }
     }
 
-    /* - Options (Skip Step, Glass Tint) staged slider rows -
+    /* - Options (Skip Step) staged slider rows -
        Label, the snapped range, and the active value hint share one line;
        the ticks + tips ride under the slider's own extent. */
     .pf-panel-cell.pf-options-cell {

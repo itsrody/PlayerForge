@@ -56,7 +56,7 @@ export async function run({ session, baseUrl, boot }) {
 
   // R4 scroll-edge law, measured on computed styles rather than screenshotted:
   // at the top of the scroll the pinned header must be fully transparent (the
-  // sheet's own tint is the one glass layer - a second painted layer used to
+  // sheet's own ink is the resting surface - a second painted layer would
   // stack over it and read as a darker band), and once content actually
   // scrolls beneath the bar the scroll-driven ramp must have engaged
   // (--pf-scroll-edge off zero, header background no longer transparent).
@@ -75,7 +75,9 @@ export async function run({ session, baseUrl, boot }) {
       return {
         grad: String(cs.backgroundImage).includes("gradient"),
         raw: String(cs.backgroundImage),
-        blur: /blur\(16px\)/.test(String(cs.backdropFilter)),
+        blur: String(cs.backdropFilter) !== "none"
+          ? /blur\(/.test(String(cs.backdropFilter))
+          : false,
         mask: String(cs.maskImage).includes("gradient")
       };
     };
@@ -118,49 +120,51 @@ export async function run({ session, baseUrl, boot }) {
   rows.push({
     name: "R4: scroll-driven solid-to-faded edge band engages over passing content",
     status: !!edge && edge.scrolled.top > 0 && edge.scrolled.edge > 0 && edge.scrolled.alpha > 0
-      && edge.band.grad && edge.band.blur && edge.band.mask && edge.band.raw.includes("0.33") ? "pass" : "fail",
+      // Ink edition: the gradient alone carries the fade (solid -pf-sheet ink
+      // at the rail) - blur and mask are required absent (R1's zero
+      // backdrop-filter budget survives content engagement).
+      && edge.band.grad && !edge.band.blur && !edge.band.mask
+      && edge.band.raw.includes("rgb(14, 14, 16)") ? "pass" : "fail",
     note: !edge ? "panel/header missing" : JSON.stringify({ atRest: edge.atRest, scrolled: edge.scrolled, band: edge.band }),
     ms: null
   });
 
-  // The softened glass scale ships as decided, asserted off the real sheet:
-  // concentric chain R5 (16 outermost, tab one ring in twice) and the blur
-  // pair - measured computed values, per the measured-not-screenshotted law.
-  const glassScale = await session.eval(function main() {
+  // The ink scale ships as decided, asserted off the real sheet: the
+  // concentric chain R5 (16 outermost, descendants derived) and R1's zero
+  // backdrop-filter over the one opaque resting ink - measured computed
+  // values, per the measured-not-screenshotted law.
+  const inkScale = await session.eval(function main() {
     const host = document.querySelector(".pf-shell");
     const panel = host?.shadowRoot?.querySelector(".pf-panel");
     if (!panel) return null;
     const cs = getComputedStyle(panel);
-    return { panelRadius: cs.borderRadius, blur: cs.backdropFilter };
+    return { panelRadius: cs.borderRadius, blur: cs.backdropFilter, ink: cs.backgroundColor };
   });
   rows.push({
-    name: "glass scale: softened radii + blur land as declared",
-    status: !!glassScale && glassScale.panelRadius === "16px" && /blur\(24px\)/.test(glassScale.blur) ? "pass" : "fail",
-    note: glassScale ? JSON.stringify(glassScale) : "panel missing",
+    name: "ink scale: concentric radius + zero blur on the opaque sheet",
+    status: !!inkScale && inkScale.panelRadius === "16px" && inkScale.blur === "none"
+      && inkScale.ink === "rgb(14, 14, 16)" ? "pass" : "fail",
+    note: inkScale ? JSON.stringify(inkScale) : "panel missing",
     ms: null
   });
 
-  // Golden Gate alignment, measured per the contrast law: the three glass
-  // tint presets drive the REAL staged slider (the options widget) - the
-  // last step re-selects Medium, the schema default, so the case leaves the
-  // setting in place - and each must land its exact declared alpha.
-  const tintPresets = await session.eval(function main() {
+  // The options-row grammar, measured on the real staged slider (the only
+  // options row left after ui.glassTint retired with the glass era): label
+  // left, bare snapped range, active value hint right - all three on one
+  // line, no tick tips on the slider itself.
+  const optionsGrammar = await session.eval(function main() {
     const host = document.querySelector(".pf-shell");
     const panel = host?.shadowRoot?.querySelector(".pf-panel");
     if (!panel) return null;
-    const slider = panel.querySelector('input[aria-label="Glass Tint"]');
+    const slider = panel.querySelector('input[aria-label="Skip Step"]');
     if (!slider) return null;
     const step = (index) => {
       slider.value = index;
       slider.dispatchEvent(new Event("input", { bubbles: true }));
-      return getComputedStyle(panel).backgroundColor;
+      return panel.querySelector('input[aria-label="Skip Step"]')?.closest(".pf-options-cell")?.querySelector(".pf-options-hint")?.textContent ?? null;
     };
-    const clear = step(0);
-    const opaque = step(2);
-    const medium = step(1);
-    // The options-row grammar rides the same slider: label left, bare
-    // snapped range, active value hint right - all three on one line, no
-    // tick tips on the slider itself.
+    const to = step(2);
+    const back = step(0);
     const cell = slider.closest(".pf-options-cell");
     const grammar = !cell ? null : {
       line: getComputedStyle(cell).flexDirection,
@@ -168,25 +172,16 @@ export async function run({ session, baseUrl, boot }) {
       hint: cell.querySelector(".pf-options-hint")?.textContent,
       tips: cell.querySelectorAll(".pf-stage-ticks, .pf-stage-labels").length
     };
-    return { clear, opaque, medium, grammar };
+    return { to, back, grammar };
   });
   rows.push({
-    name: "goldengate: glass tint presets land their declared alphas",
-    status: !!tintPresets
-      && /\.?44/.test(String(tintPresets.clear).replace("color(srgb 0 0 0 / ", ""))
-      && /\.?72/.test(String(tintPresets.opaque))
-      && /\.?58/.test(String(tintPresets.medium)) ? "pass" : "fail",
-    note: tintPresets ? JSON.stringify(tintPresets) : "panel missing",
-    ms: null
-  });
-  rows.push({
-    name: "goldengate: options rows read label left, hint right, no tick tips",
-    status: !!tintPresets?.grammar
-      && tintPresets.grammar.line === "row"
-      && tintPresets.grammar.label === "Glass Tint"
-      && tintPresets.grammar.hint === "Medium"
-      && tintPresets.grammar.tips === 0 ? "pass" : "fail",
-    note: tintPresets?.grammar ? JSON.stringify(tintPresets.grammar) : "panel missing",
+    name: "options rows read label left, hint right, no tick tips",
+    status: !!optionsGrammar?.grammar
+      && optionsGrammar.grammar.line === "row"
+      && optionsGrammar.grammar.label === "Skip Step"
+      && optionsGrammar.grammar.hint === "5s"
+      && optionsGrammar.grammar.tips === 0 ? "pass" : "fail",
+    note: optionsGrammar ? JSON.stringify(optionsGrammar) : "panel missing",
     ms: null
   });
 

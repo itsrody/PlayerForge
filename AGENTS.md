@@ -337,47 +337,48 @@ launch (§8).
 
 ## 6. HUD design law (binds any visual change)
 
-Still in force from the design process; `src/shell/chrome/styles.css` is the
-only surface, scales/tokens `@property`-typed, gradients banned in the HUD:
+Still in force from the design process — rewritten ink-style by user direction
+(the glass era's audit, budget, and contrast machinery are history below);
+`src/shell/chrome/styles.css` is the only surface, scales/tokens
+`@property`-typed, gradients banned in the HUD:
 
-- **R1 Glass budget: at most two `backdrop-filter` surfaces + one sanctioned
-  blur band** — panel + toast, plus the R4 scroll-edge band's masked blur
-  (user direction): the band fades in/out per R4, so it only costs while
-  content actually passes under the pinned header. A fourth surface is a
-  redesign decision with its own justification.
-- **R3 One resting tint (`--pf-glass-tint`), unchanged by focus** — the
-  material's two-state split (resting vs `--pf-glass-tint-focus`, 76%) was
-  retired by user direction: the panel keeps the same tint whether or not it
-  holds focus, and no control paints a highlight border merely for focus
-  (keyboard `:focus-visible` outlines on controls stay). Which tint rests is a
-  *user choice*, not a state branch: the `ui.glassTint` setting rides three
-  measured presets on `--pf-tint-alpha` (Clear 44% / Medium 58% / Opaque 72%,
-  the macOS 27 Golden Gate alignment; in-between levels are unoffered because
-  unmeasured), and one tick in R1 applies.
-- **R4 Every scrollable glass surface needs a scroll edge** — content
-  scrolling beneath a pinned control is obscured; not a blanket scrim.
-  Realized scroll-driven (the floor's scroll timelines register a
-  `--pf-scroll-edge` share): the panel header is fully transparent at the
-  top of the scroll and ramps its darker edge-ink band in only over passing
-  content — a solid-to-faded gradient of the sheet's ink at a per-preset
-  edge alpha (`--pf-edge-alpha`; GLASS_TINTS edge shares make the band over
-  the body composite land exactly one notch, +14pt, darker than the body
-  read) plus masked blur — so the resting header cannot go darker than the
-  body until content actually passes under it.
+- **R1 Ink budget: zero `backdrop-filter` surfaces, anywhere.** Every sheet —
+  panel, toast, and every in-panel control — paints opaque ink or a flat
+  surfacing on top of it; the compositor never blurs video under HUD geometry
+  (the glass era paid a per-frame `blur(16/24px) saturate(1.7/1.8)` on its two
+  sheets plus a masked band; that cost is why ink won the resource audit). A
+  `backdrop-filter` returning is a redesign decision with its own justification.
+- **R3 One resting ink (`--pf-sheet: #0e0e10`), unchanged by focus** — opaque,
+  content-independent; text legibility is a fixed material property (white on
+  the ink ≈ 18.9:1, the 64% secondary ≈ 9.9:1 — both past WCAG AAA at 7:1 over
+  any video). The `ui.glassTint` setting (Clear/Medium/Opaque alphas on
+  `--pf-tint-alpha`, GLASS_TINTS) is *retired*: translucency was the only thing
+  it could parameterize, and the glass era's two-state focus split was already
+  retired before it. Stale stored `ui.glassTint` keys stay harmlessly unread
+  (the schema coerce ignores unknown keys).
+- **R4 Every scrollable sheet keeps its scroll edge** — the pinned panel
+  header rides the one sanctioned gradient: solid ink at the rail fading down
+  a 24px tail, engaged by the scroll timeline at `--pf-scroll-edge` only while
+  content actually passes under it (0% at rest — the band paints nothing).
+  No blur, no mask: with the sheet opaque the gradient alone carries the fade,
+  and the weaker-era "one notch darker" derivation died with the transparency
+  it arbitrated.
 - **R5 Nested radii are concentric and derived:** container radius R with
   inset padding P → inset elements use R − P (panel 16 → strip/close 8 →
   tab 5). Derived, not chosen, so container changes stay correct.
 - **R6 The panel (sheet) has the largest radius in the HUD (16px).**
 - **R7 Section headers are title case** (no uppercase transform).
 - **R9 Every HUD change needs a measured contrast assertion**, not a
-  screenshot. Geometry (resting radii, control positions) may not move as a
+  screenshot. The opaque ink makes the assertion content-independent (spectral
+  ratios above); geometry (resting radii, control positions) may not move as a
   side effect of appearance work.
-- The current set is tint + blur + hairline border + rim shadows, **zero
-  linear-gradients with one sanctioned exception**: the R4 scroll-edge band
-  is a single solid-to-faded linear-gradient (user direction) — the only
-  gradient permitted in the HUD — rim highlights present (`--pf-header-rim`,
-  inset highlights), two blur layers (`--pf-blur-sm/lg` = `blur(16px)
-  saturate(1.7)` / `blur(24px) saturate(1.8)`).
+- The current set is **opaque ink + hairline border + rim shadows + one soft
+  drop shadow** (`--pf-sheet-shadow`, slimmed from the glass era's 48px blur —
+  sheet separation over arbitrary video stays, the paint is now cheap),
+  **zero linear-gradients with one sanctioned exception**: the R4 scroll-edge
+  band is the single solid-to-faded linear-gradient — the only gradient
+  permitted in the HUD. Rim highlights present (`--pf-header-rim`, inset
+  highlights). Zero blur layers.
 
 ## 7. check/ — the testing tool
 

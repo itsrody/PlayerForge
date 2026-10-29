@@ -7,7 +7,7 @@ import { ResumeTracker } from "./resume.js";
 import { SubtitleSession, SubtitlesSection, subtitleSync } from "./subtitles/subtitles.js";
 import { VideoFilter, FilterSession } from "./filter.js";
 import { SettingsPanel, addSettingsSection, addHistorySection } from "./chrome/panel.js";
-import { getSetting, SETTING_KEYS, GLASS_TINTS, onSettingsChanged } from "./chrome/config.js";
+import { getSetting, SETTING_KEYS } from "./chrome/config.js";
 import { TUNING } from "../shared/core.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls, WakeLockSession, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
@@ -180,7 +180,6 @@ export class Shell {
       },
       () => this.#setupFocusManagement(),
       () => this.#suppressContextMenu(),
-      () => this.#applyGlassTint(),
       () => this.#forwardMediaEvents(),
       () => this.#watchMediaErrors(),
       () => {
@@ -336,24 +335,6 @@ export class Shell {
       event.preventDefault();
       event.stopPropagation();
     }, { capture: true });
-  }
-
-  /**
-   * Glass tint (the Clear/Medium/Opaque presets): two registered percentages
-   * written onto the host, which the shadow's color-mix consumes - the body
-   * sheet's tint and the scroll-edge band's darker ink share (see
-   * GLASS_TINTS). Re-applied on any settings change - the cross-tab echo
-   * already dedupes own writes - and foreign or stale values ride the
-   * schema coerce to Medium.
-   */
-  #applyGlassTint() {
-    const apply = () => {
-      const definition = GLASS_TINTS[getSetting(SETTING_KEYS.glassTint)] ?? GLASS_TINTS.medium;
-      this.shellHost.style.setProperty("--pf-tint-alpha", definition.alpha);
-      this.shellHost.style.setProperty("--pf-edge-alpha", definition.edge);
-    };
-    apply();
-    onSettingsChanged(apply, { signal: this.#scope.signal });
   }
 
   /** Keep focus on the shell host when pointer interactions happen inside it. */

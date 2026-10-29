@@ -118,6 +118,15 @@ export async function run({ session, baseUrl, boot }) {
   status(rows, "ArrowUp raises volume through pf:gesture-volume", await session.eval(function main() {
     return window.__pfEvents.includes("volume") && document.querySelector("#check-video").volume > 0;
   }), "no volume event or element unchanged");
+  // The completed-action gesture toasts (flashMs window is still open): the
+  // toast sheet must paint the same opaque ink with zero backdrop-filter as
+  // the panel - R1 counts both floating sheets.
+  status(rows, "toast sheet paints opaque ink with zero backdrop-filter", await session.eval(function main() {
+    const toast = document.querySelector(".pf-shell")?.shadowRoot?.querySelector("pf-toast.pf-visible");
+    if (!toast) return false;
+    const cs = getComputedStyle(toast);
+    return cs.backdropFilter === "none" && cs.backgroundColor === "rgb(14, 14, 16)";
+  }), "no live toast or computed style not the ink shape");
 
   // Keyboard panel open via KeyS.
   await fireKeys(["KeyS"]);
@@ -127,6 +136,16 @@ export async function run({ session, baseUrl, boot }) {
     return host !== null && host.shadowRoot !== null &&
       host.shadowRoot.querySelector(".pf-panel.pf-open") !== null;
   }), "panel element still closed");
+  // Ink law proof, open panel (R1/R3/R6): the sheet is opaque ink with zero
+  // composited blur - the glass era's per-frame backdrop-filter over live
+  // video is required gone by the budget, and the resting sheet must be the
+  // exact --pf-sheet value, unchanged by open state.
+  status(rows, "open sheet paints opaque ink with zero backdrop-filter", await session.eval(function main() {
+    const panel = document.querySelector(".pf-shell")?.shadowRoot?.querySelector(".pf-panel.pf-open");
+    if (!panel) return false;
+    const cs = getComputedStyle(panel);
+    return cs.backdropFilter === "none" && cs.backgroundColor === "rgb(14, 14, 16)";
+  }), "computed backdrop-filter/read not the ink shape");
   // Close it again: the open panel's modal shield eats pointer input, which
   // would starve the scrub probe below.
   await fireKeys(["KeyS"]);
