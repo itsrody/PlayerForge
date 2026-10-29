@@ -291,9 +291,11 @@ export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_V
   // alone can never re-qualify one. The native autostatechange event is the
   // exact reveal signal; a document-level capture listener catches its
   // non-bubbling dispatch without a per-target listener that would otherwise
-  // pin a detached, never-sized video. Guarded so a host without a global
-  // document (the unit harness before it installs one) still constructs.
-  const doc = typeof document !== "undefined" ? document : null;
+  // pin a detached, never-sized video. The gate family's probe stays
+  // (ResizeObserver-above absence exercises the sync fallback), but the
+  // document itself needs no guard: every consumer constructs against a real
+  // Chromium frame, and the unit-harness host the old `typeof document` arm
+  // answered died with the tool-era retirement.
   return new PresenceGate({
     prune,
     createObserver: typeof ResizeObserver === "function"
@@ -319,7 +321,7 @@ export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_V
       // controller's abort, the same native drop every other listener in the
       // tree gets - no manual capture removeEventListener pairing.
       const ac = new AbortController();
-      doc?.addEventListener("contentvisibilityautostatechange", onReveal, { capture: true, signal: ac.signal });
+      document.addEventListener("contentvisibilityautostatechange", onReveal, { capture: true, signal: ac.signal });
       return () => ac.abort();
     }
   });
@@ -329,17 +331,18 @@ export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_V
  * Synchronous viewport-presence check. Uses the element's client rect - the
  * caller has usually just measured it, so a second read with no intervening
  * write is served from the same layout - against the layout viewport with a
- * lookahead margin. When viewport size is unknown (no window, or a harness
- * reporting zero inner sizes) it reports present, so missing viewport
- * information can only make adoption more permissive, never strand a player.
+ * lookahead margin. A zero viewport (a runtime fact, not an environment one
+ * - headless and instrumented embeds can both report 0) reports present, so
+ * missing viewport data can only make adoption more permissive, never strand
+ * a player. The old `typeof window` arm died with the retired unit-harness
+ * host that was its only other premise.
  */
 export function isOnScreen(el, margin = ON_SCREEN_MARGIN_PX) {
   if (!el || typeof el.getBoundingClientRect !== "function") {
     return true;
   }
-  const win = typeof window !== "undefined" ? window : null;
-  const vw = win?.innerWidth || win?.document?.documentElement?.clientWidth || 0;
-  const vh = win?.innerHeight || win?.document?.documentElement?.clientHeight || 0;
+  const vw = window.innerWidth || window.document.documentElement.clientWidth || 0;
+  const vh = window.innerHeight || window.document.documentElement.clientHeight || 0;
   if (!vw || !vh) {
     return true;
   }
