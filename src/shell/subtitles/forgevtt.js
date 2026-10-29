@@ -18,7 +18,7 @@ const CUE_TEXT_RE = /<\/?[a-zA-Z][^>]*>|&(?:amp|lt|gt|nbsp|lrm|rlm);|&#(?:x[0-9a
 const BOM_RE = /^\uFEFF/;
 const CRLF_RE = /\r\n?/g;
 
-export function normalizeText(raw) {
+function normalizeText(raw) {
   // NFC at the boundary: composed accents keep matching/timing stable no
   // matter how the source encoded them.
   return raw.normalize("NFC").replace(BOM_RE, "").replace(CRLF_RE, "\n");
@@ -80,7 +80,7 @@ function isDigitCode(c) {
   return c >= ZERO && c <= NINE;
 }
 
-export function timecodeToSeconds(timecode) {
+function timecodeToSeconds(timecode) {
   const n = timecode.length;
   let f = -1;
   let colons = 0;
@@ -437,7 +437,7 @@ export async function parseSubtitlesAsync(text, offset = 0) {
   return sortCues(cues);
 }
 
-export function sortCues(cues) {
+function sortCues(cues) {
   cues.sort((a, b) => a.start - b.start);
   return cues;
 }

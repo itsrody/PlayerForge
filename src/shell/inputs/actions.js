@@ -46,7 +46,7 @@ const HAPTIC_PATTERNS = {
 const canVibrate = typeof navigator?.vibrate === "function";
 
 /** Fire the haptic pulse for `type` when armed (setting, motion, activation). */
-export function gestureHaptic(type) {
+function gestureHaptic(type) {
   if (!canVibrate || !getSetting(SETTING_KEYS.haptics)) {
     return;
   }
@@ -573,7 +573,7 @@ export function easeTransformTo(video, transform) {
  * the reference box. Guards return 0 so the caller skips fill when the video
  * size or reference isn't known yet.
  */
-export function computeCoverScale(video, ref) {
+function computeCoverScale(video, ref) {
   const videoWidth = video.videoWidth;
   const videoHeight = video.videoHeight;
   if (!videoWidth || !videoHeight) {

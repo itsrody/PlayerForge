@@ -15,7 +15,7 @@ export { SHELL_MARKER };
  * (replaceSync in place, propagating to every adopted reference), and its
  * adoption into the document. The three loose variables it replaced are
  * private fields so "adopted once, upgraded monotonically" is one object's
- * story; warmStyles()/ensureStyles()/injectShell() stay plain-call façades.
+ * story; warmStyles()/injectShell() stay plain-call façades.
  */
 class ShellStyle {
   #sheet = null;
@@ -227,16 +227,6 @@ const CONTAINER_POCKET_CSS = `
  */
 export function warmStyles() {
   return style.warm();
-}
-
-/**
- * Resolve the authoritative (post-@resource) stylesheet. Never rejects; a
- * failed/absent fetch resolves to the embedded sheet. NOT the shell's critical
- * path - shells should adopt via warmStyles() so dimming never blocks.
- */
-export function ensureStyles() {
-  warmStyles();
-  return style.settled();
 }
 
 /**

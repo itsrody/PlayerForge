@@ -165,11 +165,11 @@ export class ZoomState {
 }
 
 /** The zoom steppers' formatter: "1.4x" for scale, signed % for pan. */
-export function fmtZoomScale(v) {
+function fmtZoomScale(v) {
   return `${Math.round(v * 100) / 100}x`;
 }
 
-export function fmtZoomPan(v) {
+function fmtZoomPan(v) {
   const rounded = Math.round(v);
   return rounded === 0 ? "0%" : `${rounded > 0 ? "+" : ""}${rounded}%`;
 }

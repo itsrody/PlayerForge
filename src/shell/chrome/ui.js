@@ -145,7 +145,7 @@ function canonicalName(name) {
  * One cached entry per canonical icon per document: the template element
  * parsed from the static markup once, in the requesting document, inside a
  * document-keyed WeakMap (so a document swap frees its whole map, and no doc
- * pin lives on the store). iconMarkup and createIconElement both derive from
+ * pin lives on the store). createIconElement derives from
  * this store, so a repeated icon never re-parses whether it is shipped as a
  * string (toast) or a DOM element (panel/history); the only cost for the
  * element path after the first use is a cheap cloneNode. Parsing happens in
@@ -182,17 +182,6 @@ function parsedIcon(canonical, doc) {
     } catch {}
   }
   return el;
-}
-
-/**
- * SVG markup string for an icon, or null for an unknown name. Provided for
- * callers that must inject markup directly (e.g. templates); DOM-inserting
- * callers should prefer createIconElement, which clones a parsed template
- * instead of re-parsing HTML on every use.
- */
-export function iconMarkup(name) {
-  const canonical = canonicalName(name);
-  return canonical ? ICONS[canonical] : null;
 }
 
 /**

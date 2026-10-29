@@ -40,7 +40,7 @@ const ON_SCREEN_MARGIN_PX = 256;
  * where shadow-DOM hosts retarget event.target away from the actual video
  * (open roots only; closed roots are unreachable by design).
  */
-export function videoFromEvent(event) {
+function videoFromEvent(event) {
   const target = event.target;
   if (target?.localName === "video") {
     return target;
@@ -110,7 +110,7 @@ export function forEachVideoInDocument(visit) {
  * old "hosts without the API report present" arm answered the retired jsdom
  * host and pre-floor engines, so the call is unconditional now.
  */
-export function hasPresentBox(el) {
+function hasPresentBox(el) {
   return el.checkVisibility({
     contentVisibilityAuto: true,
     opacityProperty: true,
@@ -371,7 +371,7 @@ export function createOnScreenGate({ rootMargin = `${ON_SCREEN_MARGIN_PX}px`, pr
  * listeners itself - no manual unsubscribe needed for pagehide teardown. The
  * returned function stays available for early / signal-free teardown.
  */
-export function watchMediaEvents(onVideo, { signal } = {}) {
+function watchMediaEvents(onVideo, { signal } = {}) {
   const onMediaEvent = (event) => {
     const video = videoFromEvent(event);
     if (video) {

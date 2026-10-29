@@ -43,14 +43,14 @@ export function gmUnregisterMenu(handle) {
   GM_unregisterMenuCommand(handle);
 }
 
-export function gmAddValueChangeListener(key, callback) {
+function gmAddValueChangeListener(key, callback) {
   if (typeof GM_addValueChangeListener !== "function") {
     return null;
   }
   return GM_addValueChangeListener(key, callback);
 }
 
-export function gmRemoveValueChangeListener(handle) {
+function gmRemoveValueChangeListener(handle) {
   if (handle == null || typeof GM_removeValueChangeListener !== "function") {
     return;
   }

@@ -64,7 +64,7 @@ function toFixedShape(incoming) {
  * merging keeps concurrent shells/tabs - and any future whole-blob transport -
  * converging without clobbering each other's entries.
  */
-export class ResumeStore {
+class ResumeStore {
   #state = null;
   #loaded = false;
   /** storage watchStorageKey handle for the cross-tab change subscription. */

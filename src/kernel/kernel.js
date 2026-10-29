@@ -83,7 +83,7 @@ function whenDomSettled(container, options) {
  * Formerly registry.js; kept as a class (not collapsed into Kernel privates)
  * because its displacement/onEmpty contract is pinned by dedicated unit tests.
  */
-export class ShellSlot {
+class ShellSlot {
   #current = null;
   #onEmpty;
 

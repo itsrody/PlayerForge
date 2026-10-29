@@ -291,11 +291,6 @@ export function parseSubtitlesAsync(text, offset = 0, throughWorker = false) {
   return transport.parse(text, offset, throughWorker);
 }
 
-/** Exported for the harness: whether this environment could use a Worker. */
-export function workerParseAvailable() {
-  return transport.available();
-}
-
 /* - Track renderer - */
 const STACK_OVERLAP_EM = 1.6;
 const MAX_SLOTS = 8;

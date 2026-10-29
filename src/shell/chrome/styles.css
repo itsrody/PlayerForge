@@ -954,11 +954,6 @@
           font-size: var(--pf-font-xs);
           color: var(--pf-text-soft);
         }
-
-        .pf-panel-value {
-          min-width: 0;
-          font-size: var(--pf-font-xs);
-        }
       }
 
       /* Compact inline cells (Subtitles style grid) - label | control |
@@ -979,12 +974,6 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-          }
-
-          .pf-panel-value {
-            flex: none;
-            min-width: 30px;
-            font-size: var(--pf-font-xs);
           }
 
           /* Color-swatch cell has no filling element - spread label / swatch /

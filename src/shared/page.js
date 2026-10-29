@@ -271,9 +271,9 @@ export function hashEntry(domainKey, path, duration) {
  * derive from ONE prefix, so the gate can never drift from what it vets.
  */
 const BRIDGE_MSG_PREFIX = "pf:";
-export const CTX_REQUEST_TYPE = `${BRIDGE_MSG_PREFIX}ctx-request`;
-export const CTX_RESPONSE_TYPE = `${BRIDGE_MSG_PREFIX}ctx`;
-export const FS_REQUEST_TYPE = `${BRIDGE_MSG_PREFIX}req-fullscreen`;
+const CTX_REQUEST_TYPE = `${BRIDGE_MSG_PREFIX}ctx-request`;
+const CTX_RESPONSE_TYPE = `${BRIDGE_MSG_PREFIX}ctx`;
+const FS_REQUEST_TYPE = `${BRIDGE_MSG_PREFIX}req-fullscreen`;
 
 const TITLE_TAGS = /(?:^|[- ])(?:uncensored|uncut|leaked|censored|raw|bd|hdrip|dvdrip|webrip|bluray|remux|cam|reduc(?:ing)?\s*mosaic|english\s*subtitle)/gi;
 const RECORDING_CODE_RE = /^\[([A-Z]+-\d+)(?:-[^\]]*)?\]/;
@@ -494,8 +494,8 @@ class ContextPipe {
 
 const pipeState = new ContextPipe();
 
-/** Test + teardown seam: drop the persistent pipe and legacy memo. */
-export function stopContextPipe() {
+/** Lifecycle seam: drop the persistent pipe and legacy memo. */
+function stopContextPipe() {
   pipeState.stop();
 }
 
@@ -689,7 +689,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
 /* - 4. Frame bridge - */
 
 const NONCE_TTL_MS = 5000;
-export const CTX_REQUEST_TIMEOUT_MS = 3000;
+const CTX_REQUEST_TIMEOUT_MS = 3000;
 /** How long a context pipe stays registered without a request before it is dropped. */
 const CTX_PIPE_IDLE_MS = 60_000;
 
@@ -699,7 +699,7 @@ const CTX_PIPE_IDLE_MS = 60_000;
  * reached from three event flows (the window message, per-pipe message and
  * messageerror listeners, and the idle sweep). Here the Map and the verbs are
  * private members of one instance (the FullscreenProvisioner shape), and the
- * exported createTopFrameResponder stays the thin event-handler wrapper.
+ * createTopFrameResponder stays the thin event-handler wrapper.
  *
  * Handler for the top frame: answers validated context requests. Context is
  * resolved per request (not captured at install time) so late titles and SPA
@@ -812,7 +812,7 @@ class TopFrameResponder {
   }
 }
 
-export function createTopFrameResponder(resolveContext, ownOrigin = location.origin, post = defaultPostToSource) {
+function createTopFrameResponder(resolveContext, ownOrigin = location.origin, post = defaultPostToSource) {
   const responder = new TopFrameResponder(resolveContext, ownOrigin, post);
   return (event) => responder.handle(event);
 }
@@ -824,7 +824,7 @@ function defaultPostToSource(source, message, origin) {
 /**
  * One owner of the relay's nonce ledger (the responder-class shape for the
  * nested-frame role). The pending map and its TTL sweep are private to the
- * instance; the exported createFrameRelay stays the thin event-handler
+ * instance; the createFrameRelay stays the thin event-handler
  * wrapper.
  *
  * Handler for nested frames: relays requests upward and answers back down.
@@ -884,7 +884,7 @@ class FrameRelay {
   }
 }
 
-export function createFrameRelay() {
+function createFrameRelay() {
   const relay = new FrameRelay();
   return (event) => relay.handle(event);
 }
@@ -1163,7 +1163,7 @@ class FullscreenProvisioner {
  * Handler for the top frame: grant allowfullscreen on the direct child iframe
  * that asked, then stop (no parent). Vouched by an own-child match.
  */
-export function createTopFrameProvisioner() {
+function createTopFrameProvisioner() {
   const provisioner = FullscreenProvisioner.topFrame();
   return (event) => provisioner.handle(event);
 }
@@ -1174,7 +1174,7 @@ export function createTopFrameProvisioner() {
  * The child is vouched the same way - only an iframe this document owns gets
  * its allowlist expanded.
  */
-export function createFrameProvisioner() {
+function createFrameProvisioner() {
   const provisioner = FullscreenProvisioner.relay();
   return (event) => provisioner.handle(event);
 }
