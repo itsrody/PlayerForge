@@ -29,6 +29,7 @@ async function recordGestureEvents(session) {
     host.addEventListener("pf:gesture-panel", () => window.__pfEvents.push("panel"));
     host.addEventListener("pf:gesture-pip", () => window.__pfEvents.push("pip"));
     host.addEventListener("pf:gesture-dbltap", () => window.__pfEvents.push("dbltap"));
+    host.addEventListener("pf:gesture-hold", (e) => window.__pfEvents.push("hold:" + e.detail.zone));
     host.addEventListener("pf:gesture-swipe-start", () => window.__pfEvents.push("swipe-start"));
     host.addEventListener("pf:gesture-swipe", (e) => window.__pfEvents.push("swipe:" + e.detail.direction));
     host.addEventListener("pf:gesture-pinch", (e) => window.__pfEvents.push("pinch:" + e.detail.direction));
@@ -105,6 +106,51 @@ export async function run({ session, baseUrl, boot }) {
     const t = document.querySelector("#check-video").currentTime;
     return window.__pfEvents.includes("skip") && t > 0 && t < 4;
   }), "skip event or backward step missing");
+
+  // Inline (fs gate closed), the edge-skip path is fs-gated end-to-end:
+  // resolves a left-edge zone for a real edge press, double-taps there, and
+  // requires NO dbltap/skip dispatch - the claimed plain taps fall through
+  // to the immediate tail replay instead (the inline repair path, driven
+  // with real pointer input).
+  await session.eval(function main() {
+    window.__pfEvents = [];
+    document.querySelector("#check-video").play();
+  });
+  const edgePoint = await session.eval(function main() {
+    const r = document.querySelector("#check-video").getBoundingClientRect();
+    return { x: Math.round(r.left + 8), y: Math.round(r.top + r.height / 2) };
+  });
+  await acts()
+    .move({ origin: "viewport", x: edgePoint.x, y: edgePoint.y }).press().pause(30).release()
+    .pause(100)
+    .move({ origin: "viewport", x: edgePoint.x, y: edgePoint.y }).press().pause(30).release()
+    .pause(250)
+    .perform();
+  await new Promise((r) => setTimeout(r, 300));
+  status(rows, "inline edge dbltap stays fs-gated: no dbltap/skip dispatch", await session.eval(function main() {
+    return !window.__pfEvents.includes("dbltap") && !window.__pfEvents.includes("skip");
+  }), `events=${JSON.stringify(await session.eval(function main() {
+    return window.__pfEvents;
+  }))}`);
+  // The zone plane fs-honesty: an inline edge press reports the viewport-
+  // honest left-edge zone through the hold telemetry (screen-relative it
+  // would still mean the real physical edge), and a center press reads
+  // "screen" - both carried by the fs:false hold gesture, real input.
+  await session.eval(function main() {
+    window.__pfEvents = [];
+    document.querySelector("#check-video").play();
+  });
+  await acts()
+    .move({ origin: "viewport", x: edgePoint.x, y: edgePoint.y }).press().pause(450).release()
+    .pause(200)
+    .move({ origin: "viewport", x: Math.round(center.x), y: Math.round(center.y) }).press().pause(450).release()
+    .pause(200)
+    .perform();
+  status(rows, "inline hold reports viewport-honest edge/screen zones", await session.eval(function main() {
+    return window.__pfEvents.includes("hold:left-edge") && window.__pfEvents.includes("hold:screen");
+  }), `events=${JSON.stringify(await session.eval(function main() {
+    return window.__pfEvents;
+  }))}`);
 
   await fireKeys(["KeyM"]);
   await new Promise((r) => setTimeout(r, 350));

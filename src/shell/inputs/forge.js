@@ -1068,12 +1068,20 @@ export class InputForge {
 
   #zoneForPoint(pointerEvent) {
     // Edge zones only steer fullscreen gestures (dbltap edge-skip, swipe-down
-    // exit - both fs-gated), so the reference is the physical display. screen
-    // also sidesteps innerWidth's scrollbar-inclusive quirk on Chromium. The
-    // window fallback answers the headless fact (screen.width 0), not a
-    // missing-global paranoia: `screen` is bound in every Chromium frame.
-    const screenWidth = screen.width > 0
-      ? screen.width
+    // exit - both fs-gated), so while the fs gate is open the reference is
+    // the physical display - screen also sidesteps innerWidth's
+    // scrollbar-inclusive quirk on Chromium and covers the fullscreen-iframe
+    // shape (clientX is viewport-relative and the frame fills the display).
+    // Inline the player occupies only the viewport: a screen-relative verdict
+    // could name edges the player does not have, so the reference becomes the
+    // surface the press actually landed on. Every behavioral zone consumer is
+    // fs-gated (the inline zone is telemetry only - hold/release details and
+    // the press breadcrumbs), which is exactly why fs closing may degrade
+    // the reference instead of breaking a gesture. The window fallback
+    // answers the headless fact (screen.width 0), not a missing-global
+    // paranoia: `screen` is bound in every Chromium frame.
+    const screenWidth = fs
+      ? (screen.width > 0 ? screen.width : window.innerWidth)
       : window.innerWidth;
     if (pointerEvent.clientX < screenWidth * EDGE_ZONE_RATIO) {
       return "left-edge";
@@ -1332,7 +1340,13 @@ export class InputForge {
       // types; the latch-time captures become same-element no-ops, and the
       // pinch transition keeps its deliberate release-with-markers dance.
       this.#pointerOp("setPointerCapture", event.pointerId);
-      logger.log("forge", `press owned: ${event.pointerType}, zone=${this.#gestureZone}`);
+      // The breadcrumb must report the fresh press's zone verdict:
+      // #gestureZone only takes its value in the primary-anchor block below
+      // (kept down there so a pinch second finger cannot overwrite the first
+      // finger's zone), so reading the field here prints the previous
+      // press's reset null - every `zone=null` in the field traces is this
+      // staleness, not a zoneless press.
+      logger.log("forge", `press owned: ${event.pointerType}, zone=${this.#zoneForPoint(event)}`);
       if (allowsIntent("dbltap")) {
         this.#tap.cancel();
       }
