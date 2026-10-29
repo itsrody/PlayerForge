@@ -498,6 +498,48 @@ export async function run({ session, baseUrl, boot }) {
     ms: null
   });
 
+  // The container pockets ride a real <style> element because @container SIZE
+  // rules inside a document-adopted constructable sheet never evaluate their
+  // conditions in this Chromium build (src/shell/chrome/inject.js compiles the
+  // whole pocket as a <style> carrier). This row IS that premise probe: one
+  // always-true @container rule seeded into both carriers, each writing a
+  // distinct declaration of the same custom property. The <style> twin must
+  // light the property; the adopted twin must never reach it (the twin's own
+  // declaration is the sentinel). A Chromium fix that makes the adopted arm
+  // evaluate flips this row and re-opens the pocket's carrier decision.
+  const carrier = await session.evalAsync(async function main(done) {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "container: pf-defect / inline-size; width: 400px;";
+    const target = document.createElement("div");
+    target.className = "pf-defect-target";
+    wrap.appendChild(target);
+    document.body.appendChild(wrap);
+    const text = "@container pf-defect (max-width: 500px) { .pf-defect-target { --pf-defect-inline: 1; --pf-defect-adopted: none; } }";
+    const twin = document.createElement("style");
+    twin.textContent = text;
+    document.head.appendChild(twin);
+    const adopted = new CSSStyleSheet();
+    adopted.replaceSync(text.replace("--pf-defect-inline: 1;", "--pf-defect-adopted: 1;"));
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, adopted];
+    // One frame: a size-container evaluation must have landed before reads.
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const cs = getComputedStyle(target);
+    const result = {
+      inline: cs.getPropertyValue("--pf-defect-inline").trim(),
+      adopted: cs.getPropertyValue("--pf-defect-adopted").trim()
+    };
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((sheet) => sheet !== adopted);
+    twin.remove();
+    wrap.remove();
+    done(result);
+  });
+  rows.push({
+    name: "container carrier premise: adopted sheets never evaluate size containers",
+    status: !!carrier && carrier.inline === "1" && carrier.adopted === "none" ? "pass" : "fail",
+    note: carrier ? JSON.stringify(carrier) : "probe failed to run",
+    ms: null
+  });
+
   // The shell contract must survive a full teardown: drop the current anchor,
   // append a fresh video, and require the kernel to re-anchor onto it - the
   // new video node must carry the shell marker (the old markers on container
