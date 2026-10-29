@@ -31,6 +31,7 @@ async function recordGestureEvents(session) {
     host.addEventListener("pf:gesture-dbltap", () => window.__pfEvents.push("dbltap"));
     host.addEventListener("pf:gesture-swipe-start", () => window.__pfEvents.push("swipe-start"));
     host.addEventListener("pf:gesture-swipe", (e) => window.__pfEvents.push("swipe:" + e.detail.direction));
+    host.addEventListener("pf:gesture-pinch", (e) => window.__pfEvents.push("pinch:" + e.detail.direction));
   });
 }
 
@@ -300,6 +301,41 @@ export async function run({ session, baseUrl, boot }) {
       return ok ? true :
         `transform=${midTransform}, willChange=${willChange}, events=${JSON.stringify(events)}`;
     }), "apex follow compose mismatch");
+
+  // Two-finger pinch under capture-at-press: the recognition contract (and
+  // the no-release-transition contract behind it) - a pinch END must need no
+  // capture dance, so both fingers' streams stay anchored to the zone across
+  // the transition. Synthetic pointer pair for the same reason the swipe row
+  // runs synthetic: the engine contract is the surface this harness can
+  // drive; the compositor touch recognition itself stays device-verified.
+  status(rows, "touch pinch pair: zoom recognition needs no capture release",
+    await session.eval(function main() {
+      const video = document.querySelector("#check-video");
+      if (video === null) return "no video";
+      const rect = video.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const fire = (type, id, x, y, buttons) => video.dispatchEvent(new PointerEvent(type, {
+        pointerId: id,
+        pointerType: "touch",
+        isPrimary: id === 11,
+        button: type === "pointerup" ? -1 : 0,
+        buttons,
+        bubbles: true,
+        cancelable: true,
+        clientX: x,
+        clientY: y,
+      }));
+      fire("pointerdown", 11, cx, cy, 1);
+      fire("pointerdown", 12, cx + 60, cy, 1);
+      fire("pointermove", 11, cx - 20, cy, 1);
+      fire("pointermove", 12, cx + 80, cy, 1);
+      fire("pointerup", 11, cx - 20, cy, 0);
+      fire("pointerup", 12, cx + 80, cy, 0);
+      const events = window.__pfEvents.filter((e) => e.startsWith("pinch"));
+      return events.length === 1 && events[0] === "pinch:out" ? true :
+        `pinch events=${JSON.stringify(events)}`;
+    }), "pinch recognition mismatch");
 
   return rows;
 }

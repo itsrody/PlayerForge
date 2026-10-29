@@ -741,11 +741,6 @@ export class InputForge {
   #pinchStartDistance = 0;
   #pinchFired = false;
   #pinchZone = null;
-  // Pointer ids whose capture we released on purpose (the pinch transition
-  // drops capture so both fingers stream freely); a matching
-  // lostpointercapture must not be mistaken for the browser stealing the
-  // pointer. Cleared per fresh press so recycled ids stay honest.
-  #releasedCapture = new Set();
 
   // Keyboard: the Space press machine owns its own state below; only the
   // cross-code repeat shield set stays engine-owned (bindings + repeats).
@@ -934,7 +929,6 @@ export class InputForge {
     this.#clearHoldTimer();
     this.#videoRect = null;
     this.#pointers.clear();
-    this.#releasedCapture.clear();
     cancelEase(this.#video);
     // DOM lifecycle: disconnect observers, restore styles, remove elements.
     this.#dom.destroy();
@@ -1028,17 +1022,18 @@ export class InputForge {
   #beginPinchTracking() {
     this.#endPointerSession();
     this.#primaryPointerId = null;
-    for (const pointerId of this.#pointers.keys()) {
-      // hasPointerCapture is absent in some embedders; without it, assume the
-      // release may fire so the id is never misread as a stolen pointer.
-      if (typeof this.#zone.hasPointerCapture !== "function" || this.#zone.hasPointerCapture(pointerId)) {
-        this.#releasedCapture.add(pointerId);
-      }
-      this.#pointerOp("releasePointerCapture", pointerId);
-    }
-    // Capture the baseline from the pointerdown lattice itself - both
-    // pointers' latest coords are already in #pointers, so no settle timer is
-    // needed. #pinchZone non-null is the tracking flag.
+    // No capture transition: capture-at-press already anchored BOTH presses
+    // here, and a release is exactly the Android kill chain the anchor
+    // exists to close - dropping explicit capture falls back to implicit
+    // capture on the touched nodes, which SDK overlays re-render away, and
+    // the pointercancels then eat the pinch. The historical release dance
+    // answered the old latch-time capture, which left the second finger
+    // streaming on its own node; that premise died with capture-at-press.
+    // Two pointers captured on one element is native pointer-events: both
+    // streams retarget here in full until each ends.
+    // Baseline comes from the pointerdown lattice itself - both pointers'
+    // latest coords are already in #pointers, so no settle timer is needed.
+    // #pinchZone non-null is the tracking flag.
     this.#pinchStartDistance = 0;
     this.#pinchFired = false;
     this.#pinchZone = this.#gestureZone || "screen";
@@ -1183,10 +1178,8 @@ export class InputForge {
     // every page scroll for the whole shell lifetime).
     this.#videoRect = null;
     // Any new press invalidates a stale await latch from a drag that never
-    // produced a click (no settle timer to expire it), and clears any stale
-    // intentional-capture-release marker for a recycled pointer id.
+    // produced a click (no settle timer to expire it).
     this.#clearAwaitClick();
-    this.#releasedCapture.delete(event.pointerId);
     // One rejection verdict per press, short-circuiting in the same order the
     // compound guard ran: the verdict string is the #pf-debug breadcrumb that
     // tells a device run WHY the recognizer never saw the press.
@@ -1320,8 +1313,6 @@ export class InputForge {
           logger.log("forge", `scrub latch (dx=${dx}, dy=${dy})`);
           // event.timeStamp shares the timebase the per-move velocity filter
           // below already reads, so the whole move stream pays no clock read.
-          // event.timeStamp shares the timebase the per-move velocity filter
-          // below already reads, so the whole move stream pays no clock read.
         } else if (allowsIntent("swipe") && dy > SCROLL_START_PX && dy > dx * AXIS_DOMINANCE_RATIO) {
           this.#swipe.latch(event.clientY > this.#startY ? "down" : "up");
           this.#gestureFsActive = true;
@@ -1422,13 +1413,9 @@ export class InputForge {
   /**
    * The browser reclaimed a captured pointer with no pointerup/pointercancel
    * (capture target removed, hit-test takeover). That press is over and no
-   * click will follow, so reclaim it through the same cancellation path -
-   * unless the release was our own pinch transition.
+   * click follows, so reclaim it through the same cancellation path.
    */
   #handleLostCapture(event) {
-    if (this.#releasedCapture.delete(event.pointerId)) {
-      return;
-    }
     if (this.#pointers.has(event.pointerId)) {
       logger.log("forge", `capture lost mid-session, reclaiming pointer ${event.pointerId}`);
       this.#cancelTrackedPointer(event.pointerId);
