@@ -496,11 +496,6 @@ class ContextPipe {
 
 const pipeState = new ContextPipe();
 
-/** Lifecycle seam: drop the persistent pipe and legacy memo. */
-function stopContextPipe() {
-  pipeState.stop();
-}
-
 /** Private one-shot context request over an established pipe: no broadcast,
  *  no transfer, no retry - the pipe is live and dedicated. Times out (and
  *  drops the dead pipe) instead of queueing, so the caller can fall back. */
@@ -1265,10 +1260,12 @@ export function installContextBridge() {
     }
   }, { signal: ac.signal });
 
-  // Torn down with the bridge.
+  // Torn down with the bridge: the abort tears down THIS document's
+  // listeners; the pipe state dies with them so a rebooted document starts
+  // pipeless instead of inheriting ports from the torn-down session.
   return () => {
     ac.abort();
-    stopContextPipe();
+    pipeState.stop();
   };
 }
 /* - 5. Navigation - */
