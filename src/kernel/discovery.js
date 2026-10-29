@@ -106,18 +106,16 @@ export function forEachVideoInDocument(visit) {
  * covers the case the old two-option call missed - a `content-visibility:
  * auto` player scrolled out of view keeps a layout placeholder (non-zero box)
  * but is skipped from rendering, so a stale size would wrongly admit it.
- * Feature-detected: hosts without checkVisibility (jsdom, older engines) report
- * present, so removal of the API can only make us more permissive, never less -
- * it gates both size admission and the probe's escalation decision, and a false
- * "present" costs at most the work we did before the check existed.
+ * checkVisibility is floor-guaranteed (Chromium 105, ship floor 156): the
+ * old "hosts without the API report present" arm answered the retired jsdom
+ * host and pre-floor engines, so the call is unconditional now.
  */
 export function hasPresentBox(el) {
-  return typeof el.checkVisibility !== "function"
-    || el.checkVisibility({
-      contentVisibilityAuto: true,
-      opacityProperty: true,
-      visibilityProperty: true
-    });
+  return el.checkVisibility({
+    contentVisibilityAuto: true,
+    opacityProperty: true,
+    visibilityProperty: true
+  });
 }
 
 /** Shared synchronous adoption gate: the measured box must reach min size. */
@@ -162,13 +160,16 @@ function entryBoxSize(entry) {
  * the same step shape: register an element + callback in a WeakMap, let ONE
  * observer fire the callback exactly once when the element qualifies, dedupe
  * repeat watches, and tear everything down in one stop(). They differ only in
- * which observer is used, what "qualifies" means, what an API-less host falls
- * back to, and an optional side-channel listener with its own teardown.
+ * which observer is used, what "qualifies" means, and an optional
+ * side-channel listener with its own teardown.
  *
- * `createObserver(cb)` returns a fresh observer, or null when the host lacks
- * the API (then `fallbackWatch` stands in). `qualifies(entry)` decides an
+ * `createObserver(cb)` returns a fresh observer. `qualifies(entry)` decides an
  * observer entry is a pass. `extras(qualify)` may register a side-channel
- * listener and returns its teardown.
+ * listener and returns its teardown. Both ResizeObserver (79) and
+ * IntersectionObserver (51) are floor-guaranteed, so there is no API-less
+ * stand-in arm: the JS fallbacks and the field that gated them (per-instance
+ * `typeof` reads against a harness that swapped MutationObserver) died with
+ * their premises - the retired jsdom host and the ship floor.
  *
  * `#waiting` is a WeakMap, not a Map: neither observer notifies when an
  * observed target is removed from the DOM, so a detached candidate that never
@@ -193,20 +194,12 @@ class PresenceGate {
   #offPrune = null;
   #removeExtras = null;
   #qualifies;
-  #fallbackWatch;
   #prune;
-  // Read per instance, not at module scope: the test harness swaps
-  // MutationObserver for jsdom's per test, and a hoisted check would bake
-  // in the pre-swap value.
-  #pruneSupported = typeof MutationObserver === "function";
 
-  constructor({ createObserver, qualifies, fallbackWatch, extras, prune = true }) {
+  constructor({ createObserver, qualifies, extras, prune = true }) {
     this.#qualifies = qualifies;
-    this.#fallbackWatch = fallbackWatch;
     this.#prune = prune;
-    this.#observer = createObserver
-      ? createObserver((entries) => this.#onEntries(entries))
-      : null;
+    this.#observer = createObserver((entries) => this.#onEntries(entries));
     this.#removeExtras = extras ? extras((target) => this.#qualify(target)) : null;
   }
 
@@ -233,16 +226,12 @@ class PresenceGate {
     if (this.#waiting.has(target)) {
       return;
     }
-    if (this.#observer) {
-      // Armed on first watch (see the class comment); also rearms after stop().
-      if (!this.#offPrune && this.#pruneSupported && this.#prune) {
-        this.#offPrune = onDomMutations((records) => this.#pruneDetached(records));
-      }
-      this.#waiting.set(target, onQualify);
-      this.#observer.observe(target);
-      return;
+    // Armed on first watch (see the class comment); also rearms after stop().
+    if (!this.#offPrune && this.#prune) {
+      this.#offPrune = onDomMutations((records) => this.#pruneDetached(records));
     }
-    this.#fallbackWatch(target, onQualify);
+    this.#waiting.set(target, onQualify);
+    this.#observer.observe(target);
   }
 
   #pruneDetached(records) {
@@ -298,17 +287,12 @@ export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_V
   // answered died with the tool-era retirement.
   return new PresenceGate({
     prune,
-    createObserver: typeof ResizeObserver === "function"
-      ? (cb) => new ResizeObserver(cb)
-      : null,
+    // ResizeObserver is floor-guaranteed (79, ship floor 156); the null
+    // stand-in arm that fed fallbackWatch died with its jsdom premise.
+    createObserver: (cb) => new ResizeObserver(cb),
     qualifies: (entry) => {
       const { width, height } = entryBoxSize(entry);
       return width >= minWidth && height >= minHeight && hasPresentBox(entry.target);
-    },
-    fallbackWatch: (video, onQualify) => {
-      if (meetsMinSize(video, minWidth, minHeight)) {
-        onQualify();
-      }
     },
     extras: (qualify) => {
       const onReveal = (event) => {
@@ -363,17 +347,14 @@ export function isOnScreen(el, margin = ON_SCREEN_MARGIN_PX) {
  * off-screen players. One observer per owner; `watch` dedupes per element,
  * fires `onEnter` once when the element first intersects (lookahead margin, so
  * the shell is ready just before it scrolls into view), then unobserves.
- * Without an IntersectionObserver the gate is a pass-through that fires
- * immediately, so a host lacking the API keeps the previous eager behavior.
+ * IntersectionObserver is floor-guaranteed (51, ship floor 156): the
+ * pass-through stand-in arm died with its pre-floor-engine premise.
  */
 export function createOnScreenGate({ rootMargin = `${ON_SCREEN_MARGIN_PX}px`, prune = true } = {}) {
   return new PresenceGate({
     prune,
-    createObserver: typeof IntersectionObserver === "function"
-      ? (cb) => new IntersectionObserver(cb, { rootMargin })
-      : null,
-    qualifies: (entry) => entry.isIntersecting,
-    fallbackWatch: (_el, onEnter) => onEnter()
+    createObserver: (cb) => new IntersectionObserver(cb, { rootMargin }),
+    qualifies: (entry) => entry.isIntersecting
   });
 }
 

@@ -256,14 +256,12 @@ emulation (see `check/lib/node-realm.mjs`). The method: census every
 dual-arm/dual-check probe in the tree; keep the arm whose semantics are real
 (and pin it with a test), delete the harness-only arm, and make jsdom win by
 having genuine matching semantics elsewhere. What stayed vs died:
-- Stayed: ResizeObserver/IntersectionObserver gate factories (the harness
-  deletes the globals to exercise the synchronous-rect and inert-gate
-  fallbacks), element-level probes (`requestVideoFrameCallback`,
-  `video.animate`, `requestPictureInPicture` — jsdom elements honestly lack
-  them), grant guards in store.js (manager policy, not platform),
-  `workerCapable()` (CSP/Worker presence is a runtime fact), and the
-  per-instance MutationObserver checks and down-ownership checks (deliberate,
-  each pinned by a test). The signal plane ships one arm: every deadline and
+- Stayed: element-level probes (`requestVideoFrameCallback`,
+  `video.animate`, `requestPictureInPicture` — per-element capability reads,
+  not global checks), grant guards in store.js (manager policy, not
+  platform), `workerCapable()` (CSP/Worker presence is a runtime fact), and
+  the down-ownership checks (deliberate, each pinned by a test). The signal
+  plane ships one arm: every deadline and
   composition rides native `AbortSignal.timeout`/`AbortSignal.any`
   unconditionally (the manual-deadline arm this record once kept died with
   the harness-only consumers).
@@ -271,7 +269,13 @@ having genuine matching semantics elsewhere. What stayed vs died:
   scheduler→rAF→noop ladder, `onNavigate`'s popstate/hashchange backend that
   could never see a pushState-only change, `MessageChannel`/MutationObserver/
   `isInputPending`/`vibrate`/window-resize double-typeof checks, and all
-  manual `Date.now()` deadline math behind watchdogs.
+  manual `Date.now()` deadline math behind watchdogs. The gate family's
+  fallback arms joined them (the jsdom host that swapped `MutationObserver`
+  and the "harness deletes the globals" exercising both died): the
+  ResizeObserver/IntersectionObserver null-observer stand-ins with their
+  `fallbackWatch` synchronous-rect/inert-gate arms, the per-instance
+  `#pruneSupported` read, and `checkVisibility`'s API-less permissive arm
+  (floor: 79/51/105 all below 156).
 
 **Native allocation & subscription hygiene.** The 129-listener census
 produced signal-scoped teardown everywhere (`{ signal }` options, native
