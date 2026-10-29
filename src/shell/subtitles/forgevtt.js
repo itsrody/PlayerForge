@@ -409,10 +409,13 @@ export function parseSubtitles(text, offset = 0) {
  * Cooperative variant of parseSubtitles for large track loads. Checks a
  * ~50ms time budget between blocks and, when spent, hands control back via
  * the shared yield_() facade (scheduler.yield, the one cooperative backend)
- * so a huge VTT/SRT parse never blocks video playback or paint.
- * When available it also yields as soon as navigator.scheduling.isInputPending
- * reports queued input, so a large load never delays a tap/scroll even inside
- * the time budget. Intentionally separate from parseSubtitles so the hot,
+ * so a huge VTT/SRT parse never blocks video playback or paint. The
+ * isInputPending early-yield this once OR'd into the budget check is
+ * deprecated (MDN: may report false, a removal candidate; Google's own
+ * guidance is scheduler.yield instead) and its known failure mode is our
+ * primary topology - it never returns true for input dispatched to
+ * cross-origin frames, where this script mostly runs.
+ * Intentionally separate from parseSubtitles so the hot,
  * on-the-fly sync reparse (sync-offset stepper) keeps its zero-await fast path.
  */
 const YIELD_BUDGET_MS = 50;
@@ -420,19 +423,13 @@ export async function parseSubtitlesAsync(text, offset = 0) {
   const cueText = normalizeText(text);
   const blocks = cueText.split(/\n[ \t]*\n/);
   const cues = [];
-  // Detected per call, not hoisted, so a host that lacks the API (or a harness
-  // that injects it) is honored at runtime; a worker realm without
-  // navigator.scheduling simply yields on the parse budget alone.
-  const inputPending = navigator?.scheduling?.isInputPending
-    ? () => navigator.scheduling.isInputPending()
-    : null;
   let last = performance.now();
   for (let i = 0; i < blocks.length; i++) {
     const cue = parseCueBlock(blocks[i], offset);
     if (cue) {
       cues.push(cue);
     }
-    if ((i & 127) === 0 && (inputPending?.() || performance.now() - last > YIELD_BUDGET_MS)) {
+    if ((i & 127) === 0 && performance.now() - last > YIELD_BUDGET_MS) {
       await yield_();
       last = performance.now();
     }
