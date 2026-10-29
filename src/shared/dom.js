@@ -576,17 +576,44 @@ class FsGate {
    *  script eval) re-seeds `fs` without stacking duplicate native listeners. */
   #doc = null;
 
-  #update(doc) {
-    const next = !!doc.fullscreenElement;
+  #set(next) {
     if (next === fs) {
       return;
     }
     // The exported live binding stays the one document-wide truth; the class
     // writes it so every `import { fs }` reader observes the flip.
     fs = next;
+    // The flip breadcrumb: every drag-gesture intent sits behind this gate,
+    // so a document fullscreen (the UA window's own F11/fullscreen mode,
+    // below) that played a video edge-to-edge while the gate stuck "off"
+    // read exactly as this field trace - the flip row is the field's
+    // one-line discriminator, no probe needed.
+    logger.log("lifecycle", `fullscreen ${next ? "on" : "off"}`);
     for (const cb of this.#subscribers) {
       cb(next);
     }
+  }
+
+  #update() {
+    this.#set(this.#truth());
+  }
+
+  /**
+   * The gate's one truth: ELEMENT fullscreen (fullscreenElement - the native
+   * fullscreenchange state) plus DOCUMENT fullscreen. Document fullscreen is
+   * the UA window's own fullscreen mode (F11 / the browser fullscreen
+   * button): it never fires fullscreenchange, never sets fullscreenElement,
+   * and plays the page edge-to-edge on real sites - a direct-embedded video
+   * covers the whole screen while the gate alone reads "off". Its native
+   * witness is the (fullscreen) media query, which Chromium evaluates for
+   * both fullscreen kinds, so the element arm stays the correctness carrier
+   * while the query carries the document kind; read per update event, never
+   * per press. In a fullscreened cross-origin frame the same window is
+   * fullscreen while the frame document still has a null fullscreenElement,
+   * so this arm is the one that arms embed gestures there as well.
+   */
+  #truth() {
+    return !!document.fullscreenElement || matchMedia("(fullscreen)").matches;
   }
 
   /**
@@ -596,38 +623,41 @@ class FsGate {
    * so there is one gate and one transition source regardless of shell count.
    */
   init() {
-    fs = !!document.fullscreenElement;
-    // Re-seed `fs` above (the gate's own premise: a double script eval
-    // re-seeds without stacking duplicate native listeners), and bind the
-    // transition listener once - a second init on the same document would
-    // otherwise double-fire every flip. The injectable `doc` parameter this
-    // once carried died with the jsdom harness: the bundle is per-frame and
-    // `document` cannot change underneath it.
+    // Re-seed every call (the gate's own premise: a double script eval
+    // re-seeds without stacking duplicate native listeners). The injectable
+    // `doc` parameter this once carried died with the jsdom harness: the
+    // bundle is per-frame and `document` cannot change underneath it.
+    this.#set(this.#truth());
     if (this.#doc) {
       return;
     }
     this.#doc = document;
-    document.addEventListener("fullscreenchange", () => this.#update(document));
-    // Lifecycle re-arm, the one hole the transition event cannot close: the
-    // latch is a plain boolean on a document object bfcache keeps alive with
-    // these listeners still attached, while Chromium exits fullscreen on
-    // navigation and never stores a fullscreen document in the cache - so a
-    // persisted pagehide carrying fs=true is a stale future (restore will not
-    // fire fullscreenchange to correct it). Force-false on persisted pagehide;
-    // re-seed from the live document on every restore so the latch can only
-    // ever claim state the document actually holds. Non-persisted navigations
-    // reconfigure the whole frame anyway, and a real fullscreen exit lands
-    // its own fullscreenchange - both stay unplumbed here. pagehide/pageshow
-    // fire at the Window and do not traverse the DOM tree, so the pair binds
-    // the document's view, not the document.
+    document.addEventListener("fullscreenchange", () => this.#update());
+    // Document fullscreen transitions through the fullscreenchange listener
+    // never surface: the UA window resizes in and out of its fullscreen mode,
+    // and that resize is the only native event carrying the flip. The same
+    // seat re-arms the gate after a missed element flip.
     const view = document.defaultView;
     if (view) {
+      view.addEventListener("resize", () => this.#update(), { passive: true });
+      // Lifecycle re-arm, the one hole the transition event cannot close: the
+      // latch is a plain boolean on a document object bfcache keeps alive with
+      // these listeners still attached, while Chromium exits fullscreen on
+      // navigation and never stores a fullscreen document in the cache - so a
+      // persisted pagehide carrying fs=true is a stale future (restore will not
+      // fire fullscreenchange to correct it). Force-false on persisted pagehide;
+      // re-seed from the live document on every restore so the latch can only
+      // ever claim state the document actually holds. Non-persisted navigations
+      // reconfigure the whole frame anyway, and a real fullscreen exit lands
+      // its own fullscreenchange - both stay unplumbed here. pagehide/pageshow
+      // fire at the Window and do not traverse the DOM tree, so the pair binds
+      // the document's view, not the document.
       view.addEventListener("pagehide", (event) => {
         if (event.persisted && fs) {
           fs = false;
         }
       });
-      view.addEventListener("pageshow", () => this.#update(document));
+      view.addEventListener("pageshow", () => this.#update());
     }
   }
 

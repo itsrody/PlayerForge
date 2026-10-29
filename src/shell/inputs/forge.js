@@ -1345,8 +1345,12 @@ export class InputForge {
       // (kept down there so a pinch second finger cannot overwrite the first
       // finger's zone), so reading the field here prints the previous
       // press's reset null - every `zone=null` in the field traces is this
-      // staleness, not a zoneless press.
-      logger.log("forge", `press owned: ${event.pointerType}, zone=${this.#zoneForPoint(event)}`);
+      // staleness, not a zoneless press. The fs tail is the drag-gesture
+      // discriminator: the fullscreen-only intents all sit behind the gate,
+      // so a fullscreen press whose breadcrumb still says fs=off names the
+      // fullscreen-without-fullscreenElement family (CSS full-window) in
+      // one line.
+      logger.log("forge", `press owned: ${event.pointerType}, zone=${this.#zoneForPoint(event)}, fs=${fs ? "on" : "off"}`);
       if (allowsIntent("dbltap")) {
         this.#tap.cancel();
       }

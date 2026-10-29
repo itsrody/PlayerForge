@@ -107,11 +107,12 @@ export async function run({ session, baseUrl, boot }) {
     return window.__pfEvents.includes("skip") && t > 0 && t < 4;
   }), "skip event or backward step missing");
 
-  // Inline (fs gate closed), the edge-skip path is fs-gated end-to-end:
-  // resolves a left-edge zone for a real edge press, double-taps there, and
-  // requires NO dbltap/skip dispatch - the claimed plain taps fall through
-  // to the immediate tail replay instead (the inline repair path, driven
-  // with real pointer input).
+  // Inline (fs gate closed - the check window is 1440x900 while the
+  // fixture's fixed 1280x720 canvas covers only part of it), the edge-skip
+  // path is fs-gated end-to-end: resolves a left-edge zone for a real edge
+  // press, double-taps there, and requires NO dbltap/skip dispatch - the
+  // claimed plain taps fall through to the immediate tail replay instead
+  // (the inline repair path, driven with real pointer input).
   await session.eval(function main() {
     window.__pfEvents = [];
     document.querySelector("#check-video").play();
@@ -143,7 +144,7 @@ export async function run({ session, baseUrl, boot }) {
   await acts()
     .move({ origin: "viewport", x: edgePoint.x, y: edgePoint.y }).press().pause(450).release()
     .pause(200)
-    .move({ origin: "viewport", x: Math.round(center.x), y: Math.round(center.y) }).press().pause(450).release()
+    .move({ origin: "viewport", x: center.x, y: center.y }).press().pause(450).release()
     .pause(200)
     .perform();
   status(rows, "inline hold reports viewport-honest edge/screen zones", await session.eval(function main() {
@@ -151,6 +152,59 @@ export async function run({ session, baseUrl, boot }) {
   }), `events=${JSON.stringify(await session.eval(function main() {
     return window.__pfEvents;
   }))}`);
+  // Document fullscreen, the repair row: the UA window's own fullscreen mode
+  // (F11 / the browser fullscreen button) never fires fullscreenchange and
+  // never sets fullscreenElement - the field shape the trace pinned (fs=off
+  // + no "fullscreen on" while the player visibly filled the screen). Its
+  // native witness is the (fullscreen) media query, so the stub simulates
+  // the state the gate cannot enter headless - headless Chromium can't open
+  // window fullscreen - and one resize (the UA window's observed flip event)
+  // recomputes the gate. The real-driver horizontal drag then scrubs
+  // fs-style, proving the armed end-to-end path; cleanup restores the live
+  // media query and re-seats the gate to the real truth.
+  await session.eval(function main() {
+    window.__pfEvents = [];
+    window.__pfMatchMedia = window.matchMedia;
+    const stub = {
+      matches: true,
+      addEventListener() {},
+      addListener() {},
+      removeEventListener() {},
+      removeListener() {},
+      dispatchEvent() { return false; }
+    };
+    window.matchMedia = () => stub;
+    window.dispatchEvent(new Event("resize"));
+    const v = document.querySelector("#check-video");
+    v.pause();
+    v.currentTime = 2;
+  });
+  await new Promise((r) => setTimeout(r, 300));
+  await acts()
+    .move({ origin: "viewport", x: Math.round(center.x), y: Math.round(center.y) }).press()
+    .move({ origin: "viewport", x: Math.round(center.x + 60), y: Math.round(center.y) })
+    .pause(80)
+    .move({ origin: "viewport", x: Math.round(center.x + 140), y: Math.round(center.y) })
+    .pause(80)
+    .release()
+    .perform();
+  await new Promise((r) => setTimeout(r, 400));
+  status(rows, "document fullscreen arms fs with no fullscreenElement: drag scrubs", await session.eval(function main() {
+    const t = document.querySelector("#check-video").currentTime;
+    return document.fullscreenElement === null &&
+      window.__pfEvents.includes("scrub") && t > 2;
+  }), `fullEl=${JSON.stringify(await session.eval(function main() {
+    return { el: !!document.fullscreenElement, events: window.__pfEvents, t: document.querySelector("#check-video").currentTime };
+  }))}`);
+  await session.eval(function main() {
+    window.matchMedia = window.__pfMatchMedia;
+    window.dispatchEvent(new Event("resize"));
+    window.__pfEvents = [];
+    const v = document.querySelector("#check-video");
+    v.pause();
+    v.currentTime = 2;
+  });
+  await new Promise((r) => setTimeout(r, 300));
 
   await fireKeys(["KeyM"]);
   await new Promise((r) => setTimeout(r, 350));
