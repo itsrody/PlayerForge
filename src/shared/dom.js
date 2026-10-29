@@ -83,7 +83,6 @@ class DomWatch {
 
   #observer = null;
   /** Document the observer is currently bound to - see #ensureObserver(). */
-  #observedDoc = null;
   #queued = false;
   /** Pooled records buffers: flush swaps active/recycled instead of allocating. */
   #pendingRecords = [];
@@ -178,8 +177,9 @@ class DomWatch {
   /**
    * Chromium-native scheduling advantage: `scheduler.yield()` lets the browser
    * interleave input / paint between the mutation batch and the subscriber
-   * dispatch. Falls back to the direct flush when the API is absent (jsdom
-   * tests, non-Chromium hosts) so the test tick() helper stays compatible.
+   * dispatch. Unconditional since the yield_ facade shipped single-arm - the
+   * direct-flush fallback this comment once claimed rode the dead yield
+   * ladder.
    */
   async #scheduleFlush() {
     await yield_();
@@ -193,18 +193,16 @@ class DomWatch {
   #ensureObserver() {
     const doc = globalThis.document;
     if (!doc?.documentElement) {
+      // A document-start call can outrun the parsed root; each later
+      // subscribe re-arms here, so the only cost is a quiet early arm.
       return;
     }
-    if (this.#observer && this.#observedDoc === doc) {
+    if (this.#observer) {
       return;
     }
-    // Re-bind when the active document changed underneath us. Never happens
-    // in a real page; happens constantly under jsdom test harnesses that
-    // install a fresh document per case.
-    this.#observer?.disconnect();
-    this.#queued = false;
-    this.#pendingRecords = [];
-    this.#recycledRecords = [];
+    // Per-frame bundle, hence a fixed document - the cross-document rebind
+    // machinery this once had (reseed-on-swapped-doc) exercised only in
+    // harnesses that install a fresh document per case.
     this.#observer = new MutationObserver((records) => {
       // Coalesce the batch into the pooled buffer in one place; the browser
       // already arrived with a pooled record list, so this is an append-only
@@ -227,7 +225,6 @@ class DomWatch {
       }
     });
     this.#observer.observe(doc.documentElement, { childList: true, subtree: true });
-    this.#observedDoc = doc;
   }
 
   /**
@@ -238,7 +235,6 @@ class DomWatch {
     if (this.#live === 0 && this.#observer) {
       this.#observer.disconnect();
       this.#observer = null;
-      this.#observedDoc = null;
       this.#pendingRecords = [];
       this.#recycledRecords = [];
       this.#slots.length = 0;
@@ -594,24 +590,24 @@ class FsGate {
   }
 
   /**
-   * Build the `fs` gate off the native fullscreen event and fan out transitions.
-   * Call once at startup. `doc` is injectable for jsdom tests so they drive the
-   * real mechanism.
-   *
    * This is the ONLY place that touches fullscreen: it owns the `fs` value AND
    * the single underlying `fullscreenchange` listener. Every other fs-conditioned
    * path reads `fs` directly or subscribes to transitions via subscribeFullscreen,
    * so there is one gate and one transition source regardless of shell count.
    */
-  init(doc = document) {
-    fs = !!doc.fullscreenElement;
-    // Re-seed `fs` above, but bind the transition listener once per document -
-    // a second init on the same doc would otherwise double-fire every flip.
-    if (this.#doc === doc) {
+  init() {
+    fs = !!document.fullscreenElement;
+    // Re-seed `fs` above (the gate's own premise: a double script eval
+    // re-seeds without stacking duplicate native listeners), and bind the
+    // transition listener once - a second init on the same document would
+    // otherwise double-fire every flip. The injectable `doc` parameter this
+    // once carried died with the jsdom harness: the bundle is per-frame and
+    // `document` cannot change underneath it.
+    if (this.#doc) {
       return;
     }
-    this.#doc = doc;
-    doc.addEventListener("fullscreenchange", () => this.#update(doc));
+    this.#doc = document;
+    document.addEventListener("fullscreenchange", () => this.#update(document));
     // Lifecycle re-arm, the one hole the transition event cannot close: the
     // latch is a plain boolean on a document object bfcache keeps alive with
     // these listeners still attached, while Chromium exits fullscreen on
@@ -624,14 +620,14 @@ class FsGate {
     // its own fullscreenchange - both stay unplumbed here. pagehide/pageshow
     // fire at the Window and do not traverse the DOM tree, so the pair binds
     // the document's view, not the document.
-    const view = doc.defaultView;
+    const view = document.defaultView;
     if (view) {
       view.addEventListener("pagehide", (event) => {
         if (event.persisted && fs) {
           fs = false;
         }
       });
-      view.addEventListener("pageshow", () => this.#update(doc));
+      view.addEventListener("pageshow", () => this.#update(document));
     }
   }
 
@@ -654,10 +650,13 @@ class FsGate {
   }
 }
 
+/** Subscribe to fullscreen state transitions (fires only on an actual flip,
+ *  before the gates' consumers observe the new `fs`). Returns an unsubscribe
+ *  function; pass `signal` to have it torn down automatically. */
 const fsGate = new FsGate();
 
-export function initFullscreenGate(doc = document) {
-  fsGate.init(doc);
+export function initFullscreenGate() {
+  fsGate.init();
 }
 
 export function subscribeFullscreen(cb, signal) {
