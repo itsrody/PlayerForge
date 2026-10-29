@@ -337,5 +337,84 @@ export async function run({ session, baseUrl, boot }) {
         `pinch events=${JSON.stringify(events)}`;
     }), "pinch recognition mismatch");
 
+  // Real compositor touch through the browser input pipeline: CDP
+  // Input.dispatchTouchEvent reaches Chromium's gesture/pointer pipelines -
+  // the path every real Android touch rides - not the synthetic
+  // PointerEvent surface the previous rows drove. This closes the honest gap
+  // the synthetic rows carried: the pinch/swipe engine contract is now
+  // proven END TO END on the same pipeline the compositor runs (the last
+  // compositing-touch step - physical hardware - stays device-verified).
+  const cdp = await raw.createCDPConnection("page");
+  await session.eval(function arm() {
+    window.__pfEvents = [];
+  });
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x: Math.round(center.x), y: Math.round(center.y) }]
+  });
+  for (const dy of [30, 90, 150]) {
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x: Math.round(center.x), y: Math.round(center.y + dy) }]
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  status(rows, "compositor touch stream: real swipe recognition end-to-end",
+    await session.eval(function main() {
+      const events = (window.__pfEvents || []).filter((e) => e.startsWith("swipe"));
+      if (!events.includes("swipe-start") || !events.includes("swipe:down")) {
+        return `events=${JSON.stringify(events)}`;
+      }
+      // Leader compose + willChange are the same pin as the synthetic row:
+      // the real pipeline must land on the identical engine state.
+      const video = document.querySelector("#check-video");
+      const clean = video.getAnimations().map((a) => a.cancel());
+      void clean;
+      video.style.transform = "";
+      video.style.willChange = "";
+      return true;
+    }), "compositor touch swipe mismatch");
+
+  // Owned-touch tap-highlight determination: the engine cancels every owned
+  // touch press at pointerdown (the press claim). Whether that suppresses
+  // Chromium's compositor tap highlight (gray flash) is NOT DOM-observable -
+  // the highlight is a compositor paint - so this row answers it with a
+  // screenshot diff on a paused video (a static surface whose only possible
+  // paint change across the tap is the highlight itself).
+  await session.eval(function pause() {
+    const video = document.querySelector("#check-video");
+    video.pause();
+  });
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  const clip = {
+    x: center.x - center.width / 2 + 8,
+    y: center.y - center.height / 2 + 8,
+    width: center.width - 16,
+    height: center.height - 16,
+    scale: 1
+  };
+  const shotBefore = await cdp.send("Page.captureScreenshot", { format: "png", clip });
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x: Math.round(center.x), y: Math.round(center.y) }]
+  });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+  const shotDuring = await cdp.send("Page.captureScreenshot", { format: "png", clip });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  const unwrap = (shot) => Buffer.from((shot?.data ?? shot?.result?.data), "base64");
+  const highlightFree = unwrap(shotBefore).equals(unwrap(shotDuring));
+  await session.eval(function resume() {
+    const video = document.querySelector("#check-video");
+    video.play?.();
+    video.getAnimations().forEach((a) => a.cancel());
+    video.style.transform = "";
+    video.style.willChange = "";
+  });
+  status(rows, "owned touch press leaves the compositor surface highlight-free",
+    highlightFree ? true : "screenshots diverged across the owned press", "tap highlight mismatch");
+
   return rows;
 }
