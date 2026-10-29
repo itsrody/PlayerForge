@@ -352,8 +352,8 @@ class ScrubStroke {
 
 /**
  * Swipe recognizer: the vertical drag machine owns the video-transform side
- * of a swipe stroke - the pre-stroke composition capture, the per-move
- * translateY follow, and the eased restore. The engine owns the latch
+ * of a swipe stroke - the live-visual capture, the per-move translateY
+ * follow, and the eased restore. The engine owns the latch
  * decision, stream policy (capture, suppression, swipeStart dispatch). Per
  * shell law the zoom/fill crop is the one transform owner; this stroke
  * deliberately rewrites the same property as legacy behavior - its base
@@ -389,28 +389,48 @@ class SwipeStroke {
     this.#lastTransform = "";
   }
 
-  /** Latch: snapshot the idling composition before any write happens, and
-   *  promote the video to a compositor layer the moment a down-drag takes
-   *  the stroke so the per-move translateY tracks on the compositor
-   *  (pointer rate) instead of forcing a re-rasterizing style recalc every
-   *  move. Dropped again by the restore ease below. */
+  /** Latch: snapshot the LIVE visual before any write happens, and promote
+   *  the video to a compositor layer the moment a down-drag takes the stroke
+   *  so the per-move translateY tracks on the compositor (pointer rate)
+   *  instead of forcing a re-rasterizing style recalc every move. Dropped
+   *  again by the restore ease below.
+   *  The live-visual guard: a snap in flight (TransformEase fill:"both",
+   *  120ms, or a host transition) owns the rendered value while
+   *  style.transform still reads its pre-flight value, so a plain inline
+   *  read snapshots where the video WAS, not where it shows. getAnimations
+   *  exists on the Chromium floor; jsdom check realms without it keep the
+   *  plain inline read, matching the transition arm TransformEase itself
+   *  falls back to there. */
   latch(direction) {
     this.#active = true;
     this.#direction = direction;
-    this.#baseTransform = this.#video.style.transform || "";
+    if (typeof this.#video.getAnimations === "function" && this.#video.getAnimations().length) {
+      this.#baseTransform = getComputedStyle(this.#video).transform;
+      // "none" cannot compose in a list; the string-empty base means a
+      // bare translateY follow, the resting composition.
+      if (this.#baseTransform === "none") {
+        this.#baseTransform = "";
+      }
+    } else {
+      this.#baseTransform = this.#video.style.transform || "";
+    }
     if (this.#direction === "down") {
       this.#video.style.willChange = "transform";
     }
   }
 
   /** Per-move follow: the engine derives the stroke delta (y relative to the
-   *  press origin); this machine deduplicates frame-identical writes. */
+   *  press origin); this machine deduplicates frame-identical writes. The
+   *  follow translate LEADS the list so it lands after everything else in
+   *  screen space (leftmost = outermost = applied last): appended after the
+   *  composition it would live inside a live scale() and follow at s× the
+   *  pointer rate. */
   drag(drag) {
     if (drag === this.#lastDrag) {
       return;
     }
     const t = this.#baseTransform
-      ? this.#baseTransform + " translateY(" + drag + "px)"
+      ? "translateY(" + drag + "px) " + this.#baseTransform
       : "translateY(" + drag + "px)";
     if (t !== this.#lastTransform) {
       this.#video.style.transform = t;
