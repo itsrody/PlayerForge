@@ -292,8 +292,10 @@ export function parseSubtitlesAsync(text, offset = 0, throughWorker = false) {
 }
 
 /* - Track renderer - */
-const STACK_OVERLAP_EM = 1.6;
-const MAX_SLOTS = 8;
+/* Tuning rides the shared TUNING table (forge-style aliases); the local
+ * literals it replaced lived only beside their renderer. */
+const STACK_OVERLAP_EM = TUNING.subtitles.cueStackOverlapEm;
+const MAX_SLOTS = TUNING.subtitles.cueSlots;
 /** The native TextTrack label this renderer owns; reuse, never append. */
 const TRACK_LABEL = "PlayerForge Subtitles";
 

@@ -2,13 +2,12 @@
  * Value vocabulary.
  *
  * Pure constants and predicates with zero imports - the leaf of the shared
- * layer that every other module reads. Six sections:
+ * layer that every other module reads. Five sections:
  *   1. Clamping        - one monomorphic clamp
  *   2. Tuning          - every behavior constant in the codebase
  *   3. Timing          - animation values JS reads
  *   4. Formatting      - unit-formatters for stepper/toast text
  *   5. Error policy    - benign media-error classification
- *   6. Capability      - first-available fallback chains
  */
 
 /* - 1. Clamping - */
@@ -118,7 +117,13 @@ export const TUNING = {
     /** Keyboard sync nudge: step seconds and the offset bounds (the panel
      *  stepper ranges ride the same bounds). */
     nudgeStepSeconds: 0.25,
-    syncMaxOffset: 20
+    syncMaxOffset: 20,
+    /** Concurrent cue slots the ForgeTrack renderer preallocates - beyond
+     *  this, simultaneous cues queue. */
+    cueSlots: 8,
+    /** Vertical offset (em) between two concurrently rendered cue slots in
+     *  the stack, so overlapping cues read as a visible pile. */
+    cueStackOverlapEm: 1.6
   },
   zoom: {
     /** Wheel-zoom multiplicative step; 1.15 reads as a step, not a jump. */
