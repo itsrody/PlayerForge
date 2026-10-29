@@ -360,8 +360,10 @@ function looksLikeContextResponse(data) {
 /** Page context resolved from THIS window, without any bridge: the direct
  *  answer for a top frame, and the fallback for a frame with no reachable
  *  parent chain (also makes {domain, path, title} testable in isolation).
+ *  Internal to the context resolvers below - nothing outside this module
+ *  orders a bridgeless direct read.
  */
-export function ownPageContext(win = window) {
+function ownPageContext(win = window) {
   return {
     domain: getDomainKey(win.location.hostname),
     path: win.location.pathname,

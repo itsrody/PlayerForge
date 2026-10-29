@@ -37,7 +37,6 @@
      behind the sheet. Shine-free and flat by direction: no inset white
      highlights, no drop shadow - the hairline is the whole separation. */
   --pf-sheet: #0e0e10;              /* the one resting sheet ink            */
-  --pf-panel-tint: var(--pf-sheet);
   --pf-sheet-border: 1px solid rgba(255, 255, 255, 0.18);
 
   --pf-surface-soft: rgba(255, 255, 255, 0.04);  /* cells, stepper, toggle bg   */
@@ -157,7 +156,7 @@
   initial-value: -50%;
 }
 
-/* R4 scroll-edge drive: the panel header's tint share, ramped by a
+/* R4 scroll-edge drive: the panel header's ink share, ramped by a
    scroll-driven timeline (0% at the top of the scroll, 100% once content
    actually slides beneath the pinned bar). Registered so the custom
    property is animatable at all. */
@@ -573,13 +572,11 @@
       scrollbar-width: thin;
       scrollbar-color: var(--pf-text-mid) transparent;
 
-      /* Ink sheet: same ink/border/shadow system as the toast. The tint is
-         declared exactly once, through --pf-panel-tint: the header derives
-         from the same variable instead of repainting its own layer, which
-         used to stack a second value over the sheet and read as a darker
-         band. */
-      --pf-panel-tint: var(--pf-sheet);
-      background-color: var(--pf-panel-tint);
+      /* Ink sheet: opaque charcoal + hairline edge, nothing else - the
+         same material as the toast, straight off --pf-sheet (the glass
+         era's --pf-panel-tint alias died with the tinted material it
+         parameterized; there is no second value to derive anymore). */
+      background-color: var(--pf-sheet);
       border: var(--pf-sheet-border);
       color: var(--pf-fg);
       border-radius: var(--pf-radius-lg);
@@ -613,7 +610,7 @@
          one resting surface. While content actually scrolls underneath, a
          scroll-driven timeline (the panel is the nearest scroll container)
          ramps --pf-scroll-edge from 0 to 100% over the first 24px of scroll,
-         and the edge band fades IN as one unit: a solid tint at the top that
+         and the edge band fades IN as one unit: solid ink at the top that
          washes out to transparent over the band's tail - legibility when it
          is needed, invisibility when it is not. The hairline rides the band,
          so rest is fully unmarked. */
@@ -643,7 +640,7 @@
            longer a blurred underlay to fade through, so the gradient alone
            carries the fade (the glass era's mask image bounded that now-gone
            backdrop-filter). */
-        background: linear-gradient(to bottom, var(--pf-panel-tint), transparent);
+        background: linear-gradient(to bottom, var(--pf-sheet), transparent);
         border-bottom: 1px solid var(--pf-border-soft);
         /* The scroll timeline still owns engagement: it writes
            --pf-scroll-edge (0% at rest, 100% after 24px), and the whole band

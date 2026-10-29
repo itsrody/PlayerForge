@@ -15,7 +15,7 @@ const VOLUME_STEP = 0.1;
  * streams, not discrete commands, and the resulting position is already
  * broadcast through the regular timeupdate path.
  */
-export class MediaControls {
+class MediaControls {
   #video;
 
   constructor(video) {
