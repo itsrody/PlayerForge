@@ -278,36 +278,31 @@ class ScrubStroke {
   advance(event) {
     let totalStep = 0;
     let totalStepY = 0;
-    const hasCoalesced = typeof event.getCoalescedEvents === "function";
-    const samples = hasCoalesced ? event.getCoalescedEvents() : null;
+    // getCoalescedEvents (58) and getPredictedEvents (92) are
+    // floor-guaranteed, and even constructed/synthetic PointerEvents carry
+    // the interface methods returning empty lists - so the old API-absent
+    // arms were unreachable; an empty list lands in the same loop below.
+    const samples = event.getCoalescedEvents();
     // Coalesced samples then the live event, without materializing a combined
     // array: high-rate Chromium pointer streams land here every move, so a
     // [[...samples, event]] spread per frame would allocate needlessly.
-    if (samples) {
-      const count = samples.length + 1;
-      let lastX = this.#lastX;
-      let lastY = this.#lastY;
-      for (let i = 0; i < count; i++) {
-        const sample = i < samples.length ? samples[i] : event;
-        totalStep += sample.clientX - lastX;
-        lastX = sample.clientX;
-        totalStepY += sample.clientY - lastY;
-        lastY = sample.clientY;
-      }
-      this.#lastX = lastX;
-      this.#lastY = lastY;
-    } else {
-      totalStep = event.clientX - this.#lastX;
-      this.#lastX = event.clientX;
-      totalStepY = event.clientY - this.#lastY;
-      this.#lastY = event.clientY;
+    const count = samples.length + 1;
+    let lastX = this.#lastX;
+    let lastY = this.#lastY;
+    for (let i = 0; i < count; i++) {
+      const sample = i < samples.length ? samples[i] : event;
+      totalStep += sample.clientX - lastX;
+      lastX = sample.clientX;
+      totalStepY += sample.clientY - lastY;
+      lastY = sample.clientY;
     }
+    this.#lastX = lastX;
+    this.#lastY = lastY;
 
     // Speculative velocity wash: the first predicted pointer beats the live
     // event just enough to pull the velocity estimate forward, but is clamped
     // to a fraction of the confirmed step so it can never dominate or reverse
     // against a correcting hand. Purely a velocity-shaping signal.
-    const hasPredicted = hasCoalesced && typeof event.getPredictedEvents === "function";
     let velocityStep = totalStep;
     // Sub-pixel gate: the additive term is clamped to the confirmed step
     // (Math.min below), so a sub-pixel prediction contributes at most
@@ -315,16 +310,12 @@ class ScrubStroke {
     // for the whole sub-pixel traffic high-rate pointers produce. Also covers
     // the zero step (sign(0) term is 0 anyway; a NaN delta can no longer
     // poison velocityStep at rest).
-    if (hasPredicted) {
-      // |totalStep| feeds both the sub-pixel gate and the clamp below, so read
-      // it once per move instead of twice.
-      const absStep = Math.abs(totalStep);
-      if (absStep >= 1) {
-        const predicted = event.getPredictedEvents();
-        if (predicted && predicted.length) {
-          velocityStep += Math.sign(totalStep) *
-            Math.min(Math.abs(predicted[0].clientX - event.clientX), absStep);
-        }
+    const absStep = Math.abs(totalStep);
+    if (absStep >= 1) {
+      const predicted = event.getPredictedEvents();
+      if (predicted.length) {
+        velocityStep += Math.sign(totalStep) *
+          Math.min(Math.abs(predicted[0].clientX - event.clientX), absStep);
       }
     }
 
@@ -404,24 +395,21 @@ class SwipeStroke {
    *  instead of forcing a re-rasterizing style recalc every move. Dropped
    *  again by the restore ease below.
    *  The live-visual guard: a snap in flight (TransformEase fill:"both",
-   *  120ms, or a host transition) owns the rendered value while
-   *  style.transform still reads its pre-flight value, so a plain inline
-   *  read snapshots where the video WAS, not where it shows. getAnimations
-   *  exists on the Chromium floor; jsdom check realms without it keep the
-   *  plain inline read, matching the transition arm TransformEase itself
-   *  falls back to there. */
+   *  120ms) owns the rendered value while style.transform still reads its
+   *  pre-flight value, so a plain inline read snapshots where the video WAS,
+   *  not where it shows. getAnimations (84, on Element) is floor-guaranteed;
+   *  the jsdom inline-read arm was its only other caller shape - the same
+   *  arm TransformEase's transition fallback occupied until it died. */
   latch(direction) {
     this.#active = true;
     this.#direction = direction;
-    if (typeof this.#video.getAnimations === "function" && this.#video.getAnimations().length) {
-      this.#baseTransform = getComputedStyle(this.#video).transform;
-      // "none" cannot compose in a list; the string-empty base means a
-      // bare translateY follow, the resting composition.
-      if (this.#baseTransform === "none") {
-        this.#baseTransform = "";
-      }
-    } else {
-      this.#baseTransform = this.#video.style.transform || "";
+    // The computed read covers the no-animation case too: with zero running
+    // animations the computed transform IS the inline value.
+    this.#baseTransform = getComputedStyle(this.#video).transform;
+    // "none" cannot compose in a list; the string-empty base means a
+    // bare translateY follow, the resting composition.
+    if (this.#baseTransform === "none") {
+      this.#baseTransform = "";
     }
     if (this.#direction === "down") {
       this.#video.style.willChange = "transform";
@@ -615,17 +603,13 @@ class SpaceSession {
       this.#dispatchRelease();
     } else if (allowToggle && owned && this.#canToggle()) {
       if (this.#video.paused) {
-        // play() returns a promise on spec engines; guard so an odd host
-        // (test shims, minimal webviews) degrades to a silent no-op instead
-        // of a TypeError inside the keyup handler.
-        const played = this.#video.play();
-        if (played && typeof played.catch === "function") {
-          played.catch((err) => {
-            if (!isBenignMediaPolicyError(err)) {
-              logger.log("forge", "bare-tap play rejected:", err.name);
-            }
-          });
-        }
+        // play() is a promise (spec-mandated since the API landed); benign
+        // policy rejections (autoplay block) idle silently here.
+        this.#video.play().catch((err) => {
+          if (!isBenignMediaPolicyError(err)) {
+            logger.log("forge", "bare-tap play rejected:", err.name);
+          }
+        });
       } else {
         this.#video.pause();
       }

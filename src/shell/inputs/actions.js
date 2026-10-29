@@ -330,7 +330,7 @@ class ScrubSession {
   /** Cancel the presented-frame loop if one is armed; safe to call any time. */
   dropFrameLoop() {
     if (this.#rvfcVideo) {
-      this.#rvfcVideo.cancelVideoFrameCallback?.(this.#rvfcId);
+      this.#rvfcVideo.cancelVideoFrameCallback(this.#rvfcId);
       this.#rvfcVideo = null;
       this.#rvfcId = 0;
     }
@@ -371,18 +371,18 @@ class ScrubSession {
       // Frame-accurate readout for this scrub: a short-lived rVFC loop tracks
       // the frame the user actually SAW (post-seek frames fire even while
       // paused), falling back to currentTime until the first one lands.
+      // requestVideoFrameCallback/cancelVideoFrameCallback (83) are
+      // floor-guaranteed on the video element the gesture rides.
       const scrubVideo = shell.video;
-      if (typeof scrubVideo?.requestVideoFrameCallback === "function") {
-        this.#rvfcVideo = scrubVideo;
-        const onFrame = (_now, metadata) => {
-          if (!this.#active || this.#rvfcVideo !== scrubVideo) {
-            return;
-          }
-          this.#presentedTime = metadata.mediaTime;
-          this.#rvfcId = scrubVideo.requestVideoFrameCallback(onFrame);
-        };
+      this.#rvfcVideo = scrubVideo;
+      const onFrame = (_now, metadata) => {
+        if (!this.#active || this.#rvfcVideo !== scrubVideo) {
+          return;
+        }
+        this.#presentedTime = metadata.mediaTime;
         this.#rvfcId = scrubVideo.requestVideoFrameCallback(onFrame);
-      }
+      };
+      this.#rvfcId = scrubVideo.requestVideoFrameCallback(onFrame);
     }
 
     if (Math.abs(detail.dx) < SCRUB_DEAD_ZONE_PX) {

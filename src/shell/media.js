@@ -155,11 +155,13 @@ export class MediaControls {
     this.#video.muted = !this.#video.muted;
   }
 
-  /** Native PiP availability: the browser's own always-on-top surface. */
+  /** Native PiP availability: the browser's own always-on-top surface.
+   *  pictureInPictureEnabled is runtime policy (an enterprise/embed can set
+   *  it false), so the flag check stays; the method/typeof arms it once
+   *  guarded were floor-dead (70) - a per-element disablePictureInPicture
+   *  opt still rejects through the toggle's benign-policy catch. */
   pictureInPictureSupported() {
-    return typeof this.#video.requestPictureInPicture === "function" &&
-      typeof document.pictureInPictureEnabled === "boolean" &&
-      document.pictureInPictureEnabled;
+    return document.pictureInPictureEnabled;
   }
 
   /**
@@ -394,19 +396,12 @@ class MediaSessionBridge {
   #video;
   /** Disposal flag: guards sync/metadata refresh after release. */
   #scope = new Scope();
-  /**
-   * Pre-detected once at construction: setPositionState is absent on some
-   * host surfaces, and sync() rides the ~4 Hz media clock - a hoisted boolean
-   * keeps the hot path free of per-tick try/catch.
-   */
-  #canSetPositionState = false;
 
   constructor(owner, session, controls, video) {
     this.#owner = owner;
     this.#session = session;
     this.#controls = controls;
     this.#video = video;
-    this.#canSetPositionState = typeof session?.setPositionState === "function";
   }
 
   /** Wire handlers, metadata refresh, and signal teardown. Called once by claim. */
@@ -487,10 +482,10 @@ class MediaSessionBridge {
       this.#sentPlaybackState = playbackState;
       session.playbackState = playbackState;
     }
-    if (!this.#canSetPositionState) {
-      return;
-    }
     const { duration, playbackRate, currentTime } = this.#video;
+    // setPositionState (73) is floor-guaranteed on navigator.mediaSession,
+    // which is the only session any claim hands over; the capability field
+    // that once gated this write died with its "some host surfaces" premise.
     if (!Number.isFinite(duration) || duration <= 0) {
       return;
     }

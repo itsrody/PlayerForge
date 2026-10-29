@@ -256,10 +256,8 @@ emulation (see `check/lib/node-realm.mjs`). The method: census every
 dual-arm/dual-check probe in the tree; keep the arm whose semantics are real
 (and pin it with a test), delete the harness-only arm, and make jsdom win by
 having genuine matching semantics elsewhere. What stayed vs died:
-- Stayed: element-level probes (`requestVideoFrameCallback`,
-  `video.animate`, `requestPictureInPicture` — per-element capability reads,
-  not global checks), grant guards in store.js (manager policy, not
-  platform), `workerCapable()` (CSP/Worker presence is a runtime fact), and
+- Stayed: grant guards in store.js (manager policy, not platform),
+  `workerCapable()` (CSP/Worker presence is a runtime fact), and
   the down-ownership checks (deliberate, each pinned by a test). The signal
   plane ships one arm: every deadline and
   composition rides native `AbortSignal.timeout`/`AbortSignal.any`
@@ -275,7 +273,15 @@ having genuine matching semantics elsewhere. What stayed vs died:
   ResizeObserver/IntersectionObserver null-observer stand-ins with their
   `fallbackWatch` synchronous-rect/inert-gate arms, the per-instance
   `#pruneSupported` read, and `checkVisibility`'s API-less permissive arm
-  (floor: 79/51/105 all below 156).
+  (floor: 79/51/105 all below 156). The element-level capability arms
+  followed (`requestVideoFrameCallback`/`cancelVideoFrameCallback` 83,
+  `getCoalescedEvents`/`getPredictedEvents` 58/92, `getAnimations` 84,
+  `requestPictureInPicture` 70, `setPositionState`'s optional-chain field 73
+  — "jsdom elements honestly lack them / some host surfaces" died with the
+  jsdom host), leaving the guard family to genuine refusals: PiP's
+  `pictureInPictureEnabled` policy flag, wake-lock's secure-context gate,
+  the GM grant read, `workerCapable()`, and null/parameter-shape guards
+  like the stream router's non-element eventTarget check.
 
 **Native allocation & subscription hygiene.** The 129-listener census
 produced signal-scoped teardown everywhere (`{ signal }` options, native

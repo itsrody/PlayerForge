@@ -824,29 +824,20 @@ export class ResumeTracker {
     // are actually presented - it IS the "is playing" signal - and reports the
     // exact mediaTime of the frame on screen. The callback re-arms itself and
     // idles for free whenever the element is paused, stalled, or off-screen.
-    if (typeof video.requestVideoFrameCallback === "function") {
-      const onFrame = (_now, metadata) => {
-        this.#rvfcHandle = null;
-        if (this.#scope.disposed) {
-          return;
-        }
-        this.#lastFrameMediaTime = metadata.mediaTime;
-        if (checkpointDue(metadata.mediaTime)) {
-          this.#saveProgress(metadata.mediaTime);
-        }
-        this.#rvfcHandle = video.requestVideoFrameCallback(onFrame);
-      };
+    // rVFC is floor-guaranteed (83); the timeupdate fallback arm died with
+    // the retired test harness that was its only consumer.
+    const onFrame = (_now, metadata) => {
+      this.#rvfcHandle = null;
+      if (this.#scope.disposed) {
+        return;
+      }
+      this.#lastFrameMediaTime = metadata.mediaTime;
+      if (checkpointDue(metadata.mediaTime)) {
+        this.#saveProgress(metadata.mediaTime);
+      }
       this.#rvfcHandle = video.requestVideoFrameCallback(onFrame);
-    } else {
-      // Fallback crank for engines without rVFC (test harness): the media clock
-      // (~4 Hz while the playhead advances) drives the same dynamic gate.
-      const saveIfDue = () => {
-        if (checkpointDue(shell.currentTime)) {
-          this.#saveProgress(shell.currentTime);
-        }
-      };
-      video.addEventListener("timeupdate", saveIfDue, { signal, passive: true });
-    }
+    };
+    this.#rvfcHandle = video.requestVideoFrameCallback(onFrame);
 
     const flush = () => this.#saveProgress(this.#flushPosition());
 
