@@ -137,8 +137,15 @@ export function installGMRealm({ version, grants, resources, storage, header }) 
     },
     registerMenuCommand(title, fn, options) {
       touch("GM_registerMenuCommand");
-      const id = ++menuId;
-      menus.push({ id, title: String(title), fn, options: options ?? null });
+      // TM 5.0+ semantics: an options.id matching a live entry updates it in
+      // place instead of creating a second item.
+      const id = options?.id != null ? options.id : ++menuId;
+      const i = menus.findIndex((entry) => entry.id === id);
+      if (i >= 0) {
+        menus[i] = { id, title: String(title), fn, options: options ?? null };
+      } else {
+        menus.push({ id, title: String(title), fn, options: options ?? null });
+      }
       rebuildMenus();
       return id;
     },

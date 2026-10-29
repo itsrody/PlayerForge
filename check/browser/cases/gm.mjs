@@ -220,8 +220,9 @@ export async function run({ session, boot, header, version: bundleVersion }) {
   });
   status("pfStyle resource reaches the running shell", probe === "ok", `probe=${probe}`);
 
-  // 8 - menu re-registration: one toggle, one unregister, one re-register,
-  // the command stays callable and the census adds up.
+  // 8 - menu update path: the debug toggle re-registers its previously
+  // returned handle (TM 5.0+ in-place update), so the census adds up as one
+  // register, zero unregisters, stable ids, and a flipped caption.
   const menuCensus = await session.evalAsync(function main(done) {
     const stats0 = window.__gmTest.usage();
     const keys = Object.keys(window.__pfMenu ?? {}).filter((k) => k.startsWith("menu:"));
@@ -232,22 +233,23 @@ export async function run({ session, boot, header, version: bundleVersion }) {
     setTimeout(() => {
       const stats1 = window.__gmTest.usage();
       const ids1 = window.__gmTest.aliveMenuIds();
+      const keys1 = Object.keys(window.__pfMenu ?? {}).filter((k) => k.startsWith("menu:"));
+      const debugKey1 = keys1.find((k) => k.includes("Debug"));
       done({
         ok: (stats1.GM_registerMenuCommand ?? 0) - (stats0.GM_registerMenuCommand ?? 0) === 1
-          && (stats1.GM_unregisterMenuCommand ?? 0) - (stats0.GM_unregisterMenuCommand ?? 0) === 1
-          // Three live commands: the re-registered debug toggle plus the two
-          // one-shot resets (color filter, subtitle sync).
-          && ids1.length === 3
-          && ids0.length === 3
-          && Object.keys(window.__pfMenu).some((k) => k.startsWith("menu:") && k.includes("Debug"))
-          && Object.keys(window.__pfMenu).some((k) => k.startsWith("menu:") && k.includes("Color"))
-          && Object.keys(window.__pfMenu).some((k) => k.startsWith("menu:") && k.includes("Subtitle")),
-        why: `reg=${stats1.GM_registerMenuCommand - stats0.GM_registerMenuCommand} unreg=${stats1.GM_unregisterMenuCommand - stats0.GM_unregisterMenuCommand} ids0=${ids0} ids1=${ids1}`
+          && (stats1.GM_unregisterMenuCommand ?? 0) - (stats0.GM_unregisterMenuCommand ?? 0) === 0
+          // The three live commands keep their handles across the update -
+          // an in-place edit, never a create-churn cycle.
+          && ids0.length === 3 && ids1.length === 3 && ids0.every((v, i) => ids1[i] === v)
+          && debugKey1 != null && debugKey1 !== debugKey
+          && keys1.some((k) => k.includes("Color"))
+          && keys1.some((k) => k.includes("Subtitle")),
+        why: `reg=${stats1.GM_registerMenuCommand - stats0.GM_registerMenuCommand} unreg=${stats1.GM_unregisterMenuCommand - stats0.GM_unregisterMenuCommand} ids0=${ids0} ids1=${ids1} caption="${debugKey}"->"${debugKey1}"`
       });
     }, 500);
   });
   status(
-    "menu toggle advances handle census (unregister + re-register)",
+    "menu toggle updates in place (stable id, no unregister churn)",
     menuCensus.ok === true,
     menuCensus.why ?? null
   );

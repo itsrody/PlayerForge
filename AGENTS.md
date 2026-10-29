@@ -14,7 +14,7 @@ history that explains why those conventions exist.
 A Userscript-exclusive HTML5 video player enhancer for two fork browsers:
 
 - **Helium** (macOS desktop), **Titanium** (Android)
-- Chromium **156+** platform floor, **Tampermonkey 5.5+ (MV3)** manager
+- Chromium **156+** platform floor, **Tampermonkey 5.5.1+ (MV3)** manager
 - Features: pointer/keyboard gestures, hotkeys, progress resume, watch
   history, subtitles (.srt/.vtt with per-cue placement, per-entry sync
   offset, URL/file restore), color filters with presets, per-domain

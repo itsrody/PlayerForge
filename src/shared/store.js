@@ -95,6 +95,17 @@ export function gmGetResourceText(name) {
  * does. GM_setClipboard is deliberately NOT granted/used: no feature calls
  * it, so the grant is dead permission surface. Any future clipboard write
  * should go through the native navigator.clipboard path, not the manager.
+ *
+ * MV3 manager surface (TM 5.4.1+/5.5.1+): every GM_xmlhttpRequest serializes
+ * through the manager's DNR-rule proxies - one request at a time unless a
+ * script adopts the @require workaround that bypasses the manager. Not
+ * adopted deliberately: our ingest is single-flight (one user-triggered
+ * subtitle URL load at a time), so the parallel throughput the hack buys has
+ * no caller, and it would add an external fetch dependency plus a second
+ * code path to audit. The other MV3-era streams are already accounted for on
+ * our side: the relaxed-CSP removal by default is why @sandbox raw +
+ * workerCapable() exist, and fetch-mode request handling is invisible to us
+ * behind the wrapper's onload/ontimeout contract.
  */
 /**
  * Cross-origin text fetch through the manager - CORS cannot block it.

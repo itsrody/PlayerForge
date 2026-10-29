@@ -632,8 +632,8 @@ export class Kernel {
  *  setting and flips the shared debug runtime (logger + LoAF diagnostic). The
  *  one-shot reset commands need a live shell, resolved lazily through the
  *  entry's kernel reference at click time (the kernel boots after eval).
- *  One instance owns the handles and re-registers the debug command on the
- *  flip. */
+ *  One instance owns the handles; the debug toggle re-registers with its
+ *  previously returned handle so the manager updates the item in place. */
 class MenuCommands {
   #debugId = null;
   #filterId = null;
@@ -665,10 +665,13 @@ class MenuCommands {
   }
 
   #refreshDebug() {
-    if (this.#debugId != null) {
-      gmUnregisterMenu(this.#debugId);
-    }
     const enabled = getConfigValue(DEBUG_LOGS_KEY, false);
+    // Passing the previously returned handle as options.id (TM 5.0+) makes the
+    // manager update the live item in place - the caption flip no longer pays
+    // the unregister/re-register churn (and its documented reappearance bug).
+    // autoClose stays unset: true is the manager default. Registered
+    // top-frame only, so the cross-frame merge-by-(name|title|accessKey)
+    // rule can never split a command.
     this.#debugId = gmRegisterMenu(
       `\u{1F41B} Debug Logs:${enabled ? "On" : "Off"}`,
       () => {
@@ -677,7 +680,7 @@ class MenuCommands {
         setDebugRuntime(next);
         this.#refreshDebug();
       },
-      { autoClose: true }
+      { id: this.#debugId, title: "Toggle PF debug logging", accessKey: "D" }
     );
   }
 
@@ -686,12 +689,12 @@ class MenuCommands {
     this.#filterId = gmRegisterMenu(
       "\u{1FAA8} Reset Color Filter",
       () => this.#resetEvent("filterReset", "Color filter reset"),
-      { autoClose: true }
+      { title: "Restore the default color filter", accessKey: "C" }
     );
     this.#syncId = gmRegisterMenu(
       "\u{1F4AC} Reset Subtitle Sync",
       () => this.#resetEvent("syncReset", "Subtitle sync reset"),
-      { autoClose: true }
+      { title: "Restore the default subtitle sync offset", accessKey: "S" }
     );
     return () => {
       for (const id of [this.#debugId, this.#filterId, this.#syncId]) {
