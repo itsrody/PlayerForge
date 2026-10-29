@@ -1481,7 +1481,10 @@
         max-height: min(62vh, calc(var(--pf-vv-height, 100vh) - 2 * var(--pf-space-md)));
         margin: 0;
         padding-bottom: env(safe-area-max-inset-bottom, 0px);
-        border-radius: 16px 16px 0 0;
+        /* Derived radius (R6): the sheet keeps its token as the largest HUD
+           radius in the bottom-sheet variant too - the hardcoded literal
+           this replaced would silently diverge when the token moves. */
+        border-radius: var(--pf-radius-lg) var(--pf-radius-lg) 0 0;
         border-left: none;
         border-right: none;
         border-bottom: none;
