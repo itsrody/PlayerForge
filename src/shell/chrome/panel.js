@@ -516,25 +516,25 @@ export class SettingsPanel {
         activeTab?.focus();
       }
     }, { signal });
-    if (typeof CloseWatcher === "function") {
-      try {
-        this.#closeWatcher = new CloseWatcher();
-        this.#closeWatcher.addEventListener("close", () => {
-          // The watcher fires on the Escape KEYUP, after a focused field's
-          // keydown already consumed that press to revert its edit (armed
-          // via pfEscArmed). That first Esc must not dismiss the panel -
-          // the next one will, through either path.
-          const active = deepestActiveElement(this.#shellHost);
-          if (active?.dataset?.pfEscArmed) {
-            return;
-          }
-          this.close();
-        }, { signal });
-      } catch {
-        // Constructor can throw where the API is gated; our keydown path above
-        // still dismisses, so the feature degrades instead of failing.
-        this.#closeWatcher = null;
-      }
+    // CloseWatcher is floor-guaranteed (116, ship floor 156): the typeof gate
+    // this once wrapped died. The try/catch stays - the constructor can still
+    // genuinely refuse (the per-message watcher budget / a gated page), and
+    // the keydown path above dismisses regardless, so the feature degrades.
+    try {
+      this.#closeWatcher = new CloseWatcher();
+      this.#closeWatcher.addEventListener("close", () => {
+        // The watcher fires on the Escape KEYUP, after a focused field's
+        // keydown already consumed that press to revert its edit (armed
+        // via pfEscArmed). That first Esc must not dismiss the panel -
+        // the next one will, through either path.
+        const active = deepestActiveElement(this.#shellHost);
+        if (active?.dataset?.pfEscArmed) {
+          return;
+        }
+        this.close();
+      }, { signal });
+    } catch {
+      this.#closeWatcher = null;
     }
   }
 

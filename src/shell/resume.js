@@ -794,13 +794,11 @@ export class ResumeTracker {
     // page lifetime. The status flushes below still run, so the final position
     // is never lost by this gate.
     let onScreen = true;
-    if (typeof IntersectionObserver === "function") {
-      const io = new IntersectionObserver(([entry]) => {
-        onScreen = entry.isIntersecting;
-      });
-      io.observe(video);
-      this.#scope.onDispose(() => io.disconnect());
-    }
+    const io = new IntersectionObserver(([entry]) => {
+      onScreen = entry.isIntersecting;
+    });
+    io.observe(video);
+    this.#scope.onDispose(() => io.disconnect());
 
     // Dynamic content-relative cadence: due once the playhead has advanced a
     // duration-scaled span since the last persist. No wall clock, so a paused

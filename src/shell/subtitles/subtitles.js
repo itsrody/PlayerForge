@@ -404,10 +404,10 @@ export class ForgeTrack {
   #positionOverride = null;
   /** Records the bound cuechange so destroy can unregister it. */
   #onCueChange = null;
-  /** Whether the player is currently on screen. Defaults true so a host
-   *  without IntersectionObserver (or before the first observation lands)
-   *  renders unconditionally; the observer only ever suppresses off-screen
-   *  churn and re-renders on re-entry. */
+  /** Whether the player is currently on screen. Defaults true so the time
+   *  before the first observation lands renders unconditionally; the
+   *  observer only ever suppresses off-screen churn and re-renders on
+   *  re-entry. */
   #onScreen = true;
   /** Disposal flag; cuechange itself has no signal form (spec-forced). */
   #scope = new Scope();
@@ -434,10 +434,10 @@ export class ForgeTrack {
     // track), so a fresh track per load would accumulate leaks across cycles.
     // A page track with this exact label is collision-safe - the renderer owns
     // it exclusively once created.
-    const owned = Array.from(video?.textTracks ?? []).find(
+    const owned = Array.from(video.textTracks).find(
       (track) => track.kind === "subtitles" && track.label === TRACK_LABEL
     );
-    this.#track = owned ?? video?.addTextTrack?.("subtitles", TRACK_LABEL, "en");
+    this.#track = owned ?? video.addTextTrack("subtitles", TRACK_LABEL, "en");
     if (!this.#track) {
       throw new Error("This element cannot host a subtitle track");
     }
@@ -448,22 +448,21 @@ export class ForgeTrack {
     this.#track.addEventListener("cuechange", this.#onCueChange);
     // Off-screen players still fire cuechange; suppress the slot churn until
     // the player is visibly on screen and re-render once when it scrolls back.
-    // getBoundingClientRect is the element guard: a non-element videoLike
-    // (test double, detached stub) never gets observed.
-    if (video && typeof IntersectionObserver === "function" && typeof video.getBoundingClientRect === "function") {
-      const observer = new IntersectionObserver(([entry]) => {
-        if (this.#scope.disposed) {
-          return;
-        }
-        const was = this.#onScreen;
-        this.#onScreen = entry.isIntersecting;
-        if (this.#onScreen && !was) {
-          this.#render();
-        }
-      });
-      observer.observe(video);
-      this.#scope.onDispose(() => observer.disconnect());
-    }
+    // The capability probe this once wrapped the block (IO 51, rect 45 - both
+    // below the 156 floor; it named a "videoLike test double" premise that
+    // only a harness could supply) died with the harness-only element arms.
+    const observer = new IntersectionObserver(([entry]) => {
+      if (this.#scope.disposed) {
+        return;
+      }
+      const was = this.#onScreen;
+      this.#onScreen = entry.isIntersecting;
+      if (this.#onScreen && !was) {
+        this.#render();
+      }
+    });
+    observer.observe(video);
+    this.#scope.onDispose(() => observer.disconnect());
   }
 
   /**
@@ -648,7 +647,7 @@ export class ForgeTrack {
     // Unregister our native cuechange listener: the track survives (the spec
     // has no removal API) and would otherwise keep firing this renderer's
     // slot-node logic against a torn-down pool forever.
-    this.#track.removeEventListener?.("cuechange", this.#onCueChange);
+    this.#track.removeEventListener("cuechange", this.#onCueChange);
     this.#track.mode = "disabled";
     while (this.#track.cues.length > 0) {
       this.#track.removeCue(this.#track.cues[0]);
