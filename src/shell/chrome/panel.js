@@ -1294,8 +1294,9 @@ class HistorySection {
   #resetCard(card) {
     card.dataset.entryId = "";
     const refs = this.#refsFor(card);
-    refs.title.textContent = "";
-    refs.meta.textContent = "";
+    // replaceChildren() (86): the pooled-clear backend, not the text setter.
+    refs.title.replaceChildren();
+    refs.meta.replaceChildren();
     // Generic labels while pooled: a card must never announce its previous
     // entry's name between renders.
     refs.resetBtn.setAttribute("aria-label", "Reset resume position");

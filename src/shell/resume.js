@@ -6,7 +6,8 @@ import { logger, Scope } from "../shared/runtime.js";
 /** Sort entries by updatedAt - ascending (oldest-first, for eviction) or
  *  descending (newest-first, for history display). */
 function sortByUpdatedAt(entries, descending = false) {
-  return [...entries].sort((a, b) => {
+  // toSorted (110): the native copy-sort - the spread+sort pair it replaced.
+  return entries.toSorted((a, b) => {
     const diff = (a.updatedAt || 0) - (b.updatedAt || 0);
     return descending ? -diff : diff;
   });

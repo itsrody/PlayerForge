@@ -125,7 +125,9 @@ export class ToastManager {
     this.#lastHadActions = hadActions;
     // Clone from the cached icon template: a repeated icon is a cheap
     // cloneNode, not an HTML re-parse. aria-hidden lives on the template.
-    this.#icon.textContent = "";
+    // replaceChildren() (86) is the pooled-clear backend: the textContent=""
+    // idiom this replaced conflated "clear children" with the text setter.
+    this.#icon.replaceChildren();
     const iconEl = icon ? createIconElement(icon, this.#icon.ownerDocument) : null;
     if (iconEl) {
       this.#icon.appendChild(iconEl);
@@ -134,7 +136,7 @@ export class ToastManager {
     this.#text.textContent = text || "";
     this.#text.hidden = !text;
     if (actions && actions.length) {
-      this.#actions.textContent = "";
+      this.#actions.replaceChildren();
       const doc = this.#actions.ownerDocument;
       for (const action of actions) {
         const buttonEl = button({
@@ -153,7 +155,7 @@ export class ToastManager {
       }
       this.#actions.hidden = false;
     } else {
-      this.#actions.textContent = "";
+      this.#actions.replaceChildren();
       this.#actions.hidden = true;
     }
     this.#toast.style.color = color || "";
