@@ -641,7 +641,7 @@ class SpaceSession {
  * eligibility, pointer tracking, the shared session-latch flag, and the
  * click/dblclick suppression decisions.
  *
- * Chromium 155+ native by design: one AbortSignal owns the entire listener
+ * Chromium 156+ native by design: one AbortSignal owns the entire listener
  * lifetime (destroy() === scope.abort()), all pointer listeners are passive,
  * scrub sampling consumes getCoalescedEvents(), and fullscreen truth is the
  * single shared `fs` gate (shadow.js), built on the native fullscreen event.

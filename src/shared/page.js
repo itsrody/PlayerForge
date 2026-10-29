@@ -1283,7 +1283,7 @@ export function installContextBridge() {
  *
  * `window.onurlchange` (Tampermonkey `@grant window.onurlchange`) would be
  * another backend, but it costs a grant line for coverage the native
- * Navigation API already provides on the Chromium 155 floor - the grant
+ * Navigation API already provides on the Chromium 156 floor - the grant
  * policy in shared/store.js reserves manager APIs for capabilities the page
  * cannot supply, and URL change notification is not one of them.
  *

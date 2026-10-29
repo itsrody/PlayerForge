@@ -14,7 +14,7 @@ history that explains why those conventions exist.
 A Userscript-exclusive HTML5 video player enhancer for two fork browsers:
 
 - **Helium** (macOS desktop), **Titanium** (Android)
-- Chromium **155+** platform floor, **Tampermonkey 5.5+ (MV3)** manager
+- Chromium **156+** platform floor, **Tampermonkey 5.5+ (MV3)** manager
 - Features: pointer/keyboard gestures, hotkeys, progress resume, watch
   history, subtitles (.srt/.vtt with per-cue placement, per-entry sync
   offset, URL/file restore), color filters with presets, per-domain
@@ -316,7 +316,7 @@ launch (§8).
 7. **No comments in check/ code beyond the why-docstrings it already
    carries; `installGMRealm` must stay a single self-contained function**
    (it ships as an executeScript payload — no closure references).
-8. **ES target floor: Chromium 155.** `?.` chains, top-level field syntax,
+8. **ES target floor: Chromium 156.** `?.` chains, top-level field syntax,
    `data-transfer` file APIs, View Transitions, CloseWatcher — all in scope;
    nothing below the floor, no polyfill arms.
 9. **Version is derived** (esbuild reads package.json). Header updates are
@@ -343,7 +343,7 @@ only surface, scales/tokens `@property`-typed, gradients banned in the HUD:
   unmeasured), and one tick in R1 applies.
 - **R4 Every scrollable glass surface needs a scroll edge** — content
   scrolling beneath a pinned control is obscured; not a blanket scrim.
-  Realized scroll-driven (Chromium 155's scroll timelines register a
+  Realized scroll-driven (the floor's scroll timelines register a
   `--pf-scroll-edge` share): the panel header is fully transparent at the
   top of the scroll and ramps its darker edge-ink band in only over passing
   content — a solid-to-faded gradient of the sheet's ink at a per-preset

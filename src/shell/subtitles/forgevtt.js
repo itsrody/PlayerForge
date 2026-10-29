@@ -408,8 +408,8 @@ export function parseSubtitles(text, offset = 0) {
 /**
  * Cooperative variant of parseSubtitles for large track loads. Checks a
  * ~50ms time budget between blocks and, when spent, hands control back via
- * the shared yield_() facade (scheduler.yield on Chromium 155+, rAF/noop
- * elsewhere) so a huge VTT/SRT parse never blocks video playback or paint.
+ * the shared yield_() facade (scheduler.yield, the one cooperative backend)
+ * so a huge VTT/SRT parse never blocks video playback or paint.
  * When available it also yields as soon as navigator.scheduling.isInputPending
  * reports queued input, so a large load never delays a tap/scroll even inside
  * the time budget. Intentionally separate from parseSubtitles so the hot,

@@ -28,7 +28,7 @@ const DECODER = new TextDecoder();
 
 /**
  * Report every long animation frame the worker produced. LoAF in workers
- * landed in Chromium 153, so it is always present on the 155 floor: the
+ * landed in Chromium 153, so it is always present on the 156 floor: the
  * entry-type support decides installation, one check that also covers realms
  * (like Node's PerformanceObserver) that ship the observer without LoAF.
  */

@@ -184,7 +184,7 @@ function serviceLabel(service) {
 /**
  * Order the launch candidates and keep them honest: a local disk driver is
  * only a candidate while its major matches the browser (a stale brew driver
- * 154 in front of Chromium 155 would guarantee a session refusal); the Selenium
+ * 154 in front of Chromium 156 would guarantee a session refusal); the Selenium
  * Manager candidate always trails so a whole-ladder failure needs something
  * new on disk before any retry could matter.
  */
@@ -210,7 +210,7 @@ function serviceCandidates(chromeMod, browserVersion) {
 /**
  * Fail-fast driver probe for the runner, browser-aware: it knows the
  * embedded Chromium major the launch will target, so "chromedriver 154 vs
- * chromium 155" is surfaced here (the browser-preference path is the actual
+ * chromium 156" is surfaced here (the browser-preference path is the actual
  * plan: launch falls back to Selenium Manager for the matching major) instead
  * of one loud session-refusal launch later. When the disk can supply the
  * matching major it is preferred over a merely reporting driver. Best-effort:
@@ -297,7 +297,7 @@ export class ChromiumSession {
 
     // Candidate ladder: a version-matched local driver first, Selenium
     // Manager always behind it. A mid-fork-update disk (brew driver 154 vs
-    // Chromium 155) therefore never guarantees a brew-heal round trip that
+    // Chromium 156) therefore never guarantees a brew-heal round trip that
     // reinstalls the same stale version.
     const tried = [];
     const serviceAndAttempt = async (service) => {
