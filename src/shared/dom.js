@@ -559,6 +559,16 @@ export function isInsideShell(host, node) {
  * fullscreen: latching `!!document.fullscreenElement` at the transition is the
  * single source of truth, regardless of which actor entered it. Module-level
  * so it represents document-wide truth and survives shell create/destroy.
+ *
+ * Per-frame semantics are a feature, not a gap: the Fullscreen spec gives every
+ * document in a nested chain its OWN fullscreenElement, and the gate binds the
+ * frame that contains the video - where the HUD and fs-gated gestures live - so
+ * an ancestor document entering fullscreen incorrectly claims this frame's
+ * state. Negative space: no vendor-prefixed fullscreen API anywhere (Chromium
+ * honest floor), no fullscreenerror listener in this gate (an entry rejection
+ * is not a state flip; the HUD-layer handler in shell.js covers remediation),
+ * and no polling - the native event IS the single transition source, with the
+ * pagehide/pageshow lifecycle listeners re-arming the latch (see init).
  */
 export let fs = false;
 
@@ -602,6 +612,27 @@ class FsGate {
     }
     this.#doc = doc;
     doc.addEventListener("fullscreenchange", () => this.#update(doc));
+    // Lifecycle re-arm, the one hole the transition event cannot close: the
+    // latch is a plain boolean on a document object bfcache keeps alive with
+    // these listeners still attached, while Chromium exits fullscreen on
+    // navigation and never stores a fullscreen document in the cache - so a
+    // persisted pagehide carrying fs=true is a stale future (restore will not
+    // fire fullscreenchange to correct it). Force-false on persisted pagehide;
+    // re-seed from the live document on every restore so the latch can only
+    // ever claim state the document actually holds. Non-persisted navigations
+    // reconfigure the whole frame anyway, and a real fullscreen exit lands
+    // its own fullscreenchange - both stay unplumbed here. pagehide/pageshow
+    // fire at the Window and do not traverse the DOM tree, so the pair binds
+    // the document's view, not the document.
+    const view = doc.defaultView;
+    if (view) {
+      view.addEventListener("pagehide", (event) => {
+        if (event.persisted && fs) {
+          fs = false;
+        }
+      });
+      view.addEventListener("pageshow", () => this.#update(doc));
+    }
   }
 
   /**

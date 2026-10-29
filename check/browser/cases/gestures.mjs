@@ -29,6 +29,8 @@ async function recordGestureEvents(session) {
     host.addEventListener("pf:gesture-panel", () => window.__pfEvents.push("panel"));
     host.addEventListener("pf:gesture-pip", () => window.__pfEvents.push("pip"));
     host.addEventListener("pf:gesture-dbltap", () => window.__pfEvents.push("dbltap"));
+    host.addEventListener("pf:gesture-swipe-start", () => window.__pfEvents.push("swipe-start"));
+    host.addEventListener("pf:gesture-swipe", (e) => window.__pfEvents.push("swipe:" + e.detail.direction));
   });
 }
 
@@ -158,6 +160,47 @@ export async function run({ session, baseUrl, boot }) {
   });
   await new Promise((r) => setTimeout(r, 150));
 
+  // Gate lifecycle re-arm: persisted pagehide force-falsy and pageshow
+  // re-seed from the live document (src/shared/dom.js FsGate). Driven here
+  // by native synthetic events so the drag rows below run against the
+  // re-armed latch, not the original tick - a synthetic fullscreenchange
+  // alone would only exercise the happy path.
+  status(rows, "fs gate re-arms across a persisted pagehide/pageshow cycle",
+    await session.eval(function main() {
+      const video = document.querySelector("#check-video");
+      if (video === null) return "no video";
+      const rect = video.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const fire = (type, x, y, buttons) => video.dispatchEvent(new PointerEvent(type, {
+        pointerId: 5,
+        pointerType: "touch",
+        isPrimary: true,
+        button: type === "pointerup" ? -1 : 0,
+        buttons,
+        bubbles: true,
+        cancelable: true,
+        clientX: x,
+        clientY: y,
+      }));
+      window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }));
+      // The intent must be dead while the stale latch lasts, or the
+      // force-false does nothing: a swipe attempt mid-cycle must not latch.
+      fire("pointerdown", cx, cy, 1);
+      fire("pointermove", cx, cy + 30, 1);
+      const deadTransform = video.style.transform;
+      fire("pointerup", cx, cy + 30, 0);
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      fire("pointerdown", cx, cy, 1);
+      fire("pointermove", cx, cy + 30, 1);
+      const liveTransform = video.style.transform;
+      fire("pointerup", cx, cy + 30, 0);
+      video.getAnimations().forEach((a) => a.cancel());
+      video.style.transform = "";
+      return deadTransform === "" && liveTransform.includes("translateY(30px)") ?
+        true : `dead=${deadTransform} live=${liveTransform}`;
+    }), "gate re-arm mismatch");
+
   // Horizontal drag = scrub family (fullscreen territory).
   await recordGestureEvents(session);
   await raw.actions({ async: true })
@@ -212,6 +255,51 @@ export async function run({ session, baseUrl, boot }) {
   await session.eval(function main() {
     document.querySelector("#pf-sdkprobe")?.remove();
   });
+
+  // Touch pointer-type stream through the ENGINE claim (synthetic
+  // PointerEvent dispatch - event listeners are pointer-type agnostic, and
+  // untrusted events still traverse the capture path the engine listens on;
+  // chromedriver's actions surface has no touch pointer, so the compositor
+  // touch pipeline itself stays device-verified). The seeded compose pins
+  // the prepend contract: the follow translate must LEAD the list whatever
+  // the base scale is, or the follow rides inside scale() at s× pointer
+  // rate. State is restored in the same turn - the ease's finish commit
+  // would otherwise re-apply the compose after cleanup.
+  status(rows, "touch pointer stream: swipe-down follows pointer-rate over a scaled compose",
+    await session.eval(function main() {
+      const video = document.querySelector("#check-video");
+      if (video === null) return "no video";
+      video.style.transform = "scale(1.25)";
+      const rect = video.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const fire = (type, x, y, buttons) => video.dispatchEvent(new PointerEvent(type, {
+        pointerId: 7,
+        pointerType: "touch",
+        isPrimary: true,
+        button: type === "pointerup" ? -1 : 0,
+        buttons,
+        bubbles: true,
+        cancelable: true,
+        clientX: x,
+        clientY: y,
+      }));
+      fire("pointerdown", cx, cy, 1);
+      fire("pointermove", cx, cy + 20, 1);
+      fire("pointermove", cx, cy + 100, 1);
+      const midTransform = video.style.transform;
+      const willChange = video.style.willChange;
+      fire("pointerup", cx, cy + 100, 0);
+      video.getAnimations().forEach((a) => a.cancel());
+      video.style.transform = "";
+      const events = window.__pfEvents.filter((e) => e.startsWith("swipe"));
+      const ok = midTransform === "translateY(100px) scale(1.25)" &&
+        willChange === "transform" &&
+        events.includes("swipe-start") &&
+        events.includes("swipe:down");
+      return ok ? true :
+        `transform=${midTransform}, willChange=${willChange}, events=${JSON.stringify(events)}`;
+    }), "apex follow compose mismatch");
 
   return rows;
 }

@@ -4,10 +4,19 @@ import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen, DOMManage
 import { logger, Scope, delay } from "../../shared/runtime.js";
 
 /**
- * Pointer handlers never preventDefault - native pan/scroll over the zone is
- * suppressed by the touch-action CSS set at construction - so every pointer
- * listener can be passive. Only two listeners cancel defaults: the wheel
- * pinch listener (subscribed only while fullscreen) and the click/dblclick
+ * Pointer handlers historically never preventDefault - native pan/scroll over
+ * the zone was the only touch-pipeline claimant, suppressed by the
+ * touch-action CSS set at construction, so every pointer listener could be
+ * passive. Android Chromium muted that premise: chains outside the container
+ * (SDK topology the video does not share) and shell-layer gestures do claim
+ * the touch stream there, eating the drag before any latch. So the press
+ * listener is now non-passive and cancels claimed touch presses at
+ * pointerdown (the strongest page-ownable claim - the compat tail, selection
+ * and UA attachment defaults die at the source), and a guarded touchmove
+ * belt reinforces the touch-action guarantee mid-stream while a session is
+ * owned. Mouse presses keep their defaults. Only three listeners cancel
+ * defaults now: the touch press claim, the belt, and the wheel pinch
+ * listener (subscribed only while fullscreen) plus the click/dblclick
  * suppressors that swallow post-gesture activations.
  */
 const WHEEL_CAPTURE = { capture: true, passive: false };
@@ -679,8 +688,10 @@ export class InputForge {
    *  disposed flag guards dispatch + destroy. */
   #scope = new Scope();
 
-  // Cached <video> box for hit-testing, invalidated on resize/fullscreen so
-  // pointerdown never forces a synchronous layout flush with getBoundingClientRect.
+  // Cached <video> box for hit-testing, invalidated per press (and at
+  // teardown) so pointerdown never forces a synchronous layout flush with
+  // getBoundingClientRect; a fresh press re-reads truth, covering anything a
+  // ResizeObserver or a fullscreen flip cannot.
   #videoRect = null;
 
   // Pointer session state.
@@ -768,9 +779,14 @@ export class InputForge {
     const { signal } = this.#scope;
     // Track touch-action (kills scroll/pinch takeover) and user-select (kills
     // native selection highlight + its hit-testing while scrubbing over page
-    // text) for automatic rollback on destroy.
+    // text) for automatic rollback on destroy. The touch-action contract is
+    // consulted from the touch target UP the flat tree, so it is anchored on
+    // the video itself too - embeds where the video does not share the
+    // container's chain (sibling overlays, SDK re-parenting during
+    // fullscreen) still present a default-auto chain to the browser.
     this.#dom.markStyle(zone, "touch-action", "none");
     this.#dom.markStyle(zone, "user-select", "none");
+    this.#dom.markStyle(video, "touch-action", "none");
 
     // NOTE: the native video element is deliberately NEVER patched (no
     // own-property rewrite of play/pause). Assigning JS functions as own
@@ -782,10 +798,21 @@ export class InputForge {
     // the bare-tap toggle below calls the native methods directly.
 
     const options = { capture: true, passive: true, signal };
-    zone.addEventListener("pointerdown", (event) => this.#handlePointerDown(event), options);
+    // The press listener alone is non-passive: a claimed touch press is
+    // cancelled inside #handlePointerDown, and cancelling requires it.
+    zone.addEventListener("pointerdown", (event) => this.#handlePointerDown(event), { capture: true, passive: false, signal });
     zone.addEventListener("pointermove", (event) => this.#handlePointerMove(event), options);
     zone.addEventListener("pointerup", (event) => this.#handlePointerUp(event), options);
     zone.addEventListener("pointercancel", (event) => this.#handlePointerCancel(event), options);
+    // Belt under touch-action none: during an owned session, touchmove
+    // carries no default that should win - scrolling or UA recognizers
+    // taking the stream out from under the latched stroke. Cancelled while
+    // owned only, so plain taps and SDK streams stay native.
+    zone.addEventListener("touchmove", (event) => {
+      if (this.#pointerOwned) {
+        event.preventDefault();
+      }
+    }, { capture: true, passive: false, signal });
     // Capture loss without a pointerup/cancel pair (element removed, hit-test
     // takeover) would strand an owned session; treat it as cancellation.
     zone.addEventListener("lostpointercapture", (event) => this.#handleLostCapture(event), options);
@@ -1183,6 +1210,14 @@ export class InputForge {
       // single-tap replay - a new press can still turn into a dbltap or a
       // gesture, and the SDK must not be toggled mid-sequence.
       this.#pointerOwned = true;
+      // Claim the touch at the input layer: cancelling a touch press drops
+      // the pointer's UA-default set at the source (compat mouse tail,
+      // selection and drag starts) rather than after the fact. Mouse presses
+      // keep their defaults - only touch/pen streams pay this; scroll
+      // suppression itself stays touch-action-driven (chain + belt below).
+      if (event.pointerType !== "mouse") {
+        event.preventDefault();
+      }
       if (allowsIntent("dbltap")) {
         this.#tap.cancel();
       }
