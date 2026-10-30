@@ -296,6 +296,23 @@ having genuine matching semantics elsewhere. What stayed vs died:
   composition rides native `AbortSignal.timeout`/`AbortSignal.any`
   unconditionally (the manual-deadline arm this record once kept died with
   the harness-only consumers).
+- **Zero-timer pipeline (closed by census).** The architecture carries
+  zero poll-style timers — `setTimeout`/`setInterval` never appears in src;
+  the cadence that was once a wall clock (resume checkpoints every 10s)
+  rides the `requestVideoFrameCallback` media crank (presented-frame
+  mediaTime), and the bridge's retry ladder died into the `pf:ready`
+  announcement (event-driven, last commits). Every timer that remains is
+  one of three deliberate classes: a **coalescer** — the `DomSettleWait`
+  trailing quiet period re-armed per mutation (no native "settled" event
+  exists), removal-grace one-shot deferrals, and the three persist
+  debounces that batch trailing writes under stepper drags; a **deadline**
+  over witness absence — bridge watchdogs (bridgeless embed settles null),
+  the worker spawn watchdog, and the hidden-tab flush cap with its
+  `visibilitychange` resume; or a **feature timer** whose semantics the
+  product defines as temporal — hold-to-speed, press qualifying, toast
+  auto-hide, the first-run hint cap. All ride the shared scheduler
+  (`postTask`/`delay`/`debounce`, abort-scoped). A future timer needs to
+  name one of these three classes, not merely be a `delay`.
 - Died: the `postTask` façade's whole setTimeout arm, `yield_`'s
   scheduler→rAF→noop ladder, `onNavigate`'s popstate/hashchange backend that
   could never see a pushState-only change, `MessageChannel`/MutationObserver/
