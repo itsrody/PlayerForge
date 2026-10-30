@@ -10,7 +10,7 @@
  * the chunk imports the engine, never the feature.
  */
 import { parseSubtitlesAsync as parseInBand, srtToVtt, ensureVttHeader } from "./forgevtt.js";
-import { logger, Scope, debounce } from "../../shared/runtime.js";
+import { logger, Scope, debounce, Fan } from "../../shared/runtime.js";
 import { DOMManager } from "../../shared/dom.js";
 import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/store.js";
 import { TUNING, clamp, fmtPercent, fmtEm, fmtPercentOrOff, signedSeconds } from "../../shared/core.js";
@@ -707,7 +707,8 @@ class SubtitleSyncState {
   #identity = false;
   #dirty = false;
   #tracker = null;
-  #listeners = new Set();
+  /** State audience on the shared Fan (the ONE plain-fan-out owner). */
+  #audience = new Fan("sync");
   #schedulePersist = debounce(() => this.#write(), TUNING.subtitles.syncDebounceMs);
 
   get offset() {
@@ -731,11 +732,9 @@ class SubtitleSyncState {
     // iff the entry changed): the store's own-echo filter swallows our own
     // save notifications, which means the findMatch adoption path - silent,
     // it persists nothing - only reaches us through the tracker's announce().
-    const tracker = this.#tracker;
-    if (tracker) {
+    if (this.#tracker) {
       this.#resolve();
-      const unsub = tracker.onChange(() => this.#resolve());
-      signal?.addEventListener("abort", () => unsub(), { once: true });
+      this.#tracker.onChange(() => this.#resolve(), { signal });
     }
     host.addEventListener(GESTURE_EVENTS.subSync, ({ detail }) => {
       this.set(this.#value + (detail?.direction === "left" ? -SYNC_STEP : SYNC_STEP));
@@ -771,9 +770,8 @@ class SubtitleSyncState {
     this.#emit();
   }
 
-  onState(listener) {
-    this.#listeners.add(listener);
-    return () => this.#listeners.delete(listener);
+  onState(listener, { signal } = {}) {
+    return this.#audience.subscribe(listener, { signal });
   }
 
   #write() {
@@ -786,9 +784,7 @@ class SubtitleSyncState {
   }
 
   #emit() {
-    for (const listener of this.#listeners) {
-      listener(this.#value);
-    }
+    this.#audience.emit(this.#value);
   }
 }
 
@@ -820,7 +816,8 @@ export class SubtitleSession {
    *  re-armed on each progress persist. */
   #restoreAttemptedUrl = "";
   #scope = new Scope();
-  #stateListeners = new Set();
+  /** Presentation-state audience on the shared Fan. */
+  #audience = new Fan("subtitle-state");
 
   constructor(shell) {
     this.#shell = shell;
@@ -832,13 +829,10 @@ export class SubtitleSession {
     // Sync offset rides its own singleton state: every commit shifts the
     // live cues in place (setOffset), load-time application reads the
     // current offset in the same build pass over the base cues.
-    const unsubSync = subtitleSync.onState((offset) => this.#applySyncOffset(offset));
-    this.#scope.onDispose(() => unsubSync());
+    subtitleSync.onState((offset) => this.#applySyncOffset(offset), { signal: this.#scope.signal });
     // The restore watch: the store announces only on adoption, so the
     // subscription fires once per entry identity (not per save).
-    const tracker = shell.resume;
-    const unsubRestore = tracker?.onChange?.(() => this.#tryRestore());
-    this.#scope.onDispose(() => unsubRestore?.());
+    shell.resume?.onChange?.(() => this.#tryRestore(), { signal: this.#scope.signal });
     // Stored cue style applies at boot: a saved font/stroke must be on the
     // cue layer before any track renders with it - the panel section (its
     // other applier) builds lazily, so a resume playthrough would otherwise
@@ -870,9 +864,8 @@ export class SubtitleSession {
     return !!this.#trackMeta;
   }
 
-  onState(listener) {
-    this.#stateListeners.add(listener);
-    return () => this.#stateListeners.delete(listener);
+  onState(listener, { signal } = {}) {
+    return this.#audience.subscribe(listener, { signal });
   }
 
   /** Cue-layer presentation var; safe with no track (steppers stay disabled
@@ -1013,9 +1006,7 @@ export class SubtitleSession {
   }
 
   #notifyListeners() {
-    for (const listener of this.#stateListeners) {
-      listener(this);
-    }
+    this.#audience.emit(this);
   }
 
   destroy() {
@@ -1059,8 +1050,7 @@ export class SubtitlesSection {
     this.#cuePosition = Number.isFinite(storedPos) ? storedPos : null;
     this.#fileInput = this.#createFileInput(shell);
     this.#buildPanelUi(shell);
-    const unsub = this.#session?.onState(() => this.#refreshHint());
-    this.#scope.onDispose(() => unsub?.());
+    this.#session?.onState(() => this.#refreshHint(), { signal: this.#scope.signal });
     this.#refreshHint();
   }
 
@@ -1258,8 +1248,7 @@ export class SubtitlesSection {
     });
     // Nudges that arrive through the keyboard or a menu propagate here - the
     // stepper shows the state even when it was not its own edit that moved it.
-    const unsubSync = subtitleSync.onState((offset) => syncStepper.setValue(offset));
-    this.#scope.onDispose(() => unsubSync());
+    subtitleSync.onState((offset) => syncStepper.setValue(offset), { signal: this.#scope.signal });
 
     // Caption placement grid: V / H.
     const positionHead = panel.el("div", { class: "pf-panel-section-head" }, sectionRoot);

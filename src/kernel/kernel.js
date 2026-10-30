@@ -1,4 +1,4 @@
-import { logger, setDebugRuntime, postTask, Scope, runSteps } from "../shared/runtime.js";
+import { logger, setDebugRuntime, postTask, Scope, runSteps, Fan } from "../shared/runtime.js";
 import { getConfigValue, setConfigValue, gmRegisterMenu, gmUnregisterMenu } from "../shared/store.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, DEBUG_HASH_TAG, FRAMEWORK_TUNING } from "./contract.js";
 import { findSdkForVideo } from "./detection.js";
@@ -275,8 +275,8 @@ export class Kernel {
   #pending = new Set();
   /** Abort source for in-flight settle waits; aborted at pagehide. */
   #settleScope = new AbortController();
-  /** Shell-ready listeners (direct callbacks, no bus). */
-  #createdListeners = new Set();
+  /** Shell-ready fan-out audience (one event per registration). */
+  #audience = new Fan("shell");
   #initialized = false;
   // Weak: an adopted video orphaned by an untracked removal path must not
   // pin the element (and its whole subtree) for the page's lifetime.
@@ -363,20 +363,16 @@ export class Kernel {
 
   /** Register a shell-ready listener directly; returns an unsubscribe. */
   onShellCreated(cb) {
-    this.#createdListeners.add(cb);
-    return () => this.#createdListeners.delete(cb);
+    return this.#audience.subscribe(cb);
   }
 
-  /** Register the shell then fan out to every shell-ready listener. */
+  /** Register the shell then fan out to every shell-ready listener.
+   *  No per-listener try/catch: native dispatch isolates listener
+   *  exceptions (reported to the global, never halting the rest of the
+   *  dispatch) - the per-case audit rows already watch that path. */
   #notifyShellCreated(shell) {
     this.#registry.register(shell);
-    for (const cb of this.#createdListeners) {
-      try {
-        cb(shell);
-      } catch (err) {
-        logger.error("kernel", "Shell-created listener threw:", err);
-      }
-    }
+    this.#audience.emit(shell);
   }
 
   /**

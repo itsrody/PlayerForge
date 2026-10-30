@@ -145,8 +145,8 @@ export class FilterSession {
     return matchPreset(this.#values);
   }
 
-  onState(listener) {
-    return this.#audience.subscribe(listener);
+  onState(listener, { signal } = {}) {
+    return this.#audience.subscribe(listener, { signal });
   }
 
   /** Per-key state write (panel stepper): preview + trailing persist. */
@@ -250,8 +250,7 @@ export class VideoFilter {
   constructor(shell, panel) {
     this.#session = shell.filters;
     this.#buildSection(panel);
-    const unsub = this.#session?.onState(() => this.#syncFromSession());
-    this.#scope.onDispose(() => unsub?.());
+    this.#session?.onState(() => this.#syncFromSession(), { signal: this.#scope.signal });
     this.#syncFromSession();
   }
 

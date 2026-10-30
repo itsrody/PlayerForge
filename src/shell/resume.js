@@ -91,10 +91,11 @@ class ResumeStore {
    * true when the entry SET changed (create/remove/import/cross-tab merge),
    * false for pure position/timestamp updates. Returns an unsubscribe fn.
    * Consumers that snapshot the whole list (History) re-render on structural
-   * changes only; position-only persists stay invisible to them.
+   * changes only; position-only persists stay invisible to them. A `{ signal }`
+   * rides the shared Fan, so a bound scope un-subscribes on abort.
    */
-  onChange(cb) {
-    return this.#audience.subscribe(cb);
+  onChange(cb, { signal } = {}) {
+    return this.#audience.subscribe(cb, { signal });
   }
 
   #notify(structural = false) {
@@ -862,8 +863,8 @@ export class ResumeTracker {
   }
 
   /** Subscribe to store changes (see ResumeStore#onChange). */
-  onChange(cb) {
-    return this.#store.onChange(cb);
+  onChange(cb, { signal } = {}) {
+    return this.#store.onChange(cb, { signal });
   }
 
   /* - Entry accessors for boot-time bookkeeping consumers (the sync state
