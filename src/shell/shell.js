@@ -23,6 +23,28 @@ import { requestFullscreenProvision } from "../shared/page.js";
 const EDITABLE_SELECTOR =
   "input, textarea, [contenteditable]:not([contenteditable='false'])";
 
+/**
+ * Equal-write custom-property sync onto the shell host, the one guard both
+ * CSS-var mirrors run through. A setProperty on a hot style invalidates
+ * (recolors) the host subtree even when the value matches, so event storms -
+ * volumechange under a volume drag, visualViewport resize/scroll while the
+ * URL bar collapses per frame - would pay that cost per event to no-op the
+ * paint unless each prop writes only on an actual flip (measured in the
+ * media-vars row this guard replaces).
+ */
+function cssVarSyncer(host, specs) {
+  const state = new Map();
+  return () => {
+    for (const [prop, read] of specs) {
+      const next = read();
+      if (state.get(prop) !== next) {
+        state.set(prop, next);
+        host.style.setProperty(prop, next);
+      }
+    }
+  };
+}
+
 /** Human labels for MediaError.code; an unknown code falls back at the call. */
 const MEDIA_ERROR_LABELS = {
   1: "Playback was aborted",
@@ -238,14 +260,12 @@ export class Shell {
   }
 
   /**
-   * Unified contextual reference box, per the PlayerForge geometry rule: in
-   * inline mode the reference is the shell's own container (the SDK container).
-   * Fullscreen reference box used for fill-mode cover scaling and scrub
-   * normalization. With the edge-to-edge bypass (see inject.js) the
-   * fullscreen iframe draws behind the cutout edge-to-edge, so the SDK's
-   * rendered box IS the physical screen, exactly when the window box agrees;
-   * a letterboxed non-cover frame falls back inside the getter. Returns
-   * { width, height }.
+   * The unified contextual fill box, owned by shared/dom.js ReferenceBox:
+   * inline mode reads the shell's own container (the SDK container),
+   * fullscreen reads the fs element's own rect - the device screen including
+   * the Android safe area where viewport-fit=cover merged on the active
+   * frame - and document fullscreen (no element) falls back to the window
+   * box inside the class. Returns { width, height }.
    */
   get referenceBox() {
     return this.#refBox.get();
@@ -407,26 +427,13 @@ export class Shell {
     // 156 (verified via selector probes) but match only in the video's realm;
     // from inside our shadow root they cannot select the page's video, so
     // custom properties bridge the gap.
-    let pausedVar = null;
-    let mutedVar = null;
-    const cssSync = host
-      ? () => {
-          // Write the custom properties only when their value actually flips.
-          // volumechange fires continuously while volume/panner is dragged, and
-          // a setProperty on a hot style recolors the host subtree for nothing
-          // when neither flag changed.
-          const paused = video.paused ? "1" : "0";
-          if (paused !== pausedVar) {
-            pausedVar = paused;
-            host.style.setProperty("--pf-media-paused", paused);
-          }
-          const muted = video.muted ? "1" : "0";
-          if (muted !== mutedVar) {
-            mutedVar = muted;
-            host.style.setProperty("--pf-media-muted", muted);
-          }
-        }
-      : null;
+    let cssSync = null;
+    if (host) {
+      cssSync = cssVarSyncer(host, [
+        ["--pf-media-paused", () => (video.paused ? "1" : "0")],
+        ["--pf-media-muted", () => (video.muted ? "1" : "0")]
+      ]);
+    }
     // One registration set for both concerns: play/pause/volumechange are in
     // MEDIA_SESSION_SYNC_EVENTS, so separate css-sync listeners would double-
     // dispatch those three hottest state events into two closures each.
@@ -514,7 +521,9 @@ export class Shell {
    * The mobile on-screen keyboard and collapsing URL bar shrink/offset the
    * visual viewport without changing the layout viewport, so the panel's
    * portrait bottom sheet reads these to stay above the keyboard and inside
-   * the actually-visible area.
+   * the actually-visible area. The equal-write guard matters most here: vv
+   * scroll fires per frame while the URL bar collapses, and both props read
+   * stable unless the bar/keyboard actually moved.
    */
   #watchVisualViewport() {
     const vv = window.visualViewport;
@@ -522,14 +531,10 @@ export class Shell {
     if (!vv || !host) {
       return;
     }
-    const sync = () => {
-      if (this.#scope.disposed) {
-        return;
-      }
-      host.style.setProperty("--pf-vv-height", `${vv.height}px`);
-      const inset = window.innerHeight - vv.height - vv.offsetTop;
-      host.style.setProperty("--pf-vv-inset-bottom", `${inset > 0 ? inset : 0}px`);
-    };
+    const sync = cssVarSyncer(host, [
+      ["--pf-vv-height", () => `${vv.height}px`],
+      ["--pf-vv-inset-bottom", () => `${Math.max(0, window.innerHeight - vv.height - vv.offsetTop)}px`]
+    ]);
     this.#dom.listen(vv, "resize", sync, { passive: true });
     this.#dom.listen(vv, "scroll", sync, { passive: true });
     sync();
