@@ -221,8 +221,12 @@ iframes, same-origin and cross-origin:
   with in-band fallback (`WorkerTransport` owns spawn/sequence/watchdog as one
   class), `subtitles.js` — the main-thread surface: eager `SubtitleSession`
   (ForgeTrack renderer 8 concurrent cue slots, drag-drop/URL ingest with
-  per-entry restore, parsing memoized, cue-style vars applied at boot, the
-  `SubtitleSyncState` grain singleton) + lazy `SubtitlesSection` (panel UI).
+  per-entry restore, parsing memoized, the `SubtitleSyncState`,
+  `SubtitleStyleState` (all five values boot-apply at bind; the former
+  partial font/stroke boot left a stored custom size/color/shadow unapplied
+  until the section built), and `SubtitlePlacementState` grain singletons —
+  one owner per grain, no mirror fields between session and section) + lazy
+  `SubtitlesSection` (panel UI).
 - **chrome/** — `config.js` (state: `SETTINGS_SCHEMA`, `getSetting`,
   `onSettingsChanged`, `SETTING_KEYS`, cross-tab live-reload cache),
   `panel.js` (the `Panel` builder + settings/history section renderers),

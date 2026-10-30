@@ -679,6 +679,11 @@ const SETTING_KEYS = {
  *  the literals beside a raw storage read. */
 const PLACE_DEFAULTS = { line: 85, position: 50 };
 
+/** The cue-style defaults: the five control seeds and the reset read this one
+ *  constant (the stylesheet's own var fallback lines stay CSS-owned - that is
+ *  its internal business, not this vocabulary). */
+const STYLE_DEFAULTS = { size: 1.2, color: "#ffffff", shadow: 40, font: "", stroke: 0 };
+
 /** Curated caption family stacks; "" keeps the embed's own family. */
 const CUE_FONT_OPTIONS = [
   ["Inherit", ""],
@@ -883,6 +888,118 @@ class SubtitlePlacementState {
 
 export const subtitlePlacement = new SubtitlePlacementState();
 
+/** One style seed read: storage per key, the font stringify carried from the
+ *  session boot's exact normalization (rule: one owner per read). */
+function readStyleValues() {
+  return {
+    size: getConfigValue(SETTING_KEYS.size, STYLE_DEFAULTS.size),
+    color: getConfigValue(SETTING_KEYS.color, STYLE_DEFAULTS.color),
+    shadow: getConfigValue(SETTING_KEYS.shadow, STYLE_DEFAULTS.shadow),
+    font: String(getConfigValue(SETTING_KEYS.font, STYLE_DEFAULTS.font) || ""),
+    stroke: getConfigValue(SETTING_KEYS.stroke, STYLE_DEFAULTS.stroke)
+  };
+}
+
+/**
+ * The cue-style state machine as a per-frame singleton: one owner of the five
+ * style values (size/color/shadow/font/stroke) - the panel section's steppers
+ * and the session's boot application both read here, with the per-key var
+ * mapping this class carries (the applyCue* closures the section used to keep
+ * were the second copy of the same math).
+ *
+ * Like placement: seeds re-read at every bind (a shell rebuild sees newer
+ * storage exactly as the per-shell seeds it replaces), and persistence keeps
+ * the stepper cadence - one direct write per commit, the stepper quantizes.
+ * Binding applies ALL five values to the cue layer: the former boot path
+ * covered only font/stroke, which left a stored custom size/color/shadow
+ * unapplied until the section built - the two-owner seam this owner closes.
+ * Writing the font "" family keeps today's panel-build semantics (the cue
+ * style recovers to the stylesheet's inherit through the var, as the section
+ * already wrote it on every build).
+ */
+class SubtitleStyleState {
+  /** The five style values; keys mirror the section's control table. */
+  #values = readStyleValues();
+  /** The bound session; one shell per frame (ShellSlot destroys displaced
+   *  shells), so the last bind wins and the previous session dropped its
+   *  own signal first. */
+  #session = null;
+  /** State audience on the shared Fan (the ONE plain-fan-out owner). */
+  #audience = new Fan("style");
+
+  /** Control-table key order; the boot apply walks it. */
+  static #KEYS = ["size", "color", "shadow", "font", "stroke"];
+
+  value(key) {
+    return this.#values[key];
+  }
+
+  /**
+   * Bind to the shell's session: re-seed from storage, then apply all five
+   * values - the boot application, now complete (font/stroke's former
+   * partial path rode this same seam). No signal: this state subscribes
+   * nothing (the held session ref is the only channel), the commit path is
+   * state -> session, like the sync grain's #-tracker.
+   */
+  bindSession(session) {
+    this.#values = readStyleValues();
+    this.#session = session;
+    for (const key of SubtitleStyleState.#KEYS) {
+      this.#apply(key);
+    }
+  }
+
+  /** One style commit: the persist, the live var, and the fan-out ride one
+   *  path (the section's stepper cascades wrote three of these by hand). */
+  set(key, value) {
+    if (this.#values[key] === value) {
+      return;
+    }
+    this.#values[key] = value;
+    setConfigValue(SETTING_KEYS[key], value);
+    this.#apply(key);
+    this.#emit(key);
+  }
+
+  /** Reset to the defaults; per-key equality stops the no-op writes. */
+  reset() {
+    for (const key of SubtitleStyleState.#KEYS) {
+      this.set(key, STYLE_DEFAULTS[key]);
+    }
+  }
+
+  onState(listener, { signal } = {}) {
+    return this.#audience.subscribe(listener, { signal });
+  }
+
+  #apply(key) {
+    const session = this.#session;
+    if (!session) {
+      return;
+    }
+    const v = this.#values[key];
+    if (key === "size") {
+      session.setVar("--pf-cue-font-size", `${v}em`);
+    } else if (key === "color") {
+      session.setVar("--pf-cue-color", v);
+    } else if (key === "shadow") {
+      session.setVar("--pf-cue-text-shadow", v
+        ? `1px 1px ${Math.round(v / 6)}px rgba(0, 0, 0, ${(0.4 + v / 100 * 0.6).toFixed(2)})`
+        : "none");
+    } else if (key === "font") {
+      session.setVar("--pf-cue-font-family", v);
+    } else if (key === "stroke") {
+      session.setVar("--pf-cue-stroke", `${v}px`);
+    }
+  }
+
+  #emit(key) {
+    this.#audience.emit({ key, value: this.#values[key] });
+  }
+}
+
+export const subtitleStyle = new SubtitleStyleState();
+
 /**
  * Subtitle track state for one shell, constructed at boot - not with the
  * panel. Track ownership and the ingest paths (file, URL) must be live before
@@ -914,6 +1031,11 @@ export class SubtitleSession {
     // session holds no placement fields - track load reads the state, commits
     // apply live through the bound emit below.
     subtitlePlacement.bindSession(this, this.#scope.signal);
+    // Cue style rides its own state: the bind applies ALL five values to the
+    // cue layer here (the boot apply - it used to cover only font/stroke,
+    // which left a stored custom size/color/shadow unapplied until the panel
+    // section built), and every later commit lands live the same way.
+    subtitleStyle.bindSession(this);
     // Sync offset rides its own singleton state: every commit shifts the
     // live cues in place (setOffset), load-time application reads the
     // current offset in the same build pass over the base cues.
@@ -921,18 +1043,6 @@ export class SubtitleSession {
     // The restore watch: the store announces only on adoption, so the
     // subscription fires once per entry identity (not per save).
     shell.resume?.onChange?.(() => this.#tryRestore(), { signal: this.#scope.signal });
-    // Stored cue style applies at boot: a saved font/stroke must be on the
-    // cue layer before any track renders with it - the panel section (its
-    // other applier) builds lazily, so a resume playthrough would otherwise
-    // show the embed default look until a panel opens.
-    const storedFont = String(getConfigValue(SETTING_KEYS.font, "") || "");
-    if (storedFont) {
-      this.setVar("--pf-cue-font-family", storedFont);
-    }
-    const storedStroke = Number(getConfigValue(SETTING_KEYS.stroke, 0));
-    if (Number.isFinite(storedStroke) && storedStroke > 0) {
-      this.setVar("--pf-cue-stroke", `${storedStroke}px`);
-    }
     this.#tryRestore();
     // Off-screen cue job: captions end with the content they belong to.
     shell.video?.addEventListener("ended", () => this.#forgeTrack?.clear(), {
@@ -1241,79 +1351,53 @@ export class SubtitlesSection {
     panel.addLabel(styleHead, "Style & Sync");
     const styleGrid = panel.el("div", { class: "pf-panel-grid pf-panel-grid-compact" }, styleSection);
 
-    const applyCueSize = (v) => this.#setCueVar("--pf-cue-font-size", `${v}em`);
     const sizeStepper = panel.addControl(styleGrid, {
       type: "stepper",
       label: "Size",
       min: 0.6,
       max: 3,
       step: 0.1,
-      value: getConfigValue(SETTING_KEYS.size, 1.2),
+      value: subtitleStyle.value("size"),
       format: fmtEm,
-      onChange: (v) => {
-        setConfigValue(SETTING_KEYS.size, v);
-        applyCueSize(v);
-      }
+      onChange: (v) => subtitleStyle.set("size", v)
     });
-    applyCueSize(sizeStepper.getValue());
 
     const colorField = panel.addControl(styleGrid, {
       type: "color",
       label: "Color",
-      value: getConfigValue(SETTING_KEYS.color, "#ffffff"),
-      onChange: (hex) => {
-        setConfigValue(SETTING_KEYS.color, hex);
-        this.#setCueVar("--pf-cue-color", hex);
-      }
+      value: subtitleStyle.value("color"),
+      onChange: (hex) => subtitleStyle.set("color", hex)
     });
-    this.#setCueVar("--pf-cue-color", colorField.getValue());
 
-    const applyCueShadow = (strength) => this.#setCueVar("--pf-cue-text-shadow", strength
-      ? `1px 1px ${Math.round(strength / 6)}px rgba(0, 0, 0, ${(0.4 + strength / 100 * 0.6).toFixed(2)})`
-      : "none");
     const shadowStepper = panel.addControl(styleGrid, {
       type: "stepper",
       label: "Shadow",
       min: 0,
       max: 100,
       step: 5,
-      value: getConfigValue(SETTING_KEYS.shadow, 40),
+      value: subtitleStyle.value("shadow"),
       format: fmtPercentOrOff,
-      onChange: (v) => {
-        setConfigValue(SETTING_KEYS.shadow, v);
-        applyCueShadow(v);
-      }
+      onChange: (v) => subtitleStyle.set("shadow", v)
     });
-    applyCueShadow(shadowStepper.getValue());
 
-    const applyCueFont = (font) => this.#setCueVar("--pf-cue-font-family", font);
     const fontSelect = panel.addControl(styleGrid, {
       type: "select",
       label: "Font",
       options: CUE_FONT_OPTIONS,
-      value: getConfigValue(SETTING_KEYS.font, ""),
-      onChange: (font) => {
-        setConfigValue(SETTING_KEYS.font, font);
-        applyCueFont(font);
-      }
+      value: subtitleStyle.value("font"),
+      onChange: (font) => subtitleStyle.set("font", font)
     });
-    applyCueFont(fontSelect.value || "");
 
-    const applyCueStroke = (v) => this.#setCueVar("--pf-cue-stroke", `${v}px`);
     const strokeStepper = panel.addControl(styleGrid, {
       type: "stepper",
       label: "Stroke",
       min: 0,
       max: 4,
       step: 0.5,
-      value: getConfigValue(SETTING_KEYS.stroke, 0),
+      value: subtitleStyle.value("stroke"),
       format: (v) => v ? `${v}px` : "Off",
-      onChange: (v) => {
-        setConfigValue(SETTING_KEYS.stroke, v);
-        applyCueStroke(v);
-      }
+      onChange: (v) => subtitleStyle.set("stroke", v)
     });
-    applyCueStroke(strokeStepper.getValue());
 
     const syncStepper = panel.addControl(styleGrid, {
       type: "stepper",
@@ -1363,6 +1447,15 @@ export class SubtitlesSection {
 
     this.#styleControls = { size: sizeStepper, color: colorField, shadow: shadowStepper, font: fontSelect, stroke: strokeStepper, sync: syncStepper };
     this.#positionControls = { vertical: verticalStepper, horizontal: horizontalStepper };
+    // State display: every commit echoes back into its own controls
+    // (including state-driven commits - reset - the cascade no longer
+    // drives). The placement display keeps the null split: unset placement
+    // still shows the display defaults while the state carries "authored".
+    subtitleStyle.onState(({ key, value }) => this.#styleControls?.[key]?.setValue(value), { signal: this.#scope.signal });
+    subtitlePlacement.onState((cur) => {
+      this.#positionControls.vertical?.setValue(cur.line ?? PLACE_DEFAULTS.line);
+      this.#positionControls.horizontal?.setValue(cur.position ?? PLACE_DEFAULTS.position);
+    }, { signal: this.#scope.signal });
 
     this.#resetBtn = panel.addControl(styleHead, {
       type: "button",
@@ -1371,30 +1464,20 @@ export class SubtitlesSection {
       ariaLabel: "Reset style & sync",
       ghost: true,
       onClick: () => {
-        sizeStepper.setValue(1.2);
-        colorField.setValue("#ffffff");
-        shadowStepper.setValue(40);
-        // Stepper cascades drive the state; the select is plain DOM, so the
-        // font application is explicit here.
-        if (fontSelect.value) {
-          fontSelect.value = "";
-          applyCueFont("");
-          setConfigValue(SETTING_KEYS.font, "");
-        }
-        strokeStepper.setValue(0);
-        syncStepper.setValue(0);
-        verticalStepper.setValue(PLACE_DEFAULTS.line);
-        horizontalStepper.setValue(PLACE_DEFAULTS.position);
+        // One write path per state: the style grain resets all five (each
+        // control cascades through its own onState echo), the sync grain
+        // cascades through its existing stepper subscription, and the
+        // placement steppers ride the state the same way.
+        subtitleStyle.reset();
+        subtitleSync.set(0);
+        subtitlePlacement.setLine(PLACE_DEFAULTS.line);
+        subtitlePlacement.setPosition(PLACE_DEFAULTS.position);
         flashElement(this.#resetBtn);
         this.#shell?.toastFlash("reload", "Subtitle Style Reset", "subtitles");
       }
     });
 
     this.#refreshHint();
-  }
-
-  #setCueVar(prop, value) {
-    this.#session?.setVar(prop, value);
   }
 
   #createFileInput(shell) {
