@@ -521,19 +521,31 @@ export class Shell {
    * The mobile on-screen keyboard and collapsing URL bar shrink/offset the
    * visual viewport without changing the layout viewport, so the panel's
    * portrait bottom sheet reads these to stay above the keyboard and inside
-   * the actually-visible area. The equal-write guard matters most here: vv
-   * scroll fires per frame while the URL bar collapses, and both props read
-   * stable unless the bar/keyboard actually moved.
+   * the actually-visible area. vv is the real reading for this datum - the
+   * keyboard is an out-of-layout occlusion no DOM element or laid-out box
+   * carries - so the boundary questions stay native and only two guards
+   * apply:
+   *  - Coarse-pointer boot gate: the compact-sheet block is the vars' only
+   *    consumer and it exists behind (pointer: coarse) - a desktop never
+   *    presents the keyboard over the touch sheet, so the listeners and the
+   *    writes they would arm buy nothing there. Stale after a pointer-class
+   *    flip is harmless: the consumer block also disarms and stops reading.
+   *  - Pinch scale: while scale deviates from 1, vv dims read in zoomed CSS
+   *    px and the inset formula's layout-viewport baseline (innerHeight) is
+   *    false - the readers defer to the sheet's own CSS fallbacks (the
+   *    100vh/0px the spec spells) until the pinch settles.
    */
   #watchVisualViewport() {
     const vv = window.visualViewport;
     const host = this.shellHost;
-    if (!vv || !host) {
+    if (!vv || !host || !window.matchMedia("(pointer: coarse)").matches) {
       return;
     }
     const sync = cssVarSyncer(host, [
-      ["--pf-vv-height", () => `${vv.height}px`],
-      ["--pf-vv-inset-bottom", () => `${Math.max(0, window.innerHeight - vv.height - vv.offsetTop)}px`]
+      ["--pf-vv-height", () => (vv.scale === 1 ? `${vv.height}px` : "100vh")],
+      ["--pf-vv-inset-bottom", () => (vv.scale === 1
+        ? `${Math.max(0, window.innerHeight - vv.height - vv.offsetTop)}px`
+        : "0px")]
     ]);
     this.#dom.listen(vv, "resize", sync, { passive: true });
     this.#dom.listen(vv, "scroll", sync, { passive: true });

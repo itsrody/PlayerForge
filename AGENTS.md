@@ -362,6 +362,21 @@ new code-level evidence:
   render in the top layer, so a toast could then paint above the open panel,
   inverting the documented z doctrine (`panel(4) > toast(3)`) the panel owns;
   staying in the HUD layer keeps the order the tokens express.
+- **`visualViewport` retirement in favor of real-world reads — rejected on
+  witness absence.** The vv mirror serves the portrait bottom sheet's two
+  needs — staying above the on-screen keyboard and inside the collapsed-URL-bar
+  visible area — and both are *out-of-layout occlusions*: no DOM element or
+  laid-out box carries them, so the real-world reads the geometry plane
+  unified (root client box, element rects, ReferenceBox) cannot witness them;
+  vv IS the real reading for that datum. The only non-vv arm — merging
+  `interactive-widget=resizes-content` into the host page's viewport meta
+  (keyboard resizes the layout viewport, Chrome 108+) — redefaults the entire
+  host page's keyboard layout and covers the keyboard alone (not the overlay
+  toolbar, not pinch zoom). The mirror stays, hardened: coarse-pointer boot
+  gate (the sheet block is the vars' only consumer and exists behind
+  `(pointer: coarse)` — a desktop arms nothing) and a pinch-scale guard
+  (readers emit the CSS-default neutrals `"100vh"`/`"0px"` while
+  `vv.scale !== 1`, real values at scale 1).
 
 ## 5. Conventions (the change bar)
 
