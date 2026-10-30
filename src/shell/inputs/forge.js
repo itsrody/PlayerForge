@@ -951,8 +951,10 @@ export class InputForge {
     // exit - both fs-gated), so while the fs gate is open the reference is the
     // SAME fill box every geometry consumer reads (shell.referenceBox) - whose
     // fs answer is the fs element's own rect: the frame viewport the clientX
-    // domain lives in, device-wide incl. the Android safe area where cover
-    // merged on the active frame. Inline the player occupies only the
+    // domain lives in, device-wide (where viewport-fit=cover merged on the
+    // active frame, expansion behind the cutout is the Android-Chromium shape;
+    // Android Firefox measures no safe area at all, so there the rect is the
+    // plain screen - AGENTS.md). Inline the player occupies only the
     // viewport: a fs-element-relative verdict could name edges the player
     // does not have, so the reference becomes the surface-invariant viewport
     // width. Every behavioral zone consumer is fs-gated (the inline zone is

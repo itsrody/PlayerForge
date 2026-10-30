@@ -248,10 +248,12 @@ export class Shell {
   /**
    * The unified contextual fill box, owned by shared/dom.js ReferenceBox:
    * inline mode reads the shell's own container (the SDK container),
-   * fullscreen reads the fs element's own rect - the device screen including
-   * the Android safe area where viewport-fit=cover merged on the active
-   * frame - and document fullscreen (no element) falls back to the window
-   * box inside the class. Returns { x, y, width, height }.
+   * fullscreen reads the fs element's own rect - the device screen; the
+   * viewport-fit=cover the active frame merges expands it behind the cutout
+   * on Android Chromium, while Android Firefox measures no safe area at all
+   * (the rect is the plain screen there - AGENTS.md) - and document
+   * fullscreen (no element) falls back to the window box inside the class.
+   * Returns { x, y, width, height }.
    */
   get referenceBox() {
     return this.#refBox.get();
@@ -386,10 +388,12 @@ export class Shell {
     // background upgrade later propagates through the same shared sheet.
     warmStyles();
     // Document-level (idempotent): make the SDK's own viewport report
-    // viewport-fit=cover so the fullscreen frame can draw behind the Android
-    // cutout edge-to-edge (see inject.js). Gated by fullscreen.edgeToEdge:
-    // when disabled we leave the iframe at the default (Chrome letterboxes to
-    // the safe area itself) and fill simply covers the letterboxed frame.
+    // viewport-fit=cover so the fullscreen frame can draw edge-to-edge
+    // behind the cutout on Android Chromium (see inject.js) - inert on
+    // Android Firefox, whose fullscreen presents no safe area at all
+    // (AGENTS.md). Gated by fullscreen.edgeToEdge:
+    // when disabled we leave the iframe at the default (Chromium letterboxes
+    // to the safe area itself) and fill simply covers the letterboxed frame.
     if (getSetting(SETTING_KEYS.edgeToEdge) !== false) {
       ensureViewportFitCover();
     }
