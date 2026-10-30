@@ -241,14 +241,19 @@ iframes, same-origin and cross-origin:
   standalone esbuild chunk injected as `__VTT_WORKER_SOURCE__` blob, CSP-gated
   with in-band fallback (`WorkerTransport` owns spawn/sequence/watchdog as one
   class), `subtitles.js` — the main-thread surface: eager `SubtitleSession`
-  (ForgeTrack renderer 8 concurrent cue slots, picture-anchored cue
+  (ForgeTrack renderer 8 concurrent cue slots, cue scheduling is OURS — no
+  native TextTrack anywhere on the path: the file never enters the video's
+  track list, so a host can never list/restyle/mode-flip our captions;
+  per-frame `currentTime` sampling on the media clock with the compositor's
+  rAF as the crank, a sorted-start walk with an amortized dead floor, the
+  W3C relation `start <= t < end`; picture-anchored cue
   placement — percent cue fields resolve against the displayed video
   picture derived from the ReferenceBox rect + the element's own
   box/intrinsic/object-fit re-derived per render, slots laid in the
-  env-inset layer space; unreadable geometry falls back to the old
-  layer-relative resolution — re-anchoring rides the ReferenceBox change
-  tick, video-relative marks ride the renderer's own signal-scoped RO +
-  the media `resize` event; drag-drop/URL ingest with
+  env-inset layer space; unreadable geometry and zero-area clips fall back
+  to the old layer-relative resolution — re-anchoring rides the ReferenceBox
+  change tick, video-relative marks ride the renderer's own signal-scoped
+  RO + the media `resize` event; drag-drop/URL ingest with
   per-entry restore, parsing memoized, the `SubtitleSyncState`,
   `SubtitleStyleState` (all five values boot-apply at bind; the former
   partial font/stroke boot left a stored custom size/color/shadow unapplied
@@ -596,8 +601,10 @@ stop at the first failure:
   `subtitles` (the picture-anchor case: a letterbox stage — square element
   in a taller stage — proves percent cue fields land on the displayed
   picture rect, not the layer box, with the panel drop as the real ingest
-  path and a resize row (video element + stage widening) proving the box
-  ticks re-anchor the running slots without any cue change), `robust`
+  path; a resize row (video element + stage widening) proving the box
+  ticks re-anchor the running slots without any cue change; and the own
+  scheduler's boundary rows — one seek into a second cue's window lights
+  the enter, the window passing drops the exit), `robust`
   (freeze-flush without user pause, checkpoint cadence on the native
   timeupdate media clock at 4x, 1000-echo
   < 400ms, 400 remote-adoption merges < 800ms).

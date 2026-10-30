@@ -38,7 +38,7 @@ import { flashElement, el } from "../chrome/ui.js";
  * in-band parse (forgevtt.parseSubtitlesAsync), so the worker is strictly an
  * optimization and the two paths produce the same cues for the same text:
  * they share the same engine (the byte transport only normalizes unpaired
- * surrogates, which the VTTCue/USVString sink does for in-band cues anyway).
+ * surrogates, which the string sink ForgeTrack's build pass anyway avoids).
  * A CSP-blocked page latches out of the worker path - retrying would only
  * re-pay the failure - while a crashed or hung worker is torn down and the
  * next ingest respawns fresh.
@@ -302,9 +302,6 @@ function fmtPx(value) {
   return Math.round(value * 100) / 100;
 }
 
-/** The native TextTrack label this renderer owns; reuse, never append. */
-const TRACK_LABEL = "PlayerForge Subtitles";
-
 /* - Parse memo - */
 /**
  * The content-hash parse memo as one class (the DomainKeyCache shape): the
@@ -335,9 +332,9 @@ class ParseMemo {
 
   /**
    * Parse with a content-hash memo: identical normalized text resolves to the
-   * cached cue array (the same frozen array ForgeTrack read once - cues are
-   * treated as immutable by the load path, which only copies them into
-   * VTTCue objects).
+   * cached cue array (the same plain objects the sampler schedules; the load
+   * path's build pass copies entries into its own shifted list, so the
+   * cached array stays immutable).
    */
   load(text) {
     const hash = this.#hash(text);
@@ -377,11 +374,20 @@ function shiftTime(time, offset) {
 }
 
 /**
- * Subtitle track backed by the browser's native TextTrack for timing and a
- * custom DOM surface for rendering. The browser owns cue scheduling (fires
- * cuechange at exact enter/exit boundaries), while this class owns the visual
- * output: pooled caption slots, CSS custom-property-based styling, and
- * per-cue stacking for simultaneous lines.
+ * Subtitle track with a custom DOM surface and OUR OWN cue scheduling: no
+ * native TextTrack exists anywhere along this path - the file never enters
+ * the video element's track list - so a hostile host can never list, restyle,
+ * or mode-flip the captions (its CC menu stays clean, `::cue` css cannot
+ * reach them, and a site that disables foreign text tracks mid-play cannot
+ * kill ours). Parsing is forgevtt (below); a TrackListRenderer owns
+ * scheduling after that: per-frame `currentTime` sample on the video
+ * element's own media clock - the compositor's rAF is the crank, sampled
+ * like the forge's scrub commits, never a poll timer - and the active set
+ * derives from a sorted-start walk with an amortized dead floor (ends are
+ * not sorted, so the floor only advances while head-adjacent entries are
+ * dead; a backward seek resets it, one-off O(n)). The active set is the W3C
+ * relation, start <= t < end; the visual output (pooled slots, custom
+ * properties, per-cue stacking) is unchanged.
  *
  * Cue positions are PICTURE-anchored, not layer-relative: the Universal
  * rect is the shell's one fill-box identity (ReferenceBox, see dom.js - the
@@ -402,8 +408,8 @@ function shiftTime(time, offset) {
  * the @property initial-values and prior slot values answer.
  *
  * Stage-change re-anchoring rides the ReferenceBox's change ticks (its
- * three owned invalidation sources: container RO, fs re-target, orientation
- * change); no duplicate fs/RO/orientation of ours. Video-relative marks -
+ * owned invalidation sources: container RO, fs re-target, orientation,
+ * scroll); no duplicate fs/RO/orientation of ours. Video-relative marks -
  * the video's own box moving inside an unmoved stage, and its intrinsic
  * size changing - are this class's own RO + the media element's resize
  * event, both signal-scoped.
@@ -411,7 +417,6 @@ function shiftTime(time, offset) {
 export class ForgeTrack {
   #cueLayer;
   #cueLayerStyle;
-  #track;
   #video;
   #reference;
   #slots = [];
@@ -423,10 +428,27 @@ export class ForgeTrack {
    *  pooled scrub payload: mutate in place, read immediately. */
   #lastRender = [];
   #lastActive = [];
-  /** Zero-offset cue base the native cues were built from; drives setOffset. */
+  /** Zero-offset cue base the render list was built from; drives setOffset. */
   #baseCues = null;
-  /** Offset already applied to the native cues (setOffset no-ops on a repeat). */
+  /** Offset already applied to the render list (setOffset no-ops on a
+   *  repeat). */
   #offset = 0;
+  /** The SHIFTED cue list this sampler schedules, sorted by start (ties by
+   *  end). Plain objects - the same shape parseSubtitles yields, with the
+   *  offset baked - so no native cue type ever appears on this path. */
+  #cues = null;
+  /** First list index whose entries may still activate; entries before it
+   *  are dead (end <= t) and re-tested only after a backward seek. */
+  #floor = 0;
+  /** Last sampled time; a sample at the same time reuses the walked answer. */
+  #lastTime = -1;
+  /** The active cue set in list order (start ascending), pooled: mutated in
+   *  place per sample, read immediately by the slot diff - no per-frame
+   *  allocation on the hot path. */
+  #activePool = [];
+  /** Pending rAF frame handle; 0 disarmed. The crank stops with the element:
+   *  a paused/static video stops painting, so the sampler idles with it. */
+  #rafId = 0;
   /** Global placement overrides from the panel's V/H steppers (0-100), or
    *  null to keep each cue's own line/position (default until the user moves
    *  a stepper). Applied per render, so a change re-lays active slots. */
@@ -438,14 +460,16 @@ export class ForgeTrack {
    *  steady path. */
   #picture = null;
   #pictureSeq = 0;
-  /** Records the bound cuechange so destroy can unregister it. */
-  #onCueChange = null;
+  /** The crank handle shape bound at construction so destroy cancels one
+   *  pending frame deterministically. */
+  #onFrame = null;
   /** Whether the player is currently on screen. Defaults true so the time
    *  before the first observation lands renders unconditionally; the
    *  observer only ever suppresses off-screen churn and re-renders on
    *  re-entry. */
   #onScreen = true;
-  /** Disposal flag; cuechange itself has no signal form (spec-forced). */
+  /** Disposal flag; rAF cancellation is manual (the pending frame id is not
+   *  signal-shaped). */
   #scope = new Scope();
 
   constructor(video, cueLayer, reference = null) {
@@ -453,7 +477,7 @@ export class ForgeTrack {
     this.#cueLayerStyle = cueLayer?.style;
     this.#video = video;
     this.#reference = reference;
-    // Preallocate the pooled per-slot scratch now so cuechange renders (the
+    // Preallocate the pooled per-slot scratch now so sampler renders (the
     // hot subtitle path) stay completely allocation-free.
     for (let i = 0; i < MAX_SLOTS; i++) {
       this.#lastRender[i] = { text: null, top: null, left: null, x: null, maxW: null, prevLine: NaN, prevPosition: NaN, prevPictureSeq: -1 };
@@ -467,28 +491,8 @@ export class ForgeTrack {
         this.#slots[i] = this.#dom.createElement("div", { class: "pf-cue", role: "caption" }, cueLayer);
       }
     }
-    // Reuse a PlayerForge-owned native track instead of calling addTextTrack
-    // on every toggle cycle: textTracks is append-only (no spec API removes a
-    // track), so a fresh track per load would accumulate leaks across cycles.
-    // A page track with this exact label is collision-safe - the renderer owns
-    // it exclusively once created.
-    const owned = Array.from(video.textTracks).find(
-      (track) => track.kind === "subtitles" && track.label === TRACK_LABEL
-    );
-    this.#track = owned ?? video.addTextTrack("subtitles", TRACK_LABEL, "en");
-    if (!this.#track) {
-      throw new Error("This element cannot host a subtitle track");
-    }
-    this.#track.mode = "hidden";
-    this.#onCueChange = () => {
-      this.#render();
-    };
-    this.#track.addEventListener("cuechange", this.#onCueChange);
-    // Off-screen players still fire cuechange; suppress the slot churn until
-    // the player is visibly on screen and re-render once when it scrolls back.
-    // The capability probe this once wrapped the block (IO 51, rect 45 - both
-    // below the 156 floor; it named a "videoLike test double" premise that
-    // only a harness could supply) died with the harness-only element arms.
+    // Deferred crank wiring: pending frame handle bound at construction so
+    // #armLoop can re-arm strictly and destroy cancels one id.
     const observer = new IntersectionObserver(([entry]) => {
       if (this.#scope.disposed) {
         return;
@@ -496,7 +500,7 @@ export class ForgeTrack {
       const was = this.#onScreen;
       this.#onScreen = entry.isIntersecting;
       if (this.#onScreen && !was) {
-        this.#render();
+        this.#schedule();
       }
     });
     observer.observe(video);
@@ -507,103 +511,153 @@ export class ForgeTrack {
     // resizing the element inside a constant container) and its intrinsic
     // size (the media element's own resize signal + the first metadata
     // moment the picture math can finally see an aspect).
-    reference?.subscribe(() => this.#render(), { signal: this.#scope.signal });
+    reference?.subscribe(() => this.#schedule(), { signal: this.#scope.signal });
     const videoRo = new ResizeObserver(() => {
-      this.#render();
+      this.#schedule();
     });
     videoRo.observe(video);
     this.#scope.onDispose(() => videoRo.disconnect());
-    video.addEventListener("resize", () => this.#render(), { signal: this.#scope.signal, passive: true });
-    video.addEventListener("loadedmetadata", () => this.#render(), { signal: this.#scope.signal });
+    video.addEventListener("resize", () => this.#schedule(), { signal: this.#scope.signal, passive: true });
+    video.addEventListener("loadedmetadata", () => this.#schedule(), { signal: this.#scope.signal });
+    // The crank: a stable bound field so the pending frame holds the
+    // instance and destroy cancels one id.
+    this.#onFrame = () => this.#tick();
   }
 
   /**
-   * Replace all cues on the track. Accepts plain cue objects from forgevtt.
-   * `offset` is applied while building, and the plain cues are remembered as
-   * the zero-offset base so later sync nudges can shift the native cues in
-   * place (see setOffset) instead of draining and rebuilding the list.
-   *
-   * Cues the old offsetCues()+load() path dropped entirely (shifted end <= 0,
-   * i.e. wholly before t=0) are kept as zero-length cues at t=0 instead: they
-   * can never satisfy start <= t < end, so they never enter the active set -
-   * but keeping every base cue keeps `track.cues` positionally aligned with
-   * the base array, which is what lets setOffset walk the two by index.
+   * Replace all cues. Accepts plain cue objects from forgevtt; `offset` is
+   * baked into the render list at build time (see the class docstring). The
+   * unshifted list is remembered as the zero-offset base so later sync
+   * nudges can rebuild instead of re-parsing (see setOffset).
    */
   load(cues, offset = 0) {
     if (this.#scope.disposed) {
       return;
     }
-    const track = this.#track;
-    // Drain from the back: the cue list is a live array, so popping the last
-    // index avoids shifting the remaining entries on every removal (the
-    // front-drain was O(n²) memmove for an n-cue track).
-    for (let i = track.cues.length - 1; i >= 0; i--) {
-      track.removeCue(track.cues[i]);
-    }
-    for (const cue of cues) {
-      const vtt = new VTTCue(shiftTime(cue.start, offset), shiftTime(cue.end, offset), cue.text);
-      vtt.line = cue.line;
-      vtt.position = cue.position;
-      if (cue.align) {
-        vtt.align = cue.align;
-      }
-      track.addCue(vtt);
-    }
     this.#baseCues = cues;
     this.#offset = offset;
+    this.#applyBase(offset);
   }
 
   /**
-   * Shift every loaded cue by a new sync offset, in place. Two property
-   * writes per cue replaces the old full re-offset (n plain objects) plus a
-   * drain and rebuild of the native VTTCue list: no intermediate array, no
-   * VTTCue construction, no cue-list churn. Every write re-derives from the
-   * zero-offset base, so clamping stays exact across a back-and-forth drag
-   * (no accumulated drift), and the engine repositions mutated cues itself
-   * (Blink's cueWillChange/cueDidChange path re-sorts the cue list and
-   * re-inserts into the interval tree), so active-cue scheduling stays
-   * correct.
+   * Rebuild the shifted cue list from the zero-offset base. Sort by start
+   * (ties by end, V8 stable): the walk's early exit reads list starts, and
+   * the stack order follows - the active set collects in list order, so an
+   * earlier-start overlap takes the lower slot, the deterministic shape the
+   * native insertion order approximated in practice.
    */
-  setOffset(offset) {
-    if (this.#scope.disposed || offset === this.#offset) {
-      return;
-    }
+  #applyBase(offset) {
     const base = this.#baseCues;
-    const cues = this.#track.cues;
-    if (!base) {
-      return;
-    }
-    if (cues.length !== base.length) {
-      // Defensive: the list can only diverge if a load raced this call.
-      // Rebuild rather than walk a mismatched pairing.
-      this.load(base, offset);
-      return;
-    }
+    const out = new Array(base.length);
     for (let i = 0; i < base.length; i++) {
       const src = base[i];
-      const cue = cues[i];
-      // TextTrackCue's writable timing attributes are startTime/endTime - the
-      // plain `start`/`end` names only exist on forgevtt's own cue objects.
-      // Writing `cue.start` would just create an own data property that
-      // shadows nothing: the engine keeps scheduling on the untouched
-      // startTime/endTime and activeCues would never move.
-      const start = shiftTime(src.start, offset);
-      if (cue.startTime !== start) {
-        cue.startTime = start;
-      }
-      const end = shiftTime(src.end, offset);
-      if (cue.endTime !== end) {
-        cue.endTime = end;
-      }
+      out[i] = {
+        start: shiftTime(src.start, offset),
+        end: shiftTime(src.end, offset),
+        text: src.text,
+        line: src.line,
+        position: src.position,
+        align: src.align
+      };
     }
-    this.#offset = offset;
+    out.sort((a, b) => a.start - b.start || a.end - b.end);
+    this.#cues = out;
+    this.#floor = 0;
+    this.#lastTime = -1;
+    // An immediate sample re-answers the active set the frame the list
+    // exists, before the next crank - the load-path mirror of the boundary
+    // timing the native engine once provided.
+    this.#schedule();
+    this.#armLoop();
   }
 
-  #render() {
-    if (this.#scope.disposed || !this.#cueLayer || !this.#onScreen || !this.#track) {
+  /**
+   * Rebuild the shifted list under a new sync offset. The whole rebuild
+   * replaces the native track's in-place startTime/endTime walk: no cue
+   * object survives the old list, so the order question the old setOffset
+   * carried (a large negative shift can cross starts, and the native engine
+   * re-sorted list by index) cannot even arise - the fresh sort re-answers
+   * it. The steppers debounce commits (150ms), so O(n log n) per commit
+   * rides at most ~7 rebuilds a second over at most a few thousand cues.
+   */
+  setOffset(offset) {
+    if (this.#scope.disposed || offset === this.#offset || !this.#baseCues) {
       return;
     }
-    const active = this.#track.activeCues;
+    this.#offset = offset;
+    this.#applyBase(offset);
+  }
+
+  /**
+   * One frame of scheduling: sample the media clock, advance the dead floor,
+   * collect the active set, hand the pooled list to the slot diff. The
+   * active relation is the W3C one, start <= t < end - end EXCLUSIVE, so a
+   * cue ends the frame its end time passes, and two cues sharing a boundary
+   * swap inside one sample instead of coexisting.
+   */
+  #schedule(t = (this.#video?.currentTime ?? -1)) {
+    if (this.#scope.disposed || !this.#cueLayer || !this.#onScreen || !this.#cues) {
+      return;
+    }
+    const cues = this.#cues;
+    if (t < this.#lastTime) {
+      // Backward time jump (a seek, a media re-adopt, a ratechange-driven
+      // restore): the dead floor re-opens from the list head - one-off O(n),
+      // amortized to nothing on the forward cadence the plan rides.
+      this.#floor = 0;
+    }
+    this.#lastTime = t;
+    let floor = this.#floor;
+    // Dead-floor advance: ends are not sorted, so an entry with a later end
+    // may sit before an already-dead one; the floor only advances while the
+    // head-adjacent entry is actually behind the clock, and a previously
+    // passed entry is never revisited unless the jump above reset the floor.
+    while (floor < cues.length && cues[floor].end <= t) {
+      floor++;
+    }
+    this.#floor = floor;
+    let count = 0;
+    const pool = this.#activePool;
+    for (let i = floor; i < cues.length; i++) {
+      const cue = cues[i];
+      // Sorted by start, so the first starts-ahead entry ends the scan -
+      // everything spawned after it cannot be active at t.
+      if (cue.start > t) {
+        break;
+      }
+      if (cue.end > t) {
+        pool[count++] = cue;
+      }
+    }
+    pool.length = count;
+    this.#render(pool);
+  }
+
+  #armLoop() {
+    if (!this.#rafId && !this.#scope.disposed && this.#cues?.length) {
+      this.#rafId = requestAnimationFrame(this.#onFrame);
+    }
+  }
+
+  #tick() {
+    this.#rafId = 0;
+    if (this.#scope.disposed) {
+      return;
+    }
+    const t = this.#video?.currentTime ?? -1;
+    if (t !== this.#lastTime) {
+      // A sample that moved the clock re-runs the walk; a still sample (the
+      // video paused, the tab throttled) needs nothing - the last active
+      // set already paints it.
+      this.#schedule(t);
+    }
+    this.#armLoop();
+  }
+
+  #render(active) {
+    if (this.#scope.disposed || !this.#cueLayer || !this.#onScreen) {
+      return;
+    }
     const count = Math.min(active.length, MAX_SLOTS);
     const picture = this.#derivePicture();
     if (picture) {
@@ -626,7 +680,7 @@ export class ForgeTrack {
       const prev = this.#lastRender[i];
       // Numeric dirty checks: skip string construction when values match
       // the previous render — avoids template-literal allocation per slot
-      // per cuechange on the hot subtitle path. The picture sequence joins
+      // per sample on the hot subtitle path. The picture sequence joins
       // the guards: a moved picture re-lays every anchored slot on the next
       // render (the tick-driven re-anchor) even when both percentages held.
       const boxMoved = prev.prevPictureSeq !== this.#pictureSeq;
@@ -781,6 +835,8 @@ export class ForgeTrack {
   }
 
   clear() {
+    // Ended-content hiding: hide every live slot without touching the cue
+    // lists - the crank keeps running and a later seek re-derives normally.
     if (this.#scope.disposed || !this.#lastActive.some(Boolean)) {
       return;
     }
@@ -816,23 +872,22 @@ export class ForgeTrack {
       return;
     }
     this.#scope.dispose();
-    // Unregister our native cuechange listener: the track survives (the spec
-    // has no removal API) and would otherwise keep firing this renderer's
-    // slot-node logic against a torn-down pool forever.
-    this.#track.removeEventListener("cuechange", this.#onCueChange);
-    this.#track.mode = "disabled";
-    // Back-drain from the end - the same rationale load()'s drain carries:
-    // removeCue on a live cue list shifts the remaining entries, so draining
-    // from the front pays O(n²) memmove for an n-cue track on shell teardown,
-    // while the last-index drain removes without touching earlier entries.
-    for (let i = this.#track.cues.length - 1; i >= 0; i--) {
-      this.#track.removeCue(this.#track.cues[i]);
+    // Cancel the pending frame FIRST: the crank must not re-arm against the
+    // torn-down pool (dispose already blocks the tick body; the explicit
+    // cancel keeps nothing scheduled anywhere).
+    if (this.#rafId) {
+      cancelAnimationFrame(this.#rafId);
+      this.#rafId = 0;
     }
     // DOMManager removes all cue slot elements.
     this.#dom.destroy();
     this.#slots = [];
     this.#lastActive = [];
     this.#baseCues = null;
+    this.#cues = null;
+    this.#floor = 0;
+    this.#lastTime = -1;
+    this.#activePool.length = 0;
     this.#offset = 0;
   }
 }
@@ -1195,7 +1250,7 @@ export const subtitleStyle = new SubtitleStyleState();
  * and the sync keyboard nudge applies without any panel open.
  *
  * Cue presentation is style-on-the-cue-layer: the vars live on the layer the
- * shell injected once (which survives track create/remove cycles), so setVar
+ * shell injected once (which survives cue list rebuilds), so setVar
  * is a plain style write whether or not a track exists yet.
  */
 export class SubtitleSession {
@@ -1223,8 +1278,8 @@ export class SubtitleSession {
     // which left a stored custom size/color/shadow unapplied until the panel
     // section built), and every later commit lands live the same way.
     subtitleStyle.bindSession(this);
-    // Sync offset rides its own singleton state: every commit shifts the
-    // live cues in place (setOffset), load-time application reads the
+    // Sync offset rides its own singleton state: every commit rebuilds the
+    // shifted cue list (setOffset), load-time application reads the
     // current offset in the same build pass over the base cues.
     subtitleSync.onState((offset) => this.#applySyncOffset(offset), { signal: this.#scope.signal });
     // The restore watch: the store announces only on adoption, so the

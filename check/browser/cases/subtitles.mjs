@@ -19,6 +19,10 @@
  * repositions the rect's viewport origin with no size/fs/orientation
  * signal, so the cache must invalidate on it (a stale stage collapsed the
  * clip and parked cues at the layer origin - the field-reported top-left).
+ * The last rows pin the OWN cue scheduler end to end: a second cue at
+ * 4.0-4.8s in the dropped SRT, a seek that lands inside it lights the mirror
+ * cue (enter boundary), and the window passing drops it (exit boundary) -
+ * both edges previously rode the native cuechange.
  */
 
 export async function run({ session, boot }) {
@@ -49,7 +53,7 @@ export async function run({ session, boot }) {
         return "no section";
       }
       const dt = new DataTransfer();
-      dt.items.add(new File(["1\n00:00:00,300 --> 00:00:40,000\nPF anchor cue\n"], "subs.srt", { type: "text/plain" }));
+      dt.items.add(new File(["1\n00:00:00,300 --> 00:00:40,000\nPF anchor cue\n\n2\n00:00:04,000 --> 00:00:04,800\nPF mirror cue\n"], "subs.srt", { type: "text/plain" }));
       section.dispatchEvent(new DragEvent("dragenter", { dataTransfer: dt }));
       section.dispatchEvent(new DragEvent("drop", { dataTransfer: dt }));
       return "dropped";
@@ -163,6 +167,35 @@ export async function run({ session, boot }) {
       && Math.abs((readScrolled?.videoX ?? 999) - 0) < 2
       ? "pass" : "fail",
     note: JSON.stringify(readScrolled) + " (expected top=616.5625px left=550px, video at viewport y=0)",
+    ms: null
+  });
+
+  // The sampler row: the dropped SRT carries a second cue at 4.0-4.8s, so a
+  // seek INTO that window proves the own-sampler scheduler's enter boundary
+  // (the second slot lights with the mirror cue), and the 0.8s span end
+  // proves the exit boundary - an earlier case relied on the native
+  // cuechange for both.
+  await session.eval(function main(t) {
+    document.querySelector("#check-video").currentTime = t;
+  }, 4.2);
+  const entered = await session.waitFor(
+    'return [...document.querySelector(\'.pf-shell\')?.shadowRoot?.querySelectorAll(\'.pf-cue:not([hidden])\') ?? []].some((s) => s.textContent === "PF mirror cue")',
+    6000
+  ).then((v) => !!v, () => false);
+  rows.push({
+    name: "own sampler lights a cue on the enter boundary after a seek",
+    status: entered ? "pass" : "fail",
+    note: entered ? "mirror cue visible at t=4.2" : "sampler never lit the 4.0-4.8 cue",
+    ms: null
+  });
+  const exited = await session.waitFor(
+    'return ![...document.querySelector(\'.pf-shell\')?.shadowRoot?.querySelectorAll(\'.pf-cue:not([hidden])\') ?? []].some((s) => s.textContent === "PF mirror cue")',
+    6000
+  ).then((v) => !!v, () => false);
+  rows.push({
+    name: "own sampler drops the cue on the exit boundary",
+    status: exited ? "pass" : "fail",
+    note: exited ? "mirror cue hidden by 4.8" : "mirror cue outlived its window",
     ms: null
   });
 
