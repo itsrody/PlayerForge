@@ -240,6 +240,35 @@ export async function run({ session, baseUrl, crossBaseUrl, bundle, boot, header
     await failRow("nested frames scenario failed", err);
   }
 
+  // ---- Scenario 4b: late-armed ancestors - the event-driven ready path.
+  // Realm + bundle go in bottom-up (player document first: its chain is
+  // absent above it, so its first bridge request is lost), then the mid
+  // relay, then the top. No timed retry exists in the bridge; ONLY the
+  // pf:ready announce-down + relay-echo path can drive a re-issue, so
+  // resolving this chain proves the event-driven driver directly.
+  try {
+    await session.navigate(`${baseUrl}/check/frames-nested?boot=${Date.now()}`);
+    await session.injectGMRealmFrame([0, 0], { version, grants, resources });
+    await session.evalInFrame([0, 0], bundleBody);
+    await session.injectGMRealmFrame([0], { version, grants, resources });
+    await session.evalInFrame([0], bundleBody);
+    await session.injectGMRealm({ version, grants, resources });
+    await session.injectBundle(bundle);
+    const started = Date.now();
+    await session.waitForFrame([0, 0], `return !!document.querySelector(".pf-shell");`, 9000)
+      .then(() => true, () => false);
+    latencies.late = Date.now() - started;
+    const entry = await waitForEntry([0, 0], "/check/frames-nested", "127-0-0-1", 5000);
+    askRows(
+      "late-armed ancestors: pf:ready drives resolution with zero timed retries",
+      !!entry,
+      entry ? `path=${entry.path} domain=${entry.domain} (${latencies.late}ms after top armed)` : "no bridged entry"
+    );
+  } catch (err) {
+    latencies.late = null;
+    await failRow("late-armed ancestors scenario failed", err);
+  }
+
   // ---- Scenario 5: switchboard (one placeholder, three SDK stubs, same video)
   try {
     latencies.plyr = await bootFrameScenario({

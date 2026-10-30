@@ -13,7 +13,6 @@
  * lazily, so a video-bearing iframe cannot assume its ancestors run anything
  * unless the relay chain is already listening.
  */
-import { postTask } from "./runtime.js";
 import { onDomMutations } from "./dom.js";
 
 /* - 1. Domain identity - */
@@ -273,6 +272,10 @@ export function hashEntry(domainKey, path, duration) {
 const BRIDGE_MSG_PREFIX = "pf:";
 const CTX_REQUEST_TYPE = `${BRIDGE_MSG_PREFIX}ctx-request`;
 const CTX_RESPONSE_TYPE = `${BRIDGE_MSG_PREFIX}ctx`;
+/** Down-only announcement: a frame's bridge handlers are armed. A pending
+ *  context request re-issues on it (the event-driven retry) and a latched
+ *  fullscreen provision re-hops; origin-limited to the parent hop. */
+const BRIDGE_READY_TYPE = `${BRIDGE_MSG_PREFIX}ready`;
 const FS_REQUEST_TYPE = `${BRIDGE_MSG_PREFIX}req-fullscreen`;
 
 const TITLE_TAGS = /(?:^|[- ])(?:uncensored|uncut|leaked|censored|raw|bd|hdrip|dvdrip|webrip|bluray|remux|cam|reduc(?:ing)?\s*mosaic|english\s*subtitle)/gi;
@@ -388,19 +391,6 @@ export async function getPageContext() {
     return bridged ?? ownPageContext();
   }
 }
-
-/**
- * Backoff table (ms) for bridge request retries. The fixed 1200ms poll the
- * bridge previously used intentionally avoided hammering the parent chain, but
- * cost up to a full second of latency whenever the child raced the ancestors'
- * document-start message handlers (the common embed case). An exponential
- * backoff with jitter is just as sparing in the worst case yet answers a ready
- * parent within one short retry. Initial low latency for the typical
- * already-listening parent; jitter (<=250ms) prevents a thundering herd when
- * several nested frames boot simultaneously.
- */
-const CTX_RETRY_BACKOFF = [60, 150, 320, 640];
-const CTX_RETRY_JITTER_MS = 250;
 
 /**
  * One owner of the context-pipe state. Previously three module-level `let`
@@ -575,67 +565,43 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   const { promise, resolve } = Promise.withResolvers();
   const ac = new AbortController();
   let nonce = null;
-  let retryHandle = null;
-  let attemptCount = 0;
-  let replyPort = null;
-  let transferPort = null;
   let settled = false;
 
   // Two native abort sources, kept separate by discrimination (see the pipe
   // request above for why the realm rationale retired): the request's own
   // AbortController tears the listeners down on every settle path; the
   // AbortSignal.timeout watchdog's fire means the attempt BUDGET ran out -
-  // settle null rather than re-entering the loop - and only that listener
-  // can tell that apart from a settled answer.
+  // settle null (the bridgeless fallback answers in getPageContext) - and
+  // only that listener can tell that apart from a settled answer.
   const watchdog = AbortSignal.timeout(timeoutMs);
   watchdog.addEventListener("abort", () => {
-    settle(null, false);
+    settle(null, null);
   }, { once: true });
 
-  const settle = (context, viaPort) => {
+  const settle = (context, pipePort) => {
     if (settled) {
       return;
     }
     settled = true;
-    retryHandle?.abort();
     ac.abort();
-    if (replyPort) {
-      if (viaPort) {
-        // A port answered: the chain supports a private pipe. Retain the pipe
-        // for repeat resolves instead of closing it with this one (establish
-        // also clears the legacy memo - the chain may have been upgraded).
-        pipeState.establish(replyPort);
-      } else {
-        try {
-          replyPort.close();
-        } catch {}
-      }
+    if (pipePort) {
+      // A transferred port answered: the chain supports a private pipe.
+      // Retain it for repeat resolves instead of closing it with this one
+      // (establish also clears the legacy memo - the chain may have been
+      // upgraded). An undelivered leftover port from a failed transfer needs
+      // no close(): it is unreachable from its (derelict) peer, and the pair
+      // is unreachable from here after the attempt closure dies.
+      pipeState.establish(pipePort);
     }
     resolve(context);
   };
 
-  // Private pipe: an ancestor that honored the transfer answers here directly.
-  // Scoped to the request's own signal: settle() aborts it first, so the
-  // port listener drops natively on EVERY settle path (broadcast answer,
-  // port answer, timeout) with no per-path removal to forget.
-  const onReplyPort = (event) => {
-    if (looksLikeContextResponse(event.data)) {
-      settle(mapContextPayload(event.data), true);
-    }
-  };
-  if (!pipeState.legacy) {
-    try {
-      const mc = new MessageChannel();
-      replyPort = mc.port1;
-      transferPort = mc.port2;
-      replyPort.addEventListener("message", onReplyPort, { signal: ac.signal });
-      replyPort.start();
-    } catch {
-      replyPort = null;
-      transferPort = null;
-    }
-  }
-
+  // Private pipe per attempt: an ancestor that honored the transfer answers
+  // here directly. Scoped to the request's own signal: settle() aborts it
+  // first, so the listener drops natively on EVERY settle path (port answer,
+  // broadcast answer, timeout) with no per-path removal to forget. The
+  // channel is created per ATTEMPT - a re-issue (see the ready echo below)
+  // must hand the newly-armed ancestor a live port, not a consumed one.
   const onMessage = (event) => {
     if (
       event.source === window.parent
@@ -645,42 +611,58 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
       // Broadcast answer: this chain does not honor ports - remember it so
       // later resolves stop allocating channels it will only drop.
       pipeState.markLegacy();
-      settle(mapContextPayload(event.data), false);
+      settle(mapContextPayload(event.data), null);
     }
   };
 
   window.addEventListener("message", onMessage, { signal: ac.signal });
 
-  let portAttached = false;
-  const sendRequest = () => {
+  const attempt = () => {
+    if (settled || watchdog.aborted) {
+      return;
+    }
     nonce = crypto.randomUUID();
     const msg = { type: CTX_REQUEST_TYPE, nonce };
-    if (transferPort && !portAttached) {
+    if (!pipeState.legacy) {
       try {
-        window.parent.postMessage(msg, "*", [transferPort]);
-        portAttached = true;
-        return;
+        const mc = new MessageChannel();
+        const replyPort = mc.port1;
+        replyPort.addEventListener("message", (event) => {
+          if (looksLikeContextResponse(event.data)) {
+            settle(mapContextPayload(event.data), replyPort);
+          }
+        }, { signal: ac.signal });
+        replyPort.start();
+        try {
+          window.parent.postMessage(msg, "*", [mc.port2]);
+          return;
+        } catch {
+          // Parent rejected the transfer (e.g. neutered port); fall through
+          // to the plain nonce broadcast for this attempt.
+        }
       } catch {
-        // Parent rejected the transfer (e.g. neutered port); fall through to
-        // the plain nonce broadcast for this and every later attempt.
-        transferPort = null;
+        // No MessageChannel on this host.
       }
     }
     window.parent.postMessage(msg, "*");
   };
-  const attempt = () => {
-    if (watchdog.aborted) {
-      settle(null, false);
-      return;
+
+  // The event-driven retry: exactly ONE send now, and from then on only a
+  // `pf:ready` echo re-issues it. An ancestor's armed state is a script fact
+  // - invisible to layout, to the top-window read, and to any laid-out box -
+  // so the announcement IS the real reading, and it replaces the backoff
+  // ladder [60,150,320,640]: a bridge installs once per document, so the
+  // echo fires once per late-armed ancestor rather than as a poll. Ready
+  // flows only DOWN (install announcements + relay echoes to pending
+  // requesters), from our own parent hop only, so a foreign document cannot
+  // re-issue our requests: the echo count is bounded by how many ancestor
+  // layers armed late.
+  window.addEventListener("message", (event) => {
+    const data = event && event.data;
+    if (event.source === window.parent && data && data.type === BRIDGE_READY_TYPE) {
+      attempt();
     }
-    sendRequest();
-    const base = CTX_RETRY_BACKOFF[Math.min(attemptCount, CTX_RETRY_BACKOFF.length - 1)];
-    attemptCount++;
-    retryHandle = postTask(attempt, {
-      delay: base + Math.floor(Math.random() * (CTX_RETRY_JITTER_MS + 1)),
-      signal: ac.signal
-    });
-  };
+  }, { signal: ac.signal });
   attempt();
   return promise;
 }
@@ -880,6 +862,21 @@ class FrameRelay {
       const requester = this.#pending.get(data.nonce);
       this.#pending.delete(data.nonce);
       requester.source?.postMessage(data, requester.origin || "*");
+    } else if (data.type === BRIDGE_READY_TYPE && event.source === window.parent) {
+      // An ancestor's bridge armed late: echo the ready down to every child
+      // with a pending context request, so it re-issues (the event-driven
+      // retry - see requestPageContextFromParent). Only pending requesters
+      // hear it: ready carries no nonce and is worthless to anyone else, so
+      // the echo is targeted, once per late-armed ancestor layer. The TTL
+      // sweep runs first so a dead requester's slot doesn't pin the echo.
+      const now = Date.now();
+      for (const [nonce, entry] of this.#pending) {
+        if (entry.deadline < now) {
+          this.#pending.delete(nonce);
+        } else {
+          entry.source?.postMessage(data, entry.origin || "*");
+        }
+      }
     }
   }
 }
@@ -1265,10 +1262,19 @@ export function installContextBridge() {
     // reseeds itself when the document swapped underneath it.)
     iframeRegistry.arm(ac);
     try {
-      if (type === CTX_REQUEST_TYPE || type === CTX_RESPONSE_TYPE) {
+      if (type === CTX_REQUEST_TYPE || type === CTX_RESPONSE_TYPE
+          || (type === BRIDGE_READY_TYPE && !isTop)) {
         onContext(event);
       } else if (type === FS_REQUEST_TYPE) {
         onFullscreen(event);
+      }
+      // The ready echo also re-arms an upward hop that a late ancestor alone
+      // could have missed: this frame's own fullscreen provision was latched
+      // one-shot at boot, and an ancestor arming late IS the event that
+      // re-opens it (the top never hears ready - it is ready).
+      if (type === BRIDGE_READY_TYPE && !isTop) {
+        provisionRequest.rearm();
+        provisionRequest.send();
       }
     } catch (err) {
       queueMicrotask(() => {
@@ -1276,6 +1282,21 @@ export function installContextBridge() {
       });
     }
   }, { signal: ac.signal });
+
+  // Install-time announcement: this document's bridge is armed, declared DOWN
+  // once to its own iframes. This is the real-world witness a pending child
+  // re-issues on - an ancestor's armed state is script-selective and
+  // invisible to every layout read (it cannot be watched by DOM observers,
+  // which see nodes, not listeners), so the announcement IS the dynamic
+  // driver, and there is nothing to sweep: frame load carries nothing new
+  // (a child that loads this late finds the whole chain already armed and
+  // answers on its own first attempt), and frame unload needs no reaction -
+  // document death clears its own pipes. A directly nested child arming
+  // before us is covered by the relay: it asks its parent, we forward by
+  // our pending ledger (the FrameRelay ready echo).
+  for (const iframe of document.querySelectorAll("iframe")) {
+    iframe.contentWindow?.postMessage({ type: BRIDGE_READY_TYPE }, "*");
+  }
 
   // Torn down with the bridge: the abort tears down THIS document's
   // listeners; the pipe state dies with them so a rebooted document starts

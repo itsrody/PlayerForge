@@ -71,10 +71,15 @@ iframes, same-origin and cross-origin:
 - Page context (`domain/path/title`) is read from `window.top` directly when
   same-origin-capable; cross-origin frames go through the frame bridge
   (postMessage `pf:`-prefixed, MessageChannel ports with a legacy-broadcast
-  fallback, `ContextPipe` retry backoff `[60,150,320,640]`), so the resume
-  entry always carries the **top document's** context. When nothing answers
-  (bridgeless embed), the frame falls back to its own context rather than
-  losing resume.
+  fallback), so the resume entry always carries the **top document's**
+  context. Zero timed retries: the bridge resolves event-driven — one send,
+  then a `pf:ready` announce-down (install + relay echo to pending
+  requesters, parent-hop-limited) re-issues requests and re-arms latched
+  fullscreen provisions when an ancestor's handlers armed late; an
+  ancestor's armed state is script-fact invisible to layout, so the
+  announcement is the real reading (the deadline watchdog settles null for
+  bridgeless embeds). When nothing answers, the frame falls back to its own
+  context rather than losing resume.
 - Navigation: `pagehide` tears the kernel down unless `event.persisted`
   (bfcache keeps it); `pageshow`/`resume` (freeze recovery) re-arm it.
 
