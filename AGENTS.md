@@ -299,8 +299,10 @@ having genuine matching semantics elsewhere. What stayed vs died:
 - **Zero-timer pipeline (closed by census).** The architecture carries
   zero poll-style timers — `setTimeout`/`setInterval` never appears in src;
   the cadence that was once a wall clock (resume checkpoints every 10s)
-  rides the `requestVideoFrameCallback` media crank (presented-frame
-  mediaTime), and the bridge's retry ladder died into the `pf:ready`
+  rides the native `timeupdate` broadcast + `currentTime` (the element's own
+  media clock, ~4Hz while advancing, idle while paused/stalled; the rVFC
+  presented-frame crank retired with user direction), and the bridge's
+  retry ladder died into the `pf:ready`
   announcement (event-driven, last commits). Every timer that remains is
   one of three deliberate classes: a **coalescer** — the `DomSettleWait`
   trailing quiet period re-armed per mutation (no native "settled" event
@@ -546,7 +548,8 @@ stop at the first failure:
   restores it — no panel involved),
   `persist` (storage seeding, resume restore across reboot, the sync-grain
   row: one nudge gesture lands `subOffset` in the tracker's entry), `robust`
-  (freeze-flush without user pause, rVFC frame crank on 156, 1000-echo
+  (freeze-flush without user pause, checkpoint cadence on the native
+  timeupdate media clock at 4x, 1000-echo
   < 400ms, 400 remote-adoption merges < 800ms).
 - **Per-case audit rows** follow every case file: uncaught page errors
   become fails, `console.error` becomes informational rows, a GM-usage

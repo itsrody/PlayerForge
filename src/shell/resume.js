@@ -509,10 +509,10 @@ class ResumeStore {
 /**
  * Shell-owned playback tracker: persists progress per (domain, path, duration)
  * and resumes where the user left off, with a "Start over" toast action.
- * Saves are playback-status driven: an rVFC crank (frames are presented only
- * while playing) checkpoints every duration-scaled span of content, and every
- * boundary - pause, seeked, ended, hidden, freeze, pagehide, destroy - flushes
- * immediately. No wall-clock interval.
+ * Saves are playback-status driven: native playback events (timeupdate while
+ * the clock advances) checkpoints every duration-scaled span of content, and
+ * every boundary - pause, seeked, ended, hidden, freeze, pagehide, destroy -
+ * flushes immediately. No wall-clock interval.
  */
 export class ResumeTracker {
   #shell;
@@ -524,14 +524,6 @@ export class ResumeTracker {
   /** Eagerly resolved context promise — kicked off in the constructor. */
   #contextPromise;
   #lastSavedPosition = 0;
-  /** Exact mediaTime of the most recently presented frame, refreshed by the
-   *  rVFC crank and by every seek; the flush paths prefer it over currentTime
-   *  (which is the decoder position and may lead/lag the display). NaN until
-   *  the first frame/seek. */
-  #lastFrameMediaTime = NaN;
-  /** Pending rVFC id for the frame crank; cancelled in destroy() so a queued
-   *  callback can never fire into a dead shell. */
-  #rvfcHandle = null;
   /** One-shot swap listener armed per route change; null when not armed. */
   #readoptScope = null;
   /** True from a resource swap until the new resource has been adopted:
@@ -647,9 +639,6 @@ export class ResumeTracker {
     // tracker's accessors, including the silent findMatch adoption.
     this.#store.announce();
 
-    // A resource swap reuses the element, so the previous resource's last
-    // presented frame is meaningless here; wait for this one's first frame/seek.
-    this.#lastFrameMediaTime = NaN;
     const savedPosition = Number(this.#entry.resume);
     if (Number.isFinite(savedPosition) && savedPosition > RESUME_MIN_POSITION) {
       // Seek immediately — the browser buffers from the target position in the
@@ -819,34 +808,32 @@ export class ResumeTracker {
       return positionDue(position);
     };
 
-    // Playback-status crank: requestVideoFrameCallback fires only while frames
-    // are actually presented - it IS the "is playing" signal - and reports the
-    // exact mediaTime of the frame on screen. The callback re-arms itself and
-    // idles for free whenever the element is paused, stalled, or off-screen.
-    // rVFC is floor-guaranteed (83); the timeupdate fallback arm died with
-    // the retired test harness that was its only consumer.
-    const onFrame = (_now, metadata) => {
-      this.#rvfcHandle = null;
+    // The native media-clock broadcast: `timeupdate` fires on the element's
+    // own playback clock (~4Hz while advancing) and carries no payload, so
+    // the position read is `currentTime` - the decoder's authoritative
+    // playhead. It idles for free whenever the element is paused or stalled
+    // (no advancing -> no event), and the boundaries below flush at hidden /
+    // freeze before throttling can eat a write; the rVFC per-frame crank
+    // retired with user direction - a presented-frame callback (~15x the
+    // event cost of timeupdate) bought sub-frame flush precision the 10s
+    // checkpoint span never consumed.
+    video.addEventListener("timeupdate", () => {
       if (this.#scope.disposed) {
         return;
       }
-      this.#lastFrameMediaTime = metadata.mediaTime;
-      if (checkpointDue(metadata.mediaTime)) {
-        this.#saveProgress(metadata.mediaTime);
+      if (checkpointDue(shell.currentTime)) {
+        this.#saveProgress(shell.currentTime);
       }
-      this.#rvfcHandle = video.requestVideoFrameCallback(onFrame);
-    };
-    this.#rvfcHandle = video.requestVideoFrameCallback(onFrame);
+    }, { signal, passive: true });
 
-    const flush = () => this.#saveProgress(this.#flushPosition());
+    const flush = () => this.#saveProgress(shell.currentTime);
 
     // Status flushes: persist the position at every playback boundary, so the
-    // incremental crank only has to cover steady playback gaps.
+    // incremental cadence only has to cover steady playback gaps.
     video.addEventListener("pause", flush, { signal, passive: true });
     video.addEventListener("seeked", () => {
-      // A seek is an explicit position choice: record the landed target as the
-      // exact frame time and persist it now, regardless of the checkpoint span.
-      this.#lastFrameMediaTime = shell.currentTime;
+      // A seek is an explicit position choice: the landed target IS the
+      // position; persist it now, regardless of the checkpoint span.
       this.#saveProgress(shell.currentTime);
     }, { signal, passive: true });
     video.addEventListener("ended", flush, { signal, passive: true });
@@ -860,15 +847,6 @@ export class ResumeTracker {
     // where destroy() may never run.
     document.addEventListener("freeze", flush, { signal });
     window.addEventListener("pagehide", flush, { signal });
-  }
-
-  /** Position for a boundary flush: the last presented frame when known (the
-   *  pixels the user actually saw), else the decoder's currentTime. */
-  #flushPosition() {
-    if (Number.isFinite(this.#lastFrameMediaTime)) {
-      return this.#lastFrameMediaTime;
-    }
-    return this.#shell?.currentTime ?? NaN;
   }
 
   getEntries() {
@@ -931,16 +909,12 @@ export class ResumeTracker {
     }
     this.#readoptScope?.abort();
     this.#readoptScope = null;
-    if (this.#rvfcHandle != null) {
-      this.#shell?.video?.cancelVideoFrameCallback?.(this.#rvfcHandle);
-      this.#rvfcHandle = null;
-    }
     // Final save while the scope is still undisposed - #saveProgress has no
     // disposed guard of its own (it only skips while adopting or with no entry),
     // so this ordering is what keeps a torn-down shell from writing. Then the
     // scope takes down the media listeners + off-screen observer.
     if (this.#entry) {
-      this.#saveProgress(this.#flushPosition());
+      this.#saveProgress(this.#shell?.currentTime ?? NaN);
     }
     this.#scope.dispose();
     this.#store.destroy();

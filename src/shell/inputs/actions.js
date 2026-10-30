@@ -1175,9 +1175,9 @@ class ShellActions {
 }
 
 /**
- * One ScrubSession per attach - scrub latch, seek gains, rVFC readout, and
- * toast cadence all own themselves (the pan arm that shares the scrub surface
- * routes around it in ShellActions).
+ * One ScrubSession per attach - scrub latch, seek gains, and toast cadence
+ * all own themselves (the pan arm that shares the scrub surface routes
+ * around it in ShellActions).
  */
 export function attachInputActions(shell, host, signal) {
   new ShellActions(shell).attach(host, signal);

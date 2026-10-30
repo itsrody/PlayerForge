@@ -3,8 +3,8 @@
  * backend, faster freeze/pagehide of background pages) raises the stakes on
  * everything PlayerForge persists through SYNCHRONOUS GM storage at playback
  * boundaries. Rows: the freeze flush must land the played position with no
- * user pause, the rVFC crank (the save surface Chromium actually affords) must
- * be present on the running video, and the storage echo/merge hot paths must
+ * user pause, the checkpoint cadence must ride the native timeupdate media
+ * clock (no presented-frame crank), and the storage echo/merge hot paths must
  * stay inside a tiering-era wall-clock budget (Maglev/TurboFan silently mask
  * regressions on dev hardware - this guard does not).
  */
@@ -16,7 +16,7 @@ export async function run({ session, boot }) {
   await boot();
 
   // Freeze-flush row: the kernel's Page Lifecycle flush (freeze -> #saveProgress
-  // at the last presented frame) must persist WITHOUT a user pause. Regression
+  // at the playback boundary) must persist WITHOUT a user pause. Regression
   // surface: if a future refactor moves persistence onto async backends (IDB/
   // fetch), a freeze discards the in-flight write and this row goes red.
   await session.waitFor(
@@ -60,14 +60,44 @@ export async function run({ session, boot }) {
     `before=${before} played=${played} flushedAt=${flushed} after=${after}`
   );
 
-  // rVFC presence: the save crank prefers requestVideoFrameCallback (fires
-  // only for presented frames); a Chromium that drops it silently downgrades
-  // to the timeupdate fallback - this row makes the downgrade audible.
-  const rvfc = await session.eval(function main() {
+  // Checkpoint cadence: the save drive is the element's OWN timeupdate
+  // broadcast (no presented-frame crank, no wall clock). Seek to 0 first -
+  // the seeked flush persists a clean 0 baseline (the resume-seek floor is an
+  // adoption gate, not a save gate) - then play at 4x and wait for the 10s
+  // checkpoint span to land WITHOUT any flush edge: an ended flush would
+  // read 12 (or completion-zero it), so the strict upper bound proves the
+  // cadence landed by itself, mid-content.
+  const cadence = await session.evalAsync(function main(done) {
     const v = document.querySelector("#check-video");
-    return typeof (v ?? {}).requestVideoFrameCallback;
+    if (!v) { done({ at: "no-video" }); return; }
+    const cleanup = () => { v.pause(); v.playbackRate = 1; };
+    v.currentTime = 0;
+    v.playbackRate = 4;
+    v.play().catch(() => {});
+    const deadline = Date.now() + 6000;
+    const tick = () => {
+      const store = window.__pfBacking["pf:resume"];
+      const entry = (store?.entries ?? []).find((e) => e && e.path === "/check");
+      const at = entry ? entry.resume : -1;
+      if (at >= 10 && at < 11.5) {
+        cleanup();
+        done({ at });
+        return;
+      }
+      if (Date.now() >= deadline) {
+        cleanup();
+        done({ at: `deadline pos=${v.currentTime} resume=${at}` });
+        return;
+      }
+      setTimeout(tick, 250);
+    };
+    tick();
   });
-  status("rVFC frame crank surface present on the fixture video", rvfc === "function", `typeof=${rvfc}`);
+  status(
+    "checkpoint cadence lands on the native timeupdate media clock (10s span at 4x)",
+    typeof cadence?.at === "number" && cadence.at >= 10 && cadence.at < 11.5,
+    `resume=${cadence?.at ?? cadence}`
+  );
 
   // Echo-contract budget: N sync GM_setValue calls + their microtask echo
   // deliveries must land inside the budget. The store watch layer plus the
