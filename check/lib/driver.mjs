@@ -1,12 +1,11 @@
 /**
- * Chromium session boot for the check tool.
+ * Native Firefox session boot for the check tool.
  *
  * Owns everything between "run the gates" and "real page running the real
- * bundle": driver discovery (brew chromedriver, healed via brew reinstall on
- * handshake failure, Selenium Manager cache fallback), a fork-branded browser
- * version shim so chromedriver accepts Helium's fork product string, an
- * isolated profile, and a same-origin fixture server the kernel's ad-host
- * guard will not skip.
+ * bundle": driver discovery (geckodriver from the disk, Selenium Manager
+ * cache fallback), the headless isolated-profile Firefox session the GM
+ * realm and bundle get injected into, and a same-origin fixture server the
+ * kernel's ad-host guard will not skip.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync, mkdirSync } from "node:fs";
@@ -21,79 +20,39 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
 
 const BROWSERS = [
-  process.env.HELIUM_PATH,
-  join(homedir(), "Applications", "Helium.app", "Contents", "MacOS", "Helium"),
-  "/Applications/Helium.app/Contents/MacOS/Helium",
-  process.env.CHROME_PATH,
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  join(homedir(), "Applications", "Vivaldi.app", "Contents", "MacOS", "Vivaldi"),
-  "/Applications/Vivaldi.app/Contents/MacOS/Vivaldi",
-  "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+  process.env.FIREFOX_PATH,
+  "/Applications/Firefox.app/Contents/MacOS/firefox",
+  join(homedir(), "Applications", "Firefox.app", "Contents", "MacOS", "firefox")
 ].filter((p) => p && existsSync(p));
-
-function embeddedChromiumVersion(binary) {
-  const appRoot = binary.match(/^(.*\/)(Helium|Vivaldi)\.app\//);
-  if (appRoot === null) return null;
-  const versions = join(
-    appRoot[1] + appRoot[2] + ".app", "Contents", "Frameworks",
-    `${appRoot[2]} Framework.framework`, "Versions"
-  );
-  if (existsSync(versions)) {
-    try {
-      const dotQuad = readdirSync(versions).find((d) => /^\d+\.\d+\.\d+\.\d+$/.test(d));
-      if (dotQuad) return dotQuad;
-    } catch {}
-  }
-  return null;
-}
 
 function majorOf(version) {
   return version === null ? null : String(version).split(".")[0];
 }
 
-function nativeBinaryVersion(binary) {
+/** "Mozilla Firefox 159.0" -> "159.0"; null when the binary cannot answer. */
+function firefoxBinaryVersion(binary) {
   try {
-    return execFileSync(binary, ["--version"], { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).match(/\d+\.\d+\.\d+\.\d+/)?.[0] ?? null;
+    return execFileSync(binary, ["--version"], { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).match(/(\d+\.\d+(?:\.\d+)?)/)?.[1] ?? null;
   } catch {
     return null;
   }
 }
 
-function shimBrowser(binary, dir) {
-  const version = embeddedChromiumVersion(binary);
-  if (version === null) return binary;
-  const shim = join(dir, "driver-browser-shim");
-  writeFileSync(
-    shim,
-    "#!/bin/sh\n" +
-      "# fork product strings (Helium 0.x / Vivaldi 8.x) are not chromedriver's\n" +
-      "# product; answer with the embedded Chromium version, exec otherwise.\n" +
-      'for a in "$@"; do case "$a" in --product-version|--version) printf \'%s\\n\' \'' + version + '\'; exit 0 ;; esac done\n' +
-      "exec '" + binary + "' \"$@\"\n",
-    { mode: 0o755 }
-  );
-  chmodSync(shim, 0o755);
-  return shim;
-}
-
 function chmodX(path) { try { chmodSync(path, 0o755); } catch {} }
 
-function cachedDriver(version) {
+/** Selenium Manager's on-disk geckodriver cache, newest first. */
+function cachedDriver() {
   const plat = process.arch === "arm64" ? "mac-arm64" : "mac-x64";
-  const platDir = join(homedir(), ".cache", "selenium", "chromedriver", plat);
+  const platDir = join(homedir(), ".cache", "selenium", "geckodriver", plat);
   if (!existsSync(platDir)) return null;
-  const major = majorOf(version);
-  const exact = join(platDir, version, "chromedriver");
-  if (existsSync(exact)) { chmodX(exact); return exact; }
   let best = null;
   try {
     for (const dir of readdirSync(platDir)) {
-      if (majorOf(dir) !== major) continue;
       if (best === null || dir > best) best = dir;
     }
   } catch {}
   if (best === null) return null;
-  const p = join(platDir, best, "chromedriver");
+  const p = join(platDir, best, "geckodriver");
   if (!existsSync(p)) return null;
   chmodX(p);
   return p;
@@ -101,27 +60,34 @@ function cachedDriver(version) {
 
 function scanDrivers() {
   return [
-    process.env.CHROMEDRIVER_PATH,
-    "/opt/homebrew/bin/chromedriver",
-    "/usr/local/bin/chromedriver"
+    process.env.GECKODRIVER_PATH,
+    "/opt/homebrew/bin/geckodriver",
+    "/usr/local/bin/geckodriver",
+    cachedDriver()
   ].filter((p) => p && existsSync(p));
 }
 
-function localDriverFor(browserVersion) {
-  const cached = cachedDriver(browserVersion);
-  if (cached) return cached;
-  const major = majorOf(browserVersion);
-  return scanDrivers().find((path) => majorOf(nativeBinaryVersion(path)) === major) ?? null;
+/** Unlike chromedriver, geckodriver majors are cross-version: one 0.37
+ *  serves every supported Firefox major, so any runnable disk driver is a
+ *  honest candidate and the version read is for the log, not a gate. */
+function driverLabel(path) {
+  try {
+    const out = execFileSync(path, ["--version"], { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+    const v = out.match(/(\d+\.\d+(?:\.\d+)?)/)?.[1];
+    return v ? `${basename(path)} ${v}` : basename(path);
+  } catch {
+    return `${basename(path)} (unversioned)`;
+  }
 }
 
-function serviceFor(chromeMod, browserVersion) {
-  const local = localDriverFor(browserVersion);
+function serviceFor(firefoxMod) {
+  const local = scanDrivers()[0] ?? null;
   if (local) {
-    console.log(`  driver: ${basename(local)} (major match)`);
-    return new chromeMod.ServiceBuilder(local);
+    console.log(`  driver: ${driverLabel(local)}`);
+    return new firefoxMod.ServiceBuilder(local);
   }
-  console.log("  driver: Selenium Manager resolves a version-matched chromedriver");
-  return new chromeMod.ServiceBuilder();
+  console.log("  driver: Selenium Manager resolves geckodriver");
+  return new firefoxMod.ServiceBuilder();
 }
 
 function basename(p) { return p.slice(p.lastIndexOf("/") + 1); }
@@ -148,29 +114,29 @@ function sameDocument(requested, landed) {
   return urlSlice(requested) === urlSlice(landed);
 }
 
-function brewReinstallChromedriver() {
-  console.log("  brew reinstall chromedriver (heal attempt)...");
+function brewReinstallGeckodriver() {
+  console.log("  brew reinstall geckodriver (heal attempt)...");
   try {
-    execFileSync("brew", ["reinstall", "chromedriver"], { stdio: "inherit", timeout: 120000 });
+    execFileSync("brew", ["reinstall", "geckodriver"], { stdio: "inherit", timeout: 120000 });
   } catch (err) {
     console.log(`  brew reinstall failed: ${err.message}`);
   }
 }
 
 /**
- * Launch-failure classifier: a chromedriver session death reads as its raw
+ * Launch-failure classifier: a geckodriver session death reads as its raw
  * stack + a protocol blob, so the runner needs the one-line decision out of
- * it. Version refusals get their exact shape (the single most common boot
- * failure after a fork-browser update); handshake failures / port collisions
- * so on - anything else stays "refused session".
+ * it. Firefox shapes: a refused binary (wrong product path, quarantine),
+ * the marionette handshake (geckodriver started but the browser port never
+ * opened - a real Firefox launch failure), and timeouts.
  */
 function classifyDriverFailure(err) {
   const text = String(err?.message ?? err);
   if (/session not created/i.test(text)) {
-    if (/version|only supports/i.test(text)) return "chromedriver/browser version mismatch";
-    return "session refused by chromedriver";
+    if (/binary|Failed to start|launcher|not found/i.test(text)) return "geckodriver could not start the browser";
+    return "session refused by geckodriver";
   }
-  if (/DevToolsActivePort|refused to connect|ECONNREFUSED/i.test(text)) return "handshake failed (no DevTools port)";
+  if (/marionette|connection refused|ECONNREFUSED|unexpectedly closed|handshake|Process\b/i.test(text)) return "handshake failed (no marionette port)";
   if (/TIMEDOUT|timeout/i.test(text)) return "handshake timed out";
   if (/not executable|cannot be opened|exec/i.test(text)) return "driver binary not runnable";
   return "launch refused";
@@ -182,80 +148,37 @@ function serviceLabel(service) {
 }
 
 /**
- * Order the launch candidates and keep them honest: a local disk driver is
- * only a candidate while its major matches the browser (a stale brew driver
- * 154 in front of Chromium 156 would guarantee a session refusal); the Selenium
- * Manager candidate always trails so a whole-ladder failure needs something
- * new on disk before any retry could matter.
+ * Fail-fast driver probe for the runner: prints what the disk can supply and
+ * heals a completely empty disk through brew, but never blocks - geckodriver
+ * has no version-matched-major requirement to fail against, so a missing or
+ * odd disk honestly delegates to Selenium Manager at launch. Best-effort.
  */
-function serviceCandidates(chromeMod, browserVersion) {
-  const list = [];
-  const local = localDriverFor(browserVersion);
-  if (local) {
-    console.log(`  driver candidate: ${basename(local)} (${nativeBinaryVersion(local) ?? "unknown version"})`);
-    list.push(new chromeMod.ServiceBuilder(local));
-  } else {
-    const stale = scanDrivers().find((p) => {
-      const v = nativeBinaryVersion(p);
-      return v !== null && majorOf(v) !== majorOf(browserVersion);
-    });
-    if (stale) {
-      console.log(`  driver: ${basename(stale)} on disk is stale for chromium ${browserVersion} - Selenium Manager downloads the matching major`);
-    }
-  }
-  list.push(new chromeMod.ServiceBuilder());
-  return list;
-}
-
-/**
- * Fail-fast driver probe for the runner, browser-aware: it knows the
- * embedded Chromium major the launch will target, so "chromedriver 154 vs
- * chromium 156" is surfaced here (the browser-preference path is the actual
- * plan: launch falls back to Selenium Manager for the matching major) instead
- * of one loud session-refusal launch later. When the disk can supply the
- * matching major it is preferred over a merely reporting driver. Best-effort:
- * launch falls back to Selenium Manager when this returns null.
- */
-export function ensureChromeDriver() {
+export function ensureFirefoxDriver() {
   const browserBinary = BROWSERS[0];
-  const browserVersion = browserBinary ? (embeddedChromiumVersion(browserBinary) ?? nativeBinaryVersion(browserBinary)) : null;
-  const neededMajor = majorOf(browserVersion);
+  const browserVersion = browserBinary ? firefoxBinaryVersion(browserBinary) : null;
+  console.log(`  browser probe: ${browserBinary ? `${basename(browserBinary)} (firefox ${browserVersion ?? "unknown"})` : "NO FIREFOX BINARY FOUND"}`);
 
   let drivers = scanDrivers();
   if (drivers.length === 0) {
-    console.log("  no chromedriver on disk - brew reinstalling...");
-    brewReinstallChromedriver();
+    console.log("  no geckodriver on disk - brew reinstalling...");
+    brewReinstallGeckodriver();
     drivers = scanDrivers();
   }
-  const sane = [];
   for (const bin of drivers) {
-    const version = nativeBinaryVersion(bin);
-    if (version === null) {
-      console.log(`  driver probe: ${basename(bin)} failed to report a version - skipped`);
-      continue;
-    }
-    const matches = majorOf(version) === neededMajor;
-    sane.push({ bin, version, matches });
+    console.log(`  driver probe: ${driverLabel(bin)}`);
   }
-  if (sane.length === 0) {
-    console.log("  driver probe: no usable chromedriver on disk - Selenium Manager resolves at launch");
-    return null;
-  }
-  const matching = sane.find((d) => d.matches);
-  if (matching) {
-    console.log(`  driver probe: ${basename(matching.bin)} (${matching.version}) matches chromium ${browserVersion}`);
-    return matching.bin;
-  }
-  const stale = sane[0];
-  console.log(`  driver probe: ${basename(stale.bin)} (${stale.version}) is stale for chromium ${browserVersion} - launch will prefer Selenium Manager's matching major`);
-  return null;
+  return drivers[0] ?? null;
 }
 
 /**
- * Boot a headless, isolated-profile Chromium session with the userscript realm
- * injected. Reused across cases; destroyed once per tool run.
+ * Boot a headless, isolated-profile native Firefox session with the
+ * userscript realm injected. Reused across cases; destroyed once per tool
+ * run. geckodriver manufactures its own temporary profile when none is
+ * given, so per-launch isolation is the driver's default, not an argument
+ * the ladder has to thread; the temp dir this class makes is only the
+ * owner of teardown bookkeeping for anything else per-run.
  */
-export class ChromiumSession {
+export class BrowserSession {
   #driver;
   #profileDir;
   #server;
@@ -269,44 +192,34 @@ export class ChromiumSession {
   static async launch() {
     const browserBinary = BROWSERS[0];
     if (browserBinary === undefined) {
-      throw new Error("no Chromium browser found (set HELIUM_PATH or install Helium)");
+      throw new Error("no Firefox binary found (set FIREFOX_PATH or install Firefox)");
     }
-    const browserVersion = embeddedChromiumVersion(browserBinary) ?? nativeBinaryVersion(browserBinary);
+    const browserVersion = firefoxBinaryVersion(browserBinary);
     if (browserVersion === null) {
-      throw new Error(`cannot read a Chromium version out of ${browserBinary}`);
+      console.log(`  browser: ${basename(browserBinary)} (--version unreadable - continuing)`);
+    } else {
+      console.log(`  browser: ${basename(browserBinary)} (firefox ${browserVersion})`);
     }
-    console.log(`  browser: ${basename(browserBinary)} (chromium ${browserVersion})`);
 
     const profileDir = mkdtempSync(join(tmpdir(), "check-driver-"));
     const { Builder } = await import("selenium-webdriver");
-    const chromeMod = await import("selenium-webdriver/chrome.js");
-    const options = new chromeMod.Options()
-      .setChromeBinaryPath(shimBrowser(browserBinary, profileDir))
+    const firefoxMod = await import("selenium-webdriver/firefox.js");
+    const options = new firefoxMod.Options()
+      .setBinary(browserBinary)
       .setAcceptInsecureCerts(true)
-      .addArguments(
-        `--user-data-dir=${profileDir}`,
-        "--headless=new",
-        "--no-sandbox",
-        "--disable-gpu",
-        "--disable-dev-shm-usage",
-        "--disable-extensions",
-        "--disable-background-networking",
-        "--no-first-run",
-        "--window-size=1440,900"
-      );
+      .addArguments("-headless");
 
-    // Candidate ladder: a version-matched local driver first, Selenium
-    // Manager always behind it. A mid-fork-update disk (brew driver 154 vs
-    // Chromium 156) therefore never guarantees a brew-heal round trip that
-    // reinstalls the same stale version.
+    // Candidate ladder: the disk's geckodriver first (no major-matching: one
+    // recent geckodriver serves every supported Firefox), Selenium Manager
+    // always behind it.
     const tried = [];
     const serviceAndAttempt = async (service) => {
       const label = serviceLabel(service);
       try {
         const built = await new Builder()
-          .forBrowser("chrome")
-          .setChromeOptions(options)
-          .setChromeService(service)
+          .forBrowser("firefox")
+          .setFirefoxOptions(options)
+          .setFirefoxService(service)
           .build();
         tried.push({ label, ok: true });
         return built;
@@ -315,26 +228,35 @@ export class ChromiumSession {
         throw err;
       }
     };
+    const candidates = [];
+    const local = scanDrivers()[0] ?? null;
+    if (local) {
+      console.log(`  driver candidate: ${driverLabel(local)}`);
+      candidates.push(new firefoxMod.ServiceBuilder(local));
+    } else {
+      console.log("  driver: Selenium Manager resolves geckodriver at launch");
+    }
+    candidates.push(new firefoxMod.ServiceBuilder());
+
     let driver = null;
-    for (const service of serviceCandidates(chromeMod, browserVersion)) {
+    for (const service of candidates) {
       try {
         driver = await serviceAndAttempt(service);
         break;
       } catch {}
     }
     if (driver === null) {
-      // A brew reinstall only helps launch when it can either restore a
-      // corrupted binary we never reached, or bring a NEW major onto the
-      // disk. If a local driver was already tried, or a matching one still
-      // exists but failed, the reinstall replays the identical bytes.
-      const wantsHeal = !tried.some((t) => t.ok === false && t.label !== "Selenium Manager (auto)")
-        && localDriverFor(browserVersion) === null;
+      // The brew heal only helps when the whole ladder died before ever
+      // running a local driver (i.e. nothing usable was on disk at all): a
+      // reinstall that replays identical bytes cannot fix a refused session.
+      const wantsHeal = !tried.some((t) => t.ok === false && t.label === serviceLabel(new firefoxMod.ServiceBuilder(local)))
+        && local === null;
       if (wantsHeal) {
-        brewReinstallChromedriver();
+        brewReinstallGeckodriver();
         driver = await new Builder()
-          .forBrowser("chrome")
-          .setChromeOptions(options)
-          .setChromeService(serviceFor(chromeMod, browserVersion))
+          .forBrowser("firefox")
+          .setFirefoxOptions(options)
+          .setFirefoxService(serviceFor(firefoxMod))
           .build()
           .catch((err) => {
             tried.push({ label: "brew heal", ok: false, reason: classifyDriverFailure(err), raw: String(err.message ?? err).split("\n")[0].slice(0, 140) });
@@ -343,7 +265,7 @@ export class ChromiumSession {
       }
       if (driver === null) {
         throw new Error(
-          `chromedriver launch failed for chromium ${browserVersion}; attempts:\n  ` +
+          `geckodriver launch failed for firefox ${browserVersion ?? "?"}; attempts:\n  ` +
           tried.map((t) => `${t.label} -> ${t.ok ? "ok" : (t.reason ?? "?") + " (" + (t.raw ?? "") + ")"}`).join("\n  ")
         );
       }
@@ -377,11 +299,22 @@ export class ChromiumSession {
       throw new Error(`browser never became responsive after launch (about:blank sentinel) - ${JSON.stringify(state)} lastPollError=${lastPollError}`);
     }
 
-    // Startup-tab hygiene: a fork-browser update often spawns its own
-    // welcome/startup tab ahead of the driver's about:blank; commands would
-    // then keep talking to whichever tab is current while the fixture boots
-    // land somewhere invisible. Everything but the tab the sentinel just
-    // validated is closed.
+    // Headless carries no --window-size argument across drivers: set the
+    // working rect through the window command the geckodriver natively
+    // supports. Best-effort - the deferral rows' layout math uses the
+    // viewport, not a hard-coded size.
+    try {
+      await driver.manage().window().setRect({ width: 1440, height: 900 });
+    } catch (err) {
+      console.log(`  window rect: ${String(err.message ?? err).slice(0, 80)}`);
+    }
+
+    // Startup-tab hygiene: Firefox launches with exactly the driver's
+    // about:blank tab in a fresh geckodriver profile, but a mid-flight
+    // browser update or a session-restore pref can still spawn extras;
+    // commands would then keep talking to whichever tab is current while
+    // the fixture boots land somewhere invisible. Everything but the tab
+    // the sentinel just validated is closed.
     await new Promise((r) => setTimeout(r, 200));
     const handles = await driver.getAllWindowHandles().catch(() => []);
     if (handles.length > 1) {
@@ -394,7 +327,7 @@ export class ChromiumSession {
       console.log(`  tab hygiene: closed ${handles.length - 1} startup tab(s)`);
     }
 
-    const session = new ChromiumSession(driver, profileDir);
+    const session = new BrowserSession(driver, profileDir);
     return session;
   }
 
@@ -420,7 +353,7 @@ export class ChromiumSession {
     await this.#driver.get(url);
     // Verify the landing: a get() that resolves while the browser stays on
     // the pre-navigation document (startup navigation race on a freshly
-    // updated fork browser) would otherwise plant every later probe on a
+    // updated browser) would otherwise plant every later probe on a
     // page without its fixture.
     let landed = await this.#driver.getCurrentUrl().catch(() => null);
     if (landed !== null && !sameDocument(url, landed)) {
@@ -462,9 +395,9 @@ export class ChromiumSession {
         return;
       }
       if (route && route.bytes) {
-        // Byte-range support is not cosmetic: without it Chromium treats the
-        // stream as non-seekable and silently discards currentTime seeks,
-        // which would falsify every media-state probe.
+        // Byte-range support is not cosmetic: without it a seek over the
+        // stream reads as non-seekable and silently discards currentTime
+        // seeks, which would falsify every media-state probe.
         const total = route.bytes.length;
         const match = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? "");
         if (match) {
@@ -498,7 +431,7 @@ export class ChromiumSession {
     this.#server = createServer(handler);
     await new Promise((resolve) => this.#server.listen(0, "127.0.0.1", resolve));
     this.#fixturePort = this.#server.address().port;
-    // Second loopback listener, same handler: Chromium treats localhost and
+    // Second loopback listener, same handler: browsers treat localhost and
     // 127.0.0.1 as distinct origins, so cross-origin frame scenarios ride the
     // same fixture routes without a second server. Same port across address
     // families is no conflict - v4 and v6 binds are independent namespaces -
@@ -516,7 +449,7 @@ export class ChromiumSession {
     return `http://127.0.0.1:${this.#fixturePort}`;
   }
 
-  /** An origin Chromium treats as distinct from baseUrl - same routes, same
+  /** An origin browsers treat as distinct from baseUrl - same routes, same
    *  server socket family. Frames pointed here are genuinely cross-origin. */
   get crossBaseUrl() {
     return `http://localhost:${this.#fixturePort}`;

@@ -1,12 +1,13 @@
 /**
- * Chromium 156-era robustness: background/backend offloading (SQLite IndexedDB
- * backend, faster freeze/pagehide of background pages) raises the stakes on
- * everything PlayerForge persists through SYNCHRONOUS GM storage at playback
- * boundaries. Rows: the freeze flush must land the played position with no
- * user pause, the checkpoint cadence must ride the native timeupdate media
- * clock (no presented-frame crank), and the storage echo/merge hot paths must
- * stay inside a tiering-era wall-clock budget (Maglev/TurboFan silently mask
- * regressions on dev hardware - this guard does not).
+ * The robustness floor: backing churn during background lives (page frozen
+ * mid-playback, storage echo floods from cross-tab merges) raises the stakes
+ * on everything PlayerForge persists through SYNCHRONOUS GM storage at
+ * playback boundaries. Rows: the freeze flush must land the played position
+ * with no user pause, the checkpoint cadence must ride the native timeupdate
+ * media clock (no presented-frame crank), and the storage echo/merge hot
+ * paths must stay inside a tiering-era wall-clock budget (the engine's
+ * optimizer tiers silently mask regressions on dev hardware - this guard
+ * does not).
  */
 export async function run({ session, boot }) {
   const rows = [];

@@ -352,21 +352,26 @@ export async function run({ session, baseUrl, boot }) {
     ms: null
   });
 
+  // Real stage geometry the native way: no emulation channel exists on the
+  // Firefox floor, so the 400x700 portrait pocket is the window's own rect -
+  // the same viewport width the band math reads - while the localized band
+  // forcing stays inline (the fixture's stage container width). The window
+  // is restored to its launch rect in the finally.
+  //
   // The auto band, per engine half (see :scope comments in styles.css for
-  // why the halves are separate): shrink the STAGE inline - the fixture video
-  // container is a fixed 1280px - and the pf-stage container query must
-  // re-evaluate LIVE (the band var flips, no JS re-arm), while the device
-  // pointer form stays fine, so the merged bus correctly stays closed. Then
-  // assume the coarse device (inline var - pointer media is not emulable
-  // in this headless session, established by the probe fields) and the full
-  // auto semantics must light up: bus 1 + the compact bottom-sheet corner.
-  // The setting's explicit false must veto ONLY the auto band afterwards.
+  // why the halves are separate): shrink the STAGE inline and the pf-stage
+  // container query must re-evaluate LIVE (the band var flips, no JS re-arm),
+  // while the device pointer form stays fine, so the merged bus correctly
+  // stays closed. Then assume the coarse device (inline var - pointer media
+  // is not forceable in this headless session) and the full auto semantics
+  // must light up: bus 1 + the compact bottom-sheet corner. The setting's
+  // explicit false must veto ONLY the auto band afterwards.
   let auto = null;
   let coarseAssumed = null;
   let veto = null;
   let densGate = null;
-  const cdp = await session.raw.createCDPConnection("page");
-  await cdp.send("Emulation.setDeviceMetricsOverride", { width: 400, height: 700, deviceScaleFactor: 1, mobile: true });
+  const windowState = await session.raw.manage().window().getRect().catch(() => null);
+  await session.raw.manage().window().setRect({ width: 400, height: 700 }).catch(() => {});
   try {
     await session.eval(function narrow() {
       document.querySelector(".pf-shell")?.parentElement?.style.setProperty("width", "400px");
@@ -466,8 +471,9 @@ export async function run({ session, baseUrl, boot }) {
       };
     });
   } finally {
-    await cdp.send("Emulation.setEmulatedMedia", { features: [] });
-    await cdp.send("Emulation.clearDeviceMetricsOverride", {});
+    if (windowState) {
+      await session.raw.manage().window().setRect(windowState).catch(() => {});
+    }
     await session.eval(function restore() {
       const host = document.querySelector(".pf-shell");
       host?.parentElement?.style.removeProperty("width");
@@ -505,12 +511,12 @@ export async function run({ session, baseUrl, boot }) {
 
   // The container pockets ride a real <style> element because @container SIZE
   // rules inside a document-adopted constructable sheet never evaluate their
-  // conditions in this Chromium build (src/shell/chrome/inject.js compiles the
+  // conditions in the harness engine build (src/shell/chrome/inject.js compiles the
   // whole pocket as a <style> carrier). This row IS that premise probe: one
   // always-true @container rule seeded into both carriers, each writing a
   // distinct declaration of the same custom property. The <style> twin must
   // light the property; the adopted twin must never reach it (the twin's own
-  // declaration is the sentinel). A Chromium fix that makes the adopted arm
+  // declaration is the sentinel). An engine fix that makes the adopted arm
   // evaluate flips this row and re-opens the pocket's carrier decision.
   const carrier = await session.evalAsync(async function main(done) {
     const wrap = document.createElement("div");

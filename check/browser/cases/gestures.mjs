@@ -1,12 +1,27 @@
 /**
- * The gesture contract, driven by REAL input events through chromedriver's
- * action layer (pointer streams and keystrokes sent to the headless browser),
- * with the semantic pf:gesture-* reactions recorded off the shell host.
- * Keyboard preconditions documented in inputs/forge.js: focus must not sit in
- * text entry, and the active engine arbitrates - so the pointer probes park a
- * press first, and keys arrive through the same trusted surface.
+ * The gesture contract, driven by REAL input events through geckodriver's
+ * action layer (W3C pointer streams and keystrokes sent to the headless
+ * browser), with the semantic pf:gesture-* reactions recorded off the shell
+ * host. Keyboard preconditions documented in inputs/forge.js: focus must not
+ * sit in text entry, and the active engine arbitrates - so the pointer probes
+ * park a press first, and keys arrive through the same trusted surface.
  */
 import { TUNING } from "../../../src/shared/core.js";
+import { Pointer, Origin, Button } from "selenium-webdriver/lib/input.js";
+
+/** A W3C touch-pointer stroke: geckodriver's native emulation of the
+ * pointerType "touch" input source synthesizes the trusted pointer/touch
+ * event stream through Gecko's own event-synthesis path. */
+async function touchStroke(raw, points) {
+  const finger = new Pointer("check-touch", Pointer.Type.TOUCH);
+  const seq = [
+    finger.move({ x: Math.round(points[0].x), y: Math.round(points[0].y), origin: Origin.VIEWPORT, duration: 0 }),
+    finger.press(Button.LEFT),
+    ...points.slice(1).map((p) => finger.move({ x: Math.round(p.x), y: Math.round(p.y), origin: Origin.VIEWPORT, duration: 60 })),
+    finger.release(Button.LEFT)
+  ];
+  await raw.actions({ async: true }).insert(finger, ...seq).perform();
+}
 
 function videoCenterScript() {
   // The kernel marks data-pf-shell on video/container AND our shadow host;
@@ -53,7 +68,7 @@ export async function run({ session, baseUrl, boot }) {
     return rows;
   }
   const raw = session.raw;
-  // chromium driver actions: keyDown/keyUp consume Key constants (Key.ARROW,
+  // geckodriver actions: keyDown/keyUp consume Key constants (Key.ARROW,
   // Key.UP, etc.) - press()/release()/move() drive the pointer device.
   const acts = () => raw.actions({ async: true });
   const pressDown = async () => {
@@ -159,8 +174,8 @@ export async function run({ session, baseUrl, boot }) {
   // never sets fullscreenElement - the field shape the trace pinned (fs=off
   // + no "fullscreen on" while the player visibly filled the screen). Its
   // native witness is the (fullscreen) media query, so the stub simulates
-  // the state the gate cannot enter headless - headless Chromium can't open
-  // window fullscreen - and one resize (the UA window's observed flip event)
+  // the state the gate cannot enter headless - the UA window's own
+  // fullscreen mode is not a driver-openable surface - and one resize (the UA window's observed flip event)
   // recomputes the gate. The real-driver horizontal drag then scrubs
   // fs-style, proving the armed end-to-end path; cleanup restores the live
   // media query and re-seats the gate to the real truth.
@@ -336,7 +351,7 @@ export async function run({ session, baseUrl, boot }) {
     spaceRelease.rate === 1 && spaceRelease.released, JSON.stringify(spaceRelease));
 
   // KeyP asks for picture-in-picture through the kernel's semantic layer;
-  // pip-window creation may be blocked in headless Chromium, so the row
+  // the PiP window itself is not openable in headless automation, so the row
   // asserts the contract, not the browser-side window.
   await recordGestureEvents(session);
   await fireKeys(["KeyP"]);
@@ -346,8 +361,9 @@ export async function run({ session, baseUrl, boot }) {
   }), "no pf:gesture-pip");
 
   // Scrub/swipe/pinch are fs:true-binding intents (actions.js): the kernel's
-  // fs gate reads `doc.fullscreenElement`, and headless Chromium refuses
-  // real element fullscreen (Permissions check failed). The override below
+  // fs gate reads `doc.fullscreenElement`, and driver automation cannot run
+  // the user-activation fullscreen course real element fullscreen requires.
+  // The override below
   // points the same gate at the shell host; a synthetic fullscreenchange
   // then flips the kernel's fs latch the way a real fullscreen would.
   await session.eval(function main() {
@@ -418,14 +434,13 @@ export async function run({ session, baseUrl, boot }) {
     }), `events=${JSON.stringify(await session.eval(function main() { return window.__pfEvents; }))}`);
 
   // Pointer-universality proof, real TOUCH: the mouse drag row above and this
-  // row feed the SAME recognizer letters through the two faces of Chromium's
-  // one pointer backend (CDP's synthetic touch stream arrives as pointer
-  // events with pointerType "touch"). The engine holds zero pointerType
-  // branches; this row pins the claim end-to-end on the Android geometry - a
-  // horizontal touch stroke latches scrub and commits through the same
-  // display-clock pipeline, so nothing in the input plane is routed by
-  // modality anywhere.
-  const touchCdp = await raw.createCDPConnection("page");
+  // row feed the SAME recognizer letters through two faces of the one W3C
+  // input plane (the W3C touch pointer type arrives as pointer events with
+  // pointerType "touch", synthesized by Gecko's own event path). The engine
+  // holds zero pointerType branches; this row pins the claim end-to-end on
+  // the Android geometry - a horizontal touch stroke latches scrub and
+  // commits through the same display-clock pipeline, so nothing in the input
+  // plane is routed by modality anywhere.
   await session.eval(function main() {
     const v = document.querySelector("#check-video");
     v.pause();
@@ -433,18 +448,12 @@ export async function run({ session, baseUrl, boot }) {
     window.__pfTouchSeed = v.currentTime;
     window.__pfEvents = [];
   });
-  await touchCdp.send("Input.dispatchTouchEvent", {
-    type: "touchStart",
-    touchPoints: [{ x: Math.round(center.x), y: Math.round(center.y) }]
-  });
-  for (const dx of [40, 90, 140]) {
-    await touchCdp.send("Input.dispatchTouchEvent", {
-      type: "touchMove",
-      touchPoints: [{ x: Math.round(center.x + dx), y: Math.round(center.y) }]
-    });
-    await new Promise((resolve) => setTimeout(resolve, 30));
-  }
-  await touchCdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await touchStroke(raw, [
+    center,
+    { x: center.x + 40, y: center.y },
+    { x: center.x + 90, y: center.y },
+    { x: center.x + 140, y: center.y }
+  ]);
   await new Promise((r) => setTimeout(r, 300));
   const touchScrub = await session.eval(function main() {
     return {
@@ -763,9 +772,11 @@ export async function run({ session, baseUrl, boot }) {
 
   // Touch pointer-type stream through the ENGINE claim (synthetic
   // PointerEvent dispatch - event listeners are pointer-type agnostic, and
-  // untrusted events still traverse the capture path the engine listens on;
-  // chromedriver's actions surface has no touch pointer, so the compositor
-  // touch pipeline itself stays device-verified). The seeded compose pins
+  // untrusted events still traverse the capture path the engine listens on).
+  // The W3C touch pointer row below covers the trusted stream; this row
+  // exists because the compose pin needs what a driver stream cannot give -
+  // the exact two-move envelope and a transform read BETWEEN moves with no
+  // driver-timing jitter in between. The seeded compose pins
   // the prepend contract: the follow translate must LEAD the list whatever
   // the base scale is, or the follow rides inside scale() at s× pointer
   // rate. State is restored in the same turn - the ease's finish commit
@@ -841,31 +852,23 @@ export async function run({ session, baseUrl, boot }) {
         `pinch events=${JSON.stringify(events)}`;
     }), "pinch recognition mismatch");
 
-  // Real compositor touch through the browser input pipeline: CDP
-  // Input.dispatchTouchEvent reaches Chromium's gesture/pointer pipelines -
-  // the path every real Android touch rides - not the synthetic
-  // PointerEvent surface the previous rows drove. This closes the honest gap
-  // the synthetic rows carried: the pinch/swipe engine contract is now
-  // proven END TO END on the same pipeline the compositor runs (the last
-  // compositing-touch step - physical hardware - stays device-verified).
-  const cdp = await raw.createCDPConnection("page");
+  // Real input-pipeline touch through geckodriver's W3C touch pointer -
+  // Gecko's own event-synthesis path dispatches the trusted pointer/touch
+  // stream, not the synthetic PointerEvent surface the rows above drove.
+  // This closes the honest gap the synthetic rows carried: the pinch/swipe
+  // engine contract is proven END TO END on trusted events (the last
+  // pipeline step - physical hardware - stays device-verified).
   await session.eval(function arm() {
     window.__pfEvents = [];
   });
-  await cdp.send("Input.dispatchTouchEvent", {
-    type: "touchStart",
-    touchPoints: [{ x: Math.round(center.x), y: Math.round(center.y) }]
-  });
-  for (const dy of [30, 90, 150]) {
-    await cdp.send("Input.dispatchTouchEvent", {
-      type: "touchMove",
-      touchPoints: [{ x: Math.round(center.x), y: Math.round(center.y + dy) }]
-    });
-    await new Promise((resolve) => setTimeout(resolve, 30));
-  }
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await touchStroke(raw, [
+    center,
+    { x: center.x, y: center.y + 30 },
+    { x: center.x, y: center.y + 90 },
+    { x: center.x, y: center.y + 150 }
+  ]);
   await new Promise((resolve) => setTimeout(resolve, 300));
-  status(rows, "compositor touch stream: real swipe recognition end-to-end",
+  status(rows, "input-pipeline touch stream: real swipe recognition end-to-end",
     await session.eval(function main() {
       const events = (window.__pfEvents || []).filter((e) => e.startsWith("swipe"));
       if (!events.includes("swipe-start") || !events.includes("swipe:down")) {
@@ -883,34 +886,33 @@ export async function run({ session, baseUrl, boot }) {
 
   // Owned-touch tap-highlight determination: since the prevent-scope cut the
   // tap's whole native stream passes (no at-press cancellation), so whether
-  // Chromium's compositor tap highlight (gray flash) fires on a video-zone
-  // tap is NOT DOM-observable - the highlight is a compositor paint - and
-  // this row answers it with a screenshot diff on a paused video (a static
-  // surface whose only possible paint change across the tap is the
-  // highlight itself.
+  // the engine's paint side (a compositor-applied tap highlight - nothing a
+  // DOM inspection can witness) fires on a video-zone tap is NOT
+  // DOM-observable - it is a
+  // compositor paint - and this row answers it with a screenshot diff on a
+  // paused video (a static surface whose only possible paint change across
+  // the tap is the highlight itself.
   await session.eval(function pause() {
     const video = document.querySelector("#check-video");
     video.pause();
   });
   await new Promise((resolve) => setTimeout(resolve, 250));
-  const clip = {
-    x: center.x - center.width / 2 + 8,
-    y: center.y - center.height / 2 + 8,
-    width: center.width - 16,
-    height: center.height - 16,
-    scale: 1
-  };
-  const shotBefore = await cdp.send("Page.captureScreenshot", { format: "png", clip });
-  await cdp.send("Input.dispatchTouchEvent", {
-    type: "touchStart",
-    touchPoints: [{ x: Math.round(center.x), y: Math.round(center.y) }]
-  });
+  const { By } = await import("selenium-webdriver");
+  const videoElement = await raw.findElement(By.css("#check-video"));
+  const elementShot = () => raw.takeScreenshot(videoElement);
+  const shotBefore = Buffer.from(await elementShot(), "base64");
+  // The press: a held W3C touch pointer (input-source state persists across
+  // perform calls per the WebDriver spec, so the hold spans two commands).
+  const finger = new Pointer("check-tap", Pointer.Type.TOUCH);
+  const holdActions = raw.actions({ async: true }).insert(finger,
+    finger.move({ x: Math.round(center.x), y: Math.round(center.y), origin: Origin.VIEWPORT, duration: 0 }),
+    finger.press(Button.LEFT));
+  await holdActions.perform();
   await new Promise((resolve) => setTimeout(resolve, 80));
-  const shotDuring = await cdp.send("Page.captureScreenshot", { format: "png", clip });
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  const shotDuring = Buffer.from(await elementShot(), "base64");
+  await raw.actions({ async: true }).insert(finger, finger.release(Button.LEFT)).perform();
   await new Promise((resolve) => setTimeout(resolve, 150));
-  const unwrap = (shot) => Buffer.from((shot?.data ?? shot?.result?.data), "base64");
-  const highlightFree = unwrap(shotBefore).equals(unwrap(shotDuring));
+  const highlightFree = shotBefore.equals(shotDuring);
   await session.eval(function resume() {
     const video = document.querySelector("#check-video");
     video.play?.();
@@ -918,7 +920,7 @@ export async function run({ session, baseUrl, boot }) {
     video.style.transform = "";
     video.style.willChange = "";
   });
-  status(rows, "owned touch press leaves the compositor surface highlight-free",
+  status(rows, "owned touch press leaves the video surface highlight-free",
     highlightFree ? true : "screenshots diverged across the owned press", "tap highlight mismatch");
 
   return rows;

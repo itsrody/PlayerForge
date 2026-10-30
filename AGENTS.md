@@ -55,7 +55,7 @@ derived from `package.json` by the build; never hand-edit the header version.
 **Commands:** `npm run build` (or `--watch`), `npm run lint` (eslint src/),
 `npm test` — the alias for `check/run.mjs`, the repo's one testing interface.
 `npm run check:browser`, `check:flaws`, `check:syntax` run individual gates.
-A clean run is ~33s.
+A clean run is ~60s.
 
 ---
 
@@ -542,25 +542,27 @@ stop at the first failure:
    artifact shape validation (header fields, IIFE shape, css companion) and
    the manager-contract pins: the exclusion list only ever rides the strict
    `@exclude-match` surface, and `@downloadURL` stays present for the updater.
-4. **browser** — real browser + real bundle in a GM realm: the driver rides
-   the existing Chromium-fork harness on this branch (real Helium Chromium
-   156); the firefox migration retargets it to native Firefox 159. Proves:
-   boot, gesture contract, media semantics, resume, menus, GM env, frame
-   scenarios, subtitle picture anchoring, edge robustness. ~33–45s.
+4. **browser** — real browser + real bundle in a GM realm: **real native
+   Firefox 159** headless, driven by geckodriver (this branch's floor, not a
+   fork shim). Proves: boot, gesture contract, media semantics, resume,
+   menus, GM env, frame scenarios, subtitle picture anchoring, edge
+   robustness. ~60s.
 
 ### Browser gate mechanics
 - **Row statuses are binary: only an explicit `"pass"` passes.** A case file
   returning a boolean or shorthand status reads as fail (a real failure this
   once shipped as a false row the aggregator skipped past, and four
   all-green runs stood behind it).
-- Launch ladder: version-matched disk chromedriver → Selenium Manager, with
-  a flood-spill ledger, a browser-aware `ensureChromeDriver()` probe, a
-  selective `brew reinstall chromedriver` heal, and a real-session sentinel
-  (`window.__checkReady === true` via `return`-ing script — expression-only
-  bodies return `undefined`, the historical bug). Startup-tab hygiene closes
-  Chrome's welcome tabs; `navigate()` verifies the landing (origin+path,
-  one retry) because a `get()` that resolves before navigation can eat a
-  whole case.
+- Launch ladder: disk geckodriver → Selenium Manager (geckodriver majors are
+  cross-version, so there is no version-matching gate to fail), with a
+  browser-aware `ensureFirefoxDriver()` probe, a selective
+  `brew reinstall geckodriver` heal when the disk is empty, and a
+  real-session sentinel (`window.__checkReady === true` via `return`-ing
+  script — expression-only bodies return `undefined`, the historical bug).
+  Window rect via the native `setRect` command (no `--window-size` exists on
+  Firefox); startup-tab hygiene closes any session-restore extras;
+  `navigate()` verifies the landing (origin+path, one retry) because a
+  `get()` that resolves before navigation can eat a whole case.
 - **Ceremony per case:** `navigate(page?boot=<ts>)` (query-bust, same-URL
   reload would eat the bundle) → GM realm → bundle (everything after
   `==/UserScript==` in the dist IIFE) → `wakeVideos` (dispatch `loadeddata`
@@ -640,11 +642,11 @@ stop at the first failure:
 - **Gate fails at syntax/flaws:** run the concatenation of the isolated
   import child output; if a module brings a consumer it doesn't use, that's
   the import-graph smoke catching it.
-- **Browser gate launch refused:** `driver probe` prints which disk driver
-  is stale vs the embedded Chromium major; the ladder already prefers
-  Selenium Manager — a repeated `handshake failed (no DevTools port)` after a
-  browser update is the known mid-update shape; relaunch after the browser
-  finishes updating.
+- **Browser gate launch refused:** `driver probe` prints the disk geckodriver
+  and the Firefox binary version; geckodriver is cross-version so there is no
+  stale-major shape — a repeated `handshake failed (no marionette port)`
+  after a browser update is the known mid-update shape; relaunch after the
+  browser finishes updating.
 - **A case's shell never attaches:** the boot ceremony dumps
   `{readyState, shell, video, pf, lastInjectError}` before throwing; the
   `.tmp/last-failure.png/json` capture adds `frame[0]`,

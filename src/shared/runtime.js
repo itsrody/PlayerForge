@@ -19,16 +19,17 @@
  */
 /* - 1. Scheduling - */
 /**
- * Chromium-native task scheduler.
+ * Native task scheduler facade.
  *
  * One façade over the platform's scheduling primitives so consumers never
  * duplicate the owner-signal abort choreography across the tree:
  *
  *   postTask(fn, { priority, delay, signal }) → { abort() }
- *     scheduler.postTask (Chromium 95+)
+ *     scheduler.postTask (shipped on every engine at the 159 floor)
  *
  *   yield_() → Promise
- *     scheduler.yield (Chromium 129+)
+ *     scheduler.yield (same surface; the one engine divergence is guarded
+ *     inside it - an inherited-abort rejection the facade swallows)
  *
  * Every export is a plain function so V8 can keep the fast path inline
  * (Maglev/TurboFan-friendly, no hidden-class penalty per call).
@@ -81,10 +82,32 @@ export function postTask(fn, { priority = "user-visible", delay: ms = 0, signal 
  * non-urgent work (mutation fan-out, large parses). Resolves on the next
  * scheduler slot.
  *
+ * Chromium and Firefox 159 disagree on one shape, and this facade is the single
+ * guard: `scheduler.yield()` inherits the *current task's* signal, so a
+ * continuation that wakes inside a postTask task whose signal was aborted
+ * mid-flight (DomSettleWait's done() aborts its own settle handle by design;
+ * the wake-up continuation therefore runs inside an already-aborted task)
+ * rejects with AbortError on Firefox but resolves on Chromium - which would
+ * strand every shell boot whose settle window closed via its own handle. The
+ * rejected alternatives: rethrowing treats internal bookkeeping as teardown and
+ * kills the boot; threading owner signals through every yield_() call site
+ * forks the one cooperative backend three ways. Chromium parity is the
+ * contract - yield always lands on the next scheduler slot. A non-AbortError
+ * rejection is a real scheduler complaint and propagates.
+ *
  * @returns {Promise<void>}
  */
 export function yield_() {
-  return globalThis.scheduler.yield();
+  return globalThis.scheduler.yield().catch((err) => {
+    if (err?.name !== "AbortError") {
+      throw err;
+    }
+    return new Promise((res) => {
+      // A fresh controller: the aborted task's signal is not inherited, so the
+      // slot lands regardless of what the wake-up task did to its own signal.
+      globalThis.scheduler.postTask(() => res(), {});
+    });
+  });
 }
 
 /** Cancellable delay: runs `fn` after `ms`, returned fn cancels the pending run.
