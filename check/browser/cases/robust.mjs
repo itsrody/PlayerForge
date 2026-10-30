@@ -99,6 +99,52 @@ export async function run({ session, boot }) {
     `resume=${cadence?.at ?? cadence}`
   );
 
+  // Completion reset: playing past the completion ratio must PERSIST the
+  // zero, not only flip it in memory. The save path hands the store the reset
+  // directly - asserted jointly on resume=0 in the backing doc AND a bumped
+  // doc stamp, because only a real persist produces both (an eaten write
+  // leaves the stale position on disk with an untouched updatedAt, which is
+  // then also what every other tab keeps merging). Completing from ~10
+  // crosses 11.4 (0.95 * 12s) into the reset.
+  const stampBefore = await session.eval(function main() {
+    return window.__pfBacking["pf:resume"]?.updatedAt ?? 0;
+  });
+  const completionRow = await session.evalAsync(function main(stampBefore, done) {
+    const v = document.querySelector("#check-video");
+    if (!v) { done({ why: "no-video" }); return; }
+    // A fresh sub-ratio baseline: a seek flush at 10 must save normally
+    // (10/12 < 0.95), so the zero the row waits for can only be the
+    // completion reset, never the earlier cadence work.
+    const start = Math.min(10, v.duration - 2.5);
+    if (start > 0) { v.currentTime = start; }
+    v.playbackRate = 2;
+    v.play().catch(() => {});
+    const deadline = Date.now() + 6000;
+    const tick = () => {
+      const store = window.__pfBacking["pf:resume"];
+      const entry = (store?.entries ?? []).find((e) => e && e.path === "/check");
+      if (entry && entry.resume === 0 && (store?.updatedAt ?? 0) > stampBefore) {
+        v.pause();
+        v.playbackRate = 1;
+        done({ resume: entry.resume, bumped: true });
+        return;
+      }
+      if (Date.now() >= deadline) {
+        v.pause();
+        v.playbackRate = 1;
+        done({ resume: entry ? entry.resume : -1, at: v.currentTime });
+        return;
+      }
+      setTimeout(tick, 120);
+    };
+    tick();
+  }, stampBefore);
+  status(
+    "completion reset persists the zero (resume=0 with bumped doc stamp)",
+    completionRow?.resume === 0 && completionRow?.bumped === true,
+    JSON.stringify(completionRow)
+  );
+
   // Echo-contract budget: N sync GM_setValue calls + their microtask echo
   // deliveries must land inside the budget. The store watch layer plus the
   // kernel's listeners run per write; tiering-era V8 makes this minutes-cheap,

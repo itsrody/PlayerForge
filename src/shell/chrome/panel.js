@@ -40,6 +40,7 @@ class Stepper {
   #format;
   #deferTextInput;
   #onChange;
+  #signal;
   #upButton;
   #downButton;
 
@@ -66,6 +67,7 @@ class Stepper {
     this.#format = format;
     this.#deferTextInput = deferTextInput;
     this.#onChange = onChange;
+    this.#signal = signal;
 
     const input = this.input = document.createElement("input");
     input.className = "pf-stepper-input";
@@ -239,7 +241,7 @@ class Stepper {
         this.#syncAria();
         this.#onChange?.(this.#committed);
       }
-    });
+    }, { signal: this.#signal });
 
     input.addEventListener("keydown", (event) => {
       if (event.key === "ArrowUp") {
@@ -268,12 +270,12 @@ class Stepper {
           event.stopPropagation();
         }
       }
-    });
+    }, { signal: this.#signal });
 
     input.addEventListener("blur", () => {
       delete input.dataset.pfEscArmed;
       this.#commit(input.value);
-    });
+    }, { signal: this.#signal });
   }
 }
 

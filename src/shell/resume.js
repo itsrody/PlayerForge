@@ -759,15 +759,21 @@ export class ResumeTracker {
       return;
     }
     const entry = this.#entry;
+    // The terminal state outranks the drift gate: a natural end always lands
+    // within RESUME_SAVE_EPSILON_S of the last checkpoint (the checkpoint
+    // span floor is minCheckpointSeconds), so the epsilon below would
+    // silently swallow it and the entry would keep the near-end position.
+    // The store's no-op guard then churn-skips the repeat flushes - this
+    // branch costs a real persist only on the first crossing.
+    if (entry.duration > 0 && currentTime / entry.duration >= RESUME_COMPLETION_RATIO) {
+      this.#lastSavedPosition = currentTime;
+      this.#store.updateResume(entry.id, 0);
+      return;
+    }
     if (Math.abs(currentTime - this.#lastSavedPosition) < RESUME_SAVE_EPSILON_S) {
       return;
     }
     this.#lastSavedPosition = currentTime;
-    if (entry.duration > 0 && currentTime / entry.duration >= RESUME_COMPLETION_RATIO) {
-      entry.resume = 0;
-      this.#store.updateResume(entry.id, 0);
-      return;
-    }
     this.#store.updateResume(entry.id, currentTime);
   }
 
