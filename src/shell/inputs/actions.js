@@ -148,9 +148,9 @@ class IntentGates {
   /** gesture family -> any binding armed. */
   #armed = new Map();
   /** Precomputed OR over GESTURE_IDS (all of which are pointer intents):
-   *  pointerdown ownership checked this via a 5-entry `.some(allowsIntent)`
-   *  scan per press (and again from #dominatesPress); one boolean read
-   *  replaces both. */
+   *  the fixed cost of the `allowsAnyIntent` seam - one boolean read per
+   *  press replaces the 5-entry `.some(allowsIntent)` scan the ownership
+   *  decision used to run. */
   #anyPointer = false;
   /** Fullscreen value the snapshot was taken against. */
   #fsStamp = false;

@@ -1220,7 +1220,6 @@
       border-radius: 50%;
       border: none;
       background: var(--pf-fg);
-      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
     }
 
     /* - Settings tab - compact toggle cards (whole card is the label, the

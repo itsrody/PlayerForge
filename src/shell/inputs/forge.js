@@ -4,19 +4,16 @@ import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen, DOMManage
 import { logger, Scope, delay } from "../../shared/runtime.js";
 
 /**
- * Pointer handlers historically never preventDefault - native pan/scroll over
- * the zone was the only touch-pipeline claimant, suppressed by the
- * touch-action CSS set at construction, so every pointer listener could be
- * passive. Android Chromium muted that premise: chains outside the container
- * (SDK topology the video does not share) and shell-layer gestures do claim
- * the touch stream there, eating the drag before any latch. So the press
- * listener is now non-passive and cancels claimed touch presses at
- * pointerdown (the strongest page-ownable claim - the compat tail, selection
- * and UA attachment defaults die at the source), and a guarded touchmove
- * belt reinforces the touch-action guarantee mid-stream while a session is
- * owned. Mouse presses keep their defaults. Only three listeners cancel
- * defaults now: the touch press claim, the belt, and the wheel pinch
- * listener (subscribed only while fullscreen) plus the click/dblclick
+ * Pointer handlers are passive and never preventDefault on the press or move
+ * streams - the prevent-scope rule: a plain tap's whole native sequence
+ * passes unclaimed, and only a LATCHED session (scrub/swipe at threshold,
+ * hold at timeout, pinch at recognition) claims the stream from there on.
+ * Native pan/scroll over the zone was still the one touch-pipeline claimant
+ * worth hedging against before a session exists, so the touch-action CSS
+ * set at construction carries that guarantee, and a guarded touchmove belt
+ * reinforces it mid-stream while a session is owned. Only three listeners
+ * cancel defaults now: the claimed-session touchmove belt, the wheel pinch
+ * listener (subscribed only while fullscreen), and the click/dblclick
  * suppressors that swallow post-gesture activations.
  */
 const WHEEL_CAPTURE = { capture: true, passive: false };
@@ -1438,9 +1435,12 @@ export class InputForge {
     // Role-less chrome: only elements OUTSIDE the gesture-surface family
     // (the video itself, or an ancestor wrapping it) may claim the cursor.
     // The box gate keeps full-cover affordance overlays (click-to-pause
-    // layers styling pointer over the whole player) claimed - they reach
-    // the SDK through the tap tail replay - while small crisp UIs (menus,
-    // rails, slider thumbs, icon buttons) are exempt outright.
+    // layers styling pointer over the whole player) unclaimed by this
+    // clause - their tap already passes natively (prevent-scope: nothing
+    // owned claims it), so classifying them as controls would only
+    // retarget the press ownership decision away from the player surface -
+    // while small crisp UIs (menus, rails, slider thumbs, icon buttons)
+    // are exempt outright.
     if (head.nodeType !== 1 || head === this.#video ||
         (head.contains?.(this.#video) ?? false)) {
       return false;
