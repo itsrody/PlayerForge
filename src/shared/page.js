@@ -525,12 +525,15 @@ function requestPageContextOverPipe(timeoutMs) {
     }
   };
 
-  // Two independent abort sources, each native, no merged signal: the
-  // request's own AbortController tears down the data listener, and an
-  // AbortSignal.timeout watchdog declares the pipe dead when nothing
-  // answers. jsdom and Node brand-check opposite worlds on signals (the
-  // probes proved a merged any() cannot exist across them), so the merge is
-  // what cannot ship - not the individual backends.
+  // Two native abort sources, kept separate by discrimination, not by realm
+  // (the old cross-realm "no merged any()" rationale died with the jsdom
+  // harness; the tree composes any() unconditionally where a single
+  // membership answer suffices - e.g. the entry hint). Here the watchdog's
+  // fire must DISCRIMINATE: it means a dead pipe -> drop + settle null,
+  // while every other path settles with the answer through the request's
+  // own controller. any() would still need both of these same listeners to
+  // tell those two outcomes apart, so the composition buys an allocation,
+  // not a teardown simplification.
   const dropDeadPipe = () => pipeState.dropIf(pipe);
   AbortSignal.timeout(timeoutMs).addEventListener("abort", () => {
     if (answered) {
@@ -578,12 +581,12 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   let transferPort = null;
   let settled = false;
 
-  // Single-backend: two independent native abort sources. The request's own
-  // AbortController tears down the listeners on every settle path; an
-  // AbortSignal.timeout watchdog ends the attempt budget (the retry loop
-  // re-enters until then). No merged any() signal: jsdom and Node
-  // brand-check opposite worlds on signals - the probes proved the merge
-  // cannot exist across realms, while each individual backend can.
+  // Two native abort sources, kept separate by discrimination (see the pipe
+  // request above for why the realm rationale retired): the request's own
+  // AbortController tears the listeners down on every settle path; the
+  // AbortSignal.timeout watchdog's fire means the attempt BUDGET ran out -
+  // settle null rather than re-entering the loop - and only that listener
+  // can tell that apart from a settled answer.
   const watchdog = AbortSignal.timeout(timeoutMs);
   watchdog.addEventListener("abort", () => {
     settle(null, false);
@@ -1176,12 +1179,17 @@ function createFrameProvisioner() {
   return (event) => provisioner.handle(event);
 }
 
+/* - 4a. Fullscreen provision - */
 /**
- * Sender-side latch: request fullscreen provisioning on every ancestor iframe
- * up the chain. Granting is a one-shot, idempotent operation per frame
- * (ancestors install their provisioners at document start, well before the
- * first request made here), so further requests would only replay the same
- * hops - latched by the instance field.
+ * The provisioner FSM above grants per frame; this class is the sender side.
+ * The boot-time send is latched one-shot: ancestors install their provisioners
+ * at document start, well before the first request made here, so further
+ * requests would only replay the same hops. The latch is RE-OPENED only by the
+ * failure path - a fullscreen attempt just proved an ancestor still refuses
+ * entry (its grant was wiped by a host re-render that rebuilt the iframe, or
+ * granted late), and a fresh provisioning hop is exactly what answers the
+ * next attempt. A top-frame retry posts to itself, where the provisioner's
+ * own-child vouch finds no match and dead-ends harmlessly.
  */
 class FullscreenProvisionRequest {
   #sent = false;
@@ -1193,12 +1201,21 @@ class FullscreenProvisionRequest {
     this.#sent = true;
     window.parent?.postMessage({ type: FS_REQUEST_TYPE }, "*");
   }
+
+  rearm() {
+    this.#sent = false;
+  }
 }
 
 const provisionRequest = new FullscreenProvisionRequest();
 
 export function requestFullscreenProvision() {
   provisionRequest.send();
+}
+
+export function retryFullscreenProvision() {
+  provisionRequest.rearm();
+  requestFullscreenProvision();
 }
 
 /**

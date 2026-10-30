@@ -15,7 +15,9 @@
 //                              the bridge
 //   4. nested frames         - host -> cross-origin mid -> same-origin player;
 //                              the innermost shell provisions allowfullscreen
-//                              on BOTH ancestor iframes
+//                              on BOTH ancestor iframes, and the
+//                              fullscreenerror failure path re-arms both
+//                              with no new shell
 //   5. switchboard           - one placeholder iframe whose document swaps
 //                              between three supported SDK stubs (Plyr,
 //                              Video.js, DPlayer) playing the same video
@@ -197,6 +199,41 @@ export async function run({ session, baseUrl, crossBaseUrl, bundle, boot, header
       "nested frames: fullscreen provisioning reaches both ancestor iframes",
       topGrant && midGrant,
       `top granted=${topGrant}; mid granted=${midGrant}`
+    );
+    // Wipe + retry: strip both grants (a host re-render rebuilds its iframe
+    // and carries the provisioned attributes away), reject a fullscreen
+    // attempt - the event is synthesized because only the browser's own
+    // rejection plumbing is fake under the synthetic-fs precedent; the
+    // reject hop, relay, registry vouch, and provisioner are all real - and
+    // require the failure path alone to restore both grants with no new
+    // shell created.
+    await session.eval(function main() {
+      const frame = document.getElementById("player-frame");
+      frame?.removeAttribute("allowfullscreen");
+      frame?.removeAttribute("allow");
+    });
+    await session.evalInFrame([0], function main() {
+      const frame = document.querySelector("iframe");
+      frame?.removeAttribute("allowfullscreen");
+      frame?.removeAttribute("allow");
+    });
+    await session.evalInFrame([0, 0], function main() {
+      document.dispatchEvent(new Event("fullscreenerror"));
+    });
+    const reTopGrant = await session.waitFor(
+      `return document.getElementById("player-frame")?.hasAttribute("allowfullscreen") === true;`,
+      5000
+    ).then(() => true, () => false);
+    const reMidGrant = await session.waitForFrame(
+      [0],
+      `return document.querySelector("iframe")?.hasAttribute("allowfullscreen") === true;`,
+      5000
+    ).then(() => true, () => false);
+    const shellsAfterRetry = await frameCounts([0, 0]);
+    askRows(
+      "nested frames: fullscreenerror re-arms provisioning without a new shell",
+      reTopGrant && reMidGrant && shellsAfterRetry.shells === 1,
+      `top re-granted=${reTopGrant}; mid re-granted=${reMidGrant}; shells=${shellsAfterRetry.shells}`
     );
   } catch (err) {
     latencies.nested = null;

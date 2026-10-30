@@ -12,7 +12,7 @@ import { TUNING } from "../shared/core.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls, WakeLockSession, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
 import { SHELL_MARKER, warmStyles, injectShell, watchShellHost, ensureViewportFitCover } from "./chrome/inject.js";
-import { requestFullscreenProvision } from "../shared/page.js";
+import { retryFullscreenProvision } from "../shared/page.js";
 
 /**
  * Surfaces that legitimately own the native context menu inside the shell:
@@ -467,17 +467,12 @@ export class Shell {
   /** Surface a hint + re-provision when a fullscreen entry is rejected. */
   #watchFullscreen() {
     // An attempt to enter fullscreen was rejected (typically because an
-    // ancestor embed lacks allowfullscreen - Chromium requires it on every
-    // frame edge). Surface a hint, and re-issue the provisioning request so an
-    // embed that was granted the attributes late can still answer.
-    //
-    // NOTE: this is a no-op whenever a shell was created in a nested frame, and
-    // that is the only case it guards. requestFullscreenProvision is latched
-    // one-shot (shared/page.js), and entry.js already calls it from onShellCreated,
-    // so by the time a fullscreenerror can arrive the latch is long set. The
-    // call is kept as defence in depth - if the latch is ever relaxed, or a
-    // boot-time provision is skipped, this still tries - but it does not
-    // currently enable the retry the code above describes.
+    // ancestor embed lacked the attribute when the video requested it - the
+    // common shape being a host re-render that rebuilt its iframe and
+    // carried the provisioned grant away with the old node). Surface the
+    // hint, and take the failure-path verb: the re-arm un-latches the boot
+    // latch and re-hops the chain, so the attributes are (re-)granted for
+    // the NEXT attempt.
     this.#dom.listen(document, "fullscreenerror", () => {
       // The disposed arm is gone with the other listener-entry guards
       // (abort-scoped registration, synchronous destroy); `fs` stays - it
@@ -487,7 +482,7 @@ export class Shell {
       }
       this.toastInfo("fs-block", "Fullscreen blocked by embed", "fs-block");
       if (window.top !== window) {
-        requestFullscreenProvision();
+        retryFullscreenProvision();
       }
     });
   }
