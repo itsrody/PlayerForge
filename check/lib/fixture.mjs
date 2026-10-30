@@ -102,6 +102,32 @@ export const DPLAYER_STUB_PAGE = `<!DOCTYPE html>
 </html>`;
 
 /**
+ * The letterbox stage for the subtitle picture-anchor case: the video
+ * ELEMENT is square (800x800) inside a 900x800 stage, so object-fit contain
+ * puts a 16:9 stream at a KNOWN picture rect (x=0, y=175, w=800, h=450) -
+ * images the shell's percent-relative cue anchoring would have missed.
+ */
+export const SUBS_PAGE = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; width: 1280px; height: 900px; overflow: hidden; }
+    .plyr { position: relative; width: 900px; height: 800px; }
+    #check-video { width: 800px; height: 800px; object-fit: contain; display: block; }
+  </style>
+</head>
+<body>
+  <div class="plyr" data-plyr>
+    <div class="plyr__video-wrapper">
+      <video id="check-video" src="/check-video.mp4" preload="metadata" autoplay muted playsinline></video>
+    </div>
+  </div>
+</body>
+</html>`;
+
+/**
  * Switchboard host: one placeholder iframe whose document gets swapped
  * between SDK stub pages via `swapBoard()` (driven from the harness). Every
  * variant plays the same fixture video at the same route, so the rows that

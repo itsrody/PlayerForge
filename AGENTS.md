@@ -114,7 +114,17 @@ iframes, same-origin and cross-origin:
   machinery, `ReferenceBox` — the ONE fill-box identity (inline →
   container, fs → the fullscreen element's own rect, which under
   `viewport-fit=cover` is the Android device screen incl. the safe area;
-  pools per invalidation so the hot path stays layout-free) — and
+  pools per invalidation so the hot path stays layout-free; carries the
+  full rect — `x/y` origin at the same reveal-on-invalidation instant, the
+  consumer class that anchors against it rather than merely sizing needs
+  the position — and broadcasts change ticks over the one Fan at exactly
+  its four invalidate sites (container RO, fs re-target, orientation,
+  and scroll — the origin-bearing arm: scroll repositions the viewport
+  origin with no size signal, so the size-only cache the pool once was
+  was silently wrong for anchor consumers; the audited subscriber census:
+  every gesture consumer
+  read-and-discards per flow, the subtitle renderer is the tick
+  subscriber) — and
   `layoutViewport()`: the ONE real-world viewport read (the root element's
   laid-out box first, reported innerWidth/innerHeight as fallback; kernel
   presence, the fs window fallback, and the inline gesture-zone width all
@@ -231,7 +241,14 @@ iframes, same-origin and cross-origin:
   standalone esbuild chunk injected as `__VTT_WORKER_SOURCE__` blob, CSP-gated
   with in-band fallback (`WorkerTransport` owns spawn/sequence/watchdog as one
   class), `subtitles.js` — the main-thread surface: eager `SubtitleSession`
-  (ForgeTrack renderer 8 concurrent cue slots, drag-drop/URL ingest with
+  (ForgeTrack renderer 8 concurrent cue slots, picture-anchored cue
+  placement — percent cue fields resolve against the displayed video
+  picture derived from the ReferenceBox rect + the element's own
+  box/intrinsic/object-fit re-derived per render, slots laid in the
+  env-inset layer space; unreadable geometry falls back to the old
+  layer-relative resolution — re-anchoring rides the ReferenceBox change
+  tick, video-relative marks ride the renderer's own signal-scoped RO +
+  the media `resize` event; drag-drop/URL ingest with
   per-entry restore, parsing memoized, the `SubtitleSyncState`,
   `SubtitleStyleState` (all five values boot-apply at bind; the former
   partial font/stroke boot left a stored custom size/color/shadow unapplied
@@ -516,9 +533,13 @@ stop at the first failure:
    `@exclude-match` surface, and `@downloadURL` stays present for the updater.
 4. **browser** — real Helium Chromium 156 + real bundle in a GM realm:
    boot, gesture contract, media semantics, resume, menus, GM env, frame
-   scenarios, edge robustness. ~28–36s.
+   scenarios, subtitle picture anchoring, edge robustness. ~33–45s.
 
 ### Browser gate mechanics
+- **Row statuses are binary: only an explicit `"pass"` passes.** A case file
+  returning a boolean or shorthand status reads as fail (a real failure this
+  once shipped as a false row the aggregator skipped past, and four
+  all-green runs stood behind it).
 - Launch ladder: version-matched disk chromedriver → Selenium Manager, with
   a flood-spill ledger, a browser-aware `ensureChromeDriver()` probe, a
   selective `brew reinstall chromedriver` heal, and a real-session sentinel
@@ -557,7 +578,7 @@ stop at the first failure:
   single-shell, a 6s attach-latency budget row, and the VM echo reach: a
   foreign settings write live-reloads the running frame's kernel and the
   event-time hotkeys gate sees it (blocked mid-flight, then re-armed).
-- **Cases (9):** `boot` (install contract, positive/negative discovery),
+- **Cases (10):** `boot` (install contract, positive/negative discovery),
   `discovery` (min size, no-anchor, tiny-video), `frames` (§ above),
   `gestures` (skip/mute/volume/panel/PiP/scrub with real driver input),
   `gm` (info mirror, own-echo exactly-once shape, remote-write cross-tab
@@ -571,7 +592,12 @@ stop at the first failure:
   reset row seeds a non-default color filter and proves the bare command
   restores it — no panel involved),
   `persist` (storage seeding, resume restore across reboot, the sync-grain
-  row: one nudge gesture lands `subOffset` in the tracker's entry), `robust`
+  row: one nudge gesture lands `subOffset` in the tracker's entry),
+  `subtitles` (the picture-anchor case: a letterbox stage — square element
+  in a taller stage — proves percent cue fields land on the displayed
+  picture rect, not the layer box, with the panel drop as the real ingest
+  path and a resize row (video element + stage widening) proving the box
+  ticks re-anchor the running slots without any cue change), `robust`
   (freeze-flush without user pause, checkpoint cadence on the native
   timeupdate media clock at 4x, 1000-echo
   < 400ms, 400 remote-adoption merges < 800ms).

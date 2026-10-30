@@ -251,10 +251,22 @@ export class Shell {
    * fullscreen reads the fs element's own rect - the device screen including
    * the Android safe area where viewport-fit=cover merged on the active
    * frame - and document fullscreen (no element) falls back to the window
-   * box inside the class. Returns { width, height }.
+   * box inside the class. Returns { x, y, width, height }.
    */
   get referenceBox() {
     return this.#refBox.get();
+  }
+
+  /**
+   * The ReferenceBox instance itself, handed down the composition root to
+   * the one consumer class that must couple READS with change ticks instead
+   * of arming its own observers of the same three invalidation facts: the
+   * subtitle renderer re-anchors displayed cues on the fill box moving
+   * (see subtitles.js). Gesture consumers keep using the referenceBox getter
+   * above - read-and-discard per flow stays their shape.
+   */
+  get reference() {
+    return this.#refBox;
   }
 
   get shellDom() {

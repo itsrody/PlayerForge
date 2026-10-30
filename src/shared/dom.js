@@ -740,17 +740,43 @@ export function layoutViewport() {
  * one getBoundingClientRect per invalidation, and fs flips re-target the RO
  * at the fs element so its own box changes (entry ratio snap, device zoom)
  * re-read instead of floating stale.
+ *
+ * The rect is complete (x/y origin added to the pooled dims) because its
+ * one non-gesture consumer anchors against it, not merely sizes: the
+ * subtitle renderer derives the displayed video picture within this rect
+ * and lays its slots relative to it (see subtitles.js). Origin discipline:
+ * the element arm reads it off the element's own rect in the same pass; the
+ * inline arm reads the container's rect origin beside its client dims -
+ * clientWidth/Height stay the dims source because they are UNtransformed
+ * layout numbers (a site-scaled container must keep its untransformed size
+ * for zoom/fill math even though GBCR reports the scaled box); the window
+ * fallback settles at (0,0) since every GBCR rect the consumers couple with
+ * this origin is viewport-relative. Deltas between two GBCR reads in the
+ * same frame stay honest under any ancestor transform, which is what the
+ * picture consumer actually couples.
+ *
+ * The slice's validity flips are broadcast: subscribe() rides the ONE fan-out
+ * owner (Fan) armed at exactly the three invalidate sites the pool already
+ * runs (container RO, fs re-target, orientation change). Read-and-discard
+ * per flow stays the consumption shape for the gesture consumers (every
+ * consumer re-reads in its own event flow - nobody parks a pooled box); the
+ * broadcast exists for the consumer that must RE-RENDER when the box moves
+ * without arming duplicate observers of the same three facts - the audit
+ * (subtitles reference pass) found that path unowned.
  */
 export class ReferenceBox {
   #container;
-  #box = { width: 0, height: 0 };
+  #box = { x: 0, y: 0, width: 0, height: 0 };
   #valid = false;
   #ro = null;
+  /** The one fan-out: change ticks for re-render consumers. */
+  #ticks = new Fan("reference-box");
 
   constructor(container, signal) {
     this.#container = container;
     this.#ro = new ResizeObserver(() => {
       this.#valid = false;
+      this.#ticks.emit();
     });
     this.#ro.observe(container);
     signal.addEventListener("abort", () => this.#ro.disconnect(), { once: true });
@@ -765,10 +791,33 @@ export class ReferenceBox {
           this.#ro.observe(fsEl);
         }
       }
+      // The flip itself is a tick even when the dims happen to match: the
+      // subscriber's position answer switches arms (element vs container),
+      // and a slot anchored before the flip painted against the old arm.
+      this.#ticks.emit();
     }, signal);
     screen.orientation.addEventListener("change", () => {
       this.#valid = false;
+      this.#ticks.emit();
     }, { signal, passive: true });
+    // Scroll is the fourth invalidation source: it repositions the rect's
+    // viewport ORIGIN without firing any size signal, fs flip, or
+    // orientation event. The cache predates this class's origin (its
+    // pooled-for consumers were size-only, so the omission was invisible);
+    // the one anchor consumer found the hole — a below-the-fold player
+    // booted against the pre-scroll stage, and a scrolled-in video and a
+    // stale stage stopped overlapping, so the picture clip collapsed and
+    // slots anchored at the layer's own origin. Capture-phase scroll (no
+    // bubbling), passive: the read is inside get().
+    document.addEventListener("scroll", () => {
+      this.#valid = false;
+      this.#ticks.emit();
+    }, { signal, capture: true, passive: true });
+  }
+
+  /** Subscribe a callback to box-change ticks; signal-scoped teardown. */
+  subscribe(cb, { signal } = {}) {
+    return this.#ticks.subscribe(cb, { signal });
   }
 
   get() {
@@ -779,15 +828,24 @@ export class ReferenceBox {
       const fsEl = document.fullscreenElement;
       const rect = fsEl?.getBoundingClientRect();
       if (rect && rect.width > 0 && rect.height > 0) {
+        this.#box.x = rect.x;
+        this.#box.y = rect.y;
         this.#box.width = rect.width;
         this.#box.height = rect.height;
       } else {
         ({ width: this.#box.width, height: this.#box.height } =
           layoutViewport());
+        // Viewport-relative read domain (every GBCR the rect couples with is
+        // viewport-relative too - GBCR is viewport coords, not page coords).
+        this.#box.x = 0;
+        this.#box.y = 0;
       }
     } else {
       this.#box.width = this.#container.clientWidth;
       this.#box.height = this.#container.clientHeight;
+      const rect = this.#container.getBoundingClientRect();
+      this.#box.x = rect.x;
+      this.#box.y = rect.y;
     }
     this.#valid = true;
     return this.#box;

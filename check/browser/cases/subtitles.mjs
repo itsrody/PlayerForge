@@ -1,0 +1,170 @@
+/**
+ * The displayed-picture anchor for cues: the ForgeTrack layers percent cue
+ * fields onto the video's PAINTED picture - derived from the one fill-box
+ * identity (shell.referenceBox) + the video's own box/intrinsic/object-fit,
+ * the audited computeCoverScale relation read from the other side - instead
+ * of the cue layer's own box.
+ *
+ * The stage is deliberately letterboxed: a square 800x800 element box for a
+ * 16:9 stream inside a 900x800 stage. object-fit contain centers an
+ * 800x450 picture at y=175, so a layer-relative answer (top 85% of 800 =
+ * 680, left 50% of 900 = 450) provably differs from the picture answer
+ * (top 175 + 85% of 450 = 557.5, left 50% of 800 = 400). The second row
+ * widens the VIDEO ELEMENT to 1100 (beside the stage): the picture grows
+ * to 1100x618.75 centered at y=90.625, and the box ticks must re-anchor the
+ * running slots without any cue change (the video's own box widening -
+ * the video-relative arm's signal-scoped RO - and the stage's container
+ * RO both join). The third posture scrolls the
+ * player into view after the stage was cached below the fold: scroll
+ * repositions the rect's viewport origin with no size/fs/orientation
+ * signal, so the cache must invalidate on it (a stale stage collapsed the
+ * clip and parked cues at the layer origin - the field-reported top-left).
+ */
+
+export async function run({ session, boot }) {
+  const rows = [];
+  await boot({ pagePath: "/check/subs" });
+
+  const dropSubs = async () => {
+    // The sections build runStepsAsync on the first panel open, so the key
+    // first, then the tab wait. A beat after the tab appears is the settle
+    // for the drop listener's own binding.
+    await session.eval(function main() {
+      document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyS", bubbles: true }));
+    });
+    const panelReady = await session.waitFor(
+      "return !!document.querySelector('.pf-shell')?.shadowRoot?.querySelector('.pf-panel-tab[data-title=\"Subtitles\"]');",
+      6000
+    ).then(() => true, () => false);
+    if (!panelReady) {
+      rows.push({ name: "subtitle panel section reachable", status: "fail", note: "Subtitles tab never appeared", ms: null });
+      return false;
+    }
+    await new Promise((r) => setTimeout(r, 600));
+    const dropped = await session.eval(function main() {
+      const shadow = document.querySelector(".pf-shell")?.shadowRoot;
+      const tab = shadow?.querySelector(".pf-panel-tab[data-title=\"Subtitles\"]");
+      const section = tab && shadow.getElementById(tab.getAttribute("aria-controls"));
+      if (!section) {
+        return "no section";
+      }
+      const dt = new DataTransfer();
+      dt.items.add(new File(["1\n00:00:00,300 --> 00:00:40,000\nPF anchor cue\n"], "subs.srt", { type: "text/plain" }));
+      section.dispatchEvent(new DragEvent("dragenter", { dataTransfer: dt }));
+      section.dispatchEvent(new DragEvent("drop", { dataTransfer: dt }));
+      return "dropped";
+    });
+    if (dropped !== "dropped") {
+      rows.push({ name: "subtitle ingest via panel drop", status: "fail", note: String(dropped), ms: null });
+      return false;
+    }
+    return true;
+  };
+
+  const dropped = await dropSubs();
+  const visible = await session.waitFor(
+    "return([...document.querySelector('.pf-shell')?.shadowRoot?.querySelectorAll('.pf-cue') ?? []].some((s) => !s.hidden) || false)",
+    6000
+  ).then((v) => !!v, () => false);
+  rows.push({
+    name: "panel drop ingests the track (cue renders)",
+    status: dropped && visible ? "pass" : "fail",
+    note: dropped && visible ? "slot visible after drop" : `drop=${dropped} visible=${visible}`,
+    ms: null
+  });
+
+  const readSlot = await session.eval(function main() {
+    const slot = document.querySelector(".pf-shell")?.shadowRoot?.querySelector(".pf-cue:not([hidden])");
+    if (!slot) {
+      return null;
+    }
+    const cs = getComputedStyle(slot);
+    return { top: cs.top, left: cs.left, maxWidth: cs.maxWidth, text: slot.textContent };
+  });
+  rows.push({
+    name: "letterboxed stream anchors to the displayed picture",
+    status: Math.abs(parseFloat(readSlot?.top ?? "x") - 557.5) < 1.5
+      && Math.abs(parseFloat(readSlot?.left ?? "x") - 400) < 1.5
+      && Math.abs(parseFloat(readSlot?.maxWidth ?? "x") - 640) < 1.5
+      ? "pass" : "fail",
+    note: JSON.stringify(readSlot) + " (expected top=557.5px left=400px maxWidth=640px)",
+    ms: null
+  });
+
+  // The re-anchor: the fill box moves (stage resize -> container RO -> the
+  // ReferenceBox tick feeds the running renderer), so the running slots move
+  // WITHOUT a cue change. The VIDEO ELEMENT itself widens to 1100 (its box
+  // is fixed at width:800px in the stage otherwise — a premise the first
+  // version of this row got wrong test-first): the video's own RO and the
+  // stage's container RO both join, the picture becomes
+  // 1100x618.75 centered at y=90.625 -> top 90.625 + 0.85*618.75 = 616.5625,
+  // left 0.5*1100 = 550, maxWidth 0.8*1100 = 880.
+  await session.eval(function main() {
+    document.querySelector(".plyr").style.width = "1100px";
+    document.querySelector("#check-video").style.width = "1100px";
+  });
+  const resized = await session.waitFor(
+    "return [...document.querySelector('.pf-shell')?.shadowRoot?.querySelectorAll('.pf-cue:not([hidden])') ?? []].some((s) => Math.abs(parseFloat(getComputedStyle(s).left) - 550) < 1.5)",
+    5000
+  ).then((v) => !!v, () => false);
+  const readResized = await session.eval(function main() {
+    const slot = document.querySelector(".pf-shell")?.shadowRoot?.querySelector(".pf-cue:not([hidden])");
+    if (!slot) {
+      return null;
+    }
+    const cs = getComputedStyle(slot);
+    return { top: cs.top, left: cs.left, maxWidth: cs.maxWidth };
+  });
+  rows.push({
+    name: "box ticks re-anchor the running cues on a video+stage widen",
+    status: resized
+      && Math.abs(parseFloat(readResized?.top ?? "x") - 616.5625) < 1.5
+      && Math.abs(parseFloat(readResized?.left ?? "x") - 550) < 1.5
+      && Math.abs(parseFloat(readResized?.maxWidth ?? "x") - 880) < 1.5
+      ? "pass" : "fail",
+    note: JSON.stringify(readResized) + " (expected top=616.5625px left=550px maxWidth=880px)",
+    ms: null
+  });
+
+  // The scroll posture: the player drops below the fold AFTER the stage
+  // rect was cached (real pages boot scrolled to the top, then the user
+  // scrolls in). Scroll moves the rect's viewport origin without a size
+  // signal, so the stage cache must invalidate on it — a stale stage and
+  // the scrolled-in video stop overlapping, the clip collapses, and the
+  // prior collapse anchored slots at the layer origin (the field-reported
+  // top-left). Video/layer/stage move together, so the layer-space anchor
+  // must carry the resize row's exact numbers while scrolled.
+  await session.eval(function main() {
+    document.body.style.overflow = "scroll";
+    document.body.style.height = "2600px";
+    document.querySelector(".plyr")
+      .insertAdjacentHTML("beforebegin", '<div style="height:1100px"></div>');
+  });
+  await new Promise((r) => setTimeout(r, 400));
+  await session.eval(function main() {
+    window.scrollTo(0, 1100);
+  });
+  await new Promise((r) => setTimeout(r, 400));
+  const rescrolled = await session.waitFor(
+    "return [...document.querySelector('.pf-shell')?.shadowRoot?.querySelectorAll('.pf-cue:not([hidden])') ?? []].some((s) => Math.abs(parseFloat(getComputedStyle(s).top) - 616.5625) < 1.5 && Math.abs(parseFloat(getComputedStyle(s).left) - 550) < 1.5)",
+    5000
+  ).then((v) => !!v, () => false);
+  const readScrolled = await session.eval(function main() {
+    const slot = document.querySelector(".pf-shell")?.shadowRoot?.querySelector(".pf-cue:not([hidden])");
+    if (!slot) {
+      return null;
+    }
+    const cs = getComputedStyle(slot);
+    return { top: cs.top, left: cs.left, slotX: slot.getBoundingClientRect().x, videoX: document.querySelector("#check-video").getBoundingClientRect().y };
+  });
+  rows.push({
+    name: "scroll posture keeps the picture anchor (stage invalidates on scroll)",
+    status: rescrolled
+      && Math.abs((readScrolled?.videoX ?? 999) - 0) < 2
+      ? "pass" : "fail",
+    note: JSON.stringify(readScrolled) + " (expected top=616.5625px left=550px, video at viewport y=0)",
+    ms: null
+  });
+
+  return rows;
+}

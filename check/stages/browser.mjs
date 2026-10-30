@@ -13,7 +13,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readdirSync, existsSync } from "node:fs";
 import { ChromiumSession } from "../lib/driver.mjs";
-import { FIXTURE_PAGE, FALLBACK_PAGE, VIDEOJS_STUB_PAGE, DPLAYER_STUB_PAGE, embedHostPage, switchboardPage, ensureVideoAsset } from "../lib/fixture.mjs";
+import { FIXTURE_PAGE, FALLBACK_PAGE, VIDEOJS_STUB_PAGE, DPLAYER_STUB_PAGE, SUBS_PAGE, embedHostPage, switchboardPage, ensureVideoAsset } from "../lib/fixture.mjs";
 import { parseUserScriptHeader } from "../lib/gm-realm.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -77,6 +77,10 @@ export async function run() {
     session.registerFixture("/check/switchboard", switchboardPage("/sdk/plyr#pf-debug"));
     session.registerFixture("/sdk/plyr", FIXTURE_PAGE);
     session.registerFixture("/sdk/videojs", VIDEOJS_STUB_PAGE);
+    // Letterbox stage: square video element in a taller stage, so object-fit
+    // contain puts the 16:9 stream at a KNOWN picture rect the cue anchor
+    // math must land on (see cases/subtitles.mjs for the numbers).
+    session.registerFixture("/check/subs", SUBS_PAGE);
     session.registerFixture("/sdk/dplayer", DPLAYER_STUB_PAGE);
     session.registerAsset(videoRoute, await readFile(join(ROOT, "check", ".tmp", "check-video.mp4")), "video/mp4");
     session.registerAsset("/check/xhr-ok", Buffer.from("PONG-OK"), "text/plain");
@@ -110,6 +114,13 @@ export async function run() {
     for (const caseFile of readdirSync(CASES_DIR).filter((f) => f.endsWith(".mjs")).sort()) {
       const mod = await import(join(CASES_DIR, caseFile));
       const caseRows = await mod.run({ session, baseUrl, crossBaseUrl: session.crossBaseUrl, bundle, boot: stepPage, header, version, resources });
+      // Status honesty: only an explicit "pass" passes. A case returning a
+      // boolean or shorthand status (a real failure this once shipped as a
+      // false row the aggregator skipped past) reads as fail here, so no
+      // future row shape can outrun the gate.
+      for (const r of caseRows) {
+        r.status = r.status === "pass" ? "pass" : "fail";
+      }
       // Uncaught page errors from this case's document realm fail the case
       // silently bypassing every row's own assertions.
       const pageErrors = await session.eval(function main() {

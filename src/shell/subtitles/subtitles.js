@@ -296,6 +296,12 @@ export function parseSubtitlesAsync(text, offset = 0, throughWorker = false) {
  * literals it replaced lived only beside their renderer. */
 const STACK_OVERLAP_EM = TUNING.subtitles.cueStackOverlapEm;
 const MAX_SLOTS = TUNING.subtitles.cueSlots;
+
+/** Px writer for picture-anchored values: one decimal, no float exhaust. */
+function fmtPx(value) {
+  return Math.round(value * 100) / 100;
+}
+
 /** The native TextTrack label this renderer owns; reuse, never append. */
 const TRACK_LABEL = "PlayerForge Subtitles";
 
@@ -376,11 +382,38 @@ function shiftTime(time, offset) {
  * cuechange at exact enter/exit boundaries), while this class owns the visual
  * output: pooled caption slots, CSS custom-property-based styling, and
  * per-cue stacking for simultaneous lines.
+ *
+ * Cue positions are PICTURE-anchored, not layer-relative: the Universal
+ * rect is the shell's one fill-box identity (ReferenceBox, see dom.js - the
+ * same box scrub gain, edge zones and the fill transform read), and the
+ * displayed video picture inside it derives from the video's own box +
+ * intrinsic aspect + object-fit (the audited computeCoverScale relation,
+ * owned by pinch-to-fill, read the other way: a fill-mode transform makes
+ * the picture BE the ReferenceBox rect, a containing video letterboxes
+ * inside it). Percent cue fields then mean what W3C cue positioning means -
+ * a fraction of the PAINTED picture - which the layer-relative resolution
+ * got wrong on stages whose video doesn't span them (object-fit letterbox,
+ * pillarbox, a container carrying a control bar), and wrong relative to the
+ * fill transform on every stage. Slots stay positioned in the cue layer's
+ * own coordinate space (the env-inset visible stage) - the layer keeps its
+ * CSS env insets and clip, so caption paint never enters the cutout - and
+ * the picture rect is expressed in that space per render. Unreadable
+ * geometry (zero rects) leaves the layer-relative resolution standing -
+ * the @property initial-values and prior slot values answer.
+ *
+ * Stage-change re-anchoring rides the ReferenceBox's change ticks (its
+ * three owned invalidation sources: container RO, fs re-target, orientation
+ * change); no duplicate fs/RO/orientation of ours. Video-relative marks -
+ * the video's own box moving inside an unmoved stage, and its intrinsic
+ * size changing - are this class's own RO + the media element's resize
+ * event, both signal-scoped.
  */
 export class ForgeTrack {
   #cueLayer;
   #cueLayerStyle;
   #track;
+  #video;
+  #reference;
   #slots = [];
   /** DOM lifecycle manager: cue slot elements auto-removed on destroy. */
   #dom = new DOMManager();
@@ -399,6 +432,12 @@ export class ForgeTrack {
    *  a stepper). Applied per render, so a change re-lays active slots. */
   #lineOverride = null;
   #positionOverride = null;
+  /** The displayed picture in layer coordinates, re-derived per render. A
+   *  sequence bump (only when the rect actually moves) is what the per-slot
+   *  dirty checks test, so a still picture stays allocation-free on the
+   *  steady path. */
+  #picture = null;
+  #pictureSeq = 0;
   /** Records the bound cuechange so destroy can unregister it. */
   #onCueChange = null;
   /** Whether the player is currently on screen. Defaults true so the time
@@ -409,13 +448,15 @@ export class ForgeTrack {
   /** Disposal flag; cuechange itself has no signal form (spec-forced). */
   #scope = new Scope();
 
-  constructor(video, cueLayer) {
+  constructor(video, cueLayer, reference = null) {
     this.#cueLayer = cueLayer;
     this.#cueLayerStyle = cueLayer?.style;
+    this.#video = video;
+    this.#reference = reference;
     // Preallocate the pooled per-slot scratch now so cuechange renders (the
     // hot subtitle path) stay completely allocation-free.
     for (let i = 0; i < MAX_SLOTS; i++) {
-      this.#lastRender[i] = { text: null, top: null, left: null, x: null, prevLine: NaN, prevPosition: NaN, prevI: -1 };
+      this.#lastRender[i] = { text: null, top: null, left: null, x: null, maxW: null, prevLine: NaN, prevPosition: NaN, prevPictureSeq: -1 };
       this.#lastActive[i] = false;
     }
     // Pre-allocate all cue slot elements upfront for zero first-show latency.
@@ -460,6 +501,20 @@ export class ForgeTrack {
     });
     observer.observe(video);
     this.#scope.onDispose(() => observer.disconnect());
+    // The fill box's change tick re-renders here (the re-anchor on fs flips,
+    // stage resizes, orientation); the pool owner keeps the arming. A
+    // stage-still video-relative move is ours: the video box itself (SDK
+    // resizing the element inside a constant container) and its intrinsic
+    // size (the media element's own resize signal + the first metadata
+    // moment the picture math can finally see an aspect).
+    reference?.subscribe(() => this.#render(), { signal: this.#scope.signal });
+    const videoRo = new ResizeObserver(() => {
+      this.#render();
+    });
+    videoRo.observe(video);
+    this.#scope.onDispose(() => videoRo.disconnect());
+    video.addEventListener("resize", () => this.#render(), { signal: this.#scope.signal, passive: true });
+    video.addEventListener("loadedmetadata", () => this.#render(), { signal: this.#scope.signal });
   }
 
   /**
@@ -545,11 +600,20 @@ export class ForgeTrack {
   }
 
   #render() {
-    if (this.#scope.disposed || !this.#cueLayer || !this.#onScreen) {
+    if (this.#scope.disposed || !this.#cueLayer || !this.#onScreen || !this.#track) {
       return;
     }
     const active = this.#track.activeCues;
     const count = Math.min(active.length, MAX_SLOTS);
+    const picture = this.#derivePicture();
+    if (picture) {
+      const prevBox = this.#picture;
+      if (!prevBox || prevBox.x !== picture.x || prevBox.y !== picture.y
+        || prevBox.width !== picture.width || prevBox.height !== picture.height) {
+        this.#pictureSeq++;
+        this.#picture = picture;
+      }
+    }
     for (let i = 0; i < count; i++) {
       const slot = this.#slots[i];
       if (!slot) {
@@ -562,25 +626,44 @@ export class ForgeTrack {
       const prev = this.#lastRender[i];
       // Numeric dirty checks: skip string construction when values match
       // the previous render — avoids template-literal allocation per slot
-      // per cuechange on the hot subtitle path.
-      const lineChanged = line !== prev.prevLine || i !== prev.prevI;
-      const positionChanged = position !== prev.prevPosition;
+      // per cuechange on the hot subtitle path. The picture sequence joins
+      // the guards: a moved picture re-lays every anchored slot on the next
+      // render (the tick-driven re-anchor) even when both percentages held.
+      const boxMoved = prev.prevPictureSeq !== this.#pictureSeq;
+      const lineChanged = boxMoved || line !== prev.prevLine;
+      const positionChanged = boxMoved || position !== prev.prevPosition;
       if (lineChanged) {
-        const top = `calc(${line}% - ${i * STACK_OVERLAP_EM}em)`;
+        const top = picture
+          ? `calc(${fmtPx(picture.y + (line / 100) * picture.height)}px - ${i * STACK_OVERLAP_EM}em)`
+          : `calc(${line}% - ${i * STACK_OVERLAP_EM}em)`;
         if (prev.top !== top) {
           slot.style.setProperty("--pf-cue-top", top);
         }
         prev.top = top;
         prev.prevLine = line;
-        prev.prevI = i;
       }
       if (positionChanged) {
-        const left = `${position}%`;
+        const left = picture
+          ? `${fmtPx(picture.x + (position / 100) * picture.width)}px`
+          : `${position}%`;
         if (prev.left !== left) {
           slot.style.setProperty("--pf-cue-left", left);
         }
         prev.left = left;
         prev.prevPosition = position;
+      }
+      // The 80% width cap rides the picture too: a pillarboxed picture must
+      // not invite a cue wider than the picture. Layer-relative stages
+      // (picture unreadable) keep the sheet's 80% fallback - clear the
+      // inline value once.
+      const maxW = picture ? `${fmtPx(0.8 * picture.width)}px` : null;
+      if (prev.maxW !== maxW) {
+        if (maxW) {
+          slot.style.maxWidth = maxW;
+        } else {
+          slot.style.removeProperty("max-width");
+        }
+        prev.maxW = maxW;
       }
       const x = align === "start" ? "0" : align === "end" ? "-100%" : "-50%";
       if (prev.x !== x) {
@@ -594,6 +677,7 @@ export class ForgeTrack {
       }
       prev.text = cue.text;
       prev.x = x;
+      prev.prevPictureSeq = this.#pictureSeq;
       this.#lastActive[i] = true;
     }
     for (let i = count; i < this.#slots.length; i++) {
@@ -603,6 +687,97 @@ export class ForgeTrack {
         this.#lastActive[i] = false;
       }
     }
+  }
+
+  /**
+   * The displayed video picture in the cue layer's coordinate space, or
+   * null when the geometry cannot be read honestly (zero rects - the
+   * layer-relative resolution stands; see the class docstring). Both rects
+   * are read in the same pass (GBCR viewport coords, each fresh per call),
+   * so the deltas stay truthful under any ancestor transform; object-fit
+   * resolves per pass against the element (site-set styles included).
+   */
+  #derivePicture() {
+    const layer = this.#cueLayer;
+    const video = this.#video;
+    if (!layer || !video) {
+      return null;
+    }
+    const layerBox = layer.getBoundingClientRect();
+    if (!layerBox.width || !layerBox.height) {
+      return null;
+    }
+    const vBox = video.getBoundingClientRect();
+    if (!vBox.width || !vBox.height) {
+      return null;
+    }
+    let width = vBox.width;
+    let height = vBox.height;
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (vw > 0 && vh > 0) {
+      // object-fit letterbox/pillarbox/cover of the stream inside the
+      // element box - the exact relation pinch-to-fill's cover scale owns
+      // from the other side. Centered: object-position honors its 50% 50%
+      // default the shipped CSS never overrides (an inline style from the
+      // page would shift the box yet still cancel in the layer-relative
+      // deltas only if the layer moves with it - the centering answer stays
+      // the honest default).
+      const boxAspect = vBox.width / vBox.height;
+      const vidAspect = vw / vh;
+      const fit = getComputedStyle(video).objectFit || "contain";
+      if (fit === "contain" || fit === "scale-down") {
+        if (boxAspect > vidAspect) {
+          width = height * vidAspect;
+        } else {
+          height = width / vidAspect;
+        }
+        // scale-down never upscales: the intrinsic size wins when smaller.
+        if (fit === "scale-down" && vw <= width && vh <= height) {
+          width = vw;
+          height = vh;
+        }
+      } else if (fit === "cover") {
+        if (boxAspect > vidAspect) {
+          height = width / vidAspect;
+        } else {
+          width = height * vidAspect;
+        }
+      } else if (fit === "none") {
+        width = vw;
+        height = vh;
+      }
+      // "fill": stretch to the element box, exactly as the rect reads.
+    }
+    const centerX = vBox.x + (vBox.width - width) / 2;
+    const centerY = vBox.y + (vBox.height - height) / 2;
+    // Universal clip: the picture ends at the one fill-box (the ReferenceBox
+    // rect; its fallback answer covers the shell-less defensive read). Fill
+    // mode makes the transform-scaled stream span the box and the clip is a
+    // no-op there; letterbox modes leave the black bars OUT of the anchor.
+    const ref = this.#reference?.get();
+    const stage = ref && ref.width > 0 && ref.height > 0
+      ? ref
+      : { x: layerBox.x, y: layerBox.y, width: layerBox.width, height: layerBox.height };
+    const left = Math.max(centerX, stage.x);
+    const top = Math.max(centerY, stage.y);
+    const right = Math.min(centerX + width, stage.x + stage.width);
+    const bottom = Math.min(centerY + height, stage.y + stage.height);
+    if (right - left <= 0 || bottom - top <= 0) {
+      // Video and stage stopped sharing any viewport region (a stale stage
+      // under a scroll the cache missed, a service-wide toggled layout) —
+      // that is unreadable geometry, not a zero-area picture at the stage
+      // origin: the collapsed clip computed exact 0s and every slot
+      // anchored at the layer's own top-left. The layer-relative percent
+      // resolution stands, as for the zero rects above.
+      return null;
+    }
+    return {
+      x: left - layerBox.x,
+      y: top - layerBox.y,
+      width: right - left,
+      height: bottom - top
+    };
   }
 
   clear() {
@@ -810,7 +985,15 @@ export const subtitleSync = new SubtitleSyncState();
  *  "cue-authored" (null) - the exact normalization both halves of the feature
  *  previously re-derived at their own boot (rule: one owner per read). */
 function readPlacement(key) {
-  const value = Number(getConfigValue(key, null));
+  // Number(null) is 0, not NaN: a falsy default would have read the ABSENT
+  // placement as an override of 0 — line/top 0 and position/left 0, the
+  // field-reported top-left corner. An absent key must answer null (no
+  // override; each cue's own fields apply).
+  const stored = getConfigValue(key, null);
+  if (stored === null || stored === undefined || stored === "") {
+    return null;
+  }
+  const value = Number(stored);
   return Number.isFinite(value) ? value : null;
 }
 
@@ -1151,7 +1334,10 @@ export class SubtitleSession {
       return;
     }
     if (!this.#forgeTrack) {
-      this.#forgeTrack = new ForgeTrack(this.#shell.video, this.#cueLayer);
+      // The shell's ReferenceBox rides along: the renderer anchors its slots
+      // to the displayed video picture within the one fill-box identity and
+      // re-renders on its change ticks (see ForgeTrack).
+      this.#forgeTrack = new ForgeTrack(this.#shell.video, this.#cueLayer, this.#shell.reference);
       this.#forgeTrack.setPlacement(subtitlePlacement.current);
     }
     this.#trackMeta = { name };
