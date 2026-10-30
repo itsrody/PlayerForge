@@ -2,13 +2,13 @@
 /**
  * Storage data plane.
  *
- * One module for everything that persists or crosses tabs:
+ * One module for everything that persists or crosses script instances:
  *   1. Manager API    - the GM wrappers (menu, value listeners, requests)
  *   2. Configs doc    - the whole pf:configs doc, cached once
- *   3. Cross-tab watch - watchStorageKey (the owned echo contract)
+ *   3. Cross-instance watch - watchStorageKey (the owned echo contract)
  *
- * TM-API policy: a manager API is used only where it uniquely supplies a
- * page-impossible capability (multi-tab storage + change notification,
+ * Manager-API policy: a manager API is used only where it uniquely supplies
+ * a page-impossible capability (multi-tab storage + change notification,
  * CORS-bypassing XHR, menu, GM_info) - see the policy block inside.
  */
 import { logger } from "./runtime.js";
@@ -58,14 +58,18 @@ function gmRemoveValueChangeListener(handle) {
 }
 
 /**
- * Subscribe to cross-tab writes of one storage key (owned here so both cache
- * consumers share one explanation of the echo contract instead of each
- * restating it). GM change listeners fire for OUR OWN writes too, flagged
- * `remote === false`: the writing tab's in-memory state is by definition
- * already that value, so reacting would be a duplicate parse per save - own
- * echoes are filtered. Implementations that omit the 4th listener arg behave
- * as external writes (as before). Returns `{ stop() }`, safe to call on a
- * failed install or twice.
+ * Subscribe to foreign-instance writes of one storage key (owned here so
+ * both cache consumers share one explanation of the echo contract instead
+ * of each restating it). GM change listeners fire for OUR OWN writes too,
+ * flagged `remote === false`: the writing instance's in-memory state is by
+ * definition already that value, so reacting would be a duplicate parse
+ * per save - own echoes are filtered. Under Violentmonkey (read from its
+ * released GM-values source) every foreign instance hears a `remote=true`
+ * delivery - another TAB, and another FRAME of this tab - so the filter
+ * keeps the contract this module documents: own instance silent,
+ * everything else delivered. Implementations that omit the 4th listener
+ * arg behave as external writes (as before). Returns `{ stop() }`, safe
+ * to call on a failed install or twice.
  */
 export function watchStorageKey(key, handler) {
   const id = gmAddValueChangeListener(key, (...args) => {
@@ -85,27 +89,31 @@ export function gmGetResourceText(name) {
 }
 
 /**
- * TM-API policy: a manager API is used only where it uniquely supplies a
+ * Manager-API policy: a manager API is used only where it uniquely supplies a
  * capability the page cannot - multi-tab manager storage + change
- * notification (configs/resume), CORS-bypassing XHR (@connect * subtitle
- * fetch), manager-cached resource warm-load, TM menu, GM_info. Everything
- * DOM/media/styling-side (MutationObserver, TextTrack/VTTCue,
- * adoptedStyleSheets, fullscreen) stays native; the efficient,
- * reliable implementation wins, and for those domains the native one always
- * does. GM_setClipboard is deliberately NOT granted/used: no feature calls
- * it, so the grant is dead permission surface. Any future clipboard write
- * should go through the native navigator.clipboard path, not the manager.
+ * notification (configs/resume), CORS-bypassing XHR (subtitle fetch from
+ * arbitrary user-supplied hosts), manager-cached resource warm-load, the
+ * popup menu, GM_info. Everything DOM/media/styling-side
+ * (MutationObserver, TextTrack/VTTCue, adoptedStyleSheets, fullscreen)
+ * stays native; the efficient, reliable implementation wins, and for those
+ * domains the native one always does. GM_setClipboard is deliberately NOT
+ * granted/used: no feature calls it, so the grant is dead permission
+ * surface. Any future clipboard write should go through the native
+ * navigator.clipboard path, not the manager.
  *
- * MV3 manager surface (TM 5.4.1+/5.5.1+): every GM_xmlhttpRequest serializes
- * through the manager's DNR-rule proxies - one request at a time unless a
- * script adopts the @require workaround that bypasses the manager. Not
- * adopted deliberately: our ingest is single-flight (one user-triggered
- * subtitle URL load at a time), so the parallel throughput the hack buys has
- * no caller, and it would add an external fetch dependency plus a second
- * code path to audit. The other MV3-era streams are already accounted for on
- * our side: the relaxed-CSP removal by default is why @sandbox raw +
- * workerCapable() exist, and fetch-mode request handling is invisible to us
- * behind the wrapper's onload/ontimeout contract.
+ * MV3 manager surface (Violentmonkey 2.50+ MV3, read from its released
+ * source): GM_xmlhttpRequest relays through the manager's background
+ * process with declarativeNetRequest header accommodations (it backfills an
+ * Origin when the caller omits one), `timeout`/`ontimeout` are honored, and
+ * no @connect whitelist gates it. Our ingest is single-flight (one
+ * user-triggered subtitle URL load at a time), so the request queue's
+ * throughput shape has no caller. The echo contract driving
+ * watchStorageKey is also VM-sourced: own-instance writes awake the
+ * writer's hooks with remote=false; every foreign instance - another tab
+ * or another frame of this tab - hears the UpdatedValues broadcast with
+ * remote=true. Page CSP is never relaxed - workerCapable() is the runtime
+ * gate for blob-worker spawn - and fetch-mode request handling is
+ * invisible to us behind the wrapper's onload/ontimeout contract.
  */
 /**
  * Cross-origin text fetch through the manager - CORS cannot block it.

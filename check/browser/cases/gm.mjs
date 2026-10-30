@@ -27,7 +27,7 @@ export async function run({ session, boot, header, version: bundleVersion }) {
   status(
     "GM_info mirrors the shipped header",
     info.name === header.name && info.ver === bundleVersion
-      && info.handler === "Tampermonkey" && info.grants === info.granted,
+      && info.handler === "Violentmonkey" && info.grants === info.granted,
     `name=${info.name} ver=${info.ver} handler=${info.handler}`
   );
 
@@ -51,6 +51,81 @@ export async function run({ session, boot, header, version: bundleVersion }) {
       && echo[0].old === null && echo[0].new === 42 && echo[0].remote === false
       && echo[1].old === 42 && echo[1].new === 43 && echo[1].remote === false,
     echo === null ? "no echo log" : `deliveries=${JSON.stringify(echo).slice(0, 120)}`
+  );
+
+  // 2b - the debug mirror: a foreign-instance configs write (the top-frame
+  // menu toggle reaching this frame, or a remote tab's panel) must flip the
+  // RUNNING frame's debug runtime mid-flight - frames boot silent, so a
+  // missed mirror leaves them debug-deaf with zero logs. The flip is proven
+  // two ways at once: the mirror line the kernel logs, then real debug
+  // chatter (the synthetic resume's reconcile log) appearing after it. A
+  // value-neutral re-write must NOT re-mirror - the boot latch (kernel.js
+  // #debugWatchLast) keeps unrelated foreign filter/settings writes from
+  // churning the runtime.
+  const consoleRows = () => session.eval(function main() {
+    return (window.__pfConsoleLog ?? []).filter((l) => l.includes("Debug logs") || l.includes("Page resumed"));
+  });
+  const beforeFlip = await consoleRows();
+  await session.eval(function main() {
+    const doc = JSON.parse(JSON.stringify(window.__pfBacking["pf:configs"] ?? { version: 1 }));
+    doc.debug = doc.debug ?? {};
+    doc.debug.logs = true;
+    window.__gmTest.remoteWrite("pf:configs", doc);
+  });
+  await settle(220);
+  await session.eval(function main() {
+    document.dispatchEvent(new Event("resume"));
+  });
+  await settle(220);
+  const afterFlip = await consoleRows();
+  const mirrored = afterFlip.some((l) => l.includes("Debug logs mirrored on"));
+  const resumed = afterFlip.some((l) => l.includes("Page resumed"));
+  status(
+    "foreign debug flip reaches the running kernel mid-flight",
+    mirrored && resumed && !beforeFlip.some((l) => l.includes("Page resumed")),
+    `before=${JSON.stringify(beforeFlip)} after=${JSON.stringify(afterFlip)}`
+  );
+  await session.eval(function main() {
+    const doc = JSON.parse(JSON.stringify(window.__pfBacking["pf:configs"]));
+    window.__gmTest.remoteWrite("pf:configs", doc);
+  });
+  await settle(220);
+  const afterNeutral = await consoleRows();
+  status(
+    "value-neutral foreign write never re-mirrors debug",
+    afterNeutral.filter((l) => l.includes("Debug logs mirrored")).length === 1,
+    `deliveries=${JSON.stringify(afterNeutral.filter((l) => l.includes("Debug logs")))}`
+  );
+
+  // 2c - the flip OFF. The mirror's disable-and-log order is forced: the
+  // machinery that would print the announcement is the one going silent, so
+  // the off direction is proven behaviorally instead - after the foreign
+  // off-flip, a synthetic resume produces NO new console lines (before the
+  // batch, frames stayed debug-deaf in exactly this shape). This also
+  // restores the boot-like stored state (debug off) the menu census below
+  // assumes.
+  const consoleCount = () => session.eval(function main() {
+    return (window.__pfConsoleLog ?? []).length;
+  });
+  const beforeOff = await consoleCount();
+  await session.eval(function main() {
+    const doc = JSON.parse(JSON.stringify(window.__pfBacking["pf:configs"]));
+    doc.debug.logs = false;
+    window.__gmTest.remoteWrite("pf:configs", doc);
+  });
+  await settle(220);
+  const storedOff = await session.eval(function main() {
+    return window.__pfBacking["pf:configs"]?.debug?.logs === false;
+  });
+  await session.eval(function main() {
+    document.dispatchEvent(new Event("resume"));
+  });
+  await settle(220);
+  const afterOff = await consoleCount();
+  status(
+    "foreign debug flip off silences the running kernel",
+    storedOff && afterOff === beforeOff,
+    `stored=${storedOff} console ${beforeOff}->${afterOff}`
   );
 
   // 3 - a foreign-tab settings write must move the RUNNING kernel: hotkeys off
@@ -221,7 +296,7 @@ export async function run({ session, boot, header, version: bundleVersion }) {
   status("pfStyle resource reaches the running shell", probe === "ok", `probe=${probe}`);
 
   // 8 - menu update path: the debug toggle re-registers its previously
-  // returned handle (TM 5.0+ in-place update), so the census adds up as one
+  // returned handle (VM 2.15.9+ in-place update), so the census adds up as one
   // register, zero unregisters, stable ids, and a flipped caption.
   const menuCensus = await session.evalAsync(function main(done) {
     const stats0 = window.__gmTest.usage();

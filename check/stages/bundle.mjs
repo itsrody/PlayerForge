@@ -42,7 +42,7 @@ export async function run() {
       fails.push({ name: "module syntax", note: "import/export statements leaked into the bundle body" });
     }
     // Static drift: every GM_ name the bundle body calls must appear in the
-    // @grant list - at runtime an ungranted call is simply undefined (real TM
+    // @grant list - at runtime an ungranted call is simply undefined (real VM
     // semantics), so only this check makes the omission audible. GM_info is
     // manager-provided, never granted.
     const granted = new Set([...source.matchAll(/^\/\/\s*@grant\s+GM_\w+$/gm)].map((m) => m[0].match(/GM_\w+/)[0]));

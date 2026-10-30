@@ -175,12 +175,13 @@ function bootstrap() {
       document.addEventListener("wheel", cancelHint, { capture: true, passive: true, once: true, signal: hintSignal });
     });
 
-    // Minimal public surface: pages get the version string only. The kernel
-    // (and through it the shell registry) stays private - handing it to page
-    // scripts would let them forge discovery events or poke shells. The
-    // debug hash tag (contract) re-exposes it for console debugging
-    // sessions; debug log state itself lives in the module-level logger
-    // (hash or menu setting).
+    // Wrapping surface, not public surface: the sentinel lives inside the
+    // manager's sandbox wrapper (Violentmonkey's makeGlobalWrapper routes
+    // defineProperty onto the wrapper's private target), so a page - or
+    // another script with its own wrapper - can neither read nor overlap
+    // PlayerForge. The name still does the two honest jobs the wrapper
+    // grants it: re-entry guard for this script's own boot path, and a
+    // console-debug handle for the wrapper's context.
     const debugMode = location.hash.includes(DEBUG_HASH_TAG);
     Object.defineProperty(window, "PlayerForge", {
       value: Object.freeze(debugMode

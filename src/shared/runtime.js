@@ -384,6 +384,12 @@ class DebugRuntime {
   }
 
   setRuntime(on) {
+    // Idempotence guard: mid-flight subscribers (the kernel's storage-watch
+    // debug mirror) re-fire on every foreign configs write; a value-neutral
+    // flip must not churn the perf observer's install/teardown.
+    if (on === this.#logsEnabled) {
+      return;
+    }
     this.#logsEnabled = on;
     if (on) {
       this.#installPerf();

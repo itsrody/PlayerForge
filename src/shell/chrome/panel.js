@@ -477,8 +477,8 @@ export class SettingsPanel {
    * it per open() keeps two document listeners out of the page's hot path for
    * shells whose panel is never (or rarely) opened; close()/destroy() abort
    * the per-open scope, so they die with the open state. Escape also gets a
-   * CloseWatcher where available (Chromium 131+, TM/Greasemonkey grants it via
-   * the same global): the UA then dismisses us even when a page-level
+   * CloseWatcher where available (Chromium 131+; both manager sandboxes run
+   * the same globals, so the guard is a plain capability read): the UA then dismisses us even when a page-level
    * keydown handler would otherwise swallow or reorder the event, and we do
    * not depend on the event still bubbling to the shadow host.
    */

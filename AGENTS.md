@@ -14,7 +14,7 @@ history that explains why those conventions exist.
 A Userscript-exclusive HTML5 video player enhancer for two fork browsers:
 
 - **Helium** (macOS desktop), **Titanium** (Android)
-- Chromium **156+** platform floor, **Tampermonkey 5.5.1+ (MV3)** manager
+- Chromium **156+** platform floor, **Violentmonkey 2.50+ (MV3)** manager
 - Features: pointer/keyboard gestures, hotkeys, progress resume, watch
   history, subtitles (.srt/.vtt with per-cue placement, per-entry sync
   offset, URL/file restore), color filters with presets, fullscreen
@@ -42,9 +42,9 @@ esbuild.config.mjs    single build: IIFE userscript + css resource + worker chun
 `dist/playerforge.css` via `@resource pfStyle`): match-all userscript with a
 40-host exclusion list, 8 grants (`GM_setValue/getValue/registerMenuCommand/
 unregisterMenuCommand/addValueChangeListener/removeValueChangeListener/
-getResourceText/xmlhttpRequest`), `@connect *` + subtitlecat, `@sandbox raw`,
-**`@run-at document-start`**, deliberately
-**no `@noframes`**: every frame gets the script (§2). Version is derived from
+getResourceText/xmlhttpRequest`), `@connect *` + subtitlecat,
+**`@run-at document-start`** (real under VM MV3's pre-matched registration),
+deliberately **no `@noframes`**: every frame gets the script (§2). Version is derived from
 `package.json` by the build; never hand-edit the header version.
 
 **Commands:** `npm run build` (or `--watch`), `npm run lint` (eslint src/),
@@ -121,10 +121,13 @@ iframes, same-origin and cross-origin:
   fullscreen provisioners), native navigation events.
 - **store.js** — the storage data plane: `KEYS` = two roots (`pf:configs`,
   `pf:resume`), `gmSetValue`/`loadJsonObject`, and `watchStorageKey(key,
-  handler)` — the cross-tab subscription that filters own-write echoes
-  (`remote === false`) in exactly one place. Storage is **synchronous GM
-  storage, deliberately not IndexedDB** (manager-space portability; a
-  cross-tab live-reload needs echo events, not thread offload).
+  handler)` — the cross-instance subscription that filters own-write echoes
+  (`remote === false`) in exactly one place. The echo contract is VM-truth
+  (read from its released GM-values source): own-instance writes flag false,
+  every foreign instance — another tab OR another frame of this tab — hears
+  `remote=true`, so a top-frame menu flip reaches sibling frames. Storage is
+  **synchronous GM storage, deliberately not IndexedDB** (manager-space
+  portability; a cross-tab live-reload needs echo events, not thread offload).
 
 ### kernel/ — policy layer
 - **contract.js** — the shared vocabulary both layers import in isolation:
@@ -152,7 +155,9 @@ iframes, same-origin and cross-origin:
   `ShellSlot` (one shell per session; a displaced shell is **destroyed**,
   never orphaned), `MenuCommands` (debug toggle + the two one-shot reset
   commands, installed from script eval and resolving their shell host
-  through the entry's kernel reference — works even kernel-less),
+  through the entry's kernel reference — works even kernel-less; menus
+  are top-frame only, and `#armDebugWatch` rides the storage echo to
+  propagate the debug flip into sibling frames mid-flight),
   pagehide teardown, freeze/pageshow recovery, per-boot
   manage-ability downgrades.
 
@@ -548,7 +553,10 @@ stop at the first failure:
   `discovery` (min size, no-anchor, tiny-video), `frames` (§ above),
   `gestures` (skip/mute/volume/panel/PiP/scrub with real driver input),
   `gm` (info mirror, own-echo exactly-once shape, remote-write cross-tab
-  adoption surviving a seeked-flush save, xhr shape + `ontimeout` on a
+  adoption surviving a seeked-flush save, the debug mirror: a foreign
+  configs write flips the running kernel mid-flight (mirror line + real
+  debug chatter), the reverse flip is proven silent, and a value-neutral
+  rewrite never re-mirrors, xhr shape + `ontimeout` on a
   held route, pfStyle resource warmth, menu-handle census, harvest-seeded
   reboot), `media` (stream, gesture events, kernel re-anchoring onto a
   replacement video), `menus` (menu command → panel effect; the targeted

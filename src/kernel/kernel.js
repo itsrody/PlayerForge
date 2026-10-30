@@ -1,5 +1,5 @@
 import { logger, setDebugRuntime, postTask, Scope, runSteps, Fan } from "../shared/runtime.js";
-import { getConfigValue, setConfigValue, gmRegisterMenu, gmUnregisterMenu } from "../shared/store.js";
+import { KEYS, watchStorageKey, invalidateConfigCache, getConfigValue, setConfigValue, gmRegisterMenu, gmUnregisterMenu } from "../shared/store.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, DEBUG_HASH_TAG, FRAMEWORK_TUNING } from "./contract.js";
 import { findSdkForVideo } from "./detection.js";
 import { forEachVideoInDocument, meetsMinSize, createLayoutGate, createOnScreenGate, isOnScreen, createDiscoveryTap } from "./discovery.js";
@@ -295,6 +295,11 @@ export class Kernel {
   /** The shell host provider, registered by the shell plugin (never imported). */
   #shellProvider = null;
 
+  /** The debug-watch latch: the stored debug value this frame booted with, so
+   *  value-neutral foreign configs writes (a remote tab editing a filter,
+   *  say) never clobber the boot-time #pf-debug hash override. */
+  #debugWatchLast = null;
+
   #onPageShow = (event) => {
     // bfcache restores report persisted; a discarded page comes back with
     // persisted false but wasDiscarded true. Both hand back a document whose
@@ -439,21 +444,53 @@ export class Kernel {
     runSteps([
       // Debug logs activate from the persisted menu toggle or the debug
       // hash tag (contract) - a per-load override that never writes the
-      // setting, and an explicit menu "Off" wins over it.
+      // setting, and an explicit menu "Off" wins over it. The watch below
+      // mirrors later foreign-instance flips.
       () => {
         const storedDebug = getConfigValue(DEBUG_LOGS_KEY, false);
         const hashDebug = location.hash.includes(DEBUG_HASH_TAG);
+        this.#debugWatchLast = storedDebug;
         if (storedDebug || hashDebug) {
           setDebugRuntime(true);
           logger.log("kernel", `Debug logs on (${[storedDebug && "setting", hashDebug && "hash"].filter(Boolean).join(" + ")})`);
         }
       },
+      () => this.#armDebugWatch(),
       () => document.addEventListener("pageshow", this.#onPageShow, { signal }),
       () => document.addEventListener("resume", this.#onResume, { signal }),
       () => window.addEventListener("pagehide", this.#onPageHide, { signal }),
       () => this.#armDiscoveryTap()
     ]);
     logger.log("kernel", "Kernel ready - discovery tap active");
+  }
+
+  /**
+   * Mirror foreign-instance flips of the debug setting mid-flight. The
+   * manager's echo contract decides the reach (Violentmonkey's
+   * GM-values source): a local write notifies the writer's own hooks with
+   * remote=false, while every FOREIGN instance - another tab OR another
+   * frame of this tab - re-delivers through the UpdatedValues broadcast
+   * with remote=true. watchStorageKey filters the own echo, so this handler
+   * sees exactly the outside write: the top-frame menu toggle reaching the
+   * video embed, the remote tab's settings panel, a sibling tab's command.
+   * Frames boot silent - a flip must reach them after boot, or the frame
+   * stays debug-deaf ("no logs at all" degenerates into a diagnosis trap).
+   * The handler owns its read freshness (invalidate then read - the configs
+   * cache's invalidation ordering with other handlers is none of this
+   * one's business) and the pre-write latch from init() keeps value-neutral
+   * writes from clobbering the boot-time hash override.
+   */
+  #armDebugWatch() {
+    watchStorageKey(KEYS.configs, () => {
+      invalidateConfigCache();
+      const next = getConfigValue(DEBUG_LOGS_KEY, false);
+      if (next === this.#debugWatchLast) {
+        return;
+      }
+      this.#debugWatchLast = next;
+      setDebugRuntime(next === true);
+      logger.log("kernel", `Debug logs mirrored ${next ? "on" : "off"} from a foreign write`);
+    });
   }
 
   /**
@@ -606,6 +643,16 @@ export class Kernel {
   }
 
   /**
+   * The debug toggle (MenuCommands, same kernel reference as menuShellHost)
+   * reports its flip so the watch latch tracks the fresh stored value - a
+   * later foreign echo of this doc must read value-neutral and never
+   * re-mirror our own flip.
+   */
+  noteDebugFlip(value) {
+    this.#debugWatchLast = value === true;
+  }
+
+  /**
    * Toggle the active shell's panel from outside the input stack (GM menu).
    * Warns unconditionally when nothing can host a panel - the user clicked
    * something and must know why nothing happened.
@@ -662,21 +709,24 @@ class MenuCommands {
 
   #refreshDebug() {
     const enabled = getConfigValue(DEBUG_LOGS_KEY, false);
-    // Passing the previously returned handle as options.id (TM 5.0+) makes the
-    // manager update the live item in place - the caption flip no longer pays
-    // the unregister/re-register churn (and its documented reappearance bug).
-    // autoClose stays unset: true is the manager default. Registered
-    // top-frame only, so the cross-frame merge-by-(name|title|accessKey)
-    // rule can never split a command.
+    // Passing the previously returned handle as options.id (VM 2.15.9+) makes
+    // the manager update the live item in place - the caption flip no longer
+    // pays the unregister/re-register churn. autoClose stays unset: true is
+    // the manager default. Registered top-frame only so an embed-heavy page
+    // runs one command set, not one per video frame (VM's popup does list
+    // commands registered from frames - we simply register none there); the
+    // same same-tab storage bus that re-arms fullscreen provisioning carries
+    // each frame's copy of the flip (see #armDebugWatch).
     this.#debugId = gmRegisterMenu(
       `\u{1F41B} Debug Logs:${enabled ? "On" : "Off"}`,
       () => {
         const next = !getConfigValue(DEBUG_LOGS_KEY, false);
         setConfigValue(DEBUG_LOGS_KEY, next);
+        this.#resolveKernel?.()?.noteDebugFlip?.(next);
         setDebugRuntime(next);
         this.#refreshDebug();
       },
-      { id: this.#debugId, title: "Toggle PF debug logging", accessKey: "D" }
+      { id: this.#debugId, title: "Toggle PF debug logging" }
     );
   }
 
@@ -685,12 +735,12 @@ class MenuCommands {
     this.#filterId = gmRegisterMenu(
       "\u{1FAA8} Reset Color Filter",
       () => this.#resetEvent("filterReset", "Color filter reset"),
-      { title: "Restore the default color filter", accessKey: "C" }
+      { title: "Restore the default color filter" }
     );
     this.#syncId = gmRegisterMenu(
       "\u{1F4AC} Reset Subtitle Sync",
       () => this.#resetEvent("syncReset", "Subtitle sync reset"),
-      { title: "Restore the default subtitle sync offset", accessKey: "S" }
+      { title: "Restore the default subtitle sync offset" }
     );
     return () => {
       for (const id of [this.#debugId, this.#filterId, this.#syncId]) {

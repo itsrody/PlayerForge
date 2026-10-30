@@ -1,5 +1,6 @@
 /**
- * The full GM (Tampermonkey) testing environment.
+ * The full GM (manager) realm - a mirror of Violentmonkey, the shipping
+ * manager, whose released source is the spec this file imitates:
  *
  * Everything between "run the gates" and "the kernel can trust manager
  * storage" lives here instead of in driver.mjs:
@@ -8,11 +9,12 @@
  *     GM_info at runtime.
  *   - installGMRealm: the in-page realm the session evaluates per document.
  *     Surface = exactly the granted APIs (+ GM_info) - an ungranted call
- *     stays `undefined` like real TM, so the runtime call surface cannot
+ *     stays `undefined` like real VM, so the runtime call surface cannot
  *     drift from the header without a static check at the bundle gate.
- *     Backing changes dispatch the TM echo contract: own writes flag
- *     `remote === false`, foreign-tab writes (the __gmTest hook) flag true -
- *     the kernel's cross-tab consumers filter on precisely that flag.
+ *     Backing changes dispatch the VM echo contract (read from VM's
+ *     gm-values.js): own-instance writes flag `remote === false`, foreign
+ *     -instance writes (the __gmTest hook) flag true - the kernel's
+ *     cross-instance consumers filter on precisely that flag.
  *   - GM_xmlhttpRequest is a real fetch against the session's fixture
  *     server, including timeout -> ontimeout, not a silent no-op.
  */
@@ -137,8 +139,9 @@ export function installGMRealm({ version, grants, resources, storage, header }) 
     },
     registerMenuCommand(title, fn, options) {
       touch("GM_registerMenuCommand");
-      // TM 5.0+ semantics: an options.id matching a live entry updates it in
-      // place instead of creating a second item.
+      // VM 2.15.9+ semantics: an options.id matching a live entry updates it
+      // in place instead of creating a second item (kernel.js relies on it
+      // for the debug caption flip).
       const id = options?.id != null ? options.id : ++menuId;
       const i = menus.findIndex((entry) => entry.id === id);
       if (i >= 0) {
@@ -208,15 +211,17 @@ export function installGMRealm({ version, grants, resources, storage, header }) 
       resources: Object.entries(header?.resources ?? {}).map(([name, url]) => ({ name, url }))
     },
     scriptMetaStr: header?.meta ?? "",
-    scriptHandler: "Tampermonkey",
+    scriptHandler: "Violentmonkey",
+    injectInto: "auto",
     isIncognito: false,
-    version: "6.0.0"
+    version: "2.50.0"
   };
   window.__pfBacking = backing;
   rebuildMenus();
 
   // Test hooks (not part of the GM surface): the remote-write hook is a
-  // foreign-tab write, exactly what a second browser tab's kernel would do.
+  // foreign-INSTANCE write - another tab, or another frame of this tab - exactly
+  // what a second browser tab's kernel or the top-frame menu toggle would do.
   window.__gmTest = {
     remoteWrite(key, value) {
       used.remoteWrites++;
