@@ -517,7 +517,8 @@ export class SettingsPanel {
         activeTab?.focus();
       }
     }, { signal });
-    // CloseWatcher is floor-guaranteed (116, ship floor 156): the typeof gate
+    // CloseWatcher is floor-guaranteed (Chromium 116; Firefox ships it too,
+    // in-page verified): the typeof gate
     // this once wrapped died. The try/catch stays - the constructor can still
     // genuinely refuse (the per-message watcher budget / a gated page), and
     // the keydown path above dismisses regardless, so the feature degrades.

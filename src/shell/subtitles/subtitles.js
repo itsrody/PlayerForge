@@ -541,7 +541,8 @@ export class ForgeTrack {
 
   /**
    * Rebuild the shifted cue list from the zero-offset base. Sort by start
-   * (ties by end, V8 stable): the walk's early exit reads list starts, and
+   * (ties by end - sort stability is spec-mandated so this holds on every
+   * engine): the walk's early exit reads list starts, and
    * the stack order follows - the active set collects in list order, so an
    * earlier-start overlap takes the lower slot, the deterministic shape the
    * native insertion order approximated in practice.

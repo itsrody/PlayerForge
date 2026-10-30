@@ -107,6 +107,39 @@ export async function run({ session, boot }) {
   // leaves the stale position on disk with an untouched updatedAt, which is
   // then also what every other tab keeps merging). Completing from ~10
   // crosses 11.4 (0.95 * 12s) into the reset.
+  // Baseline re-arm: the cadence row's play can itself cross the completion
+  // ratio while its poll runs, so the persisted zero this row waits for may
+  // already exist on disk - and a zero-to-zero reset is a no-op write that
+  // correctly leaves the stamp alone, reading as an eaten write. Park a real
+  // sub-ratio position first (the seek flush carries it into the backing);
+  // the row's zero can then only be its OWN completion reset, whose save
+  // must bump the stamp.
+  await session.evalAsync(function main(done) {
+    const v = document.querySelector("#check-video");
+    if (!v) { done({ why: "no-video" }); return; }
+    v.playbackRate = 1;
+    v.currentTime = Math.min(3.5, v.duration / 3);
+    v.play().catch(() => {});
+    const deadline = Date.now() + 5000;
+    const tick = () => {
+      const entry = ((window.__pfBacking["pf:resume"] ?? {}).entries ?? [])
+        .find((e) => e && e.path === "/check");
+      if (entry && entry.resume > 0) {
+        v.pause();
+        v.playbackRate = 1;
+        done({ resume: entry.resume });
+        return;
+      }
+      if (Date.now() >= deadline) {
+        v.pause();
+        done({ resume: entry ? entry.resume : -1, at: v.currentTime });
+        return;
+      }
+      setTimeout(tick, 120);
+    };
+    tick();
+  });
+
   const stampBefore = await session.eval(function main() {
     return window.__pfBacking["pf:resume"]?.updatedAt ?? 0;
   });
@@ -148,7 +181,8 @@ export async function run({ session, boot }) {
 
   // Echo-contract budget: N sync GM_setValue calls + their microtask echo
   // deliveries must land inside the budget. The store watch layer plus the
-  // kernel's listeners run per write; tiering-era V8 makes this minutes-cheap,
+  // kernel's listeners run per write; tiering-era engines make this
+  // minutes-cheap,
   // so a regression here is a real hot-path change, not measurement noise.
   const budget = (ms) => ms < 400;
   const echoes = await session.evalAsync(function main(done) {

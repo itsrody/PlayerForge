@@ -19,8 +19,9 @@ import { logger, Scope, delay } from "../../shared/runtime.js";
 const WHEEL_CAPTURE = { capture: true, passive: false };
 
 // Gesture calibration hoisted to module consts. TUNING is static (read-only
-// after load), so binding these at module scope lets V8 treat them as
-// invariant values and fold them - Maglev/TurboFan raise constants to load,
+// after load), so binding these at module scope lets the optimizing tier
+// treat them as
+// invariant values and fold them - constants get raised to loads,
 // instead of re-running shape-guarded property loads on every high-frequency
 // pointer/keyboard event.
 const EDGE_ZONE_RATIO = TUNING.gestures.edgeZoneRatio;
@@ -179,7 +180,7 @@ class GestureChannel {
     const stale = this.#pool.get(name);
     if (stale && stale.Ctor === Ctor) {
       // CustomEvent.detail is a prototype getter over an internal slot on
-      // spec engines (jsdom and Chromium alike) - plain assignment throws in
+      // spec engines (the old jsdom host matched) - plain assignment throws in
       // strict mode and never updates the slot, which silently killed every
       // gesture dispatch after the first per name. Callers pass one pooled
       // detail object per name, so the usual path is the reference compare
@@ -252,7 +253,7 @@ class ScrubStroke {
   }
 
   /**
-   * Consume every coalesced sample of the move so high-rate Chromium pointer
+   * Consume every coalesced sample of the move so high-rate pointer
    * streams scrub at full fidelity; one semantic event is emitted per move.
    *
    * Real-time velocity is measured at move granularity from true event
@@ -264,7 +265,7 @@ class ScrubStroke {
    * signal responsive enough to track speed changes mid-stroke, so the seek
    * amount stays proportional to the hand in real time.
    *
-   * Chromium's PointerEvent.getPredictedEvents() returns extrapolated FUTURE
+   * PointerEvent.getPredictedEvents() returns extrapolated FUTURE
    * positions. We speculatively "draw ahead" with them, matching the drawing
    * idiom in the Pointer Events spec (predict, then discard once real points
    * arrive): predicted travel feeds the VELOCITY estimate only, never the
@@ -278,13 +279,15 @@ class ScrubStroke {
   advance(event) {
     let totalStep = 0;
     let totalStepY = 0;
-    // getCoalescedEvents (58) and getPredictedEvents (92) are
+    // getCoalescedEvents (Chromium 58) and getPredictedEvents (Chromium
+    // 92; Firefox ships the pair on its 159 page surface, verified live -
+    // about:blank's reduced interface hides it, no abs arms anywhere) are
     // floor-guaranteed, and even constructed/synthetic PointerEvents carry
     // the interface methods returning empty lists - so the old API-absent
     // arms were unreachable; an empty list lands in the same loop below.
     const samples = event.getCoalescedEvents();
     // Coalesced samples then the live event, without materializing a combined
-    // array: high-rate Chromium pointer streams land here every move, so a
+    // array: high-rate pointer streams land here every move, so a
     // [[...samples, event]] spread per frame would allocate needlessly.
     const count = samples.length + 1;
     let lastX = this.#lastX;
@@ -609,7 +612,8 @@ class KeyHoldSession {
  * eligibility, pointer tracking, the shared session-latch flag, and the
  * click/dblclick suppression decisions.
  *
- * Chromium 156+ native by design: one AbortSignal owns the entire listener
+ * Floor-native on both engines (Chromium 156+, Firefox 159+ - the check
+ * gate drives the latter): one AbortSignal owns the entire listener
  * lifetime (destroy() === scope.abort()), all pointer listeners are passive,
  * scrub sampling consumes getCoalescedEvents(), and fullscreen truth is the
  * single shared `fs` gate (shadow.js), built on the native fullscreen event.
@@ -751,8 +755,9 @@ export class InputForge {
 
     // NOTE: the native video element is deliberately NEVER patched (no
     // own-property rewrite of play/pause). Assigning JS functions as own
-    // properties onto HTMLMediaElement mutates the instance's V8 map/expando
-    // shape and would swallow play()/pause() calls from the media command
+    // properties onto HTMLMediaElement mutates the instance's object
+    // shape/expando state and would swallow play()/pause() calls from the
+    // media command
     // plane, page autoplay code, and other plugins during a Space hold. The
     // UA's own Space-activates-video default is cancelled by preventDefault on
     // the capture-phase keydown handler, so no interception shim is needed;
@@ -769,8 +774,8 @@ export class InputForge {
     // claimed only, so plain taps and SDK streams stay native. The
     // cancelable read keeps a no-op silent: a non-cancelable claimed move
     // (UA already owns that sequence - scroll mid-progress) makes
-    // preventDefault a defined no-op whose only effect is Chromium's
-    // intervention warning, so there is nothing to assert there anyway.
+    // preventDefault a defined no-op whose only effect is engine-side
+    // intervention chatter, so there is nothing to assert there anyway.
     zone.addEventListener("touchmove", (event) => {
       if (this.#streamClaimed && event.cancelable) {
         event.preventDefault();
@@ -929,7 +934,8 @@ export class InputForge {
 
   #hitTestVideo(pointerEvent) {
     // Cache the box within one interaction so taps outside the HUD don't
-    // force a sync layout flush (getBoundingClientRect) on Chromium. The cache
+    // force a sync layout flush (getBoundingClientRect flushes layout on
+    // every engine). The cache
     // is dropped at every pointerdown (see #handlePointerDown), so it can never
     // be served stale by a scroll or ancestor-transform move.
     if (!this.#videoRect) {
@@ -1570,8 +1576,10 @@ export class InputForge {
     // The repetition arm is the cooldown below, full stop: WheelEvent carries
     // no momentum attribute on this platform (only the delta members), so a
     // former `!event.momentum` tail filter was an always-true WebKit relic -
-    // Chromium's pinch momentum phase is not DOM-visible, and the cooldown is
-    // what keeps the tail's repeated ctrl+wheel events from re-firing.
+    // Chromium's pinch momentum phase is not DOM-visible (the engine's
+    // compositor zoom is unobservable from script on any engine), and the
+    // cooldown is what keeps the tail's repeated ctrl+wheel events from
+    // re-firing.
     if (fs && event.ctrlKey && allowsIntent("pinch")) {
       event.preventDefault();
       event.stopImmediatePropagation();

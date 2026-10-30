@@ -182,7 +182,7 @@ function decodeCueText(text) {
 /**
  * Shape-stable settings default, fast-returned for cues with no settings tail
  * (the common case on track load). One shared frozen object with the same
- * 3-key hidden class as populated settings: parseCueBlock's settings reads stay
+ * 3-key object shape as populated settings: parseCueBlock's settings reads stay
  * monomorphic and the no-settings path allocates nothing. Consumers only read
  * the fields into cue objects, so sharing is safe.
  */

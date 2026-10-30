@@ -13,7 +13,8 @@ function sortByUpdatedAt(entries, descending = false) {
   });
 }
 
-// Hoisted TUNING.resume.* scalars: mutation-free calibration, so V8 folds
+// Hoisted TUNING.resume.* scalars: mutation-free calibration, so the
+// optimizing tier folds
 // them as invariants on the media-clock path rather than re-resolving the
 // deep TUNING chain on every timeupdate/save decision.
 const RESUME_STALE_DAYS = TUNING.resume.staleDays;
@@ -47,8 +48,8 @@ function isValidStore(raw) {
 /**
  * Project any incoming entry (disk, cross-tab, import, our own literal)
  * onto the fixed whitelist so every in-memory entry carries the same keys.
- * Foreign writers omit optional fields, which used to hand V8 a new hidden
- * class per adopted entry and deoptimize every store scan over them.
+ * Foreign writers omit optional fields, which used to hand the engine a new
+ * object shape per adopted entry and deoptimize every store scan over them.
  */
 function toFixedShape(incoming) {
   const out = {};

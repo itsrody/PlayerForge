@@ -8,13 +8,15 @@
  *   4. Debug runtime  - logger chatter + the LoAF diagnostic
  *
  * The scheduler façade is single-backend: it composes the platform's own
- * primitives (scheduler.postTask / scheduler.yield, Chromium 95+/129+,
- * including dedicated workers) and adds nothing else - no fallback arm, no
+ * primitives (scheduler.postTask / scheduler.yield, Chromium 95+/129+ and
+ * present on the Firefox 159 floor - verified live, including dedicated
+ * workers) and adds nothing else - no fallback arm, no
  * capability ladder. Behavioral parity is proven end-to-end via the check
  * harness (check/), not here.
  *
- * Hot-path exports stay plain functions at module scope (V8 inlines them
- * without hidden-class penalties); only stateful runtime behavior lives in
+ * Hot-path exports stay plain functions at module scope (every engine's
+ * optimizing tier inlines them without shape-change penalties); only
+ * stateful runtime behavior lives in
  * classes/examples below.
  */
 /* - 1. Scheduling - */
@@ -31,8 +33,8 @@
  *     scheduler.yield (same surface; the one engine divergence is guarded
  *     inside it - an inherited-abort rejection the facade swallows)
  *
- * Every export is a plain function so V8 can keep the fast path inline
- * (Maglev/TurboFan-friendly, no hidden-class penalty per call).
+ * Every export is a plain function so the engine's optimizing tier can keep
+ * the fast path inline (monomorphic, shape-stable per call).
  */
 
 /**

@@ -41,7 +41,8 @@ const PRESET_OPTIONS = Object.keys(PRESETS).concat(["Custom"]);
 
 // Monomorphic literal comparison. A keyed inner loop (values[key]/preset[key]
 // over ALL_KEYS) makes both load sites megamorphic - measured 93 ns/op vs
-// ~11 ns/op for literal field reads (V8 14.6). matchPreset runs on every
+// ~11 ns/op for literal field reads (recorded on the V8-era measure).
+// matchPreset runs on every
 // stepper input during a slider drag and on preset select, so this is on the
 // interaction path. Field order mirrors ALL_KEYS.
 function presetMatches(values, preset) {

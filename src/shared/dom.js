@@ -64,8 +64,9 @@ const DEFER_VISIBILITY_CAP_MS = 500;
 const COMPACTION_RATIO = 4;
 /**
  * Batch size above which the append switches from apply() to an index walk.
- * apply() spreads the batch onto the call stack and V8 refuses somewhere past
- * ~124k arguments (RangeError) - which a mass-DOM-teardown batch can reach,
+ * apply() spreads the batch onto the call stack and an engine cap rejects
+ * applied-arg batches with a RangeError (measured: V8 at ~124k args, Firefox
+ * between 262k and 524k) - which a mass-DOM-teardown batch can reach,
  * and which would escape the observer callback before the queue flag below is
  * set, silently dropping the whole batch. apply() stays the fast path for
  * every batch we actually see (measurably cheaper than an element-by-element
@@ -183,7 +184,7 @@ class DomWatch {
   }
 
   /**
-   * Chromium-native scheduling advantage: `scheduler.yield()` lets the browser
+   * Engine-native scheduling advantage: `scheduler.yield()` lets the browser
    * interleave input / paint between the mutation batch and the subscriber
    * dispatch. Unconditional since the yield_ facade shipped single-arm - the
    * direct-flush fallback this comment once claimed rode the dead yield
@@ -568,10 +569,11 @@ export function isInsideShell(host, node) {
  * document in a nested chain its OWN fullscreenElement, and the gate binds the
  * frame that contains the video - where the HUD and fs-gated gestures live - so
  * an ancestor document entering fullscreen incorrectly claims this frame's
- * state. Negative space: no vendor-prefixed fullscreen API anywhere (Chromium
- * honest floor), no fullscreenerror listener in this gate (an entry rejection
- * is not a state flip; the HUD-layer handler in shell.js covers remediation),
- * and no polling - the native event IS the single transition source, with the
+ * state. Negative space: no vendor-prefixed fullscreen API anywhere (the
+ * honest floor on every engine), no fullscreenerror listener in this gate (an
+ * entry rejection is not a state flip; the HUD-layer handler in shell.js
+ * covers remediation), and no polling - the native event IS the single
+ * transition source, with the
  * pagehide/pageshow lifecycle listeners re-arming the latch (see init).
  */
 export let fs = false;
@@ -694,11 +696,12 @@ export function subscribeFullscreen(cb, signal) {
 }
 
 /**
+/**
  * The ONE layout-viewport read, real-world-first: the ROOT ELEMENT's
  * laid-out box is what the browser actually presented - the geometry every
  * candidate rect and gesture clientX lives in - while
  * innerWidth/innerHeight are REPORTED dims that can disagree with it
- * (Chromium's scrollbar-inclusive innerWidth gutter, 0 in instrumented
+ * (engine-specific scrollbar-inclusive innerWidth gutters, 0 in instrumented
  * embeds and headless, UA resize races). The root box leads; the reported
  * arm stays the fallback for a synthetic/unstyled root; zero stays a
  * runtime fact that makes consumers PERMISSIVE, never stranding a player.

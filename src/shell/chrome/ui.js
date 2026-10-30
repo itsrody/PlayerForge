@@ -10,7 +10,7 @@
  * App-local (not shared/) since the framework never constructs UI: shared/
  * stays limited to modules the framework and the app use together. These
  * helpers stay plain module-scope functions - they run per element on shell
- * boot, so V8 gets the hot callsites monomorphic.
+ * boot, so the hot callsites stay monomorphic.
  */
 
 import { FLASH_MS, FLASH_EASING } from "../../shared/core.js";

@@ -106,7 +106,8 @@ export function forEachVideoInDocument(visit) {
  * covers the case the old two-option call missed - a `content-visibility:
  * auto` player scrolled out of view keeps a layout placeholder (non-zero box)
  * but is skipped from rendering, so a stale size would wrongly admit it.
- * checkVisibility is floor-guaranteed (Chromium 105, ship floor 156): the
+ * checkVisibility is floor-guaranteed (Chromium 105; present on the Firefox
+ * 159 page surface, verified live): the
  * old "hosts without the API report present" arm answered the retired jsdom
  * host and pre-floor engines, so the call is unconditional now.
  */
@@ -283,11 +284,12 @@ export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_V
   // pin a detached, never-sized video. The gate family's probe stays
   // (ResizeObserver-above absence exercises the sync fallback), but the
   // document itself needs no guard: every consumer constructs against a real
-  // Chromium frame, and the unit-harness host the old `typeof document` arm
+  // browser frame, and the unit-harness host the old `typeof document` arm
   // answered died with the tool-era retirement.
   return new PresenceGate({
     prune,
-    // ResizeObserver is floor-guaranteed (79, ship floor 156); the null
+    // ResizeObserver is floor-guaranteed (Chromium 79, Firefox 69+ - both
+    // branch floor engines carry it); the null
     // stand-in arm that fed fallbackWatch died with its jsdom premise.
     createObserver: (cb) => new ResizeObserver(cb),
     qualifies: (entry) => {
@@ -349,7 +351,8 @@ export function isOnScreen(el, margin = ON_SCREEN_MARGIN_PX) {
  * off-screen players. One observer per owner; `watch` dedupes per element,
  * fires `onEnter` once when the element first intersects (lookahead margin, so
  * the shell is ready just before it scrolls into view), then unobserves.
- * IntersectionObserver is floor-guaranteed (51, ship floor 156): the
+ * IntersectionObserver is floor-guaranteed (Chromium 51, Firefox 55+ - both
+ * branch floor engines carry it): the
  * pass-through stand-in arm died with its pre-floor-engine premise.
  */
 export function createOnScreenGate({ rootMargin = `${ON_SCREEN_MARGIN_PX}px`, prune = true } = {}) {

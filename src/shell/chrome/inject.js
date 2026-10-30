@@ -78,10 +78,12 @@ class ShellStyle {
 const style = new ShellStyle();
 
 /* The container pockets ride a real <style> element, not the adopted
-   constructable sheet: in this Chromium build, @container SIZE rules inside
+   constructable sheet: in the harness engine builds (Chromium and Firefox
+   both, established by the check browser gate probes), @container SIZE rules
+   inside
    an adoptedStyleSheets sheet never evaluate their conditions (a same-rule
-   <style> twin evaluates and tracks size live - established by the check
-   browser gate probes), nor do @container queries nested inside a size
+   <style> twin evaluates and tracks size live), nor do @container queries
+   nested inside a size
    @container. Both pockets style selectors that only exist in this shadow
    (.pf-panel-slot, .pf-panel-*) so the document-realm adoption is inert:
    - the stage band writer is --pf-compact-auto's only writer;
