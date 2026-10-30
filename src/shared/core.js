@@ -127,14 +127,6 @@ export const TUNING = {
      *  the stack, so overlapping cues read as a visible pile. */
     cueStackOverlapEm: 1.6
   },
-  zoom: {
-    /** Wheel-zoom multiplicative step; 1.15 reads as a step, not a jump. */
-    wheelFactor: 1.15,
-    /** Hard zoom ceiling (scale) - beyond this pan control degrades. */
-    max: 3,
-    /** Trailing persist for wheel/panel-driven zoom state. */
-    persistDebounceMs: 500
-  },
   toast: {
     /** Completed-action feedback: skip, volume, fullscreen exit, fill. */
     flashMs: 800,

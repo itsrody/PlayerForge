@@ -218,8 +218,9 @@ class ScrubStroke {
   #zone;
   #active = false;
   #lastX = 0;
-  // Y mirror of #lastX: the pan arm of scrub (zoomed fullscreen) needs
-  // the vertical stroke delta the seek arm never consumed.
+  // Y mirror of #lastX: the scrub detail carries the full pointer delta
+  // (dx and dy) - the vertical stroke delta the seek arm never consumed,
+  // detail payload geometry, not any specific consumer's state.
   #lastY = 0;
   #lastTime = 0;
   #velocity = 0;
@@ -354,7 +355,7 @@ class ScrubStroke {
  * of a swipe stroke - the live-visual capture, the per-move translateY
  * follow, and the eased restore. The engine owns the latch
  * decision, stream policy (capture, suppression, swipeStart dispatch). Per
- * shell law the zoom/fill crop is the one transform owner; this stroke
+ * shell law the fill transform is the one transform owner; this stroke
  * deliberately rewrites the same property as legacy behavior - its base
  * snapshot and the eased hand-back make it a scope of one, restored before
  * the swipe event can be consumed.

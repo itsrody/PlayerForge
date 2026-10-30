@@ -460,7 +460,7 @@ class ResumeStore {
 
   /**
    * Publish the current entry identity to listeners without awaiting a save:
-   * adoption bookkeeping consumers (sync-grain resolution, zoom domain bind,
+   * adoption bookkeeping consumers (sync-grain resolution,
    * subtitle URL restore) subscribe to onChange but a matched adoption - the
    * findMatch path - persists nothing, so without an announce they would never
    * learn their grain/entry is live. Position-only `structural=false`.
@@ -636,7 +636,7 @@ export class ResumeTracker {
     }
 
     // One notify for both adoption paths: bookkeeping consumers (subtitle
-    // sync grain, zoom domain, subs URL restore) read the entry off this
+    // sync grain, subs URL restore) read the entry off this
     // tracker's accessors, including the silent findMatch adoption.
     this.#store.announce();
 
@@ -868,7 +868,7 @@ export class ResumeTracker {
   }
 
   /* - Entry accessors for boot-time bookkeeping consumers (the sync state
-   *  machine, the zoom domain, the subtitle restorer) - the entry adopted
+   *  machine, the subtitle restorer) - the entry adopted
    *  later than the shell, so the getters read live at notify time. */
 
   /** The adopted entry id, or null before the first adoption. */

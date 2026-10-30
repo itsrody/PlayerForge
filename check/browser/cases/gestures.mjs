@@ -774,7 +774,7 @@ export async function run({ session, baseUrl, boot }) {
   // the transition. Synthetic pointer pair for the same reason the swipe row
   // runs synthetic: the engine contract is the surface this harness can
   // drive; the compositor touch recognition itself stays device-verified.
-  status(rows, "touch pinch pair: zoom recognition needs no capture release",
+  status(rows, "touch pinch pair: fill recognition needs no capture release",
     await session.eval(function main() {
       const video = document.querySelector("#check-video");
       if (video === null) return "no video";

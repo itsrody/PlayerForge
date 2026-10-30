@@ -17,20 +17,21 @@ A Userscript-exclusive HTML5 video player enhancer for two fork browsers:
 - Chromium **156+** platform floor, **Tampermonkey 5.5.1+ (MV3)** manager
 - Features: pointer/keyboard gestures, hotkeys, progress resume, watch
   history, subtitles (.srt/.vtt with per-cue placement, per-entry sync
-  offset, URL/file restore), color filters with presets, per-domain
-  zoom/pan crop, in-player settings panel, toasts, extensible shell surface
+  offset, URL/file restore), color filters with presets, fullscreen
+  pinch-to-fill fill/fit, in-player settings panel, toasts, extensible
+  shell surface
 - Not a general browser tool: ad-heavy hosts and player platforms are
   excluded in the header (YouTube, Vimeo, Netflix, streams, socials…), and
   `entry.js` keeps a runtime skip list above that.
 
-**Repo shape (25 source modules, ~14k LOC):**
+**Repo shape (24 source modules, ~14k LOC):**
 
 ```
 src/
   entry.js            install-time contract: which frames run the script
   kernel/  (4)        contract, detection, discovery, kernel orchestrator
   shared/  (5)        core, runtime, dom, page, store — the data planes
-  shell/   (15)       shell, media, resume, filter, forge+actions+zoom,
+  shell/   (14)       shell, media, resume, filter, forge+actions,
                       subtitles(3), chrome(5 + styles.css)
 check/                the one testing tool (see §7)
 dist/                 generated, not the review target
@@ -97,8 +98,8 @@ iframes, same-origin and cross-origin:
   every boot/teardown sequence), `Scope` (one destroy-root per feature, every
   listener/timer/observer routed through it), `Fan` — the ONE plain-fan-out
   owner, a native `EventTarget` carrying one event per instance
-  (`emit(payload)`/`subscribe(cb, { signal })`; the FsGate, ZoomState,
-  FilterSession, ResumeStore, ConfigStore, SubtitleSyncState,
+  (`emit(payload)`/`subscribe(cb, { signal })`; the FsGate, FilterSession,
+  ResumeStore, ConfigStore, SubtitleSyncState,
   SubtitleSession, and kernel shell-ready audiences all rode it — the
   kernel's per-listener try/catch retired with the conversion, native
   dispatch isolation is the real thing) — `DebugRuntime` (log chatter AND
@@ -174,11 +175,6 @@ iframes, same-origin and cross-origin:
   trailing persist, the menu reset gesture) + `VideoFilter` (the lazy panel
   section over it). The filter lives on the video from first play — a
   stored preset needs no panel open — and reset works with none.
-- **inputs/zoom.js** — `ZoomState` (the per-domain zoom/pan state machine:
-  wheel/steps, pan clamp, trailing persist, `resetForDomain` deletes the
-  stored crop) + `buildZoomGroup` (the zoom/pan tools inlined as one group
-  in the Settings tab over the same shell's state).
-  Pure state: the transform write belongs solely to `ViewershipTransform`.
 - **inputs/forge.js** — the pointer/keyboard gesture engine: the stream
   router (passive press/move streams under the prevent-scope rule — a plain
   tap's whole native sequence passes unclaimed, no press-time cancel
@@ -197,9 +193,10 @@ iframes, same-origin and cross-origin:
   no replay — by the prevent-scope rule there is nothing held back to hand
   back), `SpaceSession`
   (hold-to-speed + bare-tap toggle, settle-on-next-press hygiene for a
-  swallowed keyup). Gesture detail carries `dx` and the
-  mirrored `dy` the pan arm consumes; pinch and trackpad-pinch handshake
-  stay engine-core; hold/scrub timers ride the shared scheduler.
+  swallowed keyup). Gesture detail carries `dx` and the mirrored `dy` as
+  engine geometry (the detail payload shape is source-table fixed); pinch
+  and trackpad-pinch handshake stay engine-core; hold/scrub timers ride
+  the shared scheduler.
 - **inputs/actions.js** — the action layer: the binding table + `IntentGates`,
   and the per-story state machines `SkipStreak`, `ScrubSession` (the input/
   commit decoupling: moves accrue `#pendingDelta`, requestAnimationFrame —
@@ -209,10 +206,10 @@ iframes, same-origin and cross-origin:
   jitter nets to zero), the hold bookkeeping (`#activeHolds` first-source-
   wins boost; any real pause mid-hold cancels through the release teardown —
   a paused video resuming must not carry a stale boost), and
-  `ViewershipTransform` (fill-mode cover scale, the zoom crop composed as
-  `scale(s) translate(ox%,oy%)`, fullscreen-scoped wheel zoom,
-  pan-instead-of-seek scrub latch) — the one class allowed to write the
-  video transform, exposed on the shell as `shell.view` — plus the haptic
+  `ViewershipTransform` (the fill-mode cover scale composed as one
+  `scale(s)` — pinch-to-fill's transform, released on pinch-in or fullscreen
+  exit) — the one class allowed to write the video transform, exposed on
+  the shell as `shell.view` — plus the haptic
   policy.
 - **subtitles/** — `forgevtt.js` = the parse engine (the module the worker
   chunk bundles in, which is what guarantees the worker can never drift from
@@ -263,7 +260,7 @@ response gate, one close path"), then shell ("one session-end path"):
 each round found the duplicated ownership in a layer and owned it.
 
 **Module consolidations (whole-tree, several rounds).** The tree went from
-45 modules to the current 25 with these absorbed/merged shapes, always by
+45 modules to the current 24 with these absorbed/merged shapes, always by
 _subtype or data shape_, never by feature-share:
 - Wiring/lifecycle-only files absorbed into their single consumer (`guard`,
   `lifecycle`, `time`, `viewport`, `haptics`, `probe`, `menus`).

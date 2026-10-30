@@ -2,7 +2,6 @@ import { logger, Scope, yield_, runSteps, runStepsAsync } from "../shared/runtim
 import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen, DOMManager, ReferenceBox } from "../shared/dom.js";
 import { InputForge } from "./inputs/forge.js";
 import { attachInputActions, ViewershipTransform } from "./inputs/actions.js";
-import { ZoomState } from "./inputs/zoom.js";
 import { ResumeTracker } from "./resume.js";
 import { SubtitleSession, SubtitlesSection, subtitleSync } from "./subtitles/subtitles.js";
 import { VideoFilter, FilterSession } from "./filter.js";
@@ -69,8 +68,8 @@ const PANEL_SECTIONS = [
   ({ shell, panel }) => {
     addHistorySection(panel, shell);
   },
-  ({ shell, panel, signal }) => {
-    addSettingsSection(panel, shell.zoom, signal);
+  ({ panel, signal }) => {
+    addSettingsSection(panel, signal);
   }
 ];
 
@@ -92,9 +91,7 @@ export class Shell {
   #subtitles = null;
   /** Eager filter session: stored filter applies at play, menu resets work. */
   #filters = null;
-  /** Fullscreen crop state: gesture/panel state + per-domain persistence. */
-  #zoom = new ZoomState();
-  /** Fullscreen fill + zoom-crop transform machine (per-shell, owns every
+  /** Fullscreen fill + crop transform machine (per-shell, owns every
    *  video.style.transform write), exposed as shell.view. */
   #view = new ViewershipTransform(this);
   /** Lazy panel sections built on first open; torn down with the shell. */
@@ -181,22 +178,11 @@ export class Shell {
     });
 
     runSteps([
-      // Sync-state and zoom bindings before any watcher: the nudge/reset
-      // gestures and the per-domain crop must be live from frame one, panel
-      // sections included. The tracker announces each adoption once; the
-      // zoom re-binds to the entry's domain and the sync state re-resolves
-      // its grain through their own subscriptions.
-      () => {
-        subtitleSync.bindShell(this, this.#scope.signal);
-        const bindZoomDomain = () => {
-          const key = this.#resume?.domainKey;
-          if (key) {
-            this.#zoom.bindDomain(key);
-          }
-        };
-        bindZoomDomain();
-        this.#resume.onChange(bindZoomDomain);
-      },
+      // Sync-state binding before any watcher: the nudge/reset gestures must
+      // be live from frame one, panel sections included. The tracker
+      // announces each adoption once; the sync state re-resolves its grain
+      // through its own subscription.
+      () => subtitleSync.bindShell(this, this.#scope.signal),
       () => this.#setupFocusManagement(),
       () => this.#suppressContextMenu(),
       () => this.#forwardMediaEvents(),
@@ -296,12 +282,7 @@ export class Shell {
     return this.#filters;
   }
 
-  /** Zoom & pan state, shared by the action layer and the panel section. */
-  get zoom() {
-    return this.#zoom;
-  }
-
-  /** The viewership transform machine (fill + zoom crop composition). */
+  /** The viewership transform machine (fill mode). */
   get view() {
     return this.#view;
   }
@@ -573,10 +554,6 @@ export class Shell {
         this.#filters?.destroy();
         this.#filters = null;
       },
-      // Land the zoom's trailing per-domain persist before everything else
-      // dies - the last gesture-landed crop must not be the one that never
-      // got written.
-      () => this.#zoom.flush(),
       () => {
         for (const section of this.#panelSections) {
           section.destroy();
