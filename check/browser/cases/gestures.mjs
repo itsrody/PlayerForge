@@ -377,6 +377,91 @@ export async function run({ session, baseUrl, boot }) {
         (window.__pfEvents.includes("scrub-end") || window.__pfEvents.includes("scrub-release"));
     }), `events=${JSON.stringify(await session.eval(function main() { return window.__pfEvents; }))}`);
 
+  // Dead-zone residue, the slow-stroke row: a genuine slow drag arrives as
+  // sub-pixel per-move travel (0.3px per event) that per-event dropping
+  // would starve entirely. Synthetic scrub events reach the action layer
+  // directly (recognition is already proven by the drag row above): ten
+  // +0.3px moves must accrue and apply (currentTime moves off the seed),
+  // then alternating +/-0.3px jitter (a holding finger) must net to zero -
+  // the residue's sign-cancellation is the anti-shimmer the dead zone
+  // exists for.
+  await session.eval(function main() {
+    const host = document.querySelector(".pf-shell");
+    const v = document.querySelector("#check-video");
+    v.pause();
+    v.currentTime = 5;
+    const station = (state) => { window.__pfStation = state; return window.__pfStation; };
+    station({
+      fire(dx, velocity) {
+        host.dispatchEvent(new CustomEvent("pf:gesture-scrub", {
+          detail: { zone: "screen", method: "pointer", dx, dy: 0, velocity, timestamp: performance.now() }
+        }));
+      }
+    });
+    for (let i = 0; i < 10; i++) {
+      window.__pfStation.fire(0.3, 40);
+    }
+  });
+  await new Promise((r) => setTimeout(r, 250));
+  status(rows, "sub-pixel slow stroke accrues through the dead zone", await session.eval(function main() {
+    const t = document.querySelector("#check-video").currentTime;
+    return t > 5 && t < 5.05;
+  }), `t=${JSON.stringify(await session.eval(function main() {
+    return document.querySelector("#check-video").currentTime;
+  }))}`);
+  await session.eval(function main() {
+    window.__pfJitterSeed = document.querySelector("#check-video").currentTime;
+    for (let i = 0; i < 20; i++) {
+      window.__pfStation.fire(i % 2 === 0 ? 0.3 : -0.3, 40);
+    }
+  });
+  await new Promise((r) => setTimeout(r, 250));
+  status(rows, "holding-finger jitter nets to zero through the residue", await session.eval(function main() {
+    const video = document.querySelector("#check-video");
+    const t = Math.abs(video.currentTime - window.__pfJitterSeed);
+    const end = () => {
+      video.dispatchEvent(new CustomEvent("pf:gesture-scrubEnd", {
+        detail: { zone: "screen", method: "pointer" }
+      }));
+    };
+    end();
+    return t < 0.0005;
+  }), `t=${JSON.stringify(await session.eval(function main() {
+    return document.querySelector("#check-video").currentTime;
+  }))}`);
+
+  // Commit pacing, the display-clock row: the pointer stream no longer writes
+  // the decoder directly - moves only accrue pending travel and the
+  // compositor tick (requestAnimationFrame) commits one seek per refresh.
+  // One big stroke fired synchronously must therefore leave currentTime
+  // byte-identical within the same eval (the 0.6s+ of accrual is still
+  // uncommitted), and matter only after the next frame commits it - the
+  // per-event write this row forbids was exactly the input/decode coupling
+  // the rewrite cut.
+  await session.eval(function main() {
+    const v = document.querySelector("#check-video");
+    v.pause();
+    v.currentTime = 7;
+    window.__pfPaceSeed = v.currentTime;
+    window.__pfStation.fire(200, 800);
+    window.__pfSyncTime = v.currentTime;
+  });
+  status(rows, "scrub events accrue without an immediate decoder write", await session.eval(function main() {
+    return Math.abs(window.__pfSyncTime - window.__pfPaceSeed) < 1e-9;
+  }), `t=${JSON.stringify(await session.eval(function main() {
+    return document.querySelector("#check-video").currentTime;
+  }))}`);
+  await new Promise((r) => setTimeout(r, 400));
+  const paceEnd = await session.eval(function main() {
+    const video = document.querySelector("#check-video");
+    const settled = Math.abs(video.currentTime - (window.__pfPaceSeed + 0.63)) < 0.12;
+    video.dispatchEvent(new CustomEvent("pf:gesture-scrubEnd", {
+      detail: { zone: "screen", method: "pointer" }
+    }));
+    return { t: video.currentTime, settled };
+  });
+  status(rows, "compositor tick commits the accrued stroke", paceEnd.settled, `t=${paceEnd.t}`);
+
   // SDK-control passthrough, proven with real driver input while the
   // fs-bound pointer intents are ARMED (the state that used to eat them):
   // an overlay button inside the container - every SDK rail's shape - keeps
@@ -640,12 +725,13 @@ export async function run({ session, baseUrl, boot }) {
       return true;
     }), "compositor touch swipe mismatch");
 
-  // Owned-touch tap-highlight determination: the engine cancels every owned
-  // touch press at pointerdown (the press claim). Whether that suppresses
-  // Chromium's compositor tap highlight (gray flash) is NOT DOM-observable -
-  // the highlight is a compositor paint - so this row answers it with a
-  // screenshot diff on a paused video (a static surface whose only possible
-  // paint change across the tap is the highlight itself).
+  // Owned-touch tap-highlight determination: since the prevent-scope cut the
+  // tap's whole native stream passes (no at-press cancellation), so whether
+  // Chromium's compositor tap highlight (gray flash) fires on a video-zone
+  // tap is NOT DOM-observable - the highlight is a compositor paint - and
+  // this row answers it with a screenshot diff on a paused video (a static
+  // surface whose only possible paint change across the tap is the
+  // highlight itself.
   await session.eval(function pause() {
     const video = document.querySelector("#check-video");
     video.pause();

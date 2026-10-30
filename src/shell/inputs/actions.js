@@ -1,5 +1,5 @@
 import { getSetting, onSettingsChanged, SETTING_KEYS } from "../chrome/config.js";
-import { TUNING, formatTime, EASE_SNAPPY_CURVE, EASE_SNAPPY_MS } from "../../shared/core.js";
+import { TUNING, clamp, formatTime, EASE_SNAPPY_CURVE, EASE_SNAPPY_MS } from "../../shared/core.js";
 import { fs, subscribeFullscreen } from "../../shared/dom.js";
 import { GESTURE_EVENTS, GESTURES, GESTURE_IDS } from "../../kernel/contract.js";
 
@@ -283,16 +283,22 @@ class SkipStreak {
  * One activated scrub session's state machine (the seek half of the scrub
  * gesture - the recognition half lives in forge.js and arrives here as
  * semantic scrub events). Owns the latch, the velocity-proportional gain
- * setup, the presented-frame readout loop, and the toast cadence, so
+ * setup, the display-clock commit loop, and the toast cadence, so
  * ShellActions only routes: scrub detail in, seek + display out.
  *
  * State notes:
+ *   - Input and commit are decoupled by the native display clock. Pointer
+ *     moves only translate into pending seconds; requestAnimationFrame -
+ *     the compositor tick Chromium drives painting (and drains the pointer
+ *     stream) by - commits one clamped seek per tick and advances the
+ *     toast from the AUTHORED target. Seek truth beats frame truth here:
+ *     the presented-frame readout this machine once kept ran 1-3 frames
+ *     plus decode latency behind the finger, which is the visible lag the
+ *     field pinned. The readout's contract is the destination, and
+ *     presented-frame truth has its real home in resume.js, where a save
+ *     position must be what is actually on screen.
  *   - The gains lock at latch time (duration + box width are frozen for the
- *     stroke) so each move skips media's readiness gate + duration re-read.
- *   - The readout is rVFC-backed: mediaTime of the last frame actually
- *     PRESENTED beats decoder currentTime, which can lead/lag the display
- *     (same rationale as resume.js's pause flush). Drop is signal-scoped -
- *     a mid-apply shell teardown would otherwise leave a re-arming callback.
+ *     stroke) so each commit skips media's readiness gate + duration re-read.
  *   - The toast payload is one pooled object refilled in place: the toast
  *     manager destructures synchronously, so a 100ms display tick never
  *     allocates (same discipline as the gesture detail objects).
@@ -308,15 +314,18 @@ class ScrubSession {
   /** Signed display momentum (-1 left .. +1 right), first-order smoothed; picks
    *  the seek toast's icon from the stroke's average direction. */
   #momentum = 0;
+  /** Sub-pixel residue from the dead zone's unapplied micro-travel, in px. */
+  #residual = 0;
+  /** Commit pipeline: uncommitted pending seconds since the last compositor
+   *  tick, the loop handle (0 = disarmed), and the target time the last
+   *  committed seek authored (the readout's truth). */
+  #pendingDelta = 0;
+  #rafId = 0;
+  #authoredTarget = null;
   #lastToastAt = 0;
   #toastText = null;
   #toastSecDuration = NaN;
   #toastSecCurrent = NaN;
-  // Presented-frame readout trio: mediaTime, the video the loop was armed on
-  // (SPA swap guard), and the pending rVFC callback handle.
-  #presentedTime = null;
-  #rvfcVideo = null;
-  #rvfcId = 0;
   #toast = { icon: "left-arrows", text: "", group: "scrub" };
 
   constructor(shell) {
@@ -327,14 +336,48 @@ class ScrubSession {
     return this.#active;
   }
 
-  /** Cancel the presented-frame loop if one is armed; safe to call any time. */
-  dropFrameLoop() {
-    if (this.#rvfcVideo) {
-      this.#rvfcVideo.cancelVideoFrameCallback(this.#rvfcId);
-      this.#rvfcVideo = null;
-      this.#rvfcId = 0;
+  /** Stop the commit loop; safe to call any time. Uncommitted travel flushes
+   *  at end(); a scope abort (shell teardown) drops it instead - the video is
+   *  going away. */
+  stopCommitLoop() {
+    if (this.#rafId) {
+      cancelAnimationFrame(this.#rafId);
+      this.#rafId = 0;
     }
-    this.#presentedTime = null;
+  }
+
+  /** One compositor tick: commit the stroke's accrued travel as ONE clamped
+   *  seek, then re-arm while the session lives. The anchor is the decoder's
+   *  currentTime - the only writer between commits is this loop, and natural
+   *  playback advance folds in through the same read, so pending scrub
+   *  travel never double-counts it. */
+  #tick() {
+    if (!this.#active) {
+      return;
+    }
+    this.#ensureCommitLoop();
+    if (this.#pendingDelta === 0) {
+      return;
+    }
+    const pending = this.#pendingDelta;
+    this.#pendingDelta = 0;
+    const shell = this.#shell;
+    const t = clamp(shell.currentTime + pending, 0, this.#duration);
+    // The latched-seek path: readiness was verified at latch, so the commit
+    // skips media's readiness gate + duration re-read.
+    shell.media.scrubToLatched(t, this.#duration);
+    this.#authoredTarget = t;
+  }
+
+  /** Disarm if nothing armed, then arm one compositor tick. */
+  #ensureCommitLoop() {
+    if (this.#rafId) {
+      return;
+    }
+    this.#rafId = requestAnimationFrame(() => {
+      this.#rafId = 0;
+      this.#tick();
+    });
   }
 
   /** One scrub move: latches on the first (bails before the timeline exists),
@@ -367,27 +410,29 @@ class ScrubSession {
       this.#fastGain = fastCeiling / width;
       this.#sensitivity = SCRUB_SENSITIVITY;
       this.#momentum = 0;
+      // Session-start hygiene: the previous stroke's commit backlog and toast
+      // cadence must not read into this one - #pendingDelta would otherwise
+      // seek off an unexpected offset, and #lastToastAt could swallow the
+      // opening toast of a quickly repeated stroke.
+      this.#pendingDelta = 0;
+      this.#authoredTarget = null;
+      this.#lastToastAt = 0;
       gestureHaptic("scrub");
-      // Frame-accurate readout for this scrub: a short-lived rVFC loop tracks
-      // the frame the user actually SAW (post-seek frames fire even while
-      // paused), falling back to currentTime until the first one lands.
-      // requestVideoFrameCallback/cancelVideoFrameCallback (83) are
-      // floor-guaranteed on the video element the gesture rides.
-      const scrubVideo = shell.video;
-      this.#rvfcVideo = scrubVideo;
-      const onFrame = (_now, metadata) => {
-        if (!this.#active || this.#rvfcVideo !== scrubVideo) {
-          return;
-        }
-        this.#presentedTime = metadata.mediaTime;
-        this.#rvfcId = scrubVideo.requestVideoFrameCallback(onFrame);
-      };
-      this.#rvfcId = scrubVideo.requestVideoFrameCallback(onFrame);
     }
 
-    if (Math.abs(detail.dx) < SCRUB_DEAD_ZONE_PX) {
+    // Sub-pixel dead zone with a residue accumulator: a holding finger's
+    // jitter alternates sign and nets to ~zero, while a genuine slow
+    // stroke's per-move travel is sub-pixel at pointer-stream rates (a
+    // 24px/s drag is 0.4px per move at 60Hz) - per-event dropping would
+    // starve exactly the slow scrub the velocity curve's 1s floor exists
+    // for, so the residue accrues the micro-travel and applies it once a
+    // dead zone's worth is real, at the same gain as any other travel.
+    const dx = detail.dx + this.#residual;
+    if (Math.abs(dx) < SCRUB_DEAD_ZONE_PX) {
+      this.#residual = dx;
       return;
     }
+    this.#residual = 0;
 
     // Proportional velocity curve: t in [0,1] as |velocity| rises past the
     // knee, so slow scrubbing stays near the 1s floor while fast scrubbing
@@ -405,11 +450,15 @@ class ScrubSession {
     const ratio = v / SCRUB_KNEE_PX_PER_S;
     const t = Math.min(1, SCRUB_EXPONENT === 1.5 ? ratio * Math.sqrt(ratio) : ratio ** SCRUB_EXPONENT);
     const gain = this.#slowGain + (this.#fastGain - this.#slowGain) * t;
-    const deltaSeconds = detail.dx * gain * this.#sensitivity;
-    // The stroke latched above, so duration is stable - use the latched-seek
-    // path so each move skips media's readiness gate + duration re-read.
-    shell.media.scrubToLatched(shell.currentTime + deltaSeconds, this.#duration);
-    const instantDirection = detail.dx > 1 ? 1 : detail.dx < -1 ? -1 : 0;
+    const deltaSeconds = dx * gain * this.#sensitivity;
+    // Accumulate, never write: the pointer event only translates into pending
+    // travel, and the compositor tick (the loop armed below) commits one
+    // seek per display refresh. The input side stays allocation-free and
+    // independent of decode latency; the screen commits what the display clock
+    // can show.
+    this.#pendingDelta += deltaSeconds;
+    this.#ensureCommitLoop();
+    const instantDirection = dx > 1 ? 1 : dx < -1 ? -1 : 0;
     this.#momentum = this.#momentum * 0.6 + instantDirection * 0.4;
 
     if (now - this.#lastToastAt < 100) {
@@ -418,11 +467,10 @@ class ScrubSession {
     this.#lastToastAt = now;
     // Cache the formatted time string: rebuild only when the visible second
     // changes, not every 100ms tick - avoids 3 string allocations per display
-    // tick during scrub. Value prefers the presented-frame mediaTime (screen
-    // truth); decoder currentTime only until the first post-seek frame lands
-    // or when an SPA swap replaced the element mid-scrub.
-    const shownTime = (this.#rvfcVideo === shell.video ? this.#presentedTime : null)
-      ?? shell.video.currentTime;
+    // tick during scrub. The readout is the authored target - the seek
+    // destination the stroke intends, one commit behind at most. The decoder
+    // read covers the pre-first-commit instant.
+    const shownTime = this.#authoredTarget ?? shell.currentTime;
     const secDuration = Math.floor(this.#duration);
     const secCurrent = Math.floor(shownTime);
     if (secDuration !== this.#toastSecDuration || secCurrent !== this.#toastSecCurrent) {
@@ -435,11 +483,23 @@ class ScrubSession {
     shell.toast(this.#toast);
   }
 
-  /** End the stroke: everything below unwinds to the resting shape. */
+  /** End the stroke: the last accrued travel commits as one final seek (the
+   *  committed shape owns the resting position), then everything below
+   *  unwinds to the resting shape. Committing directly drives the same
+   *  latched-seek path #tick uses; #active already reads false so any
+   *  in-flight tick after this point drops out. */
   end() {
-    this.dropFrameLoop();
+    const pending = this.#pendingDelta;
+    const duration = this.#duration;
     this.#active = false;
+    this.#pendingDelta = 0;
+    this.#authoredTarget = null;
+    this.stopCommitLoop();
+    if (pending !== 0 && duration > 0) {
+      this.#shell.media.scrubToLatched(clamp(this.#shell.currentTime + pending, 0, duration), duration);
+    }
     this.#momentum = 0;
+    this.#residual = 0;
     this.#duration = 0;
     this.#slowGain = 0;
     this.#fastGain = 0;
@@ -1075,7 +1135,7 @@ class ShellActions {
     // rVFC ids aren't AbortSignal-cancellable: drop any live scrub frame loop
     // with the same scope signal these listeners die on (shell teardown can
     // land mid-scrub, and the re-arming callback would otherwise outlive us).
-    signal.addEventListener("abort", () => this.#scrubSess.dropFrameLoop(), { once: true });
+    signal.addEventListener("abort", () => this.#scrubSess.stopCommitLoop(), { once: true });
 
     host.addEventListener(GESTURE_EVENTS.swipeStart, ({ detail }) => this.#swipeStart(detail), { signal });
     host.addEventListener(GESTURE_EVENTS.swipe, ({ detail }) => this.#swipe(detail), { signal });

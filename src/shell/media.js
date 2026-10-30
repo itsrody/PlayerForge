@@ -120,14 +120,14 @@ class MediaControls {
   /**
    * Latched scrub seek for an in-progress drag session, silent (no command
    * chatter). Readiness was already verified and `duration` captured when
-   * the stroke latched, so this skips the per-move #isReady() gate and
-   * re-reading video.duration (native getter) - the single most frequent
-   * user-facing path.
+   * the stroke latched - and the capture is finite-positive by construction
+   * (the latch bails before arming otherwise), so the clamp range is always
+   * real. This is the commit loop's write - one call per compositor tick,
+   * not per pointer move - so it skips media's readiness gate and any
+   * duration re-read.
    */
   scrubToLatched(time, duration) {
-    this.#video.currentTime = Number.isFinite(duration) && duration > 0
-      ? clamp(time, 0, duration)
-      : Math.max(0, time);
+    this.#video.currentTime = clamp(time, 0, duration);
   }
 
   skip(delta) {
