@@ -462,6 +462,38 @@ export async function run({ session, baseUrl, boot }) {
   });
   status(rows, "compositor tick commits the accrued stroke", paceEnd.settled, `t=${paceEnd.t}`);
 
+  // Mid-hold pause cancels the boost: the hold arms on "playing at
+  // threshold" and a pause after the boost begins is a state that decision
+  // cannot know - leaving it latched would resume the video at the boosted
+  // rate. A synthetic hold event boosts a playing video (paused -> assert
+  // nothing: the engine gates its own arms - this row targets the action
+  // layer), then a real pause event must restore the pre-boost rate and
+  // drain the sources, so the trailing stray release the engine still
+  // dispatches no-ops harmlessly.
+  await session.eval(function main() {
+    const v = document.querySelector("#check-video");
+    v.muted = true;
+    v.playbackRate = 1;
+    v.play();
+    window.__pfPlayPaused = v.paused;
+    document.querySelector(".pf-shell").dispatchEvent(new CustomEvent("pf:gesture-hold", {
+      detail: { zone: "screen", method: "pointer" }
+    }));
+    window.__pfBoostedRate = v.playbackRate;
+    v.pause();
+  });
+  await new Promise((r) => setTimeout(r, 120));
+  status(rows, "mid-hold pause restores the saved playback rate", await session.eval(function main() {
+    return window.__pfPlayPaused === false &&
+      window.__pfBoostedRate === 2 &&
+      document.querySelector("#check-video").playbackRate === 1;
+  }), `latched=${JSON.stringify(await session.eval(function main() {
+    return [window.__pfPlayPaused, window.__pfBoostedRate, document.querySelector("#check-video").playbackRate];
+  }))}`);
+  await session.eval(function main() {
+    document.querySelector("#check-video").muted = false;
+  });
+
   // SDK-control passthrough, proven with real driver input while the
   // fs-bound pointer intents are ARMED (the state that used to eat them):
   // an overlay button inside the container - every SDK rail's shape - keeps

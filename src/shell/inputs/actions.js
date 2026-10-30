@@ -971,6 +971,28 @@ class ShellActions {
     shell.toast({ icon: "right-arrows", text: `${speed}x`, group: "hold" });
   }
 
+  /**
+   * A real pause any time after the boost began kills it. The hold arms on
+   * "playing at threshold" - a decision that cannot know a mid-hold pause
+   * (site ad breaks, resource end, OS pause) - and leaving the boosted rate
+   * latched through that pause means the video resumes at 2x under a finger
+   * whose boost-era decision is stale. This is the same teardown the release
+   * path uses, applied to every source at once: the rate restores, the set
+   * drains (so the trailing stray releases the engine still dispatches
+   * no-op harmlessly), the readout drops.
+   */
+  #cancelHoldOnPause() {
+    if (this.#activeHolds.size === 0) {
+      return;
+    }
+    const shell = this.#shell;
+    this.#activeHolds.clear();
+    if (shell.video) {
+      shell.media.endBoost(this.#savedRate);
+    }
+    shell.hideToast("hold");
+  }
+
   #release(detail) {
     const shell = this.#shell;
     const source = detail.method || "pointer";
@@ -1131,10 +1153,12 @@ class ShellActions {
     host.addEventListener(GESTURE_EVENTS.release, ({ detail }) => this.#release(detail), { signal });
     host.addEventListener(GESTURE_EVENTS.scrub, ({ detail }) => this.#scrub(detail), { signal });
     host.addEventListener(GESTURE_EVENTS.scrubEnd, () => this.#scrubEnd(), { signal });
-
-    // rVFC ids aren't AbortSignal-cancellable: drop any live scrub frame loop
-    // with the same scope signal these listeners die on (shell teardown can
-    // land mid-scrub, and the re-arming callback would otherwise outlive us).
+    // Any real pause cancels a live boost (see #cancelHoldOnPause). One
+    // permanent listener, signal-scoped; the hot path is one set-size check
+    // per real pause, not a per-hold arm/cancel pair.
+    shell.video?.addEventListener("pause", () => this.#cancelHoldOnPause(), { signal });
+    // The commit loop's cancel rides the same signal-scoped teardown: a shell
+    // teardown mid-stroke cannot leave a re-arming display-clock commit behind.
     signal.addEventListener("abort", () => this.#scrubSess.stopCommitLoop(), { once: true });
 
     host.addEventListener(GESTURE_EVENTS.swipeStart, ({ detail }) => this.#swipeStart(detail), { signal });

@@ -127,8 +127,8 @@ const firstTwoPointers = { x0: 0, y0: 0, x1: 0, y1: 0 };
  * never retain the object, so each dispatch site must rewrite EVERY field it
  * owns (no stale carries between events).
  */
-const releaseDetail = { zone: "", method: "pointer", duration: 0 };
-const holdDetail = { zone: "", method: "pointer", duration: 0 };
+const releaseDetail = { zone: "", method: "pointer" };
+const holdDetail = { zone: "", method: "pointer" };
 const scrubEndDetail = { zone: "", method: "pointer" };
 const pinchDetail = { zone: "", method: "pointer", direction: "" };
 const swipeStartDetail = { zone: "", method: "pointer", direction: "" };
@@ -493,7 +493,6 @@ class SpaceSession {
   #canToggle;
   #timer = null;
   #holding = false;
-  #holdStart = 0;
   /** Whether the CURRENT Space press was captured by us. The keydown decision
    *  (shouldHandleKeys) is latched here so keyup never toggles playback for a
    *  press we did not own (focus moved between down and up), and always
@@ -516,7 +515,6 @@ class SpaceSession {
       this.#dispatchRelease();
     }
     this.#own = true;
-    this.#holdStart = performance.now();
     this.clearTimer();
     this.#timer = delay(() => {
       this.#timer = null;
@@ -524,7 +522,6 @@ class SpaceSession {
         this.#holding = true;
         holdDetail.zone = "screen";
         holdDetail.method = "keyboard";
-        holdDetail.duration = performance.now() - this.#holdStart;
         this.#dispatch(GESTURE_EVENTS.hold, holdDetail);
       }
     }, HOLD_TIMEOUT_MS);
@@ -588,7 +585,6 @@ class SpaceSession {
   #dispatchRelease() {
     releaseDetail.zone = "screen";
     releaseDetail.method = "keyboard";
-    releaseDetail.duration = performance.now() - this.#holdStart;
     this.#dispatch(GESTURE_EVENTS.release, releaseDetail);
   }
 }
@@ -885,10 +881,9 @@ export class InputForge {
 
   /** Fill the shared release detail and dispatch the GESTURE_EVENTS.release
    *  command from `start` to now. */
-  #fireRelease(zone, method, start) {
+  #fireRelease(zone, method) {
     releaseDetail.zone = zone;
     releaseDetail.method = method;
-    releaseDetail.duration = performance.now() - start;
     this.#dispatch(GESTURE_EVENTS.release, releaseDetail);
   }
 
@@ -938,7 +933,7 @@ export class InputForge {
     this.#clearHoldTimer();
     if (this.#holding) {
       this.#holding = false;
-      this.#fireRelease(this.#gestureZone, "pointer", this.#startTime);
+      this.#fireRelease(this.#gestureZone, "pointer");
     }
     this.#scrub.end();
     this.#swipe.end();
