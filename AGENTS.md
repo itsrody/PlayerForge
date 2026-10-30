@@ -95,10 +95,14 @@ iframes, same-origin and cross-origin:
 - **dom.js** — the shared mutation feed (`onDomMutations`: ONE page-level
   MutationObserver every consumer rides — element pooling, the shell ledger,
   shadow traversal, the fullscreen gate, the iframe registry), `PoolElement`
-  machinery, and `ReferenceBox` — the ONE fill-box identity (inline →
+  machinery, `ReferenceBox` — the ONE fill-box identity (inline →
   container, fs → the fullscreen element's own rect, which under
   `viewport-fit=cover` is the Android device screen incl. the safe area;
-  pools per invalidation so the hot path stays layout-free).
+  pools per invalidation so the hot path stays layout-free) — and
+  `layoutViewport()`: the ONE real-world viewport read (the root element's
+  laid-out box first, reported innerWidth/innerHeight as fallback; kernel
+  presence, the fs window fallback, and the inline gesture-zone width all
+  consume it).
 - **page.js** — site identity (`getDomainKey`, `domainsMatch`, `domainScore`,
   `hashEntry`, title sanitizer), page context, the frame bridge (`pf:` prefix,
   `ContextPipe` class owning pipe/legacy/in-flight state, context responders,

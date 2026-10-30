@@ -20,7 +20,7 @@
  * alive via the media-event floor between player generations. Which SDK owns
  * a video is NOT this module's question - that lives in detection.js.
  */
-import { onDomMutations } from "../shared/dom.js";
+import { onDomMutations, layoutViewport } from "../shared/dom.js";
 import { logger } from "../shared/runtime.js";
 
 /** Player thresholds: the measured box must reach this to count as a player. */
@@ -314,19 +314,21 @@ export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_V
 /**
  * Synchronous viewport-presence check. Uses the element's client rect - the
  * caller has usually just measured it, so a second read with no intervening
- * write is served from the same layout - against the layout viewport with a
- * lookahead margin. A zero viewport (a runtime fact, not an environment one
- * - headless and instrumented embeds can both report 0) reports present, so
- * missing viewport data can only make adoption more permissive, never strand
- * a player. The old `typeof window` arm died with the retired unit-harness
- * host that was its only other premise.
+ * write is served from the same layout - against the layout viewport
+ * (layoutViewport(), the shared read in shared/dom.js) with a lookahead
+ * margin; a zero viewport reports present. Kernel cannot ride the shared
+ * ReferenceBox here: that owner's lifetime starts with the shell and its
+ * inline answer is the container's own box, while this gate asks presence
+ * against the full viewport for pre-shell candidates - two different
+ * datums by construction, joined only at the viewport read. The old
+ * `typeof window` arm died with the retired unit-harness host that was
+ * its only other premise.
  */
 export function isOnScreen(el, margin = ON_SCREEN_MARGIN_PX) {
   if (!el || typeof el.getBoundingClientRect !== "function") {
     return true;
   }
-  const vw = window.innerWidth || window.document.documentElement.clientWidth || 0;
-  const vh = window.innerHeight || window.document.documentElement.clientHeight || 0;
+  const { width: vw, height: vh } = layoutViewport();
   if (!vw || !vh) {
     return true;
   }

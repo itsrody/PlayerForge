@@ -1,6 +1,6 @@
 import { allowsIntent, allowsAnyIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo, cancelEase } from "./actions.js";
 import { TUNING, isBenignMediaPolicyError } from "../../shared/core.js";
-import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen, DOMManager } from "../../shared/dom.js";
+import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen, DOMManager, layoutViewport } from "../../shared/dom.js";
 import { logger, Scope, delay } from "../../shared/runtime.js";
 
 /**
@@ -920,12 +920,17 @@ export class InputForge {
     // does not have, so the reference becomes the surface-invariant viewport
     // width. Every behavioral zone consumer is fs-gated (the inline zone is
     // telemetry only - hold/release details and the press breadcrumbs), which
-    // is exactly why fs closing may degrade the reference instead of breaking
-    // a gesture; the window fallback answers the headless fact (shell-less
-    // early presses) rather than missing-global paranoia.
+    // is exactly why fs closing may degrade the reference instead of
+    // breaking a gesture. Both widths are real-world reads: the fs box is
+    // the fs element's own rect, the inline reference layoutViewport()'s
+    // root-element box - the laid-out clientX domain presses land in, while
+    // the reported innerWidth adds Chromium's scrollbar-inclusive gutter
+    // past which no zone-addressable press can land. The window arm answers
+    // the headless fact (shell-less early presses) not missing-global
+    // paranoia.
     const screenW = fs
-      ? (this.#boxFor?.()?.width ?? 0) || window.innerWidth
-      : window.innerWidth;
+      ? (this.#boxFor?.()?.width ?? 0) || layoutViewport().width
+      : layoutViewport().width;
     if (pointerEvent.clientX < screenW * EDGE_ZONE_RATIO) {
       return "left-edge";
     } else if (pointerEvent.clientX > screenW * EDGE_ZONE_START) {

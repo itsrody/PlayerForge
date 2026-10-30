@@ -694,6 +694,31 @@ export function subscribeFullscreen(cb, signal) {
 }
 
 /**
+ * The ONE layout-viewport read, real-world-first: the ROOT ELEMENT's
+ * laid-out box is what the browser actually presented - the geometry every
+ * candidate rect and gesture clientX lives in - while
+ * innerWidth/innerHeight are REPORTED dims that can disagree with it
+ * (Chromium's scrollbar-inclusive innerWidth gutter, 0 in instrumented
+ * embeds and headless, UA resize races). The root box leads; the reported
+ * arm stays the fallback for a synthetic/unstyled root; zero stays a
+ * runtime fact that makes consumers PERMISSIVE, never stranding a player.
+ * Both faces consume this: the kernel's viewport-presence gate (candidate
+ * rect against the layout viewport, pre-shell - the fill-box identity
+ * below cannot serve it, whose lifetime starts with the shell and whose
+ * inline answer is the container's own box, narrower than the viewport),
+ * the fs window fallback here, and the inline gesture-zone width.
+ * Consumers read-and-discard synchronously; the fresh pair per call keeps
+ * no pooled-object trap alive across call sites.
+ */
+export function layoutViewport() {
+  const root = document.documentElement;
+  return {
+    width: (root?.clientWidth || window.innerWidth) || 0,
+    height: (root?.clientHeight || window.innerHeight) || 0
+  };
+}
+
+/**
  * The ONE fill-box identity for every geometry consumer (scrub gain
  * normalize, cover scale, pan clamp, fs edge zones). Inline reads the
  * container; fullscreen reads the ELEMENT the UA is actually fullscreening -
@@ -757,8 +782,8 @@ export class ReferenceBox {
         this.#box.width = rect.width;
         this.#box.height = rect.height;
       } else {
-        this.#box.width = window.innerWidth;
-        this.#box.height = window.innerHeight;
+        ({ width: this.#box.width, height: this.#box.height } =
+          layoutViewport());
       }
     } else {
       this.#box.width = this.#container.clientWidth;
