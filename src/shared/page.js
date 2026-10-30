@@ -688,10 +688,15 @@ const CTX_PIPE_IDLE_MS = 60_000;
  * route changes are reflected. Requests qualify when they originate from our
  * own origin or from one of this document's <iframe> descendants.
  *
- * The payload deliberately omits document.title: any embed in the page can
- * pass the frame-tree vouch, and the title is the one field with nothing to
- * offer resume matching (domain + path + duration drive identity). Domain
- * and path stay because cross-origin players cannot function without them.
+ * The payload carries document.title despite any embed in the page being able
+ * to pass the frame-tree vouch: the title is a first-class resume-entry field
+ * the history cards render, and an omitted top-title stranded every
+ * cross-origin embed's history entry empty (0571346 reversed c515662's
+ * titleless answer for exactly that cost). Resume identity itself stays
+ * domain + path + duration driven — the title is presentation, sanitized at
+ * both ends (resolveContext strips at the answering side, mapContextPayload
+ * re-strips on arrival), and every consumer tolerates a titleless peer's
+ * answer for bridges hardened under the old shape.
  */
 class TopFrameResponder {
   #resolveContext;

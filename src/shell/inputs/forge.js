@@ -1218,7 +1218,6 @@ export class InputForge {
           this.#pointerOp("setPointerCapture", this.#primaryPointerId);
           holdDetail.zone = this.#gestureZone;
           holdDetail.method = "pointer";
-          holdDetail.duration = performance.now() - this.#startTime;
           this.#dispatch(GESTURE_EVENTS.hold, holdDetail);
         }
       }, HOLD_TIMEOUT_MS);
