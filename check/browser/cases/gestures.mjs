@@ -486,12 +486,14 @@ export async function run({ session, baseUrl, boot }) {
   // scrub math straight from the product's source table (src/shared/core.js
   // TUNING) - knee-saturated gain over the fs reference width, sensitivity
   // anchor linear outside the curve, the scrubTo clamp - against the live
-  // duration and reference width. A tuning retune re-arms the row's own
-  // expectation; only a real regression in the accrue->rAF->commit pipeline
-  // (or a curve/width engine drift the replay does not share) parts the
-  // settled time from it. The one mirrored literal is the 16px fs-box gap
-  // (shell.js FS_BOX_GAP_PX) - this fixture parks the gap far from that
-  // threshold, so per-element resolution agrees whichever side wins.
+  // duration and reference width. The width mirror is the same one truth the
+  // engine's shared ReferenceBox reads (shared/dom.js): the fs element's own
+  // rect when one exists. The synthetic fs element here (the
+  // fullscreenElement override above) IS the .pf-shell host - its rect is
+  // the same box the engine reads, no window-vs-screen heuristic shared. A
+  // tuning retune re-arms the row's own expectation; only a real regression
+  // in the accrue->rAF->commit pipeline (or a geometry identity drift the
+  // replay does not share) parts the settled time from it.
   const paceCurve = {
     sens: TUNING.controller.scrubSensitivity /
       TUNING.controller.scrubSensitivityAnchor,
@@ -499,7 +501,6 @@ export async function run({ session, baseUrl, boot }) {
     fast: TUNING.scrub.velocity.fastFullWidthFraction,
     knee: TUNING.scrub.velocity.kneeVelocityPxS,
     exp: TUNING.scrub.velocity.exponent,
-    boxGapPx: 16,
     stroke: { dx: 200, velocity: 800 }
   };
   await session.eval(function main(curve) {
@@ -518,13 +519,14 @@ export async function run({ session, baseUrl, boot }) {
   await new Promise((r) => setTimeout(r, 400));
   const paceEnd = await session.eval(function main(curve) {
     const video = document.querySelector("#check-video");
-    // fs branch of the product's referenceBox (shell.js): the window box
-    // only when window drifts past the gap rule, screen.* otherwise. The
-    // commit sought from this width, so the mirror must read the same one.
-    const width = Math.abs(window.innerWidth - screen.width) >= curve.boxGapPx ||
-      Math.abs(window.innerHeight - screen.height) >= curve.boxGapPx
-      ? window.innerWidth
-      : screen.width;
+    // The width mirror is the engine's own fs rule (shared/dom.js
+    // ReferenceBox): the fullscreen element's rect - the synthetic fs element
+    // here is the .pf-shell host - falling back to the window box when fs
+    // presents no element (the F11/document-fs shape).
+    const fsEl = document.fullscreenElement;
+    const width = fsEl
+      ? fsEl.getBoundingClientRect().width || window.innerWidth
+      : window.innerWidth;
     const duration = video.duration;
     const ratio = curve.stroke.velocity / curve.knee;
     const t = Math.min(1, ratio ** curve.exp);

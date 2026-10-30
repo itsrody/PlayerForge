@@ -401,8 +401,9 @@ class ScrubSession {
       // of container size; the fast ceiling scales with the playback DURATION
       // so a fast stroke traverses a fraction of the runtime on any length,
       // while the slow floor stays a deliberate ~1s. The reference is the
-      // unified `shell.referenceBox` (fs -> screen, inline -> container), so
-      // scrub always normalizes against the correct contextual box.
+      // unified `shell.referenceBox` (fs -> fs element box, inline ->
+      // container), so scrub always normalizes against the correct
+      // contextual box.
       const width = shell.referenceBox.width || 640;
       const fastCeiling = duration * SCRUB_FAST_FULL_WIDTH_FRACTION;
       this.#active = true;
@@ -625,8 +626,8 @@ export function easeTransformTo(video, transform) {
 /**
  * Scale factor needed for the video to cover the given reference box.
  * Fill mode is fullscreen-only (pinch binding is fs-gated), and the reference
- * (passed from `shell.referenceBox`) is the device screen in fs - the video's
- * rendered box is simply the screen. The scale models the element's content
+ * (passed from `shell.referenceBox`) is the fullscreen element's own box in
+ * fs - the device screen incl. the safe area where cover merged on the frame. The scale models the element's content
  * letterboxed by its own ratio (object-fit: contain), which the fill binding
  * (not the embed's possibly-'fill' default) is responsible for setting before
  * applying this scale. No getBoundingClientRect (forced layout) is needed: the

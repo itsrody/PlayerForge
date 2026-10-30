@@ -692,3 +692,79 @@ export function initFullscreenGate() {
 export function subscribeFullscreen(cb, signal) {
   return fsGate.subscribe(cb, signal);
 }
+
+/**
+ * The ONE fill-box identity for every geometry consumer (scrub gain
+ * normalize, cover scale, pan clamp, fs edge zones). Inline reads the
+ * container; fullscreen reads the ELEMENT the UA is actually fullscreening -
+ * `document.fullscreenElement.getBoundingClientRect()` - which is the
+ * device's real screen edge-to-edge where viewport-fit=cover merged on the
+ * active frame (Android Chromium expands the fs element under the cutout, so
+ * the safe area is INCLUDED), and the safe-rect-fitted frame otherwise: the
+ * UA's own letterbox can never spill through an element rect, which is why
+ * the previous window-vs-screen gap heuristic (FS_BOX_GAP_PX epsilon) had a
+ * reason to exist at all. No event the UA fires - fullscreenchange, resize,
+ * orientation change - reports the letterbox shape directly; the rect is the
+ * only truthful witness, and it answers the embed shape too (the host doc
+ * letterboxes the IFRAME while the in-frame fs element obeys its own frame
+ * viewport - rect = the gesture space clientX lives in, so fs edge-zone and
+ * scrub width calibration align with the coordinates every consumer reads).
+ * UA window fullscreen (F11) presents no element - the window box is the
+ * fallback (and the only answer headless can read, screen.width being 0
+ * there). The pool keeps the scrub/pinch hot path allocation + layout free:
+ * one getBoundingClientRect per invalidation, and fs flips re-target the RO
+ * at the fs element so its own box changes (entry ratio snap, device zoom)
+ * re-read instead of floating stale.
+ */
+export class ReferenceBox {
+  #container;
+  #box = { width: 0, height: 0 };
+  #valid = false;
+  #ro = null;
+
+  constructor(container, signal) {
+    this.#container = container;
+    this.#ro = new ResizeObserver(() => {
+      this.#valid = false;
+    });
+    this.#ro.observe(container);
+    signal.addEventListener("abort", () => this.#ro.disconnect(), { once: true });
+    subscribeFullscreen((active) => {
+      this.#valid = false;
+      // Re-target the observed element on each fs entrance; the exit
+      // disconnects so the fs element's detached obs don't fire again.
+      this.#ro.disconnect();
+      if (active) {
+        const fsEl = document.fullscreenElement;
+        if (fsEl) {
+          this.#ro.observe(fsEl);
+        }
+      }
+    }, signal);
+    screen.orientation.addEventListener("change", () => {
+      this.#valid = false;
+    }, { signal, passive: true });
+  }
+
+  get() {
+    if (this.#valid) {
+      return this.#box;
+    }
+    if (fs) {
+      const fsEl = document.fullscreenElement;
+      const rect = fsEl?.getBoundingClientRect();
+      if (rect && rect.width > 0 && rect.height > 0) {
+        this.#box.width = rect.width;
+        this.#box.height = rect.height;
+      } else {
+        this.#box.width = window.innerWidth;
+        this.#box.height = window.innerHeight;
+      }
+    } else {
+      this.#box.width = this.#container.clientWidth;
+      this.#box.height = this.#container.clientHeight;
+    }
+    this.#valid = true;
+    return this.#box;
+  }
+}

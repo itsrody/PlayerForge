@@ -1,5 +1,5 @@
 import { logger, Scope, yield_, runSteps, runStepsAsync } from "../shared/runtime.js";
-import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen, DOMManager } from "../shared/dom.js";
+import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen, DOMManager, ReferenceBox } from "../shared/dom.js";
 import { InputForge } from "./inputs/forge.js";
 import { attachInputActions, ViewershipTransform } from "./inputs/actions.js";
 import { ZoomState } from "./inputs/zoom.js";
@@ -22,11 +22,6 @@ import { requestFullscreenProvision } from "../shared/page.js";
  */
 const EDITABLE_SELECTOR =
   "input, textarea, [contenteditable]:not([contenteditable='false'])";
-
-/* Window-vs-screen mismatch that counts as UA letterboxing in fullscreen.
-   Cutout/gesture-bar insets are tens of CSS px; the epsilon must clear
-   desktop window-manager rounding, where fullscreen agrees within a few. */
-const FS_BOX_GAP_PX = 16;
 
 /** Human labels for MediaError.code; an unknown code falls back at the call. */
 const MEDIA_ERROR_LABELS = {
@@ -84,9 +79,9 @@ export class Shell {
   #panelSections = [];
   #panel;
   #toasts = null;
-  /** Pooled reference-box result + validity flag (see the referenceBox getter). */
-  #refBox = { width: 0, height: 0 };
-  #refBoxValid = false;
+  /** Pooled reference-box owner: the one fill-box identity (see shared/dom.js
+   *  ReferenceBox) - built in the constructor once the container is known. */
+  #refBox = null;
   #onDestroy;
   /** DOM lifecycle manager: listeners, observers, elements, rollbacks. */
   #dom = new DOMManager();
@@ -104,6 +99,7 @@ export class Shell {
     this.video = video;
     this.container = container;
     this.sdk = sdk;
+    this.#refBox = new ReferenceBox(container, this.#scope.signal);
     this.#onDestroy = onDestroy;
     this.#media = createMediaControls({ video });
     this.ready = this.#boot();
@@ -127,7 +123,8 @@ export class Shell {
 
     this.#panel = new SettingsPanel(this);
     this.#toasts = new ToastManager(this.#shellDom.hudLayer);
-    this.#inputs = new InputForge(this.video, this.container, this.shellHost);
+    this.#inputs = new InputForge(this.video, this.container, this.shellHost,
+      () => this.referenceBox);
     attachInputActions(this, this.shellHost, this.#inputs.signal);
     this.#resume = new ResumeTracker(this);
     this.#subtitles = new SubtitleSession(this);
@@ -194,7 +191,6 @@ export class Shell {
         this.#wakeLock = new WakeLockSession(this.video);
       },
       () => this.#watchOrientation(),
-      () => this.#watchReferenceBoxSize(),
       () => this.#watchVisualViewport(),
       // The runSteps tail: once every watcher is armed, the videos are
       // officially ours - stamp video and container as managed.
@@ -252,34 +248,7 @@ export class Shell {
    * { width, height }.
    */
   get referenceBox() {
-    if (!this.#refBoxValid) {
-      const box = this.#refBox;
-      if (fs) {
-        // Edge-to-edge (viewport-fit=cover merged on the active frame):
-        // the fullscreen element spans the physical screen, so screen.* IS
-        // the fill box and env-safe-rect narrowing is both unneeded and
-        // impossible (env(safe-area-inset-*) does not resolve inside
-        // iframes, Chromium #467970444). Without cover the UA letterboxes
-        // the frame to the safe rect below screen.* - filling to screen.*
-        // would spill the cover scale past the visible frame - so a real
-        // window-vs-screen mismatch falls back to the window box. The
-        // epsilon absorbs desktop rounding, where the two agree within a
-        // CSS px or two across window managers.
-        if (Math.abs(window.innerWidth - screen.width) >= FS_BOX_GAP_PX
-          || Math.abs(window.innerHeight - screen.height) >= FS_BOX_GAP_PX) {
-          box.width = window.innerWidth;
-          box.height = window.innerHeight;
-        } else {
-          box.width = screen.width;
-          box.height = screen.height;
-        }
-      } else {
-        box.width = this.container.clientWidth;
-        box.height = this.container.clientHeight;
-      }
-      this.#refBoxValid = true;
-    }
-    return this.#refBox;
+    return this.#refBox.get();
   }
 
   get shellDom() {
@@ -538,29 +507,6 @@ export class Shell {
     if (fs) {
       document.exitFullscreen()?.catch(() => {});
     }
-  }
-
-  /**
-   * Keep the pooled referenceBox honest: invalidate it on fullscreen flips
-   * (fs -> screen.* dims), window resizes, and container resizes. The getter
-   * stays allocation + layout-read free in the scrub/pinch hot path; only a
-   * change event forces the next read through the layout query.
-   */
-  #watchReferenceBoxSize() {
-    const invalidate = () => {
-      this.#refBoxValid = false;
-    };
-    // Fullscreen flips re-read screen.* dims; the container RO covers every
-    // inline-mode layout change (zoom, URL bar, panel) - the only backend,
-    // since ResizeObserver is Chromium 63+.
-    subscribeFullscreen(invalidate, this.#scope.signal);
-    this.#dom.observeResize(this.container, invalidate);
-    // Orientation flip changes the screen.* dims read in fullscreen, which
-    // the container ResizeObserver cannot see (the iframe box may not change).
-    // The Screen Orientation API is the only backend: `screen.orientation`
-    // is floor-guaranteed, and window's `orientationchange` is the legacy
-    // WebKit event Chromium only ships for compat - not a second arm here.
-    this.#dom.listen(screen.orientation, "change", invalidate, { passive: true });
   }
 
   /**
