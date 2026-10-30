@@ -377,6 +377,48 @@ export async function run({ session, baseUrl, boot }) {
         (window.__pfEvents.includes("scrub-end") || window.__pfEvents.includes("scrub-release"));
     }), `events=${JSON.stringify(await session.eval(function main() { return window.__pfEvents; }))}`);
 
+  // Pointer-universality proof, real TOUCH: the mouse drag row above and this
+  // row feed the SAME recognizer letters through the two faces of Chromium's
+  // one pointer backend (CDP's synthetic touch stream arrives as pointer
+  // events with pointerType "touch"). The engine holds zero pointerType
+  // branches; this row pins the claim end-to-end on the Android geometry - a
+  // horizontal touch stroke latches scrub and commits through the same
+  // display-clock pipeline, so nothing in the input plane is routed by
+  // modality anywhere.
+  const touchCdp = await raw.createCDPConnection("page");
+  await session.eval(function main() {
+    const v = document.querySelector("#check-video");
+    v.pause();
+    v.currentTime = 8.5;
+    window.__pfTouchSeed = v.currentTime;
+    window.__pfEvents = [];
+  });
+  await touchCdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x: Math.round(center.x), y: Math.round(center.y) }]
+  });
+  for (const dx of [40, 90, 140]) {
+    await touchCdp.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [{ x: Math.round(center.x + dx), y: Math.round(center.y) }]
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+  await touchCdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await new Promise((r) => setTimeout(r, 300));
+  const touchScrub = await session.eval(function main() {
+    return {
+      events: window.__pfEvents,
+      t: document.querySelector("#check-video").currentTime,
+      seed: window.__pfTouchSeed
+    };
+  });
+  status(rows, "real touch stroke drives the same scrub recognizer + commit",
+    touchScrub.events.includes("scrub") &&
+      (touchScrub.events.includes("scrub-end") || touchScrub.events.includes("scrub-release")) &&
+      touchScrub.t > touchScrub.seed + 0.02,
+    `t=${touchScrub.t} seed=${touchScrub.seed} events=${JSON.stringify(touchScrub.events)}`);
+
   // Dead-zone residue, the slow-stroke row: a genuine slow drag arrives as
   // sub-pixel per-move travel (0.3px per event) that per-event dropping
   // would starve entirely. Synthetic scrub events reach the action layer

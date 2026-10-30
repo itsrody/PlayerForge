@@ -734,9 +734,13 @@ export class InputForge {
     // Belt under touch-action none: during a claimed session, touchmove
     // carries no default that should win - scrolling or UA recognizers
     // taking the stream out from under the latched stroke. Cancelled while
-    // claimed only, so plain taps and SDK streams stay native.
+    // claimed only, so plain taps and SDK streams stay native. The
+    // cancelable read keeps a no-op silent: a non-cancelable claimed move
+    // (UA already owns that sequence - scroll mid-progress) makes
+    // preventDefault a defined no-op whose only effect is Chromium's
+    // intervention warning, so there is nothing to assert there anyway.
     zone.addEventListener("touchmove", (event) => {
-      if (this.#streamClaimed) {
+      if (this.#streamClaimed && event.cancelable) {
         event.preventDefault();
       }
     }, { capture: true, passive: false, signal });
@@ -1368,11 +1372,28 @@ export class InputForge {
    * (capture target removed, hit-test takeover). That press is over and no
    * click follows, so reclaim it through the same cancellation path.
    */
+  /**
+   * Capture loss mid-session cancels the tracked pointer - EXCEPT our own
+   * retarget churn: switching capture to the zone fires lostpointercapture
+   * at the PREVIOUS capture element, which for a touch pointer is the
+   * UA-implied holder at the press target (mouse never carries implied
+   * capture, which is why scrub strokes drove from mouse dies only under
+   * touch). hasPointerCapture reflects the pending override synchronously
+   * (spec: true before gotpointercapture delivery), so it still reads ours
+   * while the old element's farewell passes through - only a genuine
+   * unrelated loss (element removal, hit-test takeover) reaches the cancel.
+   */
   #handleLostCapture(event) {
-    if (this.#pointers.has(event.pointerId)) {
-      logger.log("forge", `capture lost mid-session, reclaiming pointer ${event.pointerId}`);
-      this.#cancelTrackedPointer(event.pointerId);
+    if (!this.#pointers.has(event.pointerId)) {
+      return;
     }
+    try {
+      if (this.#zone.hasPointerCapture(event.pointerId)) {
+        return;
+      }
+    } catch {}
+    logger.log("forge", `capture lost mid-session, reclaiming pointer ${event.pointerId}`);
+    this.#cancelTrackedPointer(event.pointerId);
   }
 
   /**
