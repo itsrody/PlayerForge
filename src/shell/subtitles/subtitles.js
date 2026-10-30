@@ -646,8 +646,12 @@ export class ForgeTrack {
     // slot-node logic against a torn-down pool forever.
     this.#track.removeEventListener("cuechange", this.#onCueChange);
     this.#track.mode = "disabled";
-    while (this.#track.cues.length > 0) {
-      this.#track.removeCue(this.#track.cues[0]);
+    // Back-drain from the end - the same rationale load()'s drain carries:
+    // removeCue on a live cue list shifts the remaining entries, so draining
+    // from the front pays O(n²) memmove for an n-cue track on shell teardown,
+    // while the last-index drain removes without touching earlier entries.
+    for (let i = this.#track.cues.length - 1; i >= 0; i--) {
+      this.#track.removeCue(this.#track.cues[i]);
     }
     // DOMManager removes all cue slot elements.
     this.#dom.destroy();
