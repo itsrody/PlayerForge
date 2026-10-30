@@ -48,8 +48,10 @@ export const TUNING = {
   controller: {
     holdSpeed: 2,
     streakMax: 10,
-    /** Stored raw around the 150 anchor; effective multiplier = value / 150. */
-    scrubSensitivity: 100
+    /** Scrub-gain normalization: effective multiplier = value / anchor, so an
+     *  anchor-equal raw value reads 1.0 - the documented full gain. */
+    scrubSensitivity: 150,
+    scrubSensitivityAnchor: 150
   },
   scrub: {
     /**

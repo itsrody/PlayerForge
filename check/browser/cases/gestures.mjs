@@ -6,6 +6,8 @@
  * text entry, and the active engine arbitrates - so the pointer probes park a
  * press first, and keys arrive through the same trusted surface.
  */
+import { TUNING } from "../../../src/shared/core.js";
+
 function videoCenterScript() {
   // The kernel marks data-pf-shell on video/container AND our shadow host;
   // the event surface is the .pf-shell div (the attachShadow host).
@@ -476,33 +478,73 @@ export async function run({ session, baseUrl, boot }) {
   // the decoder directly - moves only accrue pending travel and the
   // compositor tick (requestAnimationFrame) commits one seek per refresh.
   // One big stroke fired synchronously must therefore leave currentTime
-  // byte-identical within the same eval (the 0.6s+ of accrual is still
-  // uncommitted), and matter only after the next frame commits it - the
-  // per-event write this row forbids was exactly the input/decode coupling
-  // the rewrite cut.
-  await session.eval(function main() {
+  // byte-identical within the same eval (the accrual is still uncommitted),
+  // and matter only after the next frame commits it - the per-event write
+  // this row forbids was exactly the input/decode coupling the rewrite cut.
+  //
+  // The settle assert is derived, not copied: paceCurve replays the shipped
+  // scrub math straight from the product's source table (src/shared/core.js
+  // TUNING) - knee-saturated gain over the fs reference width, sensitivity
+  // anchor linear outside the curve, the scrubTo clamp - against the live
+  // duration and reference width. A tuning retune re-arms the row's own
+  // expectation; only a real regression in the accrue->rAF->commit pipeline
+  // (or a curve/width engine drift the replay does not share) parts the
+  // settled time from it. The one mirrored literal is the 16px fs-box gap
+  // (shell.js FS_BOX_GAP_PX) - this fixture parks the gap far from that
+  // threshold, so per-element resolution agrees whichever side wins.
+  const paceCurve = {
+    sens: TUNING.controller.scrubSensitivity /
+      TUNING.controller.scrubSensitivityAnchor,
+    slow: TUNING.scrub.velocity.slowFullWidthSeconds,
+    fast: TUNING.scrub.velocity.fastFullWidthFraction,
+    knee: TUNING.scrub.velocity.kneeVelocityPxS,
+    exp: TUNING.scrub.velocity.exponent,
+    boxGapPx: 16,
+    stroke: { dx: 200, velocity: 800 }
+  };
+  await session.eval(function main(curve) {
     const v = document.querySelector("#check-video");
     v.pause();
     v.currentTime = 7;
     window.__pfPaceSeed = v.currentTime;
-    window.__pfStation.fire(200, 800);
+    window.__pfStation.fire(curve.stroke.dx, curve.stroke.velocity);
     window.__pfSyncTime = v.currentTime;
-  });
+  }, paceCurve);
   status(rows, "scrub events accrue without an immediate decoder write", await session.eval(function main() {
     return Math.abs(window.__pfSyncTime - window.__pfPaceSeed) < 1e-9;
   }), `t=${JSON.stringify(await session.eval(function main() {
     return document.querySelector("#check-video").currentTime;
   }))}`);
   await new Promise((r) => setTimeout(r, 400));
-  const paceEnd = await session.eval(function main() {
+  const paceEnd = await session.eval(function main(curve) {
     const video = document.querySelector("#check-video");
-    const settled = Math.abs(video.currentTime - (window.__pfPaceSeed + 0.63)) < 0.12;
+    // fs branch of the product's referenceBox (shell.js): the window box
+    // only when window drifts past the gap rule, screen.* otherwise. The
+    // commit sought from this width, so the mirror must read the same one.
+    const width = Math.abs(window.innerWidth - screen.width) >= curve.boxGapPx ||
+      Math.abs(window.innerHeight - screen.height) >= curve.boxGapPx
+      ? window.innerWidth
+      : screen.width;
+    const duration = video.duration;
+    const ratio = curve.stroke.velocity / curve.knee;
+    const t = Math.min(1, ratio ** curve.exp);
+    const slowGain = curve.slow / width;
+    const fastGain = duration * curve.fast / width;
+    const delta = curve.stroke.dx * (slowGain + (fastGain - slowGain) * t) *
+      curve.sens;
+    // The scrubTo clamp, shared letter for letter. The baseline is the seeded
+    // pre-stroke position - currentTime here is post-commit, the very quantity
+    // under assertion.
+    const expected = Math.min(duration,
+      Math.max(0, window.__pfPaceSeed + delta));
+    const settled = Math.abs(video.currentTime - expected) < 0.005;
     video.dispatchEvent(new CustomEvent("pf:gesture-scrubEnd", {
       detail: { zone: "screen", method: "pointer" }
     }));
-    return { t: video.currentTime, settled };
-  });
-  status(rows, "compositor tick commits the accrued stroke", paceEnd.settled, `t=${paceEnd.t}`);
+    return { t: video.currentTime, expected, settled };
+  }, paceCurve);
+  status(rows, "compositor tick commits the accrued stroke", paceEnd.settled,
+    `t=${paceEnd.t} expected=${paceEnd.expected}`);
 
   // Mid-hold pause cancels the boost: the hold arms on "playing at
   // threshold" and a pause after the boost begins is a state that decision

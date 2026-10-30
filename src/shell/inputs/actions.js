@@ -243,7 +243,8 @@ const SCRUB_EXPONENT = TUNING.scrub.velocity.exponent;
 const SCRUB_DEAD_ZONE_PX = TUNING.scrub.deadZonePx;
 const SCRUB_SLOW_FULL_WIDTH_SECONDS = TUNING.scrub.velocity.slowFullWidthSeconds;
 const SCRUB_FAST_FULL_WIDTH_FRACTION = TUNING.scrub.velocity.fastFullWidthFraction;
-const SCRUB_SENSITIVITY = TUNING.controller.scrubSensitivity / 150;
+const SCRUB_SENSITIVITY =
+  TUNING.controller.scrubSensitivity / TUNING.controller.scrubSensitivityAnchor;
 /** Ignore cover-scale changes below this fraction of a scale step (sub-pixel). */
 const FILL_SCALE_EPSILON = 0.001;
 
