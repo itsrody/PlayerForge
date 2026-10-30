@@ -1,6 +1,6 @@
 import { getConfigValue, setConfigValue, deleteConfigField } from "../../shared/store.js";
 import { TUNING, clamp } from "../../shared/core.js";
-import { debounce } from "../../shared/runtime.js";
+import { debounce, Fan } from "../../shared/runtime.js";
 
 /**
  * Zoom/pan persistence: one configs leaf per domain.
@@ -32,7 +32,8 @@ export class ZoomState {
   /** Domain the current session state belongs to; "" until an entry adopts. */
   #domainKey = "";
   /** State listeners (the action layer's transform applier, the section). */
-  #listeners = new Set();
+  /** State audience on the shared Fan. */
+  #audience = new Fan("zoom");
   /** Trailing persist: wheel steps and pan strokes apply instantly, storage
    *  lands once the gesture settles. Not tied to a Scope - the singleton-like
    *  domain map outlives one shell's teardown, so a flush on destroy is what
@@ -123,9 +124,8 @@ export class ZoomState {
     this.#schedulePersist.flush();
   }
 
-  onState(listener) {
-    this.#listeners.add(listener);
-    return () => this.#listeners.delete(listener);
+  onState(listener, { signal } = {}) {
+    return this.#audience.subscribe(listener, { signal });
   }
 
   #set({ scale, ox, oy }) {
@@ -158,9 +158,7 @@ export class ZoomState {
   }
 
   #emit() {
-    for (const listener of this.#listeners) {
-      listener(this.view);
-    }
+    this.#audience.emit(this.view);
   }
 }
 
@@ -236,11 +234,10 @@ export function buildZoomGroup(panel, sectionRoot, zoom, signal) {
   // Gesture-driven state updates flow back into the steppers while the panel
   // is open (wheel zoom, pinch reset). setValue short-circuits on an equal
   // commit, so the gesture -> state -> stepper -> gesture loop is self-breaking.
-  const unsub = zoom.onState(({ scale, ox, oy }) => {
+  zoom.onState(({ scale, ox, oy }) => {
     scaleStepper?.setValue(scale);
     panXStepper?.setValue(ox);
     panYStepper?.setValue(oy);
-  });
-  signal?.addEventListener("abort", () => unsub(), { once: true });
+  }, { signal });
   return group;
 }

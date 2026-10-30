@@ -14,7 +14,7 @@
  * in C++, while a shared dispatcher would filter every document mutation in
  * JS just to reconstruct that scoping.
  */
-import { Scope, logger, postTask, yield_ } from "./runtime.js";
+import { Scope, logger, postTask, yield_, Fan } from "./runtime.js";
 
 /* - 1. Mutation feed - */
 /**
@@ -48,6 +48,14 @@ import { Scope, logger, postTask, yield_ } from "./runtime.js";
  * parked on a background-priority postTask capped at DEFER_VISIBILITY_CAP_MS
  * and resumed on visibility, so a backgrounded SPA doesn't fight its own
  * throttled idle budget with mutation scans.
+ *
+ * Deliberately NOT on the shared Fan (native EventTarget): this feed's
+ * dispatch is a compiled contract the platform fan-out cannot express -
+ * per-consumer throw isolation (one throwing subscriber must not abort the
+ * batch to its peers), the batch argument itself, tombstone compaction
+ * driven by a #live count, and liveness-gated observer teardown (EventTarget
+ * exposes no listener census). Its audience-snapshot rule simply matches
+ * native dispatch by coincidence of design.
  */
 
 /** Cap on how long a hidden document's mutation batch stays deferred. */
@@ -569,9 +577,12 @@ export function isInsideShell(host, node) {
 export let fs = false;
 
 /** Subscribers notified on a fullscreen state transition (subscribed from a
- *  single underlying native listener; see initFullscreenGate). */
+ *  single underlying native listener; see initFullscreenGate). The audience
+ *  is the shared Fan (native EventTarget backend) - the hand-rolled
+ *  subscriber Set plus per-signal abort listeners this once carried were
+ *  the Fan contract spelled by hand. */
 class FsGate {
-  #subscribers = new Set();
+  #audience = new Fan("fs");
   /** Document the gate is currently bound to, so a repeated init (e.g. double
    *  script eval) re-seeds `fs` without stacking duplicate native listeners. */
   #doc = null;
@@ -589,9 +600,7 @@ class FsGate {
     // read exactly as this field trace - the flip row is the field's
     // one-line discriminator, no probe needed.
     logger.log("lifecycle", `fullscreen ${next ? "on" : "off"}`);
-    for (const cb of this.#subscribers) {
-      cb(next);
-    }
+    this.#audience.emit(next);
   }
 
   #update() {
@@ -667,16 +676,7 @@ class FsGate {
    * function; pass `signal` to have it torn down automatically.
    */
   subscribe(cb, signal) {
-    // An aborted signal's teardown listener never fires - adding `cb` now would
-    // pin it in this.#subscribers forever (and keep firing post-teardown).
-    if (signal?.aborted) {
-      return () => {};
-    }
-    this.#subscribers.add(cb);
-    if (signal) {
-      signal.addEventListener("abort", () => this.#subscribers.delete(cb), { once: true });
-    }
-    return () => this.#subscribers.delete(cb);
+    return this.#audience.subscribe(cb, { signal });
   }
 }
 

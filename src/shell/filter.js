@@ -1,6 +1,6 @@
 import { getConfigValue, setConfigFields } from "../shared/store.js";
 import { flashElement } from "./chrome/ui.js";
-import { debounce, Scope } from "../shared/runtime.js";
+import { debounce, Scope, Fan } from "../shared/runtime.js";
 import { clamp, TUNING, fmtPercent, fmtSigned } from "../shared/core.js";
 import { GESTURE_EVENTS } from "../kernel/contract.js";
 
@@ -121,7 +121,8 @@ export class FilterSession {
    *  live-reload echo per step). Flushed on destroy. */
   #schedulePersist = debounce(() => this.#writePersist(), TUNING.filter.persistDebounceMs);
   #scope = new Scope();
-  #listeners = new Set();
+  /** State audience on the shared Fan. */
+  #audience = new Fan("filter");
 
   constructor(shell) {
     this.#shell = shell;
@@ -145,8 +146,7 @@ export class FilterSession {
   }
 
   onState(listener) {
-    this.#listeners.add(listener);
-    return () => this.#listeners.delete(listener);
+    return this.#audience.subscribe(listener);
   }
 
   /** Per-key state write (panel stepper): preview + trailing persist. */
@@ -214,9 +214,7 @@ export class FilterSession {
   }
 
   #notify() {
-    for (const listener of this.#listeners) {
-      listener(this.#values);
-    }
+    this.#audience.emit(this.#values);
   }
 
   destroy() {
@@ -224,7 +222,9 @@ export class FilterSession {
       return;
     }
     this.#scope.dispose();
-    this.#listeners.clear();
+    // No fan detach on dispose: every notify source (consumer calls, the menu
+    // reset gesture listener) dies with this scope, so post-destroy dispatch
+    // is unreachable and the audience GCs with the session it points at.
     // Land any trailing persist before the section dies - the last slider
     // value must not be the one that never got written.
     this.#schedulePersist.flush();

@@ -90,7 +90,11 @@ iframes, same-origin and cross-origin:
   check harness, not here), `delay()`/`debounce()` handles (the one timer
   backend), `runSteps`/`runStepsAsync` (ordered declarative step lists for
   every boot/teardown sequence), `Scope` (one destroy-root per feature, every
-  listener/timer/observer routed through it), `DebugRuntime` (log chatter AND
+  listener/timer/observer routed through it), `Fan` — the ONE plain-fan-out
+  owner, a native `EventTarget` carrying one event per instance
+  (`emit(payload)`/`subscribe(cb, { signal })`; the FsGate, ZoomState,
+  FilterSession, ResumeStore, and ConfigStore audiences plus manual
+  abort-listener pairs all rode it) — `DebugRuntime` (log chatter AND
   the LoAF diagnostic flip as one unit), logger facade.
 - **dom.js** — the shared mutation feed (`onDomMutations`: ONE page-level
   MutationObserver every consumer rides — element pooling, the shell ledger,

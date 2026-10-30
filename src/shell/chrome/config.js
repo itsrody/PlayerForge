@@ -5,7 +5,7 @@
  */
 import { KEYS, getConfigValue, setConfigValue, invalidateConfigCache, watchStorageKey } from "../../shared/store.js";
 import { GESTURES, GESTURE_IDS } from "../../kernel/contract.js";
-import { logger } from "../../shared/runtime.js";
+import { logger, Fan } from "../../shared/runtime.js";
 import { fmtSeconds } from "../../shared/core.js";
 
 const SETTINGS_PREFIX = "settings";
@@ -110,8 +110,8 @@ function coerceSetting(definition, value) {
 class Settings {
   /** Typed cache keyed by SETTING_KEYS, seeded once from storage. */
   #cache = {};
-  /** One EventTarget so every consumer learns about a change exactly once. */
-  #bus = new EventTarget();
+  /** One Fan so every consumer learns about a change exactly once. */
+  #bus = new Fan("settings");
 
   constructor() {
     for (const definition of SETTINGS_SCHEMA) {
@@ -126,24 +126,18 @@ class Settings {
   }
 
   #emit() {
-    this.#bus.dispatchEvent(new Event("settings"));
+    this.#bus.emit();
   }
 
   /**
    * Subscribe to settings changes; the cache is already updated when the
    * listener runs, so re-read getSetting() directly. Returns an unsubscribe;
-   * `signal` detaches it with the caller's lifecycle.
+   * `signal` detaches it with the caller's lifecycle. Fan natively realizes
+   * the no-op-on-aborted-signal convention (the DOM arm adds nothing for an
+   * aborted signal - the manual guard this once spelled).
    */
   subscribe(listener, { signal } = {}) {
-    // Reading a setting is safe with an aborted signal, but subscribing is not:
-    // the platform never fires the teardown listener on an already-aborted
-    // signal, which would leak the handler. Treat it as a no-op subscription.
-    if (signal?.aborted) {
-      return () => {};
-    }
-    const handler = () => listener();
-    this.#bus.addEventListener("settings", handler, { signal });
-    return () => this.#bus.removeEventListener("settings", handler);
+    return this.#bus.subscribe(listener, { signal });
   }
 
   set(key, value) {

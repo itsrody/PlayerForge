@@ -1,7 +1,7 @@
 import { getPageContext, domainsMatch, domainScore, getDomainKey, hashEntry, onNavigate } from "../shared/page.js";
 import { TUNING, formatTime } from "../shared/core.js";
 import { KEYS, gmSetValue, loadJsonObject, watchStorageKey } from "../shared/store.js";
-import { logger, Scope } from "../shared/runtime.js";
+import { logger, Scope, Fan } from "../shared/runtime.js";
 
 /** Sort entries by updatedAt - ascending (oldest-first, for eviction) or
  *  descending (newest-first, for history display). */
@@ -69,7 +69,8 @@ class ResumeStore {
   #loaded = false;
   /** storage watchStorageKey handle for the cross-tab change subscription. */
   #watch = null;
-  #listeners = new Set();
+  /** Entry-set audience on the shared Fan. */
+  #audience = new Fan("resume-store");
   /** Lazily built path -> entries buckets for findMatch; nulled at every
    *  structural mutation so a stale bucket can never serve a match. */
   #byPath = null;
@@ -93,14 +94,11 @@ class ResumeStore {
    * changes only; position-only persists stay invisible to them.
    */
   onChange(cb) {
-    this.#listeners.add(cb);
-    return () => this.#listeners.delete(cb);
+    return this.#audience.subscribe(cb);
   }
 
   #notify(structural = false) {
-    for (const cb of this.#listeners) {
-      cb(structural);
-    }
+    this.#audience.emit(structural);
   }
 
   constructor() {
@@ -124,7 +122,10 @@ class ResumeStore {
   destroy() {
     this.#watch.stop();
     this.#watch = null;
-    this.#listeners.clear();
+    // No fan detach: after the storage watch stops, no notify source remains
+    // (update paths ride the tracker, whose teardown destroyed this store),
+    // so post-destroy dispatch is unreachable and the audience GCs with the
+    // store it lives on.
   }
 
   /** Merge an external store. `value` is the listener's own new value when it

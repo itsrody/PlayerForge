@@ -254,6 +254,50 @@ export class Scope {
     }
   }
 }
+
+/* - 3.5 Fan-out - */
+
+/**
+ * The ONE plain-fan-out owner: a single native EventTarget carrying one
+ * event per instance, dispatching one payload to the current audience.
+ * Every subscriber-set + notify-loop + manual abort-listener-pair machine
+ * routes through this - the platform supplies the semantics those machines
+ * hand-parsed: an already-aborted signal is a no-op subscription (the DOM
+ * spec adds nothing for it; the manual "signal?.aborted" guard in three
+ * files spelled this), a live signal's listener is removed at its abort
+ * with no add/remove pair, and dispatch snapshots the audience so
+ * mid-dispatch subscriptions join the next batch (dom-watch documents the
+ * same rule as its length-hold). Dispatch is synchronous and, as with any
+ * uncaught-through-native-dispatch throw, is reported to the page error
+ * surface rather than aborting the emit call. The event type is
+ * instance-internal - it never escapes this class, so the tag is a call-site
+ * derived label (debug visibility in devtools), not a hand-spelled contract.
+ */
+export class Fan extends EventTarget {
+  #type;
+
+  constructor(tag) {
+    super();
+    this.#type = `pf:fan-${tag}`;
+  }
+
+  /** Fan one payload out synchronously. */
+  emit(payload) {
+    this.dispatchEvent(new CustomEvent(this.#type, { detail: payload }));
+  }
+
+  /**
+   * Subscribe a callback to the payload; returns the unsubscribe handle.
+   * Callbacks receive the dispatched value positionally, matching the
+   * notify-loop signatures this replaces.
+   */
+  subscribe(cb, { signal } = {}) {
+    const handler = (event) => cb(event.detail);
+    this.addEventListener(this.#type, handler, { signal });
+    return () => this.removeEventListener(this.#type, handler);
+  }
+}
+
 /* - 4. Debug runtime - */
 const PREFIX = "[PlayerForge]";
 
