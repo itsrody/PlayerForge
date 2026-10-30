@@ -334,9 +334,9 @@ export class Shell {
     }
     host.focus();
     this.#dom.listen(this.container, "pointerdown", (event) => {
-      if (this.#scope.disposed) {
-        return;
-      }
+      // No disposed re-check: this closure only fires through #dom.listen's
+      // own abort signal, and runSteps destroys synchronously - no event can
+      // interleave between the scope flip and the dom abort that removes it.
       // Common case: focus already lives on the host - no traversal needed.
       if (document.activeElement === host) {
         return;
@@ -455,10 +455,10 @@ export class Shell {
    * and an unknown code still reports a generic failure.
    */
   #watchMediaErrors() {
+    // Listener-entry guards stay out: the registration rides #dom.listen's
+    // abort signal, and synchronous destroy cannot interleave an event
+    // between the scope flip and that abort.
     this.#dom.listen(this.video, "error", () => {
-      if (this.#scope.disposed) {
-        return;
-      }
       const code = this.video.error?.code;
       this.toastInfo("alert", MEDIA_ERROR_LABELS[code] ?? "Video playback error", "media-error");
     });
@@ -479,7 +479,10 @@ export class Shell {
     // boot-time provision is skipped, this still tries - but it does not
     // currently enable the retry the code above describes.
     this.#dom.listen(document, "fullscreenerror", () => {
-      if (this.#scope.disposed || fs) {
+      // The disposed arm is gone with the other listener-entry guards
+      // (abort-scoped registration, synchronous destroy); `fs` stays - it
+      // is the semantic verdict (nothing to report while already fullscreen).
+      if (fs) {
         return;
       }
       this.toastInfo("fs-block", "Fullscreen blocked by embed", "fs-block");
@@ -491,10 +494,10 @@ export class Shell {
 
   /** Lock to landscape on fullscreen entry (Android); unlock on exit. */
   #watchOrientation() {
+    // No disposed re-check at entry: the subscription takes this.#scope's
+    // signal, so the gate drops the callback at the same abort that kills
+    // everything else; entry-only checks here would duplicate that fire.
     const unsub = subscribeFullscreen(async (active) => {
-      if (this.#scope.disposed) {
-        return;
-      }
       try {
         // Lock only a portrait display: an already-landscape device gets a
         // pointless lock churn (and a failed framing on tablets that reject
