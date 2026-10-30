@@ -415,16 +415,15 @@ export class Shell {
     const video = this.video;
     const host = this.#shellDom?.host;
     // Expose media state as CSS custom properties on the host so the shadow
-    // DOM can style based on playing/paused/muted without crossing the realm
-    // boundary. The :playing/:paused/:muted pseudo-classes are in-floor on
-    // 156 (verified via selector probes) but match only in the video's realm;
+    // DOM can style based on playing/paused without crossing the realm
+    // boundary. The :playing/:paused pseudo-classes are in-floor on 156
+    // (verified via selector probes) but match only in the video's realm;
     // from inside our shadow root they cannot select the page's video, so
     // custom properties bridge the gap.
     let cssSync = null;
     if (host) {
       cssSync = cssVarSyncer(host, [
-        ["--pf-media-paused", () => (video.paused ? "1" : "0")],
-        ["--pf-media-muted", () => (video.muted ? "1" : "0")]
+        ["--pf-media-paused", () => (video.paused ? "1" : "0")]
       ]);
     }
     // One registration set for both concerns: play/pause/volumechange are in

@@ -135,9 +135,10 @@
 
 /* Register the cue-position custom properties as syntax-typed so Blink can
    reason about them as layout/percentage values instead of opaque strings.
-   The cue pool sets these per cuechange (our hottest DOM churn); typed
+   The cue sampler sets these per render diff (our hottest DOM churn); typed
    registration lets the style engine invalidate only the affected
-   descendants and opens the door to compositor-friendly transitions. Their
+   descendants, and --pf-cue-x rides the slot entry/exit transition through
+   the translate property (see .pf-cue). Their
    initial-values ARE the cue defaults, so `.pf-cue` never needs a fallback
    and the layer no longer re-declares them. */
 @property --pf-cue-top {
@@ -305,15 +306,11 @@
     }
 
     /* - Media state styling - */
-    /* --pf-media-paused / --pf-media-muted are set on the .pf-shell host by
-       shell.js and inherit into the shadow root. Registered as <number> so
-       they can drive calc()-based conditional opacity. */
+    /* --pf-media-paused is set on the .pf-shell host by shell.js and inherits
+       into the shadow root. Registered as <number> so it can drive calc()-
+       based conditional opacity. (The old --pf-media-muted twin retired with
+       its zero consumers; its writer pair bridged a state nothing styled.) */
     @property --pf-media-paused {
-      syntax: "<number>";
-      inherits: true;
-      initial-value: 0;
-    }
-    @property --pf-media-muted {
       syntax: "<number>";
       inherits: true;
       initial-value: 0;
@@ -373,7 +370,15 @@
       position: absolute;
       top: var(--pf-cue-top, 85%);
       left: var(--pf-cue-left, 50%);
-      transform: translateX(var(--pf-cue-x, -50%));
+      /* Horizontal centering lives in the translate property (the toast's
+         proven shape), keeping transform free for any motion and composing
+         the cue-x var before any other displacement axis. The anchor lane -
+         the top/left px posture the renderer writes per slot - deliberately
+         stays OUT of the transition list: fs flips, resizes and scrolls
+         re-posture instantly, re-anchoring is not a transition, it is a
+         correction (R9: geometry may not drift as an appearance side
+         effect). */
+      translate: var(--pf-cue-x, -50%) 0px;
       max-width: 80%;
       color: var(--pf-cue-color, #fff);
       font-family: var(--pf-cue-font-family, inherit);
@@ -385,9 +390,26 @@
       white-space: pre-wrap;
       text-align: center;
       pointer-events: none;
+      /* Slot entry/exit morph over the hidden flip (the panel's keyed
+         pattern): a 3px settle-in and fade on entry, the mirrored targets
+         on the hidden state so the display interpolation holds to a real
+         fade and release instead of painting the stale cue through the
+         discrete half. Text swaps within a visible slot stay instant - the
+         motion keys off the hidden flip only, so no per-sentence churn. */
+      transition:
+        opacity var(--pf-ease-duration) var(--pf-ease-curve),
+        translate var(--pf-ease-duration) var(--pf-ease-curve),
+        display var(--pf-ease-duration) allow-discrete;
+
+      @starting-style {
+        opacity: 0;
+        translate: var(--pf-cue-x, -50%) 3px;
+      }
 
       &[hidden] {
         display: none !important;
+        opacity: 0;
+        translate: var(--pf-cue-x, -50%) 3px;
       }
     }
 

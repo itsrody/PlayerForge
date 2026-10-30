@@ -77,6 +77,28 @@ export async function run({ session, boot }) {
     ms: null
   });
 
+  // The motion contract: a visible slot transitions exactly the three
+  // properties the hidden flip owns - opacity, translate (the 3px settle),
+  // display (allow-discrete). The anchor lane (top/left) must NOT appear:
+  // posture corrections land instantly (R9). Pinned as a computed read so a
+  // token or property drift off this list fails loudly.
+  const readMotion = await session.eval(function main() {
+    const slot = document.querySelector(".pf-shell")?.shadowRoot?.querySelector(".pf-cue:not([hidden])");
+    if (!slot) {
+      return null;
+    }
+    const props = getComputedStyle(slot).transitionProperty.split(",").map((p) => p.trim()).sort();
+    return props.join("|");
+  });
+  const motionProps = (readMotion ?? "").split("|");
+  const motionOk = motionProps.includes("opacity") && motionProps.includes("translate") && motionProps.includes("display") && !motionProps.includes("top") && !motionProps.includes("left");
+  rows.push({
+    name: "cue slot transitions the motion lane only (opacity/translate/display; anchors instant)",
+    status: motionOk ? "pass" : "fail",
+    note: (readMotion ? readMotion : "no visible slot to read") + (motionOk ? " (opacity+translate+display in, top/left out)" : ""),
+    ms: null
+  });
+
   const readSlot = await session.eval(function main() {
     const slot = document.querySelector(".pf-shell")?.shadowRoot?.querySelector(".pf-cue:not([hidden])");
     if (!slot) {

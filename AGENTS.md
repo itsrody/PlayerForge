@@ -246,7 +246,12 @@ iframes, same-origin and cross-origin:
   track list, so a host can never list/restyle/mode-flip our captions;
   per-frame `currentTime` sampling on the media clock with the compositor's
   rAF as the crank, a sorted-start walk with an amortized dead floor, the
-  W3C relation `start <= t < end`; picture-anchored cue
+  W3C relation `start <= t < end`; slot entry/exit rides the hidden flip in
+  the HUD sheet itself — `@starting-style` +
+  `display allow-discrete` over `&[hidden]`, transitioning ONLY the motion
+  lane (opacity/translate — centering lives in `translate` so `transform`
+  stays free), never the anchor lane, so posture corrections land instantly;
+  picture-anchored cue
   placement — percent cue fields resolve against the displayed video
   picture derived from the ReferenceBox rect + the element's own
   box/intrinsic/object-fit re-derived per render, slots laid in the
@@ -601,7 +606,9 @@ stop at the first failure:
   `subtitles` (the picture-anchor case: a letterbox stage — square element
   in a taller stage — proves percent cue fields land on the displayed
   picture rect, not the layer box, with the panel drop as the real ingest
-  path; a resize row (video element + stage widening) proving the box
+  path; a motion-lane row proving a visible slot's computed
+  `transition-property` is exactly opacity/translate/display, the anchor
+  lane absent; a resize row (video element + stage widening) proving the box
   ticks re-anchor the running slots without any cue change; and the own
   scheduler's boundary rows — one seek into a second cue's window lights
   the enter, the window passing drops the exit), `robust`
