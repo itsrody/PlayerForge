@@ -1047,8 +1047,6 @@ class SettingsSection {
   #panel;
   /** key -> widget handle(s), so a change event can re-sync without queries. */
   #controls = new Map();
-  /** The reactivity subscription; torn down when the panel body is nulled. */
-  #off = () => {};
 
   constructor(panel, signal) {
     this.#panel = panel;
@@ -1097,8 +1095,11 @@ class SettingsSection {
     // Re-sync widgets when a setting changes elsewhere (another tab's write, or
     // an in-page setSetting that did not originate from these controls). Values
     // are assigned - never .click()/.dispatchEvent - so the sync cannot echo
-    // back into setSetting. A destroyed panel (body nulled) unsubscribes.
-    this.#off = onSettingsChanged(() => this.#syncFromCache(), { signal });
+    // back into setSetting. Teardown is the caller's signal alone (native
+    // addEventListener detach): #body is nulled only inside destroy(), which
+    // aborts that scope first, so a body-null sync call cannot exist and no
+    // second unsubscribe path is warranted.
+    onSettingsChanged(() => this.#syncFromCache(), { signal });
     logger.log("settings", "Settings section ready");
   }
 
@@ -1158,10 +1159,6 @@ class SettingsSection {
   }
 
   #syncFromCache() {
-    if (!this.#panel?.body) {
-      this.#off();
-      return;
-    }
     for (const [key, rec] of this.#controls) {
       const fresh = getSetting(key);
       if (rec.type === "bool") {
