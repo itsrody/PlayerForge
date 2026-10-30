@@ -59,77 +59,131 @@ function gestureHaptic(type) {
 }
 
 /**
- * Declarative input bindings - the single source of input policy.
+ * Declarative input policy - the single source, gathered by FUNCTION.
  *
- * Every gesture the shell understands is one record here: what triggers it,
- * which settings toggle arms it, whether it demands fullscreen, and what it
- * does. The InputForge engine owns recognition and consults this list for
- * every decision; action implementations live beside the table so trigger
- * and behavior stay reviewable in one place.
+ * One record per user-facing action; each record's `inputs` array collects
+ * every physical trigger that can fire it. The motivating case is hold-to-
+ * speed: a held pointer press and a held Space key are the SAME function -
+ * one boost rate, one toast, one haptic, one release story - so the row
+ * defines the action (its `speed` parameter, the product fact the action
+ * layer reads) and both triggers ride its `inputs`, instead of the old
+ * split that shipped the pointer hold as a table row and the Space hold
+ * as a hardcoded engine branch keyed on event.code. Adding a trigger to
+ * hold-to-speed means adding one input to this row - no engine change.
  *
- * Binding schema:
- *   id      - stable label for logging/tests.
- *   gesture - intent family ("scrub", "swipe", "dbltap", "hold", "pinch",
- *             or "key").
- *   setting - optional settings key gating this binding.
- *   fs      - when true, fires only while the document is fullscreen.
- *   Matcher fields (per family): zone/direction for swipes and taps,
- *   code/direction/emit for keys, allowControlFocus for keys that must win
- *   even when a control element holds focus.
+ * Input kinds:
+ *   pointer - a gesture-registry family id (kernel/contract.js GESTURES);
+ *             the engine's stroke machine owns recognition, and the
+ *             setting/fs fields gate it the way the old per-family rows
+ *             did.
+ *   key     - a KeyboardEvent.code carrying either an `event` handle
+ *             (one-shot: the semantic event fires on keydown) or
+ *             `session: true` (keydown arms the action's hold window,
+ *             keyup releases it - the key-session machine shared with the
+ *             pointer hold). A session key names the FAMILY it belongs to
+ *             and consults that family's pointer gate at arm time - the
+ *             same allowsIntent read that arms the pointer hold - and it
+ *             deliberately carries no `setting`, so the hotkeys toggle
+ *             keeps never governing Space; `toggleOnTap` preserves the
+ *             bare-tap play/pause the UA's space-activates-video behavior
+ *             hands over.
+ * Gates stay per input, so unifying the definition changed no behavior.
  */
-
-export const INPUT_BINDINGS = [
-  // - Pointer intents -
-  { id: "hold-speed", gesture: "hold", setting: GESTURES.hold.setting, fs: false },
-  { id: "drag-scrub", gesture: "scrub", setting: GESTURES.scrub.setting, fs: true },
-  { id: "drag-swipe", gesture: "swipe", setting: GESTURES.swipe.setting, fs: true },
-  { id: "double-tap", gesture: "dbltap", setting: GESTURES.dbltap.setting, fs: true },
-  { id: "pinch-fill", gesture: "pinch", setting: GESTURES.pinch.setting, fs: true },
-
-  // - Keyboard -
+const INPUT_ACTIONS = [
   {
-    id: "key-skip-right", gesture: "key", code: "ArrowRight", emit: GESTURE_EVENTS.skip,
-    direction: "right", setting: SETTING_KEYS.hotkeys, fs: false
+    id: "hold-speed",
+    speed: TUNING.controller.holdSpeed,
+    inputs: [
+      { kind: "pointer", family: "hold", setting: GESTURES.hold.setting, fs: false },
+      { kind: "key", code: "Space", family: "hold", session: true, toggleOnTap: true, fs: false }
+    ]
   },
   {
-    id: "key-skip-left", gesture: "key", code: "ArrowLeft", emit: GESTURE_EVENTS.skip,
-    direction: "left", setting: SETTING_KEYS.hotkeys, fs: false
+    id: "scrub",
+    inputs: [{ kind: "pointer", family: "scrub", setting: GESTURES.scrub.setting, fs: true }]
   },
   {
-    id: "key-volume-up", gesture: "key", code: "ArrowUp", emit: GESTURE_EVENTS.volume,
-    direction: "up", setting: SETTING_KEYS.hotkeys, fs: false
+    id: "swipe",
+    inputs: [{ kind: "pointer", family: "swipe", setting: GESTURES.swipe.setting, fs: true }]
   },
   {
-    id: "key-volume-down", gesture: "key", code: "ArrowDown", emit: GESTURE_EVENTS.volume,
-    direction: "down", setting: SETTING_KEYS.hotkeys, fs: false
+    id: "double-tap",
+    inputs: [{ kind: "pointer", family: "dbltap", setting: GESTURES.dbltap.setting, fs: true }]
   },
   {
-    id: "key-mute", gesture: "key", code: "KeyM", emit: GESTURE_EVENTS.mute,
-    setting: SETTING_KEYS.hotkeys, fs: false
+    id: "pinch-fill",
+    inputs: [{ kind: "pointer", family: "pinch", setting: GESTURES.pinch.setting, fs: true }]
   },
   {
-    id: "key-pip", gesture: "key", code: "KeyP", emit: GESTURE_EVENTS.pip,
-    setting: SETTING_KEYS.hotkeys, fs: false
+    id: "skip",
+    inputs: [
+      { kind: "key", code: "ArrowRight", event: GESTURE_EVENTS.skip, direction: "right", setting: SETTING_KEYS.hotkeys, fs: false },
+      { kind: "key", code: "ArrowLeft", event: GESTURE_EVENTS.skip, direction: "left", setting: SETTING_KEYS.hotkeys, fs: false }
+    ]
   },
   {
-    id: "key-panel", gesture: "key", code: "KeyS", emit: GESTURE_EVENTS.panel,
-    setting: SETTING_KEYS.hotkeys, fs: false, allowControlFocus: true
+    id: "volume",
+    inputs: [
+      { kind: "key", code: "ArrowUp", event: GESTURE_EVENTS.volume, direction: "up", setting: SETTING_KEYS.hotkeys, fs: false },
+      { kind: "key", code: "ArrowDown", event: GESTURE_EVENTS.volume, direction: "down", setting: SETTING_KEYS.hotkeys, fs: false }
+    ]
+  },
+  {
+    id: "mute",
+    inputs: [{ kind: "key", code: "KeyM", event: GESTURE_EVENTS.mute, setting: SETTING_KEYS.hotkeys, fs: false }]
+  },
+  {
+    id: "pip",
+    inputs: [{ kind: "key", code: "KeyP", event: GESTURE_EVENTS.pip, setting: SETTING_KEYS.hotkeys, fs: false }]
+  },
+  {
+    id: "panel",
+    inputs: [{ kind: "key", code: "KeyS", event: GESTURE_EVENTS.panel, setting: SETTING_KEYS.hotkeys, fs: false, allowControlFocus: true }]
   }
 ];
 
-/** Whether a binding's gates are open right now. */
-function gateOpen(binding) {
-  return (!binding.setting || getSetting(binding.setting)) &&
-    (!binding.fs || fs);
+// Table integrity, checked at import (the flaws gate's smoke catches it):
+// every pointer family and every session key's family must live in the
+// gesture registry - the registry stays the single vocabulary, and a
+// hand-spelled family id here would otherwise silently arm nothing.
+for (const action of INPUT_ACTIONS) {
+  for (const input of action.inputs) {
+    if (input.kind !== "key" && !GESTURES[input.family]) {
+      throw new TypeError(`input action ${action.id}: family ${input.family} is not in the gesture registry`);
+    }
+  }
+}
+
+/** The pointer intent inputs, in table order - the IntentGates buckets. */
+const POINTER_INTENTS = INPUT_ACTIONS.flatMap((action) =>
+  action.inputs.filter((input) => input.kind === "pointer")
+);
+
+/** The key inputs, in table order - flat for the engine's keydown walk.
+ *  Session rows (hold keys) ride the same list as one-shot rows; the
+ *  engine distinguishes them by the `session` field. */
+export const KEY_BINDINGS = INPUT_ACTIONS.flatMap((action) =>
+  action.inputs.filter((input) => input.kind === "key")
+);
+
+/** The hold boost rate, read once from the action definition that owns it. */
+const HOLD_SPEED =
+  INPUT_ACTIONS.find((action) => action.id === "hold-speed")?.speed ??
+  TUNING.controller.holdSpeed;
+
+/** Whether an input row's gates are open right now. */
+function gateOpen(input) {
+  return (!input.setting || getSetting(input.setting)) &&
+    (!input.fs || fs);
 }
 
 /**
  * The unified gate table. One class owns the whole gate dimension - settings
  * x fullscreen x gesture family - that used to live as module-level `let`s
  * and free functions:
- *   - the table buckets INPUT_BINDINGS by gesture family natively
- *     (`Map.groupBy`, Chromium 117+), so decision-point scans skip the mass
- *     of unrelated records; entries keep table order;
+ *   - the table buckets the actions' pointer inputs by gesture family
+ *     natively (`Map.groupBy`, Chromium 117+), so decision-point scans skip
+ *     the mass of unrelated rows; entries keep table order;
  *   - a per-family snapshot re-samples on the settings bus, so pointer-intent
  *     decision points read flat map entries instead of walking the binding
  *     tables at display rate. The two inputs gateOpen folds (a settings key
@@ -140,12 +194,13 @@ function gateOpen(binding) {
  *     the gate's initFullscreenGate rebind resyncs `fs` silently (no
  *     subscriber fan-out), and a snapshot that missed such a resync would arm
  *     fullscreen-only intents on an inline page.
- * Key bindings stay live-sampled per keystroke (keyArmed) - once per
- * keypress is not a hot path.
+ * Key inputs stay live-sampled per keystroke (keyArmed) - once per keypress
+ * is not a hot path.
  */
 class IntentGates {
-  #bindings = Map.groupBy(INPUT_BINDINGS, (binding) => binding.gesture);
-  /** gesture family -> any binding armed. */
+  /** The pointer inputs bucketed by family. */
+  #families = Map.groupBy(POINTER_INTENTS, (input) => input.family);
+  /** family -> any input armed. */
   #armed = new Map();
   /** Precomputed OR over GESTURE_IDS (all of which are pointer intents):
    *  the fixed cost of the `allowsAnyIntent` seam - one boolean read per
@@ -163,15 +218,15 @@ class IntentGates {
   /** Re-sample every family's gate snapshot against live settings + fs. */
   #recompute() {
     let anyPointer = false;
-    for (const [gesture, bindings] of this.#bindings) {
+    for (const [family, inputs] of this.#families) {
       let open = false;
-      for (let i = 0; i < bindings.length; i++) {
-        if (gateOpen(bindings[i])) {
+      for (let i = 0; i < inputs.length; i++) {
+        if (gateOpen(inputs[i])) {
           open = true;
           break;
         }
       }
-      this.#armed.set(gesture, open);
+      this.#armed.set(family, open);
     }
     for (let i = 0; i < GESTURE_IDS.length; i++) {
       if (this.#armed.get(GESTURE_IDS[i]) === true) {
@@ -183,12 +238,7 @@ class IntentGates {
     this.#fsStamp = fs;
   }
 
-  /** Key bindings for a family, in table order. */
-  forGesture(gesture) {
-    return this.#bindings.get(gesture);
-  }
-
-  /** True when at least one binding for the pointer-intent family is armed.
+  /** True when at least one input of the pointer-intent family is armed.
    *  Mid-session toggles still apply at the next decision via the fs-validity
    *  recheck. */
   allows(gesture) {
@@ -207,16 +257,13 @@ class IntentGates {
     return this.#anyPointer;
   }
 
-  /** Whether a key binding's gates are open right now (live per read). */
-  keyArmed(binding) {
-    return gateOpen(binding);
+  /** Whether a key input's gates are open right now (live per read). */
+  keyArmed(input) {
+    return gateOpen(input);
   }
 }
 
 const gates = new IntentGates();
-
-/** Armed key bindings, in table order - sampled live per keystroke. */
-export const KEY_BINDINGS = gates.forGesture("key");
 
 export function allowsIntent(gesture) {
   return gates.allows(gesture);
@@ -226,8 +273,8 @@ export function allowsAnyIntent() {
   return gates.anyPointer();
 }
 
-export function isKeyArmed(binding) {
-  return gates.keyArmed(binding);
+export function isKeyArmed(input) {
+  return gates.keyArmed(input);
 }
 
 /*
@@ -876,7 +923,7 @@ class ShellActions {
     if (this.#activeHolds.has(source) || (this.#activeHolds.add(source), this.#activeHolds.size > 1)) {
       return;
     }
-    const speed = TUNING.controller.holdSpeed;
+    const speed = HOLD_SPEED;
     this.#savedRate = shell.playbackRate;
     shell.media.beginBoost(speed);
     gestureHaptic("hold");

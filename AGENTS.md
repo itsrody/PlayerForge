@@ -191,13 +191,18 @@ iframes, same-origin and cross-origin:
   `SwipeStroke` (the translate-drag transform writes and their eased
   restore), `TapWindow` (the dbltap window: observation only, no seed and
   no replay — by the prevent-scope rule there is nothing held back to hand
-  back), `SpaceSession`
-  (hold-to-speed + bare-tap toggle, settle-on-next-press hygiene for a
+  back), `KeyHoldSession`
+  (the INPUT_ACTIONS session keys — today the hold-speed row's Space:
+  hold-to-speed + bare-tap toggle, settle-on-next-press hygiene for a
   swallowed keyup). Gesture detail carries `dx` and the mirrored `dy` as
   engine geometry (the detail payload shape is source-table fixed); pinch
   and trackpad-pinch handshake stay engine-core; hold/scrub timers ride
   the shared scheduler.
-- **inputs/actions.js** — the action layer: the binding table + `IntentGates`,
+- **inputs/actions.js** — the action layer: the unified `INPUT_ACTIONS`
+  table (one row per user-facing function, each gathering every trigger
+  under its `inputs` — pointer families and key codes, one-shot or
+  hold-session; the hold-speed row defines 2x hold-to-speed ONCE, its
+  pointer hold and Space hold both riding it) + `IntentGates`,
   and the per-story state machines `SkipStreak`, `ScrubSession` (the input/
   commit decoupling: moves accrue `#pendingDelta`, requestAnimationFrame —
   the compositor tick — commits one clamped seek per display refresh, the

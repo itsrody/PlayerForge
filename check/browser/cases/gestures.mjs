@@ -297,6 +297,44 @@ export async function run({ session, baseUrl, boot }) {
     return panel === null || !panel.classList.contains("pf-open");
   }), "panel still open");
 
+  // The gathered-definition row: hold-to-speed is ONE INPUT_ACTIONS row
+  // whose inputs gather both trigger kinds - the pointer hold is proven
+  // above by the zone-telemetry row, so this drives the KEY side: a held
+  // Space key rides the same hold/release events through the key-session
+  // machine the table row builds. The keydown's preventDefault cancels the
+  // UA space-activates-video default, but play() runs muted first anyway:
+  // with sound it can meet a headless autoplay policy. Driver keys stay
+  // down across separate action chains, so the drive is two chains:
+  // keydown + 700ms (the 300ms hold timer fires mid-chain) then keyup.
+  // The keysym is the literal space character, not the W3C Unidentified
+  // key (U+E000) - the latter carries no physical-key identity, so the
+  // event's code comes through empty and matches no INPUT_ACTIONS row.
+  await session.eval(function main() {
+    const v = document.querySelector("#check-video");
+    v.muted = true;
+    v.playbackRate = 1;
+    v.play();
+    window.__pfEvents = [];
+  });
+  await new Promise((r) => setTimeout(r, 150));
+  await raw.actions({ async: true }).keyDown(" ").pause(700).perform();
+  const spaceHold = await session.eval(function main() {
+    const v = document.querySelector("#check-video");
+    return { rate: v.playbackRate, held: window.__pfEvents.includes("hold:screen") };
+  });
+  status(rows, "held Space boosts 2x through the hold-speed session key",
+    spaceHold.rate === 2 && spaceHold.held, JSON.stringify(spaceHold));
+  await raw.actions({ async: true }).keyUp(" ").pause(150).perform();
+  const spaceRelease = await session.eval(function main() {
+    const v = document.querySelector("#check-video");
+    const at = { rate: v.playbackRate, released: window.__pfEvents.includes("scrub-release") };
+    v.pause();
+    v.muted = false;
+    return at;
+  });
+  status(rows, "Space keyup releases the boost back to 1x",
+    spaceRelease.rate === 1 && spaceRelease.released, JSON.stringify(spaceRelease));
+
   // KeyP asks for picture-in-picture through the kernel's semantic layer;
   // pip-window creation may be blocked in headless Chromium, so the row
   // asserts the contract, not the browser-side window.

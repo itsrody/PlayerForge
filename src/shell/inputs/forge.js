@@ -477,30 +477,42 @@ class TapWindow {
 }
 
 /**
- * Space key machine: hold-to-speed + bare-tap toggle. The engine keeps the
- * keydown/keyup routing (binding-table dispatch, focus arbitration, the
- * cross-code repeat shield set); this owns the press's hold timer, hold
- * state, and its release/toggle decision, so an orphaned hold left latched
- * by a swallowed keyup can be settled exactly by the next press.
+ * Key hold-session machine: hold-to-speed + bare-tap toggle, built from the
+ * INPUT_ACTIONS key inputs that carry `session: true` (today exactly one -
+ * Space). The engine keeps the keydown/keyup routing (binding-table walk,
+ * focus arbitration, the cross-code repeat shield set); this owns the
+ * press's hold timer, hold state, and its release/toggle decision, so an
+ * orphaned hold left latched by a swallowed keyup can be settled exactly by
+ * the next press.
  */
-class SpaceSession {
+class KeyHoldSession {
   #video;
   #dispatch;
   /** Liveness gate for the bare-tap toggle (focus may have moved between
    *  keydown and keyup), borrowed from the engine at handoff time. */
   #canToggle;
+  /** The pointer-gesture family the session's action belongs to (the
+   *  INPUT_ACTIONS row): the hold arms only when that family's gate is
+   *  open - the same allowsIntent read the pointer hold's arming consults. */
+  #family;
+  /** Whether a bare tap (down+up inside the hold window) toggles playback
+   *  - the Space row's preservation of the UA's space-activates-video
+   *  behavior. */
+  #toggleOnTap;
   #timer = null;
   #holding = false;
-  /** Whether the CURRENT Space press was captured by us. The keydown decision
-   *  (shouldHandleKeys) is latched here so keyup never toggles playback for a
-   *  press we did not own (focus moved between down and up), and always
+  /** Whether the CURRENT press was captured by us. The keydown decision
+   *  (shouldHandleKeys) is latched here so keyup never toggles playback for
+   *  a press we did not own (focus moved between down and up), and always
    *  releases a hold we did. */
   #own = false;
 
-  constructor(video, dispatch, canToggle) {
+  constructor(video, dispatch, canToggle, family, toggleOnTap) {
     this.#video = video;
     this.#dispatch = dispatch;
     this.#canToggle = canToggle;
+    this.#family = family;
+    this.#toggleOnTap = toggleOnTap;
   }
 
   /** A captured press begins (the engine already made the ownership and
@@ -516,7 +528,7 @@ class SpaceSession {
     this.clearTimer();
     this.#timer = delay(() => {
       this.#timer = null;
-      if (!this.#video.paused && allowsIntent("hold")) {
+      if (!this.#video.paused && allowsIntent(this.#family)) {
         this.#holding = true;
         holdDetail.zone = "screen";
         holdDetail.method = "keyboard";
@@ -545,7 +557,7 @@ class SpaceSession {
     this.clearTimer();
     if (wasHolding) {
       this.#dispatchRelease();
-    } else if (allowToggle && owned && this.#canToggle()) {
+    } else if (allowToggle && this.#toggleOnTap && owned && this.#canToggle()) {
       if (this.#video.paused) {
         // play() is a promise (spec-mandated since the API landed); benign
         // policy rejections (autoplay block) idle silently here.
@@ -591,9 +603,10 @@ class SpaceSession {
  * InputForge engine: the gesture router. Turns pointer/keyboard/wheel
  * physics into semantic GESTURE_EVENTS on the shell host; every policy
  * decision (settings gates, fullscreen requirement) is delegated to the
- * declarative INPUT_BINDINGS list, sampled live at each decision point.
+ * declarative INPUT_ACTIONS table, sampled live at each decision point.
  * Per-story state machines own the recognizer state (ScrubStroke, SwipeStroke,
- * TapWindow, SpaceSession) while the engine keeps the stream: press * eligibility, pointer tracking, the shared session-latch flag, and the
+ * TapWindow, KeyHoldSession) while the engine keeps the stream: press
+ * eligibility, pointer tracking, the shared session-latch flag, and the
  * click/dblclick suppression decisions.
  *
  * Chromium 156+ native by design: one AbortSignal owns the entire listener
@@ -656,11 +669,11 @@ export class InputForge {
   /** Per-story machines, built in the constructor (each borrows the engine's
    *  live gesture boundaries: video, dispatch, zone). Scrub: the move-stream
    *  recognizer; Swipe: the translate-drag machine; TapWindow: the dbltap
-   *  first/second window; SpaceSession: the keyboard hold/toggle press. */
+   *  first/second window; keySessions: the INPUT_ACTIONS hold-session keys. */
   #scrub;
   #swipe;
   #tap;
-  #space;
+  #keySessions = new Map();
 
   /**
    * Once a scrub/swipe session latches, the gesture already started fullscreen
@@ -713,7 +726,17 @@ export class InputForge {
     this.#scrub = new ScrubStroke(dispatchGesture, () => this.#gestureZone);
     this.#swipe = new SwipeStroke(video);
     this.#tap = new TapWindow();
-    this.#space = new SpaceSession(video, dispatchGesture, () => this.#shouldHandleKeys());
+    // The INPUT_ACTIONS hold-session keys (keydown arms the action's hold,
+    // keyup releases): one machine per table row, keyed by code. The class
+    // docstring carries the machine story; here only the table wiring.
+    for (const input of KEY_BINDINGS) {
+      if (input.session) {
+        this.#keySessions.set(input.code, new KeyHoldSession(
+          video, dispatchGesture, () => this.#shouldHandleKeys(),
+          input.family, input.toggleOnTap === true
+        ));
+      }
+    }
     const { signal } = this.#scope;
     // Track touch-action (kills scroll/pinch takeover) and user-select (kills
     // native selection highlight + its hit-testing while scrubbing over page
@@ -875,9 +898,16 @@ export class InputForge {
     // DOM lifecycle: disconnect observers, restore styles, remove elements.
     this.#dom.destroy();
     forgeRegistry.remove(this);
-    this.#space.abort();
+    // Session teardown dispatches (keyboard hold release) must reach the
+    // action layer while the scope signal is still live - dispose() lands at
+    // the end.
+    for (const session of this.#keySessions.values()) {
+      session.abort();
+    }
     this.#ownedKeyCodes.clear();
-    this.#space.clearTimer();
+    for (const session of this.#keySessions.values()) {
+      session.clearTimer();
+    }
     this.#pointerOwned = false;
     this.#streamClaimed = false;
     this.#clearAwaitClick();
@@ -1416,10 +1446,13 @@ export class InputForge {
    * stay latched.
    */
   #releaseSessions() {
-    // The Space shield entry dies with the session; the machine's release
-    // covers the hold + toggle decision (never toggles on lifecycle loss).
-    this.#ownedKeyCodes.delete("Space");
-    this.#space.release(false);
+    // The session shield entries die with the sessions; each machine's
+    // release covers the hold + toggle decision (never toggles on lifecycle
+    // loss).
+    for (const [code, session] of this.#keySessions) {
+      this.#ownedKeyCodes.delete(code);
+      session.release(false);
+    }
     for (const id of this.#pointers.keys()) {
       this.#cancelTrackedPointer(id);
     }
@@ -1576,11 +1609,14 @@ export class InputForge {
   }
 
   /**
-   * Space is absent from the binding table on purpose: it carries hold-to-
-   * speed semantics and intentionally ignores the hotkeys toggle. The
-   * capture-phase keydown preventDefault cancels the UA's own Space-activates-
-   * video default so it cannot fight the hold, and a bare tap toggles play/
-   * pause on the real keyup.
+   * Every key rides the INPUT_ACTIONS table: one-shot inputs fire their
+   * `event` handle on keydown; session inputs (hold keys - today the
+   * hold-speed row's Space) arm/release through the machine built from the
+   * row. The capture-phase keydown preventDefault on an owned press cancels
+   * the UA's own code-activated default (Space would activate the video, so
+   * it cannot fight the hold), and a Space tap toggles play/pause on the
+   * real keyup via the row's toggleOnTap - the row being the reason the
+   * hotkeys toggle never governed Space (it carries no setting).
    */
   #handleKeydown(event) {
     if (event.repeat) {
@@ -1596,58 +1632,49 @@ export class InputForge {
     // Fresh press: re-latch from scratch so a swallowed earlier keyup can
     // never keep shielding a press this one no longer owns.
     this.#ownedKeyCodes.delete(event.code);
-    if (event.code === "Space") {
-      if (this.#shouldHandleKeys(false)) {
-        forgeRegistry.makeLast(this);
-        // Own the press end-to-end: preventDefault cancels the UA's
-        // Space-activates-video default, and stopImmediatePropagation keeps
-        // page-level handlers (a platform's own Space shortcut lives on
-        // document bubble after this capture listener) from toggling pause
-        // mid-press - a pause before the 300ms timer would starve the hold
-        // every time. Capturing ownership also lets keyup settle exactly
-        // what keydown decided, even if focus moved in between.
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        // A swallowed keyup (focus slipped into an iframe, a page handler
-        // ate it) would leave the boost latched and poison every later hold:
-        // settle the orphaned session first, then re-arm from a clean state.
-        this.#space.press();
-        this.#ownedKeyCodes.add("Space");
-      } else {
-        // Not ours (text entry, foreign focus): a later keyup must not
-        // toggle playback for a press the page owned.
-        this.#space.foreign();
-      }
-      return;
-    }
-    for (const binding of KEY_BINDINGS) {
-      if (binding.code !== event.code) {
+    for (const input of KEY_BINDINGS) {
+      if (input.code !== event.code) {
         continue;
       }
-      if (!isKeyArmed(binding)) {
+      if (!isKeyArmed(input)) {
         continue;
       }
-      if (!this.#shouldHandleKeys(!!binding.allowControlFocus)) {
+      if (!this.#shouldHandleKeys(!!input.allowControlFocus)) {
+        // A session press the page owns (text entry, foreign focus): its
+        // keyup must not toggle playback for it.
+        if (input.session) {
+          this.#keySessions.get(input.code)?.foreign();
+        }
         continue;
       }
       forgeRegistry.makeLast(this);
+      // Own the press end-to-end: preventDefault cancels the UA default the
+      // code would otherwise act on, and stopImmediatePropagation keeps
+      // page-level handlers from racing a decision we already made.
       event.preventDefault();
       event.stopImmediatePropagation();
       this.#ownedKeyCodes.add(event.code);
+      if (input.session) {
+        // A swallowed keyup (focus slipped into an iframe, a page handler
+        // ate it) would leave the boost latched and poison every later hold:
+        // settle the orphaned session first, then re-arm from a clean state.
+        this.#keySessions.get(input.code).press();
+        return;
+      }
       keyDetail.method = "keyboard";
-      keyDetail.direction = binding.direction;
-      this.#dispatch(binding.emit, keyDetail);
+      keyDetail.direction = input.direction;
+      this.#dispatch(input.event, keyDetail);
       return;
     }
   }
 
   #handleKeyup(event) {
     this.#ownedKeyCodes.delete(event.code);
-    if (event.code !== "Space") {
-      return;
+    const session = this.#keySessions.get(event.code);
+    if (session) {
+      // Session end: hold release / bare-tap toggle - the press decision
+      // machine carries it.
+      session.release(true);
     }
-    // Space session end: hold release / bare-tap toggle - the press decision
-    // machine carries it.
-    this.#space.release(true);
   }
 }
