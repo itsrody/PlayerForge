@@ -95,8 +95,8 @@ const style = new ShellStyle();
      LAST), so every value pair resolves as it did in the sheet. */
 const CONTAINER_POCKET_CSS = `
   @container pf-stage (max-width: 480px) {
-    /* Descendant has(): the panel rides the safe-box wrapper inside the
-       slot, so a direct-child has() would miss the off veto. */
+    /* Descendant has(): same match shape as the sheet's compact on-reader
+       (styles.css), so the two readers mirror each other. */
     .pf-panel-slot:not(:has(.pf-panel[data-compact="off"])) {
       --pf-compact-auto: 1;
     }
@@ -211,7 +211,6 @@ const CONTAINER_POCKET_CSS = `
         border-left: none;
         border-right: none;
         border-bottom: none;
-        padding-bottom: env(safe-area-max-inset-bottom, 0px);
       }
     }
   }

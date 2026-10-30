@@ -114,7 +114,11 @@ iframes, same-origin and cross-origin:
   shadow traversal, the fullscreen gate, the iframe registry), `PoolElement`
   machinery, `ReferenceBox` — the ONE fill-box identity (inline →
   container, fs → the fullscreen element's own rect, which under
-  `viewport-fit=cover` is the Android device screen incl. the safe area;
+  `viewport-fit=cover` is the Android device screen incl. the safe area —
+  a Chromium-side shape: Android Firefox's fullscreen presents no safe
+  area at all, the video fills the plain screen, so no cutout
+  compensation rides the branch (user direction; reopening needs a
+  measured instance of cutout-expanded element rects there);
   pools per invalidation so the hot path stays layout-free; carries the
   full rect — `x/y` origin at the same reveal-on-invalidation instant, the
   consumer class that anchors against it rather than merely sizing needs

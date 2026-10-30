@@ -86,12 +86,6 @@
   --pf-z-hud: 2;
   --pf-z-toast: 3;
   --pf-z-panel: 4;
-  /* Safe-area insets are NOT tokenized on purpose: spelling env() through a
-     var()-mediated custom property does not substitute at computed-value time
-     here (the compact row measured the panel width going invalid, 380px ->
-     1278px, when width consumed --pf-inset-*). Every consumer spells env()
-     inline instead, matching the proven cue-stage (below) and
-     safe-area-max-inset-bottom (panel bottom) patterns. */
 
   /* -- Reset + base -- */
   position: absolute;
@@ -282,25 +276,10 @@
            true), "off" vetoes ONLY the auto path (the setting's explicit
            false) - an absent attribute is the auto-detect state, which is
            exactly how the old JS resolved "unset setting, consult the
-           query". Descendant form: the panel now rides the safe-box wrapper
-           (below), so a direct-child has() would miss it. */
+           query". Descendant form: same shape as the pocket's off veto
+           (inject.js), so the two readers mirror each other. */
         &:has(.pf-panel[data-compact="on"]) {
           --pf-compact-explicit: 1;
-        }
-
-        /* Safe-box: the wrapper that keeps the panel out of system UI in
-           edge-to-edge fullscreen. Bare four-value env() inset exactly like
-           the caption stage above - the proven substitution primitive
-           (env() inside calc()/min() or through var() tokens does not
-           substitute here; see the token block note atop the file). The
-           wrapper must not paint or catch events; the panel inside floats
-           within these bounds by auto margins. Desktop resolves all four
-           to 0: geometry identical. */
-        > .pf-safe {
-          position: absolute;
-          inset: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
-            env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
-          pointer-events: none;
         }
       }
     }
@@ -352,12 +331,12 @@
          by forge-track.js. */
 
       position: absolute;
-      /* Excludes notches and gesture bars: percentage-positioned cues
-         (.pf-cue top: 85%, line anchors) resolve against this padding box,
-         so captions never sit behind the Android 3-button/gesture bar or a
-         landscape camera cutout. env() falls back to 0 when unset. */
-      inset: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
-        env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+      /* Percentage-positioned cues (.pf-cue top: 85%, line anchors) resolve
+         against this box. No safe-area inset here: the floor's fullscreen
+         presents no cutout shape on either engine's record in this repo
+         (Android Firefox measured none - AGENTS.md), so the env() exclusion
+         layer this box once carried resolved to 0 everywhere and retired. */
+      inset: 0;
       overflow: hidden;
       pointer-events: none;
       z-index: var(--pf-z-hud);
@@ -422,12 +401,7 @@
       align-items: center;
       gap: var(--pf-space-sm);
       position: absolute;
-      /* The gesture-feedback pill rides below the cutout/status bar when the
-         frame draws edge-to-edge: top sets the margin edge, so a bare env()
-         margin-top (the proven primitive, no calc) adds the inset. 12px +
-         env when set, plain 12px on desktop. */
       top: 12px;
-      margin-top: env(safe-area-inset-top, 0px);
       left: 50%;
       z-index: var(--pf-z-toast);
       /* Dedicated translate property (Chrome 104+) - keeps centering out of
@@ -1432,9 +1406,7 @@
     }
 
     /* Portrait phones (touch): anchor the panel as a bottom sheet - it sits
-       within thumb reach and never covers the whole video. safe-area-max-inset-
-       bottom (Chrome 135+) lifts the sheet above the Android gesture bar when
-       viewport-fit=cover is active; the env() falls back to 0 when unset.
+       within thumb reach and never covers the whole video.
        --pf-vv-height/--pf-vv-inset-bottom (set on the host by shell.js from
        window.visualViewport) keep the sheet inside the on-screen keyboard's
        shrunken viewport; both fall back to layout-viewport values. */
@@ -1446,7 +1418,6 @@
         right: var(--pf-space-md);
         max-height: min(62vh, calc(var(--pf-vv-height, 100vh) - 2 * var(--pf-space-md)));
         margin: 0;
-        padding-bottom: env(safe-area-max-inset-bottom, 0px);
         /* Derived radius (R6): the sheet keeps its token as the largest HUD
            radius in the bottom-sheet variant too - the hardcoded literal
            this replaced would silently diverge when the token moves. */
