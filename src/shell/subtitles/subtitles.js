@@ -673,6 +673,12 @@ const SETTING_KEYS = {
   syncOffset: "subtitles.sync.offset"
 };
 
+/** The steppers' display defaults. The STATE itself carries null ("cue
+ *  authoring wins") for untouched placement, so these belong to the display
+ *  layer only - seed and reset read this one constant instead of re-spelling
+ *  the literals beside a raw storage read. */
+const PLACE_DEFAULTS = { line: 85, position: 50 };
+
 /** Curated caption family stacks; "" keeps the embed's own family. */
 const CUE_FONT_OPTIONS = [
   ["Inherit", ""],
@@ -791,6 +797,92 @@ class SubtitleSyncState {
 /** The per-frame sync singleton: bound by shell.js before the section builds. */
 export const subtitleSync = new SubtitleSyncState();
 
+/** The placement seed read: a stored number is the override; anything else is
+ *  "cue-authored" (null) - the exact normalization both halves of the feature
+ *  previously re-derived at their own boot (rule: one owner per read). */
+function readPlacement(key) {
+  const value = Number(getConfigValue(key, null));
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * The cue-placement state machine as a per-frame singleton: one write-point
+ * owner for the V/H overrides that both halves read - the session at track
+ * load, the (lazy) panel section's steppers at render - with no mirror fields
+ * and no section-to-session transport hop.
+ *
+ * Persistence keeps the stepper cadence placement has always had: one direct
+ * write per commit (the stepper quantizes; placement edits carry no drag
+ * stream like the sync offset, so there is nothing to trail-persist). The
+ * bound session applies each commit live through its track; track load asks
+ * for `current` in the same build pass over the base cues.
+ */
+class SubtitlePlacementState {
+  /** Stored overrides (0-100) or null until first customized. */
+  #line = readPlacement(SETTING_KEYS.line);
+  #position = readPlacement(SETTING_KEYS.horizontal);
+  /** State audience on the shared Fan (the ONE plain-fan-out owner). */
+  #audience = new Fan("placement");
+
+  get line() {
+    return this.#line;
+  }
+
+  get position() {
+    return this.#position;
+  }
+
+  /** The live override pair; track load reads this in its build pass. */
+  get current() {
+    return { line: this.#line, position: this.#position };
+  }
+
+  /**
+   * Bind to the shell's session: every committed change applies live through
+   * the session's track (or at the next load). The stored grain re-reads at
+   * each bind - a shell rebuild (SPA nav) must see newer storage exactly as
+   * the per-shell seeds it replaces did (the seed is per-bind, not the
+   * module-eval one). One registration - this state has no gesture events
+   * and no grain adoption (placement is global style, not per-entry), so
+   * there is nothing else to resolve.
+   */
+  bindSession(session, signal) {
+    this.#line = readPlacement(SETTING_KEYS.line);
+    this.#position = readPlacement(SETTING_KEYS.horizontal);
+    this.#audience.subscribe(() => session.setPlacement(this.current), { signal });
+  }
+
+  setLine(value) {
+    const next = clamp(Number(value) || 0, 0, 100);
+    if (next === this.#line) {
+      return;
+    }
+    this.#line = next;
+    setConfigValue(SETTING_KEYS.line, next);
+    this.#emit();
+  }
+
+  setPosition(value) {
+    const next = clamp(Number(value) || 0, 0, 100);
+    if (next === this.#position) {
+      return;
+    }
+    this.#position = next;
+    setConfigValue(SETTING_KEYS.horizontal, next);
+    this.#emit();
+  }
+
+  onState(listener, { signal } = {}) {
+    return this.#audience.subscribe(listener, { signal });
+  }
+
+  #emit() {
+    this.#audience.emit(this.current);
+  }
+}
+
+export const subtitlePlacement = new SubtitlePlacementState();
+
 /**
  * Subtitle track state for one shell, constructed at boot - not with the
  * panel. Track ownership and the ingest paths (file, URL) must be live before
@@ -807,10 +899,6 @@ export class SubtitleSession {
   #forgeTrack = null;
   #trackMeta = null;
   #cueLayer = null;
-  /** Stored placement overrides (0-100) or null until first customized;
-   *  applied to the track on load and on every stepper change. */
-  #cueLine = null;
-  #cuePosition = null;
   /** The last URL a restore attempted to load. The store notifies on every
    *  save, so without this dedupe a failed (or looping) fetch would be
    *  re-armed on each progress persist. */
@@ -822,10 +910,10 @@ export class SubtitleSession {
   constructor(shell) {
     this.#shell = shell;
     this.#cueLayer = shell.shellDom?.cueLayer ?? null;
-    const storedLine = Number(getConfigValue(SETTING_KEYS.line, null));
-    const storedPos = Number(getConfigValue(SETTING_KEYS.horizontal, null));
-    this.#cueLine = Number.isFinite(storedLine) ? storedLine : null;
-    this.#cuePosition = Number.isFinite(storedPos) ? storedPos : null;
+    // Cue placement rides its own singleton state (like the sync grain): the
+    // session holds no placement fields - track load reads the state, commits
+    // apply live through the bound emit below.
+    subtitlePlacement.bindSession(this, this.#scope.signal);
     // Sync offset rides its own singleton state: every commit shifts the
     // live cues in place (setOffset), load-time application reads the
     // current offset in the same build pass over the base cues.
@@ -874,11 +962,10 @@ export class SubtitleSession {
     this.#cueLayer?.style.setProperty(prop, value);
   }
 
-  /** Panel placement override (0-100 or null to keep cue-authored values);
-   *  stored so a later track creation inherits it. */
+  /** Live placement application. The state is owned by `subtitlePlacement`
+   *  entirely - this surface carries no fields, it only forwards to the live
+   *  track (track creation applies `subtitlePlacement.current` instead). */
   setPlacement({ line = null, position = null } = {}) {
-    this.#cueLine = line;
-    this.#cuePosition = position;
     this.#forgeTrack?.setPlacement({ line, position });
   }
 
@@ -951,7 +1038,7 @@ export class SubtitleSession {
     }
     if (!this.#forgeTrack) {
       this.#forgeTrack = new ForgeTrack(this.#shell.video, this.#cueLayer);
-      this.#forgeTrack.setPlacement({ line: this.#cueLine, position: this.#cuePosition });
+      this.#forgeTrack.setPlacement(subtitlePlacement.current);
     }
     this.#trackMeta = { name };
     this.#forgeTrack.load(cues, subtitleSync.offset);
@@ -1037,17 +1124,11 @@ export class SubtitlesSection {
   #styleControls = null;
   #positionControls = null;
   #resetBtn = null;
-  #cueLine = null;
-  #cuePosition = null;
   #scope = new Scope();
 
   constructor(shell) {
     this.#shell = shell;
     this.#session = shell.subtitles;
-    const storedLine = Number(getConfigValue(SETTING_KEYS.line, null));
-    const storedPos = Number(getConfigValue(SETTING_KEYS.horizontal, null));
-    this.#cueLine = Number.isFinite(storedLine) ? storedLine : null;
-    this.#cuePosition = Number.isFinite(storedPos) ? storedPos : null;
     this.#fileInput = this.#createFileInput(shell);
     this.#buildPanelUi(shell);
     this.#session?.onState(() => this.#refreshHint(), { signal: this.#scope.signal });
@@ -1261,12 +1342,10 @@ export class SubtitlesSection {
       min: 0,
       max: 100,
       step: 5,
-      value: getConfigValue(SETTING_KEYS.line, 85),
+      value: subtitlePlacement.line ?? PLACE_DEFAULTS.line,
       format: fmtPercent,
       onChange: (v) => {
-        setConfigValue(SETTING_KEYS.line, v);
-        this.#cueLine = v;
-        this.#applyPlacement();
+        subtitlePlacement.setLine(v);
       }
     });
     const horizontalStepper = panel.addControl(positionGrid, {
@@ -1275,12 +1354,10 @@ export class SubtitlesSection {
       min: 0,
       max: 100,
       step: 5,
-      value: getConfigValue(SETTING_KEYS.horizontal, 50),
+      value: subtitlePlacement.position ?? PLACE_DEFAULTS.position,
       format: fmtPercent,
       onChange: (v) => {
-        setConfigValue(SETTING_KEYS.horizontal, v);
-        this.#cuePosition = v;
-        this.#applyPlacement();
+        subtitlePlacement.setPosition(v);
       }
     });
 
@@ -1306,8 +1383,8 @@ export class SubtitlesSection {
         }
         strokeStepper.setValue(0);
         syncStepper.setValue(0);
-        verticalStepper.setValue(85);
-        horizontalStepper.setValue(50);
+        verticalStepper.setValue(PLACE_DEFAULTS.line);
+        horizontalStepper.setValue(PLACE_DEFAULTS.position);
         flashElement(this.#resetBtn);
         this.#shell?.toastFlash("reload", "Subtitle Style Reset", "subtitles");
       }
@@ -1318,12 +1395,6 @@ export class SubtitlesSection {
 
   #setCueVar(prop, value) {
     this.#session?.setVar(prop, value);
-  }
-
-  /** Push the stored V/H overrides onto the session (no-op without a track -
-   *  track creation in the session applies them at load time instead). */
-  #applyPlacement() {
-    this.#session?.setPlacement({ line: this.#cueLine, position: this.#cuePosition });
   }
 
   #createFileInput(shell) {
