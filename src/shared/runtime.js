@@ -298,6 +298,28 @@ export class Scope {
  * surface rather than aborting the emit call. The event type is
  * instance-internal - it never escapes this class, so the tag is a call-site
  * derived label (debug visibility in devtools), not a hand-spelled contract.
+ *
+ * Why no platform primitive replaces it: Observable / EventTarget.when()
+ * (the W3C "better addEventListener") is Chromium 135+ only and Mozilla
+ * holds a negative standards position on it (bug 1871732 - complexity,
+ * venue, API design), so this floor has no native fan-out subscription to
+ * adopt. Two pooling candidates were measured and declined on Firefox 159:
+ * a pooled CustomEvent re-owned per emit via defineProperty runs
+ * ~680ns/emit against ~1690ns for the fresh event - but a listener that
+ * synchronously re-emits mid-dispatch throws InvalidStateError on a pooled
+ * instance (an in-dispatch event cannot re-dispatch) while a fresh event
+ * re-enters cleanly, and the settings bus is exactly that re-entrant shape
+ * (foreign-merge journeys can re-enter subscribe-listened setters). The
+ * ~1us/emit saved is noise against the real consumers: the reference-box
+ * tick fans at most tens of times per second and the echo row budgets
+ * 1000 emissions strictly within 400ms dominated by delivery, not
+ * allocation. Fresh allocation stays.
+ *
+ * The subscribe handle is a Disposable: the same function it always was
+ * (no census consumer ever called it - every teardown rides the signal)
+ * carrying [Symbol.dispose] (fully-shipped Firefox 134; using/DisposableStack
+ * verified live on the 159 page realm), so a future consumer can take a
+ * subscription under `using` without any Fan-side second teardown path.
  */
 export class Fan extends EventTarget {
   #type;
@@ -313,14 +335,17 @@ export class Fan extends EventTarget {
   }
 
   /**
-   * Subscribe a callback to the payload; returns the unsubscribe handle.
+   * Subscribe a callback to the payload; returns the unsubscribe handle - a
+   * callable, and a Disposable ([Symbol.dispose] tears the subscription).
    * Callbacks receive the dispatched value positionally, matching the
    * notify-loop signatures this replaces.
    */
   subscribe(cb, { signal } = {}) {
     const handler = (event) => cb(event.detail);
     this.addEventListener(this.#type, handler, { signal });
-    return () => this.removeEventListener(this.#type, handler);
+    const sig = () => this.removeEventListener(this.#type, handler);
+    sig[Symbol.dispose] = sig;
+    return sig;
   }
 }
 

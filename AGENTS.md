@@ -107,8 +107,28 @@ iframes, same-origin and cross-origin:
   ResumeStore, ConfigStore, SubtitleSyncState,
   SubtitleSession, and kernel shell-ready audiences all rode it — the
   kernel's per-listener try/catch retired with the conversion, native
-  dispatch isolation is the real thing) — `DebugRuntime` (log chatter AND
-  the LoAF diagnostic flip as one unit), logger facade.
+  dispatch isolation is the real thing). Audited census: ten instances —
+  kernel shell-ready (entry's page-lifetime only; its returned handle is
+  never consumed), FsGate, ReferenceBox change-ticks (exactly ONE
+  subscriber: the subtitle renderer; every gesture consumer
+  reads-and-discards via `get()` — the emit heat is scroll-frequency but
+  one-tap-deep), FilterSession, the three SubtitleState grains +
+  SubtitleSession's presentation state, ConfigStore's `settings` bus (the
+  echo-storm hot path: 1000 foreign writes ride the robust row inside
+  400ms) and ResumeStore's entry set. The one deliberate non-fan: DomWatch
+  cannot ride it — EventTarget exposes no listener census, which the feed
+  needs three ways (liveness-gated observer teardown, tombstone
+  compaction, logged throw containment). The subscribe handle is a
+  Disposable (`[Symbol.dispose]` on the old callable — FF 134, floor-real;
+  `using` verified live on the 159 page realm); pooling the dispatched
+  CustomEvent was measured (~680 ns/emit vs ~1690 fresh) and declined: an
+  in-dispatch event re-dispatched synchronously throws InvalidStateError,
+  and the settings bus is exactly the re-entrant shape, while ~1µs/emit is
+  noise against the delivery-dominated budgets. Observable/
+  `EventTarget.when()` stays un-adoptable — Mozilla's negative standards
+  position (bug 1871732) keeps it off this floor, so Fan remains the
+  fan-out definition the platform doesn't ship — `DebugRuntime` (log
+  chatter AND the LoAF diagnostic flip as one unit), logger facade.
 - **dom.js** — the shared mutation feed (`onDomMutations`: ONE page-level
   MutationObserver every consumer rides — element pooling, the shell ledger,
   shadow traversal, the fullscreen gate, the iframe registry), `PoolElement`
