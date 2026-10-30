@@ -111,8 +111,8 @@ export async function run({ session, baseUrl, boot }) {
   // fixture's fixed 1280x720 canvas covers only part of it), the edge-skip
   // path is fs-gated end-to-end: resolves a left-edge zone for a real edge
   // press, double-taps there, and requires NO dbltap/skip dispatch - the
-  // claimed plain taps fall through to the immediate tail replay instead
-  // (the inline repair path, driven with real pointer input).
+  // dispatch never fires because the intent gate is closed (the taps'
+  // native clicks pass to the page untouched).
   await session.eval(function main() {
     window.__pfEvents = [];
     document.querySelector("#check-video").play();
@@ -196,6 +196,29 @@ export async function run({ session, baseUrl, boot }) {
   }), `fullEl=${JSON.stringify(await session.eval(function main() {
     return { el: !!document.fullscreenElement, events: window.__pfEvents, t: document.querySelector("#check-video").currentTime };
   }))}`);
+  // The fs double-tap arm, the second half of the prevent scope: two rapid
+  // taps at center - the document-level recorder must see NO dblclick (the
+  // SDK's native double tap is prevented at the fullscreen gesture surface),
+  // though both taps' presses passed natively.
+  await session.eval(function main() {
+    window.__pfDbclicks = [];
+    document.addEventListener("dblclick", (e) => window.__pfDbclicks.push(e.isTrusted));
+    const v = document.querySelector("#check-video");
+    v.pause();
+    v.currentTime = 2;
+  });
+  await acts()
+    .move({ origin: "viewport", x: Math.round(center.x), y: Math.round(center.y) })
+    .press().release()
+    .press().release()
+    .pause(500)
+    .perform();
+  await new Promise((r) => setTimeout(r, 300));
+  status(rows, "fs double tap: SDK's native dblclick prevented at the surface", await session.eval(function main() {
+    return window.__pfDbclicks.length === 0;
+  }), `dbclicks=${JSON.stringify(await session.eval(function main() {
+    return window.__pfDbclicks;
+  }))}`);
   await session.eval(function main() {
     window.matchMedia = window.__pfMatchMedia;
     window.dispatchEvent(new Event("resize"));
@@ -205,6 +228,22 @@ export async function run({ session, baseUrl, boot }) {
     v.currentTime = 2;
   });
   await new Promise((r) => setTimeout(r, 300));
+  // Inline restore, the complement: with fs closed the same two-tap sequence
+  // carries ONE native dblclick - inline the SDK's double tap is its own.
+  await acts()
+    .move({ origin: "viewport", x: Math.round(center.x), y: Math.round(center.y) })
+    .press().release()
+    .press().release()
+    .pause(500)
+    .perform();
+  await new Promise((r) => setTimeout(r, 300));
+  status(rows, "inline double tap passes one native trusted dblclick", await session.eval(function main() {
+    return window.__pfDbclicks.length === 1 && window.__pfDbclicks.every(Boolean);
+  }), `dbclicks=${JSON.stringify(await session.eval(function main() {
+    return window.__pfDbclicks;
+  }))} acts=${JSON.stringify(await session.eval(function main() {
+    return window.__pfActivations;
+  }))}`);
 
   await fireKeys(["KeyM"]);
   await new Promise((r) => setTimeout(r, 350));
@@ -377,14 +416,14 @@ export async function run({ session, baseUrl, boot }) {
   });
 
   // Role-less SDK chrome, the two shapes the shape-list exemption never
-  // covered (repair A + B, real driver input):
-  //   probe 1 - an affordance-declaring div (cursor:pointer, no role): the
-  //     stream is EXEMPT outright, so its pointerdown + click are the real
-  //     native ones, zero-latency.
-  //   probe 2 - an affordance-declaring NOTHING div (default cursor): the
-  //     press is claimed, but the plain tap replays the full press tail
-  //     (pointerdown..click in Chromium's tap order) AT the pressed element
-  //     inside the dbltap window - so its listeners still fire, once each.
+  // covered (real driver input). Under the prevent-scope rule the engine
+  // claims no stream at press time, so BOTH probes ride the fully native
+  // tap sequence - the assertions also pin isTrusted, the fact this batch
+  // is about: the SDK's single tap is its own real click again.
+  //   probe 1 - an affordance-declaring div (cursor:pointer, no role) whose
+  //     press is exempt from adoption outright.
+  //   probe 2 - an affordance-declaring NOTHING div (default cursor): adopted
+  //     as a decision, stream untouched - the native down/click pair fires.
   const probeCenterFor = (id) => session.eval(function main(id) {
     const l = document.querySelector(id)?.getBoundingClientRect();
     return l ? { x: Math.round(l.left + l.width / 2), y: Math.round(l.top + l.height / 2) } : null;
@@ -395,10 +434,10 @@ export async function run({ session, baseUrl, boot }) {
     const el = document.createElement("div");
     el.id = "pf-sdkcursor";
     el.textContent = "ctl";
-    el.__pfCounts = { down: 0, click: 0 };
+    el.__pfCounts = { down: 0, click: 0, trusted: [] };
     el.style.cssText = "position:absolute;left:96px;top:8px;width:72px;height:40px;cursor:pointer;z-index:2147483000;";
-    el.addEventListener("pointerdown", () => el.__pfCounts.down++);
-    el.addEventListener("click", () => el.__pfCounts.click++);
+    el.addEventListener("pointerdown", (e) => { el.__pfCounts.down++; el.__pfCounts.trusted.push(e.isTrusted); });
+    el.addEventListener("click", (e) => { el.__pfCounts.click++; el.__pfCounts.trusted.push(e.isTrusted); });
     video.parentElement.appendChild(el);
   });
   const cursorPoint = await probeCenterFor("#pf-sdkcursor");
@@ -409,25 +448,25 @@ export async function run({ session, baseUrl, boot }) {
     .pause(120)
     .perform();
   await new Promise((r) => setTimeout(r, 300));
-  status(rows, "affordance-cursor roleless div keeps its REAL pointerdown + click",
+  status(rows, "affordance-cursor roleless div keeps its REAL pointerdown + trusted click",
     await session.eval(function main() {
       const counts = document.querySelector("#pf-sdkcursor")?.__pfCounts;
-      return !!counts && counts.down === 1 && counts.click === 1;
+      return !!counts && counts.down === 1 && counts.click === 1 &&
+        counts.trusted.length === 2 && counts.trusted.every(Boolean);
     }), `counts=${JSON.stringify(await session.eval(function main() {
       return document.querySelector("#pf-sdkcursor")?.__pfCounts ?? null;
     }))}`);
-  // Probe 2: no affordance -> claimed press, replayed plain-tap tail at the
-  // pressed element (the window is 300ms; the click CAN no longer arrive
-  // before the pointer tail - the replay synthesizes the whole sequence).
+  // Probe 2: no affordance -> adopted decision, native stream untouched: the
+  // div's own listeners fire exactly once each, on the trusted events.
   await session.eval(function main() {
     const video = document.querySelector("#check-video");
     const el = document.createElement("div");
     el.id = "pf-sdkbare";
     el.textContent = "ctl";
-    el.__pfCounts = { down: 0, click: 0 };
+    el.__pfCounts = { down: 0, click: 0, trusted: [] };
     el.style.cssText = "position:absolute;left:96px;top:56px;width:72px;height:40px;z-index:2147483000;";
-    el.addEventListener("pointerdown", () => el.__pfCounts.down++);
-    el.addEventListener("click", () => el.__pfCounts.click++);
+    el.addEventListener("pointerdown", (e) => { el.__pfCounts.down++; el.__pfCounts.trusted.push(e.isTrusted); });
+    el.addEventListener("click", (e) => { el.__pfCounts.click++; el.__pfCounts.trusted.push(e.isTrusted); });
     video.parentElement.appendChild(el);
   });
   const barePoint = await probeCenterFor("#pf-sdkbare");
@@ -438,24 +477,26 @@ export async function run({ session, baseUrl, boot }) {
     .pause(120)
     .perform();
   await new Promise((r) => setTimeout(r, 400));
-  status(rows, "roleless div under claim gets its tap tail replayed at the pressed element",
+  status(rows, "roleless bare div keeps the fully native tap: pointerdown + trusted click",
     await session.eval(function main() {
       const counts = document.querySelector("#pf-sdkbare")?.__pfCounts;
-      return !!counts && counts.down === 1 && counts.click === 1;
+      return !!counts && counts.down === 1 && counts.click === 1 &&
+        counts.trusted.length === 2 && counts.trusted.every(Boolean);
     }), `counts=${JSON.stringify(await session.eval(function main() {
       return document.querySelector("#pf-sdkbare")?.__pfCounts ?? null;
     }))}`);
   // Probe 3: a FULL-COVER affordance overlay (click-to-pause family) stays
-  // the gesture surface - the box gate declines the exemption - and its tap
-  // still reaches it through the replay tail. Proves the two-lattice split.
+  // adopted by the decision (tap feeds the machine), while its own stream
+  // passes natively - a single tap reaches it trusted, exactly once. Proves
+  // the decision/stream split: adoption without suppression.
   await session.eval(function main() {
     const video = document.querySelector("#check-video");
     const el = document.createElement("div");
     el.id = "pf-sdkcover";
-    el.__pfCounts = { down: 0, click: 0 };
+    el.__pfCounts = { down: 0, click: 0, trusted: [] };
     el.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;cursor:pointer;z-index:2147483100;";
-    el.addEventListener("pointerdown", () => el.__pfCounts.down++);
-    el.addEventListener("click", () => el.__pfCounts.click++);
+    el.addEventListener("pointerdown", (e) => { el.__pfCounts.down++; el.__pfCounts.trusted.push(e.isTrusted); });
+    el.addEventListener("click", (e) => { el.__pfCounts.click++; el.__pfCounts.trusted.push(e.isTrusted); });
     video.parentElement.appendChild(el);
   });
   await raw.actions({ async: true })
@@ -465,10 +506,11 @@ export async function run({ session, baseUrl, boot }) {
     .pause(120)
     .perform();
   await new Promise((r) => setTimeout(r, 400));
-  status(rows, "full-cover affordance overlay: gesture surface claimed, tap tail replayed",
+  status(rows, "full-cover affordance overlay: adopted but stream-open - native trusted single tap",
     await session.eval(function main() {
       const counts = document.querySelector("#pf-sdkcover")?.__pfCounts;
-      return !!counts && counts.down === 1 && counts.click === 1;
+      return !!counts && counts.down === 1 && counts.click === 1 &&
+        counts.trusted.length === 2 && counts.trusted.every(Boolean);
     }), `counts=${JSON.stringify(await session.eval(function main() {
       return document.querySelector("#pf-sdkcover")?.__pfCounts ?? null;
     }))}`);

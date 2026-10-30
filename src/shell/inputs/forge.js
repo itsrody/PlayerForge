@@ -35,33 +35,29 @@ const AXIS_DOMINANCE_RATIO = TUNING.gestures.axisDominanceRatio;
 const PINCH_MIN_DISTANCE_PX = TUNING.gestures.pinchMinDistancePx;
 
 /**
- * Interactive SDK controls the gesture engine must never claim: when a press's
- * composed target resolves one of these, the native stream stays whole. This
+ * Interactive SDK controls whose presses the engine never adopts into the tap
+ * machine: when a press's composed target resolves one of these, the decision
+ * rejects and the SDK's double-tap/streak state stays entirely its own. This
  * is the press-stream version of the DOM hit-test law (no pf surface may
- * block): an up-front claim stopImmediatePropagation's pointerdown and, while
- * owned, the whole compat mouse/touch tail - click-driven SDK UIs survive that
- * (the owned plain tap replays its full press tail at the pressed element),
- * but controls driven by pointer events only get their events back through
- * the replay tail. SDK rails are the exact shape: buttons or role-bearing
- * wrappers. Not listed: video itself (the gesture surface), tabindex'd
+ * block): the engine claims NO stream at press time - a plain tap's full
+ * native sequence (pointer, compat mouse/touch, the UA click) passes to the
+ * page untouched, per the prevent-scope rule (suppress only the SDK's context
+ * menu everywhere and its double taps in fullscreen). The lattice's remaining
+ * job is the decision: SDK controls' presses must not feed the gesture
+ * machine, or a control's own double-tap semantics would race the skip.
+ * SDK rails are the exact shape: buttons or role-bearing wrappers. Not
+ * listed: video itself (the gesture surface), tabindex'd
  * wrappers (too coarse - an SDK div with a focus target is not a control),
  * svg (same).
- * Two native widenings past the shape list, both read per press (press is
- * not a hot path and the rect read already forced layout):
- *   1. The affordance cursor - role-less SDK chrome (menus, custom rails,
- *      drag handles) declares its press affordance the one way the platform
- *      lets it: `cursor: pointer|grab`. The head element honors it as an
- *      interactive marker, but ONLY on a small box (here: <= half the
- *      video's area) that is not the gesture-surface family (the video, or
- *      an ancestor wrapping it): a click-to-pause wrapper styling
- *      cursor:pointer over the whole player is the player surface, and
- *      surrendering it wholesale would kill the gestures there.
- *   2. The replay tail - whatever still falls under claim costs the SDK
- *      nothing on a plain tap: the seeded replay re-delivers
- *      pointerdown/touchstart/pointerup/touchend/mousedown/mouseup/click
- *      in the real Chromium tap order at the pressed element, so SDK UIs
- *      that never declared any affordance still receive their press for
- *      taps. Only real drags (scrub, swipe, hold) stay ours alone.
+ * One native widening past the shape list, read per press (press is not a
+ * hot path and the rect read already forced layout): the affordance cursor -
+ * role-less SDK chrome (menus, custom rails, drag handles) declares its
+ * press affordance the one way the platform lets it: `cursor: pointer|grab`.
+ * The head element honors it as an interactive marker, but ONLY on a small
+ * box (here: <= half the video's area) that is not the gesture-surface
+ * family (the video, or an ancestor wrapping it): a click-to-pause wrapper
+ * styling cursor:pointer over the whole player is the player surface, and
+ * surrendering it wholesale would kill the gestures there.
  * Cost: one closest() climb per press attempt, only on flips of ownership -
  * press is not a hot path and no extra layout is read beyond the head rect
  * the affordance clause needs (the video rect is already cached warm).
@@ -77,17 +73,14 @@ const DOUBLE_TAP_WINDOW_MS = TUNING.gestures.doubleTapWindowMs;
 const SCRUB_VELOCITY_TAU_S = TUNING.scrub.velocityFilterMs / 1000;
 
 /**
- * Cross-forge arbitration registry: which engine owns playback keys, and the
- * identity mark for the synthetic single-tap replays the capture click
- * handler must pass through. One module singleton - the arbitration is
- * inherently global across all live engines.
+ * Cross-forge keyboard arbitration registry: which engine owns playback keys.
+ * One module singleton - the arbitration is inherently global across all live
+ * engines.
  */
 class ForgeRegistry {
   /** All live input engines, used for keyboard focus arbitration. */
   #actives = new Set();
   #last = null;
-  /** Synthetic single-tap replays this registry saw engines dispatch. */
-  #replayedClicks = new WeakSet();
 
   add(forge) {
     this.#actives.add(forge);
@@ -112,15 +105,6 @@ class ForgeRegistry {
 
   makeLast(forge) {
     this.#last = forge;
-  }
-
-  /** Mark a replayed click so capture handlers recognize their own stand-in. */
-  markReplay(event) {
-    this.#replayedClicks.add(event);
-  }
-
-  isReplay(event) {
-    return this.#replayedClicks.has(event);
   }
 }
 
@@ -469,163 +453,28 @@ class SwipeStroke {
 }
 
 /**
- * Tap-replay machine: a first tap of a possible double tap is held back for
- * the dbltap window, expiring into a synthetic tap tail at the PRESSED
- * element - the head the pointerdown resolved (capture-at-press retargets
- * the pointerup to the zone, so the seed cannot come from there), in the
- * real Chromium tap order: mouse[] = pointerdown, mousedown, pointerup,
- * mouseup, click; touch/pen[] = pointerdown, touchstart, pointerup,
- * touchend, mousedown, mouseup, click (the compat mouse trio synthesized
- * here exactly because the claim's preventDefault suppressed it natively).
- * Every event carries the original coordinates and rides the marked-replay
- * capture-pass, so the engine's own suppressors hand it straight through -
- * a plain tap reaches the SDK shape-for-shape, while a double tap never
- * leaks its first activation. The window clock rides this machine so the
- * first/second decision lives with the seed it cancels. Debouncing engages
- * only the paths the engine guards (pointerup under an armed dbltap
- * intent), so inline taps keep their native zero-latency press.
+ * Double-tap window machine: the first tap of a possible double tap opens the
+ * window; a tap inside it closes it as the dbltap gesture (the engine then
+ * dispatches and suppresses the following activation). No seed and no replay:
+ * by the prevent-scope rule the tap's native stream was never claimed, so
+ * there is nothing held back to hand back on expiry - the engine only
+ * observes timing. The window state persists across presses, so it keeps its
+ * own class (rule 4) instead of folding into module-level lets.
  */
-class TapReplay {
+class TapWindow {
   /** -Infinity so the very first tap can never match against boot time. */
   #lastTapTime = -Infinity;
-  #timer = null;
-  #target = null;
-  #pointerType = "mouse";
-  #x = 0;
-  #y = 0;
-
-  /** Whether a first-tap seed is armed - the click/dblclick capture handlers
-   *  consult this to keep the real click invisible until the window closes. */
-  get pending() {
-    return this.#target !== null;
-  }
-
-  /** A new press could still turn into a dbltap; a stale seed must not
-   *  outlive the press it seeded from. */
-  cancel() {
-    this.#timer?.();
-    this.#timer = null;
-    this.#target = null;
-  }
 
   /** One pointerup tap visited. Returns "second" when this tap closes a
-   *  dbltap window (the pending seed dies, the engine dispatches dbltap,
-   *  suppresses activations), "first" when it opens one (the seed armed). */
-  tap(now, target, pointerType, x, y) {
+   *  dbltap window (the engine dispatches dbltap and suppresses the
+   *  activations that follow), "first" when it opens one. */
+  tap(now) {
     if (now - this.#lastTapTime < DOUBLE_TAP_WINDOW_MS) {
       this.#lastTapTime = -Infinity;
-      this.cancel();
       return "second";
     }
     this.#lastTapTime = now;
-    this.#arm(target, pointerType, x, y);
     return "first";
-  }
-
-  /** Immediate tail delivery for owned taps whose dbltap window is
-   *  disarmed: the claim swallowed mousedown/mouseup natively (and on
-   *  touch/pen the whole press tail, preventDefault at the source), so the
-   *  replay fires without waiting a window. `withClick` splits delivery:
-   *  mouse taps pass their REAL click through the click-capture
-   *  pass-through, so the replay spine carries the click only for
-   *  touch/pen. */
-  replayNow(target, pointerType, x, y, withClick) {
-    this.#target = target;
-    this.#pointerType = pointerType;
-    this.#x = x;
-    this.#y = y;
-    this.#replay(withClick);
-  }
-
-  #arm(target, pointerType, x, y) {
-    this.cancel();
-    this.#target = target;
-    this.#pointerType = pointerType;
-    this.#x = x;
-    this.#y = y;
-    this.#timer = delay(() => {
-      this.#timer = null;
-      this.#replay(true);
-    }, DOUBLE_TAP_WINDOW_MS);
-  }
-
-  #replay(withClick) {
-    const target = this.#target;
-    const type = this.#pointerType;
-    const x = this.#x;
-    const y = this.#y;
-    this.#target = null;
-    if (!target || !target.isConnected) {
-      return;
-    }
-    const win = target.ownerDocument?.defaultView;
-    if (!win) {
-      return;
-    }
-    // The faithful tap order - pointer tail first, compat tail after, the
-    // UA's touch-target lists built for the touch replay (constructible in
-    // Chromium; jsdom hosts without the constructors skip that arm rather
-    // than die: the synthetic browser gate drives mouse pointers only).
-    const init = (extra) => ({
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-      view: win,
-      clientX: x,
-      clientY: y,
-      ...extra
-    });
-    const fire = (name, Ctor, extra) => {
-      const event = new Ctor(name, init(extra));
-      forgeRegistry.markReplay(event);
-      target.dispatchEvent(event);
-    };
-    const mkTouch = () => new win.Touch({
-      target,
-      identifier: 0,
-      clientX: x,
-      clientY: y,
-      pageX: x + (win.scrollX ?? 0),
-      pageY: y + (win.scrollY ?? 0),
-      screenX: x,
-      screenY: y,
-      radiusX: 0,
-      radiusY: 0,
-      rotationAngle: 0,
-      force: 0
-    });
-    if (typeof win.PointerEvent === "function") {
-      fire("pointerdown", win.PointerEvent,
-        { pointerId: 0, pointerType: type, isPrimary: true, button: 0, buttons: 1 });
-    }
-    if (type === "touch" && typeof win.Touch === "function" && typeof win.TouchEvent === "function") {
-      // Single-touch replay: one Touch in all three lists, the seed's own
-      // coordinates. Faithful enough for tap handlers; drag tails by
-      // definition latched (this machine only replays plain taps).
-      const touch = mkTouch();
-      fire("touchstart", win.TouchEvent,
-        { touches: [touch], targetTouches: [touch], changedTouches: [touch] });
-    }
-    const MouseCtor = win.MouseEvent ?? globalThis.MouseEvent;
-    if (typeof MouseCtor === "function") {
-      fire("mousedown", MouseCtor, { button: 0, buttons: 1, detail: 1 });
-    }
-    if (typeof win.PointerEvent === "function") {
-      fire("pointerup", win.PointerEvent,
-        { pointerId: 0, pointerType: type, isPrimary: true, button: 0, buttons: 0 });
-    }
-    if (type === "touch" && typeof win.Touch === "function" && typeof win.TouchEvent === "function") {
-      fire("touchend", win.TouchEvent,
-        { touches: [], targetTouches: [], changedTouches: [mkTouch()] });
-    }
-    if (typeof MouseCtor === "function") {
-      fire("mouseup", MouseCtor, { button: 0, buttons: 0, detail: 1 });
-      if (withClick) {
-        // The click closes the tail - the payload the old click-only replay
-        // carried, now with the whole press tail ahead of it.
-        fire("click", MouseCtor, { button: 0, buttons: 0, detail: 1 });
-      }
-    }
   }
 }
 
@@ -750,8 +599,7 @@ class SpaceSession {
  * decision (settings gates, fullscreen requirement) is delegated to the
  * declarative INPUT_BINDINGS list, sampled live at each decision point.
  * Per-story state machines own the recognizer state (ScrubStroke, SwipeStroke,
- * TapReplay, SpaceSession) while the engine keeps the stream: press
- * eligibility, pointer tracking, the shared session-latch flag, and the
+ * TapWindow, SpaceSession) while the engine keeps the stream: press * eligibility, pointer tracking, the shared session-latch flag, and the
  * click/dblclick suppression decisions.
  *
  * Chromium 156+ native by design: one AbortSignal owns the entire listener
@@ -792,26 +640,27 @@ export class InputForge {
   // window stays armed for its full span so click AND dblclick both die.
   #suppressClickUntil = 0;
 
-  // SDK-domination state. #pointerOwned: the current press was gesture-
-  // eligible, so zone-capture stops its pointer/mouse/touch stream. #awaitClick:
-  // latched at pointerup to swallow the compat mouseup before the click
-  // decision; it clears on the arriving click, on cancel, or on the next
-  // pointerdown - no timer needed.
+  // Press ownership, split for the prevent-scope rule (suppress only the
+  // SDK's context menu everywhere and its double taps in fullscreen; every
+  // plain tap passes natively):
+  //   #pointerOwned - the DECISION: the press was gesture-eligible, so up
+  //     feeds the tap window and session arms claim the stream. A plain tap
+  //     is decision-owned but stream-open.
+  //   #streamClaimed - an ARMED session (scrub/swipe/hold/pinch) captured the
+  //     pointer; only this flag gates the zone-capture stream suppressors,
+  //     so taps keep their whole native sequence including the UA click.
+  //   #awaitClick - latched at pointerup for claimed sessions only, to
+  //     swallow the compat mouseup before the click decision; it clears on
+  //     the arriving click, on cancel, or on the next pointerdown - no timer
+  //     needed.
   #pointerOwned = false;
+  #streamClaimed = false;
   #awaitClick = false;
-  // The press's facts at pointerdown time: the composed-path head is the
-  // REAL hit-test element (capture-at-press retargets every later pointer
-  // event here, so a tap seed armed at pointerup would replay on the zone
-  // instead of the pressed SDK control - the pre-capture-era seed died
-  // silently with the anchoring). The pointerType tags the replay tail's
-  // order. Nulled at pointerup consumption, never kept across a press.
-  #pressTarget = null;
-  #pressPointerType = "mouse";
 
   /** Per-story machines, built in the constructor (each borrows the engine's
    *  live gesture boundaries: video, dispatch, zone). Scrub: the move-stream
-   *  recognizer; Swipe: the translate-drag machine; TapReplay: the dbltap
-   *  click-window seed; SpaceSession: the keyboard hold/toggle press. */
+   *  recognizer; Swipe: the translate-drag machine; TapWindow: the dbltap
+   *  first/second window; SpaceSession: the keyboard hold/toggle press. */
   #scrub;
   #swipe;
   #tap;
@@ -861,7 +710,7 @@ export class InputForge {
     const dispatchGesture = (name, detail) => this.#dispatch(name, detail);
     this.#scrub = new ScrubStroke(dispatchGesture, () => this.#gestureZone);
     this.#swipe = new SwipeStroke(video);
-    this.#tap = new TapReplay();
+    this.#tap = new TapWindow();
     this.#space = new SpaceSession(video, dispatchGesture, () => this.#shouldHandleKeys());
     const { signal } = this.#scope;
     // Track touch-action (kills scroll/pinch takeover) and user-select (kills
@@ -885,18 +734,16 @@ export class InputForge {
     // the bare-tap toggle below calls the native methods directly.
 
     const options = { capture: true, passive: true, signal };
-    // The press listener alone is non-passive: a claimed touch press is
-    // cancelled inside #handlePointerDown, and cancelling requires it.
-    zone.addEventListener("pointerdown", (event) => this.#handlePointerDown(event), { capture: true, passive: false, signal });
+    zone.addEventListener("pointerdown", (event) => this.#handlePointerDown(event), options);
     zone.addEventListener("pointermove", (event) => this.#handlePointerMove(event), options);
     zone.addEventListener("pointerup", (event) => this.#handlePointerUp(event), options);
     zone.addEventListener("pointercancel", (event) => this.#handlePointerCancel(event), options);
-    // Belt under touch-action none: during an owned session, touchmove
+    // Belt under touch-action none: during a claimed session, touchmove
     // carries no default that should win - scrolling or UA recognizers
     // taking the stream out from under the latched stroke. Cancelled while
-    // owned only, so plain taps and SDK streams stay native.
+    // claimed only, so plain taps and SDK streams stay native.
     zone.addEventListener("touchmove", (event) => {
-      if (this.#pointerOwned) {
+      if (this.#streamClaimed) {
         event.preventDefault();
       }
     }, { capture: true, passive: false, signal });
@@ -905,33 +752,25 @@ export class InputForge {
     zone.addEventListener("lostpointercapture", (event) => this.#handleLostCapture(event), options);
     zone.addEventListener("click", (event) => this.#handleClickCapture(event), { capture: true, signal });
     zone.addEventListener("dblclick", (event) => this.#handleDblClickCapture(event), { capture: true, signal });
-    // SDK stream dominance - ONE policy table for the compat mouse/touch
-    // streams instead of seven hand-rolled closures. Each stream event gets
-    // its single guard predicate, wired by one loop:
-    //   openers (mousedown/touchstart) may precede (or arrive without) the
-    //     tracked pointerdown, so they probe prospective eligibility directly;
-    //     mousedown additionally requires button 0.
-    //   move tails die while the press stays owned.
-    //   end tails swallow owned presses and the pending click decision;
-    //     the mouse arm additionally requires button 0.
-    // Plain hover input (#pointerOwned false, no session) always passes
-    // through untouched.
+    // SDK stream suppression - ONE policy table for the compat mouse/touch
+    // streams, keyed on the ARMED claim, not the press decision. The
+    // prevent-scope rule: a plain tap's whole stream (pointer, compat
+    // mouse/touch, the UA click) passes natively - suppressing it here would
+    // hide the SDK's only real click. Only a latched session (scrub, swipe,
+    // hold, pinch) stops the compat streams it is already owning through
+    // pointer capture, and its mouseup/touchend tails feed the click hangover
+    // (#awaitClick) until the suppressed click decides. Machine-idle moves
+    // and every plain tap pass through untouched.
     const STREAM_GUARDS = {
-      mousedown: (event) => (event.button === 0 && this.#pointerOwned) ||
-        this.#dominatesPress(event),
-      touchstart: (event) => this.#pointerOwned || this.#dominatesPress(event),
-      mousemove: () => this.#pointerOwned,
-      touchmove: () => this.#pointerOwned,
-      mouseup: (event) => event.button === 0 && (this.#pointerOwned || this.#awaitClick),
-      touchend: () => this.#pointerOwned || this.#awaitClick
+      mousedown: (event) => event.button === 0 && this.#streamClaimed,
+      touchstart: () => this.#streamClaimed,
+      mousemove: () => this.#streamClaimed,
+      touchmove: () => this.#streamClaimed,
+      mouseup: (event) => event.button === 0 && (this.#streamClaimed || this.#awaitClick),
+      touchend: () => this.#streamClaimed || this.#awaitClick
     };
     for (const [type, guard] of Object.entries(STREAM_GUARDS)) {
       zone.addEventListener(type, (event) => {
-        // Our own tap-tail replay passes through untouched: it IS the SDK's
-        // press, marked in the registry so capture suppression un-covers it.
-        if (forgeRegistry.isReplay(event)) {
-          return;
-        }
         if (guard(event)) {
           event.stopImmediatePropagation();
         }
@@ -939,10 +778,10 @@ export class InputForge {
     }
     // touchcancel shares the touchend guard and adds the pointer sweep: a
     // host can deliver it without the paired pointercancel, and the swallow
-    // alone would leave #pointerOwned/#awaitClick latched and the compat
-    // stream eaten until some later pointerup. A cancelled touch reclaims
-    // every tracked pointer - the sweep is idempotent when the paired
-    // pointercancel already ran (and vice versa).
+    // alone would leave #pointerOwned/#streamClaimed/#awaitClick latched and
+    // the compat stream eaten until some later pointerup. A cancelled touch
+    // reclaims every tracked pointer - the sweep is idempotent when the
+    // paired pointercancel already ran (and vice versa).
     zone.addEventListener("touchcancel", (event) => {
       if (STREAM_GUARDS.touchend()) {
         event.stopImmediatePropagation();
@@ -1034,8 +873,8 @@ export class InputForge {
     this.#ownedKeyCodes.clear();
     this.#space.clearTimer();
     this.#pointerOwned = false;
+    this.#streamClaimed = false;
     this.#clearAwaitClick();
-    this.#tap.cancel();
     this.#scope.dispose();
   }
 
@@ -1104,6 +943,7 @@ export class InputForge {
     this.#scrub.end();
     this.#swipe.end();
     this.#gestureFsActive = false;
+    this.#streamClaimed = false;
     this.#suppressNextActivations();
   }
 
@@ -1127,21 +967,24 @@ export class InputForge {
   #beginPinchTracking() {
     this.#endPointerSession();
     this.#primaryPointerId = null;
-    // No capture transition: capture-at-press already anchored BOTH presses
-    // here, and a release is exactly the Android kill chain the anchor
-    // exists to close - dropping explicit capture falls back to implicit
-    // capture on the touched nodes, which SDK overlays re-render away, and
-    // the pointercancels then eat the pinch. The historical release dance
-    // answered the old latch-time capture, which left the second finger
-    // streaming on its own node; that premise died with capture-at-press.
     // Two pointers captured on one element is native pointer-events: both
-    // streams retarget here in full until each ends.
-    // Baseline comes from the pointerdown lattice itself - both pointers'
-    // latest coords are already in #pointers, so no settle timer is needed.
-    // #pinchZone non-null is the tracking flag.
+    // streams retarget here in full until each ends (the recapture happens
+    // below, at recognition time). Baseline comes from the pointerdown
+    // lattice itself - both pointers' latest coords are already in #pointers,
+    // so no settle timer is needed. #pinchZone non-null is the tracking flag.
     this.#pinchStartDistance = 0;
     this.#pinchFired = false;
     this.#pinchZone = this.#gestureZone || "screen";
+    // The claim arms at recognition, not at the press (prevent-scope rule),
+    // and BOTH pointers recapture onto the zone here: the at-press capture
+    // died with the claim (it retargeted a plain tap's click off the pressed
+    // node - the swallow this batch repairs), so pinch re-anchors what the
+    // recapture law still needs - an SDK overlay's tap-time re-render must
+    // not strand either stream in an implicit capture a pointercancel eats.
+    this.#streamClaimed = true;
+    for (const pointerId of this.#pointers.keys()) {
+      this.#pointerOp("setPointerCapture", pointerId);
+    }
     this.#capturePinchBaseline();
   }
 
@@ -1276,11 +1119,6 @@ export class InputForge {
   }
 
   #handlePointerDown(event) {
-    // Our own tap-tail replay passes through untouched: it IS the SDK's
-    // press, and re-entering the claim lattice here would eat it.
-    if (forgeRegistry.isReplay(event)) {
-      return;
-    }
     // Fresh box per interaction: scroll/ancestor-transform shifts that
     // ResizeObserver and fullscreenchange never see are covered by dropping
     // the cached hit-test box at every tap (the old document-scroll capture
@@ -1316,45 +1154,27 @@ export class InputForge {
       this.#pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     }
     if (allowsAnyIntent()) {
-      // Gesture-eligible press with any pointer gesture armed: the shell owns
-      // this stream. Stop it here (zone capture, ancestor of the video) so
-      // SDK target/bubble listeners never see it, and drop any pending
-      // single-tap replay - a new press can still turn into a dbltap or a
-      // gesture, and the SDK must not be toggled mid-sequence.
+      // Decision-only ownership, the prevent-scope rule: the engine adopts
+      // the press (the up feeds the tap window) but claims NOTHING - a plain
+      // tap's whole native sequence (pointer, compat mouse/touch, the UA
+      // click) passes to the page untouched, so the SDK always receives the
+      // real, trusted tap. A session that arms (scrub, swipe, hold, pinch)
+      // claims the stream at its latch instead; only the ARMED claim gates
+      // the zone-capture suppressors. Selection/scroll defaults stay CSS-
+      // driven (user-select + touch-action above), and long-press menus are
+      // the contextmenu suppression, not a touch-default kill.
       this.#pointerOwned = true;
-      // Claim the touch at the input layer: cancelling a touch press drops
-      // the pointer's UA-default set at the source (compat mouse tail,
-      // selection and drag starts) rather than after the fact. Mouse presses
-      // keep their defaults - only touch/pen streams pay this; scroll
-      // suppression itself stays touch-action-driven (chain + belt below).
-      if (event.pointerType !== "mouse") {
-        event.preventDefault();
-      }
-      // Natively anchor the pointer stream at ownership: a touch pointer is
-      // implicitly captured to THE TOUCHED NODE, often an SDK overlay whose
-      // tap-time re-render removes it - killing the implicit capture - and
-      // the pointercancel eats the whole stroke before any recognizer
-      // latches, the touch-device "no scrub, no swipe" signature. Explicit
-      // capture-at-press retargets the stream to the stable gesture zone for
-      // every session shape (hold, pinch, scrub, swipe) and both pointer
-      // types; the latch-time captures become same-element no-ops, and the
-      // pinch transition keeps its deliberate release-with-markers dance.
-      this.#pointerOp("setPointerCapture", event.pointerId);
-      // The breadcrumb must report the fresh press's zone verdict:
-      // #gestureZone only takes its value in the primary-anchor block below
-      // (kept down there so a pinch second finger cannot overwrite the first
-      // finger's zone), so reading the field here prints the previous
-      // press's reset null - every `zone=null` in the field traces is this
-      // staleness, not a zoneless press. The fs tail is the drag-gesture
-      // discriminator: the fullscreen-only intents all sit behind the gate,
-      // so a fullscreen press whose breadcrumb still says fs=off names the
+      // The breadcrumb reports the fresh press's zone verdict: #gestureZone
+      // only takes its value in the primary-anchor block below (kept down
+      // there so a pinch second finger cannot overwrite the first finger's
+      // zone), so reading the field here prints the previous press's reset
+      // null - every `zone=null` in the field traces is this staleness, not
+      // a zoneless press. The fs tail is the drag-gesture discriminator: the
+      // fullscreen-only intents all sit behind the gate, so a fullscreen
+      // press whose breadcrumb still says fs=off names the
       // fullscreen-without-fullscreenElement family (CSS full-window) in
       // one line.
       logger.log("forge", `press owned: ${event.pointerType}, zone=${this.#zoneForPoint(event)}, fs=${fs ? "on" : "off"}`);
-      if (allowsIntent("dbltap")) {
-        this.#tap.cancel();
-      }
-      event.stopImmediatePropagation();
     }
 
     if (this.#pointers.size === 2) {
@@ -1371,11 +1191,6 @@ export class InputForge {
       this.#holding = false;
       this.#suppressClickUntil = 0;
       this.#gestureZone = this.#zoneForPoint(event);
-      // The press's real identity is the pointerdown's hit element - the
-      // only faithful seed source for a tap-tail replay (capture-at-press
-      // retargets everything after this event to the zone).
-      this.#pressTarget = (event.composedPath?.()[0]) ?? event.target;
-      this.#pressPointerType = event.pointerType;
       // Anchors + latches re-init per press (machines own their fields; the
       // swipe base snapshot deliberately persists - only a latch re-captures it).
       this.#scrub.reset(event.clientX, event.clientY, this.#startTime);
@@ -1386,6 +1201,10 @@ export class InputForge {
         this.#holdTimer = null;
         if (this.#primaryPointerId !== null && !this.#video.paused && allowsIntent("hold")) {
           this.#holding = true;
+          // The hold arms the claim here, not at the press (prevent-scope
+          // rule): first 300ms of a still press stays native, then the
+          // stream becomes ours for the release.
+          this.#streamClaimed = true;
           this.#pointerOp("setPointerCapture", this.#primaryPointerId);
           holdDetail.zone = this.#gestureZone;
           holdDetail.method = "pointer";
@@ -1403,7 +1222,7 @@ export class InputForge {
     if (pointer) {
       pointer.x = x;
       pointer.y = y;
-      if (this.#pointerOwned) {
+      if (this.#streamClaimed) {
         event.stopImmediatePropagation();
       }
     }
@@ -1433,6 +1252,10 @@ export class InputForge {
         // applies to the very next move.
         if (allowsIntent("scrub") && dx > SCROLL_START_PX && dx > dy * AXIS_DOMINANCE_RATIO) {
           this.#scrub.latch(x, y, event.timeStamp);
+          // The latch claims the stream here, not at the press: the first
+          // 15px stayed native (the SDK saw it), and from latch everything
+          // pointer-shape is ours (capture retargets the rest of the stroke).
+          this.#streamClaimed = true;
           this.#gestureFsActive = true;
           this.#pointerOp("setPointerCapture", this.#primaryPointerId);
           logger.log("forge", `scrub latch (dx=${dx}, dy=${dy})`);
@@ -1440,6 +1263,7 @@ export class InputForge {
           // below already reads, so the whole move stream pays no clock read.
         } else if (allowsIntent("swipe") && dy > SCROLL_START_PX && dy > dx * AXIS_DOMINANCE_RATIO) {
           this.#swipe.latch(event.clientY > this.#startY ? "down" : "up");
+          this.#streamClaimed = true;
           this.#gestureFsActive = true;
           this.#pointerOp("setPointerCapture", this.#primaryPointerId);
           logger.log("forge", `swipe latch (${this.#swipe.direction}, dy=${this.#swipe.direction === "down" ? "+" : "-"})`);
@@ -1464,17 +1288,23 @@ export class InputForge {
 
   #handlePointerUp(event) {
     const tracked = this.#pointers.has(event.pointerId);
-    if (tracked && this.#pointerOwned) {
+    if (tracked && this.#streamClaimed) {
       event.stopImmediatePropagation();
     }
     this.#pointers.delete(event.pointerId);
     let ownedTap = false;
     if (this.#pointers.size === 0 && this.#pointerOwned) {
-      // Session over: the click decision follows in #handleClickCapture, but
-      // the compat mouseup the UA fires between pointerup and click still
-      // belongs to our stream - keep swallowing it briefly (#awaitClick).
+      // Session over. The click decision follows in #handleClickCapture; the
+      // compat mouseup between pointerup and click belongs to the claimed
+      // stream only (a plain tap's whole tail is native), so the hangover
+      // latch arms for claimed sessions and the decision flag drops either
+      // way - every press's ownership is fresh next time.
+      const claimed = this.#streamClaimed;
       this.#pointerOwned = false;
-      this.#awaitClick = true;
+      this.#streamClaimed = false;
+      if (claimed) {
+        this.#awaitClick = true;
+      }
       ownedTap = true;
     }
     if (this.#pinchZone !== null && this.#pointers.size < 2) {
@@ -1517,26 +1347,16 @@ export class InputForge {
       this.#gestureZone !== null &&
       allowsIntent("dbltap")
     ) {
-      if (this.#tap.tap(now, this.#pressTarget ?? event.target,
-        this.#pressPointerType, event.clientX, event.clientY) === "second") {
+      if (this.#tap.tap(now) === "second") {
         this.#suppressNextActivations();
         dbltapDetail.zone = this.#gestureZone;
         dbltapDetail.method = "pointer";
         this.#dispatch(GESTURE_EVENTS.dbltap, dbltapDetail);
       }
-    } else if (ownedTap && this.#pressTarget?.isConnected) {
-      // The dbltap window is disarmed (setting off): a plain owned tap still
-      // owes the SDK its press tail - the claim swallowed mousedown/mouseup
-      // natively and, on touch/pen, the whole tail via the source
-      // preventDefault. Click delivery splits: mouse taps pass their REAL
-      // click (the click-capture pass-through branch), touch taps carry it
-      // in the replay spine.
-      this.#tap.replayNow(this.#pressTarget, this.#pressPointerType,
-        event.clientX, event.clientY, this.#pressPointerType !== "mouse");
     }
-    // The press's identity is spent: only the armed seed (a machine-owned
-    // copy) survives.
-    this.#pressTarget = null;
+    // A plain tap has nothing owned to replay: by the prevent-scope rule its
+    // native stream already carried the press to the page, and the click that
+    // follows it passes through #handleClickCapture untouched.
     this.#primaryPointerId = null;
     this.#gestureZone = null;
   }
@@ -1585,8 +1405,11 @@ export class InputForge {
     this.#pointers.delete(pointerId);
     if (this.#pointers.size === 0) {
       // A cancelled press ends the stream; no click is coming, so drop any
-      // await latch a prior pointerup left armed.
+      // await latch a prior pointerup left armed. The claim dies with the
+      // pointers: an unconsumed claimant would otherwise suppress a later
+      // plain tap's native stream forever.
       this.#pointerOwned = false;
+      this.#streamClaimed = false;
       this.#clearAwaitClick();
     }
     if (this.#pinchZone !== null && this.#pointers.size < 2) {
@@ -1602,34 +1425,6 @@ export class InputForge {
     this.#endPointerSession();
     this.#primaryPointerId = null;
     this.#gestureZone = null;
-  }
-
-  /** Whether this press belongs to the shell's gesture stream (zone capture
-   *  should stop it). Used for touchstart/mousedown, which can arrive before
-   *  or without the tracked pointerdown; mirrors #handlePointerDown's
-   *  eligibility: armed gestures, left button, outside shell chrome, over the
-   *  video (or joining a live session). */
-  #dominatesPress(event) {
-    if (event.button !== undefined && event.button !== 0) {
-      return false;
-    }
-    if (!allowsAnyIntent()) {
-      return false;
-    }
-    if (this.#eventTarget && isInsideShell(this.#eventTarget, event.target)) {
-      return false;
-    }
-    if (this.#sdkTargetInteractive(event)) {
-      return false;
-    }
-    if (this.#pointers.size > 0) {
-      return true;
-    }
-    const point = (event.touches && event.touches[0]) || event;
-    if (point.clientX === undefined) {
-      return false;
-    }
-    return this.#hitTestVideo(point);
   }
 
   /** Whether the press target resolves an interactive SDK control (see
@@ -1672,52 +1467,38 @@ export class InputForge {
     this.#awaitClick = false;
   }
 
-  /** Hold-a-first-tap's-click-back for the dbltap window is TapReplay's
-   *  story; the click capture below only consults it. */
+  /** The click hangover latch lives above (#awaitClick) - click capture only
+   *  consumes it. */
 
   #handleClickCapture(event) {
-    // Our own single-tap stand-in: pass it to the SDK untouched.
-    if (forgeRegistry.isReplay(event)) {
-      this.#clearAwaitClick();
-      return;
-    }
-    const ownedPress = this.#awaitClick || this.#tap.pending;
+    // Gesture hangover: the window is a deadline, consumed by time, so every
+    // activation inside it stays invisible - a scrub/hold/pinch session's
+    // trailing click, and an fs double-tap's second activation, both die here.
+    // Everything else is native, full stop: a plain single click passes
+    // through with zero interception (the prevent-scope rule - the SDK's only
+    // real click is this one, trusted and unthrottled).
     this.#clearAwaitClick();
-    // Gesture window: every activation the shell consumed stays invisible -
-    // the window is a deadline, consumed by time, so a dblclick arriving
-    // after its clicks is swallowed too.
     if (clickTime() < this.#suppressClickUntil) {
       event.stopImmediatePropagation();
       event.preventDefault();
-      return;
     }
-    if (!ownedPress) {
-      return; // Press the shell never took (SDK control, outside rect, right
-      // button): native single click passes through as-is.
-    }
-    if (this.#tap.pending) {
-      // First tap of a possible dbltap - hold the real click back; the seed
-      // replays it for the SDK if the window closes without a second tap.
-      event.stopImmediatePropagation();
-      event.preventDefault();
-      return;
-    }
-    // Owned press that never seeded (long press, dbltap disarmed): a plain
-    // single click - pass natively, zero latency.
   }
 
   #handleDblClickCapture(event) {
-    if (forgeRegistry.isReplay(event)) {
-      return;
-    }
+    // Gesture hangover window first (an fs double tap's dblclick dies here
+    // like its clicks did).
     if (clickTime() < this.#suppressClickUntil) {
       event.stopImmediatePropagation();
       event.preventDefault();
       return;
     }
-    if (this.#tap.pending) {
-      // Two slow taps (outside the dbltap window): both clicks are managed
-      // by their seeds, so the UA's dblclick stays invisible too.
+    // The prevent-scope rule's second arm: the SDK's DOUBLE TAP is prevented
+    // in fullscreen and only there - the UA dblclick carries every SDK's
+    // fullscreen-toggle/zoom double-tap, which would race the skip gesture
+    // (inline those intents are disarmed, so the SDK keeps its native double
+    // taps). Shell chrome is native ground: panel text selection and control
+    // dblclicks pass untouched.
+    if (fs && !(this.#eventTarget && isInsideShell(this.#eventTarget, event.target))) {
       event.stopImmediatePropagation();
       event.preventDefault();
     }
