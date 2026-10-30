@@ -494,7 +494,16 @@ new code-level evidence:
    enclosing function only when one thin wrapper name must not change.
 5. **Signal-scoped teardown.** Every listener accepts `{ signal: scope }`;
    teardown paths call `scope.dispose()` and nothing else; the single
-   abort-fire tears everything down. Never build removal-list pairs.
+   abort-fire tears everything down. Never build removal-list pairs. The
+   deliberate-machines census holds this byte-true: every hand-rolled
+   release/teardown machine now rides native abort compositions (an internal
+   release controller per machine — `postTask`'s owner bridge, `DomSettleWait`,
+   `DomWatch`, the pinch wheel, `onNavigate`, and Fan's own subscribe handle —
+   its `{ once: true }`+`{ signal: release.signal }` composition detaches the
+   owner listener natively on whichever path ends first), and the census of
+   `removeEventListener` across src comes back empty: zero live manual
+   removals remain, Fan's handle included — its handle now tears down by
+   abort like every other machine's.
 6. **Imports:** one per realm-form, combined; `shared` below package imports;
    module files import only downward across planes (kernel → contract,
    shell → shared/kernel-contract), never sideways into a sibling's consumer

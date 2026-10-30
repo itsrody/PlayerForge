@@ -710,8 +710,8 @@ export class InputForge {
   #trackpadPinchCooldownUntil = -Infinity;
   /** Whether the (non-passive) wheel pinch listener is currently attached. */
   #trackpadPinchSubscribed = false;
-  /** Stable reference so the scoped wheel listener can be removed again. */
-  #wheelHandler = null;
+  /** Per-arm controller: detaching the pinch belt aborts it natively. */
+  #pinchRelease = null;
 
   constructor(video, zone, eventTarget, boxFor) {
     this.#video = video;
@@ -867,8 +867,17 @@ export class InputForge {
     }
     if (enabled) {
       this.#trackpadPinchSubscribed = true;
-      this.#wheelHandler = (event) => this.#handleWheelCapture(event);
-      this.#zone.addEventListener("wheel", this.#wheelHandler, WHEEL_CAPTURE);
+      // The wheel listener needs a non-passive capture arm while its feature
+      // can fire (fullscreen), so it arm/disarm per session; AbortController is
+      // the release arm: detach is one abort(), and the platform drops the
+      // listener - no manual removeEventListener pair anywhere.
+      const release = new AbortController();
+      this.#pinchRelease = release;
+      this.#zone.addEventListener(
+        "wheel",
+        (event) => this.#handleWheelCapture(event),
+        { ...WHEEL_CAPTURE, signal: release.signal }
+      );
     } else {
       this.#detachTrackpadPinch();
     }
@@ -879,12 +888,8 @@ export class InputForge {
       return;
     }
     this.#trackpadPinchSubscribed = false;
-    if (this.#wheelHandler) {
-      // Managed manually: live scoping needs add/remove symmetry outside the
-      // shared AbortSignal.
-      this.#zone.removeEventListener("wheel", this.#wheelHandler, true);
-      this.#wheelHandler = null;
-    }
+    this.#pinchRelease?.abort();
+    this.#pinchRelease = null;
   }
 
   destroy() {

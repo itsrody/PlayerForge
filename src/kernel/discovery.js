@@ -372,11 +372,10 @@ export function createOnScreenGate({ rootMargin = `${ON_SCREEN_MARGIN_PX}px`, pr
  * Media events travel the composed path to document, so even shadow-hosted SDK
  * videos surface here without any subtree observer.
  *
- * Accepts an optional AbortSignal: on abort the browser drops both capture
- * listeners itself - no manual unsubscribe needed for pagehide teardown. The
- * returned function stays available for early / signal-free teardown.
+ * The returned function tears the tap down; the capture listeners ride one
+ * controller, so teardown is a single abort - no manual removal list.
  */
-function watchMediaEvents(onVideo, { signal } = {}) {
+function watchMediaEvents(onVideo) {
   const onMediaEvent = (event) => {
     const video = videoFromEvent(event);
     if (video) {
@@ -388,14 +387,13 @@ function watchMediaEvents(onVideo, { signal } = {}) {
   // loadeddata (which needs frame data) and can otherwise stay invisible to
   // discovery until the user presses play. loadeddata still matters for
   // players that surface metadata only on data; play catches late starts.
-  document.addEventListener("loadedmetadata", onMediaEvent, { capture: true, signal });
-  document.addEventListener("loadeddata", onMediaEvent, { capture: true, signal });
-  document.addEventListener("play", onMediaEvent, { capture: true, signal });
-  return () => {
-    document.removeEventListener("loadedmetadata", onMediaEvent, true);
-    document.removeEventListener("loadeddata", onMediaEvent, true);
-    document.removeEventListener("play", onMediaEvent, true);
-  };
+  // One native teardown: every listener rides the controller's signal, so
+  // stop() is a single abort() - the turn has no manual removal list.
+  const scope = new AbortController();
+  document.addEventListener("loadedmetadata", onMediaEvent, { capture: true, signal: scope.signal });
+  document.addEventListener("loadeddata", onMediaEvent, { capture: true, signal: scope.signal });
+  document.addEventListener("play", onMediaEvent, { capture: true, signal: scope.signal });
+  return () => scope.abort();
 }
 
 /**

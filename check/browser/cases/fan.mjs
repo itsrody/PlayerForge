@@ -60,6 +60,16 @@ export async function run({ session, baseUrl }) {
             f2.emit(2);
             results.signal = sigCalled === 1;
 
+            // An already-aborted owner signal is the documented no-op
+            // subscription: nothing attaches, the handle is still callable.
+            let abortedCalled = 0;
+            const dead = new AbortController();
+            dead.abort();
+            const f2d = new Fan("unit");
+            const deadHandle = f2d.subscribe(() => { abortedCalled++; }, { signal: dead.signal });
+            f2d.emit(1);
+            results.aborted = abortedCalled === 0 && typeof deadHandle === "function";
+
             let dCalled = 0;
             const f3 = new Fan("unit");
             const handle = f3.subscribe(() => { dCalled++; });
@@ -134,6 +144,7 @@ export async function run({ session, baseUrl }) {
   row("emit fans the payload positionally", probe.payload, true);
   row("the returned handle tears the subscription", probe.callable, true);
   row("signal teardown is native", probe.signal, true);
+  row("an already-aborted owner signal subscribes nothing", probe.aborted, true);
   row("the subscribe handle carries [Symbol.dispose]", probe.disposeProp, true);
   row("the subscribe handle disposes via Symbol.dispose", probe.dispose, true);
   row("`using` releases the subscription", probe.using, true);

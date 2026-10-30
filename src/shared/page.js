@@ -1317,27 +1317,40 @@ export function installContextBridge() {
  *
  * One event source so consumers never re-derive SPA navigation detection from
  * pushState patching or location polling: the native Navigation API
- * (`navigation.currententrychange`, Chromium 102+) covers pushState,
- * replaceState, hash changes and history traversal, and needs no manager grant. Single-backend by the same contract as the scheduler: the platform
+ * (`navigation.currententrychange`) covers pushState, replaceState, hash
+ * changes and history traversal, and needs no manager grant. Floor-real on
+ * both branch engines (verified live on the Firefox 159 page realm; Chromium
+ * 102). Single-backend by the same contract as the scheduler: the platform
  * is the backend (the harness supplies the event target), so no fallback arm
  * ships in production.
  *
  * `window.onurlchange` is not an option here at all: Violentmonkey's grant
  * family carries no such privilege (its extras are only window.close and
  * window.focus, per its GM wrapper source), and a manager-covered URL
- * notification would cost a grant line for nothing - the native
- * Navigation API already provides on the Chromium 156 floor - the grant
- * policy in shared/store.js reserves manager APIs for capabilities the page
- * cannot supply, and URL change notification is not one of them.
+ * notification would cost a grant line for nothing - the grant policy in
+ * shared/store.js reserves manager APIs for capabilities the page cannot
+ * supply, and URL change notification is not one of them.
  *
- * Returns an unsubscribe function; passing `signal` tears the subscription
- * down the same way. Realms with no Navigation API keep the subscriber inert.
+ * Returns an unsubscribe function - the tree's one Disposable subscription
+ * handle ([Symbol.dispose] like Fan's). Passing `signal` tears the
+ * subscription down the same way. Realms with no Navigation API keep the
+ * subscriber inert.
  */
 export function onNavigate(listener, { signal } = {}) {
   const nav = globalThis.navigation;
   if (!nav || typeof nav.addEventListener !== "function") {
     return () => {};
   }
-  nav.addEventListener("currententrychange", listener, { signal });
-  return () => nav.removeEventListener("currententrychange", listener);
+  // One release controller: the handle tears down by abort (the platform
+  // drops the listener), an owner `signal` rides the same release via the
+  // `once`+`signal` composition - no manual removal anywhere in the machine.
+  const release = new AbortController();
+  nav.addEventListener("currententrychange", listener, { signal: release.signal });
+  signal?.addEventListener("abort", release.abort.bind(release), {
+    once: true,
+    signal: release.signal
+  });
+  const off = () => release.abort();
+  off[Symbol.dispose] = off;
+  return off;
 }

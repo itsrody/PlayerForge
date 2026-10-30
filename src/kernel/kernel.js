@@ -24,6 +24,13 @@ class DomSettleWait {
       this.#settleHandle = postTask(done, { priority: "user-visible", delay: quietMs });
     });
 
+    // One release controller makes the abort-listener teardown native: every
+    // settle path (quiet window, cap, owner abort) fires `done`, and `done`
+    // heads `release.abort()` so the owner-scope listener detaches itself.
+    // Manual `signal?.removeEventListener("abort", done)` would be the pair
+    // §5.5 bans - and the quiet-page settle must not leave the kernel-scope
+    // signal subscribed page-long, which is exactly what the release buys.
+    const release = new AbortController();
     const done = () => {
       if (this.#settled) {
         return;
@@ -32,10 +39,7 @@ class DomSettleWait {
       observer.disconnect();
       this.#settleHandle?.abort();
       this.#capHandle?.abort();
-      // Normal settle must release the abort listener too: with `{ once: true }`
-      // it only self-removes on abort, so a quiet-page settle would otherwise
-      // keep the kernel-scope signal subscribed for the whole page lifetime.
-      signal?.removeEventListener("abort", done);
+      release.abort();
       resolve();
     };
 
@@ -44,7 +48,7 @@ class DomSettleWait {
 
     observer.observe(container, { childList: true });
 
-    signal?.addEventListener("abort", done, { once: true });
+    signal?.addEventListener("abort", done, { once: true, signal: release.signal });
   }
 
   get promise() {

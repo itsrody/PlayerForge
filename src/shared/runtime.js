@@ -58,24 +58,28 @@ export function postTask(fn, { priority = "user-visible", delay: ms = 0, signal 
     return { abort() {} };
   }
   const ac = new AbortController();
-  const dropOwnerSignal = () => signal?.removeEventListener("abort", onOwnerAbort);
-  const onOwnerAbort = () => {
-    dropOwnerSignal();
+  // The owner-signal release runs on every end of the task - firing, handle
+  // abort, owner abort. A page-lifetime owner scope (the kernel's) must never
+  // pin a finished task's controller, so the release signal is the native
+  // detach: the platform drops the owner listener when it aborts, whichever
+  // path drove it. AbortSignal.any would compose the signals instead, but a
+  // source subscription in the any() composite lives until the owner aborts -
+  // the exact leak this bridge avoids - so the release stays one controller.
+  const release = new AbortController();
+  const end = () => {
+    release.abort();
     ac.abort();
   };
-  signal?.addEventListener("abort", onOwnerAbort, { once: true });
+  signal?.addEventListener("abort", end, { signal: release.signal });
   const task = globalThis.scheduler.postTask(() => {
-    dropOwnerSignal();
+    release.abort();
     fn();
   }, { priority, delay: ms, signal: ac.signal });
   // Aborting the task rejects its promise; nobody awaits it, so keep the
   // rejection off the unhandled-rejection path.
   task.catch(() => {});
   return {
-    abort: () => {
-      dropOwnerSignal();
-      ac.abort();
-    }
+    abort: end
   };
 }
 
@@ -339,11 +343,28 @@ export class Fan extends EventTarget {
    * callable, and a Disposable ([Symbol.dispose] tears the subscription).
    * Callbacks receive the dispatched value positionally, matching the
    * notify-loop signatures this replaces.
+   *
+   * The handle tears down through the release-controller pattern every other
+   * machine rides: one abort controller owns the listener's signal, the
+   * handle aborts it (the platform drops the listener), an owner `signal`
+   * rides the same release via the `once`+`signal` composition. No manual
+   * `removeEventListener` anywhere in the class - and an already-aborted
+   * owner signal is the no-op subscription the docstring records, returning
+   * a dead handle instead of pinning a listener that could never fire or
+   * detach.
    */
   subscribe(cb, { signal } = {}) {
+    if (signal?.aborted) {
+      return () => {};
+    }
     const handler = (event) => cb(event.detail);
-    this.addEventListener(this.#type, handler, { signal });
-    const sig = () => this.removeEventListener(this.#type, handler);
+    const release = new AbortController();
+    this.addEventListener(this.#type, handler, { signal: release.signal });
+    signal?.addEventListener("abort", release.abort.bind(release), {
+      once: true,
+      signal: release.signal
+    });
+    const sig = () => release.abort();
     sig[Symbol.dispose] = sig;
     return sig;
   }

@@ -49,13 +49,17 @@ import { Scope, logger, postTask, yield_, Fan } from "./runtime.js";
  * and resumed on visibility, so a backgrounded SPA doesn't fight its own
  * throttled idle budget with mutation scans.
  *
- * Deliberately NOT on the shared Fan (native EventTarget): this feed's
- * dispatch is a compiled contract the platform fan-out cannot express -
- * per-consumer throw isolation (one throwing subscriber must not abort the
- * batch to its peers), the batch argument itself, tombstone compaction
- * driven by a #live count, and liveness-gated observer teardown (EventTarget
- * exposes no listener census). Its audience-snapshot rule simply matches
- * native dispatch by coincidence of design.
+ * Deliberately NOT on the shared Fan (native EventTarget): the platform's
+ * dispatch cannot express what this feed IS. Native dispatch isolates a
+ * throwing listener but REPORTS the throw to the page error surface - and a
+ * mutation batch is page-paced, so a subscriber's bug would surface as an
+ * uncaught error on every host mutation; this feed catches and logs instead,
+ * keeping the throw inside our own ledger. And the dispatch needs a listener
+ * census native EventTarget never exposes: it owns the page observer and must
+ * tear it down when the audience goes empty (liveness-gated observer
+ * teardown), plus tombstone compaction by the same #live count. Its
+ * audience-snapshot rule simply matches native dispatch by coincidence of
+ * design.
  */
 
 /** Cap on how long a hidden document's mutation batch stays deferred. */
@@ -265,17 +269,20 @@ class DomWatch {
     const slot = [handler];
     this.#slots.push(slot);
     this.#live += 1;
+    // One release controller carries the native detach: whichever path ends
+    // the subscription (manual `off()`, owner-signal abort) aborts it, and the
+    // platform drops the owner-scope listener - without the release, the
+    // signal would retain this closure until it aborts (possibly never).
+    const release = new AbortController();
     const off = () => {
+      release.abort();
       if (slot[0]) {
         slot[0] = null;
         this.#live -= 1;
-        // Release the abort listener on manual unsubscribe too - otherwise the
-        // signal retains this closure until it aborts (possibly never).
-        signal?.removeEventListener("abort", off);
       }
       this.#stopIfIdle();
     };
-    signal?.addEventListener("abort", off, { once: true });
+    signal?.addEventListener("abort", off, { once: true, signal: release.signal });
     return off;
   }
 }
