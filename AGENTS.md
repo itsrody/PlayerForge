@@ -11,10 +11,11 @@ history that explains why those conventions exist.
 
 ## 1. What PlayerForge is
 
-A Userscript-exclusive HTML5 video player enhancer for two fork browsers:
+A Userscript-exclusive HTML5 video player enhancer for **native Firefox** on
+both platforms:
 
-- **Helium** (macOS desktop), **Titanium** (Android)
-- Chromium **156+** platform floor, **Violentmonkey 2.50+ (MV3)** manager
+- **Firefox desktop** (macOS/Windows/Linux), **Firefox for Android**
+- Firefox **159+** platform floor, **Violentmonkey 2.50+ (MV2)** manager
 - Features: pointer/keyboard gestures, hotkeys, progress resume, watch
   history, subtitles (.srt/.vtt with per-cue placement, per-entry sync
   offset, URL/file restore), color filters with presets, fullscreen
@@ -46,9 +47,9 @@ apex pairs existed; the released matcher's `*.` covers the apex), 8 grants
 (`GM_setValue/getValue/registerMenuCommand/unregisterMenuCommand/
 addValueChangeListener/removeValueChangeListener/getResourceText/
 xmlhttpRequest`), `@connect *` + subtitlecat,
-**`@run-at document-start`** (real under VM MV3's pre-matched registration),
+**`@run-at document-start`** (real under VM's MV2 registration),
 deliberately **no `@noframes`**: every frame gets the script (§2).
-`@downloadURL` pins the chromium-branch dist for VM's updater. Version is
+`@downloadURL` pins the branch dist for VM's updater. Version is
 derived from `package.json` by the build; never hand-edit the header version.
 
 **Commands:** `npm run build` (or `--watch`), `npm run lint` (eslint src/),
@@ -327,7 +328,7 @@ Rule applied everywhere: a class may own mutations; a consumer that just
 calls a function must NOT be forced to spell `new` (plain-function wrappers
 stay for those seams).
 
-**Single-backend contract.** Production ships exactly one Chromium-native
+**Single-backend contract.** Production ships exactly one platform-native
 implementation per platform capability; the jsdom check harness owns all
 emulation (see `check/lib/node-realm.mjs`). The method: census every
 dual-arm/dual-check probe in the tree; keep the arm whose semantics are real
@@ -478,7 +479,7 @@ new code-level evidence:
 7. **No comments in check/ code beyond the why-docstrings it already
    carries; `installGMRealm` must stay a single self-contained function**
    (it ships as an executeScript payload — no closure references).
-8. **ES target floor: Chromium 156.** `?.` chains, top-level field syntax,
+8. **ES target floor: Firefox 159.** `?.` chains, top-level field syntax,
    `data-transfer` file APIs, View Transitions, CloseWatcher — all in scope;
    nothing below the floor, no polyfill arms.
 9. **Version is derived** (esbuild reads package.json). Header updates are
@@ -541,7 +542,9 @@ stop at the first failure:
    artifact shape validation (header fields, IIFE shape, css companion) and
    the manager-contract pins: the exclusion list only ever rides the strict
    `@exclude-match` surface, and `@downloadURL` stays present for the updater.
-4. **browser** — real Helium Chromium 156 + real bundle in a GM realm:
+4. **browser** — real browser + real bundle in a GM realm: the driver rides
+   the existing Chromium-fork harness on this branch (real Helium Chromium
+   156); the firefox migration retargets it to native Firefox 159. Proves:
    boot, gesture contract, media semantics, resume, menus, GM env, frame
    scenarios, subtitle picture anchoring, edge robustness. ~33–45s.
 
