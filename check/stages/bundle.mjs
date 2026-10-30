@@ -51,6 +51,25 @@ export async function run() {
     if (ungranted.length > 0) {
       fails.push({ name: "grant coverage", note: `body calls ${ungranted.join(", ")} without a matching @grant` });
     }
+    // Matching surface: the exclusion list ships on VM's strict surface
+    // (@exclude-match, Chrome match-pattern semantics). A loose @exclude glob
+    // line returning would silently re-open the any-characters overmatch the
+    // migration collapsed away.
+    const looseExcludes = [...source.matchAll(/^\/\/\s*@exclude\s+\S/gm)].length;
+    const matchExcludes = [...source.matchAll(/^\/\/\s*@exclude-match\s+(\S+)$/gm)].map((m) => m[1]);
+    const malformed = matchExcludes.filter((rule) => !/^\*:\/\/[^/]+\/\*$/.test(rule));
+    if (looseExcludes > 0 || malformed.length > 0 || matchExcludes.length === 0) {
+      fails.push({
+        name: "exclude surface",
+        note: `@exclude lines=${looseExcludes} @exclude-match=${matchExcludes.length} malformed=${malformed.join(", ") || "none"}`
+      });
+    }
+    // Updater surface: VM's updater compares @version against @downloadURL -
+    // a header without it pins auto-update to whatever URL the user installed
+    // from (a local install gets none).
+    if (!/^\/\/ @downloadURL\s+https:\/\//m.test(source)) {
+      fails.push({ name: "updater surface", note: "@downloadURL missing from header" });
+    }
     const sizeKb = (source.length / 1024).toFixed(1);
     rows.push({ name: `bundle emitted (${sizeKb} KB), header + IIFE shape valid`, status: "pass", ms: null });
   }

@@ -40,12 +40,16 @@ esbuild.config.mjs    single build: IIFE userscript + css resource + worker chun
 
 **Shipping artifact** (`dist/playerforge.user.js`, ~152 KB one IIFE +
 `dist/playerforge.css` via `@resource pfStyle`): match-all userscript with a
-40-host exclusion list, 8 grants (`GM_setValue/getValue/registerMenuCommand/
-unregisterMenuCommand/addValueChangeListener/removeValueChangeListener/
-getResourceText/xmlhttpRequest`), `@connect *` + subtitlecat,
+24-pattern exclusion list (`@exclude-match`, VM's strict match-pattern
+surface — the old `@exclude` glob any-character semantics is why the bare
+apex pairs existed; the released matcher's `*.` covers the apex), 8 grants
+(`GM_setValue/getValue/registerMenuCommand/unregisterMenuCommand/
+addValueChangeListener/removeValueChangeListener/getResourceText/
+xmlhttpRequest`), `@connect *` + subtitlecat,
 **`@run-at document-start`** (real under VM MV3's pre-matched registration),
-deliberately **no `@noframes`**: every frame gets the script (§2). Version is derived from
-`package.json` by the build; never hand-edit the header version.
+deliberately **no `@noframes`**: every frame gets the script (§2).
+`@downloadURL` pins the chromium-branch dist for VM's updater. Version is
+derived from `package.json` by the build; never hand-edit the header version.
 
 **Commands:** `npm run build` (or `--watch`), `npm run lint` (eslint src/),
 `npm test` — the alias for `check/run.mjs`, the repo's one testing interface.
@@ -507,7 +511,9 @@ stop at the first failure:
 1. **syntax** — parse-only V8 check of every src module (parallel children).
 2. **flaws** — repo eslint + isolated module-import smoke per module.
 3. **bundle** — real esbuild build (version derivation, worker chunk) +
-   artifact shape validation (header fields, IIFE shape, css companion).
+   artifact shape validation (header fields, IIFE shape, css companion) and
+   the manager-contract pins: the exclusion list only ever rides the strict
+   `@exclude-match` surface, and `@downloadURL` stays present for the updater.
 4. **browser** — real Helium Chromium 156 + real bundle in a GM realm:
    boot, gesture contract, media semantics, resume, menus, GM env, frame
    scenarios, edge robustness. ~28–36s.
@@ -548,7 +554,9 @@ stop at the first failure:
   video. Proven rows: only-innermost-boot, cross-origin bridge context in
   the resume entry (`domain=127-0-0-1` proves the TOP answered; a fallback would
   write `localhost`), fullscreen provisioning on every ancestor, per-variant
-  single-shell, and a 6s attach-latency budget row.
+  single-shell, a 6s attach-latency budget row, and the VM echo reach: a
+  foreign settings write live-reloads the running frame's kernel and the
+  event-time hotkeys gate sees it (blocked mid-flight, then re-armed).
 - **Cases (9):** `boot` (install contract, positive/negative discovery),
   `discovery` (min size, no-anchor, tiny-video), `frames` (§ above),
   `gestures` (skip/mute/volume/panel/PiP/scrub with real driver input),

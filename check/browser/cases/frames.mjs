@@ -172,6 +172,87 @@ export async function run({ session, baseUrl, crossBaseUrl, bundle, boot, header
     await failRow("cross-origin iframe scenario failed", err);
   }
 
+  // ---- VM echo: the settings live reload reaches the frame's RUNNING kernel.
+  // Before the manager migration the foreign-write reload only re-seeded
+  // sibling TABS - the embed kept its boot-time settings digest and stayed
+  // stale until a reboot. The echo contract (now proven in the gm case)
+  // delivers foreign-INSTANCE writes - another frame counts - so the frame's
+  // Settings engine re-seeds from the fresh doc and its event-time consumers
+  // see the flip. Proven on the hotkeys gate, the gating that guards every
+  // keyboard action: a foreign flip off blocks the panel key mid-flight, and
+  // the flip back re-arms it, with the two log sightings as delivery
+  // witnesses (the kernel's debug mirror, then the Settings engine's
+  // live-reload line). Synthetic keydown is the right probe here (the real
+  // driver input path is the gestures case's territory) - what a stale frame
+  // cache would miss is precisely the event-time getSetting() read.
+  try {
+    const armListener = () => session.evalInFrame([0], function main() {
+      window.__pfEvents = [];
+      const host = document.querySelector(".pf-shell");
+      if (!host) {
+        return false;
+      }
+      if (!window.__pfEventsInstalled) {
+        window.__pfEventsInstalled = true;
+        host.addEventListener("pf:gesture-panel", () => window.__pfEvents.push("panel"));
+      }
+      window.__pfConsoleLog = [];
+      // Witness A - the kernel's debug mirror answers a foreign write with a
+      // log line, proving the frame RECEIVES foreign-instance deliveries.
+      const doc = JSON.parse(JSON.stringify(window.__pfBacking["pf:configs"] ?? { version: 1 }));
+      doc.debug = doc.debug ?? {};
+      doc.debug.logs = true;
+      window.__gmTest.remoteWrite("pf:configs", doc);
+      return true;
+    });
+    const frameConsole = () => session.evalInFrame([0], function main() {
+      return { lines: window.__pfConsoleLog ?? [], docHotkeys: window.__pfBacking?.["pf:configs"]?.settings?.gestures?.hotkeys };
+    });
+    const writeSetting = (value) => session.evalInFrame([0], function main(value) {
+      const doc = JSON.parse(JSON.stringify(window.__pfBacking["pf:configs"]));
+      doc.settings = doc.settings ?? {};
+      doc.settings.gestures = doc.settings.gestures ?? {};
+      doc.settings.gestures.hotkeys = value;
+      window.__pfEvents = [];
+      window.__gmTest.remoteWrite("pf:configs", doc);
+    }, value);
+    const keyS = () => session.evalInFrame([0], function main() {
+      document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyS", bubbles: true }));
+    });
+    const frameProbe = () => session.evalInFrame([0], function main() {
+      return { events: window.__pfEvents ?? [], panelOpen: document.querySelector(".pf-shell")?.shadowRoot?.querySelector(".pf-panel.pf-open") !== null };
+    });
+
+    const armed = await armListener();
+    await new Promise((r) => setTimeout(r, 250));
+    const mirrorRun = await frameConsole();
+    const mirrorSighted = mirrorRun.lines.some((l) => l.includes("Debug logs mirrored on"));
+    // Flip the gate off; the Settings engine must re-seed (log line) and the
+    // panel key must die mid-flight.
+    await writeSetting(false);
+    await new Promise((r) => setTimeout(r, 250));
+    const afterOff = await frameConsole();
+    const reloadSighted = afterOff.lines.some((l) => l.includes("Live-reloaded"));
+    await keyS();
+    await new Promise((r) => setTimeout(r, 300));
+    const blocked = await frameProbe();
+    // Flip back on; the engine re-seeds again and the panel key returns.
+    await writeSetting(true);
+    await new Promise((r) => setTimeout(r, 250));
+    await keyS();
+    await new Promise((r) => setTimeout(r, 300));
+    const reArmed = await frameProbe();
+    askRows(
+      "foreign settings write live-reloads the frame's running kernel",
+      armed && mirrorSighted && reloadSighted
+        && blocked.events.length === 0 && blocked.panelOpen === false
+        && reArmed.events.length === 1,
+      `armed=${armed} mirror=${mirrorSighted} reload=${reloadSighted} blocked=${JSON.stringify(blocked.events)} panelOpen=${blocked.panelOpen} reArmed=${JSON.stringify(reArmed.events)} docAfterOff=${afterOff.docHotkeys}`
+    );
+  } catch (err) {
+    await failRow("foreign settings live-reload row failed", err);
+  }
+
   // ---- Scenario 4: nested frames (cross-origin mid -> same-origin player)
   try {
     latencies.nested = await bootFrameScenario({

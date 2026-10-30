@@ -117,7 +117,10 @@ class Settings {
     for (const definition of SETTINGS_SCHEMA) {
       this.#cache[definition.key] = coerceSetting(definition, getConfigValue(`${SETTINGS_PREFIX}.${definition.key}`, definition.default));
     }
-    // Cross-tab live reload via the storage-owned watch (shared echo contract).
+    // Cross-instance live reload via the storage-owned watch (shared echo
+    // contract): the delivery surface is the manager's echo contract, so a
+    // foreign TAB write and a foreign FRAME write (a top-frame panel reaching
+    // an embed) re-seed this cache alike.
     watchStorageKey(KEYS.configs, () => this.#refreshFromStorage());
   }
 
@@ -150,10 +153,12 @@ class Settings {
   }
 
   /**
-   * Live reload across tabs: pf:configs lives in shared manager storage,
-   * so a write from any other tab re-seeds this cache and every event-time
-   * getSetting() consumer picks it up on its next read. Our own writes echo
-   * back through the same path and land as no-ops.
+   * Live reload across script instances: pf:configs lives in shared manager
+   * storage, so a write from any other tab - or any other frame of this tab,
+   * the reach the manager's echo contract documented in store.js gives - re
+   * -seeds this cache and every event-time getSetting() consumer picks it up
+   * on its next read. Our own writes echo back through the same path and land
+   * as no-ops.
    */
   #refreshFromStorage() {
     // A cross-tab writer replaced pf:configs behind our back - drop the cached
