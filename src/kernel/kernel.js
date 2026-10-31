@@ -686,7 +686,7 @@ export class Kernel {
 /** GM menu wiring, owned at the kernel layer instead of inside the Kernel so
  *  the commands exist from script eval - not just after a video is
  *  discovered. The debug toggle works fully without a kernel: it persists the
- *  setting and flips the shared debug runtime (logger + LoAF diagnostic). The
+ *  setting and flips the shared debug runtime (the console log flag). The
  *  one-shot reset commands need a live shell, resolved lazily through the
  *  entry's kernel reference at click time (the kernel boots after eval).
  *  One instance owns the handles; the debug toggle re-registers with its

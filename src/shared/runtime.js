@@ -5,7 +5,7 @@
  *   1. Scheduling     - postTask/yield_, delay, debounce (time backend)
  *   2. Step lists     - runSteps/runStepsAsync (ordered sequences)
  *   3. Scopes         - Scope (the one teardown primitive)
- *   4. Debug runtime  - logger chatter + the LoAF diagnostic
+ *   4. Debug runtime  - logger chatter
  *
  * The scheduler façade is single-backend: it composes the platform's own
  * primitives (scheduler.postTask / scheduler.yield, Chromium 95+/129+ and
@@ -407,11 +407,6 @@ const STYLES = {
  * exceptional paths and must surface even in silent mode.
  */
 
-/** Report only the worst few per flush so the console isn't flooded. */
-const MAX_REPORT = 3;
-/** Only frames that crossed an interaction or took > this long are worth noise. */
-const JANK_THRESHOLD_MS = 150;
-
 function styleFor(channel) {
   return STYLES[channel] || "";
 }
@@ -446,25 +441,20 @@ function error(channel, ...args) {
  * One owner of the debug runtime state. Previously the log flag lived in
  * logger.js and a second `enabled` flag lived beside the LoAF diagnostic,
  * synced externally by setDebugRuntime - two states that could only be
- * kept in step by a caller. Here the visibility flag and the observer are
- * private fields of one instance: the observer can never outlive (or
- * flip on separately from) the flag it serves.
+ * kept in step by a caller. Here the flag is one private field of one
+ * instance and every flip converges on it.
  *
- * Two tiers on purpose: setLogs() flips console chatter alone (the logger
- * façade's enable/disable), while setRuntime() flips logs AND the LoAF
- * jank diagnostic as one unit (the kernel's boot probe and the GM menu
- * toggle route through the setDebugRuntime export). A production user
- * without debug toggled pays exactly zero cost: no observer, no buffered
- * entries, no console I/O.
- *
- * The LoAF surface (Chromium 123+) reports frames delayed beyond 50ms
- * with script attribution, including forced-style/layout breakdowns, so
- * jank - ours or an SDK's - surfaces on the console instead of a
- * tracing session.
+ * The LoAF jank arm was retired as dead weight, probed live on the
+ * shipping floor: Firefox 159 exposes the entry type in neither realm -
+ * page or worker - and the harness realms ship no entries either, so the
+ * supportedEntryTypes gate kept the diagnostic permanently unarmed
+ * everywhere this userscript runs. Its console formatting (worst-few per
+ * flush, blocking/style breakdowns) was the only consumer of the
+ * PerformanceObserver surface. A return would be a redesign decision with
+ * its own measurement, not a dormant gate.
  */
 class DebugRuntime {
   #logsEnabled = false;
-  #observer = null;
 
   get logsEnabled() {
     return this.#logsEnabled;
@@ -474,68 +464,11 @@ class DebugRuntime {
     this.#logsEnabled = on;
   }
 
+  // setRuntime collapsed onto setLogs when the LoAF arm retired - the
+  // observer was the second half of the two-tier split, and there is
+  // nothing left to arm separately from the console flag.
   setRuntime(on) {
-    // Idempotence guard: mid-flight subscribers (the kernel's storage-watch
-    // debug mirror) re-fire on every foreign configs write; a value-neutral
-    // flip must not churn the perf observer's install/teardown.
-    if (on === this.#logsEnabled) {
-      return;
-    }
-    this.#logsEnabled = on;
-    if (on) {
-      this.#installPerf();
-    } else {
-      this.#teardownPerf();
-    }
-  }
-
-  #installPerf() {
-    // Single-backend: the platform's PerformanceObserver decides (LoAF is an
-    // entry type) - a realm that lacks either exposes it through the same
-    // check. Node, for instance, ships PerformanceObserver without
-    // long-animation-frame.
-    if (this.#observer ||
-        !globalThis.PerformanceObserver?.supportedEntryTypes?.includes("long-animation-frame")) {
-      return;
-    }
-    try {
-      this.#observer = new PerformanceObserver((entries) => this.#report(entries));
-      this.#observer.observe({ type: "long-animation-frame", buffered: false });
-    } catch {
-      this.#observer = null;
-    }
-  }
-
-  #teardownPerf() {
-    if (!this.#observer) {
-      return;
-    }
-    this.#observer.disconnect();
-    this.#observer = null;
-  }
-
-  /** Report only the worst few per flush so the console isn't flooded. */
-  #report(entries) {
-    const worst = entries.getEntries()
-      .filter((e) => e.duration >= JANK_THRESHOLD_MS)
-      .sort((a, b) => b.duration - a.duration)
-      .slice(0, MAX_REPORT);
-    for (const entry of worst) {
-      const blocked = entry.blockingDuration ?? 0;
-      const forced = entry.scripts?.reduce((sum, s) => sum + (s.forcedStyleAndLayoutDuration ?? 0), 0) ?? 0;
-      logger.warn(
-        "perf",
-        `LoAF ${entry.duration.toFixed(0)}ms (blocking ${blocked.toFixed(0)}ms, forced style+layout ${forced.toFixed(1)}ms)`
-      );
-      for (const script of entry.scripts ?? []) {
-        if (script.name) {
-          logger.warn("perf", `  - ${script.name}`);
-        }
-        if (script.forcedStyleAndLayoutDuration > 0) {
-          logger.warn("perf", `     forced style+layout ${script.forcedStyleAndLayoutDuration.toFixed(1)}ms`);
-        }
-      }
-    }
+    this.setLogs(on);
   }
 }
 
@@ -559,7 +492,7 @@ export const logger = {
   }
 };
 
-/** Flip the debug runtime - console logs and the LoAF diagnostic - as one. */
+/** Flip the debug runtime - the one console flag (the LoAF arm retired). */
 export function setDebugRuntime(on) {
   debug.setRuntime(on);
 }

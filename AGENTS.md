@@ -132,8 +132,10 @@ iframes, same-origin and cross-origin:
   noise against the delivery-dominated budgets. Observable/
   `EventTarget.when()` stays un-adoptable — Mozilla's negative standards
   position (bug 1871732) keeps it off this floor, so Fan remains the
-  fan-out definition the platform doesn't ship — `DebugRuntime` (log
-  chatter AND the LoAF diagnostic flip as one unit), logger facade.
+  fan-out definition the platform doesn't ship — `DebugRuntime` (the
+  one debug flag, private to the instance; the LoAF arm retired — probed
+  unreachable: Firefox 159 exposes the entry type in no realm, page or
+  worker), logger facade.
 - **dom.js** — the shared mutation feed (`onDomMutations`: ONE page-level
   MutationObserver every consumer rides — element pooling, the shell ledger,
   shadow traversal, the fullscreen gate, the iframe registry), `PoolElement`

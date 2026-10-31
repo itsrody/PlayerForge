@@ -14,44 +14,16 @@
  * of thousands of cue objects, which measures ~3x more expensive for a
  * 5000-cue track.
  *
- * Chromium 153 extends Long Animation Frames to workers: the observer below
- * reports any parse that would have stalled the worker's own event loop
- * through the existing debug perf-diag channel (one message per janky frame,
- * posted asynchronously after the frame - which only a resident worker lives
- * to see). No GM_* grants exist in a Worker - this file stays pure.
+ * Chromium 153 extends Long Animation Frames to workers, but probed live on
+ * the 159 floor, Firefox ships the worker entry type in neither realm where
+ * this chunk runs - the former perf-diag channel is retired: a diagnostic
+ * that could never fire on the only shipping platform was dead weight, and
+ * a return would be a redesign decision with its own measurement. No GM_*
+ * grants exist in a Worker - this file stays pure.
  */
 import { parseSubtitles } from "./forgevtt.js";
 
-const JANK_THRESHOLD_MS = 150;
-
 const DECODER = new TextDecoder();
-
-/**
- * Report every long animation frame the worker produced. LoAF in workers
- * landed in Chromium 153, so it is always present on the 156 floor: the
- * entry-type support decides installation, one check that also covers realms
- * (like Node's PerformanceObserver) that ship the observer without LoAF.
- */
-if (PerformanceObserver.supportedEntryTypes?.includes("long-animation-frame")) {
-  new PerformanceObserver((list) => {
-    for (const entry of list.getEntries()) {
-      if (entry.duration < JANK_THRESHOLD_MS) {
-        continue;
-      }
-      const scripts = entry.scripts ?? [];
-      let forced = 0;
-      for (const script of scripts) {
-        forced += script.forcedStyleAndLayoutDuration ?? 0;
-      }
-      self.postMessage({
-        pfWorker: 1,
-        type: "perf",
-        durationMs: Math.round(entry.duration),
-        forcedMs: Math.round(forced * 10) / 10
-      });
-    }
-  }).observe({ type: "long-animation-frame", buffered: false });
-}
 
 /**
  * Flatten cues into the wire frame: numeric fields land in two interleaved

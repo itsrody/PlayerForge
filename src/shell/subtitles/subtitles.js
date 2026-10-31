@@ -170,18 +170,6 @@ class WorkerTransport {
     }
   }
 
-  #reportWorkerJank(data) {
-    // LoAF attribution in workers is Chromium 153+; only debug runs warrant
-    // the noise - the one-message-per-janky-frame perf channel is the whole
-    // debug-story, and only a resident worker ever lives to post it.
-    if (logger.enabled) {
-      logger.warn(
-        "perf",
-        `worker LoAF ${data.durationMs}ms (forced style+layout ${data.forcedMs}ms)`
-      );
-    }
-  }
-
   /** Rebuild cue objects from the worker's packed frame (engine field order). */
   #unpackCues(data) {
     const texts = data.texts;
@@ -207,10 +195,6 @@ class WorkerTransport {
   #onWorkerMessage(event) {
     const data = event.data ?? {};
     if (data.pfWorker !== 1) {
-      return;
-    }
-    if (data.type === "perf") {
-      this.#reportWorkerJank(data);
       return;
     }
     const entry = this.#pending.get(data.id);
