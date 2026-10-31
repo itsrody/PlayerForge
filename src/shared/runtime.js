@@ -245,8 +245,11 @@ export async function runStepsAsync(steps, { yieldBetween = false } = {}) {
  * the check forensics). Sub-lifetimes needing no disposer registry stay
  * bare native AbortControllers - the child() composition facility died in
  * the consumer census: every sub-lifecycle (defer signals, hint caps) was
- * already a bare one. Public class APIs keep their `destroy()` name and
- * simply delegate here.
+ * already a bare one; the MediaSessionBridge flag-root retired on the same
+ * principle - a Scope whose listeners ride a caller's signal and whose
+ * registry never fills is a disposal boolean, not an abort story (12 roots
+ * → 11, the roots census row reads the survivors). Public class APIs keep
+ * their `destroy()` name and simply delegate here.
  */
 export class Scope {
   #controller = new AbortController();

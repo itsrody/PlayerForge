@@ -105,8 +105,8 @@ const ROWS = [
   {
     name: "Scope destroy-roots",
     pattern: "new Scope(",
-    expect: 12,
-    why: "one destroy-root per feature instance; signal-scoped teardown everywhere, zero removal-list pairs (§5.5)"
+    expect: 11,
+    why: "one destroy-root per feature instance carrying real { signal } wiring or onDispose disposers; the MediaSessionBridge flag-root retired - its listeners rode the claim's caller signal and the scope held no signal consumers and no disposers, a disposal boolean, not an abort story"
   },
   {
     name: "setTimeout calls",

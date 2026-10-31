@@ -1,4 +1,4 @@
-import { logger, Scope } from "../shared/runtime.js";
+import { logger } from "../shared/runtime.js";
 import { clamp, isBenignMediaPolicyError } from "../shared/core.js";
 
 /** Volume delta applied by nudgeVolume. */
@@ -314,8 +314,12 @@ class MediaSessionBridge {
   #session;
   #controls;
   #video;
-  /** Disposal flag: guards sync/metadata refresh after release. */
-  #scope = new Scope();
+  /** Disposal flag: guards sync/metadata refresh after release. Not a Scope
+   *  root by the roots census: every listener the bridge owns rides the
+   *  claim's caller signal (attach() + the lone once-abort -> destroy), a
+   *  displacement destroys directly, and the internal scope held no signal
+   *  consumers and no disposers - a disposal boolean, not an abort story. */
+  #disposed = false;
 
   constructor(owner, session, controls, video) {
     this.#owner = owner;
@@ -387,7 +391,7 @@ class MediaSessionBridge {
 
   /** playbackState plus guarded position state; safe to call per event batch. */
   sync() {
-    if (this.#scope.disposed) {
+    if (this.#disposed) {
       return;
     }
     // Now-playing surfaces mutate document.title and video.poster without
@@ -429,10 +433,10 @@ class MediaSessionBridge {
   }
 
   destroy() {
-    if (this.#scope.disposed) {
+    if (this.#disposed) {
       return;
     }
-    this.#scope.dispose();
+    this.#disposed = true;
     this.#owner.disown(this);
     for (const action of CLEAR_ACTIONS) {
       try {
@@ -445,7 +449,7 @@ class MediaSessionBridge {
   }
 
   #refreshMetadata() {
-    if (this.#scope.disposed) {
+    if (this.#disposed) {
       return;
     }
     try {

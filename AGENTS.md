@@ -311,7 +311,10 @@ iframes, same-origin and cross-origin:
   as read-only aliases of the same record (identity is a shell-lifetime
   fact).
 - **media.js** — `MediaControls` (play/pause/seek/scrub-latch/volume/rate/
-  boost/PiP/stop), `MediaSessionOwner` claim/lifecycle. The wake-lock and
+  boost/PiP/stop), `MediaSessionOwner` claim/lifecycle — the bridge carries a
+  plain disposal boolean, not a Scope root: every listener it owns rides the
+  claim's caller signal and the had-scope held no signal consumers and no
+  disposers (the roots census's one retirement, 12→11). The wake-lock and
   fullscreen orientation-lock companions retired by user direction:
   Firefox already keeps its screen awake during media playback and handles
   fullscreen orientation on its own (the ReferenceBox orientation-change
@@ -691,7 +694,7 @@ stop at the first failure:
 1. **syntax** — parse-only V8 check of every src module (parallel children).
 2. **flaws** — repo eslint + isolated module-import smoke per module.
 3. **census** — the executable census: the recorded AGENTS.md counts
-   (ten Fans, twelve Scope roots, the zero-timer pipeline, zero manual
+   (ten Fans, eleven Scope roots, the zero-timer pipeline, zero manual
    teardowns, the empty-catch belt, the wall-clock reads) re-derived
    statically as literal occurrence counts over **comment-stripped** source —
    prose that names a pattern (`runtime.js` mentions `catch {}` in a
