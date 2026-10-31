@@ -33,14 +33,14 @@ import { AdoptionHome } from "./contract.js";
  * the fewest composed ancestor hops from the video wins; ties break by
  * registry order, then anchor order.
  *
- * Caching is single-tier: the descriptor cache (see findSdkForVideo) is the
- * one repeat-query memo - its stamp (video.parentNode + registry) is the
- * exact invalidation condition the scan itself would use, so no inner
- * match-level cache can ever answer a query the descriptor cache missed.
+ * Caching is single-tier: the descriptor cache (see resolveAdoptionHome) is the
+ * one repeat-query memo - its stamp (video.parentNode) is the exact
+ * invalidation condition the scan itself would use, so no inner match-level
+ * cache can ever answer a query the descriptor cache missed.
  *
  * Presence thresholds and the WHEN-is-it-ready machinery (size/on-screen
  * gates, media taps, the boot probe) live in discovery.js; this module only
- * answers WHICH SDK owns a video, and it imports nothing.
+ * answers WHICH SDK owns a video, importing only its contract.
  */
 
 const REGISTRY = [
@@ -116,7 +116,7 @@ class SdkMatcher {
     return len;
   }
 
-  #matchSdk(video, registry) {
+  #matchSdk(video) {
     // Single composed walk (uBO's one-pass-over-tokens shape): the rich-path
     // ancestors re-walked once per anchor, then walked again per hit to count
     // hops. Chain index IS the hop count, so one pass serves every anchor.
@@ -125,8 +125,8 @@ class SdkMatcher {
     const chain = this.#chain;
     const len = this.#fillComposedChain(video);
     let best = null;
-    for (let r = 0; r < registry.length; r++) {
-      const record = registry[r];
+    for (let r = 0; r < REGISTRY.length; r++) {
+      const record = REGISTRY[r];
       const anchors = record.anchors;
       for (let a = 0; a < anchors.length; a++) {
         const anchor = anchors[a];
@@ -152,8 +152,9 @@ class SdkMatcher {
   /**
    * Resolve the element that hosts the shell DOM: the matched record's `host`
    * override, else the matched element itself. Private to the engine; the
-   * host branch (unexercised by the current registry) is driven in tests by
-   * passing a synthetic registry to findSdkForVideo.
+   * host branch is a record-schema surface (a future SDK record may declare
+   * `host`), unexercised while every current record resolves its container
+   * to the matched anchor.
    */
   #resolveContainer({ record, el }) {
     if (!record.host) {
@@ -182,50 +183,51 @@ class SdkMatcher {
    * re-scanned the moment the video moves, so a bare <video> that a player SDK
    * later wraps is re-evaluated instead of staying cached as unrecognised.
    *
-   * `registry` defaults to the production REGISTRY and is injectable so records
-   * it does not exercise (currently `host`) stay testable without exporting
-   * resolveContainer. The cache stamp carries the registry reference, so a
-   * custom registry can never serve a production hit.
+   * The emitted descriptor carries exactly what the adoption protocol reads:
+   * name (log/error prose), container (the shell-host home), hops (the
+   * removal watch's depth input). The host/anchor emissions retired with the
+   * findSdkForVideo export face - no consumer outside this module ever read
+   * them, and the host branch stays reachable through the record schema (see
+   * #resolveContainer). The injectable-registry arm retired with it: the
+   * registry is a module constant, and the registry-stamp half of the cache
+   * key existed only to fence injected registries apart.
    */
-  find(video, registry = REGISTRY) {
+  find(video) {
     const cached = this.#descriptorCache.get(video);
-    if (cached !== undefined && cached.parent === video.parentNode && cached.registry === registry) {
+    if (cached !== undefined && cached.parent === video.parentNode) {
       return cached.descriptor;
     }
-    const match = this.#matchSdk(video, registry);
+    const match = this.#matchSdk(video);
     if (!match) {
-      this.#descriptorCache.set(video, { descriptor: null, parent: video.parentNode, registry });
+      this.#descriptorCache.set(video, { descriptor: null, parent: video.parentNode });
       return null;
     }
     const descriptor = {
       name: match.record.name,
-      host: match.record.host ?? null,
       container: this.#resolveContainer(match),
-      anchor: match.el,
       hops: match.hops
     };
-    this.#descriptorCache.set(video, { descriptor, parent: video.parentNode, registry });
+    this.#descriptorCache.set(video, { descriptor, parent: video.parentNode });
     return descriptor;
   }
 }
 
 const matcher = new SdkMatcher();
 
-export function findSdkForVideo(video, registry) {
-  return matcher.find(video, registry);
-}
-
 /**
- * The adoption screen: resolve the SDK identity once and freeze it into the
+ * The adoption screen: resolve the SDK identity once and wrap it in the
  * AdoptionHome record the watcher protocol carries. Null (no registered SDK
  * anchor) stays the engine's no-shape answer, unmodified. Called only at
  * adoption and at the re-wrap seam - the descriptor cache makes both free
- * when the composed ancestry is unchanged.
+ * when the composed ancestry is unchanged. Module's sole export face: the
+ * findSdkForVideo export retired with its injectable-registry arm (no
+ * external consumer since the kernel's adoption and re-wrap seams moved to
+ * the record).
  */
 export function resolveAdoptionHome(video) {
-  const sdk = findSdkForVideo(video);
+  const sdk = matcher.find(video);
   if (!sdk) {
     return null;
   }
-  return new AdoptionHome({ video, container: sdk.container, sdk, hops: sdk.hops });
+  return new AdoptionHome({ video, sdk });
 }

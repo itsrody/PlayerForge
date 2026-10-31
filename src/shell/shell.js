@@ -79,11 +79,11 @@ const PANEL_SECTIONS = [
  * panel, tracks fullscreen state, and wires MediaSession.
  */
 export class Shell {
-  id;
-
   /** The frozen adoption identity (contract's AdoptionHome); the public
    *  video/container/sdk reads below are its aliases, so consumer call sites
-   *  keep their names while the identity record stays the one owner. */
+   *  keep their names while the identity record stays the one owner. The
+   *  vestigial `id` field retired with that move: declared, never assigned
+   *  or read anywhere in the tree. */
   #home = null;
 
   #shellDom = null;
