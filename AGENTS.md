@@ -639,8 +639,16 @@ stop at the first failure:
   single-shell, a 6s attach-latency budget row, and the VM echo reach: a
   foreign settings write live-reloads the running frame's kernel and the
   event-time hotkeys gate sees it (blocked mid-flight, then re-armed).
-- **Cases (10):** `boot` (install contract, positive/negative discovery),
-  `discovery` (min size, no-anchor, tiny-video), `frames` (§ above),
+- **Cases (12):** `boot` (install contract, positive/negative discovery),
+  `discovery` (min size, no-anchor, tiny-video),
+  `fan` (the fan-out owner unit, imported into the page realm: positional
+  fan, callable handle, native signal teardown, aborted-signal no-op,
+  Symbol.dispose presence+use, `using` release, mid-dispatch batch join,
+  10k-emit budget, and the dispatch-isolation witness: a throwing subscriber
+  strands neither followers nor `emit`, its throw reports to the page error
+  surface by design, and the deliberate error sentences itself out of the
+  uncaught-error ledger),
+  `frames` (§ above),
   `gestures` (skip/mute/volume/panel/PiP/scrub with real driver input),
   `gm` (info mirror, own-echo exactly-once shape, remote-write cross-tab
   adoption surviving a seeked-flush save, the debug mirror: a foreign
@@ -667,7 +675,12 @@ stop at the first failure:
   the enter, the window passing drops the exit), `robust`
   (freeze-flush without user pause, checkpoint cadence on the native
   timeupdate media clock at 4x, 1000-echo
-  < 400ms, 400 remote-adoption merges < 800ms).
+  < 400ms, 400 remote-adoption merges < 800ms),
+  `scheduler` (the postTask façade unit, imported into the page realm:
+  firing order and delay honors, dead-handle/release/rejection-swallow
+  choreography, the two-controller shape surviving an abort inside the
+  task body, and `yield_()` recovering what raw `scheduler.yield()`
+  rejects).
 - **Per-case audit rows** follow every case file: uncaught page errors
   become fails, `console.error` becomes informational rows, a GM-usage
   census row; failing cases get a screenshot + page-state dump into

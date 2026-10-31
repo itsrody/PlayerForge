@@ -6,6 +6,16 @@
  * platform defines, so a node import smoke cannot witness them honestly;
  * the unit imports src/shared/runtime.js (import-clean by design)
  * straight from the working tree and exercises the class in the page.
+ * The last row witnesses native dispatch isolation, and does so from a
+ * page-realm stack: exceptions raised inside a Marionette eval stack -
+ * sync or task-scheduled - report nowhere (the sandbox realm's error
+ * surface is not the page's, probed), so the throw emits from a module
+ * script the page itself imports, where the platform's report the
+ * exception to the window error surface is the by-design behavior the
+ * kernel's retired per-listener try/catch trusted. Witnesses run on both
+ * listeners and the deliberate, asserted error sentences itself out of
+ * __pfErrors: a deliberate exception is not an accidental uncaught page
+ * error (the menus case holds the same position for command throws).
  */
 import { readFile } from "node:fs/promises";
 import { Buffer } from "node:buffer";
@@ -154,6 +164,71 @@ export async function run({ session, baseUrl }) {
     status: typeof probe.millis === "number" && probe.millis < 400 ? "pass" : "fail",
     note: `${probe.millis}ms`,
     ms: probe.millis ?? null
+  });
+
+  // Native dispatch isolation, witnessed from a page-realm stack. Two
+  // probed harness facts shape this row: exceptions raised inside a
+  // Marionette eval stack - synchronously or from a task it scheduled -
+  // report nowhere (the sandbox realm's error surface is not the page's),
+  // while the same throw from a page-stack module script reports to the
+  // window error surface normally. So the witness module script injected
+  // from the eval turn owns the import, the dispatch, and the throw's
+  // surface reading, the poll settles on the report (queued as a DOM task
+  // around the throw), and the deliberate, asserted error is then
+  // sentenced out of __pfErrors - it entered through the forensic listener
+  // EARLIER in registration order than anything this case can install, so
+  // no preventDefault ordering can keep it off the surface - spelling it
+  // into the audit's own ledger terms is the only honest accounting (the
+  // menus case holds the same position for deliberate command throws).
+  const isoMarker = `pf-fan-iso-${Math.random().toString(36).slice(2, 8)}`;
+  const iso = await session.evalAsync(function main(asset, marker, done) {
+    window.__isoMsg = null;
+    window.__isoThrew = "pending";
+    window.__isoSeen = null;
+    window.addEventListener("error", (e) => { window.__isoMsg ??= String(e.message); }, { capture: true });
+    const script = document.createElement("script");
+    script.type = "module";
+    script.textContent =
+      'import("' + asset + '").then((M) => {' +
+      '  const fan = new M.Fan("unit");' +
+      '  const seen = [];' +
+      '  fan.subscribe(() => { throw new Error("' + marker + '"); });' +
+      '  fan.subscribe((v) => { seen.push(v); });' +
+      '  let threw = null;' +
+      '  try { fan.emit(7); } catch (e) { threw = String(e?.message ?? e); }' +
+      '  window.__isoSeen = seen.slice();' +
+      '  window.__isoThrew = threw;' +
+      '});';
+    document.body.append(script);
+    const deadline = performance.now() + 5000;
+    const tick = () => {
+      const errs = window.__pfErrors ?? [];
+      const settled = window.__isoThrew !== "pending"
+        && (errs.some((e) => e.includes(marker)) || String(window.__isoMsg ?? "").includes(marker));
+      const timedOut = performance.now() > deadline;
+      if (!settled && !timedOut) {
+        setTimeout(tick, 100);
+        return;
+      }
+      const idx = errs.findIndex((e) => e.includes(marker));
+      if (idx >= 0) {
+        errs.splice(idx, 1);
+      }
+      done({
+        threw: window.__isoThrew === "pending" ? "unsettled" : window.__isoThrew,
+        seen: window.__isoSeen,
+        surfaced: String(window.__isoMsg ?? "").includes(marker),
+        reported: idx >= 0
+      });
+    };
+    tick();
+  }, `${baseUrl}${route}`, isoMarker);
+  rows.push({
+    name: "a throwing subscriber strands neither followers nor the emit call (native dispatch isolation)",
+    status: iso.threw === null && iso.seen?.length === 1 && iso.seen?.[0] === 7
+      && iso.surfaced === true && iso.reported === true ? "pass" : "fail",
+    note: iso.error ?? `threw=${JSON.stringify(iso.threw)} seen=${JSON.stringify(iso.seen)} surfaced=${iso.surfaced} reported=${iso.reported}`,
+    ms: null
   });
   return rows;
 }
