@@ -262,7 +262,7 @@ export class Shell {
   /**
    * The ReferenceBox instance itself, handed down the composition root to
    * the one consumer class that must couple READS with change ticks instead
-   * of arming its own observers of the same three invalidation facts: the
+   * of arming its own observers of the same four invalidation facts: the
    * subtitle renderer re-anchors displayed cues on the fill box moving
    * (see subtitles.js). Gesture consumers keep using the referenceBox getter
    * above - read-and-discard per flow stays their shape.

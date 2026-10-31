@@ -772,8 +772,10 @@ export function layoutViewport() {
  * picture consumer actually couples.
  *
  * The slice's validity flips are broadcast: subscribe() rides the ONE fan-out
- * owner (Fan) armed at exactly the three invalidate sites the pool already
- * runs (container RO, fs re-target, orientation change). Read-and-discard
+ * owner (Fan) armed at exactly the four invalidate sites the pool already
+ * runs (container RO, fs re-target, orientation change, and scroll - scroll
+ * is the origin-bearing arm: it repositions the viewport origin with no
+ * size signal). Read-and-discard
  * per flow stays the consumption shape for the gesture consumers (every
  * consumer re-reads in its own event flow - nobody parks a pooled box); the
  * broadcast exists for the consumer that must RE-RENDER when the box moves
@@ -824,7 +826,11 @@ export class ReferenceBox {
     // booted against the pre-scroll stage, and a scrolled-in video and a
     // stale stage stopped overlapping, so the picture clip collapsed and
     // slots anchored at the layer's own origin. Capture-phase scroll (no
-    // bubbling), passive: the read is inside get().
+    // bubbling), passive: the read is inside get(). Scrollend is native on
+    // the 159 floor but cannot serve here - it fires once at rest, while
+    // the invalidation needed is per-frame during the scroll stroke (the
+    // origin moves continuously; a settle-only event re-anchors slots at
+    // the end and lets them lag the whole way down).
     document.addEventListener("scroll", () => {
       this.#valid = false;
       this.#ticks.emit();
