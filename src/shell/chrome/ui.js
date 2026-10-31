@@ -214,7 +214,11 @@ export function createIconElement(name, doc = document) {
  * the app use together.
  */
 export function flashElement(el, { duration = FLASH_MS } = {}) {
-  if (!el || typeof el.animate !== "function") {
+  // `!el` is the only guard this carries: every caller passes an
+  // el-factory element, and WAAPI is floor-guaranteed (Element.animate 48+,
+  // getAnimations 84+) - the capability arms over both retired with the
+  // element-level capability purge this batch re-derived.
+  if (!el) {
     return;
   }
   // Deliberately main-thread: color interpolation is not compositor-backed,
@@ -226,14 +230,15 @@ export function flashElement(el, { duration = FLASH_MS } = {}) {
   // only background animator on flash targets), so they cancel without a
   // keyframe scan; running/pending animations are scanned so unrelated CSS /
   // WAAPI animations (transforms, view-transitions) survive the restart.
-  for (const anim of el.getAnimations?.() ?? []) {
+  for (const anim of el.getAnimations()) {
     if (anim.playState === "finished") {
       anim.cancel();
       continue;
     }
-    const keyframes = anim.effect && typeof anim.effect.getKeyframes === "function"
-      ? anim.effect.getKeyframes()
-      : [];
+    // The null half stays: an Animation's effect is spec-nullable. The
+    // typeof arm over getKeyframes does not - every participant effect is
+    // a KeyframeEffect on this floor.
+    const keyframes = anim.effect ? anim.effect.getKeyframes() : [];
     if (keyframes.some((kf) => "backgroundColor" in kf)) {
       anim.cancel();
     }
