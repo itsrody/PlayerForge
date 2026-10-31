@@ -67,6 +67,10 @@ function shouldSkipUrl() {
       }
     }
   } catch {}
+  // The belt IS the contract: a malformed href or a cross-origin
+  // top-location read is an unreadable URL, and unreadable means not our
+  // skip decision - the probe stays open rather than refusing a player
+  // whose address we could not name.
   return false;
 }
 

@@ -438,13 +438,19 @@ class MediaSessionBridge {
     }
     this.#disposed = true;
     this.#owner.disown(this);
-    for (const action of CLEAR_ACTIONS) {
-      try {
+    // One belt over the whole browser-process release tail: the session's
+    // held state can invalidate with no script-visible witness (a displaced
+    // claim, a released session), and destroy() is driven by an abort
+    // listener - a throw here is an uncaught DOM error, not a logged one.
+    // The per-write belt the loop carried left its two sibling writes three
+    // lines down unguarded: same session, same failure family.
+    try {
+      for (const action of CLEAR_ACTIONS) {
         this.#session.setActionHandler(action, null);
-      } catch {}
-    }
-    this.#session.playbackState = "none";
-    this.#session.metadata = null;
+      }
+      this.#session.playbackState = "none";
+      this.#session.metadata = null;
+    } catch {}
     logger.log("media", "MediaSession released");
   }
 
@@ -452,6 +458,9 @@ class MediaSessionBridge {
     if (this.#disposed) {
       return;
     }
+    // The write rides the ~4 Hz sync clock: a session surface invalidated
+    // without witness (released or displaced claim) must not kill the media
+    // clock's metadata read - the next metadata-key change re-arms it.
     try {
       this.#session.metadata = metadataOf(this.#video);
     } catch {}

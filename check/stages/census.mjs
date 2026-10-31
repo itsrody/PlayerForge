@@ -142,7 +142,7 @@ const ROWS = [
     name: "bare catch blocks",
     pattern: "catch {}",
     expect: 6,
-    why: "the verified-empty-catch belt: each one swallows a named-throwaway failure on purpose (entry install probe, forge pointer details, ui icon parse, media position-state races) - a new bare catch needs its own named why in the record"
+    why: "the verified-empty-catch belt: each one swallows a named-throwaway failure on purpose (the entry ad-host skip probe, the two forge pointer-capture lift races, the ui icon parse belt, the media session release/metadata writes) - a new bare catch needs its own named why in the record"
   },
   {
     name: "Date.now reads",

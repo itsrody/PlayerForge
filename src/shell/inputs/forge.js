@@ -1167,6 +1167,14 @@ export class InputForge {
     }
   }
 
+  /**
+   * Capture ops against a pointer id the map still holds. The browser's
+   * active-pointer set is the one state script cannot pre-check (the same
+   * witness-absence class the single-backend record honors), so a pointer
+   * lifted between the map read and the call throws NotFoundError by
+   * platform shape and the gesture path must survive it - the pointer is
+   * gone; failing the release tail for it would strand the session state.
+   */
   #pointerOp(op, pointerId) {
     if (pointerId != null) {
       try {
@@ -1452,6 +1460,9 @@ export class InputForge {
         return;
       }
     } catch {}
+    // hasPointerCapture throws the same NotFoundError lift race #pointerOp
+    // swallows - same missing witness, so the same swallow policy: the
+    // lost-capture cancel runs rather than dying on the read.
     logger.log("forge", `capture lost mid-session, reclaiming pointer ${event.pointerId}`);
     this.#cancelTrackedPointer(event.pointerId);
   }

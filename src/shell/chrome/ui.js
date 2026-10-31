@@ -180,6 +180,10 @@ function parsedIcon(canonical, doc) {
         }
       }
     } catch {}
+    // The belt degrades to the null return createIconElement's contract
+    // documents - the parse is belt-only: the markup is build-static, so a
+    // live throw has no later path to strand (a malformed build output
+    // surfaces as missing icons in every visual row long before this).
   }
   return el;
 }
