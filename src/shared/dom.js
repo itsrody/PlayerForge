@@ -543,8 +543,8 @@ export class DOMManager {
 /**
  * The deepest active element, piercing open shadow boundaries.
  * When `host` has a shadow root, the shadow tracks the real focused
- * element; otherwise falls back to `document.activeElement` (light DOM
- * or test environments like JSDOM).
+ * element; otherwise it falls back to `document.activeElement` - the
+ * light-DOM answer on a shadow-less host.
  */
 export function deepestActiveElement(host) {
   let el = host?.shadowRoot?.activeElement ?? document.activeElement;
@@ -557,7 +557,7 @@ export function deepestActiveElement(host) {
 /**
  * True when `node` is a descendant of `host`'s shadow root
  * (or is the host itself). Falls back to light-DOM `contains()` when
- * no shadow root exists (e.g. JSDOM tests).
+ * no shadow root exists.
  */
 export function isInsideShell(host, node) {
   return node === host || (host.shadowRoot?.contains(node) ?? host.contains(node));

@@ -76,9 +76,11 @@ iframes, same-origin and cross-origin:
   `requestFullscreenProvision` in `page.js`).
 - Page context (`domain/path/title`) is read from `window.top` directly when
   same-origin-capable; cross-origin frames go through the frame bridge
-  (postMessage `pf:`-prefixed, MessageChannel ports with a legacy-broadcast
-  fallback), so the resume entry always carries the **top document's**
-  context. Zero timed retries: the bridge resolves event-driven — one send,
+  (postMessage `pf:`-prefixed, MessageChannel ports; a nonce-broadcast belt
+  survives only for a genuinely refused port transfer, with no chain memo —
+  the refuse-to-remember arm retired with its jsdom premise), so the resume
+  entry always carries the **top document's** context. Zero timed retries:
+  the bridge resolves event-driven — one send,
   then a `pf:ready` announce-down (install + relay echo to pending
   requesters, parent-hop-limited) re-issues requests and re-arms latched
   fullscreen provisions when an ancestor's handlers armed late; an
@@ -193,7 +195,7 @@ iframes, same-origin and cross-origin:
   breadcrumb names the blind kind).
 - **page.js** — site identity (`getDomainKey`, `domainsMatch`, `domainScore`,
   `hashEntry`, title sanitizer), page context, the frame bridge (`pf:` prefix,
-  `ContextPipe` class owning pipe/legacy/in-flight state, context responders,
+  `ContextPipe` class owning pipe/in-flight state, context responders,
   fullscreen provisioners). The Navigation-API `onNavigate` surface (plus
   resume's whole route-follow chain it armed) is retired: same-document
   navigation is outside the product's topology — the swap machinery's one

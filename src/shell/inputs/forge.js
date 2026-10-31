@@ -199,10 +199,10 @@ class GestureChannel {
 }
 
 /** Deadline checks run on the performance.now() timebase the suppress
- *  window is armed with. event.timeStamp is deliberately ignored: jsdom and
- *  other host realms stamp epoch-based values, which would silently never
- *  match a performance-based deadline (and in production the synchronous
- *  capture handler makes the two readings equivalent anyway). */
+ *  window is armed with. event.timeStamp is deliberately ignored: the
+ *  synchronous capture handler arms the window and reads the deadline in
+ *  the same dispatch, so the two readings are equivalent anyway - a
+ *  per-event timestamp would buy a clock the handler never cross-checks. */
 function clickTime() {
   return performance.now();
 }

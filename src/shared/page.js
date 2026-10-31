@@ -392,32 +392,28 @@ export async function getPageContext() {
 
 /**
  * One owner of the context-pipe state. Previously three module-level `let`
- * globals - the live pipe record, the legacy-chain memo, and the in-flight
+ * globals - the live pipe record, a legacy-chain memo, and the in-flight
  * bridge memo looked after elsewhere - were kept in step by ad-hoc resets at
- * every settle and teardown path. Here the pipe and its legacy memo are
- * private fields of one instance with four verbs, so the established-pipe
- * identity check - a stale request's timeout drops only ITS pipe, never one
- * a newer resolve already established - and the legacy memo reset ride the
- * same object instead of being replayed by hand at each site. The in-flight
- * bridge memo rides the same object: a page hosting several videos boots one
- * shell per video, so without the memo each shell would round-trip the
- * parent chain to resolve the same context; it is cleared on settle, never
- * cached, so a later document (a fresh boot) always re-resolves.
+ * every settle and teardown path; the legacy memo retired with its jsdom
+ * premise (no memo on the refusal belt - see requestPageContextFromParent),
+ * and the pipe records and the in-flight bridge memo are private fields of
+ * one instance with four verbs, so the established-pipe identity check - a
+ * stale request's timeout drops only ITS pipe, never one a newer resolve
+ * already established - rides the same object as every reset site. The
+ * in-flight bridge memo rides the same object: a page hosting several videos
+ * boots one shell per video, so without the memo each shell would
+ * round-trip the parent chain to resolve the same context; it is cleared on
+ * settle, never cached, so a later document (a fresh boot) always
+ * re-resolves.
  */
 class ContextPipe {
   /** Live pipe record ({ port }), or null between establishes/drops. */
   #pipe = null;
-  /** A chain that only ever answers the broadcast (no port ever came back). */
-  #legacy = false;
   /** In-flight bridge promise, or null between resolves (never cached). */
   #bridge = null;
 
   get pipe() {
     return this.#pipe;
-  }
-
-  get legacy() {
-    return this.#legacy;
   }
 
   /** Close a pipe record's port, tolerating a port that died already. */
@@ -428,15 +424,14 @@ class ContextPipe {
   }
 
   /** Retain a responding port as the persistent pipe. Closes any pipe it
-   *  replaces (the chain may have been upgraded mid-session) and clears the
-   *  legacy memo. Per-request listeners attach transiently; nothing hangs off
-   *  the pipe between resolves. */
+   *  replaces (the chain may have been upgraded mid-session). Per-request
+   *  listeners attach transiently; nothing hangs off the pipe between
+   *  resolves. */
   establish(port) {
     if (this.#pipe) {
       this.#closePipe(this.#pipe);
     }
     this.#pipe = { port };
-    this.#legacy = false;
   }
 
   /** Drop the pipe only if it is still the live one: a stale request's
@@ -449,19 +444,12 @@ class ContextPipe {
     this.#closePipe(candidate);
   }
 
-  /** Remember a chain that answers the broadcast only, so later resolves stop
-   *  creating + transferring a channel it will drop. */
-  markLegacy() {
-    this.#legacy = true;
-  }
-
-  /** Drop the pipe + legacy memo when the frame bridge is torn down. */
+  /** Drop the pipe when the frame bridge is torn down. */
   stop() {
     if (this.#pipe) {
       this.#closePipe(this.#pipe);
     }
     this.#pipe = null;
-    this.#legacy = false;
   }
 
   /** Resolve through the parent chain, de-duplicated per frame: later shells
@@ -547,13 +535,17 @@ function requestPageContextOverPipe(timeoutMs) {
  * Reuses an established private MessageChannel pipe when one exists: repeat
  * resolves ride the dedicated, unforgeable link straight to the ancestor
  * responder - no broadcast, no transfer, no retry. Otherwise a first contact
- * creates a channel and transfers a port upward; the answer identifies whether
- * the chain supports the pipe (port answer: establishment) or only the legacy
- * broadcast (fallback, and the chain is remembered as legacy so later resolves
- * stop wasting channels on it).
+ * creates a channel and transfers a port upward; the port answer establishes
+ * the pipe for later resolves.
  *
- * The legacy nonce broadcast remains the fallback for parents (or test hosts
- * such as jsdom) that drop transferred ports.
+ * The nonce broadcast stays as the refusal belt only: a postMessage whose
+ * port transfer the platform refused throws synchronously, the request
+ * falls through port-less, and the ancestor answers addressed by nonce. No
+ * explicit-answer memo on top (the retired arm remembered port-dropping
+ * chains): on the actual floor every hop runs this same bundle, so the belt
+ * arms per attempt, a persistent refuser re-pays one channel per attempt
+ * (bounded by the ready-echo cadence, never a poll), and a one-shot refusal
+ * recovers the pipe on the very next resolve.
  */
 function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
   if (pipeState.pipe) {
@@ -606,9 +598,11 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
       && looksLikeContextResponse(event.data)
       && event.data.nonce === nonce
     ) {
-      // Broadcast answer: this chain does not honor ports - remember it so
-      // later resolves stop allocating channels it will only drop.
-      pipeState.markLegacy();
+      // Broadcast answer: this chain answered port-less - a refused transfer
+      // re-sent plain (the nonce travels in the message). No memo: the
+      // markLegacy arm retired with its jsdom premise, so the belt arms per
+      // attempt - a persistent refuser re-pays one channel per attempt, a
+      // one-shot refusal recovers the pipe on the next resolve.
       settle(mapContextPayload(event.data), null);
     }
   };
@@ -621,26 +615,24 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
     }
     nonce = crypto.randomUUID();
     const msg = { type: CTX_REQUEST_TYPE, nonce };
-    if (!pipeState.legacy) {
-      try {
-        const mc = new MessageChannel();
-        const replyPort = mc.port1;
-        replyPort.addEventListener("message", (event) => {
-          if (looksLikeContextResponse(event.data)) {
-            settle(mapContextPayload(event.data), replyPort);
-          }
-        }, { signal: ac.signal });
-        replyPort.start();
-        try {
-          window.parent.postMessage(msg, "*", [mc.port2]);
-          return;
-        } catch {
-          // Parent rejected the transfer (e.g. neutered port); fall through
-          // to the plain nonce broadcast for this attempt.
+    try {
+      const mc = new MessageChannel();
+      const replyPort = mc.port1;
+      replyPort.addEventListener("message", (event) => {
+        if (looksLikeContextResponse(event.data)) {
+          settle(mapContextPayload(event.data), replyPort);
         }
+      }, { signal: ac.signal });
+      replyPort.start();
+      try {
+        window.parent.postMessage(msg, "*", [mc.port2]);
+        return;
       } catch {
-        // No MessageChannel on this host.
+        // Refused transfer (e.g. neutered port); fall through to
+        // the plain nonce broadcast for this attempt.
       }
+    } catch {
+      // No MessageChannel on this host.
     }
     window.parent.postMessage(msg, "*");
   };
@@ -698,14 +690,10 @@ const CTX_PIPE_IDLE_MS = 60_000;
  */
 class TopFrameResponder {
   #resolveContext;
-  #ownOrigin;
-  #post;
   #pipes = new Map();
 
-  constructor(resolveContext, ownOrigin = location.origin, post = defaultPostToSource) {
+  constructor(resolveContext) {
     this.#resolveContext = resolveContext;
-    this.#ownOrigin = ownOrigin;
-    this.#post = post;
   }
 
   #dropPipe(entry) {
@@ -756,7 +744,7 @@ class TopFrameResponder {
     ) {
       return;
     }
-    if (event.origin !== this.#ownOrigin && !isOwnFrame(event.source)) {
+    if (event.origin !== location.origin && !isOwnFrame(event.source)) {
       return;
     }
     const { domain, path, title } = this.#resolveContext();
@@ -787,7 +775,7 @@ class TopFrameResponder {
         this.#dropPipe(entry);
       }
     }
-    this.#post(event.source, {
+    event.source.postMessage({
       type: CTX_RESPONSE_TYPE,
       nonce: data.nonce,
       domain,
@@ -797,13 +785,9 @@ class TopFrameResponder {
   }
 }
 
-function createTopFrameResponder(resolveContext, ownOrigin = location.origin, post = defaultPostToSource) {
-  const responder = new TopFrameResponder(resolveContext, ownOrigin, post);
+function createTopFrameResponder(resolveContext) {
+  const responder = new TopFrameResponder(resolveContext);
   return (event) => responder.handle(event);
-}
-
-function defaultPostToSource(source, message, origin) {
-  source.postMessage(message, origin);
 }
 
 /**

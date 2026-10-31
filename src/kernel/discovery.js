@@ -272,8 +272,6 @@ class PresenceGate {
  *
  * One gate instance per watcher (probe/kernel): `watch` dedupes repeated
  * signals for the same element, `stop` tears everything down with the owner.
- * jsdom has no real ResizeObserver, so the fallback reuses the synchronous
- * gate and still qualifies immediately.
  */
 export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_VIDEO_HEIGHT, prune = true } = {}) {
   // content-visibility: auto subtrees report an unchanged placeholder box to
@@ -281,11 +279,10 @@ export function createLayoutGate({ minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_V
   // alone can never re-qualify one. The native autostatechange event is the
   // exact reveal signal; a document-level capture listener catches its
   // non-bubbling dispatch without a per-target listener that would otherwise
-  // pin a detached, never-sized video. The gate family's probe stays
-  // (ResizeObserver-above absence exercises the sync fallback), but the
-  // document itself needs no guard: every consumer constructs against a real
-  // browser frame, and the unit-harness host the old `typeof document` arm
-  // answered died with the tool-era retirement.
+  // pin a detached, never-sized video. The document itself needs no guard:
+  // every consumer constructs against a real browser frame, and the
+  // unit-harness host the old `typeof document` arm answered died with the
+  // tool-era retirement.
   return new PresenceGate({
     prune,
     // ResizeObserver is floor-guaranteed (Chromium 79, Firefox 69+ - both
