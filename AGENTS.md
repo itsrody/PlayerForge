@@ -129,7 +129,33 @@ iframes, same-origin and cross-origin:
   one-tap-deep), FilterSession, the three SubtitleState grains +
   SubtitleSession's presentation state, ConfigStore's `settings` bus (the
   echo-storm hot path: 1000 foreign writes ride the robust row inside
-  400ms) and ResumeStore's entry set. The one deliberate non-fan: DomWatch
+  400ms) and ResumeStore's entry set.
+  **Subscriber census (the audience axis, recorded alongside the instance
+  axis)**: fs-gate 4 (ReferenceBox's fs-flip re-seed, the pinch wheel's
+  fill-release, `ViewershipTransform`'s reset, the panel's close-on-fs);
+  sync grain 2 (session offset apply + panel stepper echo); placement
+  grain 2 (the grain's forward into the session + the panel position
+  echo); settings bus 2 (the action layer's hotkey recompute + the
+  panel's cross-tab sync); resume store 2 (the sync grain's re-resolve
+  via the tracker + the subtitle restore); kernel shell-ready 1
+  (multi-boot across destroy-readopt and registry-empty recovery);
+  reference-box ticks 1; FilterSession 1 (the VideoFilter section);
+  style grain 1 (the panel echo — the five values boot-apply directly at
+  bind, no subscription); session presentation state 1 (the section's
+  hint refresh; the renderer's crank re-reads state, it does not
+  subscribe). Five relays, five true fans. The relays stay on purpose
+  (the few-fans review batch): a direct callback drops native dispatch
+  isolation (a throwing subscriber strands the notify chain) and
+  hand-rolls signal teardown the §5.5 census retired — and three of the
+  five exist because of import direction (`shared` cannot import
+  `shell`; `dispose` has no reverse surface on this floor). The one true
+  reducer audited and declined: merging the four subtitle-module Fans
+  into one grain-tagged bus (10→7) — robustness identical, but the
+  saving is a few EventTarget allocations per frame, the same noise
+  scale the pooled-dispatch measurement declined (~1µs/emit), while the
+  per-grain event identity that makes the one-owner-per-grain record
+  audit-checkable would live in payload tags instead. The one deliberate
+  non-fan: DomWatch
   cannot ride it — EventTarget exposes no listener census, which the feed
   needs three ways (liveness-gated observer teardown, tombstone
   compaction, logged throw containment). The subscribe handle is a
