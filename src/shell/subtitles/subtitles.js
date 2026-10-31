@@ -1421,10 +1421,11 @@ export class SubtitleSession {
 
   /** Last path segment as a display name, defaulted to .vtt when unknown. */
   #nameFromUrl(url) {
-    if (!URL.canParse(url)) {
+    const parsed = URL.parse(url);
+    if (!parsed) {
       return "subtitles.vtt";
     }
-    const last = decodeURIComponent(new URL(url).pathname.split("/").pop() || "");
+    const last = decodeURIComponent(parsed.pathname.split("/").pop() || "");
     if (!last) {
       return "subtitles.vtt";
     }

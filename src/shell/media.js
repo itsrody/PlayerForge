@@ -355,11 +355,14 @@ const sessionOwner = new MediaSessionOwner();
  * malformed.
  */
 function metadataOf(video) {
-  const artwork = video.poster && URL.canParse(video.poster, location.href)
+  // One-pass URL.parse returns null on malformed posters - the same guard
+  // posture URL.canParse bought, without parsing the string twice.
+  const artworkSrc = video.poster ? URL.parse(video.poster, location.href) : null;
+  const artwork = artworkSrc
     // sizes="any": OS artwork pickers (Android lock screen, desktop thumbnail
     // surfaces) select by declared dimensions; an entry without sizes is the
     // weakest form and can be skipped outright.
-    ? [{ src: new URL(video.poster, location.href).href, sizes: "any" }]
+    ? [{ src: artworkSrc.href, sizes: "any" }]
     : [];
   const title = document.title?.trim();
   if (!title && !artwork.length) {

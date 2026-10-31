@@ -285,6 +285,13 @@ class ScrubStroke {
     // floor-guaranteed, and even constructed/synthetic PointerEvents carry
     // the interface methods returning empty lists - so the old API-absent
     // arms were unreachable; an empty list lands in the same loop below.
+    //
+    // Stream floor: pointerrawupdate is also live on the 159 floor and was
+    // probed over real driver strokes - 1:1 with pointermove, no denser a
+    // sample stream - and non-cancelable besides. A second subscription
+    // would feed the wash identical counts, while the committed seek stays
+    // pinned to the rAF display cadence downstream (ScrubSession), so the
+    // pointermove stream IS the sampling contract here.
     const samples = event.getCoalescedEvents();
     // Coalesced samples then the live event, without materializing a combined
     // array: high-rate pointer streams land here every move, so a

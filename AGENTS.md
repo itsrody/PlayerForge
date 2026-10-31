@@ -239,7 +239,11 @@ iframes, same-origin and cross-origin:
   latch feeding the shared `fs` gate, and click/dblclick suppression, over
   per-story recognizer
   machines: `ScrubStroke` (pointer move-stream scrub with coalesced samples,
-  the exp-smoothed velocity filter, and the bounded predicted-events wash),
+  the exp-smoothed velocity filter, and the bounded predicted-events wash;
+  the move stream is pointermove+coalesced alone — `pointerrawupdate` is
+  live on the floor but fires 1:1 with pointermove over real driver
+  strokes (probed) and is non-cancelable, so a second stream buys no
+  samples and the committed seek stays rAF-bound),
   `SwipeStroke` (the translate-drag transform writes and their eased
   restore), `TapWindow` (the dbltap window: observation only, no seed and
   no replay — by the prevent-scope rule there is nothing held back to hand

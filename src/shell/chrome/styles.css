@@ -217,7 +217,15 @@
          inset:0 keeps the geometry identical to the host box. Stage-true
          rules query this under pf-stage; the compact band writer is the
          consumer. */
-      container: pf-stage / inline-size;
+          container: pf-stage / inline-size;
+
+      /* The floor's anchor positioning (live on Firefox 147+, probed here)
+         never substitutes for this tree's geometry: the only resolved
+         placements are stage-inset (this hud, the sheet's viewport margin)
+         by doctrine, and cue geometry derives from the DISPLAYED picture -
+         an object-fit re-derivation over the video's border box - which
+         anchor() cannot express (border-box-relative only). No JS-placed
+         toast/panel geometry exists to hand it either. */
 
       /* Re-enable pointer events on every HUD child - but keep the caption
          layer click-transparent via the more specific rule below. */
