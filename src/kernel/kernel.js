@@ -1,7 +1,7 @@
 import { logger, setDebugRuntime, postTask, Scope, runSteps, Fan } from "../shared/runtime.js";
 import { KEYS, watchStorageKey, invalidateConfigCache, getConfigValue, setConfigValue, gmRegisterMenu, gmUnregisterMenu } from "../shared/store.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, DEBUG_HASH_TAG, FRAMEWORK_TUNING } from "./contract.js";
-import { findSdkForVideo } from "./detection.js";
+import { resolveAdoptionHome } from "./detection.js";
 import { forEachVideoInDocument, meetsMinSize, createLayoutGate, createOnScreenGate, isOnScreen, createDiscoveryTap } from "./discovery.js";
 
 /**
@@ -165,6 +165,9 @@ const REMOVAL_DEPTH_MARGIN = 1;
 
 /**
  * One video's removal watchdog, extracted from a per-closure Kernel private.
+ * Its anchors derive from the adoption home (contract's AdoptionHome): the
+ * video and container the shell was adopted with, plus the SDK's hop count,
+ * all one frozen record - the same identity the shell itself stores.
  *
  * Previously the watch lived in Kernel#watchVideoRemoval as a closure machine
  * whose state - the observed anchors, the MutationObserver, the pending grace
@@ -204,15 +207,15 @@ class RemovalWatch {
   #graceCancel = null;
   #stopped = false;
 
-  constructor({ video, container, hops, signal, onRemoved, onReparent, onStop }) {
-    this.#video = video;
-    this.#container = container;
+  constructor({ home, signal, onRemoved, onReparent, onStop }) {
+    this.#video = home.video;
+    this.#container = home.container;
     this.#onRemoved = onRemoved;
     this.#onReparent = onReparent;
     this.#onStop = onStop;
     /** Adaptive watch depth: the matched anchor + a margin, never unbounded. */
-    this.#watchDepth = Number.isInteger(hops) && hops > 0
-      ? Math.min(hops + REMOVAL_DEPTH_MARGIN, MAX_REMOVAL_DEPTH)
+    this.#watchDepth = Number.isInteger(home.hops) && home.hops > 0
+      ? Math.min(home.hops + REMOVAL_DEPTH_MARGIN, MAX_REMOVAL_DEPTH)
       : MAX_REMOVAL_DEPTH;
     this.#signal = signal;
     this.#reanchor();
@@ -339,8 +342,8 @@ export class Kernel {
   #discoveryTap = null;
   /** True once the full-document discovery tap has been downgraded. */
   #discoveryDowngraded = false;
-  /** Lazily built observer-driven presence gates ("layout"/"onScreen" ->
-   *  createLayoutGate/createOnScreenGate engines), stopped with the kernel
+  /** Lazily built observer-driven presence gates, keyed by their engine
+   *  factories (createLayoutGate/createOnScreenGate), stopped with the kernel
    *  scope (see #ensureGate). */
   #gates = new Map();
   /** Kernel lifecycle scope: removal observers disconnect via onDispose,
@@ -414,7 +417,9 @@ export class Kernel {
   /**
    * The shell plugin registers its host provider here; the framework never
    * imports the shell, it only calls the provider it was handed. Provider
-   * shape: `{ create({ video, container, sdk, onDestroy }) -> host }`.
+   * shape: `{ create({ home, onDestroy }) -> host }` - the frozen adoption
+   * home (contract's AdoptionHome) is the identity record the shell stores;
+   * the framework never passes bare video/container/sdk refs across this seam.
    */
   registerShellProvider(provider) {
     this.#shellProvider = provider;
@@ -439,9 +444,12 @@ export class Kernel {
    * wait defers creation until the SDK's DOM has quiesced (or the cap expires),
    * with post-wait guards against videos that vanished or were adopted
    * meanwhile. A ready shell is handed to #notifyShellCreated. Page-unload
-   * cleanup aborts in-flight waits via #settleScope.
+   * cleanup aborts in-flight waits via #settleScope. The adoption home rides
+   * frozen: whatever the settle costs in time, the identity the shell boots
+   * with is the one adoption resolved.
    */
-  async #onVideoFound({ video, container, sdk }) {
+  async #onVideoFound({ home }) {
+    const { video, container, sdk } = home;
     logger.log("lifecycle", `video:found - ${sdk.name}`);
     if (this.#registry.getByVideo(video)) {
       logger.log("lifecycle", "Video already has a shell, skipping");
@@ -466,7 +474,7 @@ export class Kernel {
     }
     let shell = null;
     try {
-      shell = this.#createShell({ video, container, sdk });
+      shell = this.#createShell({ home });
       await shell?.ready;
       this.#notifyShellCreated(shell);
       logger.log("lifecycle", `Shell created for ${sdk.name}`);
@@ -605,26 +613,43 @@ export class Kernel {
    * Returns the live gate, or null once the scope is disposed, so a late
    * adoption after pagehide has nothing to wait for.
    */
-  #ensureGate(kind, create) {
-    let gate = this.#gates.get(kind);
+  /**
+   * The kernel's observer-driven presence gates (layout, on-screen): each built
+   * on first need from its engine factory and torn down with the kernel scope.
+   * Cached per factory - the gate lives in a map keyed by the engine import
+   * itself, so there is no string key to misspell (a typo'd key would silently
+   * fork a second RO/IO instance) - and one instance serves every candidate
+   * the page offers, in either deferral order. Returns the live gate, or null
+   * once the scope is disposed, so a late adoption after pagehide has nothing
+   * to wait for.
+   */
+  #ensureGate(create) {
+    let gate = this.#gates.get(create);
     if (!gate && !this.#scope.disposed) {
       gate = create();
-      this.#gates.set(kind, gate);
+      this.#gates.set(create, gate);
       this.#scope.onDispose(() => {
         gate.stop();
-        this.#gates.delete(kind);
+        this.#gates.delete(create);
       });
     }
     return gate ?? null;
   }
 
-  /** Adopt the video, emit discovery and start removal watching. */
+  /**
+   * The adoption body, in detection-resolved vocabulary: `resolveAdoptionHome`
+   * freezes the identity once (the provider, the removal watch, and the
+   * destroy-readopt compare all speak the same frozen record), then the
+   * presence gates run. The scope guard before the gates is the one-main-video
+   * law (see the block comment below), so a refused candidate never pins
+   * observers.
+   */
   #adoptVideo(video) {
     if (this.#seenVideos.has(video) || video.hasAttribute(SHELL_MARKER)) {
       return;
     }
-    const sdk = findSdkForVideo(video);
-    if (!sdk) {
+    const home = resolveAdoptionHome(video);
+    if (!home) {
       return;
     }
     // The one-main-video scope law, the pick policy "first-qualifying wins":
@@ -639,7 +664,7 @@ export class Kernel {
     // the media tap re-run adoption so the next qualifying candidate wins.
     if (this.#registry.occupied || this.#pending.size > 0) {
       if (logger.enabled) {
-        logger.log("kernel", `${sdk.name} candidate refused - one main video per page (a shell is live or booting)`);
+        logger.log("kernel", `${home.sdk.name} candidate refused - one main video per page (a shell is live or booting)`);
       }
       return;
     }
@@ -649,7 +674,7 @@ export class Kernel {
       // gate re-enters this method the moment the delivered box qualifies
       // (RO callbacks run off the mutation batch, with layout already fresh,
       // and the size is read from the observation rather than a fresh reflow).
-      this.#ensureGate("layout", createLayoutGate)?.watch(video, () => this.#adoptVideo(video));
+      this.#ensureGate(createLayoutGate)?.watch(video, () => this.#adoptVideo(video));
       return;
     }
     // Player-sized but off-screen (a carousel slide, a below-the-fold embed):
@@ -657,11 +682,10 @@ export class Kernel {
     // does not boot a full shell for a video the user cannot see. isOnScreen
     // reports true when the viewport is unknown, so this can only delay.
     if (!isOnScreen(video)) {
-      this.#ensureGate("onScreen", createOnScreenGate)?.watch(video, () => this.#adoptVideo(video));
+      this.#ensureGate(createOnScreenGate)?.watch(video, () => this.#adoptVideo(video));
       return;
     }
-    const container = sdk.container;
-    if (!container) {
+    if (!home.container) {
       logger.warn("kernel", "No container for video - skipping");
       return;
     }
@@ -670,24 +694,22 @@ export class Kernel {
     // default), the dimensions/duration interpolation never runs - a disabled
     // log call must cost one boolean read, not a template build.
     if (logger.enabled) {
-      logger.log("kernel", `${sdk.name} adopted (${video.videoWidth}x${video.videoHeight}, ${Math.round(video.duration)}s)`);
+      logger.log("kernel", `${home.sdk.name} adopted (${video.videoWidth}x${video.videoHeight}, ${Math.round(video.duration)}s)`);
     }
-    this.#onVideoFound({ video, container, sdk });
-    this.#watchVideoRemoval(video, container, sdk.hops);
+    this.#onVideoFound({ home });
+    this.#watchVideoRemoval(home);
     this.#downgradeDiscoveryTap();
   }
 
   /** Hand per-video removal watching to its one stateful owner. */
-  #watchVideoRemoval(video, container, hops) {
+  #watchVideoRemoval(home) {
     let watch = null;
     watch = new RemovalWatch({
-      video,
-      container,
-      hops,
+      home,
       signal: this.#scope.signal,
-      onRemoved: () => this.#onVideoRemoved(video),
-      onReparent: () => this.#onRewrap(watch, video),
-      onStop: () => this.#seenVideos.delete(video)
+      onRemoved: () => this.#onVideoRemoved(home.video),
+      onReparent: () => this.#onRewrap(watch, home.video),
+      onStop: () => this.#seenVideos.delete(home.video)
     });
     // Chromium-native single-target consolidation and the timer are both
     // handled inside the watch; the kernel scope is its pagehide backstop.
@@ -698,42 +720,42 @@ export class Kernel {
    * Universal container identity, the re-parent seam: the watch's
    * parent-equality check surfaced a live re-home, so identity re-resolves
    * through the same detection the adoption ran (the parent-stamped
-   * descriptor cache invalidates exactly on this parent change). One
-   * decision rule, from the ShellSlot doctrine: container identity is a
-   * shell-lifetime fact and a displaced shell is destroyed, never
-   * re-seated - so a DIFFERENT resolved container stops this watch, tears
-   * the boot-identity shell down (destroy rolls back every managed marker,
-   * so nothing blocks the rebuild), and re-adopts through the existing
-   * boot path at the new home. The equality shape - the pinned moveBefore
-   * re-home onto a bare stage - resolves the same container and falls out
-   * the comparison untouched. An unresolvable video (the full SDK context
-   * left the composed ancestry) stands on the boot identity: the
-   * adoption contract says no SDK anchor means no shell, but there is no
-   * matching mid-flight teardown contract, and the move may reverse.
+   * descriptor cache invalidates exactly on this parent change), landing in
+   * a NEW AdoptionHome while the live shell still reads its frozen boot
+   * record. One decision rule, from the ShellSlot doctrine: container
+   * identity is a shell-lifetime fact and a displaced shell is destroyed,
+   * never re-seated - so a DIFFERENT resolved container stops this watch,
+   * tears the boot-identity shell down (destroy rolls back every managed
+   * marker, so nothing blocks the rebuild), and re-adopts through the
+   * existing boot path at the new home. The equality shape - the pinned
+   * moveBefore re-home onto a bare stage - resolves the same container and
+   * falls out the comparison untouched. An unresolvable video (the full SDK
+   * context left the composed ancestry - the re-resolve answers null or a
+   * null container) stands on the boot identity: the adoption contract says
+   * no SDK anchor means no shell, but there is no matching mid-flight
+   * teardown contract, and the move may reverse.
    */
   #onRewrap(watch, video) {
     const shell = this.#registry.getByVideo(video);
     if (!shell) {
       return;
     }
-    const sdk = findSdkForVideo(video);
-    const container = sdk?.container ?? null;
+    const redetected = resolveAdoptionHome(video);
+    const container = redetected?.container ?? null;
     if (!container || container === shell.container) {
       return;
     }
-    logger.log("lifecycle", `${sdk.name} re-wrapped: container identity changed - destroy-readopt`);
+    logger.log("lifecycle", `${redetected.sdk.name} re-wrapped: container identity changed - destroy-readopt`);
     watch.stop();
     shell.destroy();
     this.#adoptVideo(video);
   }
 
-  #createShell({ video, container, sdk }) {
+  #createShell({ home }) {
     // The provider is guaranteed present - #onVideoFound checks and reports
     // before reaching here, and this is a private method with one caller.
     const shell = this.#shellProvider.create({
-      video,
-      container,
-      sdk,
+      home,
       onDestroy: () => this.#registry.unregister(shell)
     });
     return shell;

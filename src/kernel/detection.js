@@ -1,5 +1,7 @@
+import { AdoptionHome } from "./contract.js";
+
 /**
- * SDK identity engine.
+ * SDK identity engine. Registry-driven, importing only its contract.
  *
  * Detection is registry-driven: every supported player SDK declares exactly one
  * record below, and a video is adopted only when its composed ancestry contains
@@ -211,4 +213,19 @@ const matcher = new SdkMatcher();
 
 export function findSdkForVideo(video, registry) {
   return matcher.find(video, registry);
+}
+
+/**
+ * The adoption screen: resolve the SDK identity once and freeze it into the
+ * AdoptionHome record the watcher protocol carries. Null (no registered SDK
+ * anchor) stays the engine's no-shape answer, unmodified. Called only at
+ * adoption and at the re-wrap seam - the descriptor cache makes both free
+ * when the composed ancestry is unchanged.
+ */
+export function resolveAdoptionHome(video) {
+  const sdk = findSdkForVideo(video);
+  if (!sdk) {
+    return null;
+  }
+  return new AdoptionHome({ video, container: sdk.container, sdk, hops: sdk.hops });
 }

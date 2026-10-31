@@ -82,3 +82,25 @@ export const GESTURE_EVENTS = Object.freeze(Object.fromEntries([
 export const FRAMEWORK_TUNING = {
   removalGraceMs: 500
 };
+
+/**
+ * The adoption identity, the kernel→shell watcher protocol: ONE frozen record
+ * per adoption, resolved once at discovery and handed unchanged through every
+ * seam that speaks the boot identity - the provider (Shell), the removal
+ * watch (its anchored roots derive from video/container/hops), and the
+ * destroy-readopt compare (home.container === shell.home.container; a re-wrap
+ * resolves a NEW record and the old one stays the boot identity it was -
+ * identity is a shell-lifetime fact, read-only for every holder). Each of
+ * these seams previously re-invented the shape as a hand-spelled
+ * {video, container, sdk} object; the record is the one spelling, so a
+ * descriptor field that must ride the identity is one edit here.
+ */
+export class AdoptionHome {
+  constructor({ video, container, sdk, hops }) {
+    this.video = video;
+    this.container = container;
+    this.sdk = sdk;
+    this.hops = hops;
+    Object.freeze(this);
+  }
+}

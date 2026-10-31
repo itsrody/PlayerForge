@@ -110,8 +110,8 @@ function bootstrap() {
     // entry (and out of the kernel) is what keeps the shell a plug-in rather
     // than something the framework constructs directly.
     kernel.registerShellProvider({
-      create({ video, container, sdk, onDestroy }) {
-        return new Shell({ video, container, sdk, onDestroy });
+      create({ home, onDestroy }) {
+        return new Shell({ home, onDestroy });
       }
     });
     kernel.init();

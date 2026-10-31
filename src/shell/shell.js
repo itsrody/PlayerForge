@@ -80,9 +80,11 @@ const PANEL_SECTIONS = [
  */
 export class Shell {
   id;
-  video;
-  container;
-  sdk;
+
+  /** The frozen adoption identity (contract's AdoptionHome); the public
+   *  video/container/sdk reads below are its aliases, so consumer call sites
+   *  keep their names while the identity record stays the one owner. */
+  #home = null;
 
   #shellDom = null;
   #inputs = null;
@@ -112,14 +114,26 @@ export class Shell {
   /** OS media-key facet, null without MediaSession support. */
   #mediaSession = null;
 
-  constructor({ video, container, sdk, onDestroy }) {
-    this.video = video;
-    this.container = container;
-    this.sdk = sdk;
-    this.#refBox = new ReferenceBox(container, this.#scope.signal);
+  constructor({ home, onDestroy }) {
+    this.#home = home;
+    this.#refBox = new ReferenceBox(home.container, this.#scope.signal);
     this.#onDestroy = onDestroy;
-    this.#media = createMediaControls({ video });
+    this.#media = createMediaControls({ video: home.video });
     this.ready = this.#boot();
+  }
+
+  /** The adoption identity's aliases: the same names the Shell always carried
+   *  as public fields, now read-only (identity is a shell-lifetime fact). */
+  get video() {
+    return this.#home.video;
+  }
+
+  get container() {
+    return this.#home.container;
+  }
+
+  get sdk() {
+    return this.#home.sdk;
   }
 
   /**

@@ -225,11 +225,16 @@ iframes, same-origin and cross-origin:
 - **contract.js** — the shared vocabulary both layers import in isolation:
   gesture registry (`GESTURES`/`GESTURE_IDS` are formula-derived from `{id:
   label}` pairs), `GESTURE_EVENTS` (`pf:gesture-<id>`), `DEBUG_HASH_TAG =
-  "pf-debug"`, tuning knobs. The frame bridge's message types derive from
+  "pf-debug"`, tuning knobs, and `AdoptionHome` — the frozen adoption
+  identity the kernel→shell watcher protocol carries (one record per
+  adoption through the provider, the `RemovalWatch` anchors, and the
+  destroy-readopt compare; every seam previously re-spelled the
+  `{video, container, sdk}` shape by hand). The frame bridge's message types derive from
   their own single prefix inside `page.js` (module-local by documented
   design); key bindings derive in `actions.js`. No machine-facing string is
   hand-spelled anywhere else.
-- **detection.js** — the SDK identity engine, registry-driven, import-free.
+- **detection.js** — the SDK identity engine, registry-driven, importing only
+  its contract.
   15 supported SDK records (JW Player, Video.js, Plyr, ArtPlayer, DPlayer,
   MediaElement.js, XGPlayer, Aliplayer, Fluid Player, Flowplayer, Clappr,
   Vidstack, Mux Player, Radiant, Laravel Video Embed), each a set of
@@ -251,7 +256,10 @@ iframes, same-origin and cross-origin:
   "first-qualifying wins": a candidate meeting SDK identity is refused while
   a shell is live or mid-boot (`#registry.occupied || #pending`), never
   pinning a presence gate on a refused video, and recovery is the
-  registry-empty edge re-arming the full discovery tap — the `ShellSlot`
+  registry-empty edge re-arming the full discovery tap — identity flows as
+  ONE frozen `AdoptionHome` (`resolveAdoptionHome` resolves at adoption and
+  at the re-wrap seam; the provider, `RemovalWatch`, and the
+  container-equality compare all read the same record) — the `ShellSlot`
   (one shell per session; a displaced shell is **destroyed**, never
   orphaned; the adoption guard makes the displaced-destroy a backstop),
   `MenuCommands` (debug toggle + the two one-shot reset
@@ -271,7 +279,10 @@ iframes, same-origin and cross-origin:
 ### shell/ — the feature layer
 - **shell.js** — composes the boot step list (realm → settle → DOM layers →
   HUD wiring → media session → sections → markers), stamps managed markers,
-  owns destroy and re-anchor paths.
+  owns destroy and re-anchor paths. The shell stores the frozen
+  `AdoptionHome` the provider hands it and exposes `video`/`container`/`sdk`
+  as read-only aliases of the same record (identity is a shell-lifetime
+  fact).
 - **media.js** — `MediaControls` (play/pause/seek/scrub-latch/volume/rate/
   boost/PiP/stop), `MediaSessionOwner` claim/lifecycle. The wake-lock and
   fullscreen orientation-lock companions retired by user direction:
