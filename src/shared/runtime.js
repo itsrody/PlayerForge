@@ -14,6 +14,21 @@
  * capability ladder. Behavioral parity is proven end-to-end via the check
  * harness (check/), not here.
  *
+ * Retirement audit, re-probed on the shipping engine (Firefox 159, live):
+ * nothing upstream is sunsetting - the surface is still a WICG draft and
+ * neither MDN (restated 2025) nor Chrome's deprecation ledger records any
+ * move against it; the engine honors the priority tiers natively
+ * (deterministic user-blocking > user-visible > background landing order).
+ * The façade itself cannot retire into nothing either: it is the one owner
+ * of the dead-handle guard, the owner-signal release, the swallowed task
+ * rejection and the abort() contract that delay/debounce and every boot
+ * deadline share. Even its two-controller shape is measured, not chosen: an
+ * AbortSignal abort landing inside the task body rejects the COMPLETED
+ * task's promise (live on 159), so one controller driving the task signal
+ * directly would bucket every successful fire into the AbortError rejection
+ * the façade only exists to swallow - the cancel signal and the release
+ * signal stay separate for that measured reason.
+ *
  * Hot-path exports stay plain functions at module scope (every engine's
  * optimizing tier inlines them without shape-change penalties); only
  * stateful runtime behavior lives in
@@ -94,7 +109,12 @@ export function postTask(fn, { priority = "user-visible", delay: ms = 0, signal 
  * mid-flight (DomSettleWait's done() aborts its own settle handle by design;
  * the wake-up continuation therefore runs inside an already-aborted task)
  * rejects with AbortError on Firefox but resolves on Chromium - which would
- * strand every shell boot whose settle window closed via its own handle. The
+ * strand every shell boot whose settle window closed via its own handle.
+ * Re-probed live on the Firefox 159 page realm (Oct 2026) and the divergence
+ * is exactly as recorded: the continuation of a yield whose enclosing task
+ * had already aborted its own signal never resumes (the promise rejects
+ * AbortError), while a yield parked BEFORE an external abort resolves - so
+ * the guard remains load-bearing and Chromium parity stays the contract. The
  * rejected alternatives: rethrowing treats internal bookkeeping as teardown and
  * kills the boot; threading owner signals through every yield_() call site
  * forks the one cooperative backend three ways. Chromium parity is the

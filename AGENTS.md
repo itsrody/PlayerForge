@@ -97,11 +97,16 @@ iframes, same-origin and cross-origin:
   `fmtPercentOrOff`, …), error classification, `delay/debounce` moved out
   (they live in runtime's scheduler). Zero imports.
 - **runtime.js** — the scheduling engine: a `postTask` façade over
-  `scheduler.postTask` (single native arm; the jsdom emulation lives in the
-  check harness, not here), `delay()`/`debounce()` handles (the one timer
-  backend), `runSteps`/`runStepsAsync` (ordered declarative step lists for
-  every boot/teardown sequence), `Scope` (one destroy-root per feature, every
-  listener/timer/observer routed through it), `Fan` — the ONE plain-fan-out
+  `scheduler.postTask` (single native arm, no emulation anywhere — the real
+  engine is the check's proof surface; the retirement audit is re-probed live:
+  no upstream sunset movement, priority tiers honored natively on 159, the
+  two-controller shape load-bearing because an abort landing inside the task
+  body rejects the completed task's promise, and the `yield_()` guard still
+  recovers what raw `scheduler.yield()` rejects in an own-aborted task —
+  pinned by the `scheduler` check case), `delay()`/`debounce()` handles (the
+  one timer backend), `runSteps`/`runStepsAsync` (ordered declarative step
+  lists for every boot/teardown sequence), `Scope` (one destroy-root per
+  feature, every listener/timer/observer routed through it), `Fan` — the ONE plain-fan-out
   owner, a native `EventTarget` carrying one event per instance
   (`emit(payload)`/`subscribe(cb, { signal })`; the FsGate, FilterSession,
   ResumeStore, ConfigStore, SubtitleSyncState,
