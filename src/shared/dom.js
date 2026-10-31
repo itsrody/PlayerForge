@@ -505,9 +505,14 @@ export class DOMManager {
     // below can no longer register new tracked artifacts.
     this.#scope.dispose();
 
-    // External cleanups (may reference elements being removed next).
+    // External cleanups (may reference elements being removed next). The
+    // loop rides the Scope dispose contract this class already composes -
+    // errors are isolated AND logged, so a teardown throw surfaces rather
+    // than vanishing.
     for (let i = this.#cleanups.length - 1; i >= 0; i--) {
-      try { this.#cleanups[i](); } catch {}
+      try { this.#cleanups[i](); } catch (err) {
+        logger.error("dom", "Cleanup in shell DOM teardown failed:", err);
+      }
     }
     this.#cleanups.length = 0;
 

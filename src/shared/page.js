@@ -416,20 +416,14 @@ class ContextPipe {
     return this.#pipe;
   }
 
-  /** Close a pipe record's port, tolerating a port that died already. */
-  #closePipe(record) {
-    try {
-      record.port.close();
-    } catch {}
-  }
-
   /** Retain a responding port as the persistent pipe. Closes any pipe it
    *  replaces (the chain may have been upgraded mid-session). Per-request
    *  listeners attach transiently; nothing hangs off the pipe between
-   *  resolves. */
+   *  resolves. Close is spec-idempotent (a closed port's close() is a void
+   *  no-op on this floor), so every site calls it directly. */
   establish(port) {
     if (this.#pipe) {
-      this.#closePipe(this.#pipe);
+      this.#pipe.port.close();
     }
     this.#pipe = { port };
   }
@@ -441,13 +435,13 @@ class ContextPipe {
       return;
     }
     this.#pipe = null;
-    this.#closePipe(candidate);
+    candidate.port.close();
   }
 
   /** Drop the pipe when the frame bridge is torn down. */
   stop() {
     if (this.#pipe) {
-      this.#closePipe(this.#pipe);
+      this.#pipe.port.close();
     }
     this.#pipe = null;
   }
@@ -1264,9 +1258,12 @@ export function installContextBridge() {
         provisionRequest.send();
       }
     } catch (err) {
-      queueMicrotask(() => {
-        throw err;
-      });
+      // The platform's own out-of-band report verb: the deliberate error
+      // sentence still lands on the page error surface (the audit ledger's
+      // rows read the same events), and sibling routes inside the dispatch
+      // stay isolated. The queueMicrotask rethrow shape this replaces was
+      // the same report one lap later.
+      reportError(err);
     }
   }, { signal: ac.signal });
 
