@@ -196,10 +196,11 @@ class RemovalWatch {
     this.#reanchor();
   }
 
-  /** Chromium-native single-target consolidation: `MutationObserver.observe()`
-   *  supports multiple root targets natively (childList filtered in C++), so
-   *  up to `watchDepth` per-video C++ wrappers collapse to one instance.
-   *  The kernel scope disconnects it at pagehide - no per-video bookkeeping. */
+  /** Spec-level multi-target consolidation: `MutationObserver.observe()`
+   *  accepts multiple root targets on every engine (the subtree filter runs
+   *  natively), so up to `watchDepth` per-video wrappers collapse to one
+   *  instance. The kernel scope disconnects it at pagehide - no per-video
+   *  bookkeeping. */
   #reanchor() {
     // MutationObserver has no per-target unobserve(): disconnect() is the
     // only way to drop the stale roots (the previous loop called a method
@@ -232,6 +233,15 @@ class RemovalWatch {
     return () => handle.abort();
   }
 
+  /**
+   * Record-shape freedom: every decision re-derives from live DOM state and
+   * never reads the queued records, so a host's state-preserving move
+   * (`Element.moveBefore`, live on the 159 floor in both its Element and
+   * Document forms) lands as the same removed/added records a remove+insert
+   * produces - the queued "removal" reads a video that is still connected,
+   * the pending grace is cancelled, and the parent-equality check below
+   * re-anchors onto the new chain. No per-shape code exists to get wrong.
+   */
   #checkAnchors() {
     const video = this.#video;
     if (!video.isConnected) {

@@ -586,5 +586,56 @@ export async function run({ session, baseUrl, boot }) {
     ms: null
   });
 
+  // The state-preserving move: a host that reorders its player with
+  // Element.moveBefore (live on the 159 floor) must not strand the running
+  // shell - the queued removal record reads a video that is still connected,
+  // so the grace cancels before it can fire.
+  const reorder = await session.evalAsync(function main(done) {
+    const v = document.querySelector("#check-video-2");
+    if (!v || !v.matches("[data-pf-shell]")) { done(null); return; }
+    const sib = document.createElement("span");
+    v.parentElement.append(sib);            // v is no longer the last child
+    v.parentElement.moveBefore(v, null);    // real reorder: [sib, v]
+    setTimeout(() => done({
+      parent: v.parentElement === sib.parentElement,
+      stamped: v.matches("[data-pf-shell]"),
+      shells: document.querySelectorAll(".pf-shell").length
+    }), 600);
+  });
+  rows.push({
+    name: "a state-preserving moveBefore reorder never strands the shell",
+    status: reorder && reorder.parent && reorder.stamped && reorder.shells === 1 ? "pass" : "fail",
+    note: reorder ? JSON.stringify(reorder) : "no stamped video to move",
+    ms: null
+  });
+
+  // Cross-parent rehome: the same primitive moving the video to a fresh
+  // container outside the old anchor chain - the observation re-derives from
+  // live state (removed record arrives with isConnected already true) and
+  // the parent-equality check re-anchors; exactly one shell survives.
+  const rehome = await session.evalAsync(function main(done) {
+    const v = document.querySelector("#check-video-2");
+    if (!v || !v.matches("[data-pf-shell]")) { done(null); return; }
+    const stage = document.createElement("div");
+    stage.id = "move-stage";
+    document.body.append(stage);
+    stage.moveBefore(v, null);
+    const deadline = Date.now() + 8000;
+    const tick = () => {
+      const stamped = v.matches("[data-pf-shell]");
+      const shells = document.querySelectorAll(".pf-shell").length;
+      if (stamped && shells === 1) done({ stamped, shells });
+      else if (Date.now() < deadline) setTimeout(tick, 150);
+      else done({ stamped, shells });
+    };
+    tick();
+  });
+  rows.push({
+    name: "a moveBefore cross-parent move re-anchors the running shell",
+    status: rehome && rehome.stamped && rehome.shells === 1 ? "pass" : "fail",
+    note: rehome ? JSON.stringify(rehome) : "no stamped video to move",
+    ms: null
+  });
+
   return rows;
 }

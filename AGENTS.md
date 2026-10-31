@@ -194,7 +194,10 @@ iframes, same-origin and cross-origin:
   MutationObserver check), the media feed (`DiscoveryTap`: lazy escalation —
   cheap tap first, full listeners only for rendered candidates), idempotent
   boot sentinel, `RemovalWatch` (grace-per-disconnect observer, re-parent
-  aware).
+  aware, and `moveBefore`-aware by derivation: state-preserving moves land
+  as the same remove+add record shape, both primitive forms live on the 159
+  floor, and the watch's decisions re-derive from live DOM state — no
+  per-shape code exists).
 - **kernel.js** — the orchestrator: `whenDomSettled` boot sequencing, the
   `ShellSlot` (one shell per session; a displaced shell is **destroyed**,
   never orphaned), `MenuCommands` (debug toggle + the two one-shot reset
@@ -640,7 +643,9 @@ stop at the first failure:
   rewrite never re-mirrors, xhr shape + `ontimeout` on a
   held route, pfStyle resource warmth, menu-handle census, harvest-seeded
   reboot), `media` (stream, gesture events, kernel re-anchoring onto a
-  replacement video), `menus` (menu command → panel effect; the targeted
+  replacement video, and the state-preserving move: a `moveBefore` reorder
+  in place and a cross-parent re-home of the running shell, both
+  floor-real), `menus` (menu command → panel effect; the targeted
   reset row seeds a non-default color filter and proves the bare command
   restores it — no panel involved),
   `persist` (storage seeding, resume restore across reboot, the sync-grain

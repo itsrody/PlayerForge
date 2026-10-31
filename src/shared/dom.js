@@ -49,6 +49,12 @@ import { Scope, logger, postTask, yield_, Fan } from "./runtime.js";
  * and resumed on visibility, so a backgrounded SPA doesn't fight its own
  * throttled idle budget with mutation scans.
  *
+ * Host-mechanism note (probed live on the 159 floor): a state-preserving
+ * `Element.moveBefore` lands as the same removed-node/added-node records a
+ * remove+insert produces - the DOM spec defines the observation that way -
+ * so nothing here special-cases a move versus a re-parent; consumers that
+ * re-derive from live state (RemovalWatch, the pool) never see a new shape.
+ *
  * Deliberately NOT on the shared Fan (native EventTarget): the platform's
  * dispatch cannot express what this feed IS. Native dispatch isolates a
  * throwing listener but REPORTS the throw to the page error surface - and a
