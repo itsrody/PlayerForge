@@ -22,7 +22,11 @@
  * The last rows pin the OWN cue scheduler end to end: a second cue at
  * 4.0-4.8s in the dropped SRT, a seek that lands inside it lights the mirror
  * cue (enter boundary), and the window passing drops it (exit boundary) -
- * both edges previously rode the native cuechange.
+ * both edges previously rode the native cuechange. Between them, one row
+ * pins the ingest-ownership law on the floor: the track never enters the
+ * video's native track list (textTracks.length is 0 while a cue slot is
+ * visible), so a hostile host has nothing of ours to list, restyle, or
+ * mode-flip - the surface the feature deliberately leaves it.
  */
 
 export async function run({ session, boot }) {
@@ -74,6 +78,22 @@ export async function run({ session, boot }) {
     name: "panel drop ingests the track (cue renders)",
     status: dropped && visible ? "pass" : "fail",
     note: dropped && visible ? "slot visible after drop" : `drop=${dropped} visible=${visible}`,
+    ms: null
+  });
+
+  // The ingest-ownership law, floor-real: with a track loaded and rendering,
+  // the video's native track list must still be empty - the captions never
+  // enter it, so a hosts's CC menu and `::cue` css have nothing of ours to
+  // touch. Read alongside the visible slot so the answer is not vacuous.
+  const custody = await session.eval(function main() {
+    const video = document.querySelector("#check-video");
+    const slot = document.querySelector(".pf-shell")?.shadowRoot?.querySelector(".pf-cue:not([hidden])");
+    return { textTracks: video?.textTracks?.length ?? "no video", slotVisible: !!slot };
+  });
+  rows.push({
+    name: "the ingested track never enters the video's native track list",
+    status: custody && custody.slotVisible && custody.textTracks === 0 ? "pass" : "fail",
+    note: JSON.stringify(custody),
     ms: null
   });
 

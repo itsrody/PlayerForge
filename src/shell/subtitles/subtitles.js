@@ -101,15 +101,16 @@ class WorkerTransport {
    */
   #pending = new Map();
 
-  /** Whether this environment could use a Worker at all (source + surface). */
+  /**
+   * Whether this environment could ride a Worker. Only the source matters:
+   * Worker/Blob/URL members are unconditional on the 159 page and worker
+   * realms (and the Node import smoke never calls this), while the genuine
+   * refusal - a worker-src CSP blocking blob Workers - stages at spawn in
+   * #ensureWorker's try/catch latch. The former layered typeof census
+   * belonged to the removed element-capability family.
+   */
   available() {
-    return (
-      workerSource() !== null &&
-      typeof globalThis.Worker === "function" &&
-      typeof globalThis.Blob === "function" &&
-      typeof globalThis.URL?.createObjectURL === "function" &&
-      typeof globalThis.URL?.revokeObjectURL === "function"
-    );
+    return workerSource() !== null;
   }
 
   /** Spawn the resident worker once; null when unavailable or CSP-latched. */
@@ -363,7 +364,10 @@ function shiftTime(time, offset) {
  * the video element's track list - so a hostile host can never list, restyle,
  * or mode-flip the captions (its CC menu stays clean, `::cue` css cannot
  * reach them, and a site that disables foreign text tracks mid-play cannot
- * kill ours). Parsing is forgevtt (below); a TrackListRenderer owns
+ * kill ours). The floor makes the law cheap to keep honestly: even the
+ * native realtime cue-observer shape is incomplete here (`oncuechange` is
+ * absent from TextTrack.prototype on the 159 floor, probed), and the
+ * check's custody row pins the empty track list beside a visible slot. Parsing is forgevtt (below); a TrackListRenderer owns
  * scheduling after that: per-frame `currentTime` sample on the video
  * element's own media clock - the compositor's rAF is the crank, sampled
  * like the forge's scrub commits, never a poll timer - and the active set

@@ -321,7 +321,11 @@ function parseCueBlock(block, offset) {
  * Parse a VTT (or SRT already normalized to VTT) document into cue objects
  * using a single forward line scan. Blank/whitespace-only lines end a block
  * (the `\n[ \t]*\n` separator the old split produced), a block whose first
- * line is NOTE/STYLE/REGION is skipped wholesale, a cue is its timing line
+ * line is NOTE/STYLE/REGION is skipped wholesale - regions deliberately: the
+ * floor's VTTRegion interface exists (probed on 159) but its per-region
+ * layout cannot express in this engine's percent-anchored slot model, and
+ * consuming the native surface would route the render through the track
+ * path the feature keeps closed -, a cue is its timing line
  * plus the payload after it, and any later timing-looking line inside a
  * payload stays cue text. `offset` shifts every cue by a constant number of
  * seconds; cues pushed fully before zero are dropped, partially shifted ones
