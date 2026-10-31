@@ -248,11 +248,12 @@ export class Shell {
   /**
    * The unified contextual fill box, owned by shared/dom.js ReferenceBox:
    * inline mode reads the shell's own container (the SDK container),
-   * fullscreen reads Firefox's own screen directly (screen.width/height -
-   * the viewport IS the screen when this document presents a
-   * fullscreenElement), with the window-box fallback for the fs shapes
-   * that present no element of ours (the F11/document kind, a frame under
-   * a fullscreened ancestor). Returns { x, y, width, height }.
+   * fullscreen reads the active document's OWN viewport (layoutViewport)
+   * whenever the native document-fullscreen witness (the gate's fs) is
+   * armed in it - the active context is a document in both topologies
+   * (the video directly embedded lives in the top document, an iframed
+   * video in its frame document), and each document's viewport is the one
+   * gesture space its coordinates live in. Returns { x, y, width, height }.
    */
   get referenceBox() {
     return this.#refBox.get();
