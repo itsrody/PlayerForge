@@ -372,7 +372,7 @@ class MediaSessionBridge {
   #sentDuration = NaN;
   #sentPlaybackRate = NaN;
   /** Fingerprint of the metadata inputs (title + poster) at last refresh.
-   *  SPA/now-playing surfaces mutate document.title and video.poster without
+   *  Now-playing surfaces mutate document.title and video.poster without
    *  any metadata-load event; sync() rides the media clock, so a cheap string
    *  compare there re-arms OS surfaces the moment either changes. */
   #metadataKey = "";
@@ -390,7 +390,7 @@ class MediaSessionBridge {
     if (this.#scope.disposed) {
       return;
     }
-    // SPA/now-playing surfaces mutate document.title and video.poster without
+    // Now-playing surfaces mutate document.title and video.poster without
     // any metadata-load event; the ~4 Hz media clock already runs through
     // sync(), so a cheap string compare re-arms OS surfaces on either change.
     if (this.#metadataKey !== metadataKeyOf(this.#video)) {

@@ -1079,7 +1079,7 @@ export class InputForge {
   /**
    * Decide whether keyboard shortcuts should apply: yes when focus sits
    * on a target that cannot consume the keystroke itself - inside the
-   * container, or at page level (SPA roots park focus on app wrappers,
+   * container, or at page level (app roots park focus on the app wrapper,
    * not body) while this engine owns playback.
    */
   #shouldHandleKeys(allowControlFocus = false) {

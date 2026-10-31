@@ -22,7 +22,7 @@ import { Scope, logger, postTask, yield_, Fan } from "./runtime.js";
  *
  * Discovery (kernel/discovery.js) and the shell-host reconnect watchdog
  * (chrome/inject.js) both need "something anywhere changed" - running two
- * full-document MutationObservers makes SPA pages pay twice per mutation
+ * full-document MutationObservers makes busy pages pay twice per mutation
  * batch. This dispatcher observes once, coalesces records per microtask,
  * and fans out to subscribers.
  *
@@ -46,7 +46,7 @@ import { Scope, logger, postTask, yield_, Fan } from "./runtime.js";
  * outnumber live ones 4:1, so a long-lived page never grows the slot array.
  * When the tab is hidden, dispatch (whose subscribers re-scan the DOM) is
  * parked on a background-priority postTask capped at DEFER_VISIBILITY_CAP_MS
- * and resumed on visibility, so a backgrounded SPA doesn't fight its own
+ * and resumed on visibility, so a backgrounded page doesn't fight its own
  * throttled idle budget with mutation scans.
  *
  * Host-mechanism note (probed live on the 159 floor): a state-preserving

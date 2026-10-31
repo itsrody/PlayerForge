@@ -82,7 +82,7 @@ class SdkMatcher {
    *
    * Parent-stamped: a descriptor names a specific container, so
    * it is only valid for the ancestry it resolved against. A re-parent (SDK
-   * wrap, SPA re-render reusing the video node) invalidates it; the next query
+   * wrap, a host re-nest reusing the video node) invalidates it; the next query
    * re-scans and the container/anchor follow the new tree instead of pointing at
    * a detached node.
    */

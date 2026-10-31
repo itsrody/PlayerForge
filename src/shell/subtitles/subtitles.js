@@ -300,7 +300,7 @@ class ParseMemo {
    *  eight covers a session of thumb-loading without any eviction math. */
   #limit = 8;
   /** contentHash -> parsed cues, so a reload of the same subtitle text (panel
-   *  re-open, SPA re-adopt, URL subs again after boot) skips the parse entirely. */
+   *  re-open, URL subs again after boot) skips the parse entirely. */
   #cues = new Map();
 
   /** FNV-1a over the normalized text - collision risk is far below the

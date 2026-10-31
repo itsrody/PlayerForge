@@ -7,7 +7,6 @@
  *   3. Page context    - resolving {domain, path, title} for this shell
  *   4. Frame bridge    - always-on top<->iframe message plumbing + fullscreen
  *                        provisioning; the live iframe registry
- *   5. Navigation      - same-document URL change events
  *
  * The bridge MUST be installed in every frame at document-start: kernels boot
  * lazily, so a video-bearing iframe cannot assume its ancestors run anything
@@ -36,7 +35,7 @@ const DOMAIN_TLDS = {
   ])
 };
 const IPV4_RE = /^(?:\d{1,3}\.){3}\d{1,3}$/;
-/** Memo cap: stops unbounded growth on SPAs with dynamic subdomains. */
+/** Memo cap: stops unbounded growth on pages with dynamic subdomains. */
 const DOMAIN_KEY_CACHE_MAX = 256;
 
 /**
@@ -291,9 +290,8 @@ const TRAIL_PUNCT_RE = /[\s\-–—|·:,/]+$/;
  * The title sanitizer: stripNonAscii runs ~8 regex passes per call, so one
  * instance carries a single input->output memo slot (the hot shape is the
  * same input repeating - the top-frame responder re-sanitizes document.title
- * per incoming request, ownPageContext re-resolves on every navigation probe
- * of an unchanged title). Pure function, so one slot is always correct -
- * alternating inputs just miss, they never lie.
+ * per incoming request of an unchanged title). Pure function, so one slot is
+ * always correct - alternating inputs just miss, they never lie.
  */
 class TitleSanitizer {
   #input = null;
@@ -404,7 +402,7 @@ export async function getPageContext() {
  * bridge memo rides the same object: a page hosting several videos boots one
  * shell per video, so without the memo each shell would round-trip the
  * parent chain to resolve the same context; it is cleared on settle, never
- * cached, so SPA path changes re-resolve.
+ * cached, so a later document (a fresh boot) always re-resolves.
  */
 class ContextPipe {
   /** Live pipe record ({ port }), or null between establishes/drops. */
@@ -684,8 +682,8 @@ const CTX_PIPE_IDLE_MS = 60_000;
  * createTopFrameResponder stays the thin event-handler wrapper.
  *
  * Handler for the top frame: answers validated context requests. Context is
- * resolved per request (not captured at install time) so late titles and SPA
- * route changes are reflected. Requests qualify when they originate from our
+ * resolved per request (not captured at install time) so late titles are
+ * reflected. Requests qualify when they originate from our
  * own origin or from one of this document's <iframe> descendants.
  *
  * The payload carries document.title despite any embed in the page being able
@@ -1310,47 +1308,4 @@ export function installContextBridge() {
     ac.abort();
     pipeState.stop();
   };
-}
-/* - 5. Navigation - */
-/**
- * Same-document URL change events.
- *
- * One event source so consumers never re-derive SPA navigation detection from
- * pushState patching or location polling: the native Navigation API
- * (`navigation.currententrychange`) covers pushState, replaceState, hash
- * changes and history traversal, and needs no manager grant. Floor-real on
- * both branch engines (verified live on the Firefox 159 page realm; Chromium
- * 102). Single-backend by the same contract as the scheduler: the platform
- * is the backend (the harness supplies the event target), so no fallback arm
- * ships in production.
- *
- * `window.onurlchange` is not an option here at all: Violentmonkey's grant
- * family carries no such privilege (its extras are only window.close and
- * window.focus, per its GM wrapper source), and a manager-covered URL
- * notification would cost a grant line for nothing - the grant policy in
- * shared/store.js reserves manager APIs for capabilities the page cannot
- * supply, and URL change notification is not one of them.
- *
- * Returns an unsubscribe function - the tree's one Disposable subscription
- * handle ([Symbol.dispose] like Fan's). Passing `signal` tears the
- * subscription down the same way. Realms with no Navigation API keep the
- * subscriber inert.
- */
-export function onNavigate(listener, { signal } = {}) {
-  const nav = globalThis.navigation;
-  if (!nav || typeof nav.addEventListener !== "function") {
-    return () => {};
-  }
-  // One release controller: the handle tears down by abort (the platform
-  // drops the listener), an owner `signal` rides the same release via the
-  // `once`+`signal` composition - no manual removal anywhere in the machine.
-  const release = new AbortController();
-  nav.addEventListener("currententrychange", listener, { signal: release.signal });
-  signal?.addEventListener("abort", release.abort.bind(release), {
-    once: true,
-    signal: release.signal
-  });
-  const off = () => release.abort();
-  off[Symbol.dispose] = off;
-  return off;
 }

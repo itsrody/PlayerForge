@@ -69,7 +69,7 @@ function forEachVideoInMutations(mutations, visit) {
       // Cheap element guard: text/comment nodes and the subtree we already
       // know is empty of videos can't yield a <video>, so skip the
       // querySelectorAll scan (which would otherwise run per added node on
-      // every mutation batch of an SPA page).
+      // every mutation batch on a busy page).
       if (node.nodeType !== 1) {
         continue;
       }
@@ -175,7 +175,7 @@ function entryBoxSize(entry) {
  * `#waiting` is a WeakMap, not a Map: neither observer notifies when an
  * observed target is removed from the DOM, so a detached candidate that never
  * qualified would otherwise be pinned (and so would the callback) until
- * stop() - a leak that matters for the long-lived kernel gate on an SPA that
+ * stop() - a leak that matters for the long-lived kernel gate on a page that
  * recycles players. stop() swaps in a fresh one instead of clear().
  *
  * Native target-list hygiene. Browsers keep observed elements in the

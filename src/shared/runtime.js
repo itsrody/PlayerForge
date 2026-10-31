@@ -244,9 +244,8 @@ export async function runStepsAsync(steps, { yieldBetween = false } = {}) {
  * breadcrumb; a teardown-throw was equally invisible to the debug flip and
  * the check forensics). Sub-lifetimes needing no disposer registry stay
  * bare native AbortControllers - the child() composition facility died in
- * the consumer census: resume's readopt attempt evolved into a bare
- * controller, and every other sub-lifecycle (defer signals, hint caps)
- * already was one. Public class APIs keep their `destroy()` name and
+ * the consumer census: every sub-lifecycle (defer signals, hint caps) was
+ * already a bare one. Public class APIs keep their `destroy()` name and
  * simply delegate here.
  */
 export class Scope {

@@ -548,13 +548,13 @@ export class Kernel {
     this.#discoveryTap?.stop();
     this.#discoveryTap = createDiscoveryTap((video) => this.#adoptVideo(video));
     this.#discoveryDowngraded = false;
-    // Mutations only report future changes: a rebuild (SPA route swap) can
+    // Mutations only report future changes: a host rebuild can
     // leave a new player sitting in the tree with no pending record for us.
     forEachVideoInDocument((video) => this.#adoptVideo(video));
   }
 
   /**
-   * The last shell left the live page. A router swap can destroy the shell and
+   * The last shell left the live page. A host teardown rebuild can destroy the shell and
    * insert a fresh player that never fires a media event, and the first
    * adoption had downgraded us to the media-event tap - so re-arm the full
    * document tap to hunt again. Skipped during pagehide (scope already

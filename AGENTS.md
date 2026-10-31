@@ -194,7 +194,14 @@ iframes, same-origin and cross-origin:
 - **page.js** — site identity (`getDomainKey`, `domainsMatch`, `domainScore`,
   `hashEntry`, title sanitizer), page context, the frame bridge (`pf:` prefix,
   `ContextPipe` class owning pipe/legacy/in-flight state, context responders,
-  fullscreen provisioners), native navigation events.
+  fullscreen provisioners). The Navigation-API `onNavigate` surface (plus
+  resume's whole route-follow chain it armed) is retired: same-document
+  navigation is outside the product's topology — the swap machinery's one
+  unique value was the route-change + in-place-swap conjunction, an in-place
+  src swap without a route change never had a watcher even then, and a
+  route change with document unload is the kernel's pagehide + fresh boot.
+  Reintroducing it needs new scope direction: a same-document URL change is
+  now a blind spot, accepted.
 - **store.js** — the storage data plane: `KEYS` = two roots (`pf:configs`,
   `pf:resume`), `gmSetValue`/`loadJsonObject`, and `watchStorageKey(key,
   handler)` — the cross-instance subscription that filters own-write echoes
@@ -258,12 +265,14 @@ iframes, same-origin and cross-origin:
   listener in dom.js stays - it is the fill-rect's geometry feed, not the
   lock).
 - **resume.js** — the resume tracker: store warm → context resolve → entry
-  match/create → restore → progress drive. Save cadence = 10s checkpoint
-  span; flushes on `seeked`, on pause, on visibility loss, on freeze;
-  `RESUME_MIN_POSITION` (5s) floor; bounds cutoff; the entry carries
-  per-viewing extras (`subOffset`, `subsUrl`); cross-tab merges arrive
-  through `watchStorageKey` and require the tracker's `#loaded` latch
-  (`#adoptExternal`, which announces so grain consumers re-resolve).
+  match/create → restore → progress drive. One adoption per tracker
+  lifetime — a same-document route change is out of scope (see the page.js
+  bullet), so there is no route-follow/`#adopting` machinery. Save cadence
+  = 10s checkpoint span; flushes on `seeked`, on pause, on visibility loss,
+  on freeze; `RESUME_MIN_POSITION` (5s) floor; bounds cutoff; the entry
+  carries per-viewing extras (`subOffset`, `subsUrl`); cross-tab merges
+  arrive through `watchStorageKey` and require the tracker's `#loaded`
+  latch (`#adoptExternal`, which announces so grain consumers re-resolve).
 - **filter.js** — `FilterSession` (eager state machine: values, apply,
   trailing persist, the menu reset gesture) + `VideoFilter` (the lazy panel
   section over it). The filter lives on the video from first play — a
@@ -550,7 +559,7 @@ new code-level evidence:
    deliberate-machines census holds this byte-true: every hand-rolled
    release/teardown machine now rides native abort compositions (an internal
    release controller per machine — `postTask`'s owner bridge, `DomSettleWait`,
-   `DomWatch`, the pinch wheel, `onNavigate`, and Fan's own subscribe handle —
+   `DomWatch`, the pinch wheel, and Fan's own subscribe handle —
    its `{ once: true }`+`{ signal: release.signal }` composition detaches the
    owner listener natively on whichever path ends first), and the census of
    `removeEventListener` across src comes back empty: zero live manual

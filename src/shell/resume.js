@@ -1,4 +1,4 @@
-import { getPageContext, domainsMatch, domainScore, getDomainKey, hashEntry, onNavigate } from "../shared/page.js";
+import { getPageContext, domainsMatch, domainScore, getDomainKey, hashEntry } from "../shared/page.js";
 import { TUNING, formatTime } from "../shared/core.js";
 import { KEYS, gmSetValue, loadJsonObject, watchStorageKey } from "../shared/store.js";
 import { logger, Scope, Fan } from "../shared/runtime.js";
@@ -120,7 +120,7 @@ class ResumeStore {
     this.#watch = watchStorageKey(KEYS.resume, (_name, _old, value) => this.#adoptExternal(value));
   }
 
-  /** Release the cross-tab change subscription (SPA re-entry / shell teardown). */
+  /** Release the cross-tab change subscription (shell teardown). */
   destroy() {
     this.#watch.stop();
     this.#watch = null;
@@ -526,11 +526,6 @@ export class ResumeTracker {
   /** Eagerly resolved context promise — kicked off in the constructor. */
   #contextPromise;
   #lastSavedPosition = 0;
-  /** One-shot swap listener armed per route change; null when not armed. */
-  #readoptScope = null;
-  /** True from a resource swap until the new resource has been adopted:
-   *  saves are muted so the reset currentTime cannot land in the old entry. */
-  #adopting = false;
 
   constructor(shell) {
     this.#shell = shell;
@@ -556,7 +551,6 @@ export class ResumeTracker {
       return;
     }
     this.#startProgressWatch(shell);
-    this.#watchNavigation();
   }
 
   /**
@@ -564,7 +558,7 @@ export class ResumeTracker {
    * loadedmetadata / durationchange / error settle the wait, and destroy
    * aborts the scope (which both resolves it and drops the media listeners).
    * Returns false when the caller must give up (destroyed / detached / no
-   * duration), so first discovery and swap re-adoption share one wait with no
+   * duration), so first discovery and later adoptions share one wait with no
    * wall-clock deadline: a slow source is adopted whenever its metadata
    * actually arrives instead of being abandoned at a cap.
    */
@@ -608,9 +602,11 @@ export class ResumeTracker {
   /**
    * Bind the tracker to the entry for `context` at the media's CURRENT
    * duration: match-or-create, resume-seek when that entry carries a saved
-   * position, reseed the save gates. Shared by first discovery and every
-   * swap re-adoption, so an SPA route change lands on its own (path,
-   * duration) entry instead of the one discovered at boot.
+   * position, reseed the save gates. One adoption per tracker lifetime: the
+   * entry is matched against this document's (path, duration) and a
+   * mid-lifetime resource swap on the same element is out of scope - a
+   * route change is a document navigation (kernel pagehide + fresh boot)
+   * and an in-place swap without one has no watcher by design.
    */
   #adoptEntry(context) {
     const shell = this.#shell;
@@ -664,99 +660,9 @@ export class ResumeTracker {
     return true;
   }
 
-  /**
-   * Follow same-document navigations (shared/page.js): flush the entry
-   * we are leaving - if the player swaps resources before the next
-   * timeupdate, that flush is the last write this route gets - then arm the
-   * re-adoption the swap triggers. A hash/query-only change resolves to the
-   * same (domain, path) and stops here.
-   */
-  #watchNavigation() {
-    onNavigate(() => {
-      if (this.#scope.disposed || !this.#entry) {
-        return;
-      }
-      this.#saveProgress(this.#shell.currentTime);
-      this.#followRoute();
-    }, { signal: this.#scope.signal });
-  }
-
-  async #followRoute() {
-    try {
-      const context = await getPageContext();
-      if (this.#scope.disposed || !context || !this.#entry) {
-        return;
-      }
-      const current = this.#entry;
-      if (current.path === context.path && domainsMatch(current.domain, context.domain)) {
-        return;
-      }
-      this.#armReadopt();
-    } catch (err) {
-      logger.error("resume", "Route follow after navigation failed:", err);
-    }
-  }
-
-  /**
-   * One-shot: the next resource selection on the element belongs to the route
-   * we navigated to, so adoption runs against THAT resource's metadata and
-   * duration. Saves mute (see #adopting) from the swap until adoption
-   * finishes, so the element's reset currentTime can never land in the entry
-   * we are leaving - the navigation flush already holds its position.
-   */
-  #armReadopt() {
-    if (this.#scope.disposed || this.#readoptScope) {
-      return;
-    }
-    const ac = new AbortController();
-    this.#readoptScope = ac;
-    const video = this.#shell.video;
-    const run = () => {
-      if (this.#readoptScope !== ac) {
-        return;
-      }
-      this.#readoptScope = null;
-      this.#adopting = true;
-      ac.abort();
-      this.#readopt();
-    };
-    video.addEventListener("loadstart", run, { signal: ac.signal, once: true });
-    // The SPA may have kicked off the new resource BEFORE it pushed history:
-    // that loadstart already fired, and waiting for a second one would strand
-    // the adoption. Adopt now when the element is mid-selection.
-    if (video.readyState === 0 && video.networkState === 2) {
-      run();
-    }
-  }
-
-  async #readopt() {
-    try {
-      const context = await getPageContext();
-      if (this.#scope.disposed || !context) {
-        return;
-      }
-      if (!(await this.#waitForDuration())) {
-        return;
-      }
-      if (this.#scope.disposed || !this.#entry) {
-        return;
-      }
-      // Deliberately no pre-switch flush here: by loadstart the element has
-      // already reset its playhead, so writing currentTime now would stamp
-      // the NEW resource's 0 onto the entry we are leaving. Its position was
-      // captured by the navigation flush plus every save before the swap
-      // (this.#adopting mutes the window in between).
-      this.#adoptEntry(context);
-    } catch (err) {
-      logger.error("resume", "Re-adoption after resource swap failed:", err);
-    } finally {
-      this.#adopting = false;
-    }
-  }
-
-  /** Save gate: entry-less or swap-in-flight states never write. */
+  /** Save gate: entry-less states never write. */
   #saveProgress(currentTime) {
-    if (this.#adopting || !this.#entry) {
+    if (!this.#entry) {
       return;
     }
     const entry = this.#entry;
@@ -788,9 +694,9 @@ export class ResumeTracker {
     // GM storage for a video the user cannot see. IntersectionObserverInit has
     // no `signal` member, so the observer registers its disconnect with the
     // scope - otherwise a shell torn down while the element stays in the page
-    // (SPA video swaps) would leak the observer + target for the rest of the
-    // page lifetime. The status flushes below still run, so the final position
-    // is never lost by this gate.
+    // (a replacement-video re-anchor) would leak the observer + target for
+    // the rest of the page lifetime. The status flushes below still run, so
+    // the final position is never lost by this gate.
     let onScreen = true;
     const io = new IntersectionObserver(([entry]) => {
       onScreen = entry.isIntersecting;
@@ -810,7 +716,7 @@ export class ResumeTracker {
       return Math.abs(position - this.#lastSavedPosition) >= span;
     };
     const checkpointDue = (position) => {
-      if (this.#adopting || !this.#entry || !onScreen || document.visibilityState === "hidden" || shell.paused) {
+      if (!this.#entry || !onScreen || document.visibilityState === "hidden" || shell.paused) {
         return false;
       }
       return positionDue(position);
@@ -915,10 +821,8 @@ export class ResumeTracker {
     if (this.#scope.disposed) {
       return;
     }
-    this.#readoptScope?.abort();
-    this.#readoptScope = null;
     // Final save while the scope is still undisposed - #saveProgress has no
-    // disposed guard of its own (it only skips while adopting or with no entry),
+    // disposed guard of its own (it only skips with no entry),
     // so this ordering is what keeps a torn-down shell from writing. Then the
     // scope takes down the media listeners + off-screen observer.
     if (this.#entry) {

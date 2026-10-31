@@ -452,7 +452,8 @@ export class SettingsPanel {
       if (hadFocusInside) {
         // Back to the opener (native showModal() restore) when it is still a
         // live element - body/null (nothing was focused) and a disconnected
-        // opener (SPA navigation) fall back to the shell host instead.
+        // opener (the host rebuilt its DOM) fall back to the shell host
+        // instead.
         const live = opener && opener !== document.body
           && opener !== document.documentElement && opener.isConnected;
         if (live) {
