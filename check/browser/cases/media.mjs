@@ -586,6 +586,40 @@ export async function run({ session, baseUrl, boot }) {
     ms: null
   });
 
+  // A containment re-wrap: the SDK container identity is a shell-lifetime
+  // fact. The host re-nests the running video into a SECOND Plyr-styled
+  // wrapper (the descriptor cache's parent-stamp exists for exactly this
+  // shape), so the re-parent seam re-resolves detection and the
+  // boot-identity shell is destroyed and re-adopted at the new home -
+  // exactly one shell ends attached to the NEW container's wrapper
+  // (positioned absolutely so the on-screen adoption gate sees it).
+  const rewrap = await session.evalAsync(function main(done) {
+    const v = document.querySelector("#check-video-2");
+    if (!v || !v.matches("[data-pf-shell]")) { done(null); return; }
+    const second = document.createElement("div");
+    second.className = "plyr";
+    second.setAttribute("data-plyr", "");
+    second.style.cssText = "position:absolute;left:0;top:0;width:1280px;height:720px;";
+    second.innerHTML = "<div class=\"plyr__video-wrapper\" style=\"width:100%;height:100%\"></div>";
+    document.body.append(second);
+    second.querySelector(".plyr__video-wrapper").moveBefore(v, null);
+    const deadline = Date.now() + 9000;
+    const tick = () => {
+      const newWrapper = second.querySelector(".pf-shell")?.parentElement === second.querySelector(".plyr__video-wrapper");
+      const shells = document.querySelectorAll(".pf-shell").length;
+      if (newWrapper && shells === 1) done({ host: newWrapper, shells });
+      else if (Date.now() < deadline) setTimeout(tick, 150);
+      else done({ host: newWrapper, shells });
+    };
+    tick();
+  });
+  rows.push({
+    name: "re-wrap into a second SDK container: boot-identity shell dies, video re-adopts in the new home",
+    status: rewrap && rewrap.host && rewrap.shells === 1 ? "pass" : "fail",
+    note: rewrap ? JSON.stringify(rewrap) : "no stamped video to move",
+    ms: null
+  });
+
   // The state-preserving move: a host that reorders its player with
   // Element.moveBefore (live on the 159 floor) must not strand the running
   // shell - the queued removal record reads a video that is still connected,

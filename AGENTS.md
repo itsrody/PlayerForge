@@ -238,7 +238,13 @@ iframes, same-origin and cross-origin:
   are top-frame only, and `#armDebugWatch` rides the storage echo to
   propagate the debug flip into sibling frames mid-flight),
   pagehide teardown, freeze/pageshow recovery, per-boot
-  manage-ability downgrades.
+  manage-ability downgrades, and the universal-container-identity seam on
+  `RemovalWatch`'s re-parent branch: container identity is a shell-lifetime
+  fact resolved by detection alone — a live re-home re-runs
+  `findSdkForVideo` (the parent-stamped cache invalidates on exactly this
+  parent change), and a DIFFERENT container destroys the boot-identity
+  shell and re-adopts through the boot path (destroy-readopt; the
+  equality shape and the unresolvable shape stand untouched).
 
 ### shell/ — the feature layer
 - **shell.js** — composes the boot step list (realm → settle → DOM layers →
@@ -690,7 +696,9 @@ stop at the first failure:
   rewrite never re-mirrors, xhr shape + `ontimeout` on a
   held route, pfStyle resource warmth, menu-handle census, harvest-seeded
   reboot), `media` (stream, gesture events, kernel re-anchoring onto a
-  replacement video, and the state-preserving move: a `moveBefore` reorder
+  replacement video, the containment re-wrap (a second SDK container — the
+  destroy-readopt seam, one shell ends in the new home), and the
+  state-preserving move: a `moveBefore` reorder
   in place and a cross-parent re-home of the running shell, both
   floor-real), `menus` (menu command → panel effect; the targeted
   reset row seeds a non-default color filter and proves the bare command

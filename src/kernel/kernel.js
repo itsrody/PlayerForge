@@ -171,6 +171,15 @@ const REMOVAL_DEPTH_MARGIN = 1;
  * that finds it reconnected re-anchors. stop() is the single teardown for
  * both ends - a really-removed video and a page that is leaving - and both
  * release the seen-video pin via the owner's onStop callback.
+ *
+ * The re-parent branch is also the one identity seam the tree carries: the
+ * kernel's onReparent callback re-resolves detection there (universal
+ * container identity), and when the resolved container differs from the
+ * shell's boot identity it destroys that shell and re-adopts through the
+ * boot path - meaning this watch may be stopped from inside its own
+ * callback. A stopped watch therefore refuses to re-observe (#reanchor
+ * no-ops), so the callback's trailing re-seat can never resurrect roots
+ * the stop just dropped.
  */
 class RemovalWatch {
   #video;
@@ -178,15 +187,18 @@ class RemovalWatch {
   #watchDepth;
   #signal;
   #onRemoved;
+  #onReparent;
   #onStop;
   #anchors = [];
   #observer = new MutationObserver(() => this.#checkAnchors());
   #graceCancel = null;
+  #stopped = false;
 
-  constructor({ video, container, hops, signal, onRemoved, onStop }) {
+  constructor({ video, container, hops, signal, onRemoved, onReparent, onStop }) {
     this.#video = video;
     this.#container = container;
     this.#onRemoved = onRemoved;
+    this.#onReparent = onReparent;
     this.#onStop = onStop;
     /** Adaptive watch depth: the matched anchor + a margin, never unbounded. */
     this.#watchDepth = Number.isInteger(hops) && hops > 0
@@ -202,6 +214,12 @@ class RemovalWatch {
    *  instance. The kernel scope disconnects it at pagehide - no per-video
    *  bookkeeping. */
   #reanchor() {
+    // The re-wrap may have stopped this watch from inside the very callback
+    // that called here (the kernel's destroy-readopt seam) - a stopped
+    // watch refuses to observe, so no roots resurrect past their stop.
+    if (this.#stopped) {
+      return;
+    }
     // MutationObserver has no per-target unobserve(): disconnect() is the
     // only way to drop the stale roots (the previous loop called a method
     // that does not exist and threw, leaving the anchors stranded on their
@@ -269,11 +287,23 @@ class RemovalWatch {
     this.#graceCancel?.();
     this.#graceCancel = null;
     if (video.parentElement !== this.#anchors[0]) {
+      // Currency crossing: the parent changed under a connected video. The
+      // kernel seam may resolve a NEW SDK container here and tear this
+      // watch down (with its shell) - the trailing re-observe below no-ops
+      // through the stopped guard when it does.
+      this.#onReparent?.();
       this.#reanchor();
     }
   }
 
   stop() {
+    // The onStop callback (seen-pin release) must fire exactly once, and
+    // the kernel-scope dispose calls stop() again at pagehide on a watch
+    // the re-wrap seam already stopped.
+    if (this.#stopped) {
+      return;
+    }
+    this.#stopped = true;
     this.#observer.disconnect();
     this.#graceCancel?.();
     this.#graceCancel = null;
@@ -621,17 +651,52 @@ export class Kernel {
 
   /** Hand per-video removal watching to its one stateful owner. */
   #watchVideoRemoval(video, container, hops) {
-    const watch = new RemovalWatch({
+    let watch = null;
+    watch = new RemovalWatch({
       video,
       container,
       hops,
       signal: this.#scope.signal,
       onRemoved: () => this.#onVideoRemoved(video),
+      onReparent: () => this.#onRewrap(watch, video),
       onStop: () => this.#seenVideos.delete(video)
     });
     // Chromium-native single-target consolidation and the timer are both
     // handled inside the watch; the kernel scope is its pagehide backstop.
     this.#scope.onDispose(() => watch.stop());
+  }
+
+  /**
+   * Universal container identity, the re-parent seam: the watch's
+   * parent-equality check surfaced a live re-home, so identity re-resolves
+   * through the same detection the adoption ran (the parent-stamped
+   * descriptor cache invalidates exactly on this parent change). One
+   * decision rule, from the ShellSlot doctrine: container identity is a
+   * shell-lifetime fact and a displaced shell is destroyed, never
+   * re-seated - so a DIFFERENT resolved container stops this watch, tears
+   * the boot-identity shell down (destroy rolls back every managed marker,
+   * so nothing blocks the rebuild), and re-adopts through the existing
+   * boot path at the new home. The equality shape - the pinned moveBefore
+   * re-home onto a bare stage - resolves the same container and falls out
+   * the comparison untouched. An unresolvable video (the full SDK context
+   * left the composed ancestry) stands on the boot identity: the
+   * adoption contract says no SDK anchor means no shell, but there is no
+   * matching mid-flight teardown contract, and the move may reverse.
+   */
+  #onRewrap(watch, video) {
+    const shell = this.#registry.getByVideo(video);
+    if (!shell) {
+      return;
+    }
+    const sdk = findSdkForVideo(video);
+    const container = sdk?.container ?? null;
+    if (!container || container === shell.container) {
+      return;
+    }
+    logger.log("lifecycle", `${sdk.name} re-wrapped: container identity changed - destroy-readopt`);
+    watch.stop();
+    shell.destroy();
+    this.#adoptVideo(video);
   }
 
   #createShell({ video, container, sdk }) {
