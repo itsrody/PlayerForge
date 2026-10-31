@@ -65,12 +65,8 @@ const MEDIA_ERROR_LABELS = {
 const PANEL_SECTIONS = [
   ({ shell }) => new SubtitlesSection(shell),
   ({ shell, panel }) => new VideoFilter(shell, panel),
-  ({ shell, panel }) => {
-    addHistorySection(panel, shell);
-  },
-  ({ panel, signal }) => {
-    addSettingsSection(panel, signal);
-  }
+  ({ shell, panel, signal }) => addHistorySection(panel, shell, signal),
+  ({ panel, signal }) => addSettingsSection(panel, signal)
 ];
 
 /**
@@ -561,9 +557,21 @@ export class Shell {
         this.#filters = null;
       },
       () => {
-        for (const section of this.#panelSections) {
-          section.destroy();
-        }
+        // The section-handle destroy loop under ONE uniform belt (the
+        // release-tail class): a section destroy that throws must not
+        // strand the inputs, panel, toast, and DOM teardown steps behind
+        // it - they are the shell's only unregister on this path, so a
+        // broken member (a section that violates the contract the
+        // PANEL_SECTIONS table establishes) dies here and the tail gets
+        // everything below it done. The sections' own destroys are all
+        // contract members today; the belt is for the future one that
+        // is not (the leftover DOM it leaves behind is what the rows
+        // then catch).
+        try {
+          for (const section of this.#panelSections) {
+            section.destroy();
+          }
+        } catch {}
         this.#panelSections = [];
       },
       () => {

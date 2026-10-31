@@ -490,6 +490,11 @@ export class ForgeTrack {
     // Pre-allocate all cue slot elements upfront for zero first-show latency.
     // Slots are hidden by default and toggled visible by #render().
     // DOMManager tracks them for automatic removal on destroy.
+    // The trio's third pool (toast pill, history cards, cue slots) but
+    // pool-by-construction rather than a DomPool consumer: MAX_SLOTS is
+    // compile-time bound, slots never return to an available set - they
+    // toggle through the #lastActive diff - so acquire/release would fit
+    // nothing here and grow-on-demand is dead capacity.
     if (cueLayer) {
       for (let i = 0; i < MAX_SLOTS; i++) {
         this.#slots[i] = this.#dom.createElement("div", { class: "pf-cue", role: "caption" }, cueLayer);

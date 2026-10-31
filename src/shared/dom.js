@@ -307,8 +307,12 @@ export function onDomMutations(handler, { signal } = {}) {
  * cleanup. Elements grow the pool on demand but never shrink automatically —
  * call shrink() to drop excess elements after bulk removals.
  *
- * Used by toasts, history cards, and subtitle cue slots to avoid repeated
- * createElement/remove cycles on hot paths.
+ * Used by toasts and history cards to avoid repeated createElement/remove
+ * cycles on hot paths. The subtitle cue slots are the third pool surface by
+ * the same intent but pool-by-construction: a MAX_SLOTS-bound fixed
+ * pre-allocation (DOMManager), never acquire/release - the slot count is
+ * compile-time bounded and slots toggle with the render diff, so a
+ * grow-on-demand recycle pool fits nothing there.
  */
 export class DomPool {
   /** Factory: creates a fresh element (not attached to any parent). */

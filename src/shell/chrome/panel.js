@@ -308,7 +308,11 @@ function createStepper(options) {
  *   - Product sections (addSettingsSection, addHistorySection): the concrete
  *     panels the shell fills through that API, kept beside it because they
  *     program the builder surface directly instead of reaching back up into
- *     config.js state.
+ *     config.js state. Both return their instance for the shell's
+ *     section-handle contract (attempt-rollback + shell destroy call
+ *     section.destroy?.()) - void-wrapped builders left that contract dead
+ *     for half the entries - and take the shell scope's signal for any
+ *     subscription that must not live past the build call.
  */
 export class SettingsPanel {
   #hudLayer;
@@ -1170,15 +1174,30 @@ class SettingsSection {
       }
     }
   }
+
+  /** The section-handle contract's destroy: the settings-sync listener
+   *  already died with the shell scope's signal (native addEventListener
+   *  detach), and the widgets die in the panel tree, so the only live state
+   *  left is the control registry the change-sync walk consumes. */
+  destroy() {
+    this.#controls.clear();
+  }
 }
 
 export function addSettingsSection(panel, signal) {
-  new SettingsSection(panel, signal);
+  // The instance rides the shell's section-handle contract (see the class
+  // doc): the shell destroy/rollback loops call section.destroy?.(), which
+  // this instance honors through its own destroy (the control registry
+  // clear); the sync listener itself rides the caller's signal natively.
+  return new SettingsSection(panel, signal);
 }
 
 /**
  * The resume-history section: pooled past-video cards for the shell's
- * opening panel, one event-delegated listener for the whole list.
+ * opening panel, one event-delegated listener for the whole list. The card
+ * pool is the panel's reusable DOM among the three (the toast pill, this
+ * pool, and the subtitle cue slots): grow-on-demand with a shrink pass,
+ * because the card count is the only runtime-dynamic one of the trio.
  */
 function formatDomain(domain) {
   if (!domain) return "";
@@ -1201,7 +1220,7 @@ class HistorySection {
   #hint;
   #cardPool;
 
-  constructor(panel, shell) {
+  constructor(panel, shell, signal = null) {
     this.#panel = panel;
     this.#shell = shell;
     const sectionRoot = panel.addSection("History", "resume");
@@ -1231,11 +1250,14 @@ class HistorySection {
     // on cross-tab imports; re-render when the entry SET changes so the open
     // History tab never shows a boot-time snapshot. Position-only persists are
     // not structural and stay invisible - the cards don't display position.
+    // The subscription rides the shell scope's signal (the store's Fan
+    // contract): teardown un-subscribes by abort, not by outliving into a
+    // destroyed store's GC window.
     shell.resume?.onChange?.((structural) => {
       if (structural) {
         this.#render();
       }
-    });
+    }, { signal });
   }
 
   #refsFor(card) {
@@ -1360,8 +1382,26 @@ class HistorySection {
     }
     refs.meta.textContent = parts.join(" \u00b7 ");
   }
+
+  /** The section-handle contract's destroy: the resume subscription already
+   *  died with the shell scope's signal, and the active cards ride the
+   *  panel tree's removal, so what is retired here is the pool's idle side
+   *  (detached by the release discipline) and the render state referencing
+   *  it. The early-return construction (no section root) has no pool -
+   *  optional-chained here for exactly that shape. */
+  destroy() {
+    this.#cardPool?.destroy();
+    this.#activeCards.length = 0;
+    this.#cardPool = null;
+    this.#list = null;
+    this.#hint = null;
+  }
 }
 
-export function addHistorySection(panel, shell) {
-  new HistorySection(panel, shell);
+export function addHistorySection(panel, shell, signal = null) {
+  // The instance rides the shell's section-handle contract (see the class
+  // doc); its destroy retires the card pool's idle side and the render
+  // state, while the resume subscription rides the shell scope's signal
+  // natively and the active cards die in the panel tree.
+  return new HistorySection(panel, shell, signal);
 }

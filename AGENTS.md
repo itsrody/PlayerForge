@@ -174,8 +174,13 @@ iframes, same-origin and cross-origin:
   worker), logger facade.
 - **dom.js** — the shared mutation feed (`onDomMutations`: ONE page-level
   MutationObserver every consumer rides — element pooling, the shell ledger,
-  shadow traversal, the fullscreen gate, the iframe registry), `PoolElement`
-  machinery, `ReferenceBox` — the ONE fill-box identity and ONE read in
+  shadow traversal, the fullscreen gate, the iframe registry), `DomPool`
+  (element recycling; the three reusable DOM pools are the toast pill, the
+  panel's history cards, and the subtitle cue slots — the first two are
+  DomPool consumers, the cue slots are pool-by-construction: a
+  MAX_SLOTS-bound fixed pre-allocation that never acquires/releases, so a
+  grow-on-demand recycle fits nothing there), `ReferenceBox` — the ONE
+  fill-box identity and ONE read in
   both modes: the same SDK container discovery resolved (detection's
   composed-ancestry `host`/anchor walk), a single `getBoundingClientRect()`
   filling dims AND origin — the read the discovery presence gates use on
@@ -309,7 +314,12 @@ iframes, same-origin and cross-origin:
   owns destroy and re-anchor paths. The shell stores the frozen
   `AdoptionHome` the provider hands it and exposes `video`/`container`/`sdk`
   as read-only aliases of the same record (identity is a shell-lifetime
-  fact).
+  fact). The panel-section destroy loop rides ONE uniform bare `catch` (the
+  release-tail class): a section destroy that throws must not strand the
+  inputs/panel/toast/DOM teardown steps behind it — they are the shell's
+  only unregister on that path, so the broken member dies contained and the
+  tail gets everything below it done (a future member without an honest
+  destroy surfaces as leftover DOM in the rows, not as a leak).
 - **media.js** — `MediaControls` (play/pause/seek/scrub-latch/volume/rate/
   boost/PiP/stop), `MediaSessionOwner` claim/lifecycle — the bridge carries a
   plain disposal boolean, not a Scope root: every listener it owns rides the
@@ -413,7 +423,12 @@ iframes, same-origin and cross-origin:
   `SubtitlesSection` (panel UI).
 - **chrome/** — `config.js` (state: `SETTINGS_SCHEMA`, `getSetting`,
   `onSettingsChanged`, `SETTING_KEYS`, cross-tab live-reload cache),
-  `panel.js` (the `Panel` builder + settings/history section renderers),
+  `panel.js` (the `Panel` builder + settings/history section renderers;
+  the product sections return their instances into the shell's
+  section-handle table — the `PANEL_SECTIONS` entries are the build *and*
+  teardown source of truth, so attempt-rollback and shell destroy call
+  `section.destroy?.()` on real handles, and the history subscription rides
+  the shell scope's signal into the resume store's Fan),
   `ui.js` (`el`/`button` construction, the SVG icon factory, `flashElement`
   WAAPI), `inject.js` (`ShellStyle` sheet lifecycle: adopt-once, monotonic
   `@resource` upgrade; viewport-fit-cover), `toast.js` (`ToastManager`,
