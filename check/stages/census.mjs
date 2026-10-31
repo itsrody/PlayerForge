@@ -135,8 +135,8 @@ const ROWS = [
   {
     name: "AbortController machines",
     pattern: "new AbortController(",
-    expect: 17,
-    why: "the deliberate release-controller census: each is one machine's internal teardown root (postTask owner bridge, DomSettleWait, DomWatch, the pinch wheel, Fan's subscribe handle, per-scope roots) - §5.5's hand-rolled release machines all ride these"
+    expect: 16,
+    why: "the deliberate release-controller census: each is one machine's internal teardown root (postTask owner bridge, DomSettleWait, DomWatch's subscribe release and defer machine, the pinch wheel, Fan's subscribe handle, the page.js pipe-request settle family, per-pipe entries and the bridge install mount, the panel's per-open dismissal scope, the layout-gate reveal listener, the media-tap scope, the entry hint composite source, per-scope roots) - every hand-rolled release machine rides one of these; the kernel settle-scope retired into the kernel Scope (pagehide disposal already aborted both, one owner per abort story)"
   },
   {
     name: "bare catch blocks",

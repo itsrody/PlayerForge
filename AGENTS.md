@@ -611,8 +611,13 @@ new code-level evidence:
    abort-fire tears everything down. Never build removal-list pairs. The
    deliberate-machines census holds this byte-true: every hand-rolled
    release/teardown machine now rides native abort compositions (an internal
-   release controller per machine — `postTask`'s owner bridge, `DomSettleWait`,
-   `DomWatch`, the pinch wheel, and Fan's own subscribe handle —
+   release controller per machine — `postTask`'s owner bridge (task signal +
+   release), `DomSettleWait`, `DomWatch` (its subscribe release and its defer
+   machine), the pinch wheel, Fan's own subscribe handle, the page.js pipe
+   family (per-request settle signals, per-pipe entries, the bridge install
+   mount), the panel's per-open dismissal scope, the layout-gate reveal and
+   media-tap scopes, the entry hint's composite source, and the per-scope
+   roots —
    its `{ once: true }`+`{ signal: release.signal }` composition detaches the
    owner listener natively on whichever path ends first), and the census of
    `removeEventListener` across src comes back empty: zero live manual

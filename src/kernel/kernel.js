@@ -341,8 +341,6 @@ export class Kernel {
    *  clear is the price of narrowing: a stranded earlier Set entry outlived
    *  the storm, a stranded slot would refuse every later candidate forever. */
   #booting = null;
-  /** Abort source for in-flight settle waits; aborted at pagehide. */
-  #settleScope = new AbortController();
   /** Shell-ready fan-out audience (one event per registration). */
   #audience = new Fan("shell");
   #initialized = false;
@@ -358,7 +356,10 @@ export class Kernel {
    *  scope (see #ensureGate). */
   #gates = new Map();
   /** Kernel lifecycle scope: removal observers disconnect via onDispose,
-   *  grace timers cancel via the signal. */
+   *  grace timers and settle waits cancel via the signal. The scope is the
+   *  single abort owner here - the separate settle-scope this signal absorbed
+   *  rode the same pagehide disposal, two controllers telling one abort
+   *  story. */
   #scope = new Scope();
   /** The shell host provider, registered by the shell plugin (never imported). */
   #shellProvider = null;
@@ -416,14 +417,12 @@ export class Kernel {
         this.#discoveryTap = null;
       },
       // Scope first: onDispose disconnects every removal observer, the
-      // signal cancels pending removal-grace postTasks, and the page-level
+      // signal cancels pending removal-grace postTasks and resolves in-flight
+      // settle waits instantly (their done() disconnects the MutationObserver
+      // and aborts the quiet/cap handles), and the page-level
       // pageshow/pagehide listeners drop. Shell teardown below then runs
       // with all watch machinery already dead.
       () => this.#scope.dispose(),
-      // Abort in-flight settle waits so their observers + timers die
-      // immediately instead of running the full quiet/cap window on a page
-      // that is already leaving.
-      () => this.#settleScope.abort(),
       () => this.#registry.destroyAll()
     ]);
   };
@@ -457,10 +456,10 @@ export class Kernel {
    * Bridges video discovery to shell creation (former lifecycle.js): a settle
    * wait defers creation until the SDK's DOM has quiesced (or the cap expires),
    * with post-wait guards against videos that vanished or were adopted
-   * meanwhile. A ready shell is handed to #notifyShellCreated. Page-unload
-   * cleanup aborts in-flight waits via #settleScope. The adoption home rides
-   * frozen: whatever the settle costs in time, the identity the shell boots
-   * with is the one adoption resolved.
+   * meanwhile. A ready shell is handed to #notifyShellCreated. In-flight
+   * waits ride the kernel scope's signal, so pagehide disposal aborts them.
+   * The adoption home rides frozen: whatever the settle costs in time, the
+   * identity the shell boots with is the one adoption resolved.
    */
   async #onVideoFound({ home }) {
     const { video, container, sdk } = home;
@@ -478,12 +477,20 @@ export class Kernel {
     }
     this.#booting = video;
     try {
-      await whenDomSettled(container, { signal: this.#settleScope.signal });
+      await whenDomSettled(container, { signal: this.#scope.signal });
     } finally {
       // Cleared on every exit path: the guarded body below may return early
       // (video or container left the document before settle), and a rejected
       // wait must not strand the slot - see the field doc.
       this.#booting = null;
+    }
+    if (this.#scope.disposed) {
+      // Pagehide disposal aborted this wait (settle rides the kernel scope's
+      // signal): the guards below run inside a leaving document where
+      // isConnected still reads true and the destroyed registry no longer
+      // refuses, so without this the continuation booted a shell onto a page
+      // the teardown had already swept.
+      return;
     }
     if (!video.isConnected || !container.isConnected) {
       logger.log("lifecycle", `${sdk.name} video left the document before settle - skipping`);
