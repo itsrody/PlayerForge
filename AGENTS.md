@@ -66,9 +66,16 @@ iframes, same-origin and cross-origin:
 
 - Each frame document runs the full bundle: its own kernel, its own bridge
   installation, its own GM realm. A kernel boots only when **its own
-  document** holds a qualifying video, so exactly one document boots a shell
-  per embedded player, neighbors stay inert, and a video-less host page never
-  boots.
+  document** holds a qualifying video, and it adopts exactly **one main
+  video per document** — the product's scope law: the first qualifying
+  candidate wins (detection + presence gates order = the pick), later
+  qualifying candidates are refused while a shell is live or mid-boot, and
+  the registry-empty edge re-arms discovery so the next candidate adopts
+  when the main leaves. Enforcement is **per document only** — cross-frame
+  coordination machinery does not exist, so a Top video plus a
+  separate-iframe video still yields two shells. Exactly one document boots
+  a shell per embedded player, neighbors stay inert, and a video-less host
+  page never boots.
 - Menu commands install **top-frame only**.
 - `window.top !== window` frames push fullscreen provisioning up the chain on
   shell creation: every ancestor document grants `allowfullscreen` on its
@@ -195,7 +202,7 @@ iframes, same-origin and cross-origin:
   breadcrumb names the blind kind).
 - **page.js** — site identity (`getDomainKey`, `domainsMatch`, `domainScore`,
   `hashEntry`, title sanitizer), page context, the frame bridge (`pf:` prefix,
-  `ContextPipe` class owning pipe/in-flight state, context responders,
+  `ContextPipe` class owning pipe state, context responders,
   fullscreen provisioners). The Navigation-API `onNavigate` surface (plus
   resume's whole route-follow chain it armed) is retired: same-document
   navigation is outside the product's topology — the swap machinery's one
@@ -239,9 +246,15 @@ iframes, same-origin and cross-origin:
   as the same remove+add record shape, both primitive forms live on the 159
   floor, and the watch's decisions re-derive from live DOM state — no
   per-shape code exists).
-- **kernel.js** — the orchestrator: `whenDomSettled` boot sequencing, the
-  `ShellSlot` (one shell per session; a displaced shell is **destroyed**,
-  never orphaned), `MenuCommands` (debug toggle + the two one-shot reset
+- **kernel.js** — the orchestrator: `whenDomSettled` boot sequencing
+  (`runSteps`), the one-main-video scope guard on adoption — the pick policy
+  "first-qualifying wins": a candidate meeting SDK identity is refused while
+  a shell is live or mid-boot (`#registry.occupied || #pending`), never
+  pinning a presence gate on a refused video, and recovery is the
+  registry-empty edge re-arming the full discovery tap — the `ShellSlot`
+  (one shell per session; a displaced shell is **destroyed**, never
+  orphaned; the adoption guard makes the displaced-destroy a backstop),
+  `MenuCommands` (debug toggle + the two one-shot reset
   commands, installed from script eval and resolving their shell host
   through the entry's kernel reference — works even kernel-less; menus
   are top-frame only, and `#armDebugWatch` rides the storage echo to
@@ -708,7 +721,10 @@ stop at the first failure:
   held route, pfStyle resource warmth, menu-handle census, harvest-seeded
   reboot), `media` (stream, gesture events, kernel re-anchoring onto a
   replacement video, the containment re-wrap (a second SDK container — the
-  destroy-readopt seam, one shell ends in the new home), and the
+  destroy-readopt seam, one shell ends in the new home), the one-main
+  refusal row (a second Plyr wrapper with a second video appended while the
+  main is live → still exactly one shell, the second video unstamped — a
+  refusal is an absence, so the row samples to a stable no-adoption), and the
   state-preserving move: a `moveBefore` reorder
   in place and a cross-parent re-home of the running shell, both
   floor-real), `menus` (menu command → panel effect; the targeted

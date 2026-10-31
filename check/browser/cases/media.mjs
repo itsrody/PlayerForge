@@ -620,6 +620,49 @@ export async function run({ session, baseUrl, boot }) {
     ms: null
   });
 
+  // One main video per page: once a shell is live, a later qualifying
+  // candidate is refused. A second Plyr-styled wrapper with a second video
+  // (appended while the main is live) fires loadeddata into the downgraded
+  // media-event tap - adoption must refuse it: still exactly one shell, and
+  // the second video stays unstamped. A refusal is an absence, so the row
+  // samples until the absence is stable (early exit only when a second shell
+  // wrongly appears or the stamp lands - both are failures).
+  const refusal = await session.evalAsync(function main(done) {
+    const third = document.createElement("div");
+    third.className = "plyr";
+    third.setAttribute("data-plyr", "");
+    third.style.cssText = "position:absolute;left:0;top:740px;width:1280px;height:720px;";
+    third.innerHTML = "<div class=\"plyr__video-wrapper\" style=\"width:100%;height:100%\"><video id=\"check-video-3\" muted autoplay playsinline></video></div>";
+    document.body.append(third);
+    const v3 = third.querySelector("video");
+    v3.src = "/check-video.mp4";
+    let observed = null;
+    v3.addEventListener("loadeddata", () => {
+      observed = Date.now();
+      const tick = () => {
+        const stamped = v3.matches("[data-pf-shell]");
+        const shells = document.querySelectorAll(".pf-shell").length;
+        if (stamped || shells !== 1) {
+          done({ stamped, shells, waited: Date.now() - observed });
+          return;
+        }
+        if (Date.now() - observed > 7000) {
+          done({ stamped, shells, waited: 7000 });
+          return;
+        }
+        setTimeout(tick, 250);
+      };
+      tick();
+    }, { once: true });
+    setTimeout(() => done({ stamped: false, shells: document.querySelectorAll(".pf-shell").length, note: "loadeddata never fired" }), 11000);
+  });
+  rows.push({
+    name: "one main video per page: a second qualifying candidate while the main is live is refused",
+    status: refusal && !refusal.stamped && refusal.shells === 1 ? "pass" : "fail",
+    note: refusal ? JSON.stringify(refusal) : "no assessment within 11s",
+    ms: null
+  });
+
   // The state-preserving move: a host that reorders its player with
   // Element.moveBefore (live on the 159 floor) must not strand the running
   // shell - the queued removal record reads a video that is still connected,

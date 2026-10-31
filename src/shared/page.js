@@ -385,8 +385,7 @@ export async function getPageContext() {
   try {
     return ownPageContext(window.top);
   } catch {
-    const bridged = await pipeState.bridge(() => requestPageContextFromParent());
-    return bridged ?? ownPageContext();
+    return (await requestPageContextFromParent()) ?? ownPageContext();
   }
 }
 
@@ -396,21 +395,19 @@ export async function getPageContext() {
  * bridge memo looked after elsewhere - were kept in step by ad-hoc resets at
  * every settle and teardown path; the legacy memo retired with its jsdom
  * premise (no memo on the refusal belt - see requestPageContextFromParent),
- * and the pipe records and the in-flight bridge memo are private fields of
- * one instance with four verbs, so the established-pipe identity check - a
- * stale request's timeout drops only ITS pipe, never one a newer resolve
- * already established - rides the same object as every reset site. The
- * in-flight bridge memo rides the same object: a page hosting several videos
- * boots one shell per video, so without the memo each shell would
- * round-trip the parent chain to resolve the same context; it is cleared on
- * settle, never cached, so a later document (a fresh boot) always
- * re-resolves.
+ * and the pipe record is a private field of one instance with three verbs,
+ * so the established-pipe identity check - a stale request's timeout drops
+ * only ITS pipe, never one a newer resolve already established - rides the
+ * same object as every reset site. The in-flight bridge memo retired with the
+ * one-main-video scope law: it multiplexed the chain-walk across the shells a
+ * multi-video document booted, and one shell (hence one context resolve) per
+ * document now leaves nothing for it to dedup - the resume tracker holds the
+ * single getPageContext promise, and a re-resolve after a replacement shell
+ * is sequential, not in-flight.
  */
 class ContextPipe {
   /** Live pipe record ({ port }), or null between establishes/drops. */
   #pipe = null;
-  /** In-flight bridge promise, or null between resolves (never cached). */
-  #bridge = null;
 
   get pipe() {
     return this.#pipe;
@@ -444,23 +441,6 @@ class ContextPipe {
       this.#pipe.port.close();
     }
     this.#pipe = null;
-  }
-
-  /** Resolve through the parent chain, de-duplicated per frame: later shells
-   *  sharing this document await the memo instead of re-arming the chain. */
-  bridge(request) {
-    if (!this.#bridge) {
-      this.#bridge = request();
-      this.#bridge.then(
-        () => {
-          this.#bridge = null;
-        },
-        () => {
-          this.#bridge = null;
-        }
-      );
-    }
-    return this.#bridge;
   }
 }
 

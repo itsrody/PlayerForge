@@ -78,7 +78,10 @@ function whenDomSettled(container, options) {
 }
 
 /**
- * Holds the single live shell. PlayerForge is one-shell-per-session by design.
+ * Holds the single live shell. PlayerForge is one-shell-per-session by design,
+ * and under the one-main-video scope law the kernel's adoption guard makes
+ * that employment-side fact (a shell is never adopted once one is live or
+ * mid-boot): register()'s displaced-destroy stays only as the backstop.
  *
  * `onEmpty` (optional) fires when the last shell leaves through unregister -
  * the DOM-status edge the kernel uses to re-arm discovery. It is not wired to
@@ -95,14 +98,21 @@ class ShellSlot {
     this.#onEmpty = onEmpty;
   }
 
+  /** The one-main-video adoption guard's read: is any shell live here. */
+  get occupied() {
+    return this.#current !== null;
+  }
+
   /**
-   * Install the session's shell. PlayerForge is one-shell-per-session, so a
-   * shell already live is destroyed here rather than silently dropped:
-   * otherwise adopting a second player orphans the first (still in the DOM and
-   * removal-watched, but unreachable from the registry and so never torn down).
-   * The slot is filled before destroying the displaced shell so its own
-   * onDestroy -> unregister() sees a different current and neither nulls the
-   * slot nor reports an empty registry.
+   * Install the session's shell. The displaced-destroy is the one-main-video
+   * backstop: the kernel's adoption guard refuses every later candidate while
+   * a shell is live, so a displacement should never fire - but a shell that
+   * slips through (a boot racing a teardown edge) is destroyed here rather
+   * than silently dropped, otherwise it would be orphaned (still in the DOM
+   * and removal-watched, but unreachable from the registry and so never torn
+   * down). The slot is filled before destroying the displaced shell so its
+   * own onDestroy -> unregister() sees a different current and neither nulls
+   * the slot nor reports an empty registry.
    */
   register(shell) {
     const previous = this.#current;
@@ -571,12 +581,14 @@ export class Kernel {
   /**
    * After the first successful adoption, drop the full-document discovery tap
    * (the heavier childList+subtree observer) and fall back to the cheap
-   * capture-mode media-event tap. On MPA pages there is no second player to
-   * surface, so keeping the per-mutation scan alive for the whole page taxes
-   * every DOM change for nothing; the media-event tap still catches a
+   * capture-mode media-event tap. There is never a second shell to surface -
+   * the one-main-video scope law refuses any later qualifying candidate - so
+   * keeping the per-mutation scan alive for the whole page taxes every DOM
+   * change for nothing; the media-event tap still catches a
    * script-lazy SDK player that fires loadedmetadata/loadeddata/play, so
-   * discovery never goes fully quiet, and #onRegistryEmpty re-arms the full tap
-   * if that shell later leaves. Idempotent; pagehide tears the tap down.
+   * discovery never goes fully quiet, and #onRegistryEmpty re-arms the full
+   * tap when that shell leaves (the next candidate's adoption path).
+   * Idempotent; pagehide tears the tap down.
    */
   #downgradeDiscoveryTap() {
     if (this.#discoveryDowngraded) {
@@ -613,6 +625,22 @@ export class Kernel {
     }
     const sdk = findSdkForVideo(video);
     if (!sdk) {
+      return;
+    }
+    // The one-main-video scope law, the pick policy "first-qualifying wins":
+    // once any shell is live here - or one is mid-boot through the settle
+    // wait, its registry entry not yet placed - later qualifying candidates
+    // are refused. The guard sits after SDK identity (the refusal log names
+    // the candidate) and before the presence gates, so a refused video never
+    // pins a layout/on-screen observer that would keep re-entering adoption
+    // for a candidate the scope law will not adopt. Recovery is the existing
+    // registry-empty edge: the main's RemovalWatch destroying its shell fires
+    // #onRegistryEmpty, re-arms the full discovery tap, and its seed walk plus
+    // the media tap re-run adoption so the next qualifying candidate wins.
+    if (this.#registry.occupied || this.#pending.size > 0) {
+      if (logger.enabled) {
+        logger.log("kernel", `${sdk.name} candidate refused - one main video per page (a shell is live or booting)`);
+      }
       return;
     }
     if (!meetsMinSize(video)) {
@@ -712,13 +740,12 @@ export class Kernel {
   }
 
   /**
-   * The shell host one-shot menu commands act on: the most recently created
-   * shell (the same precedence the panel toggle follows - the user works with
-   * the newest player they opened). Null when no shell is live here.
+   * The shell host one-shot menu commands act on: the one live shell (the
+   * one-main-video scope law leaves at most one). Null when no shell is live
+   * here.
    */
   menuShellHost() {
-    const shells = this.#registry.getAll();
-    return shells.length ? shells.at(-1).shellHost : null;
+    return this.#registry.getAll()[0]?.shellHost ?? null;
   }
 
   /**
