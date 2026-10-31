@@ -1155,7 +1155,10 @@ class SubtitlePlacementState {
   }
 }
 
-export const subtitlePlacement = new SubtitlePlacementState();
+// In-module singletons: the panel section is the whole audience, and the
+// session/section wiring is all in this file - the cross-module export face
+// the grains once carried has zero importers (the zero-legacy sweep).
+const subtitlePlacement = new SubtitlePlacementState();
 
 /** One style seed read: storage per key, the font stringify carried from the
  *  session boot's exact normalization (rule: one owner per read). */
@@ -1267,7 +1270,8 @@ class SubtitleStyleState {
   }
 }
 
-export const subtitleStyle = new SubtitleStyleState();
+// In-module singleton (see the placement grain above).
+const subtitleStyle = new SubtitleStyleState();
 
 /**
  * Subtitle track state for one shell, constructed at boot - not with the

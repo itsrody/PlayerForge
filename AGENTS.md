@@ -281,7 +281,7 @@ iframes, same-origin and cross-origin:
 - **kernel.js** — the orchestrator: `whenDomSettled` boot sequencing
   (`runSteps`), the one-main-video scope guard on adoption — the pick policy
   "first-qualifying wins": a candidate meeting SDK identity is refused while
-  a shell is live or mid-boot (`#registry.occupied || #pending`), never
+  a shell is live or mid-boot (`#registry.occupied || #booting != null`), never
   pinning a presence gate on a refused video, and recovery is the
   registry-empty edge re-arming the full discovery tap — identity flows as
   ONE frozen `AdoptionHome` (`resolveAdoptionHome` resolves at adoption and

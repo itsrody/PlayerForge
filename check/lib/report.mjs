@@ -1,9 +1,12 @@
-export const CYAN = "\u001b[36m";
-export const GREEN = "\u001b[32m";
-export const RED = "\u001b[31m";
-export const YELLOW = "\u001b[33m";
-export const DIM = "\u001b[2m";
-export const RESET = "\u001b[0m";
+/* ANSI tokens, module-internal: every renderer in this file uses them and
+ * no other check module does (the zero-legacy sweep dropped their export
+ * face along with the dead todoNote helper). */
+const CYAN = "\u001b[36m";
+const GREEN = "\u001b[32m";
+const RED = "\u001b[31m";
+const YELLOW = "\u001b[33m";
+const DIM = "\u001b[2m";
+const RESET = "\u001b[0m";
 
 export function banner(msg) {
   console.log(`\n${CYAN}▸ ${msg}${RESET}`);
@@ -43,8 +46,4 @@ export function fatal(section, error, context) {
   if (context) {
     console.error(`  ${context}`);
   }
-}
-
-export function todoNote(msg) {
-  console.log(`  ${DIM}${msg}${RESET}`);
 }

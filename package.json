@@ -9,7 +9,6 @@
     "dev": "node esbuild.config.mjs --watch",
     "lint": "eslint src/",
     "test": "node check/run.mjs",
-    "verify": "node check/run.mjs",
     "check": "node check/run.mjs",
     "check:browser": "node check/run.mjs browser",
     "check:flaws": "node check/run.mjs syntax flaws",
