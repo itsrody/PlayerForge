@@ -13,7 +13,6 @@
  * unless the relay chain is already listening.
  */
 import { onDomMutations } from "./dom.js";
-import { gcCleaner } from "./runtime.js";
 
 /* - 1. Domain identity - */
 
@@ -406,17 +405,9 @@ export async function getPageContext() {
  * round-trip the parent chain to resolve the same context; it is cleared on
  * settle, never cached, so a later document (a fresh boot) always
  * re-resolves.
- *
- * Each pipe record is enrolled on the GcCleaner net (the record is the
- * watched wrapper, the release closes the port): every explicit verb -
- * establish's replacement, dropIf, stop - rides the net's own run-once
- * release, and any future drop path that forgets the close cannot leak the
- * port - the posthumous fire closes it and says so. See GcCleaner for the
- * two-hop contract (watch the record, not the resource) and the declined
- * subscriber verdicts.
  */
 class ContextPipe {
-  /** Live pipe record ({ port, net }), or null between establishes/drops. */
+  /** Live pipe record ({ port }), or null between establishes/drops. */
   #pipe = null;
   /** In-flight bridge promise, or null between resolves (never cached). */
   #bridge = null;
@@ -425,24 +416,22 @@ class ContextPipe {
     return this.#pipe;
   }
 
-  /** Retain a responding port as the persistent pipe. Retires any pipe it
+  /** Close a pipe record's port, tolerating a port that died already. */
+  #closePipe(record) {
+    try {
+      record.port.close();
+    } catch {}
+  }
+
+  /** Retain a responding port as the persistent pipe. Closes any pipe it
    *  replaces (the chain may have been upgraded mid-session). Per-request
    *  listeners attach transiently; nothing hangs off the pipe between
    *  resolves. */
   establish(port) {
     if (this.#pipe) {
-      this.#pipe.net();
+      this.#closePipe(this.#pipe);
     }
-    // The record is the watched wrapper; the release closes the captured
-    // port. The close is run-once through the net: establish's eager
-    // retirement and any eventually-forgotten drop share the same verb.
-    const record = { port, net: null };
-    record.net = gcCleaner.enlist(record, () => {
-      try {
-        port.close();
-      } catch {}
-    }, { label: "context-pipe" });
-    this.#pipe = record;
+    this.#pipe = { port };
   }
 
   /** Drop the pipe only if it is still the live one: a stale request's
@@ -452,12 +441,14 @@ class ContextPipe {
       return;
     }
     this.#pipe = null;
-    candidate.net();
+    this.#closePipe(candidate);
   }
 
   /** Drop the pipe when the frame bridge is torn down. */
   stop() {
-    this.#pipe?.net();
+    if (this.#pipe) {
+      this.#closePipe(this.#pipe);
+    }
     this.#pipe = null;
   }
 

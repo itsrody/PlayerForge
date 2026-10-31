@@ -137,26 +137,7 @@ iframes, same-origin and cross-origin:
   fan-out definition the platform doesn't ship — `DebugRuntime` (the
   one debug flag, private to the instance; the LoAF arm retired — probed
   unreachable: Firefox 159 exposes the entry type in no realm, page or
-  worker), `GcCleaner` — the ONE GC-backed cleanup net (native
-  FinalizationRegistry, floor-real; the contract is two-hop: enlist the
-  owner record the holder can drop, never the resource, because the
-  registry holds the release closure and with it the resource strongly until
-  release; release runs exactly once across three arms — the machine's own
-  signal abort, the record's collection, an explicit drop, the run-once
-  guard covers double-fire; posthumous fires warn so a real leak sentence
-  lands in silent mode). Subscriber census: adopted — ContextPipe's pipe
-  record (the pf context protocol). declined — TopFrameResponder's pipe
-  entries (the entry IS the resource holder; a proxy wrapper would be
-  artificial, and the idle sweep is the real backstop since the map's
-  strong hold is exactly why the net cannot fire), FrameRelay's nonce
-  ledger (bookkeeping eviction, no resource), RemovalWatch/DiscoveryTap/
-  kernel page-lifetime machines (kernel scope backstop completes them — no
-  forgotten shape), WorkerTransport (module-level page-lifetime singleton),
-  watchStorageKey (manager-realm retention GC cannot reach), IframeRegistry
-  (page-lifetime). The one real cross-document shape — a port peer dying
-  with its document — is unwitnessable by design: the surviving record is
-  still strongly held, so collection never fires; the records' own activity
-  sweeps stay that cleanup's owner. logger facade.
+  worker), logger facade.
 - **dom.js** — the shared mutation feed (`onDomMutations`: ONE page-level
   MutationObserver every consumer rides — element pooling, the shell ledger,
   shadow traversal, the fullscreen gate, the iframe registry), `PoolElement`
@@ -215,9 +196,7 @@ iframes, same-origin and cross-origin:
 - **page.js** — site identity (`getDomainKey`, `domainsMatch`, `domainScore`,
   `hashEntry`, title sanitizer), page context, the frame bridge (`pf:` prefix,
   `ContextPipe` class owning pipe/in-flight state, context responders,
-  fullscreen provisioners). The pipe record is enrolled on the GC net so a
-  forgotten drop cannot leak the port (see the runtime bullet's clean-up
-  census). The Navigation-API `onNavigate` surface (plus
+  fullscreen provisioners). The Navigation-API `onNavigate` surface (plus
   resume's whole route-follow chain it armed) is retired: same-document
   navigation is outside the product's topology — the swap machinery's one
   unique value was the route-change + in-place-swap conjunction, an in-place
@@ -753,16 +732,7 @@ stop at the first failure:
   firing order and delay honors, dead-handle/release/rejection-swallow
   choreography, the two-controller shape surviving an abort inside the
   task body, and `yield_()` recovering what raw `scheduler.yield()`
-  rejects),
-  `gc` (the GcCleaner unit, imported into the page realm: the explicit
-  drop arm releases exactly once with double-drop no-ops, the signal arm
-  the same, the Disposable handle parity, a throwing release contained
-  along the Scope teardown convention, and the armed-not-eager witness;
-  the posthumous collect arm is deliberately unpinned — GC cannot be
-  forced or observed deterministically in the content realm, so a row that
-  could be green without the fire would be false confidence — the arm is
-  FinalizationRegistry-spec-trusted and its real posthumous sentence
-  surfaces in informational console rows whenever a leak reaches it).
+  rejects).
 - **Per-case audit rows** follow every case file: uncaught page errors
   become fails, `console.error` becomes informational rows, a GM-usage
   census row; failing cases get a screenshot + page-state dump into
