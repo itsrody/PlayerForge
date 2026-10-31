@@ -54,7 +54,8 @@ derived from `package.json` by the build; never hand-edit the header version.
 
 **Commands:** `npm run build` (or `--watch`), `npm run lint` (eslint src/),
 `npm test` — the alias for `check/run.mjs`, the repo's one testing interface.
-`npm run check:browser`, `check:flaws`, `check:syntax` run individual gates.
+`npm run check:browser`, `check:flaws` (the syntax+flaws pair),
+`check:census` — the individual quick gates.
 A clean run is ~60s.
 
 ---
@@ -684,11 +685,21 @@ stop at the first failure:
 
 1. **syntax** — parse-only V8 check of every src module (parallel children).
 2. **flaws** — repo eslint + isolated module-import smoke per module.
-3. **bundle** — real esbuild build (version derivation, worker chunk) +
+3. **census** — the executable census: the recorded AGENTS.md counts
+   (ten Fans, twelve Scope roots, the zero-timer pipeline, zero manual
+   teardowns, the empty-catch belt, the wall-clock reads) re-derived
+   statically as literal occurrence counts over **comment-stripped** source —
+   prose that names a pattern (`runtime.js` mentions `catch {}` in a
+   docstring, `kernel.js` names `removeEventListener` in a comment) must not
+   count, so a naive grep would misreport the record. Each row carries its
+   why-docstring: a red row is answered by updating the gate's expect **and**
+   the AGENTS.md census in the same commit, with the change's why — never by
+   bumping the number alone.
+4. **bundle** — real esbuild build (version derivation, worker chunk) +
    artifact shape validation (header fields, IIFE shape, css companion) and
    the manager-contract pins: the exclusion list only ever rides the strict
    `@exclude-match` surface, and `@downloadURL` stays present for the updater.
-4. **browser** — real browser + real bundle in a GM realm: **real native
+5. **browser** — real browser + real bundle in a GM realm: **real native
    Firefox 159** headless, driven by geckodriver (this branch's floor, not a
    fork shim). Proves: boot, gesture contract, media semantics, resume,
    menus, GM env, frame scenarios, subtitle picture anchoring, edge
@@ -808,6 +819,11 @@ stop at the first failure:
 - **Gate fails at syntax/flaws:** run the concatenation of the isolated
   import child output; if a module brings a consumer it doesn't use, that's
   the import-graph smoke catching it.
+- **Gate fails at census:** a recorded count moved — the red row names it and
+  prints the why it guarded. The fix is a reasoning commit: update the gate's
+  `expect` in `check/stages/census.mjs` and the AGENTS.md census together,
+  with the change's why in the message. Bumping the number alone is what the
+  gate exists to make visible, never the fix.
 - **Browser gate launch refused:** `driver probe` prints the disk geckodriver
   and the Firefox binary version; geckodriver is cross-version so there is no
   stale-major shape — a repeated `handshake failed (no marionette port)`

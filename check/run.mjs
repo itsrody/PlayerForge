@@ -7,8 +7,11 @@
  *
  *   1. syntax  - parse-only V8 check of every src module
  *   2. flaws   - repo ESLint + isolated module-import smoke
- *   3. bundle  - real esbuild build + artifact shape validation
- *   4. browser - real native Firefox running the real bundle: boot, the
+ *   3. census  - executable census: the recorded AGENTS.md counts re-derived
+ *                statically (comment-stripped occurrence counts), so census
+ *                drift turns red instead of passing silently
+ *   4. bundle  - real esbuild build + artifact shape validation
+ *   5. browser - real native Firefox running the real bundle: boot, the
  *                gesture contract, real playback, panel plumbing
  *
  * Usage:
@@ -22,6 +25,7 @@ import { ensureFirefoxDriver } from "./lib/driver.mjs";
 const GATES = [
   ["syntax", "./stages/syntax.mjs", null],
   ["flaws", "./stages/flaws.mjs", null],
+  ["census", "./stages/census.mjs", null],
   ["bundle", "./stages/bundle.mjs", null],
   ["browser", "./stages/browser.mjs", "bundle"]
 ];

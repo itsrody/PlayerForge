@@ -12,7 +12,8 @@
     "verify": "node check/run.mjs",
     "check": "node check/run.mjs",
     "check:browser": "node check/run.mjs browser",
-    "check:flaws": "node check/run.mjs syntax flaws"
+    "check:flaws": "node check/run.mjs syntax flaws",
+    "check:census": "node check/run.mjs census"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
