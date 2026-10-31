@@ -389,6 +389,96 @@ export class Fan extends EventTarget {
   }
 }
 
+/* - 3.6 GC cleanup - */
+/**
+ * The ONE GC-backed cleanup net: a native FinalizationRegistry (floor-real,
+ * spec-stable, no arms) so a machine's forgotten tear-down path cannot take
+ * a live resource with it. The gap no existing owner closes: §5.5 routes
+ * every teardown through the machine's own choreography (signal abort,
+ * explicit stop), but a mid-flight path can DROP the owner record without
+ * running the release - the strong-held record then keeps the resource
+ * (an open pipe port is the live shape) after every reader is gone,
+ * invisible to the owning abort. When the dropped record is next collected,
+ * the registry fires the release itself - the platform is the watcher.
+ *
+ * Contract every subscriber holds:
+ *  - Enroll the OWNER RECORD, never the resource. The release closure
+ *    captures the resource, and the registry holds that closure strongly
+ *    until release or unenroll - so the watched object must be a wrapper
+ *    the holder can drop one hop above the resource (a pipe record, not
+ *    the port), or the net can never fire. The subscriber census: the
+ *    ContextPipe's pipe record (the pf context protocol). Declined verdicts
+ *    live in AGENTS section 3.
+ *  - A release is idempotent and resurrection-free: close(), terminate(),
+ *    disconnect(), abort() state - nothing reads the spent resource.
+ *  - The net is a SAFETY NET, not a second teardown root: §5.5 signal
+ *    scopes stay the one teardown choreography every machine carries; the
+ *    net only guarantees that a forgotten path cannot leak forever, and it
+ *    says so when it does - a release firing posthumously is warn()'d (an
+ *    exceptional path, surfaces even in silent mode), the same audit trail
+ *    the debug forensics read.
+ *
+ * Page-lifetime singles (the kernel tap, the module-level subtitle
+ * transport) are declined subscribers: their records are document-lifetime,
+ * so nothing can be dropped mid-flight without the document taking
+ * everything with it - no forgotten shape exists for a net to catch. And
+ * the one real cross-document shape - a MessagePort peer dying with its
+ * document - is unwitnessable by design: the surviving port's record is
+ * still strongly held here, so collection never fires; the records' own
+ * activity sweeps stay that cleanup's owner.
+ */
+export class GcCleaner {
+  /** Held value and unregister token in one object per enrollment. */
+  #registry = new FinalizationRegistry((entry) => entry.collect());
+
+  /**
+   * Enlist one owner record for the net. `watched` is the droppable record
+   * (see the contract), `release` the resource teardown it captures, and
+   * `signal` an optional owner-lifecycle abort arming BEFORE the record is
+   * ever dropped. Whichever arm fires first runs the release exactly once.
+   * Returns a Disposable handle: drop() runs now (the explicit healthy
+   * path), [Symbol.dispose] parity like Fan's handle.
+   */
+  enlist(watched, release, { signal, label = "resource" } = {}) {
+    let done = false;
+    const token = {};
+    // The internal release controller: the abort-arm listener detaches
+    // natively on whichever path ends the enrollment (the posthumous fire
+    // cannot reach it another way), so a released record's closure stops
+    // pinning the resource at the moment the resource is spent.
+    const releaseCtrl = new AbortController();
+    const run = (posthumous) => {
+      if (done) {
+        return;
+      }
+      done = true;
+      releaseCtrl.abort();
+      // Order-free against the GC fire: an unregister after the callback
+      // fired is a false return, before it cancels the fire.
+      this.#registry.unregister(token);
+      try {
+        release();
+      } catch (err) {
+        error("gc-cleaner", `${label}: release threw during teardown`, err);
+      }
+      if (posthumous) {
+        warn("gc-cleaner", `${label}: release ran posthumously - a holder dropped its record without teardown`);
+      }
+    };
+    token.collect = () => run(true);
+    signal?.addEventListener("abort", () => run(false), {
+      once: true,
+      signal: releaseCtrl.signal
+    });
+    this.#registry.register(watched, token, token);
+    const handle = () => run(false);
+    handle[Symbol.dispose] = handle;
+    return handle;
+  }
+}
+
+export const gcCleaner = new GcCleaner();
+
 /* - 4. Debug runtime - */
 const PREFIX = "[PlayerForge]";
 
