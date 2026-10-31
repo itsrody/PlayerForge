@@ -730,7 +730,12 @@ export class ResumeTracker {
     // freeze before throttling can eat a write; the rVFC per-frame crank
     // retired with user direction - a presented-frame callback (~15x the
     // event cost of timeupdate) bought sub-frame flush precision the 10s
-    // checkpoint span never consumed.
+    // checkpoint span never consumed. NOT a script clock and stays on this
+    // cadence under the clocks direction: timeupdate is the element's own
+    // broadcast - the standard "media time advanced" event - so the
+    // checkpoint cadence is already event-driven for free; rVFC-
+    // checkpointing would add per-frame callback load keyed to the subtitle
+    // crank's handle for zero cadence gain.
     video.addEventListener("timeupdate", () => {
       if (this.#scope.disposed) {
         return;

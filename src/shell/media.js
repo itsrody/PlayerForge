@@ -347,8 +347,9 @@ class MediaSessionBridge {
         }
       }
     });
-    // Metadata first so sync()'s staleness check (title/poster fingerprint)
-    // finds a fresh key instead of re-refreshing on this very first call.
+    // Metadata first so the OS surface paints at claim time, before the
+    // first sync() passes; the dynamic witnesses below own every later
+    // metadata write.
     this.#refreshMetadata();
     // Initial state (playbackState + position) lands through sync(), which
     // also seeds the dedup cache - writing playbackState here would only
@@ -356,6 +357,34 @@ class MediaSessionBridge {
     this.sync();
     // Posters often arrive with metadata; refresh once it exists.
     this.#video.addEventListener("loadedmetadata", () => this.#refreshMetadata(), { signal });
+    // The dynamic metadata witnesses, not the media clock (the clocks
+    // direction): now-playing surfaces mutate document.title and
+    // video.poster with no metadata-load event, and the OS is the consumer
+    // whose rendered metadata should update when the page changes it,
+    // not at the next playback tick. No event surface exists for either
+    // (no standard titlechange on any engine; poster is attribute-only),
+    // so each input carries its own MutationObserver - two per claim,
+    // released with it through the claim's signal.
+    const armObserver = (observer) => {
+      signal.addEventListener("abort", () => observer.disconnect(), { once: true });
+    };
+    // The fingerprint compare first: a write is an OS-surface IPC, and only
+    // a real change paying for one is the deal the dedup key ever struck.
+    const checkMetadata = () => {
+      if (this.#metadataKey !== metadataKeyOf(this.#video)) {
+        this.#refreshMetadata();
+      }
+    };
+    const titleObs = new MutationObserver(checkMetadata);
+    titleObs.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      characterData: true
+    });
+    armObserver(titleObs);
+    const posterObs = new MutationObserver(checkMetadata);
+    posterObs.observe(this.#video, { attributeFilter: ["poster"] });
+    armObserver(posterObs);
     signal.addEventListener("abort", () => this.destroy(), { once: true });
     logger.log("media", "MediaSession claimed - handlers registered");
   }
@@ -377,8 +406,9 @@ class MediaSessionBridge {
   #sentPlaybackRate = NaN;
   /** Fingerprint of the metadata inputs (title + poster) at last refresh.
    *  Now-playing surfaces mutate document.title and video.poster without
-   *  any metadata-load event; sync() rides the media clock, so a cheap string
-   *  compare there re-arms OS surfaces the moment either changes. */
+   *  any metadata-load event; the title and poster MutationObservers (the
+   *  dynamic witnesses) carry their own fingerprint compare, so a write is
+   *  an OS-surface IPC only on a real change. */
   #metadataKey = "";
   /** Position dedup quantum in seconds. timeupdate ticks at ~250 ms, so a
    *  finer quantum passed every tick (0.25 is not < 0.25) and pushed the
@@ -386,19 +416,18 @@ class MediaSessionBridge {
    *  dedups the whole tick stream to ~1 IPC/s - no OS progress UI renders
    *  finer - while duration/rate flips and pause still write immediately
    *  (their own guards bypass the quantum), and a seek catches up within a
-   *  second of continuous playback. */
+   *  second of continuous playback. The fully-dynamic alternative - write
+   *  only on state change and let the OS rate-interpolate the position -
+   *  loses the drift correction this rewrite IS: buffer stalls and engine
+   *  rounding accumulate into visible OS progress drift the 1s re-derive
+   *  bounds, so it stays. A state change (pause/rate/seek/duration) bypasses
+   *  the quantum immediately, so the event-driven write is already first. */
   static #POSITION_EPSILON = 1;
 
   /** playbackState plus guarded position state; safe to call per event batch. */
   sync() {
     if (this.#disposed) {
       return;
-    }
-    // Now-playing surfaces mutate document.title and video.poster without
-    // any metadata-load event; the ~4 Hz media clock already runs through
-    // sync(), so a cheap string compare re-arms OS surfaces on either change.
-    if (this.#metadataKey !== metadataKeyOf(this.#video)) {
-      this.#refreshMetadata();
     }
     const session = this.#session;
     const playbackState = this.#video.paused ? "paused" : "playing";

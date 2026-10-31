@@ -386,8 +386,12 @@ iframes, same-origin and cross-origin:
   (ForgeTrack renderer 8 concurrent cue slots, cue scheduling is OURS — no
   native TextTrack anywhere on the path: the file never enters the video's
   track list, so a host can never list/restyle/mode-flip our captions;
-  per-frame `currentTime` sampling on the media clock with the compositor's
-  rAF as the crank, a sorted-start walk with an amortized dead floor, the
+  the presented-frame rVFC crank (re-adopted by the clocks direction —
+  samples the callback's `mediaTime`, the painted frame's own timeline
+  position, so the active set is answered by what the eye sees; a paused
+  seek carries its own `seeked` rider, and the cross-source gap rides the
+  presentation-lag epsilon), a sorted-start walk with an amortized dead
+  floor, the
   W3C relation `start <= t < end`; slot entry/exit rides the hidden flip in
   the HUD sheet itself — `@starting-style` +
   `display allow-discrete` over `&[hidden]`, transitioning ONLY the motion

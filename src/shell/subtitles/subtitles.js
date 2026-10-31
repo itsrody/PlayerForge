@@ -280,6 +280,16 @@ export function parseSubtitlesAsync(text, offset = 0, throughWorker = false) {
 /* Tuning rides the shared TUNING table (forge-style aliases); the local
  * literals it replaced lived only beside their renderer. */
 const STACK_OVERLAP_EM = TUNING.subtitles.cueStackOverlapEm;
+/**
+ * Presentation lag the two timeline sources may report apart: the rVFC
+ * crank samples the presented frame's mediaTime (picture timeline), while
+ * the event riders (seeked, resize, load) sample currentTime (the playback
+ * position model). At steady state the two sit within one frame duration;
+ * stalls may stretch the gap. Below this floor a "backward" sample is
+ * cross-source jitter, not a rewind - resetting the dead floor for it
+ * would re-open a walk the next presented frame re-answers anyway.
+ */
+const PRESENT_LAG_EPSILON = 0.25;
 const MAX_SLOTS = TUNING.subtitles.cueSlots;
 
 /** Px writer for picture-anchored values: one decimal, no float exhaust. */
@@ -367,15 +377,18 @@ function shiftTime(time, offset) {
  * kill ours). The floor makes the law cheap to keep honestly: even the
  * native realtime cue-observer shape is incomplete here (`oncuechange` is
  * absent from TextTrack.prototype on the 159 floor, probed), and the
- * check's custody row pins the empty track list beside a visible slot. Parsing is forgevtt (below); a TrackListRenderer owns
- * scheduling after that: per-frame `currentTime` sample on the video
- * element's own media clock - the compositor's rAF is the crank, sampled
- * like the forge's scrub commits, never a poll timer - and the active set
- * derives from a sorted-start walk with an amortized dead floor (ends are
- * not sorted, so the floor only advances while head-adjacent entries are
- * dead; a backward seek resets it, one-off O(n)). The active set is the W3C
- * relation, start <= t < end; the visual output (pooled slots, custom
- * properties, per-cue stacking) is unchanged.
+ * check's custody row pins the empty track list beside a visible slot. Parsing is forgevtt (below); a
+ * TrackListRenderer owns scheduling after that: the presented-frame crank
+ * (requestVideoFrameCallback, floor-real 132 <= 159) samples the callback's
+ * mediaTime - the timeline position of the frame that just painted, so the
+ * active set is answered by the frame the eye can see; no callback fires
+ * without a presentation, so an idle video costs zero, and a paused seek
+ * carries its own event rider. The walk derives the active set from a
+ * sorted-start list with an amortized dead floor (ends are not sorted, so
+ * the floor only advances while head-adjacent entries are dead; a backward
+ * seek resets it, one-off O(n)). The active set is the W3C relation,
+ * start <= t < end; the visual output (pooled slots, custom properties,
+ * per-cue stacking) is unchanged.
  *
  * Cue positions are PICTURE-anchored, not layer-relative: the Universal
  * rect is the shell's one fill-box identity (ReferenceBox, see dom.js - the
@@ -434,8 +447,10 @@ export class ForgeTrack {
    *  place per sample, read immediately by the slot diff - no per-frame
    *  allocation on the hot path. */
   #activePool = [];
-  /** Pending rAF frame handle; 0 disarmed. The crank stops with the element:
-   *  a paused/static video stops painting, so the sampler idles with it. */
+  /** Pending rVFC frame handle; 0 disarmed. The crank stops with the
+   *  element: a paused/static video stops presenting frames, so the sampler
+   *  receives no callbacks and idles with it - re-arming per callback is
+   *  free while no frame presents. */
   #rafId = 0;
   /** Global placement overrides from the panel's V/H steppers (0-100), or
    *  null to keep each cue's own line/position (default until the user moves
@@ -449,7 +464,8 @@ export class ForgeTrack {
   #picture = null;
   #pictureSeq = 0;
   /** The crank handle shape bound at construction so destroy cancels one
-   *  pending frame deterministically. */
+   *  pending frame deterministically. The callback receives the presented
+   *  frame's metadata: mediaTime IS the timeline the cue relation means. */
   #onFrame = null;
   /** Whether the player is currently on screen. Defaults true so the time
    *  before the first observation lands renders unconditionally; the
@@ -507,9 +523,17 @@ export class ForgeTrack {
     this.#scope.onDispose(() => videoRo.disconnect());
     video.addEventListener("resize", () => this.#schedule(), { signal: this.#scope.signal, passive: true });
     video.addEventListener("loadedmetadata", () => this.#schedule(), { signal: this.#scope.signal });
+    // The paused-seek cliff: whether a paused engine re-presents on seek is
+    // unowned platform behavior - the presented-frame crank cannot promise
+    // the cue refresh there. This event rider closes it both ways: fires on
+    // every seek (the rider walk re-bases the floor via #schedule's own
+    // backward reset at the new currentTime), while the playing cadence
+    // stays the presented frames' alone.
+    video.addEventListener("seeked", () => this.#schedule(), { signal: this.#scope.signal });
     // The crank: a stable bound field so the pending frame holds the
-    // instance and destroy cancels one id.
-    this.#onFrame = () => this.#tick();
+    // instance and destroy cancels one id. The callback's metadata carries
+    // mediaTime - the presented frame's position on the media timeline.
+    this.#onFrame = (metadata) => this.#tick(metadata);
   }
 
   /**
@@ -589,10 +613,13 @@ export class ForgeTrack {
       return;
     }
     const cues = this.#cues;
-    if (t < this.#lastTime) {
+    if (t < this.#lastTime - PRESENT_LAG_EPSILON) {
       // Backward time jump (a seek, a media re-adopt, a ratechange-driven
       // restore): the dead floor re-opens from the list head - one-off O(n),
-      // amortized to nothing on the forward cadence the plan rides.
+      // amortized to nothing on the forward cadence the plan rides. The
+      // epsilon floor keeps cross-source presentation jitter (mediaTime
+      // vs currentTime differing by one frame after an event rider) from
+      // re-opening a walk the next presented frame answers.
       this.#floor = 0;
     }
     this.#lastTime = t;
@@ -623,21 +650,31 @@ export class ForgeTrack {
   }
 
   #armLoop() {
-    if (!this.#rafId && !this.#scope.disposed && this.#cues?.length) {
-      this.#rafId = requestAnimationFrame(this.#onFrame);
+    const video = this.#video;
+    if (!this.#rafId && video && !this.#scope.disposed && this.#cues?.length) {
+      // rVFC: the callback fires per PRESENTED frame (its metadata carries
+      // mediaTime), never without one - re-arming per callback keeps the
+      // chain alive through playback and goes silent under pause/stall for
+      // free. Floor-real on 159 (132 <= 159), so there is no rAF arm.
+      this.#rafId = video.requestVideoFrameCallback(this.#onFrame);
     }
   }
 
-  #tick() {
+  /**
+   * One presented frame: the callback's metadata.mediaTime IS the timeline
+   * position of the frame the eye can see - closer to true than currentTime,
+   * which is the playback position model and may run ahead during a stall.
+   */
+  #tick(metadata) {
     this.#rafId = 0;
     if (this.#scope.disposed) {
       return;
     }
-    const t = this.#video?.currentTime ?? -1;
+    const t = metadata?.mediaTime ?? (this.#video?.currentTime ?? -1);
     if (t !== this.#lastTime) {
       // A sample that moved the clock re-runs the walk; a still sample (the
-      // video paused, the tab throttled) needs nothing - the last active
-      // set already paints it.
+      // same frame re-presented) needs nothing - the last active set
+      // already paints it.
       this.#schedule(t);
     }
     this.#armLoop();
@@ -863,9 +900,10 @@ export class ForgeTrack {
     this.#scope.dispose();
     // Cancel the pending frame FIRST: the crank must not re-arm against the
     // torn-down pool (dispose already blocks the tick body; the explicit
-    // cancel keeps nothing scheduled anywhere).
-    if (this.#rafId) {
-      cancelAnimationFrame(this.#rafId);
+    // cancel keeps nothing scheduled anywhere - the rVFC handle cancels
+    // against the element whose frame request issued it).
+    if (this.#rafId && this.#video) {
+      this.#video.cancelVideoFrameCallback(this.#rafId);
       this.#rafId = 0;
     }
     // DOMManager removes all cue slot elements.
