@@ -1,5 +1,5 @@
 import { logger, Scope, yield_, runSteps, runStepsAsync } from "../shared/runtime.js";
-import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen, DOMManager, ReferenceBox } from "../shared/dom.js";
+import { deepestActiveElement, isInsideShell, fs, DOMManager, ReferenceBox } from "../shared/dom.js";
 import { InputForge } from "./inputs/forge.js";
 import { attachInputActions, ViewershipTransform } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
@@ -9,7 +9,7 @@ import { SettingsPanel, addSettingsSection, addHistorySection } from "./chrome/p
 import { getSetting, SETTING_KEYS } from "./chrome/config.js";
 import { TUNING } from "../shared/core.js";
 import { ToastManager } from "./chrome/toast.js";
-import { claimMediaSession, createMediaControls, WakeLockSession, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
+import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
 import { SHELL_MARKER, warmStyles, injectShell, watchShellHost, ensureViewportFitCover } from "./chrome/inject.js";
 import { retryFullscreenProvision } from "../shared/page.js";
 
@@ -111,8 +111,6 @@ export class Shell {
   #media;
   /** OS media-key facet, null without MediaSession support. */
   #mediaSession = null;
-  /** Screen wake-lock companion; owns its acquire/release lifecycle. */
-  #wakeLock = null;
 
   constructor({ video, container, sdk, onDestroy }) {
     this.video = video;
@@ -195,10 +193,12 @@ export class Shell {
         });
       },
       () => this.#watchFullscreen(),
-      () => {
-        this.#wakeLock = new WakeLockSession(this.video);
-      },
-      () => this.#watchOrientation(),
+      // No wake-lock or orientation-lock companion here: user direction -
+      // Firefox already keeps its screen awake during media playback and
+      // rotates/keeps fullscreen video by its own devices (desktop never
+      // rotates; Android Firefox handles fullscreen orientation natively),
+      // so the companion machines paid their listeners for behavior the
+      // platform owns.
       () => this.#watchVisualViewport(),
       // The runSteps tail: once every watcher is armed, the videos are
       // officially ours - stamp video and container as managed.
@@ -483,27 +483,6 @@ export class Shell {
     });
   }
 
-  /** Lock to landscape on fullscreen entry (Android); unlock on exit. */
-  #watchOrientation() {
-    // No disposed re-check at entry: the subscription takes this.#scope's
-    // signal, so the gate drops the callback at the same abort that kills
-    // everything else; entry-only checks here would duplicate that fire.
-    const unsub = subscribeFullscreen(async (active) => {
-      try {
-        // Lock only a portrait display: an already-landscape device gets a
-        // pointless lock churn (and a failed framing on tablets that reject
-        // the request). type is absent on older impls - keep the legacy lock.
-        const type = screen.orientation?.type;
-        if (active && screen.orientation?.lock && (!type || type.includes("portrait"))) {
-          await screen.orientation.lock("landscape");
-        } else if (!active && screen.orientation?.unlock) {
-          screen.orientation.unlock();
-        }
-      } catch {}
-    }, this.#scope.signal);
-    this.#dom.onCleanup(unsub);
-  }
-
   exitFullscreen() {
     if (fs) {
       document.exitFullscreen()?.catch(() => {});
@@ -574,10 +553,6 @@ export class Shell {
           section.destroy();
         }
         this.#panelSections = [];
-      },
-      () => {
-        this.#wakeLock?.destroy();
-        this.#wakeLock = null;
       },
       () => {
         this.#inputs?.destroy();

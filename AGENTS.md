@@ -215,9 +215,12 @@ iframes, same-origin and cross-origin:
   HUD wiring → media session → sections → markers), stamps managed markers,
   owns destroy and re-anchor paths.
 - **media.js** — `MediaControls` (play/pause/seek/scrub-latch/volume/rate/
-  boost/PiP/stop), `MediaSessionOwner` claim/lifecycle, `WakeLockSession`
-  (screen wake-lock companion: acquire on play/visibility/boot, release on
-  pause/ended/destroy, browser-owned via an abort signal).
+  boost/PiP/stop), `MediaSessionOwner` claim/lifecycle. The wake-lock and
+  fullscreen orientation-lock companions retired by user direction:
+  Firefox already keeps its screen awake during media playback and handles
+  fullscreen orientation on its own (the ReferenceBox orientation-change
+  listener in dom.js stays - it is the fill-rect's geometry feed, not the
+  lock).
 - **resume.js** — the resume tracker: store warm → context resolve → entry
   match/create → restore → progress drive. Save cadence = 10s checkpoint
   span; flushes on `seeked`, on pause, on visibility loss, on freeze;
@@ -413,8 +416,8 @@ having genuine matching semantics elsewhere. What stayed vs died:
   `requestPictureInPicture` 70, `setPositionState`'s optional-chain field 73
   — "jsdom elements honestly lack them / some host surfaces" died with the
   jsdom host), leaving the guard family to genuine refusals: PiP's
-  `pictureInPictureEnabled` policy flag, wake-lock's secure-context gate,
-  the GM grant read, `workerCapable()`, and null/parameter-shape guards
+  `pictureInPictureEnabled` policy flag, the GM grant read,
+  `workerCapable()`, and null/parameter-shape guards
   like the stream router's non-element eventTarget check.
 
 **Native allocation & subscription hygiene.** The 129-listener census
