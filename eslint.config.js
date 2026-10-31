@@ -34,7 +34,6 @@ export default [
         setInterval: "readonly",
         clearInterval: "readonly",
         queueMicrotask: "readonly",
-        reportError: "readonly",
         structuredClone: "readonly",
         crypto: "readonly",
         URL: "readonly",

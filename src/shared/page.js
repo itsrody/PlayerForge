@@ -1263,7 +1263,7 @@ export function installContextBridge() {
       // rows read the same events), and sibling routes inside the dispatch
       // stay isolated. The queueMicrotask rethrow shape this replaces was
       // the same report one lap later.
-      reportError(err);
+      globalThis.reportError(err);
     }
   }, { signal: ac.signal });
 
