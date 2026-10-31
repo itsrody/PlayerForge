@@ -728,7 +728,7 @@ export class InputForge {
     // fractions of the SAME fill box every other geometry consumer reads -
     // the old screen.width lattice here was a second screen identity that
     // missed the letterboxed-embed shape (clientX domain is the frame
-    // viewport, not the device) and headless screen.width 0.
+    // viewport, not the device).
     this.#boxFor = boxFor;
     // The recognizer set: borrowed closures over this engine's live gesture
     // boundaries (video element for transform/toggle truth, dispatch for the
@@ -962,23 +962,21 @@ export class InputForge {
     // Edge zones only steer fullscreen gestures (dbltap edge-skip, swipe-down
     // exit - both fs-gated), so while the fs gate is open the reference is the
     // SAME fill box every geometry consumer reads (shell.referenceBox) - whose
-    // fs answer is the fs element's own rect: the frame viewport the clientX
-    // domain lives in, device-wide (where viewport-fit=cover merged on the
-    // active frame, expansion behind the cutout is the Android-Chromium shape;
-    // Android Firefox measures no safe area at all, so there the rect is the
-    // plain screen - AGENTS.md). Inline the player occupies only the
-    // viewport: a fs-element-relative verdict could name edges the player
-    // does not have, so the reference becomes the surface-invariant viewport
-    // width. Every behavioral zone consumer is fs-gated (the inline zone is
-    // telemetry only - hold/release details and the press breadcrumbs), which
-    // is exactly why fs closing may degrade the reference instead of
-    // breaking a gesture. Both widths are real-world reads: the fs box is
-    // the fs element's own rect, the inline reference layoutViewport()'s
-    // root-element box - the laid-out clientX domain presses land in, while
-    // the reported innerWidth adds Chromium's scrollbar-inclusive gutter
-    // past which no zone-addressable press can land. The window arm answers
-    // the headless fact (shell-less early presses) not missing-global
-    // paranoia.
+    // fs answer is the ACTIVE document's own viewport (the one gesture space
+    // the clientX domain lives in: the top viewport equals the screen under
+    // any fullscreen kind, a frame's viewport is its own gesture space
+    // whether filled edge-to-edge by the SDK's frame fullscreen or
+    // letterboxed under a fullscreen window). Inline the player occupies only
+    // the viewport: a fullscreen-vs-player confusion could name edges the
+    // player does not have, so the reference becomes the surface-invariant
+    // viewport width. Every behavioral zone consumer is fs-gated (the inline
+    // zone is telemetry only - hold/release details and the press
+    // breadcrumbs), which is exactly why fs closing may degrade the reference
+    // instead of breaking a gesture. Both widths are real-world reads: the fs
+    // box and the inline reference ride layoutViewport()'s root-element box -
+    // the laid-out clientX domain presses land in - and the reported
+    // innerWidth fallback covers the headless fact (shell-less early
+    // presses), not missing-global paranoia.
     const screenW = fs
       ? (this.#boxFor?.()?.width ?? 0) || layoutViewport().width
       : layoutViewport().width;
@@ -1232,8 +1230,8 @@ export class InputForge {
       // a zoneless press. The fs tail is the drag-gesture discriminator: the
       // fullscreen-only intents all sit behind the gate, so a fullscreen
       // press whose breadcrumb still says fs=off names the
-      // fullscreen-without-fullscreenElement family (CSS full-window) in
-      // one line.
+      // fullscreen-without-a-witness family (a fullscreen kind the gate
+      // missed) in one line.
       logger.log("forge", `press owned: ${event.pointerType}, zone=${this.#zoneForPoint(event)}, fs=${fs ? "on" : "off"}`);
     }
 

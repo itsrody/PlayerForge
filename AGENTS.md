@@ -140,15 +140,19 @@ iframes, same-origin and cross-origin:
   MutationObserver every consumer rides — element pooling, the shell ledger,
   shadow traversal, the fullscreen gate, the iframe registry), `PoolElement`
   machinery, `ReferenceBox` — the ONE fill-box identity (inline →
-  container, fs → Firefox's OWN screen reading, `screen.width/height`,
-  read directly — the viewport IS the screen when this document presents
-  a fullscreenElement; the window box stays the fallback for the
-  fs-with-no-element shapes: the F11/document kind and a frame under a
-  fullscreened ancestor, where the gesture space is the frame viewport,
-  not the device screen; the former fs-element GBCR pass and RO
-  re-target retired by user direction — Firefox owns the fullscreen
-  geometry, and the screen dims are stable across the entry, killing
-  the transition race and the post-flip re-read chase);
+  container, fs → the ACTIVE document's own viewport via
+  `layoutViewport()`, whenever the native document-fullscreen witness
+  (fs) is armed in it — the active context is a document in both
+  topologies, the video directly embedded inside the [Top] document
+  and an iframed video inside its [frame] document, and each
+  document's viewport is the one gesture space its coordinates live
+  in (the top viewport equals the screen under any fullscreen kind;
+  a frame's viewport is its own gesture space whether filled by the
+  SDK's frame fullscreen or letterboxed under a fullscreen window);
+  the fullscreenElement presence test, the screen.width reading it
+  armed, and the window-box fallback distinction retired — asking
+  "who fullscreened" carried weights the gesture geometry never
+  read);
   pools per invalidation so the hot path stays layout-free; carries the
   full rect — `x/y` origin at the same reveal-on-invalidation instant, the
   consumer class that anchors against it rather than merely sizing needs
@@ -162,7 +166,7 @@ iframes, same-origin and cross-origin:
   subscriber) — and
   `layoutViewport()`: the ONE real-world viewport read (the root element's
   laid-out box first, reported innerWidth/innerHeight as fallback; kernel
-  presence, the fs window fallback, and the inline gesture-zone width all
+  presence, the fullscreen reading, and the inline gesture-zone width all
   consume it). Real-reading candidates audited against the floor and
   declined: `devicePixelContentBoxSize` (delivers live on the floor, probed
   via the boxes option — device-pixel units no CSS-px consumer can
@@ -170,7 +174,23 @@ iframes, same-origin and cross-origin:
   anchor positioning (a positioning surface; its styles.css verdict), vv
   (the §4 witness-absence verdict; the sheet's mirror, not this class).
   Headless so far: reports a real synthetic screen (1366×768 probed — the
-  old screen-width-0 note died).
+  old screen-width-0 note died). The `fs` gate (FsGate) keeps ONLY the
+  native fullscreen API's own surfaces, by user direction: truth is
+  `document.fullscreenElement` (per document — the video's own top/frame
+  document) read per update from `fullscreenchange` and the lifecycle
+  pageshow re-seed, and both fullscreen media queries retired with the
+  probe record from this batch's run: the old `(fullscreen)` query never
+  evaluates on Firefox under ANY kind (probed element/document/frame/exit,
+  headed + headless; the "Chromium evaluates both" note was Chromium-side
+  on a Firefox-only floor), and `(display-mode: fullscreen)` — probed
+  Firefox's universal fullscreen witness (both kinds, a fullscreened frame
+  and its parent, false on exit, the letterboxed frame under a fullscreened
+  window too, where the frame viewport stays the gesture space) — is a
+  display-mode surface, not the API, so it left with the rest; window
+  fullscreen (F11) presents no fullscreenElement and fires no
+  fullscreenchange, so the gate goes dark there by construction (the same
+  reading real Firefox shipped before the probe run; the gate's own
+  breadcrumb names the blind kind).
 - **page.js** — site identity (`getDomainKey`, `domainsMatch`, `domainScore`,
   `hashEntry`, title sanitizer), page context, the frame bridge (`pf:` prefix,
   `ContextPipe` class owning pipe/legacy/in-flight state, context responders,

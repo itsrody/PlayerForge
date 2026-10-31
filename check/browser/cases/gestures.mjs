@@ -169,29 +169,23 @@ export async function run({ session, baseUrl, boot }) {
   }), `events=${JSON.stringify(await session.eval(function main() {
     return window.__pfEvents;
   }))}`);
-  // Document fullscreen, the repair row: the UA window's own fullscreen mode
-  // (F11 / the browser fullscreen button) never fires fullscreenchange and
-  // never sets fullscreenElement - the field shape the trace pinned (fs=off
-  // + no "fullscreen on" while the player visibly filled the screen). Its
-  // native witness is the (fullscreen) media query, so the stub simulates
-  // the state the gate cannot enter headless - the UA window's own
-  // fullscreen mode is not a driver-openable surface - and one resize (the UA window's observed flip event)
-  // recomputes the gate. The real-driver horizontal drag then scrubs
-  // fs-style, proving the armed end-to-end path; cleanup restores the live
-  // media query and re-seats the gate to the real truth.
+  // Element fullscreen, the synthetic-API-datum arc: the real driver
+  // fullscreen course needs a user-activated requestFullscreen (probed
+  // available to a Marionette click) but the entry resizes the window out
+  // from under the rows' viewport coordinate frame, so the arc mounts the
+  // Fullscreen API's own datum - document.fullscreenElement, the exact
+  // property the gate's truth reads (FsGate.#truth) - and a synthetic
+  // fullscreenchange fires the same update event a real entry would. The
+  // real-driver horizontal drag then scrubs fs-style, proving the armed
+  // end-to-end path; the dismount below re-seats the gate to the real
+  // truth before the inline rows.
   await session.eval(function main() {
     window.__pfEvents = [];
-    window.__pfMatchMedia = window.matchMedia;
-    const stub = {
-      matches: true,
-      addEventListener() {},
-      addListener() {},
-      removeEventListener() {},
-      removeListener() {},
-      dispatchEvent() { return false; }
-    };
-    window.matchMedia = () => stub;
-    window.dispatchEvent(new Event("resize"));
+    Object.defineProperty(document, "fullscreenElement", {
+      configurable: true,
+      get() { return document.querySelector(".pf-shell"); }
+    });
+    document.dispatchEvent(new Event("fullscreenchange"));
     const v = document.querySelector("#check-video");
     v.pause();
     v.currentTime = 2;
@@ -206,9 +200,9 @@ export async function run({ session, baseUrl, boot }) {
     .release()
     .perform();
   await new Promise((r) => setTimeout(r, 400));
-  status(rows, "document fullscreen arms fs with no fullscreenElement: drag scrubs", await session.eval(function main() {
+  status(rows, "fs-armed drag scrubs against the synthetic fullscreenElement", await session.eval(function main() {
     const t = document.querySelector("#check-video").currentTime;
-    return document.fullscreenElement === null &&
+    return !!document.fullscreenElement &&
       window.__pfEvents.includes("scrub") && t > 2;
   }), `fullEl=${JSON.stringify(await session.eval(function main() {
     return { el: !!document.fullscreenElement, events: window.__pfEvents, t: document.querySelector("#check-video").currentTime };
@@ -237,8 +231,11 @@ export async function run({ session, baseUrl, boot }) {
     return window.__pfDbclicks;
   }))}`);
   await session.eval(function main() {
-    window.matchMedia = window.__pfMatchMedia;
-    window.dispatchEvent(new Event("resize"));
+    // Dismount the synthetic datum: deleting the own property restores the
+    // prototype getter (real fullscreenElement), and the extra
+    // fullscreenchange re-seats the gate at the real truth (fs closed).
+    delete document.fullscreenElement;
+    document.dispatchEvent(new Event("fullscreenchange"));
     window.__pfEvents = [];
     const v = document.querySelector("#check-video");
     v.pause();
@@ -360,12 +357,12 @@ export async function run({ session, baseUrl, boot }) {
     return window.__pfEvents.includes("pip");
   }), "no pf:gesture-pip");
 
-  // Scrub/swipe/pinch are fs:true-binding intents (actions.js): the kernel's
-  // fs gate reads `doc.fullscreenElement`, and driver automation cannot run
-  // the user-activation fullscreen course real element fullscreen requires.
-  // The override below
-  // points the same gate at the shell host; a synthetic fullscreenchange
-  // then flips the kernel's fs latch the way a real fullscreen would.
+  // Scrub/swipe/pinch are fs:true-binding intents (actions.js): the mount
+  // re-arms the Fullscreen API's own datum (the fixture stays a boring page
+  // under a boring window - element fullscreen would resize the driver
+  // window out from under the rows' coordinate frame), and the synthetic
+  // fullscreenchange flips the kernel's fs latch the way a real fullscreen
+  // would. The stub persists through the fs territory below.
   await session.eval(function main() {
     Object.defineProperty(document, "fullscreenElement", {
       configurable: true,
@@ -534,9 +531,9 @@ export async function run({ session, baseUrl, boot }) {
   // TUNING) - knee-saturated gain over the fs reference width, sensitivity
   // anchor linear outside the curve, the scrubTo clamp - against the live
   // duration and reference width. The width mirror is the same one truth the
-  // engine's shared ReferenceBox reads (shared/dom.js): Firefox's own screen
-  // reading when a fullscreen element exists (the fullscreenElement override
-  // above presents one), the window box when fs presents none. A
+  // engine's shared ReferenceBox reads (shared/dom.js): the active document's
+  // own viewport whenever the native document-fullscreen witness (fs) is
+  // armed in it, the container rule is the engine's inline arm. A
   // tuning retune re-arms the row's own expectation; only a real regression
   // in the accrue->rAF->commit pipeline (or a geometry identity drift the
   // replay does not share) parts the settled time from it.
@@ -566,12 +563,11 @@ export async function run({ session, baseUrl, boot }) {
   const paceEnd = await session.eval(function main(curve) {
     const video = document.querySelector("#check-video");
     // The width mirror is the engine's own fs rule (shared/dom.js
-    // ReferenceBox): Firefox's screen reading when a fullscreen element
-    // exists (the synthetic override here presents one), the window box
-    // when fs presents none (the F11/document-fs shape).
-    const width = document.fullscreenElement
-      ? (screen.width || window.innerWidth)
-      : window.innerWidth;
+    // ReferenceBox): under the native document-fullscreen witness (fs,
+    // armed here by the synthetic flip) the engine reads the ACTIVE
+    // document's own viewport, root box first with the reported dims as
+    // the fallback - exactly the layoutViewport order the row mirrors.
+    const width = document.documentElement.clientWidth || window.innerWidth;
     const duration = video.duration;
     const ratio = curve.stroke.velocity / curve.knee;
     const t = Math.min(1, ratio ** curve.exp);

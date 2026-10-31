@@ -574,13 +574,14 @@ export function isInsideShell(host, node) {
  * this one boolean - nothing else touches fullscreen directly.
  *
  * The shell lives inside the SDK's frame, so an SDK fullscreen IS a document
- * fullscreen: latching `!!document.fullscreenElement` at the transition is the
- * single source of truth, regardless of which actor entered it. Module-level
+ * fullscreen: the Fullscreen API's own state - document.fullscreenElement,
+ * read per update - is the single source of truth, regardless of which
+ * actor entered it (both media queries are retired; see #truth). Module-level
  * so it represents document-wide truth and survives shell create/destroy.
  *
- * Per-frame semantics are a feature, not a gap: the Fullscreen spec gives every
- * document in a nested chain its OWN fullscreenElement, and the gate binds the
- * frame that contains the video - where the HUD and fs-gated gestures live - so
+ * Per-frame semantics are a feature, not a gap: fullscreen truth resolves
+ * per document, and the gate binds the frame that contains the video - where
+ * the HUD and fs-gated gestures live - so
  * an ancestor document entering fullscreen incorrectly claims this frame's
  * state. Negative space: no vendor-prefixed fullscreen API anywhere (the
  * honest floor on every engine), no fullscreenerror listener in this gate (an
@@ -610,10 +611,11 @@ class FsGate {
     // writes it so every `import { fs }` reader observes the flip.
     fs = next;
     // The flip breadcrumb: every drag-gesture intent sits behind this gate,
-    // so a document fullscreen (the UA window's own F11/fullscreen mode,
-    // below) that played a video edge-to-edge while the gate stuck "off"
-    // read exactly as this field trace - the flip row is the field's
-    // one-line discriminator, no probe needed.
+    // so a fullscreen whose breadcrumb still says "off" while the video
+    // plays edge-to-edge names the fullscreen kind the gate cannot see (the
+    // F11/fullscreen-button window mode presents no fullscreenElement and
+    // fires no fullscreenchange - the API's state never flips) - the flip
+    // row is the field's one-line discriminator, no probe needed.
     logger.log("lifecycle", `fullscreen ${next ? "on" : "off"}`);
     this.#audience.emit(next);
   }
@@ -623,21 +625,29 @@ class FsGate {
   }
 
   /**
-   * The gate's one truth: ELEMENT fullscreen (fullscreenElement - the native
-   * fullscreenchange state) plus DOCUMENT fullscreen. Document fullscreen is
-   * the UA window's own fullscreen mode (F11 / the browser fullscreen
-   * button): it never fires fullscreenchange, never sets fullscreenElement,
-   * and plays the page edge-to-edge on real sites - a direct-embedded video
-   * covers the whole screen while the gate alone reads "off". Its native
-   * witness is the (fullscreen) media query, which Chromium evaluates for
-   * both fullscreen kinds, so the element arm stays the correctness carrier
-   * while the query carries the document kind; read per update event, never
-   * per press. In a fullscreened cross-origin frame the same window is
-   * fullscreen while the frame document still has a null fullscreenElement,
-   * so this arm is the one that arms embed gestures there as well.
+   * The gate's one truth: the Fullscreen API's own state,
+   * `document.fullscreenElement` - read per update event, never per press.
+   * The event/state pair IS the native fullscreen API surface (the state
+   * resolves per document, fullscreenchange is its one transition event),
+   * and both media-query shapes are retired with it on user direction
+   * ("keep only the native fullscreen API, retire anything else"): the old
+   * `(fullscreen)` query Firefox never evaluates for ANY kind (probed false
+   * under both - the "Chromium evaluates both" note was Chromium side on a
+   * Firefox-only floor), and the `(display-mode: fullscreen)` query this
+   * gate carried one probe run - it IS Firefox's universal fullscreen
+   * witness (probed covering both kinds, a fullscreened frame and its
+   * parent, false on exit) but it reads the window's display mode, not the
+   * API's state, so with only-API direction it leaves with the rest.
+   * Document kind (the UA window's own F11/fullscreen-button mode) presents
+   * no fullscreenElement and fires no fullscreenchange, so the API's state
+   * simply does not see it - the gate goes dark there by construction, the
+   * same reading real Firefox shipped before this probe run (the element
+   * test was the old truth's only live arm). The update events that feed
+   * this truth are the API's own: fullscreenchange, plus the lifecycle
+   * pageshow re-seed.
    */
   #truth() {
-    return !!document.fullscreenElement || matchMedia("(fullscreen)").matches;
+    return !!document.fullscreenElement;
   }
 
   /**
@@ -657,25 +667,21 @@ class FsGate {
     }
     this.#doc = document;
     document.addEventListener("fullscreenchange", () => this.#update());
-    // Document fullscreen transitions through the fullscreenchange listener
-    // never surface: the UA window resizes in and out of its fullscreen mode,
-    // and that resize is the only native event carrying the flip. The same
-    // seat re-arms the gate after a missed element flip.
+    // The only seat beyond the API's own event is lifecycle: the bfcache
+    // hole the transition event cannot close. The latch
+    // is a plain boolean on a document object bfcache keeps alive with
+    // these listeners still attached, while the browser exits fullscreen on
+    // navigation and never stores a fullscreen document in the cache - so a
+    // persisted pagehide carrying fs=true is a stale future (restore will not
+    // fire fullscreenchange to correct it). Force-false on persisted pagehide;
+    // re-seed from the live document on every restore so the latch can only
+    // ever claim state the document actually holds. Non-persisted navigations
+    // reconfigure the whole frame anyway, and a real fullscreen exit lands
+    // its own fullscreenchange - both stay unplumbed here. pagehide/pageshow
+    // fire at the Window and do not traverse the DOM tree, so the pair binds
+    // the document's view, not the document.
     const view = document.defaultView;
     if (view) {
-      view.addEventListener("resize", () => this.#update(), { passive: true });
-      // Lifecycle re-arm, the one hole the transition event cannot close: the
-      // latch is a plain boolean on a document object bfcache keeps alive with
-      // these listeners still attached, while Chromium exits fullscreen on
-      // navigation and never stores a fullscreen document in the cache - so a
-      // persisted pagehide carrying fs=true is a stale future (restore will not
-      // fire fullscreenchange to correct it). Force-false on persisted pagehide;
-      // re-seed from the live document on every restore so the latch can only
-      // ever claim state the document actually holds. Non-persisted navigations
-      // reconfigure the whole frame anyway, and a real fullscreen exit lands
-      // its own fullscreenchange - both stay unplumbed here. pagehide/pageshow
-      // fire at the Window and do not traverse the DOM tree, so the pair binds
-      // the document's view, not the document.
       view.addEventListener("pagehide", (event) => {
         if (event.persisted && fs) {
           fs = false;
@@ -722,7 +728,7 @@ export function subscribeFullscreen(cb, signal) {
  * rect against the layout viewport, pre-shell - the fill-box identity
  * below cannot serve it, whose lifetime starts with the shell and whose
  * inline answer is the container's own box, narrower than the viewport),
- * the fs window fallback here, and the inline gesture-zone width.
+ * the fullscreen reading here, and the inline gesture-zone width.
  * Consumers read-and-discard synchronously; the fresh pair per call keeps
  * no pooled-object trap alive across call sites.
  */
@@ -737,28 +743,24 @@ export function layoutViewport() {
 /**
  * The ONE fill-box identity for every geometry consumer (scrub gain
  * normalize, cover scale, pan clamp, fs edge zones). Inline reads the
- * container; fullscreen reads Firefox's OWN screen directly -
- * screen.width/height - because when THIS document's fullscreenElement is
- * present, its viewport IS the screen edge-to-edge: the UA's :fullscreen
- * geometry plants the element at the screen bounds (any letterboxing lives
- * inside the element's content, the screen stays the gesture space clientX
- * lives in), and the screen dims are stable before, during, and after the
- * entry - no transition race, no post-flip style churn (the entry ratio
- * snap, device-zoom re-reads the retired element pass chased) can move
- * them. Origin (0,0): in fullscreen the window fills the screen, so
- * viewport-relative == screen-relative for the coordinates every consumer
- * couples. When fs is armed but THIS document presents no
- * fullscreenElement - the F11/document kind, or this frame inside a
- * fullscreened ancestor - the gesture space is the frame's own viewport,
- * NOT the device screen (a letterboxed iframe on a fullscreened window
- * reads its viewport box), so the window box stays that arm's reading; a
- * zero screen reading degrades there too - a runtime fact that keeps
- * consumers permissive, never stranding a player. Retired with the
- * change: the fs-element GBCR pass and the fs RO re-target - the
- * disconnect/observe dance and its detached-observers worry - by user
- * direction: Firefox owns the fullscreen geometry, read it from Firefox
- * directly. The pool keeps the scrub/pinch hot path allocation + layout
- * free: one read pair per invalidation.
+ * container; fullscreen reads the ACTIVE document's own viewport -
+ * layoutViewport() - whenever the native document-fullscreen witness (the
+ * gate's fs: the Fullscreen API's own state, fullscreenElement, updated by
+ * its fullscreenchange event) is armed in that document. The
+ * active context is a document in both
+ * topologies - the video directly embedded lives inside the top document,
+ * an iframed video lives inside its frame document - and each document's
+ * viewport is the one gesture space its clientX coordinates live in: the
+ * top viewport equals the screen under any fullscreen kind, and a frame's
+ * viewport is its own gesture space whether it fills the screen (the SDK's
+ * frame fullscreen expands the frame viewport edge-to-edge) or sits
+ * letterboxed inside a fullscreened window. Retired with the change: the
+ * fullscreenElement presence test and the screen reading it armed (its
+ * headline surface), plus the window-box "fallback" distinction - asking
+ * "who fullscreened" carried weights the gesture geometry never reads;
+ * the viewport question is the native one, answered by the gate.
+ * The pool keeps the scrub/pinch hot path allocation + layout free:
+ * one read pair per invalidation.
  *
  * The real-reading candidates audited against the 159 floor for adoption:
  * devicePixelContentBoxSize not only exists - it DELIVERS (probed: the RO
@@ -771,18 +773,19 @@ export function layoutViewport() {
  * positioning is a positioning surface, not a JS reading (its rejection
  * stands in styles.css). visualViewport's datum is out-of-layout occlusion
  * no element rect can carry (the gate verdict's witness-absence - the
- * sheet's mirror, not this class). Both fullscreen kinds are not
- * driver-openable in the harness (element: user-activation, probed TypeError
- * from the eval turn; document kind: the W3C Fullscreen Window command runs
- * headless but (fullscreen) stays false) - the synthetic-flip rows in
- * gestures.mjs pin those arms' logic instead.
+ * sheet's mirror, not this class). Real element fullscreen IS
+ * driver-openable (a Marionette click carries user activation - probed),
+ * but the synthetic-flip rows in gestures.mjs still pin those arms' logic:
+ * resizing the driver window under a running case costs the coordinate
+ * frame the rows are written against.
  *
  * The rect is complete (x/y origin added to the pooled dims) because its
  * one non-gesture consumer anchors against it, not merely sizes: the
  * subtitle renderer derives the displayed video picture within this rect
  * and lays its slots relative to it (see subtitles.js). Origin discipline:
- * the fullscreen arms settle at (0,0) (the viewport is the gesture space
- * there and fills the screen); the inline arm reads the container's rect
+ * the fullscreen arm settles at (0,0) (the document's
+ * own viewport is the gesture space in fullscreen); the
+ * inline arm reads the container's rect
  * origin beside its client dims -
  * clientWidth/Height stay the dims source because they are UNtransformed
  * layout numbers (a site-scaled container must keep its untransformed size
@@ -860,26 +863,25 @@ export class ReferenceBox {
       return this.#box;
     }
     if (fs) {
-      // Firefox's own screen reading when this document drives the
-      // fullscreen (fullscreenElement present here means the viewport is
-      // the screen edge-to-edge); no element - F11/document kind, or this
-      // frame under a fullscreened ancestor - keeps the frame viewport as
-      // the gesture space. The element-absent case cannot reuse a pooled
-      // non-zero width from the inline arm, so the dims are locals first:
-      // the window box is the deliberate fallback, zero-guarded.
-      let width = 0;
-      let height = 0;
-      if (document.fullscreenElement) {
-        width = screen.width;
-        height = screen.height;
-      }
-      if (width <= 0 || height <= 0) {
-        ({ width, height } = layoutViewport());
-      }
+      // The document-fullscreen reading: the active context is one document
+      // - top [directly embedded video] or frame [iframed video] - and the
+      // native document-fullscreen witness resolves in that same document
+      // (the gate's fs: the Fullscreen API's own state). What changed here is
+      // only the question: not "who
+      // fullscreened" (the fullscreenElement presence test and the screen
+      // reading it armed both retired), but "is this document's viewport
+      // the fullscreen surface" - and the viewport is the gesture space
+      // clientX lives in for BOTH topologies: the top viewport equals the
+      // screen under any fullscreen kind, and a frame's viewport is its
+      // own gesture space whether it fills the screen (the SDK's frame
+      // fullscreen expands the frame viewport) or sits letterboxed inside
+      // a fullscreened window. The ONE real-world viewport read stays the
+      // reader so the class keeps a single opinion on viewport geometry
+      // codebase-wide.
+      ({ width: this.#box.width, height: this.#box.height } =
+        layoutViewport());
       this.#box.x = 0;
       this.#box.y = 0;
-      this.#box.width = width;
-      this.#box.height = height;
     } else {
       this.#box.width = this.#container.clientWidth;
       this.#box.height = this.#container.clientHeight;
