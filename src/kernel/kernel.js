@@ -88,7 +88,11 @@ function whenDomSettled(container, options) {
  * destroyAll(): that is a page-teardown sweep, not a live page losing a player.
  *
  * Formerly registry.js; kept as a class (not collapsed into Kernel privates)
- * because its displacement/onEmpty contract is pinned by dedicated unit tests.
+ * because its displacement/onEmpty contract is a story of its own. The
+ * multi-shell `getAll()` array face retired with the one-main-video scope law:
+ * the kernel's adoption guard leaves at most one live shell, so callers read
+ * `current` directly, and the exact-census pins live in the browser rows
+ * (re-anchor, re-wrap, moveBefore reorder count `=== 1`).
  */
 class ShellSlot {
   #current = null;
@@ -101,6 +105,11 @@ class ShellSlot {
   /** The one-main-video adoption guard's read: is any shell live here. */
   get occupied() {
     return this.#current !== null;
+  }
+
+  /** The one live shell, or null - the scope law's ceiling is one. */
+  get current() {
+    return this.#current;
   }
 
   /**
@@ -133,10 +142,6 @@ class ShellSlot {
 
   getByVideo(video) {
     return this.#current?.video === video ? this.#current : null;
-  }
-
-  getAll() {
-    return this.#current ? [this.#current] : [];
   }
 
   destroyAll() {
@@ -329,7 +334,13 @@ export class Kernel {
   /** The one live shell (one-shell-per-session; see ShellSlot). */
   #registry = new ShellSlot(() => this.#onRegistryEmpty());
   /** Videos with a settle wait in flight - dedups repeated discovery. */
-  #pending = new Set();
+  /** The video whose boot is mid-settle, registry entry not yet placed - the
+   *  one-main scope's other occupancy fact. Single by the same guarantee the
+   *  adoption guard enforces (nothing else can pass the guard while set, so
+   *  the multi-shell Set this replaced is now generality); the `finally`
+   *  clear is the price of narrowing: a stranded earlier Set entry outlived
+   *  the storm, a stranded slot would refuse every later candidate forever. */
+  #booting = null;
   /** Abort source for in-flight settle waits; aborted at pagehide. */
   #settleScope = new AbortController();
   /** Shell-ready fan-out audience (one event per registration). */
@@ -365,7 +376,7 @@ export class Kernel {
       return;
     }
     logger.log("kernel", "Restored from bfcache - reconciling");
-    this.#reconcileOrphans();
+    this.#reconcileOrphan();
   };
 
   /**
@@ -378,16 +389,19 @@ export class Kernel {
       return;
     }
     logger.log("kernel", "Page resumed - reconciling");
-    this.#reconcileOrphans();
+    this.#reconcileOrphan();
   };
 
-  #reconcileOrphans() {
-    for (const shell of this.#registry.getAll()) {
-      if (!shell.video.isConnected) {
-        this.#seenVideos.delete(shell.video);
-        shell.destroy();
-        logger.log("kernel", `Reconciled orphaned shell: ${shell.sdk.name}`);
-      }
+  /** The one-main-video scope's recycle-page reconcile: the registry holds at
+   *  most one shell, and an orphaned one (its video gone while the page sat
+   *  in the bfcache) is destroyed here so the recovery scan can adopt what
+   *  actually lives on the page. */
+  #reconcileOrphan() {
+    const shell = this.#registry.current;
+    if (shell && !shell.video.isConnected) {
+      this.#seenVideos.delete(shell.video);
+      shell.destroy();
+      logger.log("kernel", `Reconciled orphaned shell: ${shell.sdk.name}`);
     }
   }
 
@@ -459,12 +473,18 @@ export class Kernel {
       logger.error("lifecycle", "No shell factory set!");
       return;
     }
-    if (this.#pending.has(video)) {
+    if (this.#booting === video) {
       return;
     }
-    this.#pending.add(video);
-    await whenDomSettled(container, { signal: this.#settleScope.signal });
-    this.#pending.delete(video);
+    this.#booting = video;
+    try {
+      await whenDomSettled(container, { signal: this.#settleScope.signal });
+    } finally {
+      // Cleared on every exit path: the guarded body below may return early
+      // (video or container left the document before settle), and a rejected
+      // wait must not strand the slot - see the field doc.
+      this.#booting = null;
+    }
     if (!video.isConnected || !container.isConnected) {
       logger.log("lifecycle", `${sdk.name} video left the document before settle - skipping`);
       return;
@@ -662,7 +682,7 @@ export class Kernel {
     // registry-empty edge: the main's RemovalWatch destroying its shell fires
     // #onRegistryEmpty, re-arms the full discovery tap, and its seed walk plus
     // the media tap re-run adoption so the next qualifying candidate wins.
-    if (this.#registry.occupied || this.#pending.size > 0) {
+    if (this.#registry.occupied || this.#booting != null) {
       if (logger.enabled) {
         logger.log("kernel", `${home.sdk.name} candidate refused - one main video per page (a shell is live or booting)`);
       }
@@ -767,7 +787,7 @@ export class Kernel {
    * here.
    */
   menuShellHost() {
-    return this.#registry.getAll()[0]?.shellHost ?? null;
+    return this.#registry.current?.shellHost ?? null;
   }
 
   /**
