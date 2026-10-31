@@ -248,12 +248,11 @@ export class Shell {
   /**
    * The unified contextual fill box, owned by shared/dom.js ReferenceBox:
    * inline mode reads the shell's own container (the SDK container),
-   * fullscreen reads the fs element's own rect - the device screen; the
-   * viewport-fit=cover the active frame merges expands it behind the cutout
-   * on Android Chromium, while Android Firefox measures no safe area at all
-   * (the rect is the plain screen there - AGENTS.md) - and document
-   * fullscreen (no element) falls back to the window box inside the class.
-   * Returns { x, y, width, height }.
+   * fullscreen reads Firefox's own screen directly (screen.width/height -
+   * the viewport IS the screen when this document presents a
+   * fullscreenElement), with the window-box fallback for the fs shapes
+   * that present no element of ours (the F11/document kind, a frame under
+   * a fullscreened ancestor). Returns { x, y, width, height }.
    */
   get referenceBox() {
     return this.#refBox.get();

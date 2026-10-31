@@ -737,27 +737,28 @@ export function layoutViewport() {
 /**
  * The ONE fill-box identity for every geometry consumer (scrub gain
  * normalize, cover scale, pan clamp, fs edge zones). Inline reads the
- * container; fullscreen reads the ELEMENT the UA is actually fullscreening -
- * `document.fullscreenElement.getBoundingClientRect()` - which is the
- * device's real screen edge-to-edge where viewport-fit=cover merged on the
- * active frame (Android Chromium expands the fs element under the cutout, so
- * the safe area is INCLUDED), and the safe-rect-fitted frame otherwise: the
- * UA's own letterbox can never spill through an element rect, which is why
- * the previous window-vs-screen gap heuristic (FS_BOX_GAP_PX epsilon) had a
- * reason to exist at all. No event the UA fires - fullscreenchange, resize,
- * orientation change - reports the letterbox shape directly; the rect is the
- * only truthful witness, and it answers the embed shape too (the host doc
- * letterboxes the IFRAME while the in-frame fs element obeys its own frame
- * viewport - rect = the gesture space clientX lives in, so fs edge-zone and
- * scrub width calibration align with the coordinates every consumer reads).
- * UA window fullscreen (F11) presents no element - the window box is the
- * fallback (and the earlier headless note - screen.width being 0 there - is
- * stale: probed, headless reports a real synthetic screen of 1366x768; the
- * window fallback exists simply because no element is present to read). The
- * pool keeps the scrub/pinch hot path allocation + layout free:
- * one getBoundingClientRect per invalidation, and fs flips re-target the RO
- * at the fs element so its own box changes (entry ratio snap, device zoom)
- * re-read instead of floating stale.
+ * container; fullscreen reads Firefox's OWN screen directly -
+ * screen.width/height - because when THIS document's fullscreenElement is
+ * present, its viewport IS the screen edge-to-edge: the UA's :fullscreen
+ * geometry plants the element at the screen bounds (any letterboxing lives
+ * inside the element's content, the screen stays the gesture space clientX
+ * lives in), and the screen dims are stable before, during, and after the
+ * entry - no transition race, no post-flip style churn (the entry ratio
+ * snap, device-zoom re-reads the retired element pass chased) can move
+ * them. Origin (0,0): in fullscreen the window fills the screen, so
+ * viewport-relative == screen-relative for the coordinates every consumer
+ * couples. When fs is armed but THIS document presents no
+ * fullscreenElement - the F11/document kind, or this frame inside a
+ * fullscreened ancestor - the gesture space is the frame's own viewport,
+ * NOT the device screen (a letterboxed iframe on a fullscreened window
+ * reads its viewport box), so the window box stays that arm's reading; a
+ * zero screen reading degrades there too - a runtime fact that keeps
+ * consumers permissive, never stranding a player. Retired with the
+ * change: the fs-element GBCR pass and the fs RO re-target - the
+ * disconnect/observe dance and its detached-observers worry - by user
+ * direction: Firefox owns the fullscreen geometry, read it from Firefox
+ * directly. The pool keeps the scrub/pinch hot path allocation + layout
+ * free: one read pair per invalidation.
  *
  * The real-reading candidates audited against the 159 floor for adoption:
  * devicePixelContentBoxSize not only exists - it DELIVERS (probed: the RO
@@ -780,8 +781,9 @@ export function layoutViewport() {
  * one non-gesture consumer anchors against it, not merely sizes: the
  * subtitle renderer derives the displayed video picture within this rect
  * and lays its slots relative to it (see subtitles.js). Origin discipline:
- * the element arm reads it off the element's own rect in the same pass; the
- * inline arm reads the container's rect origin beside its client dims -
+ * the fullscreen arms settle at (0,0) (the viewport is the gesture space
+ * there and fills the screen); the inline arm reads the container's rect
+ * origin beside its client dims -
  * clientWidth/Height stay the dims source because they are UNtransformed
  * layout numbers (a site-scaled container must keep its untransformed size
  * for zoom/fill math even though GBCR reports the scaled box); the window
@@ -792,13 +794,13 @@ export function layoutViewport() {
  *
  * The slice's validity flips are broadcast: subscribe() rides the ONE fan-out
  * owner (Fan) armed at exactly the four invalidate sites the pool already
- * runs (container RO, fs re-target, orientation change, and scroll - scroll
+ * runs (container RO, fs flip, orientation change, and scroll - scroll
  * is the origin-bearing arm: it repositions the viewport origin with no
  * size signal). Read-and-discard
  * per flow stays the consumption shape for the gesture consumers (every
  * consumer re-reads in its own event flow - nobody parks a pooled box); the
  * broadcast exists for the consumer that must RE-RENDER when the box moves
- * without arming duplicate observers of the same three facts - the audit
+ * without arming duplicate observers of the same four facts - the audit
  * (subtitles reference pass) found that path unowned.
  */
 export class ReferenceBox {
@@ -817,20 +819,12 @@ export class ReferenceBox {
     });
     this.#ro.observe(container);
     signal.addEventListener("abort", () => this.#ro.disconnect(), { once: true });
-    subscribeFullscreen((active) => {
-      this.#valid = false;
-      // Re-target the observed element on each fs entrance; the exit
-      // disconnects so the fs element's detached obs don't fire again.
-      this.#ro.disconnect();
-      if (active) {
-        const fsEl = document.fullscreenElement;
-        if (fsEl) {
-          this.#ro.observe(fsEl);
-        }
-      }
+    subscribeFullscreen(() => {
       // The flip itself is a tick even when the dims happen to match: the
-      // subscriber's position answer switches arms (element vs container),
-      // and a slot anchored before the flip painted against the old arm.
+      // arm switches (screen vs container - a different origin axis and a
+      // different dims source), and a slot anchored before the flip
+      // painted against the old arm.
+      this.#valid = false;
       this.#ticks.emit();
     }, signal);
     screen.orientation.addEventListener("change", () => {
@@ -866,21 +860,26 @@ export class ReferenceBox {
       return this.#box;
     }
     if (fs) {
-      const fsEl = document.fullscreenElement;
-      const rect = fsEl?.getBoundingClientRect();
-      if (rect && rect.width > 0 && rect.height > 0) {
-        this.#box.x = rect.x;
-        this.#box.y = rect.y;
-        this.#box.width = rect.width;
-        this.#box.height = rect.height;
-      } else {
-        ({ width: this.#box.width, height: this.#box.height } =
-          layoutViewport());
-        // Viewport-relative read domain (every GBCR the rect couples with is
-        // viewport-relative too - GBCR is viewport coords, not page coords).
-        this.#box.x = 0;
-        this.#box.y = 0;
+      // Firefox's own screen reading when this document drives the
+      // fullscreen (fullscreenElement present here means the viewport is
+      // the screen edge-to-edge); no element - F11/document kind, or this
+      // frame under a fullscreened ancestor - keeps the frame viewport as
+      // the gesture space. The element-absent case cannot reuse a pooled
+      // non-zero width from the inline arm, so the dims are locals first:
+      // the window box is the deliberate fallback, zero-guarded.
+      let width = 0;
+      let height = 0;
+      if (document.fullscreenElement) {
+        width = screen.width;
+        height = screen.height;
       }
+      if (width <= 0 || height <= 0) {
+        ({ width, height } = layoutViewport());
+      }
+      this.#box.x = 0;
+      this.#box.y = 0;
+      this.#box.width = width;
+      this.#box.height = height;
     } else {
       this.#box.width = this.#container.clientWidth;
       this.#box.height = this.#container.clientHeight;

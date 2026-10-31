@@ -140,17 +140,20 @@ iframes, same-origin and cross-origin:
   MutationObserver every consumer rides — element pooling, the shell ledger,
   shadow traversal, the fullscreen gate, the iframe registry), `PoolElement`
   machinery, `ReferenceBox` — the ONE fill-box identity (inline →
-  container, fs → the fullscreen element's own rect, which under
-  `viewport-fit=cover` is the Android device screen incl. the safe area —
-  a Chromium-side shape: Android Firefox's fullscreen presents no safe
-  area at all, the video fills the plain screen, so no cutout
-  compensation rides the branch (user direction; reopening needs a
-  measured instance of cutout-expanded element rects there);
+  container, fs → Firefox's OWN screen reading, `screen.width/height`,
+  read directly — the viewport IS the screen when this document presents
+  a fullscreenElement; the window box stays the fallback for the
+  fs-with-no-element shapes: the F11/document kind and a frame under a
+  fullscreened ancestor, where the gesture space is the frame viewport,
+  not the device screen; the former fs-element GBCR pass and RO
+  re-target retired by user direction — Firefox owns the fullscreen
+  geometry, and the screen dims are stable across the entry, killing
+  the transition race and the post-flip re-read chase);
   pools per invalidation so the hot path stays layout-free; carries the
   full rect — `x/y` origin at the same reveal-on-invalidation instant, the
   consumer class that anchors against it rather than merely sizing needs
   the position — and broadcasts change ticks over the one Fan at exactly
-  its four invalidate sites (container RO, fs re-target, orientation,
+  its four invalidate sites (container RO, fs flip, orientation,
   and scroll — the origin-bearing arm: scroll repositions the viewport
   origin with no size signal, so the size-only cache the pool once was
   was silently wrong for anchor consumers; the audited subscriber census:

@@ -534,10 +534,9 @@ export async function run({ session, baseUrl, boot }) {
   // TUNING) - knee-saturated gain over the fs reference width, sensitivity
   // anchor linear outside the curve, the scrubTo clamp - against the live
   // duration and reference width. The width mirror is the same one truth the
-  // engine's shared ReferenceBox reads (shared/dom.js): the fs element's own
-  // rect when one exists. The synthetic fs element here (the
-  // fullscreenElement override above) IS the .pf-shell host - its rect is
-  // the same box the engine reads, no window-vs-screen heuristic shared. A
+  // engine's shared ReferenceBox reads (shared/dom.js): Firefox's own screen
+  // reading when a fullscreen element exists (the fullscreenElement override
+  // above presents one), the window box when fs presents none. A
   // tuning retune re-arms the row's own expectation; only a real regression
   // in the accrue->rAF->commit pipeline (or a geometry identity drift the
   // replay does not share) parts the settled time from it.
@@ -567,12 +566,11 @@ export async function run({ session, baseUrl, boot }) {
   const paceEnd = await session.eval(function main(curve) {
     const video = document.querySelector("#check-video");
     // The width mirror is the engine's own fs rule (shared/dom.js
-    // ReferenceBox): the fullscreen element's rect - the synthetic fs element
-    // here is the .pf-shell host - falling back to the window box when fs
-    // presents no element (the F11/document-fs shape).
-    const fsEl = document.fullscreenElement;
-    const width = fsEl
-      ? fsEl.getBoundingClientRect().width || window.innerWidth
+    // ReferenceBox): Firefox's screen reading when a fullscreen element
+    // exists (the synthetic override here presents one), the window box
+    // when fs presents none (the F11/document-fs shape).
+    const width = document.fullscreenElement
+      ? (screen.width || window.innerWidth)
       : window.innerWidth;
     const duration = video.duration;
     const ratio = curve.stroke.velocity / curve.knee;

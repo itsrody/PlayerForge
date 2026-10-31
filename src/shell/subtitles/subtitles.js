@@ -396,7 +396,7 @@ function shiftTime(time, offset) {
  * the @property initial-values and prior slot values answer.
  *
  * Stage-change re-anchoring rides the ReferenceBox's change ticks (its
- * owned invalidation sources: container RO, fs re-target, orientation,
+ * owned invalidation sources: container RO, fs flip, orientation,
  * scroll); no duplicate fs/RO/orientation/scroll of ours. Video-relative marks -
  * the video's own box moving inside an unmoved stage, and its intrinsic
  * size changing - are this class's own RO + the media element's resize
