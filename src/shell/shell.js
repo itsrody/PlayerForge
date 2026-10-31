@@ -246,14 +246,12 @@ export class Shell {
   }
 
   /**
-   * The unified contextual fill box, owned by shared/dom.js ReferenceBox:
-   * inline mode reads the shell's own container (the SDK container),
-   * fullscreen reads the active document's OWN viewport (layoutViewport)
-   * whenever the native document-fullscreen witness (the gate's fs) is
-   * armed in it - the active context is a document in both topologies
-   * (the video directly embedded lives in the top document, an iframed
-   * video in its frame document), and each document's viewport is the one
-   * gesture space its coordinates live in. Returns { x, y, width, height }.
+   * The unified contextual fill box, owned by shared/dom.js ReferenceBox,
+   * ONE read in both modes: the same SDK container discovery resolved
+   * (getBoundingClientRect - dims AND origin, the same read pair the
+   * discovery presence gates use). In the SDK's fullscreen that container
+   * is expanded edge-to-edge, so its rect becomes the gesture space on its
+   * own - no mode switch inside the box. Returns { x, y, width, height }.
    */
   get referenceBox() {
     return this.#refBox.get();

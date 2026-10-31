@@ -961,22 +961,21 @@ export class InputForge {
   #zoneForPoint(pointerEvent) {
     // Edge zones only steer fullscreen gestures (dbltap edge-skip, swipe-down
     // exit - both fs-gated), so while the fs gate is open the reference is the
-    // SAME fill box every geometry consumer reads (shell.referenceBox) - whose
-    // fs answer is the ACTIVE document's own viewport (the one gesture space
-    // the clientX domain lives in: the top viewport equals the screen under
-    // any fullscreen kind, a frame's viewport is its own gesture space
-    // whether filled edge-to-edge by the SDK's frame fullscreen or
-    // letterboxed under a fullscreen window). Inline the player occupies only
-    // the viewport: a fullscreen-vs-player confusion could name edges the
-    // player does not have, so the reference becomes the surface-invariant
-    // viewport width. Every behavioral zone consumer is fs-gated (the inline
-    // zone is telemetry only - hold/release details and the press
-    // breadcrumbs), which is exactly why fs closing may degrade the reference
-    // instead of breaking a gesture. Both widths are real-world reads: the fs
-    // box and the inline reference ride layoutViewport()'s root-element box -
-    // the laid-out clientX domain presses land in - and the reported
-    // innerWidth fallback covers the headless fact (shell-less early
-    // presses), not missing-global paranoia.
+    // SAME fill box every geometry consumer reads (shell.referenceBox) - the
+    // SDK container's own rect, which in the SDK's fullscreen IS the
+    // edge-to-edge gesture space (the gate's fs only arms in the video's own
+    // document, and there the fullscreened tree is the SDK's container tree).
+    // Inline the player occupies only the viewport: a fullscreen-vs-player
+    // confusion could name edges the player does not have, so the reference
+    // becomes the surface-invariant viewport width. Every behavioral zone
+    // consumer is fs-gated (the inline zone is telemetry only - hold/release
+    // details and the press breadcrumbs), which is exactly why fs closing may
+    // degrade the reference instead of breaking a gesture. Both widths are
+    // real-world reads: the fs box rides the container's own laid-out rect,
+    // the inline reference layoutViewport()'s root-element box - the laid-out
+    // clientX domain presses land in - and the reported innerWidth fallback
+    // covers the headless fact (shell-less early presses), not
+    // missing-global paranoia.
     const screenW = fs
       ? (this.#boxFor?.()?.width ?? 0) || layoutViewport().width
       : layoutViewport().width;

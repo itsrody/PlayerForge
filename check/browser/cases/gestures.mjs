@@ -531,12 +531,14 @@ export async function run({ session, baseUrl, boot }) {
   // TUNING) - knee-saturated gain over the fs reference width, sensitivity
   // anchor linear outside the curve, the scrubTo clamp - against the live
   // duration and reference width. The width mirror is the same one truth the
-  // engine's shared ReferenceBox reads (shared/dom.js): the active document's
-  // own viewport whenever the native document-fullscreen witness (fs) is
-  // armed in it, the container rule is the engine's inline arm. A
-  // tuning retune re-arms the row's own expectation; only a real regression
-  // in the accrue->rAF->commit pipeline (or a geometry identity drift the
-  // replay does not share) parts the settled time from it.
+  // engine's shared ReferenceBox reads (shared/dom.js): the same SDK
+  // container discovery resolved, ONE GBCR read in both modes - the
+  // synthetic fs flip here never physically expands the container, so the
+  // mirror reads that same container rect the engine reads (the .pf-shell
+  // host's parentElement). A tuning retune re-arms the row's own
+  // expectation; only a real regression in the accrue->rAF->commit
+  // pipeline (or a geometry identity drift the replay does not share)
+  // parts the settled time from it.
   const paceCurve = {
     sens: TUNING.controller.scrubSensitivity /
       TUNING.controller.scrubSensitivityAnchor,
@@ -562,12 +564,12 @@ export async function run({ session, baseUrl, boot }) {
   await new Promise((r) => setTimeout(r, 400));
   const paceEnd = await session.eval(function main(curve) {
     const video = document.querySelector("#check-video");
-    // The width mirror is the engine's own fs rule (shared/dom.js
-    // ReferenceBox): under the native document-fullscreen witness (fs,
-    // armed here by the synthetic flip) the engine reads the ACTIVE
-    // document's own viewport, root box first with the reported dims as
-    // the fallback - exactly the layoutViewport order the row mirrors.
-    const width = document.documentElement.clientWidth || window.innerWidth;
+    // The width mirror is the engine's own rule (shared/dom.js
+    // ReferenceBox): the SDK container's rect - the .pf-shell host's
+    // parentElement, the same element discovery resolved and the engine
+    // pools its fill box from - in ONE read for both modes.
+    const width = document.querySelector(".pf-shell").parentElement
+      .getBoundingClientRect().width;
     const duration = video.duration;
     const ratio = curve.stroke.velocity / curve.knee;
     const t = Math.min(1, ratio ** curve.exp);

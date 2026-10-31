@@ -727,9 +727,8 @@ export function subscribeFullscreen(cb, signal) {
  * Both faces consume this: the kernel's viewport-presence gate (candidate
  * rect against the layout viewport, pre-shell - the fill-box identity
  * below cannot serve it, whose lifetime starts with the shell and whose
- * inline answer is the container's own box, narrower than the viewport),
- * the fullscreen reading here, and the inline gesture-zone width.
- * Consumers read-and-discard synchronously; the fresh pair per call keeps
+ * answer is the container's own box, narrower than the viewport) and the
+ * inline gesture-zone width. Consumers read-and-discard synchronously; the fresh pair per call keeps
  * no pooled-object trap alive across call sites.
  */
 export function layoutViewport() {
@@ -742,58 +741,49 @@ export function layoutViewport() {
 
 /**
  * The ONE fill-box identity for every geometry consumer (scrub gain
- * normalize, cover scale, pan clamp, fs edge zones). Inline reads the
- * container; fullscreen reads the ACTIVE document's own viewport -
- * layoutViewport() - whenever the native document-fullscreen witness (the
- * gate's fs: the Fullscreen API's own state, fullscreenElement, updated by
- * its fullscreenchange event) is armed in that document. The
- * active context is a document in both
- * topologies - the video directly embedded lives inside the top document,
- * an iframed video lives inside its frame document - and each document's
- * viewport is the one gesture space its clientX coordinates live in: the
- * top viewport equals the screen under any fullscreen kind, and a frame's
- * viewport is its own gesture space whether it fills the screen (the SDK's
- * frame fullscreen expands the frame viewport edge-to-edge) or sits
- * letterboxed inside a fullscreened window. Retired with the change: the
- * fullscreenElement presence test and the screen reading it armed (its
- * headline surface), plus the window-box "fallback" distinction - asking
- * "who fullscreened" carried weights the gesture geometry never reads;
- * the viewport question is the native one, answered by the gate.
- * The pool keeps the scrub/pinch hot path allocation + layout free:
- * one read pair per invalidation.
+ * normalize, cover scale, pan clamp, fs edge zones), and it is ONE read in
+ * both modes: the same SDK container discovery resolved (detection
+ * resolves it through the SDK record's anchor with the composed-ancestry
+ * walk; the kernel hands that exact element to the shell, which builds this box around it). getBoundingClientRect() on the
+ * container - the read the discovery presence gates use too - fills the
+ * pooled box complete (x/y origin + dims, one read pair per invalidation);
+ * no mode switch, no arm pair. The fullscreen convergence: the gate's fs
+ * (Fullscreen API state) only arms in the video's OWN document now, and
+ * there the fullscreened tree IS the SDK's container tree - the SDK's
+ * fullscreen expands this container edge-to-edge, so the container's rect
+ * becomes the gesture space on its own; the class needs no fs branch at
+ * all (the letterboxed-frame/document-kind shapes the old viewport arm
+ * served are dark under the API-only gate by construction). Retired with
+ * the change: the fs layoutViewport() arm and its (0,0) origin rule, and
+ * the inline clientWidth/Height dual-source - the "untransformed layout
+ * numbers" distinction died with the arm split; the rect is genuinely one
+ * quantity now, and a site-scaled container reports the scaled box the
+ * real gestures land in.
  *
  * The real-reading candidates audited against the 159 floor for adoption:
  * devicePixelContentBoxSize not only exists - it DELIVERS (probed: the RO
  * observation with boxes:["device-pixel-content-box"] fired, no throw) -
  * but the row is DEVICE pixels (CSS px x DPR): every consumer here couples
- * CSS px (gesture clientX, the untransformed clientWidth used for
- * zoom/fill math, the cue-picture geometry), so no consumer can eat it.
- * IntersectionObserver's rect is the viewport INTERSECTION, not the element
- * box, and fires episodically (ratio crossings), not per flow. Anchor
- * positioning is a positioning surface, not a JS reading (its rejection
- * stands in styles.css). visualViewport's datum is out-of-layout occlusion
- * no element rect can carry (the gate verdict's witness-absence - the
- * sheet's mirror, not this class). Real element fullscreen IS
- * driver-openable (a Marionette click carries user activation - probed),
- * but the synthetic-flip rows in gestures.mjs still pin those arms' logic:
- * resizing the driver window under a running case costs the coordinate
- * frame the rows are written against.
+ * CSS px (gesture clientX, the zoom/fill math, the cue-picture geometry),
+ * so no consumer can eat it. IntersectionObserver's rect is the viewport
+ * INTERSECTION, not the element box, and fires episodically (ratio
+ * crossings), not per flow. Anchor positioning is a positioning surface,
+ * not a JS reading (its rejection stands in styles.css). visualViewport's
+ * datum is out-of-layout occlusion no element rect can carry (the gate
+ * verdict's witness-absence - the sheet's mirror, not this class). Real
+ * element fullscreen IS driver-openable (a Marionette click carries user
+ * activation - probed), but the synthetic-flip rows in gestures.mjs still
+ * pin the fs flow's logic: resizing the driver window under a running case
+ * costs the coordinate frame the rows are written against.
  *
- * The rect is complete (x/y origin added to the pooled dims) because its
+ * The rect is complete (x/y beside the dims in the same read) because its
  * one non-gesture consumer anchors against it, not merely sizes: the
  * subtitle renderer derives the displayed video picture within this rect
- * and lays its slots relative to it (see subtitles.js). Origin discipline:
- * the fullscreen arm settles at (0,0) (the document's
- * own viewport is the gesture space in fullscreen); the
- * inline arm reads the container's rect
- * origin beside its client dims -
- * clientWidth/Height stay the dims source because they are UNtransformed
- * layout numbers (a site-scaled container must keep its untransformed size
- * for zoom/fill math even though GBCR reports the scaled box); the window
- * fallback settles at (0,0) since every GBCR rect the consumers couple with
- * this origin is viewport-relative. Deltas between two GBCR reads in the
- * same frame stay honest under any ancestor transform, which is what the
- * picture consumer actually couples.
+ * and lays its slots relative to it (see subtitles.js). Deltas between two
+ * GBCR reads in the same frame stay honest under any ancestor transform,
+ * which is what the picture consumer actually couples - and the pooled
+ * origin rides the same read, so a scroll- or fs-motion can never leave
+ * dims and origin from different instants.
  *
  * The slice's validity flips are broadcast: subscribe() rides the ONE fan-out
  * owner (Fan) armed at exactly the four invalidate sites the pool already
@@ -824,9 +814,10 @@ export class ReferenceBox {
     signal.addEventListener("abort", () => this.#ro.disconnect(), { once: true });
     subscribeFullscreen(() => {
       // The flip itself is a tick even when the dims happen to match: the
-      // arm switches (screen vs container - a different origin axis and a
-      // different dims source), and a slot anchored before the flip
-      // painted against the old arm.
+      // SDK's expansion of the container lands its layout change after the
+      // gate event, so the tick reads at the flip and the re-render
+      // consumer re-anchors against the settled box instead of one moment
+      // behind the state.
       this.#valid = false;
       this.#ticks.emit();
     }, signal);
@@ -862,33 +853,17 @@ export class ReferenceBox {
     if (this.#valid) {
       return this.#box;
     }
-    if (fs) {
-      // The document-fullscreen reading: the active context is one document
-      // - top [directly embedded video] or frame [iframed video] - and the
-      // native document-fullscreen witness resolves in that same document
-      // (the gate's fs: the Fullscreen API's own state). What changed here is
-      // only the question: not "who
-      // fullscreened" (the fullscreenElement presence test and the screen
-      // reading it armed both retired), but "is this document's viewport
-      // the fullscreen surface" - and the viewport is the gesture space
-      // clientX lives in for BOTH topologies: the top viewport equals the
-      // screen under any fullscreen kind, and a frame's viewport is its
-      // own gesture space whether it fills the screen (the SDK's frame
-      // fullscreen expands the frame viewport) or sits letterboxed inside
-      // a fullscreened window. The ONE real-world viewport read stays the
-      // reader so the class keeps a single opinion on viewport geometry
-      // codebase-wide.
-      ({ width: this.#box.width, height: this.#box.height } =
-        layoutViewport());
-      this.#box.x = 0;
-      this.#box.y = 0;
-    } else {
-      this.#box.width = this.#container.clientWidth;
-      this.#box.height = this.#container.clientHeight;
-      const rect = this.#container.getBoundingClientRect();
-      this.#box.x = rect.x;
-      this.#box.y = rect.y;
-    }
+    // One read in both modes - the same getBoundingClientRect() the
+    // discovery presence gates use on this element: dims AND origin come
+    // from the same rect, so a scroll- or fs-motion can never leave them
+    // from different instants. Fullscreen needs no branch: fs only arms in
+    // the video's own document, and there the SDK's fullscreen expands
+    // THIS container - its rect becomes the gesture space on its own.
+    const rect = this.#container.getBoundingClientRect();
+    this.#box.x = rect.x;
+    this.#box.y = rect.y;
+    this.#box.width = rect.width;
+    this.#box.height = rect.height;
     this.#valid = true;
     return this.#box;
   }

@@ -139,20 +139,21 @@ iframes, same-origin and cross-origin:
 - **dom.js** — the shared mutation feed (`onDomMutations`: ONE page-level
   MutationObserver every consumer rides — element pooling, the shell ledger,
   shadow traversal, the fullscreen gate, the iframe registry), `PoolElement`
-  machinery, `ReferenceBox` — the ONE fill-box identity (inline →
-  container, fs → the ACTIVE document's own viewport via
-  `layoutViewport()`, whenever the native document-fullscreen witness
-  (fs) is armed in it — the active context is a document in both
-  topologies, the video directly embedded inside the [Top] document
-  and an iframed video inside its [frame] document, and each
-  document's viewport is the one gesture space its coordinates live
-  in (the top viewport equals the screen under any fullscreen kind;
-  a frame's viewport is its own gesture space whether filled by the
-  SDK's frame fullscreen or letterboxed under a fullscreen window);
-  the fullscreenElement presence test, the screen.width reading it
-  armed, and the window-box fallback distinction retired — asking
-  "who fullscreened" carried weights the gesture geometry never
-  read);
+  machinery, `ReferenceBox` — the ONE fill-box identity and ONE read in
+  both modes: the same SDK container discovery resolved (detection's
+  composed-ancestry `host`/anchor walk), a single `getBoundingClientRect()`
+  filling dims AND origin — the read the discovery presence gates use on
+  the same element. The fullscreen convergence is structural: the fs gate
+  only arms in the video's own document now, and there the fullscreened
+  tree IS the SDK's container tree — the SDK's fullscreen expands the
+  container edge-to-edge, so its rect becomes the gesture space on its own
+  and the class needs no fs branch at all (the letterboxed-frame /
+  document-kind shapes the former viewport arm served are dark under the
+  API-only gate by construction); the fs `layoutViewport()` arm, the
+  `(0,0)` origin rule it carried, and the inline clientWidth/Height
+  "untransformed layout numbers" dual-source all retired with the
+  direction (a site-scaled container now reports the scaled box the real
+  gestures land in);
   pools per invalidation so the hot path stays layout-free; carries the
   full rect — `x/y` origin at the same reveal-on-invalidation instant, the
   consumer class that anchors against it rather than merely sizing needs
@@ -166,8 +167,7 @@ iframes, same-origin and cross-origin:
   subscriber) — and
   `layoutViewport()`: the ONE real-world viewport read (the root element's
   laid-out box first, reported innerWidth/innerHeight as fallback; kernel
-  presence, the fullscreen reading, and the inline gesture-zone width all
-  consume it). Real-reading candidates audited against the floor and
+  presence and the inline gesture-zone width consume it). Real-reading candidates audited against the floor and
   declined: `devicePixelContentBoxSize` (delivers live on the floor, probed
   via the boxes option — device-pixel units no CSS-px consumer can
   couple), IO (intersection-clipped, episodic),
