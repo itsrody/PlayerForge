@@ -160,7 +160,14 @@ iframes, same-origin and cross-origin:
   `layoutViewport()`: the ONE real-world viewport read (the root element's
   laid-out box first, reported innerWidth/innerHeight as fallback; kernel
   presence, the fs window fallback, and the inline gesture-zone width all
-  consume it).
+  consume it). Real-reading candidates audited against the floor and
+  declined: `devicePixelContentBoxSize` (delivers live on the floor, probed
+  via the boxes option — device-pixel units no CSS-px consumer can
+  couple), IO (intersection-clipped, episodic),
+  anchor positioning (a positioning surface; its styles.css verdict), vv
+  (the §4 witness-absence verdict; the sheet's mirror, not this class).
+  Headless so far: reports a real synthetic screen (1366×768 probed — the
+  old screen-width-0 note died).
 - **page.js** — site identity (`getDomainKey`, `domainsMatch`, `domainScore`,
   `hashEntry`, title sanitizer), page context, the frame bridge (`pf:` prefix,
   `ContextPipe` class owning pipe/legacy/in-flight state, context responders,

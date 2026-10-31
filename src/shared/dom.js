@@ -751,11 +751,30 @@ export function layoutViewport() {
  * viewport - rect = the gesture space clientX lives in, so fs edge-zone and
  * scrub width calibration align with the coordinates every consumer reads).
  * UA window fullscreen (F11) presents no element - the window box is the
- * fallback (and the only answer headless can read, screen.width being 0
- * there). The pool keeps the scrub/pinch hot path allocation + layout free:
+ * fallback (and the earlier headless note - screen.width being 0 there - is
+ * stale: probed, headless reports a real synthetic screen of 1366x768; the
+ * window fallback exists simply because no element is present to read). The
+ * pool keeps the scrub/pinch hot path allocation + layout free:
  * one getBoundingClientRect per invalidation, and fs flips re-target the RO
  * at the fs element so its own box changes (entry ratio snap, device zoom)
  * re-read instead of floating stale.
+ *
+ * The real-reading candidates audited against the 159 floor for adoption:
+ * devicePixelContentBoxSize not only exists - it DELIVERS (probed: the RO
+ * observation with boxes:["device-pixel-content-box"] fired, no throw) -
+ * but the row is DEVICE pixels (CSS px x DPR): every consumer here couples
+ * CSS px (gesture clientX, the untransformed clientWidth used for
+ * zoom/fill math, the cue-picture geometry), so no consumer can eat it.
+ * IntersectionObserver's rect is the viewport INTERSECTION, not the element
+ * box, and fires episodically (ratio crossings), not per flow. Anchor
+ * positioning is a positioning surface, not a JS reading (its rejection
+ * stands in styles.css). visualViewport's datum is out-of-layout occlusion
+ * no element rect can carry (the gate verdict's witness-absence - the
+ * sheet's mirror, not this class). Both fullscreen kinds are not
+ * driver-openable in the harness (element: user-activation, probed TypeError
+ * from the eval turn; document kind: the W3C Fullscreen Window command runs
+ * headless but (fullscreen) stays false) - the synthetic-flip rows in
+ * gestures.mjs pin those arms' logic instead.
  *
  * The rect is complete (x/y origin added to the pooled dims) because its
  * one non-gesture consumer anchors against it, not merely sizes: the
