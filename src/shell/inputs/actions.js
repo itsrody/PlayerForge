@@ -6,65 +6,12 @@ import { GESTURE_EVENTS, GESTURES, GESTURE_IDS } from "../../kernel/contract.js"
 export { GESTURE_EVENTS };
 
 /**
- * Haptic feedback for gesture latches, via Chromium Android's Vibration API
- * (navigator.vibrate). Chromium-based mobile browsers implement the Vibration
- * API (the W3C spec note: "implemented in Chromium-based browsers"); desktop
- * Chromium and hosts without a vibrator no-op it and iOS never implements it.
- *
- * The successor Web Haptics API (navigator.playHaptics) is still a WICG/MSEdge
- * explainer and NOT shipped in any Chromium release, so navigator.vibrate plus
- * short-pulse patterns is the only real, portable hook today.
- *
- * Patterns are deliberately SHORT: a gesture latch is a confirm pulse, not a
- * notification (Android has the VIBRATE permission + Touch Feedback setting,
- * and treats very short single pulses as haptic ticks while long ones read as
- * alerts). Each gesture family gets a distinct shape (one tick, double tick,
- * triple tick) so scrub-latch, pinch-fire, double-tap, and hold read
- * differently to the hand.
- *
- * Gates:
- *   - a user setting (gestures.haptics) so it can be turned off entirely;
- *   - sticky-user-activation + hardware presence via feature detection (all
- *     `vibrate` returns on failure is false / a no-op).
- * Never throws.
- */
-
-/** Distinct pulse shapes per gesture, in milliseconds (vibrate / pause / ...). */
-const HAPTIC_PATTERNS = {
-  /** Speed-up hold engaged. */
-  hold: 12,
-  /** Scrub session latched. */
-  scrub: [10, 24, 10],
-  /** Pinch-fill engaged or released. */
-  pinch: [8, 14, 8, 14, 8],
-  /** Fullscreen double-tap committed (skip/toggle). */
-  dbltap: [14, 40, 14],
-  /** Swipe gesture committed (exit fullscreen). */
-  swipe: [10, 30, 10]
-};
-
-const canVibrate = typeof navigator?.vibrate === "function";
-
-/** Fire the haptic pulse for `type` when armed (setting, motion, activation). */
-function gestureHaptic(type) {
-  if (!canVibrate || !getSetting(SETTING_KEYS.haptics)) {
-    return;
-  }
-  const pattern = HAPTIC_PATTERNS[type];
-  if (pattern != null) {
-    try {
-      navigator.vibrate(pattern);
-    } catch {}
-  }
-}
-
-/**
  * Declarative input policy - the single source, gathered by FUNCTION.
  *
  * One record per user-facing action; each record's `inputs` array collects
  * every physical trigger that can fire it. The motivating case is hold-to-
  * speed: a held pointer press and a held Space key are the SAME function -
- * one boost rate, one toast, one haptic, one release story - so the row
+ * one boost rate, one toast, one release story - so the row
  * defines the action (its `speed` parameter, the product fact the action
  * layer reads) and both triggers ride its `inputs`, instead of the old
  * split that shipped the pointer hold as a table row and the Space hold
@@ -466,7 +413,6 @@ class ScrubSession {
       this.#pendingDelta = 0;
       this.#authoredTarget = null;
       this.#lastToastAt = 0;
-      gestureHaptic("scrub");
     }
 
     // Sub-pixel dead zone with a residue accumulator: a holding finger's
@@ -830,7 +776,7 @@ export class ViewershipTransform {
    * Pinch-out fill entry: normalize object-fit to 'contain' (computeCoverScale
    * models the element content letterboxed by its own ratio), freeze the cover
    * scale, compose. Returns false when the video needs no cover (0 scale), so
-   * the caller's haptic/toast stay silent on a no-op.
+   * the caller's toast stays silent on a no-op.
    */
   beginFill(video, box) {
     const scale = computeCoverScale(video, box);
@@ -926,7 +872,6 @@ class ShellActions {
     const speed = HOLD_SPEED;
     this.#savedRate = shell.playbackRate;
     shell.media.beginBoost(speed);
-    gestureHaptic("hold");
     shell.toast({ icon: "right-arrows", text: `${speed}x`, group: "hold" });
   }
 
@@ -994,7 +939,6 @@ class ShellActions {
       return;
     }
     if (detail.distance > TUNING.gestures.swipeExitMinPx) {
-      gestureHaptic("swipe");
       this.#view.exitFill(false);
       shell.toastFlash("fs-exit", "Fullscreen Exited", "fs");
       shell.exitFullscreen();
@@ -1008,12 +952,10 @@ class ShellActions {
    * playback. Inline double-taps belong to the browser/player natively.
    */
   #dbltap(detail) {
-    // Both edge-skip and center-play are inert before the timeline exists; gate
-    // the shared haptic too so an unready double-tap is fully silent.
+    // Both edge-skip and center-play are inert before the timeline exists.
     if (!this.#shell.media.ready) {
       return;
     }
-    gestureHaptic("dbltap");
     if (detail.zone === "left-edge" || detail.zone === "right-edge") {
       this.#skip(detail.zone === "left-edge" ? "left" : "right");
     } else if (detail.zone === "screen") {
@@ -1065,7 +1007,6 @@ class ShellActions {
     }
     if (detail.direction === "out") {
       if (!this.#view.fillActive && this.#view.beginFill(shell.video, shell.referenceBox)) {
-        gestureHaptic("pinch");
         shell.toastFlash("fill-aspect", "Fill Mode", "pinch");
       }
     } else if (detail.direction === "in") {

@@ -13,14 +13,13 @@ const SETTINGS_PREFIX = "settings";
 /**
  * The non-gesture setting-key vocabulary, written exactly once here: the
  * schema entries and every consumer derive from these handles, so a key
- * rename can never silently orphan a binding gate, haptic gate, or panel
+ * rename can never silently orphan a binding gate or panel
  * read. (The gesture-family keys stay on GESTURES[id].setting - the kernel
  * contract owns that vocabulary.)
  */
 export const SETTING_KEYS = Object.freeze({
   stepSeek: "controller.stepSeek",
   hotkeys: "gestures.hotkeys",
-  haptics: "gestures.haptics",
   edgeToEdge: "fullscreen.edgeToEdge",
   compact: "ui.compact"
 });
@@ -57,13 +56,6 @@ export const SETTINGS_SCHEMA = [
     group: "Features"
   },
   ...GESTURE_TOGGLES,
-  {
-    key: SETTING_KEYS.haptics,
-    type: "bool",
-    label: "Haptic Feedback",
-    default: true,
-    group: "Features"
-  },
   {
     key: SETTING_KEYS.edgeToEdge,
     type: "bool",

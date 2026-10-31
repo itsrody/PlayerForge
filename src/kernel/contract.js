@@ -13,8 +13,8 @@
  *                          every layer derives from. Each family id maps to its
  *                          semantic event, its configs-doc setting gate, and its
  *                          settings-panel label - so input bindings, the
- *                          settings schema, the pointer-intent list and the
- *                          haptic table all reference one key instead of
+ *                          settings schema and the pointer-intent list all
+ *                          reference one key instead of
  *                          re-spelling the strings.
  *   - GESTURE_EVENTS     - the semantic event contract: the shell dispatches
  *                          these onto its host; the framework may emit the

@@ -263,8 +263,7 @@ iframes, same-origin and cross-origin:
   `ViewershipTransform` (the fill-mode cover scale composed as one
   `scale(s)` — pinch-to-fill's transform, released on pinch-in or fullscreen
   exit) — the one class allowed to write the video transform, exposed on
-  the shell as `shell.view` — plus the haptic
-  policy.
+  the shell as `shell.view`.
 - **subtitles/** — `forgevtt.js` = the parse engine (the module the worker
   chunk bundles in, which is what guarantees the worker can never drift from
   the main-thread parser; ~.srt→WEBVTT normalizing), `vtt-worker.js` — a
