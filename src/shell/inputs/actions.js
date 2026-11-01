@@ -129,7 +129,8 @@ function gateOpen(input) {
  * x fullscreen x gesture family - that used to live as module-level `let`s
  * and free functions:
  *   - the table buckets the actions' pointer inputs by gesture family
- *     natively (`Map.groupBy`, Chromium 117+), so decision-point scans skip
+ *     natively (`Map.groupBy`, both engines sit far below the floor), so
+ *     decision-point scans skip
  *     the mass of unrelated rows; entries keep table order;
  *   - a per-family snapshot re-samples on the settings bus, so pointer-intent
  *     decision points read flat map entries instead of walking the binding
@@ -284,9 +285,9 @@ class SkipStreak {
  * State notes:
  *   - Input and commit are decoupled by the native display clock. Pointer
  *     moves only translate into pending seconds; requestAnimationFrame -
- *     the compositor tick Chromium drives painting (and drains the pointer
- *     stream) by - commits one clamped seek per tick and advances the
- *     toast from the AUTHORED target. Seek truth beats frame truth here:
+ *     the display clock every engine paints by, the tick that also drains
+ *     the pointer stream - commits one clamped seek per tick and advances
+ *     the toast from the AUTHORED target. Seek truth beats frame truth here:
  *     the presented-frame readout this machine once kept ran 1-3 frames
  *     plus decode latency behind the finger, which is the visible lag the
  *     field pinned. The readout's contract is the destination, and
@@ -512,12 +513,13 @@ class ScrubSession {
  * in-flight animation so no cleanup can land mid-gesture.
  *
  * Where Element.animate (Web Animations API) is available -
- * Chromium 69+, i.e. this fork's floor guarantees it unconditionally - the
- * snap runs a WAAPI animation on the compositor: one deterministic
+ * both engines sit far below this floor (Firefox got it in 75), so it is
+ * guaranteed unconditionally and the snap runs a WAAPI animation on the
+ * compositor: one deterministic
  * compositor animation with a real finish/cancel. The video is promoted to
  * its own compositor layer while a transform is live (fill-mode, swipe/pinch
- * restore) so Chromium composites the scale/translate instead of
- * re-rasterizing the media surface every frame; the layer is released once
+ * restore) so the compositor scales/translates the media surface instead of
+ * re-rasterizing it every frame; the layer is released once
  * the snap settles (or is cancelled).
  */
 

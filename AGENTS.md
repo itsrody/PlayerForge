@@ -427,7 +427,19 @@ iframes, same-origin and cross-origin:
   `dx` and the mirrored `dy` as
   engine geometry (the detail payload shape is source-table fixed); pinch
   and trackpad-pinch handshake stay engine-core; hold/scrub timers ride
-  the shared scheduler.
+  the shared scheduler. Keyboard arbitration filters its candidates by
+  engine liveness (`#isActive`: `readyState > 0 && !ended` — an ended
+  engine must not steal keys from a live one), deliberate for the
+  multi-engine case, but answers **vacancy outright**: when no engine
+  holds a playable video (`candidates === 0` — every live video ended or
+  not yet loaded), playback arbitration is vacuous and the method returns
+  true, so the page-level chrome keys (panel/history/settings) still work
+  after the credits roll — exactly when the keyboard has nothing else to
+  do; one shell per realm-document (the scope law) makes vacancy
+  single-engine, so no cross-engine routing question survives. The
+  gestures case proves the shape: seek to duration marks `ended` on the
+  paused fixture video, the real driver KeyS still opens the panel, and
+  the row restores (seek-back + panel close) before the hold-speed rows.
 - **inputs/actions.js** — the action layer: the unified `INPUT_ACTIONS`
   table (one row per user-facing function, each gathering every trigger
   under its `inputs` — pointer families and key codes, one-shot or

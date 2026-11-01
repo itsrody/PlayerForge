@@ -709,8 +709,8 @@ class KeyHoldSession {
  * eligibility, pointer tracking, the shared session-latch flag, and the
  * click/dblclick suppression decisions.
  *
- * Floor-native on both engines (Chromium 156+, Firefox 159+ - the check
- * gate drives the latter): one AbortSignal owns the entire listener
+ * Floor-native: Firefox 159 (this branch's floor, the check gate's engine).
+ * One AbortSignal owns the entire listener
  * lifetime (destroy() === scope.abort()), all pointer listeners are passive,
  * scrub sampling consumes getCoalescedEvents(), and fullscreen truth is the
  * single shared `fs` gate (shadow.js), built on the native fullscreen event.
@@ -1164,9 +1164,9 @@ export class InputForge {
     if (isInsideShell(this.#eventTarget, activeElement)) {
       return true;
     }
-    if (!this.#isActive(this)) {
-      return false;
-    }
+    // Live playback arbitration first: engines whose video is actually
+    // playable (loaded, not finished) decide among themselves - an ended
+    // engine must not steal keys from a live one.
     let candidates = 0;
     let includesThis = false;
     for (const forge of forgeRegistry.actives()) {
@@ -1180,7 +1180,14 @@ export class InputForge {
     } else if (candidates > 1) {
       return forgeRegistry.isLast(this);
     }
-    return false;
+    // No engine holds a playable video (every live video ended or is not
+    // yet loaded): playback arbitration is vacuous, there is nothing for a
+    // dead key to not-steal. The page-level keys answer here - the
+    // credits-rolled state where panel/history/settings access is exactly
+    // what the keyboard exists for. One shell per realm-document (the
+    // scope law) makes vacancy single-engine, so no cross-engine routing
+    // question survives.
+    return true;
   }
 
   /**

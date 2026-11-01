@@ -310,6 +310,74 @@ export async function run({ session, baseUrl, boot }) {
     return panel === null || !panel.classList.contains("pf-open");
   }), "panel still open");
 
+  // The ended-video hotkey row (arbitration's vacancy fallback): key
+  // arbitration filters candidates by engine liveness - a video that
+  // reached its end no longer "owns playback". Deliberate for the
+  // multi-engine case (an ended engine must not steal keys from a live
+  // one), but with one engine that left every key dead exactly when the
+  // keyboard should matter most: after the credits roll, panel/history/
+  // settings are the only things left to do. Vacancy answers: no playable
+  // candidate = nothing for a dead key to not-steal, so the shell's keys
+  // still work. Seek to the exact end marks ended on a paused video; a
+  // short play-through catches any engine quirk, then the same trusted
+  // KeyS drive must still open the panel.
+  const endedWitness = await session.eval(function main() {
+    const v = document.querySelector("#check-video");
+    v.pause();
+    v.currentTime = v.duration;
+    return v.duration;
+  });
+  if (endedWitness) {
+    await sleep(250);
+    const ended = await session.eval(function main() {
+      const v = document.querySelector("#check-video");
+      return v.ended || (v.currentTime >= v.duration && v.paused);
+    });
+    if (!ended) {
+      await session.eval(function main() {
+        document.querySelector("#check-video").play()?.catch?.(() => {});
+      });
+      const deadline = Date.now() + 4000;
+      while (Date.now() < deadline
+        && !(await session.eval(function main() {
+          const v = document.querySelector("#check-video");
+          return v.ended;
+        }))) {
+        await sleep(150);
+      }
+    }
+  }
+  await fireKeys(["KeyS"]);
+  await sleep(400);
+  status(rows, "ended video still answers chrome keys (panel opens on the vacancy fallback)", await session.eval(function main() {
+    const host = document.querySelector(".pf-shell");
+    const v = document.querySelector("#check-video");
+    return (v === null || v.ended) &&
+      host !== null && host.shadowRoot !== null &&
+      host.shadowRoot.querySelectorAll(".pf-panel.pf-open").length === 1;
+  }), "no ended witness or panel stayed closed");
+  // Restore the shared fixture for the later rows: un-end it by seeking
+  // back and pausing, and close the panel again so the Space/PiP rows
+  // below meet the same plain-shell state their probe scripts assume
+  // (the open panel parks focus inside the shell, which re-routes the
+  // held Space away from the session key).
+  const restored = await session.eval(function main() {
+    const v = document.querySelector("#check-video");
+    v.currentTime = 2;
+    v.pause();
+    const host = document.querySelector(".pf-shell");
+    const panel = host !== null ? host.shadowRoot.querySelector(".pf-panel") : null;
+    if (panel !== null && panel.classList.contains("pf-open")) {
+      return "open";
+    }
+    return "closed";
+  });
+  if (restored === "open") {
+    await fireKeys(["KeyS"]);
+    await sleep(300);
+  }
+
+
   // The gathered-definition row: hold-to-speed is ONE INPUT_ACTIONS row
   // whose inputs gather both trigger kinds - the pointer hold is proven
   // above by the zone-telemetry row, so this drives the KEY side: a held
