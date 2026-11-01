@@ -31,7 +31,7 @@ const DOMAIN_TLDS = {
     "app", "blog", "dev", "fun", "game", "host", "live", "love", "new", "news", "one", "online",
     "page", "park", "plus", "pro", "shop", "site", "store", "tech", "video", "work", "xyz",
     "club", "life", "world", "today", "tools", "social", "beer", "email", "space", "cool",
-    "social", "games", "legal", "luxury", "fans", "buzz", "country", "kim", "pub", "rest"
+    "games", "legal", "luxury", "fans", "buzz", "country", "kim", "pub", "rest"
   ])
 };
 const IPV4_RE = /^(?:\d{1,3}\.){3}\d{1,3}$/;
@@ -679,7 +679,10 @@ class TopFrameResponder {
     entry.port.close();
   }
 
-  /** Live-pipe keepalive: refresh stamps on activity, evict idle ports. */
+  /** Keepalive on activity only (the zero-poll law: no sweep timer, a next
+   *  request refreshes the touching entry's stamp and evicts every entry
+   *  idle past the cutoff - a pipe that goes truly idle stays open until
+   *  some later pipe activity or a messageerror drop closes it). */
   #touchPipe(entry) {
     entry.lastUsed = performance.now();
     const cutoff = entry.lastUsed - CTX_PIPE_IDLE_MS;

@@ -208,6 +208,12 @@ function bootstrap() {
   // otherwise lose capture entirely, since probe install is order-gated on
   // the bridge returning.
   try {
+    // The returned teardown is deliberately never consumed, the way the
+    // kernel shell-ready handle is not: the bridge is page-lifetime plumbing
+    // that must stay armed across kernel boots (and across bfcache restores,
+    // where the kernel tears down but the frame is still alive), and a real
+    // unload disposes the realm with it. Wiring it into a pagehide would
+    // close the pipes on the persisted path this bridge is required to keep.
     installContextBridge();
   } catch (error) {
     logger.error("entry", "Frame bridge install failed", error);

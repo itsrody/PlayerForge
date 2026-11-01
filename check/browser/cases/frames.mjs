@@ -20,6 +20,10 @@ import { DEBUG_HASH_TAG } from "../../../src/kernel/contract.js";
 //                              on BOTH ancestor iframes, and the
 //                              fullscreenerror failure path re-arms both
 //                              with no new shell
+//   4c. mixed walk chain     - host -> same-origin mid -> cross-origin player;
+//                              the ctx route's vouch reaches a nested asker
+//                              through the readable walk while the fullscreen
+//                              provisioner refuses that same non-direct asker
 //   5. switchboard           - one placeholder iframe whose document swaps
 //                              between three supported SDK stubs (Plyr,
 //                              Video.js, DPlayer) playing the same video
@@ -350,6 +354,75 @@ export async function run({ session, baseUrl, crossBaseUrl, bundle, boot, header
   } catch (err) {
     latencies.late = null;
     await failRow("late-armed ancestors scenario failed", err);
+  }
+
+  // ---- Scenario 4c: mixed-topology vouch posture. Chain: top -> SAME-origin
+  // mid -> cross-origin player. The mid being readable from the top is the
+  // branch the /check/frames-nested chain (cross mid) cannot reach. The two
+  // routes intentionally carry different vouch postures against this one
+  // topology: the ctx route accepts a nested asker through isOwnFrame's
+  // same-origin readable walk; the fullscreen provisioner accepts direct
+  // children only.
+  try {
+    await bootFrameScenario({
+      pagePath: "/check/frames-walk", framePaths: [[0], [0, 0]], shellPath: [0, 0]
+    });
+    // (a) The player frame direct-sends a plain pf:ctx-request to window.top,
+    // skipping the mid relay. Top's origin differs from bottom's, so ONLY the
+    // readable-walk can vouch the asker: top's document -> mid's document
+    // (same-origin) -> the iframe element holding bottom's window. A walk
+    // that stopped at direct children drops this request unanswered - and a
+    // positive answer carrying domain=127-0-0-1 proves the TOP wrote it
+    // (bottom's own fallback context would say localhost).
+    await session.evalInFrame([0, 0], function main() {
+      window.__ctxNonce = crypto.randomUUID();
+      window.__ctx = null;
+      window.addEventListener("message", (event) => {
+        const d = event && event.data;
+        if (d && typeof d === "object" && d.type === "pf:ctx"
+            && d.nonce === window.__ctxNonce) {
+          window.__ctx = d;
+        }
+      });
+      window.top.postMessage(
+        { type: "pf:ctx-request", nonce: window.__ctxNonce }, "*");
+    });
+    const ctx = await session.waitForFrame([0, 0],
+      `return window.__ctx ? { domain: window.__ctx.domain, path: window.__ctx.path } : false;`,
+      5000
+    ).then((v) => v, () => null);
+    askRows(
+      "walk chain: ctx route vouches a nested asker through the readable descendant walk",
+      !!ctx && ctx.domain === "127-0-0-1",
+      ctx ? `domain=${ctx.domain} path=${ctx.path}` : `no bridged answer ${await frameDiag()}`
+    );
+    // (b) The same asker posture must NOT punch the top's fullscreen grant.
+    // Strip the top grant, then have the player frame re-request fullscreen
+    // DIRECT to the top again - the provisioner's iframeRegistry.child vouch
+    // matches only its DIRECT child's contentWindow (mid), so a grandchild's
+    // request dead-ends with nothing re-granted.
+    await session.eval(function main() {
+      document.getElementById("player-frame")?.removeAttribute("allowfullscreen");
+      document.getElementById("player-frame")?.removeAttribute("allow");
+    });
+    await session.evalInFrame([0, 0], function main() {
+      window.top.postMessage({ type: "pf:req-fullscreen" }, "*");
+    });
+    await sleep(900);
+    const topGrant = await session.eval(function main() {
+      const frame = document.getElementById("player-frame");
+      return {
+        fs: frame?.hasAttribute("allowfullscreen") ?? false,
+        allow: (frame?.getAttribute("allow") ?? "").includes("fullscreen")
+      };
+    });
+    askRows(
+      "walk chain: fullscreen provisioner refuses a non-direct-child re-request",
+      topGrant.fs === false && topGrant.allow === false,
+      `top player-frame allowfullscreen=${topGrant.fs} allow-fullscreen=${topGrant.allow}`
+    );
+  } catch (err) {
+    await failRow("walk chain scenario failed", err);
   }
 
   // ---- Scenario 5: switchboard (one placeholder, three SDK stubs, same video)

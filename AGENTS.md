@@ -94,7 +94,11 @@ iframes, same-origin and cross-origin:
   fullscreen provisions when an ancestor's handlers armed late; an
   ancestor's armed state is script-fact invisible to layout, so the
   announcement is the real reading (the deadline watchdog settles null for
-  bridgeless embeds). When nothing answers, the frame falls back to its own
+  bridgeless embeds). The bridge's returned teardown is deliberately never
+  consumed at its entry install — the same page-lifetime arrangement as the
+  kernel shell-ready handle: the bridge must stay armed across kernel boots
+  and bfcache restores, and a real unload disposes the realm with it. When
+  nothing answers, the frame falls back to its own
   context rather than losing resume.
 - Navigation: `pagehide` tears the kernel down unless `event.persisted`
   (bfcache keeps it); `pageshow`/`resume` (freeze recovery) re-arm it.

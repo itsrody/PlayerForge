@@ -73,6 +73,12 @@ export async function run() {
     // reading window.top is cross - exactly the bridge's designed case.
     session.registerFixture("/check/nested-mid", embedHostPage("/check", "pf nested mid"));
     session.registerFixture("/check/frames-nested", embedHostPage(`${session.crossBaseUrl}/check/nested-mid`, "pf nested host"));
+    // Walk topology: top -> SAME-origin mid -> cross-origin player. The mid
+    // being readable from the top is what lets the ctx route's isOwnFrame
+    // deep walk vouch a nested descendant directly - the /check/frames-nested
+    // chain (cross mid) deliberately cannot exercise that branch.
+    session.registerFixture("/check/frames-walk-mid", embedHostPage(`${session.crossBaseUrl}/sdk/plyr`, "pf walk mid"));
+    session.registerFixture("/check/frames-walk", embedHostPage("/check/frames-walk-mid", "pf walk host"));
     // Switchboard: one placeholder iframe whose doc swaps between the SDK
     // stub pages - each registry-adopted by its namespaced anchor classes.
     session.registerFixture("/check/switchboard", switchboardPage(`/sdk/plyr#${DEBUG_HASH_TAG}`));
