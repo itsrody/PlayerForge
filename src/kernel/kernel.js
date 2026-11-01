@@ -1,5 +1,6 @@
 import { logger, setDebugRuntime, postTask, Scope, runSteps, Fan } from "../shared/runtime.js";
-import { KEYS, watchStorageKey, invalidateConfigCache, getConfigValue, setConfigValue, gmRegisterMenu, gmUnregisterMenu } from "../shared/store.js";
+import { KEYS, watchStorageKey, gmSetValue, invalidateConfigCache, getConfigValue, setConfigValue, gmRegisterMenu, gmUnregisterMenu } from "../shared/store.js";
+import { getDomainKey } from "../shared/page.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, DEBUG_HASH_TAG, FRAMEWORK_TUNING } from "./contract.js";
 import { resolveAdoptionHome } from "./detection.js";
 import { forEachVideoInDocument, meetsMinSize, createLayoutGate, createOnScreenGate, isOnScreen, createDiscoveryTap } from "./discovery.js";
@@ -834,6 +835,18 @@ export class Kernel {
   }
 
   /**
+   * The frame-local kernel half of the diagnostics dump (installFrameDiagnostics
+   * composes the page half outside): kernel-owned state read synchronously at
+   * dump time - the one live shell's SDK name and the mid-boot latch.
+   */
+  diagnosticSnapshot() {
+    return {
+      shell: this.#registry.current?.sdk?.name ?? null,
+      booting: this.#booting != null
+    };
+  }
+
+  /**
    * The debug toggle (MenuCommands, same kernel reference as menuShellHost)
    * reports its flip so the watch latch tracks the fresh stored value - a
    * later foreign echo of this doc must read value-neutral and never
@@ -860,6 +873,53 @@ export class Kernel {
   }
 }
 
+/**
+ * The frame diagnostics: one console line per script realm, and the whole
+ * field-triage surface. It exists because the fs-ui field loop burned about
+ * ten console probes on one question - "which document is the player's
+ * state in?" - that this one menu tap answers for every realm at once, no
+ * devtools frame-context dance. logger.warn (not log) carries it: warn is
+ * not debug-gated, and the dump MUST land on a stock install without
+ * debug mode - that gate is the surface's reason to exist. Composition:
+ * page facts here, kernel facts through the same lazy resolver the menu
+ * commands ride (kernel boots after eval; a video-less host frame still
+ * dumps - "shell:null, videos:0" is itself the diagnosis).
+ */
+function dumpFrameState(resolveKernel) {
+  const videos = [];
+  forEachVideoInDocument((video) => {
+    const home = resolveAdoptionHome(video);
+    videos.push({
+      sdk: home?.sdk.name ?? null,
+      size: meetsMinSize(video),
+      screened: isOnScreen(video)
+    });
+  });
+  const snapshot = resolveKernel?.()?.diagnosticSnapshot?.() ?? null;
+  const record = {
+    realm: window.top === window ? "top" : "frame",
+    domain: getDomainKey(location.hostname),
+    fsEl: document.fullscreenElement?.tagName.toLowerCase() ?? null,
+    debug: logger.enabled,
+    videos,
+    shell: snapshot?.shell ?? null,
+    booting: snapshot?.booting === true
+  };
+  logger.warn("diag", JSON.stringify(record));
+}
+
+/**
+ * Install the diagnostics responder: the pf:diag echo listener, per realm.
+ * The watch contract filters own-write echoes, so the originating top frame
+ * dumps directly in its menu click and every OTHER instance of this script
+ * - another tab OR another frame, the same reach the settings bus already
+ * rides - answers on the echo. Page-lifetime install like the frame bridge:
+ * the returned stop is never consumed, and a real unload disposes with it.
+ */
+export function installFrameDiagnostics(resolveKernel = null) {
+  watchStorageKey(KEYS.diag, () => dumpFrameState(resolveKernel));
+}
+
 /** GM menu wiring, owned at the kernel layer instead of inside the Kernel so
  *  the commands exist from script eval - not just after a video is
  *  discovered. The debug toggle works fully without a kernel: it persists the
@@ -870,6 +930,7 @@ export class Kernel {
  *  previously returned handle so the manager updates the item in place. */
 class MenuCommands {
   #debugId = null;
+  #diagId = null;
   #filterId = null;
   #syncId = null;
   /** () -> kernel: the entry keeps the kernel reference for commands to
@@ -923,6 +984,18 @@ class MenuCommands {
 
   install() {
     this.#refreshDebug();
+    this.#diagId = gmRegisterMenu(
+      "\u{1F50D} Dump Frame State",
+      () => {
+        // The consumers are every instance of this script through the
+        // pf:diag echo; the watch filters own writes, so the originator
+        // reports itself here and the echo brings every other realm in -
+        // one click, one console line per frame.
+        gmSetValue(KEYS.diag, crypto.randomUUID());
+        dumpFrameState(this.#resolveKernel);
+      },
+      { title: "Print one state line per PlayerForge realm (frame) to the console" }
+    );
     this.#filterId = gmRegisterMenu(
       "\u{1FAA8} Reset Color Filter",
       () => this.#resetEvent("filterReset", "Color filter reset"),
@@ -934,7 +1007,7 @@ class MenuCommands {
       { title: "Restore the default subtitle sync offset" }
     );
     return () => {
-      for (const id of [this.#debugId, this.#filterId, this.#syncId]) {
+      for (const id of [this.#debugId, this.#diagId, this.#filterId, this.#syncId]) {
         if (id != null) {
           gmUnregisterMenu(id);
         }

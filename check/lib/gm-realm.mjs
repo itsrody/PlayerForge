@@ -260,4 +260,13 @@ export function installGMRealm({ version, grants, resources, storage, header }) 
     window.__pfConsoleLog.push(parts.map((p) => String(p?.message ?? p)).join(" ").slice(0, 160));
     origLog.apply(console, parts);
   };
+  // Warn rides a wider slice than log's chatter cap: the diagnostics dump
+  // (logger.warn on purpose - not debug-gated) is the row's record and its
+  // JSON must survive capture whole; debug chatter never rides this hook.
+  const origWarn = console.warn;
+  console.warn = (...parts) => {
+    if (window.__pfConsoleLog.length >= 80) window.__pfConsoleLog.shift();
+    window.__pfConsoleLog.push(parts.map((p) => String(p?.message ?? p)).join(" ").slice(0, 400));
+    origWarn.apply(console, parts);
+  };
 }

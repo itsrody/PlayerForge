@@ -1,6 +1,6 @@
 {
   "name": "playerforge",
-  "version": "1.2.1",
+  "version": "1.2.3",
   "description": "native Firefox 159+ (desktop and Android) / Violentmonkey 2.50+ (MV2) exclusive HTML5 video player enhancer with gestures, hotkeys, progress resume, subtitles, and an extensible plugin system",
   "license": "MIT",
   "type": "module",

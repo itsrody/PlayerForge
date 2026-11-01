@@ -313,9 +313,9 @@ export async function run({ session, boot, header, version: bundleVersion }) {
       done({
         ok: (stats1.GM_registerMenuCommand ?? 0) - (stats0.GM_registerMenuCommand ?? 0) === 1
           && (stats1.GM_unregisterMenuCommand ?? 0) - (stats0.GM_unregisterMenuCommand ?? 0) === 0
-          // The three live commands keep their handles across the update -
+          // The four live commands keep their handles across the update -
           // an in-place edit, never a create-churn cycle.
-          && ids0.length === 3 && ids1.length === 3 && ids0.every((v, i) => ids1[i] === v)
+          && ids0.length === 4 && ids1.length === 4 && ids0.every((v, i) => ids1[i] === v)
           && debugKey1 != null && debugKey1 !== debugKey
           && keys1.some((k) => k.includes("Color"))
           && keys1.some((k) => k.includes("Subtitle")),
@@ -327,6 +327,39 @@ export async function run({ session, boot, header, version: bundleVersion }) {
     "menu toggle updates in place (stable id, no unregister churn)",
     menuCensus.ok === true,
     menuCensus.why ?? null
+  );
+
+  // 8.5 - the frame-diagnostics dump: one menu tap answers with the realm's
+  // own state line through logger.warn (not debug-gated - that gate is the
+  // surface's premise). The single-realm parse proves identity, the live
+  // registry, and the per-video SDK attribution; the cross-frame echo reach
+  // (the actual field question) has its row in the frames case.
+  const diagDump = await session.eval(function main() {
+    const keys = Object.keys(window.__pfMenu ?? {}).filter((k) => k.startsWith("menu:"));
+    const diagKey = keys.find((k) => k.includes("Dump"));
+    if (!diagKey) {
+      return { ok: false, why: "diag command missing; menu keys=" + keys.join("|") };
+    }
+    window.__pfConsoleLog.length = 0;
+    (window.__pfMenu[diagKey])();
+    const lines = window.__pfConsoleLog.filter((l) => l.includes("[diag]"));
+    const record = lines.map((l) => l.slice(l.indexOf("{"))).find(Boolean) ?? "";
+    let parsed = null;
+    try { parsed = JSON.parse(record); } catch { parsed = null; }
+    return {
+      ok: parsed != null
+        && parsed.realm === "top"
+        && parsed.shell === "Plyr"
+        && Array.isArray(parsed.videos)
+        && parsed.videos.some((v) => v.sdk === "Plyr"),
+      why: `lines=${lines.length} record=${record.slice(0, 120)}`,
+      line: lines[0] ?? null
+    };
+  });
+  status(
+    "diagnostics dump: menu tap prints the realm's state line",
+    diagDump.ok === true,
+    diagDump.ok ? null : `${diagDump.why} line=${diagDump.line}`
   );
 
   // 9 - session harvest seeds the reboot realm: the marker written here is

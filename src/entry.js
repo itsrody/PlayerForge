@@ -1,7 +1,7 @@
 import { Kernel } from "./kernel/kernel.js";
 import { DEBUG_HASH_TAG } from "./kernel/contract.js";
 import { Shell } from "./shell/shell.js";
-import { installMenuCommands } from "./kernel/kernel.js";
+import { installMenuCommands, installFrameDiagnostics } from "./kernel/kernel.js";
 import { installContextBridge, requestFullscreenProvision } from "./shared/page.js";
 import { installVideoProbe } from "./kernel/discovery.js";
 import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/discovery.js";
@@ -101,6 +101,12 @@ function bootstrap() {
   if (window.top === window) {
     installMenuCommands(() => menuKernelRef.current);
   }
+  // The diagnostics responder is EVERY frame's (the command is top-frame
+  // only, the echo answer is realm-wide - each script instance reports its
+  // own document, which is the whole point of the surface). Same kernel
+  // resolver as the menu commands: the dump reads identity through the
+  // entry's reference at dump time, not at install.
+  installFrameDiagnostics(() => menuKernelRef.current);
   const boot = () => {
     if (window.PlayerForge) {
       logger.warn("entry", "Kernel already initialized");

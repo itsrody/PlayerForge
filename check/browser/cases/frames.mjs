@@ -485,5 +485,54 @@ export async function run({ session, baseUrl, crossBaseUrl, bundle, boot, header
     JSON.stringify(latencies)
   );
 
+  // ---- Diagnostics dump reach: the field-triage surface's own proof. The
+  // top's menu tap answers top directly (own write echo-filtered — the gm
+  // case parses the same line shape), and the frame realm's responder is
+  // answered the way every "foreign instance reaches a realm" row in this
+  // case is — an IN-FRAME remote write through the audit surface. Each
+  // harness realm is an echo island by construction (copy-seeded backing),
+  // so real cross-realm delivery stays manager-truth: the premise the
+  // settings live-reload row rides too. The parsed realm flag is the row;
+  // SDK-agnostic since the switchboard's last variant varies.
+  try {
+    const cleared = await session.eval(function main() {
+      if (window.__pfConsoleLog) {
+        window.__pfConsoleLog.length = 0;
+      }
+      return Object.keys(window.__pfMenu ?? {}).filter((k) => k.includes("Dump")).length;
+    });
+    const frameWired = await session.evalInFrame([0], function main() {
+      if (window.__pfConsoleLog) {
+        window.__pfConsoleLog.length = 0;
+      }
+      return window.__gmTest?.remoteWrite != null;
+    });
+    if (cleared === 1 && frameWired === true) {
+      await session.eval(function main() {
+        (window.__pfMenu[Object.keys(window.__pfMenu ?? {}).filter((k) => k.includes("Dump"))[0]])();
+      });
+      await session.evalInFrame([0], function main() {
+        window.__gmTest.remoteWrite("pf:diag", "probe-uuid-" + String(Math.random()).slice(2));
+      });
+      await sleep(400);
+      const topLine = await session.eval(function main() {
+        return (window.__pfConsoleLog ?? []).find((l) => l.includes("[diag]")) ?? null;
+      });
+      const frameLine = await session.evalInFrame([0], function main() {
+        return (window.__pfConsoleLog ?? []).find((l) => l.includes("[diag]")) ?? null;
+      });
+      askRows(
+        "diagnostics dump: top answers its own menu tap; the frame realm answers a foreign pf:diag write",
+        typeof topLine === "string" && topLine.includes('"realm":"top"')
+          && typeof frameLine === "string" && frameLine.includes('"realm":"frame"'),
+        `top=${topLine} frame=${frameLine}`
+      );
+    } else {
+      askRows("diagnostics dump: menu tap AND frame responder reachable", false, `dump commands=${cleared} frameWired=${frameWired}`);
+    }
+  } catch (err) {
+    askRows("diagnostics dump reach row failed", false, String(err?.message ?? err).slice(0, 120));
+  }
+
   return rows;
 }

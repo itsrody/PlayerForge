@@ -16,7 +16,15 @@ import { logger } from "./runtime.js";
 /** The whole GM storage namespace: every root key lives here. */
 export const KEYS = {
   configs: "pf:configs",
-  resume: "pf:resume"
+  resume: "pf:resume",
+  // The frame-diagnostics trigger - NOT a persisted state. A menu command
+  // writes it; every realm's echo listener answers with its own one-line
+  // state dump and that is the whole protocol. Values are fresh randomUUIDs
+  // per tap (a wall-clock stamp would add a Date.now read the census would
+  // have to carry for a value nothing ever reads), so a no-value-read key
+  // accrues no cleanup deadline - a reboot finds nothing to act on by
+  // construction and stale residue is inert.
+  diag: "pf:diag"
 };
 
 function gmGetValue(key, fallback) {

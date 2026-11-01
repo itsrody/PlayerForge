@@ -259,8 +259,12 @@ iframes, same-origin and cross-origin:
   route change with document unload is the kernel's pagehide + fresh boot.
   Reintroducing it needs new scope direction: a same-document URL change is
   now a blind spot, accepted.
-- **store.js** — the storage data plane: `KEYS` = two roots (`pf:configs`,
-  `pf:resume`), `gmSetValue`/`loadJsonObject`, and `watchStorageKey(key,
+- **store.js** — the storage data plane: `KEYS` = three roots (`pf:configs`,
+  `pf:resume`, and the transient `pf:diag` — NOT a state; each write is a
+  one-shot "dump now" gesture consumed by its own echo, `randomUUID` values
+  mean no read ever re-acts and a stale residue is inert, so it owes no
+  cleanup deadline),
+  `gmSetValue`/`loadJsonObject`, and `watchStorageKey(key,
   handler)` — the cross-instance subscription that filters own-write echoes
   (`remote === false`) in exactly one place. The echo contract is VM-truth
   (read from its released GM-values source): own-instance writes flag false,
@@ -323,10 +327,23 @@ iframes, same-origin and cross-origin:
   (one shell per session; a displaced shell is **destroyed**, never
   orphaned; the adoption guard makes the displaced-destroy a backstop),
   `MenuCommands` (debug toggle + the two one-shot reset
-  commands, installed from script eval and resolving their shell host
-  through the entry's kernel reference — works even kernel-less; menus
+  commands + the frame-state diagnostics dump, installed from script eval
+  and resolving their shell host through the entry's kernel reference —
+  works even kernel-less; menus
   are top-frame only, and `#armDebugWatch` rides the storage echo to
   propagate the debug flip into sibling frames mid-flight),
+  `installFrameDiagnostics` + `dumpFrameState` — the one-tap field triage:
+  the dump command writes `pf:diag`, the top realm answers by direct call
+  (its own write is echo-filtered), and every script realm
+  — another tab or another frame — answers through the echo with one
+  `logger.warn` state line (warn rides the NOT-debug-gated belt on purpose;
+  the dump must land on a stock install — that gate is the surface's
+  premise: it exists because the fs-ui field loop burned ten console probes
+  answering "which document holds the player's state"). Page-lifetime
+  install like the frame bridge; per-realm record carries realm/domain,
+  videos with per-video SDK identity + min-size + on-screen, the live
+  shell's SDK name, the mid-boot latch, fullscreenElement, and the debug
+  flag),
   pagehide teardown, freeze/pageshow recovery, per-boot
   manage-ability downgrades, and the universal-container-identity seam on
   `RemovalWatch`'s re-parent branch: container identity is a shell-lifetime
@@ -873,7 +890,12 @@ stop at the first failure:
   write `localhost`), fullscreen provisioning on every ancestor, per-variant
   single-shell, a 6s attach-latency budget row, and the VM echo reach: a
   foreign settings write live-reloads the running frame's kernel and the
-  event-time hotkeys gate sees it (blocked mid-flight, then re-armed).
+  event-time hotkeys gate sees it (blocked mid-flight, then re-armed), and
+  the diagnostics reach: the top's menu tap answers top (own write
+  echo-filtered), and the frame realm's responder answers an IN-FRAME
+  foreign `pf:diag` write through the audit surface — cross-realm delivery
+  itself stays manager-truth (every harness realm is an echo island;
+  the same premise the settings live-reload row rides).
 - **Cases (13):** `boot` (install contract, positive/negative discovery),
   `discovery` (min size, no-anchor, tiny-video),
   `fan` (the fan-out owner unit, imported into the page realm: positional
@@ -895,7 +917,11 @@ stop at the first failure:
   configs write flips the running kernel mid-flight (mirror line + real
   debug chatter), the reverse flip is proven silent, and a value-neutral
   rewrite never re-mirrors, xhr shape + `ontimeout` on a
-  held route, pfStyle resource warmth, menu-handle census, harvest-seeded
+  held route, pfStyle resource warmth, menu-handle census (four live
+  commands: debug toggle, the frame-state dump, the two resets), the
+  diagnostics dump row (one menu tap prints the realm's own state line
+  through the warn plane — identity, live registry, per-video attribution
+  parsed whole), harvest-seeded
   reboot), `media` (stream, gesture events, kernel re-anchoring onto a
   replacement video, the containment re-wrap (a second SDK container — the
   destroy-readopt seam, one shell ends in the new home), the one-main
