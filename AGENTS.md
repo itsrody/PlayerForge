@@ -896,7 +896,7 @@ stop at the first failure:
   foreign `pf:diag` write through the audit surface — cross-realm delivery
   itself stays manager-truth (every harness realm is an echo island;
   the same premise the settings live-reload row rides).
-- **Cases (13):** `boot` (install contract, positive/negative discovery),
+- **Cases (14):** `boot` (install contract, positive/negative discovery),
   `discovery` (min size, no-anchor, tiny-video),
   `fan` (the fan-out owner unit, imported into the page realm: positional
   fan, callable handle, native signal teardown, aborted-signal no-op,
@@ -912,6 +912,17 @@ stop at the first failure:
   hops, and a record without a stub builder fails its row),
   `frames` (§ above),
   `gestures` (skip/mute/volume/panel/PiP/scrub with real driver input),
+  `hotpaths` (the hot-path budgets: the per-frame/echo loops the tree rides,
+  benchmarked in the REAL engine as regression tripwires — fan dispatch at
+  100k emissions (10-subscriber echo-audience shape and the zero-subscriber
+  warm read; the fresh-CustomEvent ~2.9µs/emit re-measured and the pooling
+  decline re-recorded), the ingest engine's full 1.1MB / ~19k-cue parse and
+  its offset reparse (double-digit ms), and 250k HUD formatter calls —
+  every budget a multi-x multiplier over the measured baseline, so the
+  tripwire catches shape regressions (an accidental allocation loop, a
+  megamorphic rewrite) and never CI jitter; nothing earned an adoption —
+  the loops are already engine-tight and the measured verdicts are the
+  batch's record),
   `gm` (info mirror, own-echo exactly-once shape, remote-write cross-tab
   adoption surviving a seeked-flush save, the debug mirror: a foreign
   configs write flips the running kernel mid-flight (mirror line + real
