@@ -27,7 +27,14 @@ import { sleep } from "../../lib/driver.mjs";
  * pins the ingest-ownership law on the floor: the track never enters the
  * video's native track list (textTracks.length is 0 while a cue slot is
  * visible), so a hostile host has nothing of ours to list, restyle, or
- * mode-flip - the surface the feature deliberately leaves it.
+ * mode-flip - the surface the feature deliberately leaves it. The last two
+ * rows machine the surfaces the original case never touched: the panel's
+ * V-stepper commit re-anchors the running slot this frame (the no-arg
+ * render birth defect never landed a placement override pre-fix), and a
+ * track over the retired worker's threshold (512KiB) drains through the
+ * cooperative parse - the forgevtt async arm, now THE ingest backend since
+ * the dedicated-Worker offloader retired - and lands its overloaded cue
+ * through the real panel drop path.
  */
 
 export async function run({ session, boot }) {
@@ -238,7 +245,93 @@ export async function run({ session, boot }) {
   rows.push({
     name: "own sampler drops the cue on the exit boundary",
     status: exited ? "pass" : "fail",
-    note: exited ? "mirror cue hidden by 4.8" : "mirror cue outlived its window",
+    note: exited ? "mirror cue hidden by 4.8" : "mirror cue outlived its window"
+  });
+
+  // The placement override: the panel's V stepper commits a global line
+  // override (85 -> 90; step 5), and the running slot must re-anchor THIS
+  // FRAME - setPlacement re-renders the last active set instead of waiting
+  // for the next cue change. Pre-fix the commit path died inside #render
+  // (no-arg call, undefined.length) and the override never landed. The
+  // widened+scrolled posture from the earlier rows holds the numbers:
+  // picture 1100x618.75 at y=90.625 -> top 90.625 + 0.9*618.75 = 647.5.
+  // The stepper's text field (no defer) commits live per input event -
+  // typing the value is a real user path and avoids synthesizing pointer
+  // capture. Expected top: 647.5px.
+  const placement = await session.evalAsync(function main(done) {
+    const shadow = document.querySelector(".pf-shell")?.shadowRoot;
+    const tab = shadow?.querySelector('.pf-panel-tab[data-title="Subtitles"]');
+    const section = tab && shadow.getElementById(tab.getAttribute("aria-controls"));
+    const cell = section && [...section.querySelectorAll(".pf-panel-cell")]
+      .find((c) => c.querySelector(".pf-panel-label")?.textContent === "V");
+    const input = cell?.querySelector(".pf-stepper-input");
+    if (!input) {
+      done({ ok: false, top: null, why: "no V stepper input found" });
+      return;
+    }
+    input.value = "90";
+    input.dispatchEvent(new Event("input", { bubbles: false }));
+    setTimeout(() => {
+      const slot = document.querySelector(".pf-shell")?.shadowRoot
+        ?.querySelector(".pf-cue:not([hidden])");
+      const top = slot ? parseFloat(getComputedStyle(slot).top) : null;
+      done({
+        ok: top !== null && Math.abs(top - 647.5) < 1.5,
+        top,
+        why: top === null ? "no visible slot after override" : `top=${top} (expected 647.5)`
+      });
+    }, 300);
+  });
+  rows.push({
+    name: "V-stepper commit re-anchors the running slot this frame",
+    status: placement.ok === true ? "pass" : "fail",
+    note: placement.why ?? null,
+    ms: null
+  });
+
+  // The scale arm's proof, post-retirement: a track over the threshold the
+  // worker once gated (512KiB of text - real .srt/.vtt files are tens of KB)
+  // drains through the cooperative parse (forgevtt's 50ms/yield loop, the
+  // one remaining backend) and lands its overloaded cue through the REAL
+  // panel drop path. The sought cue is 4.5-5.5 inside the second drop's
+  // track, whose first member renders slot 0.
+  const scaleRide = await session.evalAsync(function main(done) {
+    let text = "";
+    let i = 1;
+    while (text.length < 560000) {
+      text += i + "\n00:00:04,500 --> 00:00:05,500\nPF scale cue " + i + "\n\n";
+      i++;
+    }
+    const shadow = document.querySelector(".pf-shell")?.shadowRoot;
+    const tab = shadow?.querySelector('.pf-panel-tab[data-title="Subtitles"]');
+    const section = tab && shadow.getElementById(tab.getAttribute("aria-controls"));
+    if (!section) {
+      done({ ok: false, why: "no Subtitles section to drop into" });
+      return;
+    }
+    const dt = new DataTransfer();
+    dt.items.add(new File([text], "big.srt", { type: "text/plain" }));
+    section.dispatchEvent(new DragEvent("dragenter", { dataTransfer: dt }));
+    section.dispatchEvent(new DragEvent("drop", { dataTransfer: dt }));
+    const deadline = Date.now() + 9000;
+    const poll = setInterval(() => {
+      const slot = document.querySelector(".pf-shell")?.shadowRoot
+        ?.querySelector(".pf-cue:not([hidden])");
+      const landed = slot && slot.textContent === "PF scale cue 1";
+      if (landed || Date.now() > deadline) {
+        clearInterval(poll);
+        done({
+          ok: landed === true,
+          why: landed ? "over-threshold track drained cooperative and landed slot 0"
+            : "no scale-cue slot after 9s"
+        });
+      }
+    }, 120);
+  });
+  rows.push({
+    name: "over-threshold ingest drains the cooperative parse and lands its cue",
+    status: scaleRide.ok === true ? "pass" : "fail",
+    note: scaleRide.why ?? null,
     ms: null
   });
 

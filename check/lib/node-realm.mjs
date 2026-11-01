@@ -3,7 +3,6 @@
  *
  * A handful of src modules touch realm globals at import time by design:
  * - GM_getValue (config bootstrap reads through the store)
- * - self (the VTT transform) - a worker realm global
  * - ./styles.css - esbuild's userscript transform is what makes that import
  *   meaningful; plain Node needs the loader hook this prelude registers.
  *
@@ -32,7 +31,6 @@ registerHooks({
   }
 });
 
-globalThis.self ??= globalThis;
 globalThis.GM_info ??= { script: { version: "0.0.0-check" }, scriptHandler: "check", version: "0.0.0" };
 globalThis.GM_getValue ??= (key, fallback = null) => fallback;
 

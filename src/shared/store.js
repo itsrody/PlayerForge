@@ -111,8 +111,7 @@ export function gmGetResourceText(name) {
  * watchStorageKey is also VM-sourced: own-instance writes awake the
  * writer's hooks with remote=false; every foreign instance - another tab
  * or another frame of this tab - hears the UpdatedValues broadcast with
- * remote=true. Page CSP is never relaxed - workerCapable() is the runtime
- * gate for blob-worker spawn - and fetch-mode request handling is
+ * remote=true. Page CSP is never relaxed, and fetch-mode request handling is
  * invisible to us behind the wrapper's onload/ontimeout contract.
  */
 /**

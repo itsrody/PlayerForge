@@ -1,15 +1,22 @@
 /**
- * The PlayerForge subtitles feature, main-thread side: the ingest transport
- * (threshold-gated Worker offloader), the track renderer (ForgeTrack), and
- * the shell panel section that drives them (SubtitlesSection) - the three
- * layers that only ever run on the main thread, in dependency order.
+ * The PlayerForge subtitles feature, main-thread side: the track renderer
+ * (ForgeTrack) and the shell panel section that drives it (SubtitlesSection)
+ * - the feature layers over the parse engine and the ingest facade, in
+ * dependency order.
  *
- * Parsing itself is forgevtt.js: the engine both transport paths share and
- * the only module the worker chunk (vtt-worker.js) bundles straight in, so
- * the two paths can never drift. This file stays out of the worker build -
- * the chunk imports the engine, never the feature.
+ * Parsing itself is forgevtt.js. Its async variant IS the ingest arm: the
+ * 50ms block budget hands the thread back through scheduler.yield, so even a
+ * multi-megabyte track drains without blocking video playback or paint. The
+ * once-ridden dedicated Worker offloader retired with this batch's row cache:
+ * its 512KiB floor gate fired virtually never (real .srt/.vtt files are tens
+ * of KB, and sync offsets + the parse memo make the rest of the repo
+ * reparse-free), its own check row could not produce a spawn in the real
+ * bundle, and its in-band fallback rendered byte-identical cues - the
+ * cooperative yield loop is the same work, proven and natively scoped. The
+ * native `<track>` parse stays ledger-rejected on ingest ownership (xhr
+ * bypass + host custody), so there is no third arm.
  */
-import { parseSubtitlesAsync as parseInBand, srtToVtt, ensureVttHeader } from "./forgevtt.js";
+import { parseSubtitlesAsync, srtToVtt, ensureVttHeader } from "./forgevtt.js";
 import { logger, Scope, debounce, Fan } from "../../shared/runtime.js";
 import { DOMManager } from "../../shared/dom.js";
 import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/store.js";
@@ -17,265 +24,6 @@ import { TUNING, clamp, fmtPercent, fmtEm, fmtPercentOrOff, signedSeconds } from
 import { GESTURE_EVENTS } from "../../kernel/contract.js";
 import { SETTING_KEYS } from "../chrome/config.js";
 import { flashElement, el } from "../chrome/ui.js";
-
-/* - Ingest transport - */
-
-/**
- * Threshold-gated subtitle parse offloader.
- *
- * Large tracks parse on a long-lived dedicated Worker: spawn cost and engine
- * compile are paid once per page, concurrent ingests queue natively in the
- * worker's message loop (request ids settle them independently - no
- * single-flight flag, no per-load spawn/terminate dance), and both directions
- * move bytes the native way: the UTF-8 payload is transferred (TextEncoder +
- * transfer list, no string structured-clone) and the cues return as a packed
- * frame - two transferable Float64Arrays plus two cloned string arrays - which
- * measures ~3x cheaper than cloning the cue object graph for a 5000-cue
- * track. Small tracks stay in-band: for them the round trip costs more than
- * the parse itself.
- *
- * Every failure mode - no Worker, page CSP blocking blob workers, a crashed
- * worker, a wedged worker, teardown mid-await - degrades to the cooperative
- * in-band parse (forgevtt.parseSubtitlesAsync), so the worker is strictly an
- * optimization and the two paths produce the same cues for the same text:
- * they share the same engine (the byte transport only normalizes unpaired
- * surrogates, which the string sink ForgeTrack's build pass anyway avoids).
- * A CSP-blocked page latches out of the worker path - retrying would only
- * re-pay the failure - while a crashed or hung worker is torn down and the
- * next ingest respawns fresh.
- *
- * The worker chunk is injected at build time by esbuild (define
- * __VTT_WORKER_SOURCE__). Keeping this module loadable by the Node test
- * harness is worth one trade-off: esbuild substitutes the identifier into the
- * typeof guard too, so the chunk's string literal appears in the bundle once
- * (the constant-folded guard discards the null arm) - never worth splitting
- * the parser for.
- */
-
-const BUILTIN_WORKER_SOURCE =
-  typeof __VTT_WORKER_SOURCE__ === "string" ? __VTT_WORKER_SOURCE__ : null;
-
-/**
- * The worker chunk either comes from the build-time define (production bundle)
- * or, under the test harness, from an injected global - both resolve to the
- * same esbuild output of vtt-worker.js, so the executed engine is the real one.
- * Reading it dynamically (not at import) keeps the module Node-importable and
- * lets tests arm the worker path after the static import.
- */
-function workerSource() {
-  if (BUILTIN_WORKER_SOURCE !== null) {
-    return BUILTIN_WORKER_SOURCE;
-  }
-  return typeof globalThis.__VTT_WORKER_SOURCE__ === "string"
-    ? globalThis.__VTT_WORKER_SOURCE__
-    : null;
-}
-
-/** Below this, the cooperative in-band path is strictly cheaper than a spawn. */
-const WORKER_MIN_CHARS = 1 << 19;
-/** Failsafe: no sane VTT ingest takes this long. */
-const WORKER_TIMEOUT_MS = 60_000;
-
-const ENCODER = new TextEncoder();
-
-/**
- * The worker transport - one owner of the resident worker's whole lifecycle.
- * The state it needs used to be five loose module variables (worker, url,
- * CSP latch, request sequence, in-flight map); they are private fields here
- * so that spawn/latch/watchdog/settle is one object's story instead of a
- * module's. Parse eligibility and the cooperative in-band fallback keep the
- * exact contracts; only the ownership moved.
- */
-class WorkerTransport {
-  #worker = null;
-  #workerUrl = null;
-  /** CSP-blocked pages never gain a Worker - latch so each ingest doesn't re-pay the failed spawn. */
-  #workerBroken = false;
-  #requestSeq = 0;
-  /**
-   * In-flight requests by id. The worker processes messages in order, so this
-   * is the whole concurrency story: no busy flag, no queue of our own - a
-   * second large ingest waits on the worker's loop instead of degrading to
-   * the main thread.
-   * Each entry: { resolve, fallback } - fallback re-runs the cooperative
-   * in-band parse with this request's own text.
-   */
-  #pending = new Map();
-
-  /**
-   * Whether this environment could ride a Worker. Only the source matters:
-   * Worker/Blob/URL members are unconditional on the 159 page and worker
-   * realms (and the Node import smoke never calls this), while the genuine
-   * refusal - a worker-src CSP blocking blob Workers - stages at spawn in
-   * #ensureWorker's try/catch latch. The former layered typeof census
-   * belonged to the removed element-capability family.
-   */
-  available() {
-    return workerSource() !== null;
-  }
-
-  /** Spawn the resident worker once; null when unavailable or CSP-latched. */
-  #ensureWorker() {
-    if (this.#worker !== null) {
-      return this.#worker;
-    }
-    if (this.#workerBroken) {
-      return null;
-    }
-    let url = null;
-    try {
-      url = globalThis.URL.createObjectURL(
-        new globalThis.Blob([workerSource()], { type: "text/javascript" })
-      );
-      // Pages with a worker-src CSP block blob Workers by throwing here; the
-      // blob URL must be revoked before the synchronous throw escapes, or
-      // every blocked load would leak one URL.
-      const worker = new globalThis.Worker(url, { name: "playerforge-vtt" });
-      this.#worker = worker;
-      worker.onmessage = (event) => this.#onWorkerMessage(event);
-      worker.onerror = () => this.#killWorker();
-      this.#workerUrl = url;
-      return worker;
-    } catch (err) {
-      if (url !== null) {
-        globalThis.URL.revokeObjectURL(url);
-      }
-      this.#workerBroken = true;
-      logger.warn("subtitles", "Blob worker blocked (page CSP?), staying in-band", err);
-      return null;
-    }
-  }
-
-  /**
-   * Tear down the resident worker and settle every in-flight request through
-   * its in-band fallback. Called on a worker crash or when a request's
-   * watchdog fires (a hung worker would otherwise wedge every later ingest);
-   * the next eligible parse respawns fresh.
-   */
-  #killWorker() {
-    const inflight = [...this.#pending.values()];
-    this.#pending.clear();
-    const doomed = this.#worker;
-    const doomedUrl = this.#workerUrl;
-    this.#worker = null;
-    this.#workerUrl = null;
-    if (doomed !== null) {
-      doomed.onmessage = null;
-      doomed.onerror = null;
-      doomed.terminate();
-      if (doomedUrl !== null) {
-        globalThis.URL.revokeObjectURL(doomedUrl);
-      }
-    }
-    for (const entry of inflight) {
-      entry.fallback();
-    }
-  }
-
-  /** Rebuild cue objects from the worker's packed frame (engine field order). */
-  #unpackCues(data) {
-    const texts = data.texts;
-    const n = texts.length;
-    const times = data.times;
-    const nums = data.nums;
-    const aligns = data.aligns;
-    const cues = new Array(n);
-    for (let i = 0; i < n; i++) {
-      const j = i * 2;
-      cues[i] = {
-        start: times[j],
-        end: times[j + 1],
-        text: texts[i],
-        line: nums[j],
-        position: nums[j + 1],
-        align: aligns[i]
-      };
-    }
-    return cues;
-  }
-
-  #onWorkerMessage(event) {
-    const data = event.data ?? {};
-    if (data.pfWorker !== 1) {
-      return;
-    }
-    const entry = this.#pending.get(data.id);
-    if (entry === undefined) {
-      // Already settled (watchdog/crash) or a foreign message - never let a
-      // stale reply resolve a request that already fell back.
-      return;
-    }
-    this.#pending.delete(data.id);
-    if (data.error !== undefined || !(data.times instanceof Float64Array)) {
-      entry.fallback();
-      return;
-    }
-    entry.resolve(this.#unpackCues(data));
-  }
-
-  #runInWorker(worker, text) {
-    const id = ++this.#requestSeq;
-    const { promise, resolve } = Promise.withResolvers();
-    this.#pending.set(id, {
-      resolve,
-      fallback: () => {
-        parseInBand(text).then(resolve);
-      }
-    });
-    // Failsafe for a wedged worker: drop it (settling every in-flight
-    // request in-band) so one hang can't stack up behind it. The listener
-    // becomes a no-op once the request settles any other way.
-    AbortSignal.timeout(WORKER_TIMEOUT_MS).addEventListener(
-      "abort",
-      () => {
-        if (this.#pending.has(id)) {
-          this.#killWorker();
-        }
-      },
-      { once: true }
-    );
-    try {
-      const bytes = ENCODER.encode(text);
-      worker.postMessage({ pfWorker: 1, id, bytes }, [bytes.buffer]);
-    } catch (err) {
-      const entry = this.#pending.get(id);
-      if (entry !== undefined) {
-        this.#pending.delete(id);
-        entry.fallback();
-      }
-      logger.warn("subtitles", "Worker postMessage failed, falling back in-band", err);
-    }
-    return promise;
-  }
-
-  /**
-   * Cooperative subtitle parse, offloaded to the dedicated Worker only when
-   * the track is large enough to make the round trip worthwhile and a
-   * Worker is available. `throughWorker` is a test/tune knob that bypasses
-   * the size gate; production callers never pass it.
-   */
-  parse(text, offset = 0, throughWorker = false) {
-    const eligible =
-      offset === 0 &&
-      this.available() &&
-      (throughWorker || text.length >= WORKER_MIN_CHARS);
-    if (!eligible) {
-      return parseInBand(text, offset);
-    }
-    const worker = this.#ensureWorker();
-    if (worker === null) {
-      return parseInBand(text, offset);
-    }
-    return this.#runInWorker(worker, text);
-  }
-}
-
-const transport = new WorkerTransport();
-
-/** Cooperative parse - the façade over the transport's worker offload. */
-export function parseSubtitlesAsync(text, offset = 0, throughWorker = false) {
-  return transport.parse(text, offset, throughWorker);
-}
 
 /* - Track renderer - */
 /* Tuning rides the shared TUNING table (forge-style aliases); the local
@@ -359,9 +107,8 @@ function memoizedParse(text) {
 }
 
 /**
- * Shift a base cue time by a sync offset, clamped at t=0 - the exact time the
- * offsetCues() pass used to bake into a fresh copy of the cue list. Negative
- * or past-the-origin times collapse to 0, so a cue wholly before t=0 becomes a
+ * Shift a base cue time by a sync offset, clamped at t=0. Negative or
+ * past-the-origin times collapse to 0, so a cue wholly before t=0 becomes a
  * zero-length cue at 0 (never active) instead of being dropped.
  */
 function shiftTime(time, offset) {
@@ -900,7 +647,13 @@ export class ForgeTrack {
     }
     this.#lineOverride = line;
     this.#positionOverride = position;
-    this.#render();
+    // Re-render the LAST ACTIVE SET in place: the pooled list still holds
+    // what the previous sample painted, so the override applies to the live
+    // slots this frame instead of waiting for the next cue change. (The
+    // argument-less call this once kept threw inside #render - a birth defect
+    // the placement rows never machined; the pooled set is the render's real
+    // input, the same handle #schedule hands it every sampled walk.)
+    this.#render(this.#activePool);
   }
 
   destroy() {

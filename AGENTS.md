@@ -25,7 +25,7 @@ both platforms:
   excluded in the header (YouTube, Vimeo, Netflix, streams, socials…), and
   `entry.js` keeps a runtime skip list above that.
 
-**Repo shape (24 source modules, ~15k LOC):**
+**Repo shape (23 source modules, ~15k LOC):**
 
 ```
 src/
@@ -33,10 +33,10 @@ src/
   kernel/  (4)        contract, detection, discovery, kernel orchestrator
   shared/  (5)        core, runtime, dom, page, store — the data planes
   shell/   (14)       shell, media, resume, filter, forge+actions,
-                      subtitles(3), chrome(5 + styles.css)
+                      subtitles(2), chrome(5 + styles.css)
 check/                the one testing tool (see §7)
 dist/                 generated, not the review target
-esbuild.config.mjs    single build: IIFE userscript + css resource + worker chunk
+esbuild.config.mjs    single build: IIFE userscript + css resource
 ```
 
 **Shipping artifact** (`dist/playerforge.user.js`, ~165 KB one IIFE +
@@ -430,12 +430,17 @@ iframes, same-origin and cross-origin:
   `scale(s)` — pinch-to-fill's transform, released on pinch-in or fullscreen
   exit) — the one class allowed to write the video transform, exposed on
   the shell as `shell.view`.
-- **subtitles/** — `forgevtt.js` = the parse engine (the module the worker
-  chunk bundles in, which is what guarantees the worker can never drift from
-  the main-thread parser; ~.srt→WEBVTT normalizing), `vtt-worker.js` — a
-  standalone esbuild chunk injected as `__VTT_WORKER_SOURCE__` blob, CSP-gated
-  with in-band fallback (`WorkerTransport` owns spawn/sequence/watchdog as one
-  class), `subtitles.js` — the main-thread surface: eager `SubtitleSession`
+- **subtitles/** — `forgevtt.js` = the parse engine (~.srt→WEBVTT normalizing)
+  whose async variant IS the ingest arm — a 50ms block budget hands the
+  thread back through scheduler.yield, so even a multi-megabyte track drains
+  without stalling playback or paint (the dedicated-Worker offloader retired
+  with the subtitles A→Z batch: its 512KiB floor gate fired virtually never
+  — real .srt/.vtt files are tens of KB and offsets/memo reparse nothing —
+  its one real-floor row could not produce a spawn in the shipped bundle,
+  and the in-band fallback rendered byte-identical cues; the native `<track>`
+  parse stays ledger-rejected on ingest ownership, so the cooperative arm
+  is the whole decision space), `subtitles.js` — the main-thread surface:
+  eager `SubtitleSession`
   (ForgeTrack renderer 8 concurrent cue slots, cue scheduling is OURS — no
   native TextTrack anywhere on the path: the file never enters the video's
   track list, so a host can never list/restyle/mode-flip our captions;
@@ -531,7 +536,7 @@ churn was import-paths only:
 `ContextPipe`, `DebugRuntime`, `FullscreenProvisioner`,
 `PresenceGate`, `DiscoveryTap`, `RemovalWatch`, `ShellSlot` (state kept as a
 class because its displacement/`onEmpty` contract is unit-pinned),
-`WorkerTransport`, `ShellStyle`, `HoldRepeater`, `MediaControls`,
+`ShellStyle`, `HoldRepeater`, `MediaControls`,
 `MediaSessionOwner`, `TransformEase`, `ForgeRegistry`/`GestureChannel`,
 `ConfigStore`, `VideoProbe`, `DomSettleWatch`, `MenuCommands`, plus the
 DomWatch/FsGate/Settings/SdkMatcher/panel-section family and — in the input
@@ -546,8 +551,7 @@ emulation (see `check/lib/node-realm.mjs`). The method: census every
 dual-arm/dual-check probe in the tree; keep the arm whose semantics are real
 (and pin it with a test), delete the harness-only arm, and make jsdom win by
 having genuine matching semantics elsewhere. What stayed vs died:
-- Stayed: grant guards in store.js (manager policy, not platform),
-  `workerCapable()` (CSP/Worker presence is a runtime fact), and
+- Stayed: grant guards in store.js (manager policy, not platform), and
   the down-ownership checks (deliberate, each pinned by a test). The signal
   plane ships one arm: every deadline and
   composition rides native `AbortSignal.timeout`/`AbortSignal.any`
@@ -566,7 +570,7 @@ having genuine matching semantics elsewhere. What stayed vs died:
   exists), removal-grace one-shot deferrals, and the three persist
   debounces that batch trailing writes under stepper drags; a **deadline**
   over witness absence — bridge watchdogs (bridgeless embed settles null),
-  the worker spawn watchdog, and the hidden-tab flush cap with its
+  and the hidden-tab flush cap with its
   `visibilitychange` resume; or a **feature timer** whose semantics the
   product defines as temporal — hold-to-speed, press qualifying, toast
   auto-hide, the first-run hint cap. All ride the shared scheduler
@@ -589,7 +593,7 @@ having genuine matching semantics elsewhere. What stayed vs died:
   — "jsdom elements honestly lack them / some host surfaces" died with the
   jsdom host), leaving the guard family to genuine refusals: PiP's
   `pictureInPictureEnabled` policy flag, the GM grant read,
-  `workerCapable()`, and null/parameter-shape guards
+  and null/parameter-shape guards
   like the stream router's non-element eventTarget check.
 
 **Native allocation & subscription hygiene.** The 129-listener census
@@ -776,7 +780,7 @@ stop at the first failure:
    why-docstring: a red row is answered by updating the gate's expect **and**
    the AGENTS.md census in the same commit, with the change's why — never by
    bumping the number alone.
-4. **bundle** — real esbuild build (version derivation, worker chunk) +
+4. **bundle** — real esbuild build (version derivation) +
    artifact shape validation (header fields, IIFE shape, css companion) and
    the manager-contract pins: the exclusion list only ever rides the strict
    `@exclude-match` surface, `@downloadURL` stays present for the updater,
@@ -881,9 +885,14 @@ stop at the first failure:
   path; a motion-lane row proving a visible slot's computed
   `transition-property` is exactly opacity/translate/display, the anchor
   lane absent; a resize row (video element + stage widening) proving the box
-  ticks re-anchor the running slots without any cue change; and the own
+  ticks re-anchor the running slots without any cue change; the own
   scheduler's boundary rows — one seek into a second cue's window lights
-  the enter, the window passing drops the exit), `robust`
+  the enter, the window passing drops the exit — plus the V-stepper
+  placement row (typing "90" into the panel stepper's live-commit field
+  re-anchors the running slot the same frame) and the scale row, a
+  >512KiB drop through the real panel path proving the cooperative
+  parse (the arm the retired Worker offloader left as sole backend)
+  drains and lands its overloaded cue), `robust`
   (freeze-flush without user pause, checkpoint cadence on the native
   timeupdate media clock at 4x, 1000-echo
   < 400ms, 400 remote-adoption merges < 800ms),
