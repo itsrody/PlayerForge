@@ -1,4 +1,5 @@
 import { sleep } from "../../lib/driver.mjs";
+import { DEBUG_HASH_TAG } from "../../../src/kernel/contract.js";
 // Real-world frame scenarios.
 //
 // The bundle is a match-all userscript with no @noframes - a userscript
@@ -364,7 +365,7 @@ export async function run({ session, baseUrl, crossBaseUrl, bundle, boot, header
       `sdk=${sdk} shells=${counts.shells}`
     );
 
-    latencies.videojs = await swapVariant(`${baseUrl}/sdk/videojs#pf-debug`);
+    latencies.videojs = await swapVariant(`${baseUrl}/sdk/videojs#${DEBUG_HASH_TAG}`);
     sdk = await sdkInFrame([0]);
     counts = await frameCounts([0]);
     askRows(
@@ -373,7 +374,7 @@ export async function run({ session, baseUrl, crossBaseUrl, bundle, boot, header
       `sdk=${sdk} shells=${counts.shells}`
     );
 
-    latencies.dplayer = await swapVariant(`${baseUrl}/sdk/dplayer#pf-debug`);
+    latencies.dplayer = await swapVariant(`${baseUrl}/sdk/dplayer#${DEBUG_HASH_TAG}`);
     sdk = await sdkInFrame([0]);
     counts = await frameCounts([0]);
     askRows(

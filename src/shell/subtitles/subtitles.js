@@ -15,6 +15,7 @@ import { DOMManager } from "../../shared/dom.js";
 import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/store.js";
 import { TUNING, clamp, fmtPercent, fmtEm, fmtPercentOrOff, signedSeconds } from "../../shared/core.js";
 import { GESTURE_EVENTS } from "../../kernel/contract.js";
+import { SETTING_KEYS } from "../chrome/config.js";
 import { flashElement, el } from "../chrome/ui.js";
 
 /* - Ingest transport - */
@@ -939,16 +940,14 @@ const SUBTITLE_EXT_RE = new RegExp(`\\.(${SUBTITLE_EXTS.join("|")})$`, "i");
 const SRT_NAME_RE = new RegExp(`\\.${SUBTITLE_EXTS[0]}$`, "i");
 const SUBTITLE_NAME_FALLBACK = `subtitles.${SUBTITLE_EXTS[1]}`;
 
-const SETTING_KEYS = {
-  size: "subtitles.style.size",
-  color: "subtitles.style.color",
-  shadow: "subtitles.style.shadow",
-  font: "subtitles.style.font",
-  stroke: "subtitles.style.stroke",
-  line: "subtitles.position.line",
-  horizontal: "subtitles.position.horizontal",
-  syncOffset: "subtitles.sync.offset"
-};
+/** The user-facing projection of the extension pair: the three controls
+ *  (load button, URL prompt, drop toast) hand their copy the same two
+ *  extensions, spelled here once so a new extension type propagates. */
+const SUBTITLE_EXTS_HINT = `(.${SUBTITLE_EXTS[0]} / .${SUBTITLE_EXTS[1]})`;
+
+/** The drop-target affordance class (styles.css): toggled by the section's
+ *  drag listeners. */
+const DROP_ACTIVE_CLASS = "pf-drop-active";
 
 /** The steppers' display defaults. The STATE itself carries null ("cue
  *  authoring wins") for untouched placement, so these belong to the display
@@ -991,7 +990,7 @@ const SYNC_BOUNDS = TUNING.subtitles.syncMaxOffset;
  */
 class SubtitleSyncState {
   /** Resolved current value; null until first resolution or bind attempt. */
-  #value = Number(getConfigValue(SETTING_KEYS.syncOffset, 0)) || 0;
+  #value = Number(getConfigValue(SETTING_KEYS.subtitles.syncOffset, 0)) || 0;
   #identity = false;
   #dirty = false;
   #tracker = null;
@@ -1040,7 +1039,7 @@ class SubtitleSyncState {
     this.#identity = !!tracker?.entryId;
     const target = this.#identity
       ? tracker.subOffset
-      : (Number(getConfigValue(SETTING_KEYS.syncOffset, 0)) || 0);
+      : (Number(getConfigValue(SETTING_KEYS.subtitles.syncOffset, 0)) || 0);
     if (!this.#dirty && target !== this.#value) {
       this.#value = target;
       this.#emit();
@@ -1067,7 +1066,7 @@ class SubtitleSyncState {
     if (this.#identity && this.#tracker) {
       this.#tracker.setSubOffset(this.#value);
     } else {
-      setConfigValue(SETTING_KEYS.syncOffset, this.#value);
+      setConfigValue(SETTING_KEYS.subtitles.syncOffset, this.#value);
     }
   }
 
@@ -1109,8 +1108,8 @@ function readPlacement(key) {
  */
 class SubtitlePlacementState {
   /** Stored overrides (0-100) or null until first customized. */
-  #line = readPlacement(SETTING_KEYS.line);
-  #position = readPlacement(SETTING_KEYS.horizontal);
+  #line = readPlacement(SETTING_KEYS.subtitles.line);
+  #position = readPlacement(SETTING_KEYS.subtitles.horizontal);
   /** State audience on the shared Fan (the ONE plain-fan-out owner). */
   #audience = new Fan("placement");
 
@@ -1137,8 +1136,8 @@ class SubtitlePlacementState {
    * there is nothing else to resolve.
    */
   bindSession(session, signal) {
-    this.#line = readPlacement(SETTING_KEYS.line);
-    this.#position = readPlacement(SETTING_KEYS.horizontal);
+    this.#line = readPlacement(SETTING_KEYS.subtitles.line);
+    this.#position = readPlacement(SETTING_KEYS.subtitles.horizontal);
     this.#audience.subscribe(() => session.setPlacement(this.current), { signal });
   }
 
@@ -1148,7 +1147,7 @@ class SubtitlePlacementState {
       return;
     }
     this.#line = next;
-    setConfigValue(SETTING_KEYS.line, next);
+    setConfigValue(SETTING_KEYS.subtitles.line, next);
     this.#emit();
   }
 
@@ -1158,7 +1157,7 @@ class SubtitlePlacementState {
       return;
     }
     this.#position = next;
-    setConfigValue(SETTING_KEYS.horizontal, next);
+    setConfigValue(SETTING_KEYS.subtitles.horizontal, next);
     this.#emit();
   }
 
@@ -1180,11 +1179,11 @@ const subtitlePlacement = new SubtitlePlacementState();
  *  session boot's exact normalization (rule: one owner per read). */
 function readStyleValues() {
   return {
-    size: getConfigValue(SETTING_KEYS.size, STYLE_DEFAULTS.size),
-    color: getConfigValue(SETTING_KEYS.color, STYLE_DEFAULTS.color),
-    shadow: getConfigValue(SETTING_KEYS.shadow, STYLE_DEFAULTS.shadow),
-    font: String(getConfigValue(SETTING_KEYS.font, STYLE_DEFAULTS.font) || ""),
-    stroke: getConfigValue(SETTING_KEYS.stroke, STYLE_DEFAULTS.stroke)
+    size: getConfigValue(SETTING_KEYS.subtitles.size, STYLE_DEFAULTS.size),
+    color: getConfigValue(SETTING_KEYS.subtitles.color, STYLE_DEFAULTS.color),
+    shadow: getConfigValue(SETTING_KEYS.subtitles.shadow, STYLE_DEFAULTS.shadow),
+    font: String(getConfigValue(SETTING_KEYS.subtitles.font, STYLE_DEFAULTS.font) || ""),
+    stroke: getConfigValue(SETTING_KEYS.subtitles.stroke, STYLE_DEFAULTS.stroke)
   };
 }
 
@@ -1244,7 +1243,7 @@ class SubtitleStyleState {
       return;
     }
     this.#values[key] = value;
-    setConfigValue(SETTING_KEYS[key], value);
+    setConfigValue(SETTING_KEYS.subtitles[key], value);
     this.#apply(key);
     this.#emit(key);
   }
@@ -1575,7 +1574,7 @@ export class SubtitlesSection {
       if (hasFiles(event)) {
         event.preventDefault();
         dragCounter.count++;
-        sectionRoot.classList.add("pf-drop-active");
+        sectionRoot.classList.add(DROP_ACTIVE_CLASS);
       }
     }, { signal });
     sectionRoot.addEventListener("dragover", (event) => {
@@ -1588,16 +1587,16 @@ export class SubtitlesSection {
       dragCounter.count--;
       if (dragCounter.count <= 0) {
         dragCounter.count = 0;
-        sectionRoot.classList.remove("pf-drop-active");
+        sectionRoot.classList.remove(DROP_ACTIVE_CLASS);
       }
     }, { signal });
     sectionRoot.addEventListener("drop", (event) => {
       event.preventDefault();
       dragCounter.count = 0;
-      sectionRoot.classList.remove("pf-drop-active");
+      sectionRoot.classList.remove(DROP_ACTIVE_CLASS);
       const files = [...(event.dataTransfer?.files || [])].filter(isSubtitleFile);
       if (!files.length) {
-        shell.toastInfo("captions", "Drop a .srt or .vtt file", "subtitles");
+        shell.toastInfo("captions", `Drop a .${SUBTITLE_EXTS[0]} or .${SUBTITLE_EXTS[1]} file`, "subtitles");
         return;
       }
       for (const file of files) {
@@ -1613,7 +1612,7 @@ export class SubtitlesSection {
     this.#loadButton = panel.addControl(actions, {
       type: "button",
       icon: "upload",
-      title: "Load subtitles (.srt / .vtt)",
+      title: `Load subtitles ${SUBTITLE_EXTS_HINT}`,
       ariaLabel: "Load subtitles",
       onClick: () => this.#fileInput?.click()
     });
@@ -1792,7 +1791,7 @@ export class SubtitlesSection {
   #promptForUrl() {
     // The sandbox forwards prompt() to the page; a hostile page can stub it,
     // in which case the dialog misbehaves and file loading stays untouched.
-    const url = window.prompt("Subtitle URL (.srt / .vtt)");
+    const url = window.prompt(`Subtitle URL ${SUBTITLE_EXTS_HINT}`);
     if (url) {
       this.#session?.loadFromUrl(url);
     }

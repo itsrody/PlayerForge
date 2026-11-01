@@ -440,8 +440,17 @@ iframes, same-origin and cross-origin:
   one owner per grain, no mirror fields between session and section) + lazy
   `SubtitlesSection` (panel UI).
 - **chrome/** — `config.js` (state: `SETTINGS_SCHEMA`, `getSetting`,
-  `onSettingsChanged`, `SETTING_KEYS`, cross-tab live-reload cache),
+  `onSettingsChanged`, `SETTING_KEYS`, cross-tab live-reload cache;
+  `SETTING_KEYS` is the ONE key-vocabulary table — the four machine-read
+  root handles plus the `subtitles` group the subtitle state machines ride
+  through raw-config handles, so no second table spells a dotted key),
   `panel.js` (the `Panel` builder + settings/history section renderers;
+  `startViewTransition` runs plain `{ update }` — the old `types` array and
+  its `pf-panel-open`/`pf-panel-close` strings were vocabulary with no CSS
+  reader: the HUD animation keys the static `pf-panel` transition-name, so
+  a direction-differentiated variant would need the CSS to consume the
+  types (a visual redesign decision, not a spelling fix); the open-restore
+  and containment focus fallback share one `#focusFallback()`;
   the product sections return their instances into the shell's
   section-handle table — the `PANEL_SECTIONS` entries are the build *and*
   teardown source of truth, so attempt-rollback and shell destroy call
@@ -743,7 +752,13 @@ stop at the first failure:
 4. **bundle** — real esbuild build (version derivation, worker chunk) +
    artifact shape validation (header fields, IIFE shape, css companion) and
    the manager-contract pins: the exclusion list only ever rides the strict
-   `@exclude-match` surface, and `@downloadURL` stays present for the updater.
+   `@exclude-match` surface, `@downloadURL` stays present for the updater,
+   and the HUD class-vocabulary agreement scan — every `pf-*` class the
+   source JS spells must have a reader on styles.css or the inject-side
+   sheet (a class no CSS consumes is a dead vocabulary token, the same
+   audit shape as the grant-coverage check; `pf-debug` is the
+   `DEBUG_HASH_TAG` vocabulary, never a class, and trailing-hyphen tokens
+   are template id prefixes).
 5. **browser** — real browser + real bundle in a GM realm: **real native
    Firefox 159** headless, driven by geckodriver (this branch's floor, not a
    fork shim). Proves: boot, gesture contract, media semantics, resume,

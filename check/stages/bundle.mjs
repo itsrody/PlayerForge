@@ -7,9 +7,10 @@
  * export survives esbuild's userscript transform).
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stripComments } from "./census.mjs";
 
 const HERE = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BUNDLE = join(HERE, "dist", "playerforge.user.js");
@@ -72,6 +73,43 @@ export async function run() {
     }
     const sizeKb = (source.length / 1024).toFixed(1);
     rows.push({ name: `bundle emitted (${sizeKb} KB), header + IIFE shape valid`, status: "pass", ms: null });
+  }
+
+  // HUD class-vocabulary agreement: every pf-* class the source JS spells
+  // must have a reader on the HUD's one styling surface (styles.css or the
+  // inject-side compact sheet). A JS class no CSS consumes is a dead
+  // vocabulary token, the way an ungranted GM_ call is a silent undefined -
+  // the same audit shape as the grant-coverage row above. Two deliberate
+  // scan exclusions: "pf-debug" is the DEBUG_HASH_TAG vocabulary (the
+  // contract writes that exact literal exactly once; it keys hash
+  // detection, never a class), and a trailing-hyphen token is a template
+  // prefix (pf-panel-tab-${n} id derivation), not a whole class name.
+  let cssCorpus = "";
+  try {
+    cssCorpus = readFileSync(join(HERE, "src/shell/chrome/styles.css"), "utf8")
+      + readFileSync(join(HERE, "src/shell/chrome/inject.js"), "utf8");
+  } catch {
+    // The styling surfaces always ship; an unreadable corpus fails below
+    // with every class unstyled, never silently passes.
+    cssCorpus = "";
+  }
+  const srcWalker = (dir, out = []) => {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) srcWalker(path, out);
+      else if (name.endsWith(".js")) out.push(path);
+    }
+    return out;
+  };
+  const strippedSrc = srcWalker(join(HERE, "src")).map((p) => stripComments(readFileSync(p, "utf8"))).join("\n");
+  const classTokens = new Set(
+    [...strippedSrc.matchAll(/(?<=["'`\s(,=])pf-[a-z][a-z-]+/g)]
+      .map((m) => m[0])
+      .filter((token) => token !== "pf-debug" && !token.endsWith("-"))
+  );
+  const dead = [...classTokens].filter((token) => !cssCorpus.includes(token)).sort();
+  if (dead.length > 0) {
+    fails.push({ name: "HUD class vocabulary", note: `source spells pf-* classes with no CSS reader: ${dead.join(", ")}` });
   }
 
   if (fails.length > 0) {

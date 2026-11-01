@@ -12,6 +12,7 @@ import { Buffer } from "node:buffer";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readdirSync, existsSync } from "node:fs";
+import { DEBUG_HASH_TAG } from "../../src/kernel/contract.js";
 import { BrowserSession } from "../lib/driver.mjs";
 import { FIXTURE_PAGE, FALLBACK_PAGE, VIDEOJS_STUB_PAGE, DPLAYER_STUB_PAGE, SUBS_PAGE, embedHostPage, switchboardPage, ensureVideoAsset } from "../lib/fixture.mjs";
 import { parseUserScriptHeader } from "../lib/gm-realm.mjs";
@@ -74,7 +75,7 @@ export async function run() {
     session.registerFixture("/check/frames-nested", embedHostPage(`${session.crossBaseUrl}/check/nested-mid`, "pf nested host"));
     // Switchboard: one placeholder iframe whose doc swaps between the SDK
     // stub pages - each registry-adopted by its namespaced anchor classes.
-    session.registerFixture("/check/switchboard", switchboardPage("/sdk/plyr#pf-debug"));
+    session.registerFixture("/check/switchboard", switchboardPage(`/sdk/plyr#${DEBUG_HASH_TAG}`));
     session.registerFixture("/sdk/plyr", FIXTURE_PAGE);
     session.registerFixture("/sdk/videojs", VIDEOJS_STUB_PAGE);
     // Letterbox stage: square video element in a taller stage, so object-fit

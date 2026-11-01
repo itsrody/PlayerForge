@@ -300,7 +300,7 @@ function createStepper(options) {
  *     instead of assembling DOM. Sections populate lazily via
  *     setSectionBuilder on first open, with a toast + builder-restore when a
  *     build fails. Open/close is a class flip wrapped in view transitions
- *     (pf-panel-open / pf-panel-close); compact mode is an explicit setting
+ *     (the CSS keys the animation on the static pf-panel transition name); compact mode is an explicit setting
  *     with a narrow-touch auto-detect re-applied live on breakpoint changes.
  *     Dismissal while open: UA-owned Escape (CloseWatcher, Chromium 131+)
  *     plus our guarded document listeners for outside click; close() hands
@@ -432,13 +432,13 @@ export class SettingsPanel {
     // focus back to it (native showModal() behavior), not just the host.
     this.#returnFocus = deepestActiveElement(this.#shellHost);
     this.#armDismissal();
-    this.#runWithViewTransition("pf-panel-open", () => {
+    this.#runWithViewTransition(() => {
       this.#applyCompactSetting();
       this.#root.classList.add("pf-open");
       // Tab boxes resolve only after the display flip; doing it inside the
       // transition update keeps the strip as the source of truth in the VT.
       this.#moveCapsule();
-      const activeTab = this.#root.querySelector(".pf-panel-tab-active") || this.#closeButton;
+      const activeTab = this.#focusFallback();
       if (activeTab && deepestActiveElement(this.#shellHost) !== activeTab) {
         activeTab.focus();
       }
@@ -450,7 +450,7 @@ export class SettingsPanel {
       const opener = this.#returnFocus;
       this.#returnFocus = null;
       const hadFocusInside = this.#root.contains(deepestActiveElement(this.#shellHost));
-      this.#runWithViewTransition("pf-panel-close", () => {
+      this.#runWithViewTransition(() => {
         this.#root.classList.remove("pf-open");
       });
       // Dismissal dies before focus moves: the focusin containment handler
@@ -521,8 +521,7 @@ export class SettingsPanel {
     document.addEventListener("focusin", (event) => {
       const target = event.target;
       if (target !== this.#shellHost && !this.#shellHost.contains(target)) {
-        const activeTab = this.#root.querySelector(".pf-panel-tab-active") || this.#closeButton;
-        activeTab?.focus();
+        this.#focusFallback()?.focus();
       }
     }, { signal });
     // CloseWatcher is floor-guaranteed (Chromium 116; Firefox ships it too,
@@ -1027,11 +1026,24 @@ export class SettingsPanel {
     }
   }
 
-  #runWithViewTransition(type, update) {
+  /** The focus fallback when no tab holds the ring: the capsule's active
+   *  tab, else the close button. Shared by the open restore and the
+   *  containment handler (one query, one fallback, one vocabulary). */
+  #focusFallback() {
+    return this.#root.querySelector(".pf-panel-tab-active") || this.#closeButton;
+  }
+
+  #runWithViewTransition(update) {
     // The floor guarantees startViewTransition (Chromium 111+): one arm, the
     // UA clips the animation itself whenever it must (reduced motion,
     // overlapping transitions) while `update` always drives the DOM flip.
-    const transition = document.startViewTransition({ types: [type], update });
+    // The old `types: ["pf-panel-open"|"pf-panel-close"]` argument retired:
+    // those two type strings were vocabulary with no reader — the HUD
+    // animation keys the static `pf-panel` view-transition-name, so the
+    // types never selected anything. A direction-differentiated variant
+    // needs the CSS to consume the types; that is a visual redesign
+    // decision, not a spelling fix.
+    const transition = document.startViewTransition({ update });
     // An overlapping open/close skips the older transition by design; the
     // browser then rejects `ready` (and settles `finished`), and those
     // rejections must not surface as unhandled promise errors in user

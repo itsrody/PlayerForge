@@ -21,7 +21,21 @@ export const SETTING_KEYS = Object.freeze({
   stepSeek: "controller.stepSeek",
   hotkeys: "gestures.hotkeys",
   edgeToEdge: "fullscreen.edgeToEdge",
-  compact: "ui.compact"
+  compact: "ui.compact",
+  // Subtitle drives ride raw config handles (getConfigValue/setConfigValue on
+  // the dotted path, no schema defaults): the subtitle module owns their
+  // seed/reset/persist protocol. Grouped here so the whole key vocabulary
+  // stays written exactly once.
+  subtitles: Object.freeze({
+    size: "subtitles.style.size",
+    color: "subtitles.style.color",
+    shadow: "subtitles.style.shadow",
+    font: "subtitles.style.font",
+    stroke: "subtitles.style.stroke",
+    line: "subtitles.position.line",
+    horizontal: "subtitles.position.horizontal",
+    syncOffset: "subtitles.sync.offset"
+  })
 });
 
 /**

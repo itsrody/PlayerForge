@@ -139,6 +139,13 @@ const keyDetail = { method: "keyboard", direction: undefined };
 // reads it synchronously within the scrub handler).
 const scrubDetail = { zone: "", method: "pointer", dx: 0, dy: 0, velocity: 0, timestamp: 0 };
 
+/** The gesture-zone fallback: a press outside every named edge zone lives
+ *  on "screen" - the one zone-free detail value the action layer's zone
+ *  switch understands. Written once; every detail fill rides it. */
+function resolveZone(zone) {
+  return zone || "screen";
+}
+
 function captureFirstTwo(pointers, out) {
   let n = 0;
   for (const point of pointers.values()) {
@@ -339,7 +346,7 @@ class ScrubStroke {
     // Emit via the pooled event: the payload and the Event both ride reused
     // objects, so no per-move allocation (dispatchEvent runs synchronously and
     // consumers read before the next move re-mutates them).
-    scrubDetail.zone = this.#zone() || "screen";
+    scrubDetail.zone = resolveZone(this.#zone());
     scrubDetail.method = "pointer";
     scrubDetail.dx = totalStep;
     scrubDetail.dy = totalStepY;
@@ -355,7 +362,7 @@ class ScrubStroke {
       return;
     }
     this.#active = false;
-    scrubEndDetail.zone = this.#zone() || "screen";
+    scrubEndDetail.zone = resolveZone(this.#zone());
     scrubEndDetail.method = "pointer";
     this.#dispatch(GESTURE_EVENTS.scrubEnd, scrubEndDetail);
   }
@@ -1095,7 +1102,7 @@ export class InputForge {
     // so no settle timer is needed. #pinchZone non-null is the tracking flag.
     this.#pinchStartDistance = 0;
     this.#pinchFired = false;
-    this.#pinchZone = this.#gestureZone || "screen";
+    this.#pinchZone = resolveZone(this.#gestureZone);
     // The claim arms at recognition, not at the press (prevent-scope rule),
     // and BOTH pointers recapture onto the zone here: the at-press capture
     // died with the claim (it retargeted a plain tap's click off the pressed
@@ -1391,7 +1398,7 @@ export class InputForge {
           logger.log("forge", `swipe latch (${this.#swipe.direction}, dy=${this.#swipe.direction === "down" ? "+" : "-"})`);
           this.#suppressNextActivations();
           event.stopImmediatePropagation();
-          swipeStartDetail.zone = this.#gestureZone || "screen";
+          swipeStartDetail.zone = resolveZone(this.#gestureZone);
           swipeStartDetail.method = "pointer";
           swipeStartDetail.direction = this.#swipe.direction;
           this.#dispatch(GESTURE_EVENTS.swipeStart, swipeStartDetail);
@@ -1457,7 +1464,7 @@ export class InputForge {
       const swipeDirection = this.#swipe.direction;
       this.#endPointerSession();
       if (wasSwiping) {
-        swipeDetail.zone = this.#gestureZone || "screen";
+        swipeDetail.zone = resolveZone(this.#gestureZone);
         swipeDetail.method = "pointer";
         swipeDetail.direction = swipeDirection;
         swipeDetail.distance = distance;

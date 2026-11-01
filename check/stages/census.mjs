@@ -33,7 +33,9 @@ function walk(dir, out = []) {
  * countable pattern), string and template bodies pass through escape-aware.
  * Comment prose mentioning a pattern therefore never inflates a count.
  */
-function stripComments(source) {
+/** Exported for the bundle stage's HUD-class agreement scan: one comment
+ *  stripper, two consumers. */
+export function stripComments(source) {
   let out = "";
   let i = 0;
   let inBlock = false;
