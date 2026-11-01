@@ -29,6 +29,15 @@ function majorOf(version) {
   return version === null ? null : String(version).split(".")[0];
 }
 
+/** The node-side sleep between driver commands and case steps - one helper,
+ *  every check file buys the same promise shape instead of re-spelling it
+ *  (three files kept local twins under three names). In-page probe bodies
+ *  stay self-contained - they serialize into the page realm and can never
+ *  close over a check-module import. */
+export function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** "Mozilla Firefox 159.0" -> "159.0"; null when the binary cannot answer. */
 function firefoxBinaryVersion(binary) {
   try {
@@ -281,7 +290,7 @@ export class BrowserSession {
     let responsive = false;
     let lastPollError = null;
     while ((Date.now() < deadline)) {
-      await new Promise((r) => setTimeout(r, 250));
+      await sleep(250);
       // The check must be a `return`-ing script body (Selenium string quirk):
       // an expression-only body returns undefined and the sentinel would
       // never observe the flag the assignment just set.
@@ -294,7 +303,7 @@ export class BrowserSession {
         return { url: String(location.href), ready: document.readyState, sent: window.__checkReady ?? null };
       }).catch((err) => ({ probeError: String(err.message ?? err).slice(0, 100) }));
       try { await driver.quit(); } catch {}
-      await new Promise((r) => setTimeout(r, 200));
+      await sleep(200);
       rmSync(profileDir, { recursive: true, force: true });
       throw new Error(`browser never became responsive after launch (about:blank sentinel) - ${JSON.stringify(state)} lastPollError=${lastPollError}`);
     }
@@ -315,7 +324,7 @@ export class BrowserSession {
     // commands would then keep talking to whichever tab is current while
     // the fixture boots land somewhere invisible. Everything but the tab
     // the sentinel just validated is closed.
-    await new Promise((r) => setTimeout(r, 200));
+    await sleep(200);
     const handles = await driver.getAllWindowHandles().catch(() => []);
     if (handles.length > 1) {
       const current = await driver.getWindowHandle();
@@ -357,7 +366,7 @@ export class BrowserSession {
     // page without its fixture.
     let landed = await this.#driver.getCurrentUrl().catch(() => null);
     if (landed !== null && !sameDocument(url, landed)) {
-      await new Promise((r) => setTimeout(r, 400));
+      await sleep(400);
       await this.#driver.get(url);
       landed = await this.#driver.getCurrentUrl().catch(() => null);
       if (landed !== null && !sameDocument(url, landed)) {
@@ -504,7 +513,7 @@ export class BrowserSession {
     while (Date.now() < deadline) {
       try { last = await this.#driver.executeScript(checkFn); if (last) return last; }
       catch (err) { last = err.message; }
-      await new Promise((r) => setTimeout(r, intervalMs));
+      await sleep(intervalMs);
     }
     throw new Error(`timeout after ${timeoutMs}ms - last=${JSON.stringify(last)}`);
   }
@@ -555,7 +564,7 @@ export class BrowserSession {
         last = err.message;
       }
       await this.#driver.switchTo().defaultContent();
-      await new Promise((r) => setTimeout(r, intervalMs));
+      await sleep(intervalMs);
     }
     throw new Error(`frame timeout after ${timeoutMs}ms (path [${path.join(",")}]) - last=${JSON.stringify(last)}`);
   }

@@ -1,3 +1,4 @@
+import { sleep } from "../../lib/driver.mjs";
 /**
  * The storage data plane end to end: the kernel must (a) write the configs
  * doc and the resume tracker through the GM backing, and (b) a reboot seeded
@@ -21,13 +22,13 @@ export async function run({ session, boot }) {
     `return (() => { const v = document.querySelector("#check-video"); return v && v.duration > 3 ? v.duration : false; })()`,
     5000
   );
-  await new Promise((r) => setTimeout(r, 900));
+  await sleep(900);
   await session.eval(function main() {
     const v = document.querySelector("#check-video");
     v.currentTime = 6;
     v.play().catch(() => {});
   });
-  await new Promise((r) => setTimeout(r, 2200));
+  await sleep(2200);
   const resume = await session.eval(function main() {
     return window.__pfBacking["pf:resume"] ?? null;
   });

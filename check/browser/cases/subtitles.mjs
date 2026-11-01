@@ -1,3 +1,4 @@
+import { sleep } from "../../lib/driver.mjs";
 /**
  * The displayed-picture anchor for cues: the ForgeTrack layers percent cue
  * fields onto the video's PAINTED picture - derived from the one fill-box
@@ -48,7 +49,7 @@ export async function run({ session, boot }) {
       rows.push({ name: "subtitle panel section reachable", status: "fail", note: "Subtitles tab never appeared", ms: null });
       return false;
     }
-    await new Promise((r) => setTimeout(r, 600));
+    await sleep(600);
     const dropped = await session.eval(function main() {
       const shadow = document.querySelector(".pf-shell")?.shadowRoot;
       const tab = shadow?.querySelector(".pf-panel-tab[data-title=\"Subtitles\"]");
@@ -186,11 +187,11 @@ export async function run({ session, boot }) {
     document.querySelector(".plyr")
       .insertAdjacentHTML("beforebegin", '<div style="height:1100px"></div>');
   });
-  await new Promise((r) => setTimeout(r, 400));
+  await sleep(400);
   await session.eval(function main() {
     window.scrollTo(0, 1100);
   });
-  await new Promise((r) => setTimeout(r, 400));
+  await sleep(400);
   const rescrolled = await session.waitFor(
     "return [...document.querySelector('.pf-shell')?.shadowRoot?.querySelectorAll('.pf-cue:not([hidden])') ?? []].some((s) => Math.abs(parseFloat(getComputedStyle(s).top) - 616.5625) < 1.5 && Math.abs(parseFloat(getComputedStyle(s).left) - 550) < 1.5)",
     5000

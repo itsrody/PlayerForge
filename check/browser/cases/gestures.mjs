@@ -1,3 +1,4 @@
+import { sleep } from "../../lib/driver.mjs";
 /**
  * The gesture contract, driven by REAL input events through geckodriver's
  * action layer (W3C pointer streams and keystrokes sent to the headless
@@ -108,7 +109,7 @@ export async function run({ session, baseUrl, boot }) {
     v.currentTime = 2;
   });
   await fireKeys(["ArrowRight"]);
-  await new Promise((r) => setTimeout(r, 400));
+  await sleep(400);
   status(rows, "ArrowRight skips forward (+5s)", await session.eval(function main() {
     const t = document.querySelector("#check-video").currentTime;
     return window.__pfEvents.includes("skip") && t > 5 && t < 10;
@@ -118,7 +119,7 @@ export async function run({ session, baseUrl, boot }) {
     document.querySelector("#check-video").currentTime = 7;
   });
   await fireKeys(["ArrowLeft"]);
-  await new Promise((r) => setTimeout(r, 400));
+  await sleep(400);
   status(rows, "ArrowLeft skips backward (-5s)", await session.eval(function main() {
     const t = document.querySelector("#check-video").currentTime;
     return window.__pfEvents.includes("skip") && t > 0 && t < 4;
@@ -144,7 +145,7 @@ export async function run({ session, baseUrl, boot }) {
     .move({ origin: "viewport", x: edgePoint.x, y: edgePoint.y }).press().pause(30).release()
     .pause(250)
     .perform();
-  await new Promise((r) => setTimeout(r, 300));
+  await sleep(300);
   status(rows, "inline edge dbltap stays fs-gated: no dbltap/skip dispatch", await session.eval(function main() {
     return !window.__pfEvents.includes("dbltap") && !window.__pfEvents.includes("skip");
   }), `events=${JSON.stringify(await session.eval(function main() {
@@ -190,7 +191,7 @@ export async function run({ session, baseUrl, boot }) {
     v.pause();
     v.currentTime = 2;
   });
-  await new Promise((r) => setTimeout(r, 300));
+  await sleep(300);
   await acts()
     .move({ origin: "viewport", x: Math.round(center.x), y: Math.round(center.y) }).press()
     .move({ origin: "viewport", x: Math.round(center.x + 60), y: Math.round(center.y) })
@@ -199,7 +200,7 @@ export async function run({ session, baseUrl, boot }) {
     .pause(80)
     .release()
     .perform();
-  await new Promise((r) => setTimeout(r, 400));
+  await sleep(400);
   status(rows, "fs-armed drag scrubs against the synthetic fullscreenElement", await session.eval(function main() {
     const t = document.querySelector("#check-video").currentTime;
     return !!document.fullscreenElement &&
@@ -224,7 +225,7 @@ export async function run({ session, baseUrl, boot }) {
     .press().release()
     .pause(500)
     .perform();
-  await new Promise((r) => setTimeout(r, 300));
+  await sleep(300);
   status(rows, "fs double tap: SDK's native dblclick prevented at the surface", await session.eval(function main() {
     return window.__pfDbclicks.length === 0;
   }), `dbclicks=${JSON.stringify(await session.eval(function main() {
@@ -241,7 +242,7 @@ export async function run({ session, baseUrl, boot }) {
     v.pause();
     v.currentTime = 2;
   });
-  await new Promise((r) => setTimeout(r, 300));
+  await sleep(300);
   // Inline restore, the complement: with fs closed the same two-tap sequence
   // carries ONE native dblclick - inline the SDK's double tap is its own.
   await acts()
@@ -250,7 +251,7 @@ export async function run({ session, baseUrl, boot }) {
     .press().release()
     .pause(500)
     .perform();
-  await new Promise((r) => setTimeout(r, 300));
+  await sleep(300);
   status(rows, "inline double tap passes one native trusted dblclick", await session.eval(function main() {
     return window.__pfDbclicks.length === 1 && window.__pfDbclicks.every(Boolean);
   }), `dbclicks=${JSON.stringify(await session.eval(function main() {
@@ -260,14 +261,14 @@ export async function run({ session, baseUrl, boot }) {
   }))}`);
 
   await fireKeys(["KeyM"]);
-  await new Promise((r) => setTimeout(r, 350));
+  await sleep(350);
   status(rows, "KeyM flips muted through pf:gesture-mute", await session.eval(function main() {
     const v = document.querySelector("#check-video");
     return window.__pfEvents.includes("mute") && v.muted !== v.hasAttribute("muted");
   }), "no mute event or muted state unchanged");
 
   await fireKeys(["ArrowUp"]);
-  await new Promise((r) => setTimeout(r, 350));
+  await sleep(350);
   status(rows, "ArrowUp raises volume through pf:gesture-volume", await session.eval(function main() {
     return window.__pfEvents.includes("volume") && document.querySelector("#check-video").volume > 0;
   }), "no volume event or element unchanged");
@@ -283,7 +284,7 @@ export async function run({ session, baseUrl, boot }) {
 
   // Keyboard panel open via KeyS.
   await fireKeys(["KeyS"]);
-  await new Promise((r) => setTimeout(r, 400));
+  await sleep(400);
   status(rows, "KeyS opens the panel (pf:gesture-panel)", await session.eval(function main() {
     const host = document.querySelector(".pf-shell");
     return host !== null && host.shadowRoot !== null &&
@@ -302,7 +303,7 @@ export async function run({ session, baseUrl, boot }) {
   // Close it again: the open panel's modal shield eats pointer input, which
   // would starve the scrub probe below.
   await fireKeys(["KeyS"]);
-  await new Promise((r) => setTimeout(r, 300));
+  await sleep(300);
   status(rows, "KeyS closes the panel again", await session.eval(function main() {
     const host = document.querySelector(".pf-shell");
     const panel = host !== null ? host.shadowRoot.querySelector(".pf-panel") : null;
@@ -328,7 +329,7 @@ export async function run({ session, baseUrl, boot }) {
     v.play();
     window.__pfEvents = [];
   });
-  await new Promise((r) => setTimeout(r, 150));
+  await sleep(150);
   await raw.actions({ async: true }).keyDown(" ").pause(700).perform();
   const spaceHold = await session.eval(function main() {
     const v = document.querySelector("#check-video");
@@ -352,7 +353,7 @@ export async function run({ session, baseUrl, boot }) {
   // asserts the contract, not the browser-side window.
   await recordGestureEvents(session);
   await fireKeys(["KeyP"]);
-  await new Promise((r) => setTimeout(r, 400));
+  await sleep(400);
   status(rows, "KeyP asks for picture-in-picture", await session.eval(function main() {
     return window.__pfEvents.includes("pip");
   }), "no pf:gesture-pip");
@@ -370,7 +371,7 @@ export async function run({ session, baseUrl, boot }) {
     });
     document.dispatchEvent(new Event("fullscreenchange"));
   });
-  await new Promise((r) => setTimeout(r, 150));
+  await sleep(150);
 
   // Gate lifecycle re-arm: persisted pagehide force-falsy and pageshow
   // re-seed from the live document (src/shared/dom.js FsGate). Driven here
@@ -423,7 +424,7 @@ export async function run({ session, baseUrl, boot }) {
     .release()
     .pause(120)
     .perform();
-  await new Promise((r) => setTimeout(r, 400));
+  await sleep(400);
   status(rows, "drag produces scrub stream + scrubEnd",
     await session.eval(function main() {
       return window.__pfEvents.includes("scrub") &&
@@ -451,7 +452,7 @@ export async function run({ session, baseUrl, boot }) {
     { x: center.x + 90, y: center.y },
     { x: center.x + 140, y: center.y }
   ]);
-  await new Promise((r) => setTimeout(r, 300));
+  await sleep(300);
   const touchScrub = await session.eval(function main() {
     return {
       events: window.__pfEvents,
@@ -490,7 +491,7 @@ export async function run({ session, baseUrl, boot }) {
       window.__pfStation.fire(0.3, 40);
     }
   });
-  await new Promise((r) => setTimeout(r, 250));
+  await sleep(250);
   status(rows, "sub-pixel slow stroke accrues through the dead zone", await session.eval(function main() {
     const t = document.querySelector("#check-video").currentTime;
     return t > 5 && t < 5.05;
@@ -503,7 +504,7 @@ export async function run({ session, baseUrl, boot }) {
       window.__pfStation.fire(i % 2 === 0 ? 0.3 : -0.3, 40);
     }
   });
-  await new Promise((r) => setTimeout(r, 250));
+  await sleep(250);
   status(rows, "holding-finger jitter nets to zero through the residue", await session.eval(function main() {
     const video = document.querySelector("#check-video");
     const t = Math.abs(video.currentTime - window.__pfJitterSeed);
@@ -561,7 +562,7 @@ export async function run({ session, baseUrl, boot }) {
   }), `t=${JSON.stringify(await session.eval(function main() {
     return document.querySelector("#check-video").currentTime;
   }))}`);
-  await new Promise((r) => setTimeout(r, 400));
+  await sleep(400);
   const paceEnd = await session.eval(function main(curve) {
     const video = document.querySelector("#check-video");
     // The width mirror is the engine's own rule (shared/dom.js
@@ -611,7 +612,7 @@ export async function run({ session, baseUrl, boot }) {
     window.__pfBoostedRate = v.playbackRate;
     v.pause();
   });
-  await new Promise((r) => setTimeout(r, 120));
+  await sleep(120);
   status(rows, "mid-hold pause restores the saved playback rate", await session.eval(function main() {
     return window.__pfPlayPaused === false &&
       window.__pfBoostedRate === 2 &&
@@ -649,7 +650,7 @@ export async function run({ session, baseUrl, boot }) {
     .release()
     .pause(120)
     .perform();
-  await new Promise((r) => setTimeout(r, 300));
+  await sleep(300);
   status(rows, "sdk control passthrough: overlay button keeps pointerdown + click",
     await session.eval(function main() {
       const counts = document.querySelector("#pf-sdkprobe")?.__pfCounts;
@@ -693,7 +694,7 @@ export async function run({ session, baseUrl, boot }) {
     .release()
     .pause(120)
     .perform();
-  await new Promise((r) => setTimeout(r, 300));
+  await sleep(300);
   status(rows, "affordance-cursor roleless div keeps its REAL pointerdown + trusted click",
     await session.eval(function main() {
       const counts = document.querySelector("#pf-sdkcursor")?.__pfCounts;
@@ -722,7 +723,7 @@ export async function run({ session, baseUrl, boot }) {
     .release()
     .pause(120)
     .perform();
-  await new Promise((r) => setTimeout(r, 400));
+  await sleep(400);
   status(rows, "roleless bare div keeps the fully native tap: pointerdown + trusted click",
     await session.eval(function main() {
       const counts = document.querySelector("#pf-sdkbare")?.__pfCounts;
@@ -751,7 +752,7 @@ export async function run({ session, baseUrl, boot }) {
     .release()
     .pause(120)
     .perform();
-  await new Promise((r) => setTimeout(r, 400));
+  await sleep(400);
   status(rows, "full-cover affordance overlay: adopted but stream-open - native trusted single tap",
     await session.eval(function main() {
       const counts = document.querySelector("#pf-sdkcover")?.__pfCounts;

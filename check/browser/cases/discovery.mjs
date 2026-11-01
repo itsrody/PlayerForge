@@ -1,3 +1,4 @@
+import { sleep } from "../../lib/driver.mjs";
 /**
  * The discovery contract's negative half: a kernel that shells *every* video
  * is worse than one that boots nothing. Probe the boundaries the discovery
@@ -37,7 +38,7 @@ export async function run({ session, baseUrl, bundle }) {
     await session.injectGMRealm();
     await session.injectBundle(bundle);
     await session.wakeVideos();
-    await new Promise((r) => setTimeout(r, 900));
+    await sleep(900);
     return session.eval(function main() {
       return { shell: document.querySelector(".pf-shell") !== null, version: typeof window.PlayerForge };
     });

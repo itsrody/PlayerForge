@@ -373,10 +373,18 @@ iframes, same-origin and cross-origin:
   `SwipeStroke` (the translate-drag transform writes and their eased
   restore), `TapWindow` (the dbltap window: observation only, no seed and
   no replay — by the prevent-scope rule there is nothing held back to hand
-  back), `KeyHoldSession`
+  back), `PressHold` — the ONE press-hold qualifier (timer + latch + pooled
+  hold/release dispatch) both trigger shapes ride — and `KeyHoldSession`
   (the INPUT_ACTIONS session keys — today the hold-speed row's Space:
   hold-to-speed + bare-tap toggle, settle-on-next-press hygiene for a
-  swallowed keyup). Gesture detail carries `dx` and the mirrored `dy` as
+  swallowed keyup; the KeyHoldSession copy it replaced was the keyboard
+  spelling of a story the engine's pointer press owned inline, with the
+  same null-check timer-clear body spelled twice — the channel-shape facts
+  are constructor options (`method`; `zone` as a string for keys or a `()
+  =>` live reader for the pointer shape) and the per-press facts are
+  `arm()` parameters (`gate`, and the pointer's `onArm` claim effect, so
+  the claim is a parameter, not a second class)). Gesture detail carries
+  `dx` and the mirrored `dy` as
   engine geometry (the detail payload shape is source-table fixed); pinch
   and trackpad-pinch handshake stay engine-core; hold/scrub timers ride
   the shared scheduler.
@@ -834,6 +842,12 @@ stop at the first failure:
   choreography, the two-controller shape surviving an abort inside the
   task body, and `yield_()` recovering what raw `scheduler.yield()`
   rejects).
+- **One `sleep` helper** (check/lib/driver.mjs): every node-side wait
+  between driver commands and case steps buys the one promise shape; the
+  three local twins it absorbed (a `settle` in two case files plus ~40
+  inline one-liners) went with it. In-page probe sleeps stay self-contained
+  on purpose — the evaluated bodies serialize into the page realm and can
+  never close over a check-module import.
 - **Per-case audit rows** follow every case file: uncaught page errors
   become fails, `console.error` becomes informational rows, a GM-usage
   census row; failing cases get a screenshot + page-state dump into

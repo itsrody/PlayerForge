@@ -1,3 +1,4 @@
+import { sleep } from "../../lib/driver.mjs";
 /**
  * Boot behaves like the manager would: on a fixture page with a Plyr-anchored
  * video the kernel discovers the candidate and mounts the shell; on a page
@@ -51,7 +52,7 @@ export async function run({ session, baseUrl, bundle, boot }) {
   await session.injectGMRealm();
   await session.injectBundle(bundle);
   await session.wakeVideos();
-  await new Promise((r) => setTimeout(r, 400));
+  await sleep(400);
   const unbooted = await session.eval(function main() {
     return window.PlayerForge === undefined;
   });

@@ -1,3 +1,4 @@
+import { sleep } from "../../lib/driver.mjs";
 // Real-world frame scenarios.
 //
 // The bundle is a match-all userscript with no @noframes - a userscript
@@ -224,23 +225,23 @@ export async function run({ session, baseUrl, crossBaseUrl, bundle, boot, header
     });
 
     const armed = await armListener();
-    await new Promise((r) => setTimeout(r, 250));
+    await sleep(250);
     const mirrorRun = await frameConsole();
     const mirrorSighted = mirrorRun.lines.some((l) => l.includes("Debug logs mirrored on"));
     // Flip the gate off; the Settings engine must re-seed (log line) and the
     // panel key must die mid-flight.
     await writeSetting(false);
-    await new Promise((r) => setTimeout(r, 250));
+    await sleep(250);
     const afterOff = await frameConsole();
     const reloadSighted = afterOff.lines.some((l) => l.includes("Live-reloaded"));
     await keyS();
-    await new Promise((r) => setTimeout(r, 300));
+    await sleep(300);
     const blocked = await frameProbe();
     // Flip back on; the engine re-seeds again and the panel key returns.
     await writeSetting(true);
-    await new Promise((r) => setTimeout(r, 250));
+    await sleep(250);
     await keyS();
-    await new Promise((r) => setTimeout(r, 300));
+    await sleep(300);
     const reArmed = await frameProbe();
     askRows(
       "foreign settings write live-reloads the frame's running kernel",

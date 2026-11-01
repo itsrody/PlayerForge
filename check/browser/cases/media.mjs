@@ -1,3 +1,4 @@
+import { sleep } from "../../lib/driver.mjs";
 /**
  * Real playback through the real bundle: the fixture video is served over
  * http, reaches a real duration, and panel + resume paths that depend on
@@ -32,7 +33,7 @@ export async function run({ session, baseUrl, boot }) {
     host?.addEventListener("pf:gesture-panel", () => window.__pfPanelEvents++);
     document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyS", key: "s", bubbles: true }));
   });
-  await new Promise((r) => setTimeout(r, 300));
+  await sleep(300);
   const panelCount = await session.eval(function main() {
     return window.__pfPanelEvents;
   });

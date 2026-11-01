@@ -487,17 +487,127 @@ class TapWindow {
 }
 
 /**
- * Key hold-session machine: hold-to-speed + bare-tap toggle, built from the
- * INPUT_ACTIONS key inputs that carry `session: true` (today exactly one -
- * Space). The engine keeps the keydown/keyup routing (binding-table walk,
- * focus arbitration, the cross-code repeat shield set); this owns the
- * press's hold timer, hold state, and its release/toggle decision, so an
- * orphaned hold left latched by a swallowed keyup can be settled exactly by
- * the next press.
+ * The ONE press-hold qualifier machine - every owned press channel rides it,
+ * instead of re-owning a timer + latch + release story per trigger shape.
+ * The KeyHoldSession machine this replaces was the keyboard copy of a story
+ * the engine's pointer press owned inline (#holdTimer + #holding + the same
+ * null-check timer-clear body spelled twice) - two channels already drifting
+ * (different gate shapes, different zone fills), so the story is one class
+ * with the channel-shape facts as constructor options and the per-press
+ * facts as arm() parameters. One instance per pressed channel:
+ *   - `method` - the pooled detail's method string ("pointer"/"keyboard").
+ *   - `zone`   - the pooled detail's zone at fire time: a plain string
+ *                ("screen" - keys hold one zone) or a () => read (the
+ *                pointer shape resolves the engine's per-press zone live).
+ * `arm(timeoutMs, { gate, onArm })` carries the per-press parameters: the
+ * gate reads whatever the channel calls live at arm decision time (press
+ * liveness, paused, the family intent gate) and `onArm` is the pointer
+ * claim effect (stream capture), run after the latch flips and before the
+ * hold dispatches - the claim is a parameter, not a second machine.
+ */
+class PressHold {
+  /** The pooled hold/release dispatch callback (the engine's method or —
+   *  from the key channel — the borrowed dispatchGesture boundary). */
+  #dispatch;
+  // Channel-shape facts: the pooled detail's zone (string, or a () => read
+  // for the pointer shape) and method, fixed at construction.
+  #zone;
+  #method;
+  /** The armed qualifier timer; null-honest (see clear() — the same
+   * "almost every landing is clear" memory-tune both old bodies spelled). */
+  #timer = null;
+  /** Whether the CURRENT hold is latched - the channel's own read. */
+  #holding = false;
+
+  constructor({ dispatch, zone, method }) {
+    this.#dispatch = dispatch;
+    this.#zone = zone;
+    this.#method = method;
+  }
+
+  get holding() {
+    return this.#holding;
+  }
+
+  /** The detail's zone at fire time: strings read direct, readers read live. */
+  #zoneText() {
+    return typeof this.#zone === "function" ? this.#zone() : this.#zone;
+  }
+
+  /**
+   * Arm the qualifier over a fresh press. The gate is evaluated at fire
+   * time over whatever the channel names live, so no channel-state copy
+   * rides the timer; onArm - the pointer claim - runs after the latch
+   * flips and before the hold dispatches (the arm-then-dispatch order the
+   * pointer shape always held).
+   */
+  arm(timeoutMs, { gate, onArm = null } = {}) {
+    this.clear();
+    this.#timer = delay(() => {
+      this.#timer = null;
+      if (!gate()) {
+        return;
+      }
+      this.#holding = true;
+      if (onArm) {
+        onArm();
+      }
+      holdDetail.zone = this.#zoneText();
+      holdDetail.method = this.#method;
+      this.#dispatch(GESTURE_EVENTS.hold, holdDetail);
+    }, timeoutMs);
+  }
+
+  /**
+   * Drop ownership: an armed-but-unfired timer clears silently (a
+   * not-yet-hold never dispatches), a latched hold releases (restoring the
+   * boost through the action layer's release handler). End-of-press and
+   * teardown-shaped both land here - the exact clear-then-fire sequence
+   * both former bodies spelled.
+   */
+  release() {
+    this.clear();
+    if (this.#holding) {
+      this.#holding = false;
+      releaseDetail.zone = this.#zoneText();
+      releaseDetail.method = this.#method;
+      this.#dispatch(GESTURE_EVENTS.release, releaseDetail);
+    }
+  }
+
+  /**
+   * Silent reset for a fresh press: drop timer and latch with no dispatch
+   * (the pointer shape's old `#holding = false; #clearHoldTimer()` pair).
+   * Latched-vs-fresh cannot interleave and release() is one call away, so
+   * the engine keeps the quiet path explicit.
+   */
+  reset() {
+    this.clear();
+    this.#holding = false;
+  }
+
+  clear() {
+    // The armed-latch-checks own hot path: an armed timer not yet landed gets
+    // cancelled through the shared scheduler handle; the null
+    // assignment stays unconditional so the field is reset.
+    if (this.#timer !== null) {
+      this.#timer();
+    }
+    this.#timer = null;
+  }
+}
+
+/**
+ * The keyboard press channel: holds the keydown ownership facts the
+ * input-table walk latches (#own - a press the page owned never toggles),
+ * focus-liveness and the bare-tap toggle decision, all over the ONE
+ * PressHold qualifier (zone "screen", method "keyboard" - keys hold no
+ * per-press zone). What this once spelled inline was the qualifier itself.
  */
 class KeyHoldSession {
   #video;
-  #dispatch;
+  // The shared qualifier: timer + latch + pooled hold/release dispatch.
+  #phase;
   /** Liveness gate for the bare-tap toggle (focus may have moved between
    *  keydown and keyup), borrowed from the engine at handoff time. */
   #canToggle;
@@ -509,8 +619,6 @@ class KeyHoldSession {
    *  - the Space row's preservation of the UA's space-activates-video
    *  behavior. */
   #toggleOnTap;
-  #timer = null;
-  #holding = false;
   /** Whether the CURRENT press was captured by us. The keydown decision
    *  (shouldHandleKeys) is latched here so keyup never toggles playback for
    *  a press we did not own (focus moved between down and up), and always
@@ -519,7 +627,7 @@ class KeyHoldSession {
 
   constructor(video, dispatch, canToggle, family, toggleOnTap) {
     this.#video = video;
-    this.#dispatch = dispatch;
+    this.#phase = new PressHold({ dispatch, zone: "screen", method: "keyboard" });
     this.#canToggle = canToggle;
     this.#family = family;
     this.#toggleOnTap = toggleOnTap;
@@ -530,21 +638,13 @@ class KeyHoldSession {
    *  clean state - a swallowed keyup would otherwise poison every later
    *  hold with a latched boost. */
   press() {
-    if (this.#holding) {
-      this.#holding = false;
-      this.#dispatchRelease();
+    if (this.#phase.holding) {
+      this.#phase.release();
     }
     this.#own = true;
-    this.clearTimer();
-    this.#timer = delay(() => {
-      this.#timer = null;
-      if (!this.#video.paused && allowsIntent(this.#family)) {
-        this.#holding = true;
-        holdDetail.zone = "screen";
-        holdDetail.method = "keyboard";
-        this.#dispatch(GESTURE_EVENTS.hold, holdDetail);
-      }
-    }, HOLD_TIMEOUT_MS);
+    this.#phase.arm(HOLD_TIMEOUT_MS, {
+      gate: () => !this.#video.paused && allowsIntent(this.#family)
+    });
   }
 
   /** A press the page owned (text entry, foreign focus): its keyup must not
@@ -560,14 +660,11 @@ class KeyHoldSession {
    * field. Blur finishes silently-with-release and never toggles.
    */
   release(allowToggle) {
-    const wasHolding = this.#holding;
+    const wasHolding = this.#phase.holding;
     const owned = this.#own;
     this.#own = false;
-    this.#holding = false;
-    this.clearTimer();
-    if (wasHolding) {
-      this.#dispatchRelease();
-    } else if (allowToggle && this.#toggleOnTap && owned && this.#canToggle()) {
+    this.#phase.release();
+    if (!wasHolding && allowToggle && this.#toggleOnTap && owned && this.#canToggle()) {
       if (this.#video.paused) {
         // play() is a promise (spec-mandated since the API landed); benign
         // policy rejections (autoplay block) idle silently here.
@@ -583,29 +680,12 @@ class KeyHoldSession {
   }
 
   /** Teardown-shaped finish: restore a latched hold's rate (release-only,
-   *  never toggles - used only where focus truth is unknowable, destroy). */
+   *  never toggles - used only where focus truth is unknowable, destroy).
+   *  The release carries the timer clear, so the destroy loop's separate
+   *  clear pass dropped with it. */
   abort() {
-    if (this.#holding) {
-      this.#holding = false;
-      this.#dispatchRelease();
-    }
     this.#own = false;
-  }
-
-  clearTimer() {
-    // Almost every landing reaches here with no hold timer armed; the
-    // null check skips the cancel invocation on that hot path. The null
-    // assignment stays unconditional so the field is reset.
-    if (this.#timer !== null) {
-      this.#timer();
-    }
-    this.#timer = null;
-  }
-
-  #dispatchRelease() {
-    releaseDetail.zone = "screen";
-    releaseDetail.method = "keyboard";
-    this.#dispatch(GESTURE_EVENTS.release, releaseDetail);
+    this.#phase.release();
   }
 }
 
@@ -651,8 +731,14 @@ export class InputForge {
   #startX = 0;
   #startY = 0;
   #startTime = 0;
-  #holdTimer = null;
-  #holding = false;
+  /** The pointer press channel's hold qualifier: the ONE PressHold machine
+   *  with the engine boundaries as options - live per-press zone read, the
+   *  pooled dispatch, method "pointer". The key channels hold their own. */
+  #pointerHold = new PressHold({
+    dispatch: (name, detail) => this.#dispatch(name, detail),
+    zone: () => this.#gestureZone,
+    method: "pointer"
+  });
   #gestureZone = null;
 
   // Click/dblclick suppression after gestures: a deadline (time-based, not
@@ -908,7 +994,6 @@ export class InputForge {
     // while the scope signal is still live - dispose() lands at the end,
     // exactly where #scope.abort() used to.
     this.#endPointerSession();
-    this.#clearHoldTimer();
     this.#videoRect = null;
     this.#pointers.clear();
     cancelEase(this.#video);
@@ -917,14 +1002,12 @@ export class InputForge {
     forgeRegistry.remove(this);
     // Session teardown dispatches (keyboard hold release) must reach the
     // action layer while the scope signal is still live - dispose() lands at
-    // the end.
+    // the end. The release carries the qualifier's timer clear, so no
+    // separate clear pass follows.
     for (const session of this.#keySessions.values()) {
       session.abort();
     }
     this.#ownedKeyCodes.clear();
-    for (const session of this.#keySessions.values()) {
-      session.clearTimer();
-    }
     this.#pointerOwned = false;
     this.#streamClaimed = false;
     this.#clearAwaitClick();
@@ -934,14 +1017,6 @@ export class InputForge {
   /** Suppress the click/dblclick that follows an interactive gesture. */
   #suppressNextActivations() {
     this.#suppressClickUntil = performance.now() + SUPPRESS_WINDOW_MS;
-  }
-
-  /** Fill the shared release detail and dispatch the GESTURE_EVENTS.release
-   *  command from `start` to now. */
-  #fireRelease(zone, method) {
-    releaseDetail.zone = zone;
-    releaseDetail.method = method;
-    this.#dispatch(GESTURE_EVENTS.release, releaseDetail);
   }
 
   #hitTestVideo(pointerEvent) {
@@ -992,26 +1067,12 @@ export class InputForge {
    *  end, and (for a swipe) restore the eased transform. Stroke machines
    *  self-guard, so the three teardown calls are unconditional. */
   #endPointerSession() {
-    this.#clearHoldTimer();
-    if (this.#holding) {
-      this.#holding = false;
-      this.#fireRelease(this.#gestureZone, "pointer");
-    }
+    this.#pointerHold.release();
     this.#scrub.end();
     this.#swipe.end();
     this.#gestureFsActive = false;
     this.#streamClaimed = false;
     this.#suppressNextActivations();
-  }
-
-  #clearHoldTimer() {
-    // Almost every pointermove reaches here with no hold timer armed; the
-    // null check skips the cancel invocation on that hot path. The null
-    // assignment stays unconditional so the field is reset.
-    if (this.#holdTimer !== null) {
-      this.#holdTimer();
-    }
-    this.#holdTimer = null;
   }
 
   /** Tear down two-pointer pinch tracking once fewer than two pointers remain. */
@@ -1253,29 +1314,23 @@ export class InputForge {
       this.#startX = event.clientX;
       this.#startY = event.clientY;
       this.#startTime = performance.now();
-      this.#holding = false;
       this.#suppressClickUntil = 0;
       this.#gestureZone = this.#zoneForPoint(event);
       // Anchors + latches re-init per press (machines own their fields; the
       // swipe base snapshot deliberately persists - only a latch re-captures it).
       this.#scrub.reset(event.clientX, event.clientY, this.#startTime);
       this.#swipe.reset();
-      this.#clearHoldTimer();
-
-      this.#holdTimer = delay(() => {
-        this.#holdTimer = null;
-        if (this.#primaryPointerId !== null && !this.#video.paused && allowsIntent("hold")) {
-          this.#holding = true;
-          // The hold arms the claim here, not at the press (prevent-scope
-          // rule): first 300ms of a still press stays native, then the
-          // stream becomes ours for the release.
+      this.#pointerHold.reset();
+      this.#pointerHold.arm(HOLD_TIMEOUT_MS, {
+        gate: () => this.#primaryPointerId !== null && !this.#video.paused && allowsIntent("hold"),
+        // The hold arms the claim here, not at the press (prevent-scope
+        // rule): first 300ms of a still press stays native, then the
+        // stream becomes ours for the release.
+        onArm: () => {
           this.#streamClaimed = true;
           this.#pointerOp("setPointerCapture", this.#primaryPointerId);
-          holdDetail.zone = this.#gestureZone;
-          holdDetail.method = "pointer";
-          this.#dispatch(GESTURE_EVENTS.hold, holdDetail);
         }
-      }, HOLD_TIMEOUT_MS);
+      });
     }
   }
 
@@ -1302,7 +1357,7 @@ export class InputForge {
     const dy = Math.abs(y - this.#startY);
 
     if (dx > HOLD_CANCEL_MOVE_PX || dy > HOLD_CANCEL_MOVE_PX) {
-      this.#clearHoldTimer();
+      this.#pointerHold.clear();
     }
 
     // The `fs` gate and the intent gates drive the session only until it
@@ -1310,7 +1365,7 @@ export class InputForge {
     // fullscreen), #gestureFsActive replaces the per-move `fs` read and the
     // allowsIntent scans for the rest of the move stream - the same decisions
     // stay fixed mid-session.
-    if ((this.#gestureFsActive || fs) && !this.#holding) {
+    if ((this.#gestureFsActive || fs) && !this.#pointerHold.holding) {
       if (!this.#scrub.active && !this.#swipe.active) {
         // Intent gates are sampled live: toggling a setting mid-session
         // applies to the very next move.
@@ -1377,7 +1432,7 @@ export class InputForge {
     if (this.#primaryPointerId === null || event.pointerId !== this.#primaryPointerId) {
       return;
     }
-    this.#clearHoldTimer();
+    this.#pointerHold.clear();
     // One clock read for the whole handler: the double-tap branch below shares
     // this stamp instead of taking a second performance.now() per tap.
     const now = performance.now();
@@ -1386,7 +1441,7 @@ export class InputForge {
     const dy = event.clientY - this.#startY;
     const distance = Math.sqrt(dx * dx + dy * dy);
 
-    if (this.#holding || this.#scrub.active || this.#swipe.active) {
+    if (this.#pointerHold.holding || this.#scrub.active || this.#swipe.active) {
       // A latched session ends through the same #endPointerSession teardown
       // the cancel/destroy paths use: it fires the release, the scrub-end,
       // and (for a swipe) restores the video transform and clears the stroke

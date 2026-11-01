@@ -1,3 +1,4 @@
+import { sleep } from "../../lib/driver.mjs";
 /**
  * The GM surface contract: the API set the granted header shipped, the echo
  * semantics kernel consumers rely on, the cross-tab refreshes that must move
@@ -8,10 +9,9 @@
 export async function run({ session, boot, header, version: bundleVersion }) {
   const rows = [];
   const status = (name, ok, note = null) => rows.push({ name, status: ok ? "pass" : "fail", note: ok ? null : note, ms: null });
-  const settle = (ms) => new Promise((r) => setTimeout(r, ms));
 
   await boot();
-  await settle(300);
+  await sleep(300);
 
   // 1 - GM_info mirrors the header the bundle shipped, grants included.
   const info = await session.eval(function main(headerName, granted) {
@@ -42,7 +42,7 @@ export async function run({ session, boot, header, version: bundleVersion }) {
   });
   for (const value of [42, 43]) {
     await session.eval(function main(v) { window.GM_setValue("pf:echo-probe", v); }, value);
-    await settle(220);
+    await sleep(220);
   }
   const echo = await session.eval(function main() { return window.__echoLog ?? null; });
   status(
@@ -72,11 +72,11 @@ export async function run({ session, boot, header, version: bundleVersion }) {
     doc.debug.logs = true;
     window.__gmTest.remoteWrite("pf:configs", doc);
   });
-  await settle(220);
+  await sleep(220);
   await session.eval(function main() {
     document.dispatchEvent(new Event("resume"));
   });
-  await settle(220);
+  await sleep(220);
   const afterFlip = await consoleRows();
   const mirrored = afterFlip.some((l) => l.includes("Debug logs mirrored on"));
   const resumed = afterFlip.some((l) => l.includes("Page resumed"));
@@ -89,7 +89,7 @@ export async function run({ session, boot, header, version: bundleVersion }) {
     const doc = JSON.parse(JSON.stringify(window.__pfBacking["pf:configs"]));
     window.__gmTest.remoteWrite("pf:configs", doc);
   });
-  await settle(220);
+  await sleep(220);
   const afterNeutral = await consoleRows();
   status(
     "value-neutral foreign write never re-mirrors debug",
@@ -113,14 +113,14 @@ export async function run({ session, boot, header, version: bundleVersion }) {
     doc.debug.logs = false;
     window.__gmTest.remoteWrite("pf:configs", doc);
   });
-  await settle(220);
+  await sleep(220);
   const storedOff = await session.eval(function main() {
     return window.__pfBacking["pf:configs"]?.debug?.logs === false;
   });
   await session.eval(function main() {
     document.dispatchEvent(new Event("resume"));
   });
-  await settle(220);
+  await sleep(220);
   const afterOff = await consoleCount();
   status(
     "foreign debug flip off silences the running kernel",
@@ -152,7 +152,7 @@ export async function run({ session, boot, header, version: bundleVersion }) {
   const keyM = async () => {
     await raw.actions({ async: true }).move({ origin: "viewport", x: center.x, y: center.y }).press().pause(40).release().pause(40).perform();
     await raw.actions({ async: true }).keyDown("m").keyUp("m").pause(120).perform();
-    await settle(300);
+    await sleep(300);
   };
   await session.eval(function main() {
     window.__pfEvents = [];
@@ -163,13 +163,13 @@ export async function run({ session, boot, header, version: bundleVersion }) {
   status("KeyM baseline fires while hotkeys are on (foreign-write precondition)", baseline.mute === 1, `mute events=${baseline.mute}`);
 
   await writeHotkeys(false);
-  await settle(300);
+  await sleep(300);
   await keyM();
   const off = await muteCount();
   status("remote pf:configs write (hotkeys off) blocks the running kernel's KeyM", off.mute === 1, `mute events after off=${off.mute}`);
 
   await writeHotkeys(true);
-  await settle(300);
+  await sleep(300);
   await keyM();
   const back = await muteCount();
   status("remote settings write re-arms hotkeys on the live kernel", back.mute === 2, `mute events after on=${back.mute}`);
@@ -334,9 +334,9 @@ export async function run({ session, boot, header, version: bundleVersion }) {
   await session.eval(function main() {
     window.GM_setValue("pf:check-harvest", { stamp: "harvest" });
   });
-  await settle(150);
+  await sleep(150);
   await boot({ persist: true });
-  await settle(400);
+  await sleep(400);
   const harvested = await session.eval(function main() {
     const v = window.__pfBacking["pf:check-harvest"] ?? null;
     return v && v.stamp === "harvest";

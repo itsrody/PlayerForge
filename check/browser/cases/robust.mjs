@@ -1,3 +1,4 @@
+import { sleep } from "../../lib/driver.mjs";
 /**
  * The robustness floor: backing churn during background lives (page frozen
  * mid-playback, storage echo floods from cross-tab merges) raises the stakes
@@ -12,7 +13,6 @@
 export async function run({ session, boot }) {
   const rows = [];
   const status = (name, ok, note = null) => rows.push({ name, status: ok ? "pass" : "fail", note: ok ? null : note, ms: null });
-  const settle = (ms) => new Promise((r) => setTimeout(r, ms));
 
   await boot();
 
@@ -24,7 +24,7 @@ export async function run({ session, boot }) {
     "return (() => { const v = document.querySelector('#check-video'); return v && v.duration > 3 ? v.duration : false; })()",
     6000
   );
-  await settle(900); // kernel boot re-anchor settles (boot page drive pattern)
+  await sleep(900); // kernel boot re-anchor settles (boot page drive pattern)
   const before = await session.eval(function main() {
     const store = window.__pfBacking["pf:resume"] ?? { entries: [] };
     const own = (store.entries ?? []).find((e) => e && e.path === "/check");
