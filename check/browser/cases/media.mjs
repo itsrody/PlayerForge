@@ -594,30 +594,83 @@ export async function run({ session, baseUrl, boot }) {
   // boot-identity shell is destroyed and re-adopted at the new home -
   // exactly one shell ends attached to the NEW container's wrapper
   // (positioned absolutely so the on-screen adoption gate sees it).
+  // The row also witnesses the mid-fill destroy release: before the move,
+  // pinch-fill engages through the shell host's semantic pinch event (the
+  // exact route the engine dispatches), against a mismatched container box
+  // (the 16:9 fixture under a 900px stage gives a ~1.42 cover scale) and a
+  // staged embed-owned inline object-fit, so the destroy's fill release has
+  // real values to hand back - transform cleared and object-fit restored,
+  // not carried into the re-adoption.
   const rewrap = await session.evalAsync(function main(done) {
     const v = document.querySelector("#check-video-2");
     if (!v || !v.matches("[data-pf-shell]")) { done(null); return; }
-    const second = document.createElement("div");
-    second.className = "plyr";
-    second.setAttribute("data-plyr", "");
-    second.style.cssText = "position:absolute;left:0;top:0;width:1280px;height:720px;";
-    second.innerHTML = "<div class=\"plyr__video-wrapper\" style=\"width:100%;height:100%\"></div>";
-    document.body.append(second);
-    second.querySelector(".plyr__video-wrapper").moveBefore(v, null);
-    const deadline = Date.now() + 9000;
-    const tick = () => {
-      const newWrapper = second.querySelector(".pf-shell")?.parentElement === second.querySelector(".plyr__video-wrapper");
-      const shells = document.querySelectorAll(".pf-shell").length;
-      if (newWrapper && shells === 1) done({ host: newWrapper, shells });
-      else if (Date.now() < deadline) setTimeout(tick, 150);
-      else done({ host: newWrapper, shells });
+    const result = { fill: null, release: null, host: false, shells: 0 };
+    const stage2 = () => {
+      const second = document.createElement("div");
+      second.className = "plyr";
+      second.setAttribute("data-plyr", "");
+      second.style.cssText = "position:absolute;left:0;top:0;width:1280px;height:720px;";
+      second.innerHTML = "<div class=\"plyr__video-wrapper\" style=\"width:100%;height:100%\"></div>";
+      document.body.append(second);
+      second.querySelector(".plyr__video-wrapper").moveBefore(v, null);
+      const deadline = Date.now() + 9000;
+      const tick = () => {
+        const shellHost = second.querySelector(".pf-shell");
+        const host = !!(shellHost && shellHost.parentElement === second.querySelector(".plyr__video-wrapper"));
+        const shells = document.querySelectorAll(".pf-shell").length;
+        if (host && shells === 1) {
+          // The destroy ran before this: the readopt's fresh transform
+          // must have found no hostage - transform cleared, staged fit back.
+          result.host = true;
+          result.shells = shells;
+          result.release = { transform: v.style.transform, objectFit: v.style.objectFit };
+          done(result);
+          return;
+        }
+        if (Date.now() < deadline) setTimeout(tick, 150);
+        else { result.shells = shells; done(result); }
+      };
+      tick();
     };
-    tick();
+    // Stage an embed-owned inline fit (the stub stylesheet only sets a
+    // computed one), mismatch the container box against the 16:9 fixture,
+    // give the container RO one beat to tick the reference box, then the
+    // semantic pinch the engine itself dispatches.
+    v.style.objectFit = "cover";
+    v.closest(".plyr").style.width = "900px";
+    setTimeout(() => {
+      document.querySelector(".pf-shell").dispatchEvent(
+        new CustomEvent("pf:gesture-pinch", { detail: { direction: "out" } }));
+      const deadline = Date.now() + 3000;
+      const pollFill = () => {
+        if (v.style.transform.indexOf("scale(") === 0 && v.style.objectFit === "contain") {
+          result.fill = { transform: v.style.transform, objectFit: v.style.objectFit };
+          stage2();
+          return;
+        }
+        if (Date.now() < deadline) setTimeout(pollFill, 100);
+        else { result.fill = { transform: v.style.transform, objectFit: v.style.objectFit }; stage2(); }
+      };
+      pollFill();
+    }, 350);
   });
   rows.push({
     name: "re-wrap into a second SDK container: boot-identity shell dies, video re-adopts in the new home",
     status: rewrap && rewrap.host && rewrap.shells === 1 ? "pass" : "fail",
     note: rewrap ? JSON.stringify(rewrap) : "no stamped video to move",
+    ms: null
+  });
+  rows.push({
+    name: "mid-fill destroy releases the transform hostage (fill active at destroy; cleared + object-fit restored on re-adoption)",
+    status: rewrap && rewrap.fill && rewrap.fill.transform.startsWith("scale(")
+      && rewrap.host && rewrap.release
+      && rewrap.release.transform === "" && rewrap.release.objectFit === "cover"
+      ? "pass" : "fail",
+    note: rewrap && rewrap.fill
+      ? (!rewrap.fill.transform.startsWith("scale(")
+        ? "fill never engaged (transform stayed empty)"
+        : JSON.stringify({ fill: rewrap.fill, release: rewrap.release, host: rewrap.host }))
+      : "no stamped video to move",
     ms: null
   });
 

@@ -458,9 +458,11 @@ export class Kernel {
    * meanwhile. A ready shell is handed to #notifyShellCreated. In-flight
    * waits ride the kernel scope's signal, so pagehide disposal aborts them.
    * The adoption home rides frozen: whatever the settle costs in time, the
-   * identity the shell boots with is the one adoption resolved.
+   * identity the shell boots with is the one adoption resolved. A boot that
+   * ends without a shell is handed to #abandonBoot - the pin and the
+   * downgrade were placed before the wait, and nothing else releases them.
    */
-  async #onVideoFound({ home }) {
+  async #onVideoFound({ home, watch }) {
     const { video, container, sdk } = home;
     logger.log("lifecycle", `video:found - ${sdk.name}`);
     if (this.#registry.getByVideo(video)) {
@@ -492,7 +494,7 @@ export class Kernel {
       return;
     }
     if (!video.isConnected || !container.isConnected) {
-      logger.log("lifecycle", `${sdk.name} video left the document before settle - skipping`);
+      this.#abandonBoot(watch, `${sdk.name} video left the document before settle`);
       return;
     }
     if (this.#registry.getByVideo(video)) {
@@ -511,6 +513,43 @@ export class Kernel {
       // idempotent, so it reaps the partial state without double-freeing a
       // shell that never got registered.
       await shell?.destroy?.();
+      // The destroy either never registered (creation threw) or just
+      // emptied the registry (a registered shell whose ready rejected), so
+      // #onRegistryEmpty will not fire from this failure: without the
+      // release below the pin refuses every later event for this video and
+      // the downgrade strands.
+      this.#abandonBoot(watch);
+    }
+  }
+
+  /**
+   * Release a boot that produced no shell. Two side effects were placed
+   * before the settle wait and are stranded by every shell-less exit:
+   * the seen-pin (the boot's media-event laterality - a refused adoption
+   * refuses the video for its whole lifetime) and the downgraded tap
+   * (consistent only with a shell that is not there). The one automatic
+   * recovery edge, #onRegistryEmpty off the registry's unregister, never
+   * fires for these shapes. watch.stop() is exactly-once (idempotent with
+   * the scope defer and the destroy-readopt seam), then the full tap re-arms
+   * when no shell holds the page: its seed walk re-runs adoption, so a
+   * re-connected video re-boots without waiting for a media event the
+   * downgraded tap cannot deliver. A video whose boot threw deterministically
+   * re-enters this same path through the re-armed tap - event-driven and
+   * settle-bounded, the recovery shape #onRegistryEmpty already rides; the
+   * stranded-forever alternative is what this method exists to repair.
+   * Skipped under pagehide: the scope's defers stopped every watch already,
+   * and a re-armed tap would outlive the teardown.
+   */
+  #abandonBoot(watch, why) {
+    if (why && logger.enabled) {
+      logger.log("lifecycle", why);
+    }
+    if (this.#scope.disposed) {
+      return;
+    }
+    watch.stop();
+    if (!this.#registry.current) {
+      this.#armDiscoveryTap();
     }
   }
 
@@ -717,12 +756,14 @@ export class Kernel {
     if (logger.enabled) {
       logger.log("kernel", `${home.sdk.name} adopted (${video.videoWidth}x${video.videoHeight}, ${Math.round(video.duration)}s)`);
     }
-    this.#onVideoFound({ home });
-    this.#watchVideoRemoval(home);
+    this.#onVideoFound({ home, watch: this.#watchVideoRemoval(home) });
     this.#downgradeDiscoveryTap();
   }
 
-  /** Hand per-video removal watching to its one stateful owner. */
+  /** Hand per-video removal watching to its one stateful owner and return
+   *  the watch, so the boot it accompanies can release the seen-pin through
+   *  an abandoned exit (#abandonBoot) - the pin is added before the settle
+   *  wait, and this watch's onStop is its only release. */
   #watchVideoRemoval(home) {
     let watch = null;
     watch = new RemovalWatch({
@@ -735,6 +776,7 @@ export class Kernel {
     // Chromium-native single-target consolidation and the timer are both
     // handled inside the watch; the kernel scope is its pagehide backstop.
     this.#scope.defer(() => watch.stop());
+    return watch;
   }
 
   /**

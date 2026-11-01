@@ -542,6 +542,15 @@ export class Shell {
       // Scope first: flips disposed (re-entrancy guard), aborts the shared
       // signal (MediaSession/settings/fullscreen listeners die natively).
       () => this.#scope.dispose(),
+      // Release an active fill before any DOM teardown. The reachable
+      // mid-fill destroy is the destroy-readopt seam (a live re-home that
+      // resolves a DIFFERENT container destroys the boot-identity shell),
+      // and a video left riding its inline fill transform + claimed
+      // object-fit would carry them into the re-adoption: the fresh shell's
+      // ViewershipTransform boots #fillActive=false / #priorObjectFit=""
+      // and never sees the hostage. The instant path here cancels any
+      // in-flight WAAPI ease first; a no-op when fill was never active.
+      () => this.#view.exitFill(false),
       // Destroy sub-components (each manages its own internal state). Lazy
       // panel sections tear down in build order.
       () => {

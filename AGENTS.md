@@ -334,7 +334,15 @@ iframes, same-origin and cross-origin:
   `findSdkForVideo` (the parent-stamped cache invalidates on exactly this
   parent change), and a DIFFERENT container destroys the boot-identity
   shell and re-adopts through the boot path (destroy-readopt; the
-  equality shape and the unresolvable shape stand untouched).
+  equality shape and the unresolvable shape stand untouched). The boot
+  hands itself its `RemovalWatch` and carries an explicit shell-less-exit
+  release (`#abandonBoot`): a settle that resolves disconnected, and a
+  mid-boot `shell.create` throw / `ready` reject, never touch the
+  registry-empty edge (nothing registered), so without this the pre-boot
+  pin refuses every later event for that video and the downgrade strands —
+  the release stops the watch (onStop = pin release, exactly-once) and
+  re-arms the full tap when the registry is empty; skipped under pagehide
+  (the scope defers already stopped it).
 
 ### shell/ — the feature layer
 - **shell.js** — composes the boot step list (realm → settle → DOM layers →
@@ -347,7 +355,12 @@ iframes, same-origin and cross-origin:
   inputs/panel/toast/DOM teardown steps behind it — they are the shell's
   only unregister on that path, so the broken member dies contained and the
   tail gets everything below it done (a future member without an honest
-  destroy surfaces as leftover DOM in the rows, not as a leak).
+  destroy surfaces as leftover DOM in the rows, not as a leak). Destroy
+  releases an active fill right after the scope flip (`#view.exitFill(false)`): the
+  reachable mid-fill destroy is the destroy-readopt seam, and a video left
+  riding its inline fill transform + claimed object-fit would carry them
+  into the re-adoption — the fresh shell's ViewershipTransform boots
+  `#fillActive=false`/`#priorObjectFit=""` and never sees the hostage.
 - **media.js** — `MediaControls` (play/pause/seek/scrub-latch/volume/rate/
   boost/PiP/stop), `MediaSessionOwner` claim/lifecycle — the bridge carries a
   plain disposal boolean, not a Scope root: every listener it owns rides the
