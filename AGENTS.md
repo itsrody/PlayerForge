@@ -478,10 +478,26 @@ iframes, same-origin and cross-origin:
   pointer hold and Space hold both riding it) + `IntentGates`,
   and the per-story state machines `SkipStreak`, `ScrubSession` (the input/
   commit decoupling: moves accrue `#pendingDelta`, requestAnimationFrame —
-  the compositor tick — commits one clamped seek per display refresh, the
+  the compositor tick — commits one clamped seek per display refresh (the
+  pump's clock probed against rVFC and declined: 30 pipelined paused-seek
+  writes over 500ms landed as ONE `seeked` + ONE presentation callback while
+  rAF held 60 commit ticks over the same window, rVFC idles outright on a
+  paused video with no presented frames, and its playing cadence is content
+  fps — 50 fires vs rAF's 241 across a 2s play window on a 120Hz display —
+  so a presented-frame pump either quantizes to the decoder's display rate
+  or strands at pause, while the UA coalesces burst seeks with zero dropped
+  frames, making the rAF pump the efficient shape already), the
   readout shows the authored target, `end()` flushes the backlog; a dead
   zone with a residue accumulator keeps slow strokes alive while holding
-  jitter nets to zero), the hold bookkeeping (`#activeHolds` first-source-
+  jitter nets to zero) — and the pump's idle arm measured and declined
+  (a still hand keeps a 120Hz early-return tick whose self-time rounds to
+  0 at the probe's resolution — the noise scale the pooled-dispatch verdict
+  declined at higher frequency — so a dynamic disarm buys nothing), while
+  the native guarantees the floor hands the pump for free are recorded
+  (the rAF argument IS the frame clock — equal to document.timeline.currentTime
+  to the digit, so a callback never buys a second clock read; cadence is
+  pinned to the display's vsync with 8.34ms median interval and no drift;
+  a hidden tab pauses rAF outright and resumes within 11ms of re-show), the hold bookkeeping (`#activeHolds` first-source-
   wins boost; any real pause mid-hold cancels through the release teardown —
   a paused video resuming must not carry a stale boost), and
   `ViewershipTransform` (the fill-mode cover scale composed as one
