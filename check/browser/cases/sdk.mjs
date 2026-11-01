@@ -81,7 +81,10 @@ export async function run({ session, baseUrl }) {
       },
       Vidstack: () => tagStub("media-player"),
       "Mux Player": () => tagStub("mux-player"),
-      "Radiant Media Player": () => tagStub("radiant-media-player"),
+      // The audit's provenance fix: the stub proves the PRIMARY install
+      // route's wrapper (.rmp-container) that the record gained - the WC
+      // route's tag stub always matched and never needed a fixture.
+      "Radiant Media Player": () => stub({ class: "rmp-container" }),
       "Laravel Video Embed": () => {
         // First anchor shape: the wrapper div that is :first-child of the
         // data-page root holds the video. The data-page root mounts (the

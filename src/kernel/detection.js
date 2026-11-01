@@ -65,7 +65,16 @@ const REGISTRY = [
   { name: "Clappr", anchors: [".container[data-container]", "[data-player]"] },
   { name: "Vidstack", anchors: ["media-player"] },
   { name: "Mux Player", anchors: ["mux-player"] },
-  { name: "Radiant Media Player", anchors: ["radiant-media-player"] },
+  // Radiant ships TWO install routes (docs 10.7.9 quick-start): the primary
+  // script build appends the player into a site-chosen div via
+  // `new RadiantMP(elementID)` - the appended wrapper carries the
+  // SDK-namespaced class .rmp-container (verified in the served
+  // wc.rmp.min.css class set, rmp 10.7.9), so the standard install matches;
+  // the secondary custom-element build renders <radiant-media-player> and
+  // needs its vendor tag. .rmp-video exists on the media element itself and
+  // is deliberately NOT an anchor: a 0-hop match would resolve the video
+  // element as the shell home, a box the shell cannot host its DOM in.
+  { name: "Radiant Media Player", anchors: [".rmp-container", "radiant-media-player"] },
   { name: "Laravel Video Embed", anchors: ["[data-page] > div:first-child", "#app[data-page]"] },
 ];
 

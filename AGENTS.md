@@ -298,14 +298,28 @@ iframes, same-origin and cross-origin:
   `.container[data-container]` (the vendor-set `{ class: "container",
   "data-container": "" }` Container element, one hop closer than the Core's
   `data-player` fallback arm — verified in clappr/clappr main) resolves the
-  shell home to the tight video box. One deliberate exception rides under
-  review: Laravel Video Embed's anchors are Inertia's `data-page` vocabulary,
-  not the package's own (every Laravel embed package renders iframes), so the
+  shell home to the tight video box. The kernel A→Z audit re-proved the
+  ring against current vendor releases: XGPlayer's `xgplayer` root class
+  (v3 source + docs, the `xg-` elements are plain non-canonical elements),
+  MediaElement's dual namespace (`mejs__` default + the legacy `mejs-`
+  stylesheet route, verified through 7.1.0), Flowplayer's `.flowplayer`
+  setup container (the OSS release's own minimal-setup markup), and
+  ArtPlayer's `art-video-player` (256 occurrences across the current 5.x
+  dist) all hold; the audit found one record GAP — Radiant's single
+  custom-element anchor covered only its secondary WC install route, so it
+  gained `.rmp-container` (the primary script route's appended wrapper,
+  verified in the served rmp 10.7.9 `wc.rmp.min.css` class set), and the
+  media element's own `.rmp-video` is deliberately not an anchor — a 0-hop
+  match would resolve the video element as the shell home, a box the shell
+  cannot host its DOM in. One deliberate exception rides under review:
+  Laravel Video Embed's anchors are Inertia's `data-page` vocabulary, not
+  the package's own (every Laravel embed package renders iframes), so the
   record matches any Inertia app with a bare video — it was added for a
-  real-target site with a named fullscreen fix and stays until user direction
-  replaces or removes it. The registry is exported as `SDK_REGISTRY` so the
-  check's registry-coverage case proves every record against a real
-  anchor-satisfying stub per record.
+  real-target site with a named fullscreen fix and stays per the audit's
+  user direction until the diagnostics dump prints its topology field
+  facts, where the retire-vs-narrow decision re-opens. The registry is
+  exported as `SDK_REGISTRY` so the check's registry-coverage case proves
+  every record against a real anchor-satisfying stub per record.
 - **discovery.js** — presence machinery: min-size thresholds (100×60),
   on-screen/layout deferral gates (`PresenceGate`, per-instance
   MutationObserver check), the media feed (`DiscoveryTap`: lazy escalation —
@@ -946,7 +960,13 @@ stop at the first failure:
   destroy-readopt seam, one shell ends in the new home), the one-main
   refusal row (a second Plyr wrapper with a second video appended while the
   main is live → still exactly one shell, the second video unstamped — a
-  refusal is an absence, so the row samples to a stable no-adoption), and the
+  refusal is an absence, so the row samples to a stable no-adoption), the
+  refusal-recovery row (the refusal leaves the candidate unpinned — no
+  seen-pin, no gate — so once the live shell's owner is really removed and
+  the registry-empty edge fires, the re-armed full tap's seed walk adopts
+  the surviving candidate, whichever video the doc-order pick left
+  unshelled; the strand shape, a refusal surviving its refusal with no
+  recovery path, is the row's fail), and the
   state-preserving move: a `moveBefore` reorder
   in place and a cross-parent re-home of the running shell, both
   floor-real), `menus` (menu command → panel effect; the targeted

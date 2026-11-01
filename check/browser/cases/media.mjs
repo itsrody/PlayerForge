@@ -868,5 +868,72 @@ export async function run({ session, baseUrl, boot }) {
     ms: null
   });
 
+  // Refusal recovery, the one-main scope law's exit: the refusal row left
+  // video3 refused and unpinned (a refusal is an absence - no seen-pin, no
+  // gate). Once the registry's shell is REALLY removed - its owner video
+  // leaves and the RemovalWatch grace ends the shell - the registry-empty
+  // edge re-arms the full tap, and its seed walk re-runs adoption on the
+  // surviving candidate. Which video owns the shell when this row starts
+  // is the seed walk's doc-order pick (the refusal-row's third appended
+  // FIRST, before the vtRace stage that holds video2), so the row removes
+  // whoever owns it and expects the OTHER video - each of which sat in a
+  // refusal at some point in this case - to adopt in its place. The strand
+  // shape (a refusal that survives its refusal with no recovery path) is
+  // this row's fail.
+  const refusalRecovery = await session.evalAsync(function main(done) {
+    const first = document.querySelector("#check-video-2");
+    const second = document.querySelector("#check-video-3");
+    if (!first || !second) {
+      done(null);
+      return;
+    }
+    const deadline = Date.now() + 9000;
+    const ownerOf = () => document.querySelector(".pf-shell")?.parentNode?.querySelector("video")?.id ?? null;
+    // Phase 1: a stable one-shell state with a KNOWN owner (the vtRace
+    // teardown re-arms the seed; either video may hold the slot when this
+    // row starts, and the vtRace row's re-adopt read "not yet" at +1100ms).
+    const removed = { id: null };
+    const waitStable = () => {
+      const owner = ownerOf();
+      if (owner === first.id || owner === second.id) {
+        removed.id = owner;
+        const ownerEl = owner === first.id ? first : second;
+        ownerEl.remove();
+        // Grace (500ms) plus settle + boot - poll from past the grace.
+        setTimeout(tick, 650);
+        return;
+      }
+      if (Date.now() < deadline) {
+        setTimeout(waitStable, 200);
+        return;
+      }
+      done({ state: "no owned shell stabilized", shells: document.querySelectorAll(".pf-shell").length, owner: ownerOf() });
+    };
+    const tick = () => {
+      const shells = document.querySelectorAll(".pf-shell").length;
+      const owner = ownerOf();
+      // Success: the one live shell belongs to the OTHER video - the
+      // removed owner left, the surviving candidate (refused earlier in
+      // this case) adopted through the re-armed tap.
+      if (shells === 1 && owner && removed.id && owner !== removed.id) {
+        done({ stamped: true, shells, owner, removed: removed.id });
+        return;
+      }
+      if (Date.now() < deadline) {
+        setTimeout(tick, 250);
+        return;
+      }
+      // The strand-shape diagnosis: name the surviving shell's owner.
+      done({ stamped: false, shells, owner, removed: removed.id, first: first.matches("[data-pf-shell]"), second: second.matches("[data-pf-shell]") });
+    };
+    waitStable();
+  });
+  rows.push({
+    name: "refusal recovery: the refused candidate adopts when the main leaves (registry-empty edge re-arms the tap)",
+    status: refusalRecovery && refusalRecovery.stamped && refusalRecovery.shells === 1 ? "pass" : "fail",
+    note: refusalRecovery ? JSON.stringify(refusalRecovery) : "no live main and refused candidate to work",
+    ms: null
+  });
+
   return rows;
 }
