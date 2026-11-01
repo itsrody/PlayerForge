@@ -88,12 +88,12 @@ const banner = `// ==UserScript==
 // @grant        GM_xmlhttpRequest
 // @connect      *
 // @connect      https://www.subtitlecat.com
-// @resource     pfStyle https://raw.githubusercontent.com/itsrody/PlayerForge/firefox/dist/playerforge.css
+// @resource     pfStyle https://raw.githubusercontent.com/itsrody/PlayerForge/master/dist/playerforge.css
 // @run-at       document-start
 // The updater surface: VM's updater polls @downloadURL and compares @version
 // (install-from-URL only leaves the fallback to the install source, which a
-// local install does not have). Both URLs pin the firefox branch dist.
-// @downloadURL  https://raw.githubusercontent.com/itsrody/PlayerForge/firefox/dist/playerforge.user.js
+// local install does not have). Both URLs pin the master branch dist.
+// @downloadURL  https://raw.githubusercontent.com/itsrody/PlayerForge/master/dist/playerforge.user.js
 // @supportURL   https://github.com/itsrody/PlayerForge/issues
 // @homepageURL  https://github.com/itsrody/PlayerForge
 // @license      MIT
@@ -186,7 +186,7 @@ function verifyMinified(text) {
   if (!text.startsWith("// ==UserScript==")) {
     throw new Error("min build: metadata banner displaced from file head");
   }
-  for (const needle of ["@name         PlayerForge", "@version", "@grant        GM_setValue", "@resource     pfStyle https://raw.githubusercontent.com/itsrody/PlayerForge/firefox/dist/playerforge.css"]) {
+  for (const needle of ["@name         PlayerForge", "@version", "@grant        GM_setValue", "@resource     pfStyle https://raw.githubusercontent.com/itsrody/PlayerForge/master/dist/playerforge.css"]) {
     if (!text.includes(needle)) {
       throw new Error(`min build: metadata line missing: ${needle.trim().split(/\s+/)[0]}`);
     }
