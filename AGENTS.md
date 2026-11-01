@@ -25,7 +25,7 @@ both platforms:
   excluded in the header (YouTube, Vimeo, Netflix, streams, socials…), and
   `entry.js` keeps a runtime skip list above that.
 
-**Repo shape (24 source modules, ~14k LOC):**
+**Repo shape (24 source modules, ~15k LOC):**
 
 ```
 src/
@@ -39,7 +39,7 @@ dist/                 generated, not the review target
 esbuild.config.mjs    single build: IIFE userscript + css resource + worker chunk
 ```
 
-**Shipping artifact** (`dist/playerforge.user.js`, ~152 KB one IIFE +
+**Shipping artifact** (`dist/playerforge.user.js`, ~165 KB one IIFE +
 `dist/playerforge.css` via `@resource pfStyle`): match-all userscript with a
 24-pattern exclusion list (`@exclude-match`, VM's strict match-pattern
 surface — the old `@exclude` glob any-character semantics is why the bare

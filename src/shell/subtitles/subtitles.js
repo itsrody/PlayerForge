@@ -740,11 +740,14 @@ export class ForgeTrack {
       // The 80% width cap rides the picture too: a pillarboxed picture must
       // not invite a cue wider than the picture. Layer-relative stages
       // (picture unreadable) keep the sheet's 80% fallback - clear the
-      // inline value once.
-      const maxW = picture ? `${fmtPx(0.8 * picture.width)}px` : null;
+      // inline value once. The numeric width is the dirty field - the same
+      // skip-string-construction rule the line/position checks follow, so
+      // an unchanged picture allocates no css string either.
+      const maxW = picture ? picture.width : null;
       if (prev.maxW !== maxW) {
-        if (maxW) {
-          slot.style.maxWidth = maxW;
+        const css = picture ? `${fmtPx(0.8 * maxW)}px` : null;
+        if (css) {
+          slot.style.maxWidth = css;
         } else {
           slot.style.removeProperty("max-width");
         }
@@ -925,8 +928,15 @@ export class ForgeTrack {
 }
 
 /* - Shell section - */
-const SUBTITLE_FILE_ACCEPT = ".srt,.vtt";
-const SUBTITLE_EXT_RE = /\.(srt|vtt)$/i;
+/** The ingest vocabulary's ONE source table: every machine-facing spelling
+ *  below - the file-picker accept list, the extension regex, the srt-detect
+ *  test, the display-name defaults - is a projection of this (the four
+ *  hand-spelled forms this once kept drifted apart inside the same file). */
+const SUBTITLE_EXTS = ["srt", "vtt"];
+const SUBTITLE_FILE_ACCEPT = SUBTITLE_EXTS.map((ext) => `.${ext}`).join(",");
+const SUBTITLE_EXT_RE = new RegExp(`\\.(${SUBTITLE_EXTS.join("|")})$`, "i");
+const SRT_NAME_RE = new RegExp(`\\.${SUBTITLE_EXTS[0]}$`, "i");
+const SUBTITLE_NAME_FALLBACK = `subtitles.${SUBTITLE_EXTS[1]}`;
 
 const SETTING_KEYS = {
   size: "subtitles.style.size",
@@ -1411,7 +1421,7 @@ export class SubtitleSession {
     if (this.#scope.disposed) {
       return;
     }
-    const normalizedText = /\.srt$/i.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
+    const normalizedText = SRT_NAME_RE.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
     // Content-hash memo: a re-ingest of the same text (rebooted entry's URL,
     // panel re-attach) skips the parse and reuses the same cue array; big
     // multi-megabyte tracks first offload to the worker (see memoizedParse).
@@ -1458,13 +1468,13 @@ export class SubtitleSession {
   #nameFromUrl(url) {
     const parsed = URL.parse(url);
     if (!parsed) {
-      return "subtitles.vtt";
+      return SUBTITLE_NAME_FALLBACK;
     }
     const last = decodeURIComponent(parsed.pathname.split("/").pop() || "");
     if (!last) {
-      return "subtitles.vtt";
+      return SUBTITLE_NAME_FALLBACK;
     }
-    return SUBTITLE_EXT_RE.test(last) ? last : `${last}.vtt`;
+    return SUBTITLE_EXT_RE.test(last) ? last : `${last}.${SUBTITLE_EXTS[1]}`;
   }
 
   #setSubsUrl(url) {

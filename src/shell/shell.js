@@ -411,7 +411,7 @@ export class Shell {
       return;
     }
     // Register host for auto-removal on destroy and mark managed attributes.
-    this.#dom.onCleanup(() => this.#shellDom?.host.remove());
+    this.#dom.defer(() => this.#shellDom?.host.remove());
     this.#dom.markAttribute(this.#shellDom.host, SHELL_MARKER, "");
     // Restore container position if we changed it from static.
     const style = getComputedStyle(this.container);
@@ -420,7 +420,7 @@ export class Shell {
     }
     // Parasite watchdog: re-attach host if evicted by SDK.
     const dropWatch = watchShellHost(this.container, this.#shellDom.host);
-    this.#dom.onCleanup(dropWatch);
+    this.#dom.defer(dropWatch);
   }
 
   #forwardMediaEvents() {

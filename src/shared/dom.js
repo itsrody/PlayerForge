@@ -483,14 +483,16 @@ export class DOMManager {
 
   /**
    * Register an external cleanup callback (e.g. an unsubscribe handle from
-   * dom-watch.js or a pool destroy). The Scope's defer is the one disposer
-   * registry - this was the last hand-rolled twin (an own array + reversed
-   * isolation loop), now riding the contract it duplicated: same reverse
-   * order, same isolated-throw treaty, and the run-now path on an already-
-   * disposed scope closes the hole the cleared-array push left (a late
-   * registration used to append into the emptied array and never run).
+   * dom-watch.js or a pool destroy). The name is the same verb the Scope
+   * registry speaks - `defer` IS the delegation target, so the vocabulary
+   * is one word for one registry on both sides of the seam (the onCleanup
+   * name this once kept was the pre-defer verb over the platform's word).
+   * Same reverse order, same isolated-throw treaty, and the run-now path on
+   * an already-disposed scope closes the hole the cleared-array push left
+   * (a late registration used to append into the emptied array and never
+   * run).
    */
-  onCleanup(fn) {
+  defer(fn) {
     this.#scope.defer(fn);
   }
 
@@ -503,7 +505,7 @@ export class DOMManager {
     if (this.#scope.disposed) return;
 
     // Mark disposed + abort the signal FIRST: every signal-bound listener,
-    // the observer disconnects, and the onCleanup callbacks are released by
+    // the observer disconnects, and the deferred cleanups are released by
     // the platform here (all ride the Scope's defer), and the passes below
     // run after every registration path is already closed.
     this.#scope.dispose();

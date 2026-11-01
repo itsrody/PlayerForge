@@ -202,7 +202,7 @@ export class ToastManager {
     this.#pauseAutoHide();
     // Only the AVAILABLE side empties here: the held #toast was acquired at
     // construction and never re-enters the pool, and it stays attached by
-    // contract - the HUD host's removal (the shell's #dom onCleanup)
+    // contract - the HUD host's removal (the shell's #dom defer)
     // carries it out with the whole layer's unregistering.
     this.#pool.destroy();
   }
