@@ -168,7 +168,10 @@ iframes, same-origin and cross-origin:
   needs three ways (liveness-gated observer teardown, tombstone
   compaction, logged throw containment). The subscribe handle is a
   Disposable (`[Symbol.dispose]` on the old callable — FF 134, floor-real;
-  `using` verified live on the 159 page realm); pooling the dispatched
+  `using` verified live on the 159 page realm; one shape on every subscribe
+  path — the already-aborted no-op returns the same Disposable over a
+  release spent at once, the bare-closure fast path this once kept was a
+  second shape whose protocol was aliasing luck); pooling the dispatched
   CustomEvent was measured (~680 ns/emit vs ~1690 fresh) and declined: an
   in-dispatch event re-dispatched synchronously throws InvalidStateError,
   and the settings bus is exactly the re-entrant shape, while ~1µs/emit is
@@ -788,11 +791,11 @@ stop at the first failure:
   `discovery` (min size, no-anchor, tiny-video),
   `fan` (the fan-out owner unit, imported into the page realm: positional
   fan, callable handle, native signal teardown, aborted-signal no-op,
-  Symbol.dispose presence+use, `using` release, mid-dispatch batch join,
-  10k-emit budget, and the dispatch-isolation witness: a throwing subscriber
-  strands neither followers nor `emit`, its throw reports to the page error
-  surface by design, and the deliberate error sentences itself out of the
-  uncaught-error ledger),
+  Symbol.dispose presence+use, `using` release (a live and a dead handle),
+  mid-dispatch batch join, 10k-emit budget, and the dispatch-isolation
+  witness: a throwing subscriber strands neither followers nor `emit`, its
+  throw reports to the page error surface by design, and the deliberate
+  error sentences itself out of the uncaught-error ledger),
   `frames` (§ above),
   `gestures` (skip/mute/volume/panel/PiP/scrub with real driver input),
   `gm` (info mirror, own-echo exactly-once shape, remote-write cross-tab

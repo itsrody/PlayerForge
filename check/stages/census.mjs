@@ -1,7 +1,7 @@
 /**
  * Gate 3 - the executable census.
  *
- * The AGENTS.md census records (ten Fans, twelve Scope roots, the
+ * The AGENTS.md census records (ten Fans, eleven Scope roots, the
  * zero-timer pipeline, zero manual teardowns) used to be prose re-derived by
  * hand each review; here they are re-derived by the tool, so a deliberate
  * change that moves a count turns the gate red until the recorded census in
@@ -153,7 +153,6 @@ const ROWS = [
 ];
 
 export async function run() {
-  const start = Date.now();
   const files = walk(SRC);
   const countsPerRow = ROWS.map((row) => ({ ...row, total: 0, sites: [] }));
   for (const file of files) {

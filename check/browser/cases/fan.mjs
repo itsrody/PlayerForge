@@ -80,6 +80,26 @@ export async function run({ session, baseUrl }) {
             f2d.emit(1);
             results.aborted = abortedCalled === 0 && typeof deadHandle === "function";
 
+            // One handle shape on every path: the dead no-op handle is the
+            // same Disposable, so `using` releases it instead of throwing
+            // (a bare-closure fast path here was a second shape whose
+            // Disposable protocol was luck, not a guarantee).
+            let deadUsing = null;
+            try {
+              const runDeadUsing = new Function("fan", "sig", "cb", `
+                "use strict";
+                {
+                  using h = fan.subscribe(cb, { signal: sig });
+                }
+                return true;
+              `);
+              deadUsing = runDeadUsing(f2d, dead.signal, () => {});
+              deadUsing = deadUsing === true;
+            } catch (err) {
+              deadUsing = "THROW " + err.name;
+            }
+            results.deadUsing = deadUsing;
+
             let dCalled = 0;
             const f3 = new Fan("unit");
             const handle = f3.subscribe(() => { dCalled++; });
@@ -155,6 +175,7 @@ export async function run({ session, baseUrl }) {
   row("the returned handle tears the subscription", probe.callable, true);
   row("signal teardown is native", probe.signal, true);
   row("an already-aborted owner signal subscribes nothing", probe.aborted, true);
+  row("a dead handle is Disposable - `using` releases it", probe.deadUsing, true);
   row("the subscribe handle carries [Symbol.dispose]", probe.disposeProp, true);
   row("the subscribe handle disposes via Symbol.dispose", probe.dispose, true);
   row("`using` releases the subscription", probe.using, true);

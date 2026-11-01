@@ -339,11 +339,27 @@ export class Scope {
  * files spelled this), a live signal's listener is removed at its abort
  * with no add/remove pair, and dispatch snapshots the audience so
  * mid-dispatch subscriptions join the next batch (dom-watch documents the
- * same rule as its length-hold). Dispatch is synchronous and, as with any
- * uncaught-through-native-dispatch throw, is reported to the page error
- * surface rather than aborting the emit call. The event type is
- * instance-internal - it never escapes this class, so the tag is a call-site
- * derived label (debug visibility in devtools), not a hand-spelled contract.
+ * same rule as its length-hold).
+ *
+ *   - `emit(payload)`  — synchronous fan-out; dispatch is native, so an
+ *                        uncaught subscriber throw reports to the page
+ *                        error surface rather than aborting the emit call
+ *                        (native dispatch isolation - the kernel's
+ *                        per-listener try/catch retired on that truth) -
+ *                        and the fan case sentences the deliberate throw
+ *                        out of the uncaught-error ledger itself.
+ *   - `subscribe(cb, { signal })` — one handle shape on every path,
+ *                        including the already-aborted no-op: a callable
+ *                        and a Disposable ([Symbol.dispose]; fully-shipped
+ *                        Firefox 134, using/DisposableStack verified live
+ *                        on the 159 page realm), so `using` releases a
+ *                        subscription with no Fan-side second teardown
+ *                        path - every census teardown rides the owner
+ *                        signal; no consumer ever called the handle.
+ *
+ * The event type is instance-internal - it never escapes this class, so
+ * the tag is a call-site derived label (debug visibility in devtools), not
+ * a hand-spelled contract.
  *
  * Why no platform primitive replaces it: Observable / EventTarget.when()
  * (the W3C "better addEventListener") is Chromium 135+ only and Mozilla
@@ -360,12 +376,6 @@ export class Scope {
  * tick fans at most tens of times per second and the echo row budgets
  * 1000 emissions strictly within 400ms dominated by delivery, not
  * allocation. Fresh allocation stays.
- *
- * The subscribe handle is a Disposable: the same function it always was
- * (no census consumer ever called it - every teardown rides the signal)
- * carrying [Symbol.dispose] (fully-shipped Firefox 134; using/DisposableStack
- * verified live on the 159 page realm), so a future consumer can take a
- * subscription under `using` without any Fan-side second teardown path.
  */
 export class Fan extends EventTarget {
   #type;
@@ -390,22 +400,26 @@ export class Fan extends EventTarget {
    * machine rides: one abort controller owns the listener's signal, the
    * handle aborts it (the platform drops the listener), an owner `signal`
    * rides the same release via the `once`+`signal` composition. No manual
-   * `removeEventListener` anywhere in the class - and an already-aborted
-   * owner signal is the no-op subscription the docstring records, returning
-   * a dead handle instead of pinning a listener that could never fire or
-   * detach.
+   * `removeEventListener` anywhere in the class. One handle shape on every
+   * path: an already-aborted owner signal is the no-op subscription the
+   * class doc records - nothing attaches, and the returned handle is the
+   * same Disposable over a release that was spent at once (the bare-closure
+   * fast path this once kept was a second shape that only the callable
+   * contract covered; `using` on it would have thrown instead of releasing,
+   * so the aliasing this now carries was protocol luck, not a guarantee).
    */
   subscribe(cb, { signal } = {}) {
-    if (signal?.aborted) {
-      return () => {};
-    }
-    const handler = (event) => cb(event.detail);
     const release = new AbortController();
-    this.addEventListener(this.#type, handler, { signal: release.signal });
-    signal?.addEventListener("abort", release.abort.bind(release), {
-      once: true,
-      signal: release.signal
-    });
+    if (signal?.aborted) {
+      release.abort();
+    } else {
+      const handler = (event) => cb(event.detail);
+      this.addEventListener(this.#type, handler, { signal: release.signal });
+      signal?.addEventListener("abort", release.abort.bind(release), {
+        once: true,
+        signal: release.signal
+      });
+    }
     const sig = () => release.abort();
     sig[Symbol.dispose] = sig;
     return sig;
