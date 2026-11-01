@@ -365,6 +365,15 @@ iframes, same-origin and cross-origin:
   carries per-viewing extras (`subOffset`, `subsUrl`); cross-tab merges
   arrive through `watchStorageKey` and require the tracker's `#loaded`
   latch (`#adoptExternal`, which announces so grain consumers re-resolve).
+  The merge adopts REMOVALS too — a foreign doc omitting a known entry is a
+  deletion made elsewhere, adopted under doc-side LWW (entry revision older
+  than the foreign doc's stamp) so a background tab's next checkpoint
+  cannot resurrect a panel-deleted entry; the "Start over" toast action
+  writes its reset through the store (an explicit boundary outranks the
+  drift epsilon, like the completion state does). The never-written
+  `pending` entry field (entrance-only across the whole repo history) is
+  retired with its load-time sweep — the one wall-clock read that went with
+  it is the Date.now census 10→9.
 - **filter.js** — `FilterSession` (eager state machine: values, apply,
   trailing persist, the menu reset gesture) + `VideoFilter` (the lazy panel
   section over it). The filter lives on the video from first play — a
@@ -862,7 +871,10 @@ stop at the first failure:
   reset row seeds a non-default color filter and proves the bare command
   restores it — no panel involved),
   `persist` (storage seeding, resume restore across reboot, the sync-grain
-  row: one nudge gesture lands `subOffset` in the tracker's entry),
+  row: one nudge gesture lands `subOffset` in the tracker's entry, the
+  Start-over row proving the explicit boundary writes past the drift
+  epsilon, and the foreign-omission row proving a removal adoption with no
+  write-back resurrection),
   `subtitles` (the picture-anchor case: a letterbox stage — square element
   in a taller stage — proves percent cue fields land on the displayed
   picture rect, not the layer box, with the panel drop as the real ingest

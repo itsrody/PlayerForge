@@ -1,9 +1,12 @@
 import { sleep } from "../../lib/driver.mjs";
 /**
  * The storage data plane end to end: the kernel must (a) write the configs
- * doc and the resume tracker through the GM backing, and (b) a reboot seeded
+ * doc and the resume tracker through the GM backing, (b) a reboot seeded
  * with prior-session storage must surface exactly that state through the
- * store again - the whole reason pf:configs/pf:resume live in manager space.
+ * store again - the whole reason pf:configs/pf:resume live in manager
+ * space, (c) a foreign doc that omits a known entry adopts the removal
+ * (cross-tab delete convergence), and (d) an explicit boundary ("Start
+ * over") persists regardless of the drift-epsilon gate.
  */
 export async function run({ session, boot }) {
   const rows = [];
@@ -97,6 +100,91 @@ export async function run({ session, boot }) {
     name: "resume restores the saved position after reboot",
     status: seek !== null ? "pass" : "fail",
     note: seek === null ? "no restored seek within 6s" : `currentTime=${seek}`,
+    ms: null
+  });
+
+  // The explicit boundary: the restored boot's action toast carries "Start
+  // over". Paused at the saved position, clicking it must write the reset
+  // through the store - a plain seek-to-0 leaves the entry's last resume
+  // intact because the flushed seek lands inside the save epsilon (and the
+  // next boot would resume the position the user just discarded).
+  const startOver = await session.evalAsync(function main(done) {
+    const video = document.querySelector("#check-video");
+    video.pause();
+    // The HUD (toasts included) lives inside the shell host's open shadow
+    // root - the light DOM carries only the host (.pf-shell), so the toast
+    // probe must cross the boundary explicitly.
+    const probe = () => document.querySelector(".pf-shell")?.shadowRoot?.querySelector(
+      'pf-toast .pf-toast-actions button[title="Start over"]');
+    let polled = 0;
+    const poll = setInterval(() => {
+      polled++;
+      const button = probe();
+      if (button) {
+        clearInterval(poll);
+        button.click();
+        setTimeout(() => {
+          const entries = window.__pfBacking["pf:resume"]?.entries ?? [];
+          done({ ok: entries[0]?.resume === 0, why: `resume=${entries[0]?.resume}` });
+        }, 400);
+        return;
+      }
+      if (polled > 24) {
+        clearInterval(poll);
+        const shadow = document.querySelector(".pf-shell")?.shadowRoot ?? null;
+        const toast = shadow?.querySelector("pf-toast") ?? null;
+        done({
+          ok: false,
+          why: `no button; shadow=${shadow ? "yes" : "none"} toast=${toast ? "yes" : "none"} class=${toast?.className}`
+            + ` buttons=${(toast?.querySelectorAll(".pf-toast-actions button") ?? []).length}`
+            + ` titles=${[...(toast?.querySelectorAll("button") ?? [])].map((b) => b.title).join("|")}`
+        });
+      }
+    }, 60);
+  });
+  rows.push({
+    name: "Start over writes the reset past the drift-epsilon gate",
+    status: startOver.ok === true ? "pass" : "fail",
+    note: startOver.why ?? null,
+    ms: null
+  });
+
+  // Cross-tab removal convergence: a foreign doc (another tab's whole-store
+  // write) that omits one of OUR entries is a deletion made elsewhere - the
+  // catalog LWW merge must adopt it, not resurrect the entry on this tab's
+  // next checkpoint write. The forged doc stamps a timestamp newer than the
+  // entry's last revision, so the doc-side LWW guard attests to the absence.
+  const removal = await session.evalAsync(function main(done) {
+    const doc = window.__pfBacking["pf:resume"];
+    const entry = (doc?.entries ?? [])[0];
+    if (!entry) { done({ ok: false, why: "no entry to remove" }); return; }
+    window.__gmTest.remoteWrite("pf:resume", {
+      version: 1,
+      entries: [],
+      updatedAt: Math.max(doc.updatedAt || 0, entry.updatedAt || 0) + 5000
+    });
+    // Provoke this tab's own write path (a pause flush) after the echo: the
+    // stale entry must not be rewritten back onto the disk.
+    const video = document.querySelector("#check-video");
+    video.play().catch(() => {});
+    setTimeout(() => {
+      video.pause();
+      setTimeout(() => {
+        const after = window.__pfBacking["pf:resume"];
+        const resurrected = (after?.entries ?? []).length > 0;
+        done({
+          ok: (after?.entries ?? []).length === 0,
+          why: resurrected
+            ? `resurrected: ${JSON.stringify(after.entries[0]).slice(0, 80)}`
+            : "removal adopted, no write-back"
+        });
+      }, 500);
+    }, 250);
+  });
+  rows.push({
+    name: "foreign doc omission adopts the removal (delete convergence)",
+    status: removal.ok === true ? "pass" : "fail",
+    note: removal.why ?? null,
     ms: null
   });
 

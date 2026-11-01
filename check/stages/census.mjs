@@ -149,8 +149,8 @@ const ROWS = [
   {
     name: "Date.now reads",
     pattern: "Date.now(",
-    expect: 10,
-    why: "the wall-clock reads, page.js and resume.js only: resume entry timestamps and staleness cutoffs, plus page-context nonce/deadline math - the zero-timer pipeline's deadline class reads it at call time; a new consumer must join page/resume or name its own when-why"
+    expect: 9,
+    why: "the wall-clock reads, page.js and resume.js only: resume entry timestamps and staleness cutoffs, plus page-context nonce/deadline math - the zero-timer pipeline's deadline class reads it at call time; a new consumer must join page/resume or name its own when-why (one resume read left with the never-written 'pending' vocabulary: its load-time sweep was the tenth)"
   }
 ];
 

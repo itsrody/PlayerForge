@@ -1,4 +1,4 @@
-import { getPageContext, domainsMatch, domainScore, getDomainKey, hashEntry } from "../shared/page.js";
+import { getPageContext, domainsMatch, domainScore, hashEntry } from "../shared/page.js";
 import { TUNING, formatTime } from "../shared/core.js";
 import { KEYS, gmSetValue, loadJsonObject, watchStorageKey } from "../shared/store.js";
 import { logger, Scope, Fan } from "../shared/runtime.js";
@@ -14,18 +14,21 @@ function sortByUpdatedAt(entries, descending = false) {
 }
 
 // Hoisted TUNING.resume.* scalars: mutation-free calibration, so the
-// optimizing tier folds
-// them as invariants on the media-clock path rather than re-resolving the
-// deep TUNING chain on every timeupdate/save decision.
+// optimizing tier folds them as invariants on the media-clock path rather
+// than re-resolving the deep TUNING chain on every timeupdate/save decision.
+// The old NOT-hoisted exception (checkpointRatio/min/max, "tests mutate them
+// at runtime") dried up with the tests/ suite it cited - nothing in the tree
+// mutates a TUNING.resume field anywhere, so the checkpoint scalars join
+// the fold.
 const RESUME_STALE_DAYS = TUNING.resume.staleDays;
 const RESUME_MAX_ENTRIES = TUNING.resume.maxEntries;
 const RESUME_DURATION_FUZZ = TUNING.resume.durationFuzz;
 const RESUME_MIN_POSITION = TUNING.resume.minPosition;
 const RESUME_SAVE_EPSILON_S = TUNING.resume.saveEpsilonSeconds;
 const RESUME_COMPLETION_RATIO = TUNING.resume.completionRatio;
-// NOTE: checkpointRatio/min/max are deliberately NOT hoisted - tests mutate
-// TUNING.resume.* at runtime to pin the checkpoint span, so they must stay
-// live object reads on the save-decision path.
+const RESUME_CHECKPOINT_RATIO = TUNING.resume.checkpointRatio;
+const RESUME_CHECKPOINT_MIN_S = TUNING.resume.minCheckpointSeconds;
+const RESUME_CHECKPOINT_MAX_S = TUNING.resume.maxCheckpointSeconds;
 
 /**
  * LWW merge of foreign entries into memory. Unknown ids join the store;
@@ -38,7 +41,7 @@ const RESUME_COMPLETION_RATIO = TUNING.resume.completionRatio;
 const RESUME_ENTRY_FIELDS = new Set([
   "id", "domain", "path", "title", "duration", "resume",
   "subOffset", "subsUrl",
-  "createdAt", "updatedAt", "pending"
+  "createdAt", "updatedAt"
 ]);
 
 function isValidStore(raw) {
@@ -141,8 +144,8 @@ class ResumeStore {
     }
     const raw = isValidStore(value) ? value : loadJsonObject(KEYS.resume, null);
     if (isValidStore(raw)) {
-      const { added, updated } = this.#mergeRaw(raw);
-      if (added || updated) {
+      const { added, updated, removed } = this.#mergeRaw(raw);
+      if (added || updated || removed) {
         this.#diskEcho = null;
         this.#notify(true);
       }
@@ -152,13 +155,16 @@ class ResumeStore {
   #mergeRaw(raw) {
     let added = 0;
     let updated = 0;
+    let removed = 0;
     // The same lazy map createEntry/updateResume use; entries referenced here
     // are the live in-memory objects, so the adoption walk never forks.
     const byId = this.#entriesById();
+    const foreignIds = new Set();
     for (const incoming of raw.entries) {
       if (!incoming || typeof incoming !== "object" || typeof incoming.id !== "string") {
         continue;
       }
+      foreignIds.add(incoming.id);
       const known = byId.get(incoming.id);
       if (!known) {
         const shaped = toFixedShape(incoming);
@@ -173,22 +179,38 @@ class ResumeStore {
         updated++;
       }
     }
-    if (added === 0 && updated === 0) {
-      return { added, updated };
+    // Removal convergence: the storage doc is the store's truth surface, so a
+    // known id its writer omitted is a deletion made elsewhere - adopt it
+    // here instead of resurrecting the entry on this store's next persist
+    // (an additive-only merge let a background tab's later checkpoint write
+    // a survivor back, undoing the other tab's panel remove). Guarded
+    // doc-side LWW: only a foreign doc stamped AFTER an entry's last
+    // revision attests to its absence - an entry this store actively revised
+    // more recently than the foreign writer's whole doc keeps its position,
+    // the same newer-wins rule the position merge runs; and a doc with no
+    // comparable stamp can witness nothing, so it drops nothing.
+    const docUpdatedAt = raw.updatedAt || 0;
+    if (docUpdatedAt > 0) {
+      for (const [id, entry] of byId) {
+        if (!foreignIds.has(id) && (entry.updatedAt || 0) <= docUpdatedAt) {
+          byId.delete(id);
+          removed++;
+        }
+      }
     }
-    // The entries array holds the exact same objects byId maps: in-place-only
-    // merges (every known id, LWW-adopted newer timestamps) reshare it - the
-    // Set-spread rebuild ran on every cross-tab echo otherwise.
-    if (added > 0) {
+    if (added > 0 || removed > 0) {
+      // The entries array held the exact same objects byId maps: both
+      // structural changes (adoption, removal) rebuild it from the map -
+      // the Set-spread rebuild ran on every cross-tab echo otherwise.
       this.#state.entries = [...byId.values()];
       this.#invalidateLookupCaches();
-    } else {
+    } else if (updated > 0) {
       // In-place adoption mutates updatedAt values only: the entry objects
       // (and their id/path keys) are unchanged, so #byId/#byPath stay exact -
       // but a cached sorted snapshot sorts on updatedAt and is stale now.
       this.#sorted = null;
     }
-    return { added, updated };
+    return { added, updated, removed };
   }
 
   /**
@@ -296,13 +318,6 @@ class ResumeStore {
       gmSetValue(KEYS.resume, this.#state);
       logger.warn("resume", "Resume store missing or corrupt - reset");
     }
-    const stalePending = this.#state.entries.filter((entry) => entry.pending).length;
-    if (stalePending) {
-      this.#state.entries = this.#state.entries.filter((entry) => !entry.pending);
-      this.#state.updatedAt = Date.now();
-      gmSetValue(KEYS.resume, this.#state);
-      logger.log("resume", `Dropped ${stalePending} stale pending entries`);
-    }
     this.#invalidateLookupCaches();
     this.#loaded = true;
   }
@@ -369,7 +384,7 @@ class ResumeStore {
     let best = null;
     let bestScore = -Infinity;
     for (const entry of candidates) {
-      if (entry.pending || !domainsMatch(entry.domain, domainKey)) {
+      if (!domainsMatch(entry.domain, domainKey)) {
         continue;
       }
       const fuzz = Math.abs(entry.duration - targetDuration);
@@ -650,6 +665,14 @@ export class ResumeTracker {
         icon: "reload",
         title: "Start over",
         onClick: () => {
+          // An explicit boundary outranks the drift gate exactly like the
+          // terminal state does in #saveProgress: a plain seek-to-0 leaves
+          // the store untouched when the flush lands within the epsilon of
+          // the last checkpoint (the common click-then-stop-at-zero case),
+          // and the next boot would resume the position the user just
+          // discarded. Writing the reset through the store makes it land;
+          // its own no-op guard absorbs repeat clicks.
+          this.#store.updateResume(this.#entry.id, 0);
           this.#lastSavedPosition = 0;
           shell.media.seekTo(0);
         }
@@ -712,8 +735,8 @@ export class ResumeTracker {
     const positionDue = (position) => {
       const duration = this.#entry.duration;
       const span = Math.min(
-        TUNING.resume.maxCheckpointSeconds,
-        Math.max(TUNING.resume.minCheckpointSeconds, duration * TUNING.resume.checkpointRatio)
+        RESUME_CHECKPOINT_MAX_S,
+        Math.max(RESUME_CHECKPOINT_MIN_S, duration * RESUME_CHECKPOINT_RATIO)
       );
       return Math.abs(position - this.#lastSavedPosition) >= span;
     };
@@ -794,11 +817,6 @@ export class ResumeTracker {
   /** The adopted entry id, or null before the first adoption. */
   get entryId() {
     return this.#entry?.id ?? null;
-  }
-
-  /** Top-document domain key of the current entry (null before adoption). */
-  get domainKey() {
-    return this.#entry ? getDomainKey(this.#entry.domain) : null;
   }
 
   /** Per-entry subtitle sync offset in seconds (0 with none). */
