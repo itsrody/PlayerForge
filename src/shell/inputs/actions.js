@@ -585,6 +585,11 @@ class TransformEase {
       animation.cancel();
     };
     pending.set(video, stop);
+    // Both end-state listeners carry once: finish and cancel are each a
+    // one-shot transition back to idle on this animation instance (a
+    // cancel-after-finish pair is the commit path, both guards no-op on the
+    // pending check), so the native once-drop is the honest teardown arm -
+    // no listener survives the animation's done state.
     animation.addEventListener("finish", () => {
       if (pending.get(video) !== stop) {
         return;
@@ -595,13 +600,13 @@ class TransformEase {
       animation.cancel();
       pending.delete(video);
       this.#dropPromotion(video);
-    });
+    }, { once: true });
     animation.addEventListener("cancel", () => {
       if (pending.get(video) === stop) {
         pending.delete(video);
         this.#dropPromotion(video);
       }
-    });
+    }, { once: true });
   }
 }
 

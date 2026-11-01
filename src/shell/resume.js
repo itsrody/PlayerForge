@@ -580,9 +580,11 @@ export class ResumeTracker {
     const onLoaded = () => finishWaiting();
     const onError = () => finishWaiting();
     signal.addEventListener("abort", finishWaiting, { once: true });
-    video.addEventListener("loadedmetadata", onLoaded, { signal });
-    video.addEventListener("durationchange", onDurationChange, { signal });
-    video.addEventListener("error", onError, { signal });
+    // Observation-only riders (the resolve never cancels a default); the
+    // pause/seeked/ended flush belt below carries the same passive contract.
+    video.addEventListener("loadedmetadata", onLoaded, { signal, passive: true });
+    video.addEventListener("durationchange", onDurationChange, { signal, passive: true });
+    video.addEventListener("error", onError, { signal, passive: true });
     await metadataReady;
     if (this.#scope.disposed) {
       logger.log("resume", "Shell destroyed before metadata - skipping");
