@@ -917,12 +917,20 @@ stop at the first failure:
   100k emissions (10-subscriber echo-audience shape and the zero-subscriber
   warm read; the fresh-CustomEvent ~2.9µs/emit re-measured and the pooling
   decline re-recorded), the ingest engine's full 1.1MB / ~19k-cue parse and
-  its offset reparse (double-digit ms), and 250k HUD formatter calls —
-  every budget a multi-x multiplier over the measured baseline, so the
-  tripwire catches shape regressions (an accidental allocation loop, a
-  megamorphic rewrite) and never CI jitter; nothing earned an adoption —
-  the loops are already engine-tight and the measured verdicts are the
-  batch's record),
+  its offset reparse (double-digit ms), 250k HUD formatter calls, and the
+  zero-alloc allocation probes — the fresh-vs-pooled measurement pairs that
+  answer every zero-alloc rewrite candidate: the per-render picture-derive
+  box (fresh object at rVFC cadence vs one-retained-picture + one-scratch
+  ping-pong; PARITY at 1M renders, ~5ms harness-precision floor both) and
+  the sync-offset cue-list rebuild (#applyBase's fresh Array + object per
+  cue per stepper commit vs list+object reuse with a module comparator;
+  PARITY at the pathological 19k-cue scale x 15 commits) — both poolings
+  DECLINED as noise, the same verdict the fresh-CustomEvent pooling
+  decline recorded, and every budget a multi-x multiplier over the
+  measured baseline, so the tripwire catches shape regressions (an
+  accidental allocation loop, a megamorphic rewrite) and never CI jitter;
+  nothing earned an adoption — the loops are already engine-tight and the
+  measured verdicts are the batch's record),
   `gm` (info mirror, own-echo exactly-once shape, remote-write cross-tab
   adoption surviving a seeked-flush save, the debug mirror: a foreign
   configs write flips the running kernel mid-flight (mirror line + real
