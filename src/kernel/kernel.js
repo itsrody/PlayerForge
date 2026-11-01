@@ -333,7 +333,6 @@ class RemovalWatch {
 export class Kernel {
   /** The one live shell (one-shell-per-session; see ShellSlot). */
   #registry = new ShellSlot(() => this.#onRegistryEmpty());
-  /** Videos with a settle wait in flight - dedups repeated discovery. */
   /** The video whose boot is mid-settle, registry entry not yet placed - the
    *  one-main scope's other occupancy fact. Single by the same guarantee the
    *  adoption guard enforces (nothing else can pass the guard while set, so
@@ -637,12 +636,6 @@ export class Kernel {
   /**
    * The kernel's observer-driven presence gates (layout, on-screen): each built
    * on first need from its engine factory and torn down with the kernel scope.
-   * Returns the live gate, or null once the scope is disposed, so a late
-   * adoption after pagehide has nothing to wait for.
-   */
-  /**
-   * The kernel's observer-driven presence gates (layout, on-screen): each built
-   * on first need from its engine factory and torn down with the kernel scope.
    * Cached per factory - the gate lives in a map keyed by the engine import
    * itself, so there is no string key to misspell (a typo'd key would silently
    * fork a second RO/IO instance) - and one instance serves every candidate
@@ -712,10 +705,11 @@ export class Kernel {
       this.#ensureGate(createOnScreenGate)?.watch(video, () => this.#adoptVideo(video));
       return;
     }
-    if (!home.container) {
-      logger.warn("kernel", "No container for video - skipping");
-      return;
-    }
+    // No container guard: the record schema resolves the container to the
+    // matched element itself whenever `host` is undeclared (the current
+    // records' state), and the host branch falls back to the same element
+    // when its selector misses - detection never answers a match without a
+    // container element.
     this.#seenVideos.add(video);
     // Guarded like the logger contract promises: with chatter off (the
     // default), the dimensions/duration interpolation never runs - a disabled
@@ -757,8 +751,8 @@ export class Kernel {
    * existing boot path at the new home. The equality shape - the pinned
    * moveBefore re-home onto a bare stage - resolves the same container and
    * falls out the comparison untouched. An unresolvable video (the full SDK
-   * context left the composed ancestry - the re-resolve answers null or a
-   * null container) stands on the boot identity: the adoption contract says
+   * context left the composed ancestry - the re-resolve answers null) stands
+   * on the boot identity: the adoption contract says
    * no SDK anchor means no shell, but there is no matching mid-flight
    * teardown contract, and the move may reverse.
    */

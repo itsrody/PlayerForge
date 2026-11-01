@@ -283,7 +283,19 @@ iframes, same-origin and cross-origin:
   **SDK-namespaced anchor selectors** resolved through composed ancestry
   (`closest()`, shadow-boundary aware); the matched element with the fewest
   ancestor hops wins. There is deliberately **no generic fallback** — a bare
-  `<video>` with no SDK anchor never boots.
+  `<video>` with no SDK anchor never boots. Record provenance is
+  source-verified, not assumed: Clappr's compound lead anchor
+  `.container[data-container]` (the vendor-set `{ class: "container",
+  "data-container": "" }` Container element, one hop closer than the Core's
+  `data-player` fallback arm — verified in clappr/clappr main) resolves the
+  shell home to the tight video box. One deliberate exception rides under
+  review: Laravel Video Embed's anchors are Inertia's `data-page` vocabulary,
+  not the package's own (every Laravel embed package renders iframes), so the
+  record matches any Inertia app with a bare video — it was added for a
+  real-target site with a named fullscreen fix and stays until user direction
+  replaces or removes it. The registry is exported as `SDK_REGISTRY` so the
+  check's registry-coverage case proves every record against a real
+  anchor-satisfying stub per record.
 - **discovery.js** — presence machinery: min-size thresholds (100×60),
   on-screen/layout deferral gates (`PresenceGate`, per-instance
   MutationObserver check), the media feed (`DiscoveryTap`: lazy escalation —
@@ -648,7 +660,9 @@ new code-level evidence:
    one response gate, one close path, one timer backend, one mutation feed,
    one storage watch contract.
 3. **Everything machine-facing is derived from a source table** (§3 lists
-   them). Adding an SDK = one record + check rows. Adding a gesture = one
+   them). Adding an SDK = one record + check rows (the registry-coverage case
+   demands a stub builder for every record, so the fixture promise is
+   machine-enforced). Adding a gesture = one
    table row; the schema, bindings, and events derive.
 4. **Stateful ownership = private classes.** If state is mutated in more
    than one public flow, it belongs to one object with `#`-fields, not to
@@ -810,7 +824,7 @@ stop at the first failure:
   single-shell, a 6s attach-latency budget row, and the VM echo reach: a
   foreign settings write live-reloads the running frame's kernel and the
   event-time hotkeys gate sees it (blocked mid-flight, then re-armed).
-- **Cases (12):** `boot` (install contract, positive/negative discovery),
+- **Cases (13):** `boot` (install contract, positive/negative discovery),
   `discovery` (min size, no-anchor, tiny-video),
   `fan` (the fan-out owner unit, imported into the page realm: positional
   fan, callable handle, native signal teardown, aborted-signal no-op,
@@ -819,6 +833,11 @@ stop at the first failure:
   witness: a throwing subscriber strands neither followers nor `emit`, its
   throw reports to the page error surface by design, and the deliberate
   error sentences itself out of the uncaught-error ledger),
+  `sdk` (the registry-coverage gate, imported into the page realm through the
+  served working-tree module: every registry record resolves against a real
+  anchor-satisfying stub — name, container element, and one hop — the bare
+  video keeps its null answer, the Clappr compound beats the Core on fewest
+  hops, and a record without a stub builder fails its row),
   `frames` (§ above),
   `gestures` (skip/mute/volume/panel/PiP/scrub with real driver input),
   `gm` (info mirror, own-echo exactly-once shape, remote-write cross-tab

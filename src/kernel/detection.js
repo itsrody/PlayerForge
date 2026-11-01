@@ -54,12 +54,26 @@ const REGISTRY = [
   { name: "Aliplayer", anchors: [".prism-player"] },
   { name: "Fluid Player", anchors: [".fluid_video_wrapper"] },
   { name: "Flowplayer", anchors: [".fp-player", "flowplayer-ui", "[data-player-id]", ".flowplayer"] },
-  { name: "Clappr", anchors: ["[data-player]"] },
+  // Clappr emits two SDK-owned markers (verified in clappr/clappr main,
+  // packages/clappr-core): the Container element renders
+  // { class: "container", "data-container": "" } and the Core element renders
+  // { "data-player": "" }. The compound leads: both attributes are vendor-set
+  // on one element that sits closest to the video (the container directly
+  // wraps the playback el, while the core wraps containers), so the shell
+  // home resolves to the tight box; the bare [data-player] stays as the
+  // fallback arm for layouts the compound misses.
+  { name: "Clappr", anchors: [".container[data-container]", "[data-player]"] },
   { name: "Vidstack", anchors: ["media-player"] },
   { name: "Mux Player", anchors: ["mux-player"] },
   { name: "Radiant Media Player", anchors: ["radiant-media-player"] },
   { name: "Laravel Video Embed", anchors: ["[data-page] > div:first-child", "#app[data-page]"] },
 ];
+
+/** The registry as a check-tool surface: the registry-coverage case derives
+ *  its per-record stub rows from these records, so a new record added without
+ *  an anchor-satisfying stub shape turns the gate red. Frozen - the matcher
+ *  holds the same array by reference. */
+export const SDK_REGISTRY = REGISTRY;
 
 /**
  * The whole identity engine as one class: the composed-ancestry scratch, the
