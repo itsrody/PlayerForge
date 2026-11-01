@@ -101,7 +101,8 @@ class DomWatch {
   #live = 0;
 
   #observer = null;
-  /** Document the observer is currently bound to - see #ensureObserver(). */
+  /** Flush-pending latch: a batch is queued in #pendingRecords and a
+   *  #scheduleFlush() is already in flight - no double-schedule. */
   #queued = false;
   /** Pooled records buffers: flush swaps active/recycled instead of allocating. */
   #pendingRecords = [];
@@ -412,18 +413,6 @@ export class DOMManager {
   }
 
   /**
-   * Create a ResizeObserver that is automatically disconnected on destroy.
-   * Returns the observer for manual use between creation and destroy.
-   */
-  observeResize(target, callback) {
-    if (this.#scope.disposed) return null;
-    const observer = new ResizeObserver(callback);
-    observer.observe(target);
-    this.#scope.defer(() => observer.disconnect());
-    return observer;
-  }
-
-  /**
    * Create an element and append it to a parent. The element is automatically
    * removed from the DOM on destroy.
    */
@@ -716,7 +705,6 @@ export function subscribeFullscreen(cb, signal) {
   return fsGate.subscribe(cb, signal);
 }
 
-/**
 /**
  * The ONE layout-viewport read, real-world-first: the ROOT ELEMENT's
  * laid-out box is what the browser actually presented - the geometry every

@@ -187,8 +187,10 @@ iframes, same-origin and cross-origin:
   unreachable: Firefox 159 exposes the entry type in no realm, page or
   worker), logger facade.
 - **dom.js** — the shared mutation feed (`onDomMutations`: ONE page-level
-  MutationObserver every consumer rides — element pooling, the shell ledger,
-  shadow traversal, the fullscreen gate, the iframe registry), `DomPool`
+  MutationObserver; its four real subscribers are discovery's media tap +
+  detached-target prune, the page.js pipe diff, and inject.js's reconnect
+  watchdog — the module's other exports ride the same plane, not the feed),
+  `DomPool`
   (element recycling; the three reusable DOM pools are the toast pill, the
   panel's history cards, and the subtitle cue slots — the first two are
   DomPool consumers, the cue slots are pool-by-construction: a

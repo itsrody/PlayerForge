@@ -6,7 +6,11 @@ import { sleep } from "../../lib/driver.mjs";
  * store again - the whole reason pf:configs/pf:resume live in manager
  * space, (c) a foreign doc that omits a known entry adopts the removal
  * (cross-tab delete convergence), and (d) an explicit boundary ("Start
- * over") persists regardless of the drift-epsilon gate.
+ * over") persists regardless of the drift-epsilon gate. (e) is the DomPool
+ * reuse contract at the History cards: a cross-tab structural merge
+ * re-renders the section, and a live card keeps its NODE across both a
+ * grow (two forged foreign entries adopted) and a shrink (the excess
+ * released back) - node identity, not a rebuilt tree.
  */
 export async function run({ session, boot }) {
   const rows = [];
@@ -148,6 +152,152 @@ export async function run({ session, boot }) {
     note: startOver.why ?? null,
     ms: null
   });
+
+  // The DomPool reuse contract at the History cards. The section renders
+  // off the tracker's structural merge announcements, so the witness rides
+  // a cross-tab add: a foreign doc (newer stamp) carries two forged
+  // entries, the open History list must grow by acquisitions, and the
+  // card already on screen must keep its node - the reconcile walks
+  // #activeCards by index and only the missing slots acquire from the
+  // pool. A property stamped on the live card is the identity witness: a
+  // rebuilt tree would lose it.
+  const poolGrow = await session.evalAsync(function main(done) {
+    const shadow = document.querySelector(".pf-shell")?.shadowRoot;
+    if (!shadow) { done({ ok: false, why: "no shell shadow" }); return; }
+    // The panel opens on the shared hotkey (the same KeyS route the
+    // subtitles case rides); the History section builds lazily at first
+    // activation, so the tab click precedes the card wait.
+    document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyS", bubbles: true }));
+    const deadline = Date.now() + 5000;
+    let opened = false;
+    const start = () => {
+      const shadow2 = document.querySelector(".pf-shell")?.shadowRoot;
+      const historyTab = shadow2?.querySelector('.pf-panel-tab[data-title="History"]');
+      if (!opened && historyTab) {
+        opened = true;
+        historyTab.click();
+      }
+      if (opened) {
+        const list = shadow2.querySelector(".pf-history-list");
+        const cards = list ? [...list.querySelectorAll(".pf-history-card")] : [];
+        if (cards.length >= 1) {
+          const live = cards[0];
+          live.__pfPoolWitness = true;
+          window.__pfPoolBaseId = live.dataset.entryId;
+          done({ ok: true, live: live.dataset.entryId, cards: cards.length, why: null });
+          return;
+        }
+      } else if (Date.now() > deadline) {
+        done({ ok: false, why: "History tab never appeared (panel never opened)" });
+        return;
+      }
+      if (Date.now() > deadline) {
+        done({ ok: false, why: "History cards never rendered" });
+        return;
+      }
+      setTimeout(start, 80);
+    };
+    setTimeout(start, 120);
+  });
+  if (poolGrow.ok) {
+    const grow = await session.evalAsync(function main(done) {
+      const doc = window.__pfBacking["pf:resume"];
+      const base = (doc?.entries ?? [])[0];
+      if (!base) { done({ ok: false, why: "no base entry to build the foreign doc from" }); return; }
+      const stamp = Math.max(doc.updatedAt || 0, base.updatedAt || 0) + 5000;
+      const forged = (n) => ({
+        id: "pf-pool-forged-" + n, title: "Pool Forge " + n, domain: "127-0-0-1",
+        duration: 12, resume: 0, subOffset: 0, updatedAt: stamp
+      });
+      window.__gmTest.remoteWrite("pf:resume", {
+        version: 1,
+        entries: [{ ...base }, forged(1), forged(2)],
+        updatedAt: stamp
+      });
+      const deadline = Date.now() + 5000;
+      const poll = () => {
+        const cards = [...document.querySelector(".pf-shell")?.shadowRoot
+          ?.querySelectorAll(".pf-history-card") ?? []];
+        const witness = cards.find((c) => c.__pfPoolWitness === true);
+        if (cards.length === 3 && witness) {
+          done({
+            ok: true,
+            // The marker is NODE identity: pool nodes are interchangeable,
+            // the reconcile may re-map the marked card onto any entry, and
+            // the sorted render order can put a forged id first - reuse is
+            // attested by the marked node still riding the list.
+            why: `3 cards; marked node still riding the list (now renders ${witness.dataset.entryId}); forged ids adopted`
+          });
+          return;
+        }
+        if (Date.now() > deadline) {
+          done({
+            ok: false,
+            why: `cards=${cards.length} witness=${witness ? "preserved" : "lost"} ids=${cards.map((c) => c.dataset.entryId).join(",")}`
+          });
+          return;
+        }
+        setTimeout(poll, 80);
+      };
+      setTimeout(poll, 120);
+    });
+    rows.push({
+      name: "cross-tab merge re-renders the pooled History cards keeping the live node",
+      status: grow.ok === true ? "pass" : "fail",
+      note: grow.why ?? null,
+      ms: null
+    });
+
+    // The shrink half: a foreign doc back to ONE entry is an adopted
+    // removal of the two forged cards - the reconcile releases the excess
+    // (real pool release, not DOM-only removal) and the live card rides
+    // its same node again.
+    const shrink = await session.evalAsync(function main(done) {
+      const doc = window.__pfBacking["pf:resume"];
+      const entry = (doc?.entries ?? []).find((e) => e.id === window.__pfPoolBaseId);
+      if (!entry) { done({ ok: false, why: "base entry vanished before the shrink stage" }); return; }
+      window.__gmTest.remoteWrite("pf:resume", {
+        version: 1,
+        entries: [{ ...entry }],
+        updatedAt: Math.max(doc.updatedAt || 0, entry.updatedAt || 0) + 10000
+      });
+      const deadline = Date.now() + 5000;
+      const poll = () => {
+        const cards = [...document.querySelector(".pf-shell")?.shadowRoot
+          ?.querySelectorAll(".pf-history-card") ?? []];
+        const witness = cards.find((c) => c.__pfPoolWitness === true);
+        if (cards.length === 1 && witness) {
+          done({ ok: true, why: "1 card, live node kept through the shrink" });
+          return;
+        }
+        if (Date.now() > deadline) {
+          done({ ok: false, why: `cards=${cards.length} witness=${witness ? "preserved" : "lost"}` });
+          return;
+        }
+        setTimeout(poll, 80);
+      };
+      setTimeout(poll, 120);
+    });
+    rows.push({
+      name: "shrink reconciles the History list releasing excess members (pool release)",
+      status: shrink.ok === true ? "pass" : "fail",
+      note: shrink.why ?? null,
+      ms: null
+    });
+  } else {
+    rows.push({
+      name: "cross-tab merge re-renders the pooled History cards keeping the live node",
+      status: "fail",
+      note: poolGrow.why ?? null,
+      ms: null
+    });
+    rows.push({
+      name: "shrink reconciles the History list releasing excess members (pool release)",
+      status: "fail",
+      note: "skipped: the grow stage never established a witness card",
+      ms: null
+    });
+  }
 
   // Cross-tab removal convergence: a foreign doc (another tab's whole-store
   // write) that omits one of OUR entries is a deletion made elsewhere - the

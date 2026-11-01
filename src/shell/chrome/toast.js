@@ -199,7 +199,15 @@ export class ToastManager {
   }
 
   destroy() {
-    this.#pauseAutoHide();
+    // Cancel the pending auto-hide directly: #pauseAutoHide() early-returns
+    // when the pause was never engaged, so a show(duration>0) that ran
+    // without a hover left a delay armed against the removed HUD - whose
+    // eventual flip lands as a class write on a detached node. #paused
+    // latches too: nothing remains to resume, so a late pointerleave
+    // cannot re-arm anything either way.
+    this.#cancelAutoHide?.();
+    this.#cancelAutoHide = null;
+    this.#paused = true;
     // Only the AVAILABLE side empties here: the held #toast was acquired at
     // construction and never re-enters the pool, and it stays attached by
     // contract - the HUD host's removal (the shell's #dom defer)
