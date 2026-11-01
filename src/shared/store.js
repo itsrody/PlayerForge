@@ -268,6 +268,14 @@ class ConfigStore {
   /**
    * Remove one dotted field from the configs document (migration sweeps).
    * No-op when any intermediate segment or the leaf itself is missing.
+   * The dotted-descent walk is deliberately NOT folded into setFields':
+   * the two share the segment loop but diverge on purpose — setFields
+   * creates missing intermediates and warns each unsafe shape ("batch
+   * dropped": the write must stay visible), deleteField silently no-ops
+   * every absent/unsafe shape (a sweep over already-removed keys is the
+   * common case) and copy-on-writes the nodes it descends so the delete
+   * below never reaches the cached sub-doc. A shared walker would carry
+   * four behaviors under one mode flag — a parameterized wheel, not one.
    */
   deleteField(path) {
     const doc = { ...this.#readDoc() };

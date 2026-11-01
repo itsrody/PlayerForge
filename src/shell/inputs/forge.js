@@ -235,21 +235,22 @@ class ScrubStroke {
     return this.#active;
   }
 
-  /** Fresh press: anchors re-init so a later latch starts from its origin. */
-  reset(x, y, time) {
-    this.#active = false;
+  /** The one sample/active seeding both entry shapes share. */
+  #seedSample(x, y, time, active) {
+    this.#active = active;
     this.#lastX = x;
     this.#lastY = y;
     this.#lastTime = time;
     this.#velocity = 0;
   }
 
+  /** Fresh press: anchors re-init so a later latch starts from its origin. */
+  reset(x, y, time) {
+    this.#seedSample(x, y, time, false);
+  }
+
   latch(x, y, time) {
-    this.#active = true;
-    this.#lastX = x;
-    this.#lastY = y;
-    this.#lastTime = time;
-    this.#velocity = 0;
+    this.#seedSample(x, y, time, true);
   }
 
   /**
@@ -390,13 +391,18 @@ class SwipeStroke {
     return this.#direction;
   }
 
-  /** Fresh press: the drag state dies with the press; the base snapshot
-   *  persists (it is only ever read by a stroke that re-captures it first). */
-  reset() {
+  /** The one stroke-state drop both endings share. */
+  #dropStroke() {
     this.#active = false;
     this.#direction = null;
     this.#lastDrag = NaN;
     this.#lastTransform = "";
+  }
+
+  /** Fresh press: the drag state dies with the press; the base snapshot
+   *  persists (it is only ever read by a stroke that re-captures it first). */
+  reset() {
+    this.#dropStroke();
   }
 
   /** Latch: snapshot the LIVE visual before any write happens, and promote
@@ -452,10 +458,7 @@ class SwipeStroke {
     if (!this.#active) {
       return;
     }
-    this.#active = false;
-    this.#direction = null;
-    this.#lastDrag = NaN;
-    this.#lastTransform = "";
+    this.#dropStroke();
     easeTransformTo(this.#video, this.#baseTransform || "");
   }
 }

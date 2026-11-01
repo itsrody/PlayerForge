@@ -768,13 +768,7 @@ export class ForgeTrack {
       prev.prevPictureSeq = this.#pictureSeq;
       this.#lastActive[i] = true;
     }
-    for (let i = count; i < this.#slots.length; i++) {
-      const slot = this.#slots[i];
-      if (!slot.hidden) {
-        slot.hidden = true;
-        this.#lastActive[i] = false;
-      }
-    }
+    this.#dropSlots(count);
   }
 
   /**
@@ -868,19 +862,26 @@ export class ForgeTrack {
     };
   }
 
-  clear() {
-    // Ended-content hiding: hide every live slot without touching the cue
-    // lists - the crank keeps running and a later seek re-derives normally.
-    if (this.#scope.disposed || !this.#lastActive.some(Boolean)) {
-      return;
-    }
-    for (let i = 0; i < this.#slots.length; i++) {
+  /** The one slot retirement both exits share: hide from `from` onward
+   *  (0 = all), each flip dirty-checked so an already-hidden slot never
+   *  re-runs its exit transition. */
+  #dropSlots(from) {
+    for (let i = from; i < this.#slots.length; i++) {
       const slot = this.#slots[i];
       if (!slot.hidden) {
         slot.hidden = true;
         this.#lastActive[i] = false;
       }
     }
+  }
+
+  clear() {
+    // Ended-content hiding: hide every live slot without touching the cue
+    // lists - the crank keeps running and a later seek re-derives normally.
+    if (this.#scope.disposed || !this.#lastActive.some(Boolean)) {
+      return;
+    }
+    this.#dropSlots(0);
   }
 
   setVar(prop, value) {

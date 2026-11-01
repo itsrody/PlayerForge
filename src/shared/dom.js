@@ -164,11 +164,17 @@ class DomWatch {
     }
   }
 
-  #flushPending() {
+  /** The one parked-defer teardown both exits share: abort the deferred
+   *  flush and its visibility listener, then null the pair. */
+  #clearDefer() {
     this.#deferAc?.abort();
     this.#deferAc = null;
     this.#deferHandle?.abort();
     this.#deferHandle = null;
+  }
+
+  #flushPending() {
+    this.#clearDefer();
     this.#flush();
   }
 
@@ -257,10 +263,7 @@ class DomWatch {
       this.#pendingRecords = [];
       this.#recycledRecords = [];
       this.#slots.length = 0;
-      this.#deferAc?.abort();
-      this.#deferAc = null;
-      this.#deferHandle?.abort();
-      this.#deferHandle = null;
+      this.#clearDefer();
     }
   }
 

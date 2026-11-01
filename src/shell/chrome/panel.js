@@ -171,22 +171,33 @@ class Stepper {
     this.input.value = this.#format ? this.#format(this.#committed) : this.#numText(this.#committed);
   }
 
+  /**
+   * The one commit dance every write path shares: one rounded/clamped
+   * value, one aria sync, one onChange — each skipped when the value
+   * didn't move. The input's live path never repaints through it (typing
+   * must stay in the field); #showCommitted belongs to the callers that
+   * own a repaint.
+   */
+  #apply(next) {
+    if (next !== this.#committed) {
+      this.#committed = next;
+      this.#syncAria();
+      this.#onChange?.(this.#committed);
+    }
+    return this.#committed;
+  }
+
   #commit(rawText) {
     const parsed = Number.parseFloat(rawText);
     if (!Number.isFinite(parsed)) {
       this.#showCommitted();
       return this.#committed;
     }
-    const next = this.#roundTo(clamp(parsed, this.#lo, this.#hi));
-    if (next !== this.#committed) {
-      this.#committed = next;
-      this.#syncAria();
-      this.#onChange?.(this.#committed);
-    }
+    const committed = this.#apply(this.#roundTo(clamp(parsed, this.#lo, this.#hi)));
     // Render after the mutation: the old order painted the pre-commit value,
     // so blur/Enter/nudge flashed the previous number while state advanced.
     this.#showCommitted();
-    return this.#committed;
+    return committed;
   }
 
   #nudge(dir) {
@@ -198,15 +209,10 @@ class Stepper {
   }
 
   setValue(next) {
-    const nextValue = this.#roundTo(clamp(Number(next), this.#lo, this.#hi));
-    if (nextValue === this.#committed) {
-      this.#showCommitted();
-      return this.#committed;
-    }
-    this.#committed = nextValue;
+    this.#apply(this.#roundTo(clamp(Number(next), this.#lo, this.#hi)));
+    // Programmatic writes always repaint the field (a stale typed value
+    // must yield whether or not the value moved).
     this.#showCommitted();
-    this.#syncAria();
-    this.#onChange?.(this.#committed);
     return this.#committed;
   }
 
@@ -235,12 +241,9 @@ class Stepper {
       if (!Number.isFinite(parsed)) {
         return;
       }
-      const next = this.#roundTo(clamp(parsed, this.#lo, this.#hi));
-      if (next !== this.#committed) {
-        this.#committed = next;
-        this.#syncAria();
-        this.#onChange?.(this.#committed);
-      }
+      // Live per-keystroke commit when this stepper doesn't defer; the field
+      // itself is never repainted here (typing must stay in the field).
+      this.#apply(this.#roundTo(clamp(parsed, this.#lo, this.#hi)));
     }, { signal: this.#signal });
 
     input.addEventListener("keydown", (event) => {
