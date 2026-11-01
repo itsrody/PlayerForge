@@ -494,7 +494,13 @@ iframes, same-origin and cross-origin:
   its `pf-panel-open`/`pf-panel-close` strings were vocabulary with no CSS
   reader: the HUD animation keys the static `pf-panel` transition-name, so
   a direction-differentiated variant would need the CSS to consume the
-  types (a visual redesign decision, not a spelling fix); the open-restore
+  types (a visual redesign decision, not a spelling fix). The UA schedules
+  each flip's update callback on its own clock, so both flips are
+  null-guarded against the destroy-between-scheduling-and-callback window
+  (a shell destroyed mid-flight nulls the DOM refs before the UA runs the
+  update; an unguarded throw there rejects `updateCallbackDone`/`finished`
+  unhandled — the media case proves the race with a 120ms-delayed spy and
+  a +30ms destroy-readopt); the open-restore
   and containment focus fallback share one `#focusFallback()`;
   the product sections return their instances into the shell's
   section-handle table — the `PANEL_SECTIONS` entries are the build *and*

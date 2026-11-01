@@ -218,7 +218,7 @@ const CONTAINER_POCKET_CSS = `
 
 /**
  * Apply the shell stylesheet as early as possible - ideally from
- * document-start, the real timing Violentmonkey MV3's registered
+ * document-start, the real timing Violentmonkey MV2's registered
  * pre-matched injections give - so first-video dimming never waits on
  * a network round trip. The embedded string is applied synchronously first
  * (it is always available), then the @resource text is fetched in the
@@ -371,11 +371,10 @@ export function ensureViewportFitCover(doc = document) {
     } else {
       meta.setAttribute("content", `${content.replace(/\s*,\s*$/, "")},viewport-fit=cover`);
     }
-    return !!head;
+  } else {
+    const created = doc.createElement("meta");
+    created.setAttribute("name", "viewport");
+    created.setAttribute("content", "width=device-width, initial-scale=1, viewport-fit=cover");
+    head.appendChild(created);
   }
-  const created = doc.createElement("meta");
-  created.setAttribute("name", "viewport");
-  created.setAttribute("content", "width=device-width, initial-scale=1, viewport-fit=cover");
-  (head || doc.documentElement).appendChild(created);
-  return !!head;
 }

@@ -101,8 +101,11 @@ export function gmGetResourceText(name) {
  * surface. Any future clipboard write should go through the native
  * navigator.clipboard path, not the manager.
  *
- * MV3 manager surface (Violentmonkey 2.50+ MV3, read from its released
- * source): GM_xmlhttpRequest relays through the manager's background
+ * Manager surface: Violentmonkey ships MV3 on Chrome (service-worker
+ * relay) and MV2 on Firefox - this product's floor. The released-source
+ * facts below are quoted from the Chrome-MV3 build, the one whose relay
+ * mechanics they describe; the Firefox-MV2 build keeps the same response
+ * contract for callers (timeout honored, no @connect gate). GM_xmlhttpRequest relays through the manager's background
  * process with declarativeNetRequest header accommodations (it backfills an
  * Origin when the caller omits one), `timeout`/`ontimeout` are honored, and
  * no @connect whitelist gates it. Our ingest is single-flight (one

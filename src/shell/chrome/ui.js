@@ -163,9 +163,10 @@ function parsedIcon(canonical, doc) {
   let el = perDoc.get(canonical);
   if (!el) {
     const markup = ICONS[canonical];
-    // Parse the static SVG markup via DOMParser, never innerHTML: on MV3 /
-    // strict-CSP sites that enforce Trusted Types, innerHTML would be blocked
-    // at runtime. The markup is a fixed, trusted build-time string - not user
+    // Parse the static SVG markup via DOMParser, never innerHTML: on strict-
+    // CSP sites that enforce Trusted Types, innerHTML would be blocked
+    // at runtime. A manifest version cannot be the enforcement surface - a
+    // host page's CSP is - so the wording names the actual gate. The markup is a fixed, trusted build-time string - not user
     // input - so parsing it into a detached element is the safe equivalent.
     // DOMParser is resolved from the target document's realm so the parsed
     // node comes back in the same world, regardless of which window first

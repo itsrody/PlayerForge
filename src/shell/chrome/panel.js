@@ -152,7 +152,7 @@ class Stepper {
       lastY = event.clientY;
       remainder = 0;
       button.setPointerCapture(event.pointerId);
-    });
+    }, { signal });
     return button;
   }
 
@@ -302,8 +302,8 @@ function createStepper(options) {
  *     build fails. Open/close is a class flip wrapped in view transitions
  *     (the CSS keys the animation on the static pf-panel transition name); compact mode is an explicit setting
  *     with a narrow-touch auto-detect re-applied live on breakpoint changes.
- *     Dismissal while open: UA-owned Escape (CloseWatcher, Chromium 131+)
- *     plus our guarded document listeners for outside click; close() hands
+ *     Dismissal while open: UA-owned Escape (CloseWatcher — floor-guaranteed,
+ *     matching the #armDismissal record) plus our guarded document listeners for outside click; close() hands
  *     focus back to the opener (native showModal() semantics, tracked at
  *     open()). Arrow-key tab navigation stays ours (roving tabindex over the
  *     section tablist).
@@ -433,6 +433,13 @@ export class SettingsPanel {
     this.#returnFocus = deepestActiveElement(this.#shellHost);
     this.#armDismissal();
     this.#runWithViewTransition(() => {
+      // The UA schedules the update callback on its own clock: a destroy
+      // between the flip scheduling and this callback has already nulled the
+      // DOM refs, and a throw here rejects updateCallbackDone unhandled. No
+      // refs - nothing to flip.
+      if (!this.#root || this.#scope.disposed) {
+        return;
+      }
       this.#applyCompactSetting();
       this.#root.classList.add("pf-open");
       // Tab boxes resolve only after the display flip; doing it inside the
@@ -450,8 +457,10 @@ export class SettingsPanel {
       const opener = this.#returnFocus;
       this.#returnFocus = null;
       const hadFocusInside = this.#root.contains(deepestActiveElement(this.#shellHost));
+      // Same scheduling hazard as the open flip: the callback outlives a
+      // synchronous destroy, which nulls #root before the UA runs this.
       this.#runWithViewTransition(() => {
-        this.#root.classList.remove("pf-open");
+        this.#root?.classList.remove("pf-open");
       });
       // Dismissal dies before focus moves: the focusin containment handler
       // would yank an outside-the-shell opener straight back to the tab.

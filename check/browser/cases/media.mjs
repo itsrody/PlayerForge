@@ -768,5 +768,105 @@ export async function run({ session, baseUrl, boot }) {
     ms: null
   });
 
+  // The panel's open/close flights schedule their class flip through
+  // document.startViewTransition, whose update callback runs on the UA's own
+  // clock. A shell destroy landing between the scheduling and that callback
+  // must find the update callable null-guarded - otherwise the flip throws
+  // late and rejects updateCallbackDone/finished unhandled. Row: spy-wrap
+  // startViewTransition to hold every update behind a 120ms delay, open the
+  // panel (KeyS), close it (Escape), then tear the shell down synchronously
+  // through the destroy-readopt seam (a fresh moveBefore re-home) while the
+  // close flight is still pending (destroy at +30ms, update at +120ms).
+  // Every captured flight's updateCallbackDone AND finished must RESOLVE.
+  // The spy normalizes BOTH argument shapes: the panel's own contract is the
+  // object form ({ update } - see panel.js), a bare callback is spec-legal
+  // too; a spy that hands the object itself to the delay would stringify it
+  // into a timer-fire parse error (the "[object Object]" trap this row once
+  // tripped as "missing ] after element list").
+  const vtRace = await session.evalAsync(function main(done) {
+    const v0 = document.querySelector("#check-video-2");
+    if (!v0 || !v0.matches("[data-pf-shell]")) { done(null); return; }
+    // The engine disowns hotkeys on an ended video (#isActive: readyState>0
+    // && !ended), and this row lands near the fixture's 12s end, wherever
+    // earlier rows left playback - loop keeps the arbitration row-shape as
+    // "one live engine" instead of a race with the fixture's clock.
+    v0.loop = true;
+    const out = { flights: 0, callbacks: "", finished: "", destroyed: "", adopted: "", reason: "" };
+    const flights = [];
+    const orig = document.startViewTransition;
+    document.startViewTransition = (input) => {
+      const update = typeof input === "function" ? input : input?.update;
+      const t = orig.call(document, () => { setTimeout(update, 120); });
+      flights.push(t);
+      return t;
+    };
+    let dead = false;
+    const finish = (patch) => {
+      document.startViewTransition = orig;
+      if (!dead) {
+        dead = true;
+        Object.assign(out, patch);
+        done(out);
+      }
+    };
+    // Open: KeyS rides the input table's panel row (the engine dispatches the
+    // semantic panel event); the pf-open flip is INSIDE the delayed update.
+    document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyS", bubbles: true }));
+    const openDeadline = Date.now() + 6000;
+    const openTick = () => {
+      const host = document.querySelector(".pf-shell");
+      const panel = host && host.shadowRoot && host.shadowRoot.querySelector(".pf-panel");
+      if (!panel || !panel.classList.contains("pf-open")) {
+        if (Date.now() < openDeadline) setTimeout(openTick, 120);
+        else finish({ reason: "panel never opened" });
+        return;
+      }
+      // Close: the per-open dismissal keydown schedules a close flight whose
+      // update is delayed 120ms.
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      // +30ms: still inside the close flight's window - tear the shell down
+      // synchronously through the re-parent seam.
+      setTimeout(() => {
+        const stage = document.createElement("div");
+        stage.className = "plyr";
+        stage.setAttribute("data-plyr", "");
+        stage.style.cssText = "position:absolute;left:0;top:740px;width:1280px;height:720px;";
+        stage.innerHTML = "<div class=\"plyr__video-wrapper\" style=\"width:100%;height:100%\"></div>";
+        document.body.append(stage);
+        const oldHost = document.querySelector(".pf-shell");
+        stage.querySelector(".plyr__video-wrapper").moveBefore(v0, null);
+        setTimeout(() => {
+          // The destroy-readopt may have re-attached a NEW shell host within
+          // this window, so the witness is the OLD host's disconnection -
+          // not a momentary shell-count shape.
+          out.destroyed = oldHost && !oldHost.isConnected ? "gone" : "host still attached";
+        }, 80);
+        setTimeout(() => {
+          out.adopted = v0.matches("[data-pf-shell]") ? "re-adopted" : "not yet";
+          out.flights = flights.length;
+          if (!flights.length) {
+            finish({ reason: "no view transitions captured - the race was never exercised" });
+            return;
+          }
+          Promise.all(flights.flatMap((t) => [t.updateCallbackDone, t.finished])).then(
+            () => finish({ callbacks: "resolved", finished: "resolved" }),
+            (err) => finish({
+              callbacks: "rejected",
+              finished: "rejected",
+              reason: String(err && err.message || err)
+            })
+          );
+        }, 1100);
+      }, 30);
+    };
+    openTick();
+  });
+  rows.push({
+    name: "panel flight vs destroy: a shell destroyed mid-flight leaves every view transition resolving (null-guarded late update)",
+    status: vtRace && vtRace.flights >= 2 && vtRace.destroyed === "gone" && vtRace.callbacks === "resolved" && vtRace.finished === "resolved" ? "pass" : "fail",
+    note: vtRace ? JSON.stringify(vtRace) : "no stamped video to move",
+    ms: null
+  });
+
   return rows;
 }
