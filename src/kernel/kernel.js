@@ -355,7 +355,7 @@ export class Kernel {
    *  factories (createLayoutGate/createOnScreenGate), stopped with the kernel
    *  scope (see #ensureGate). */
   #gates = new Map();
-  /** Kernel lifecycle scope: removal observers disconnect via onDispose,
+  /** Kernel lifecycle scope: removal observers disconnect via defer,
    *  grace timers and settle waits cancel via the signal. The scope is the
    *  single abort owner here - the separate settle-scope this signal absorbed
    *  rode the same pagehide disposal, two controllers telling one abort
@@ -416,7 +416,7 @@ export class Kernel {
         this.#discoveryTap?.stop();
         this.#discoveryTap = null;
       },
-      // Scope first: onDispose disconnects every removal observer, the
+      // Scope first: defer disconnects every removal observer, the
       // signal cancels pending removal-grace postTasks and resolves in-flight
       // settle waits instantly (their done() disconnects the MutationObserver
       // and aborts the quiet/cap handles), and the page-level
@@ -655,7 +655,7 @@ export class Kernel {
     if (!gate && !this.#scope.disposed) {
       gate = create();
       this.#gates.set(create, gate);
-      this.#scope.onDispose(() => {
+      this.#scope.defer(() => {
         gate.stop();
         this.#gates.delete(create);
       });
@@ -740,7 +740,7 @@ export class Kernel {
     });
     // Chromium-native single-target consolidation and the timer are both
     // handled inside the watch; the kernel scope is its pagehide backstop.
-    this.#scope.onDispose(() => watch.stop());
+    this.#scope.defer(() => watch.stop());
   }
 
   /**

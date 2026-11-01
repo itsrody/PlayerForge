@@ -393,8 +393,6 @@ export class DOMManager {
   #attrRollbacks = [];
   /** [el, prop, value, original] triples for style rollback on destroy. */
   #styleRollbacks = [];
-  /** [fn] External cleanup callbacks (e.g. dom-watch unsubscribe handles). */
-  #cleanups = [];
   #scope = new Scope();
 
   /**
@@ -418,7 +416,7 @@ export class DOMManager {
     if (this.#scope.disposed) return null;
     const observer = new ResizeObserver(callback);
     observer.observe(target);
-    this.#scope.onDispose(() => observer.disconnect());
+    this.#scope.defer(() => observer.disconnect());
     return observer;
   }
 
@@ -485,14 +483,15 @@ export class DOMManager {
 
   /**
    * Register an external cleanup callback (e.g. an unsubscribe handle from
-   * dom-watch.js or a pool destroy). Called in reverse order on destroy.
+   * dom-watch.js or a pool destroy). The Scope's defer is the one disposer
+   * registry - this was the last hand-rolled twin (an own array + reversed
+   * isolation loop), now riding the contract it duplicated: same reverse
+   * order, same isolated-throw treaty, and the run-now path on an already-
+   * disposed scope closes the hole the cleared-array push left (a late
+   * registration used to append into the emptied array and never run).
    */
   onCleanup(fn) {
-    if (this.#scope.disposed) {
-      fn();
-      return;
-    }
-    this.#cleanups.push(fn);
+    this.#scope.defer(fn);
   }
 
   /**
@@ -503,22 +502,11 @@ export class DOMManager {
   destroy() {
     if (this.#scope.disposed) return;
 
-    // Mark disposed + abort the signal FIRST: every signal-bound listener
-    // and observer disconnect registered above is released by the platform
-    // here (onDispose runs observer disconnects), and cleanup callbacks
-    // below can no longer register new tracked artifacts.
+    // Mark disposed + abort the signal FIRST: every signal-bound listener,
+    // the observer disconnects, and the onCleanup callbacks are released by
+    // the platform here (all ride the Scope's defer), and the passes below
+    // run after every registration path is already closed.
     this.#scope.dispose();
-
-    // External cleanups (may reference elements being removed next). The
-    // loop rides the Scope dispose contract this class already composes -
-    // errors are isolated AND logged, so a teardown throw surfaces rather
-    // than vanishing.
-    for (let i = this.#cleanups.length - 1; i >= 0; i--) {
-      try { this.#cleanups[i](); } catch (err) {
-        logger.error("dom", "Cleanup in shell DOM teardown failed:", err);
-      }
-    }
-    this.#cleanups.length = 0;
 
     // Attribute rollbacks (restore original values).
     for (const [el, attr, , original] of this.#attrRollbacks) {

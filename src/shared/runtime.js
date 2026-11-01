@@ -230,13 +230,29 @@ export async function runStepsAsync(steps, { yieldBetween = false } = {}) {
  * This is the single teardown primitive classes compose instead of
  * hand-rolling a `#destroyed` boolean + a pile of `?.disconnect()` sweeps:
  *
- *   - `signal`    — hand straight to `addEventListener`/`postTask`/observers
- *                   that accept `{ signal }`; abort tears them down natively.
- *   - `onDispose(fn)` — reverse-registration-order cleanup for everything
- *                   that has no signal form (elements, rollbacks, stores).
- *                   Runs immediately if the scope is already disposed.
- *   - `dispose()` — idempotent: marks disposed FIRST (re-entrant destroy
- *                   calls no-op), aborts the signal, then runs disposers.
+ *   - `signal`  — hand straight to `addEventListener`/`postTask`/observers
+ *                 that accept `{ signal }`; abort tears them down natively.
+ *   - `defer(fn)` — reverse-registration-order cleanup for everything that
+ *                 has no signal form (elements, rollbacks, stores). Runs
+ *                 immediately if the scope is already disposed. The name is
+ *                 the platform's own - DisposableStack ships this exact
+ *                 shape on this floor - but the queue is ours and not the
+ *                 platform's, for two contract mismatches its APIs carry:
+ *                 a disposed stack REFUSES late registration
+ *                 (DisposableStack.defer throws ReferenceError) where the
+ *                 contract runs the disposer at once - a late registration
+ *                 can neither outlive its owner nor strand its registrant's
+ *                 flow - and the platform RETHROWS disposer errors
+ *                 (SuppressedError chains on dispose) where this teardown
+ *                 treaty isolates AND logs every throw so a teardown-throw
+ *                 never vanishes (the check forensics see it) and dispose()
+ *                 never fails its destroy flow.
+ *   - `dispose()` — idempotent: the abort state flip IS the disposed truth
+ *                 (abort() completes its flip synchronously before any
+ *                 listener runs, so a re-entrant call no-ops from the flip
+ *                 onward and the two-state `#disposed` flag this once kept
+ *                 is gone), aborts the signal, then runs disposers
+ *                 reversed.
  *
  * Disposer errors are isolated AND logged - one throw never strands the
  * rest, and the throw surfaces rather than vanishing (the dispose loop's
@@ -250,21 +266,26 @@ export async function runStepsAsync(steps, { yieldBetween = false } = {}) {
  * registry never fills is a disposal boolean, not an abort story (12 roots
  * → 11, the roots census row reads the survivors). Public class APIs keep
  * their `destroy()` name and simply delegate here.
+ *
+ * The [Symbol.dispose] protocol this once considered stayed un-adopted:
+ * Scope roots outlive any `using` block they could ride (a feature root's
+ * lifetime IS the feature's lifetime), so the alias would be dead surface.
+ * Fan's subscribe handle carries the protocol because a subscription is
+ * exactly the short-lived shape; a feature root is not.
  */
 export class Scope {
   #controller = new AbortController();
   /** Lazily allocated; null after dispose. */
   #disposers = null;
-  #disposed = false;
 
   /** AbortSignal for `{ signal }` registration on any abortable API. */
   get signal() {
     return this.#controller.signal;
   }
 
-  /** True from the start of dispose() onward. */
+  /** True once dispose() has begun - the abort state itself. */
   get disposed() {
-    return this.#disposed;
+    return this.#controller.signal.aborted;
   }
 
   /**
@@ -273,8 +294,8 @@ export class Scope {
    * carrying the loop's isolated-error handling, so a late registration
    * can neither outlive its owner nor strand its registrant's flow.
    */
-  onDispose(fn) {
-    if (this.#disposed) {
+  defer(fn) {
+    if (this.disposed) {
       this.#runDisposer(fn);
       return;
     }
@@ -290,12 +311,11 @@ export class Scope {
     }
   }
 
-  /** Idempotent teardown: mark disposed, abort, run disposers reversed. */
+  /** Idempotent teardown: abort (the disposed flip), run disposers reversed. */
   dispose() {
-    if (this.#disposed) {
+    if (this.disposed) {
       return;
     }
-    this.#disposed = true;
     this.#controller.abort();
     const disposers = this.#disposers;
     this.#disposers = null;

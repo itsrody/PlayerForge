@@ -513,7 +513,7 @@ export class ForgeTrack {
       }
     });
     observer.observe(video);
-    this.#scope.onDispose(() => observer.disconnect());
+    this.#scope.defer(() => observer.disconnect());
     // The fill box's change tick re-renders here (the re-anchor on fs flips,
     // stage resizes, orientation); the pool owner keeps the arming. A
     // stage-still video-relative move is ours: the video box itself (SDK
@@ -525,7 +525,7 @@ export class ForgeTrack {
       this.#schedule();
     });
     videoRo.observe(video);
-    this.#scope.onDispose(() => videoRo.disconnect());
+    this.#scope.defer(() => videoRo.disconnect());
     video.addEventListener("resize", () => this.#schedule(), { signal: this.#scope.signal, passive: true });
     video.addEventListener("loadedmetadata", () => this.#schedule(), { signal: this.#scope.signal });
     // The paused-seek cliff: whether a paused engine re-presents on seek is

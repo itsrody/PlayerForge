@@ -116,7 +116,14 @@ iframes, same-origin and cross-origin:
   pinned by the `scheduler` check case), `delay()`/`debounce()` handles (the
   one timer backend), `runSteps`/`runStepsAsync` (ordered declarative step
   lists for every boot/teardown sequence), `Scope` (one destroy-root per
-  feature, every listener/timer/observer routed through it), `Fan` — the ONE plain-fan-out
+  feature, every listener/timer/observer routed through it; the cleanup
+  verb is `defer(fn)` — the platform's DisposableStack vocabulary on this
+  floor, with the queue deliberately NOT the platform's: a disposed stack
+  refuses late registration where the contract runs it immediately, and the
+  platform rethrows disposer errors where the treaty isolates and logs every
+  throw; the `#disposed` flag died into `signal.aborted` — the abort flip
+  completes synchronously before any listener runs, so a re-entrant dispose
+  no-ops from the flip onward), `Fan` — the ONE plain-fan-out
   owner, a native `EventTarget` carrying one event per instance
   (`emit(payload)`/`subscribe(cb, { signal })`; the FsGate, FilterSession,
   ResumeStore, ConfigStore, SubtitleSyncState,

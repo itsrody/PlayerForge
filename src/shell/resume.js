@@ -704,7 +704,7 @@ export class ResumeTracker {
       onScreen = entry.isIntersecting;
     });
     io.observe(video);
-    this.#scope.onDispose(() => io.disconnect());
+    this.#scope.defer(() => io.disconnect());
 
     // Dynamic content-relative cadence: due once the playhead has advanced a
     // duration-scaled span since the last persist. No wall clock, so a paused
