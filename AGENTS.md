@@ -939,6 +939,26 @@ Still in force from the design process — rewritten ink-style by user direction
   highlights anywhere** — the rim era (`--pf-header-rim`, `--pf-sheet-inner`'s
   rim insets) retired by direction. Zero blur layers, zero shadow layers.
 
+The HUD token sweep (census) re-derived the token plane from both sheets
+(styles.css + inject.js's compact band), comment-stripped: **zero orphaned
+tokens** — every declared `--pf-*` has a reader, with one census-relevant
+shape: `--pf-compact` is read through a **container style query**
+(`@container pf-compact-bus style(--pf-compact: 1)`) rather than `var()`,
+so a var()-only counter would misreport it dead. Six tokens read without a
+sheet declaration, all legitimate: the five `@property`-registered ones
+(`--pf-cue-top/left/x`, `--pf-media-paused` — registration provides the
+initial value, e.g. the paused-opacity dampener is correct before any JS
+write arms) and the vv pair (`--pf-vv-height`/`--pf-vv-inset-bottom`),
+whose only writer is the coarse-pointer-gated vv mirror (shell.js) whose
+readers exist only inside the `(pointer: coarse)` bottom-sheet block, with
+the var() fallbacks being exactly the spec-spelled `100vh`/`0px` neutrals
+the pinch-guard defers to. Ink law re-census: exactly one `linear-gradient`
+in the sheet (the R4 scroll-edge band), zero `backdrop-filter`/`box-shadow`
+(the two other grep hits are R1's own tombstone comments). The z doctrine
+tokens hold their declared order (`--pf-z-hud` 2 < `--pf-z-toast` 3 <
+`--pf-z-panel` 4) and the R5 radii chain its derived values (pill 999,
+lg 16 → md 12 → sm 8 → xs 5).
+
 ## 7. check/ — the testing tool
 
 `check/run.mjs` is the repo's one testing interface. Gates run in order and
