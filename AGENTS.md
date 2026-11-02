@@ -51,6 +51,28 @@ xmlhttpRequest`), `@connect *` + subtitlecat,
 deliberately **no `@noframes`**: every frame gets the script (§2).
 `@downloadURL` pins the branch dist for VM's updater. Version is
 derived from `package.json` by the build; never hand-edit the header version.
+The header↔runtime cross-check (sweep): the 8 `@grant`s map 1:1 onto real
+call sites — setValue/getValue/addValueChangeListener/removeValueChangeListener
+(store.js's storage plane), registerMenuCommand/unregisterMenuCommand
+(kernel.js's MenuCommands), getResourceText (inject.js's `pfStyle` warm),
+xmlhttpRequest (store.js's `gmRequestText`, the CORS-bypass subtitle ingest);
+`GM_info` needs no grant (entry's version mirror) and `GM_setClipboard` is
+deliberately absent — the store.js docstring's dead-permission-surface record
+and the banner agree. There is exactly one network egress family in the tree:
+the subtitle `loadFromUrl` path, user-supplied URLs from arbitrary hosts,
+which is what `@connect *` is FOR; there is no plain `fetch` or
+XMLHttpRequest anywhere in src (all cross-origin text rides the manager, whose
+Firefox-MV2 wrapper honors `timeout`/`ontimeout` and gates nothing). The
+explicit `@connect subtitlecat` line predates the umbrella (`004bd6e`, a
+per-domain pre-approval) and has no dedicated caller left — inert
+documentation under the matcher, kept as a header surface (header edits are
+interventions). The two exclusion vocabularies are complementary, not
+redundant: the 24 `@exclude-match` patterns ban the player *platforms* the
+match-all lets sitewide, while `entry.js`'s runtime skip
+(`AD_HOST_SUFFIXES`/`AD_HOST_PREFIXES` + the about:blank/data: gate) does the
+hostname-anchored work the header cannot — rejecting ad/captcha *frames* of
+sites the header allows, whose hostnames may appear only in a path or query
+of a legitimate video page.
 
 **Commands:** `npm run build` (or `--watch`), `npm run lint` (eslint src/),
 `npm test` — the alias for `check/run.mjs`, the repo's one testing interface.
@@ -920,7 +942,32 @@ stop at the first failure:
    count, so a naive grep would misreport the record. Each row carries its
    why-docstring: a red row is answered by updating the gate's expect **and**
    the AGENTS.md census in the same commit, with the change's why — never by
-   bumping the number alone.
+   bumping the number alone. The error-path A→Z sweep classified every
+   throw/catch under comment-stripped src (6 throws, 34 catches) into
+   eight named classes, each with its why: **throw-through** (media's
+   play/PiP rethrow non-benign after the AbortError/NotAllowedError
+   filter — callers own a failure surface), **release-tail bare
+   catches** (panel-section destroy loop, MediaSession destroy belt,
+   forge's two pointer-lift races — teardown must complete, not report),
+   the **Scope isolation site** (`#runDisposer`: catch-log-never-rethrow,
+   the only machine given that verb), **witness-absence fallbacks**
+   (shouldSkipUrl's belt-owns-the-contract, discovery's rect
+   try/returns, page.js's cross-origin contentDocument subtree-end),
+   **port-lifecycle races** (the bridge's five postMessage/port sites —
+   re-establish the pipe, not an error path), **log-then-continue
+   persistence** (resume/store persist, inject's monotonic resource
+   upgrade, panel's build rollback+toast, subtitles' three-stage #fail
+   toasts, entry's bridge-install isolation with the probe still
+   running), **feature-degrade** (CloseWatcher null with the keydown
+   path still dismissing, DOMParser belt, session-metadata skip until
+   the next key change), and **fan-out isolation** (dom-watch's
+   per-subscriber belt; the bridge dispatch's `reportError` rehome —
+   the platform's own out-of-band report verb keeps deliberate error
+   sentences on the page error surface the audit ledger reads, while
+   sibling routes inside the dispatch stay isolated). Tool-facing
+   metric this feeds: the browser cases fail on any page error, so a
+   rethrow or reportError sentence must always be deliberate by
+   construction — the classes are the map behind that ceremony.
 4. **bundle** — real esbuild build (version derivation) +
    artifact shape validation (header fields, IIFE shape, css companion) and
    the manager-contract pins: the exclusion list only ever rides the strict
