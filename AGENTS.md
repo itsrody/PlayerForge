@@ -521,6 +521,40 @@ iframes, same-origin and cross-origin:
   riding its inline fill transform + claimed object-fit would carry them
   into the re-adoption — the fresh shell's ViewershipTransform boots
   `#fillActive=false`/`#priorObjectFit=""` and never sees the hostage.
+
+  **Sweep #8 record (shell lifecycle A→Z, audit-clean).** The module read
+  front-to-back with every seam reconciled against the wider records:
+  the boot contract is two-phase (`#injectDom` → one `yield_` → the eager
+  component set + lazy `PANEL_SECTIONS` builder → the watcher `runSteps`
+  with the managed-marker stamp as its tail), and `#injectDom`'s four
+  deferrals (host removal, `SHELL_MARKER` on the host, the static→relative
+  position fix, the parasite watchdog) all ride the shell's `DOMManager`.
+  The teardown ownership matrix is the record's real deliverable — five
+  components, five disjoint release stories, each pinned to exactly one
+  root: `resume`/`subtitles`/`filters` own their `destroy()` verbs and are
+  nulled in build order; `MediaSession` listeners ride the `claimMediaSession`
+  `signal`; the input machinery (forge engine + `attachInputActions` +
+  `ViewershipTransform`'s fullscreen/resize/loadedmetadata arms, whose
+  `attach(signal)` is handed the forge's signal at the `attachInputActions`
+  call site) dies at `#inputs.destroy()`; `ReferenceBox` tears down from
+  the kernel scope abort alone (its RO disconnect rides the abort
+  listener, orientation/scroll/capture-scroll ride `{ signal }` options)
+  and needs no explicit destroy; and the `DOMManager` is the eleven-root
+  census's second shell-side `new Scope(` — a separate machine disposed
+  by its own `destroy()` verb at the destroy tail, after the `#scope`
+  flip, with no cross-cascade between the two roots (the never-disposed
+  `#dom`-without-`#scope` shape cannot happen: `shell.destroy` is the
+  only caller and runs both). The re-entrant destroy guard rides
+  `#scope.disposed` returning early; mid-boot destroys are legal (every
+  post-`#injectDom` field guards `?.`, the sections array is empty by
+  construction). Idle-state facts recorded for the next reader:
+  `#home` stays intentionally (identity is a shell-lifetime fact),
+  `#view` is not nulled because `exitFill(false)` restores every byte
+  it can mutate (transform + claimed object-fit) and it holds no
+  listeners of its own (they die with the forge signal). One subtlety
+  kept deliberately rather than "fixed": a section destroy that throws
+  mid-loop abandons its later siblings before the array clears — the
+  documented belt premise, not a bug to repair.
 - **media.js** — the media plane A→Z's single-writer population: every
   HTMLMediaElement property write in the tree (7) lives in this file — three
   clamped `currentTime` writes (stop/seekTo/latched-scrub), clamped volume,
