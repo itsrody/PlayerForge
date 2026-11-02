@@ -92,6 +92,39 @@ one `file.text()` drop-ingest read), and the bundle stage pins the header
 half (exactly 2 `@connect` lines with the `*` umbrella among them; exactly 1
 `@resource` — pfStyle is the one manager-fetched asset).
 
+**Sweep #7 record (manager floor, premise-level, all verified against
+Violentmonkey master at the v2.50.0-era HEAD — the same release the floor
+names).** Five runtime premises the tree encodes as literal manager behavior,
+each now source-cited: (1) the **echo contract** — `src/injected/web/
+gm-values.js`: own writes call `notifyChange` with `remote = false`; the
+background's `UpdatedValues` broadcast (`src/background/utils/values.js`) is
+sent to every opener frame of every tab (sibling frames of the writing tab
+included) and re-fires hooks through `changedRemotely(..., remote = true)` —
+and self-receipt is deduped structurally: the writer's own `bridge.storages`
+was updated at write time, so its broadcast re-read finds `oldRaw === raw` and
+never re-fires (the "own-write echo arrives exactly once" shape the `gm` case
+proves empirically in both directions); per-callback try/catch isolation is
+the released behavior. (2) **the xhr relay gates nothing** — `src/background/
+utils/requests.js` consumes no `@connect` vocabulary anywhere in the
+background/injected request pair (`vetUrl` is URL-shape validation, not
+host consent; the only "connect" in the pair is a forbidden-header regex), and
+`timeout` is clamped and honored with `timeout` in `EVENTS_TO_NOTIFY` so
+`ontimeout` propagates — the premise behind the store.js docstring and the
+`gm` case's ontimeout row. (3) **the frame model's manager premise** —
+`src/manifest.yml` the Firefox MV2 build ships `matches: <all_urls>`,
+`run_at: document_start`, `all_frames: true`, byte-confirming "every frame,
+top and cross-origin iframes, runs the full bundle". (4) **the `GM_info`
+mirror** — `src/injected/web/gm-api-wrapper.js` sets `scriptHandler =
+VIOLENTMONKEY` and `version = VM_VER`; the `gm` case's handler assertion and
+entry.js's version mirror are manager-truth reads, not constants. (5) **the
+matching surface** — sweep #5's `tester.js` record covers this floor's
+matcher (`*.` apex coverage, strict `@exclude-match`). These premises are
+what make Tampermonkey/Greasemonkey ports non-trivial: each is a
+released-source behavior the runtime treats as given, and re-auditing them
+against a different manager means re-proving each file's semantics from
+that manager's released source (see the sweep's remote-verification
+artifacts under `check/.tmp/`, left uncommitted per convention).
+
 The two exclusion vocabularies are complementary, not
 redundant: the 24 `@exclude-match` patterns ban the player *platforms* the
 match-all lets sitewide, while `entry.js`'s runtime skip
