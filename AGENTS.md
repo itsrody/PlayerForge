@@ -473,7 +473,31 @@ iframes, same-origin and cross-origin:
   drift epsilon, like the completion state does). The never-written
   `pending` entry field (entrance-only across the whole repo history) is
   retired with its load-time sweep — the one wall-clock read that went with
-  it is the Date.now census 10→9.
+  it is the Date.now census 10→9. The resume-plane A→Z sweep read the
+  module end to end and verified the whole seam ring against the shared
+  planes — no src gap: the store's persistence shape (fixed-whitelist
+  entry projection blocks field injection and prototype traversal since
+  `__proto__`/`constructor` are outside RESUME_ENTRY_FIELDS; foreign and
+  future writers adopted with a restamp, malformed entries dropped with a
+  count-warn, the echo attestation never minted on a load), the merge's
+  exact invalidation contract (in-place LWW updates touch only `updatedAt`,
+  so `#byId`/`#byPath` stay exact and only the sorted snapshot drops; the
+  doc-side removal adoption keeps the entry when it is exactly-recent -
+  under `<=`, deliberate), the strict four-field echo fast path
+  (docUpdated + version + count + maxEntry stamp; any foreign writer bumps
+  one), the checkpoint mathematics (span = clamp(duration·0.01, 10, 60)s,
+  completion 0.95 outranks the 3s epsilon on the terminal state, the
+  store's no-op guards churn-skip repeats), the id-trust rule (an
+  `hashEntry` id matches only when `domainsMatch` agrees, so legacy
+  domain-less ids and true collisions fall through to the fuzz-scored
+  path-bucket match), and the two classified subtleties the sweep cleared
+  rather than fixed: destroy's `currentTime ?? NaN` fallback is
+  unreachable (`#shell` is never nulled) and even a fired NaN write would
+  be Number.isFinite-guarded at every consumer, and the `#persist`
+  embedded foreign-merge window (an echo-miss race) rewrites the disk
+  with the converged set immediately after, without a structural notify —
+  the remote-write path proper announces, so History staleness is bounded
+  to a same-instant race whose writer is the writer tab itself.
 - **filter.js** — `FilterSession` (eager state machine: values, apply,
   trailing persist, the menu reset gesture) + `VideoFilter` (the lazy panel
   section over it). The filter lives on the video from first play — a
