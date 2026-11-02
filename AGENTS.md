@@ -802,6 +802,60 @@ iframes, same-origin and cross-origin:
   `@resource` upgrade; viewport-fit-cover), `toast.js` (`ToastManager`,
   pooled custom element), **styles.css** (the HUD — §6).
 
+  **Sweep #9 record (chrome/ A→Z, audit-clean).** The three small modules
+  read front-to-back with no src gap:
+  `ui.js` — the construction helpers are the measured-allocation shapes
+  the allocation sweep pinned (`el`'s for-in + hasOwn over the attr map,
+  the ~78→~20 ns/op finding; `button`'s one-mutated attrs object with
+  forwarded rest keys, so the `data-action` contract never silently
+  drops); the icon plane is the two-table vocabulary (`ICONS` +
+  `ALIASES`, `canonicalName` hasOwn-gated) feeding the document-keyed
+  WeakMap template cache with cloneNode derivation — the string path
+  (toast markup) and the element path (panel buttons) hit the same
+  cache; `DOMParser`-not-innerHTML is the strict-CSP/Trusted-Types belt
+  (the census's 7th bare catch includes this file's) with
+  `importNode` keeping the parsed node in the requesting realm;
+  `flashElement` is the WAAPI restart grammar (cancel finished
+  background animations + scan running ones for `backgroundColor`, the
+  null-effect half kept spec-nullable; `!el` the only guard; FLASH
+  constants from core, no re-spelled durations).
+  `toast.js` — singleton `DomPool(initial: 1)`; `acquire` is consumed at
+  construction and never released (the held-side contract the pool's
+  destroy comment names); pointer-events follow the stylesheet's
+  hidden/interactive state so no inline writes go stale across reuse;
+  the repeated-show skip is the 4-field render fingerprint (irrelevant
+  churn is the ~100ms scrub-hint tick); auto-hide rides the scheduler's
+  `delay` (feature-timer class) with the WCAG 2.2.1 hover/focus hold
+  carried uniformly on (this is behavior, not an a11y branch — the
+  pause machinery runs on every realm); destroy cancels the pending
+  delay and latches `#paused` before `#pool.destroy()` (available-side
+  only — the held pill rides the hud-removal defer in shell.js); the
+  four pointer/focus listeners are element-owned and die with the layer
+  at natural GC.
+  `inject.js` — `ShellStyle` is the one-object sheet story (adopt-once,
+  the strictly-monotonic `@resource` upgrade with its parity guard and
+  last-good-keep on a bad `replaceSync` — the log-then-continue class
+  the error-path census pins; `settled()` never rejects); the container
+  pockets ride a real `<style>` element because `@container` size rules
+  do not evaluate inside `adoptedStyleSheets` in either harness engine
+  (gate-probed), restating the sheet's old tie order as source order
+  (density → landscape adjustment → compact reader LAST);
+  `watchShellHost` is fully event-driven as documented — container
+  childList MO + the detach leg armed only while the container is out
+  of the document, riding the shared mutation feed (one of the four
+  DomWatch feed subscribers §2 records), no timers, no surrender;
+  `ensureViewportFitCover` is idempotent, and *forcing* cover over an
+  embed's own fit keyword is the point, not an overreach.
+  One classified surface (kept, not fixed): `pf-toast` is never
+  registered in any `customElements` registry — it is a valid
+  unregistered tagname styled by tag selector — and it is created in
+  the PAGE document (`hudLayer.ownerDocument`), so a page that
+  pre-registered the `pf-toast` name could upgrade it. The reach is
+  toast behavior only, by a page that already owns every other byte of
+  the document; the shadow-host isolation story does not require
+  creating the element in a different realm, so no new registry or
+  realm-juggling was added for the theoretical shape.
+
 ## 4. The OOP development path (A→Z chronicle)
 
 The tree was rebuilt by a sequence of review-and-unification passes. Each pass
