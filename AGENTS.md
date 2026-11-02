@@ -395,7 +395,36 @@ iframes, same-origin and cross-origin:
   riding its inline fill transform + claimed object-fit would carry them
   into the re-adoption — the fresh shell's ViewershipTransform boots
   `#fillActive=false`/`#priorObjectFit=""` and never sees the hostage.
-- **media.js** — `MediaControls` (play/pause/seek/scrub-latch/volume/rate/
+- **media.js** — the media plane A→Z's single-writer population: every
+  HTMLMediaElement property write in the tree (7) lives in this file — three
+  clamped `currentTime` writes (stop/seekTo/latched-scrub), clamped volume,
+  muted flip, and two playbackRate writes whose release (`endBoost`) is
+  deliberately UNGATED so a mid-hold source swap cannot strand a boosted
+  rate; the reads outside are shell aliases and resume/cue consumers, and
+  the one second play call is forge's bare-tap — native parity: its silence
+  logs real rejections to debug instead of rethrowing (media.play's
+  throw-through serves gesture/panel callers that own a failure surface; a
+  gesture surface with nothing to degrade into does not). Readiness is two
+  gates: `#isReady()` (readyState ≥ HAVE_METADATA) for everything
+  timeline-independent, and `#canSeekNow()`, which additionally recognizes
+  the MSE window (duration set, readyState still 0) where the spec's
+  default-playback-start parking makes a restore issued there real. Benign
+  media policy errors classify as exactly AbortError/NotAllowedError
+  (load interruptions, autoplay policy). The MediaSession bridge pushes a
+  1s-epsilon-deduped position state (~1 IPC/s steady vs 4; state changes
+  bypass the quantum immediately) and clears ONLY its six registered
+  actions on teardown (prev/next stay the page's); the two metadata
+  witness observers (documentElement subtree for the title, `poster`
+  attribute for artwork) ride the HOST page's mutation axis for their
+  fingerprint compare — that page's userscript tax (2 getter reads + 1
+  template per mutation batch), the tree's one per-host-mutation cost
+  surface, with the candidates (title-node-only observer, part-compare
+  without the concat) parked unless a site surfaces real cost. `URL.parse`
+  as the null-guarded poster parse and `fastSeek` under the seekto
+  handler's `fastSeek` detail are the floor-era surfaces; PiP keeps the
+  `pictureInPictureEnabled` runtime policy read (enterprise/embed can
+  disable) while the method-presence checks that died floor-dead (70) stay
+  dead. — `MediaControls` (play/pause/seek/scrub-latch/volume/rate/
   boost/PiP/stop), `MediaSessionOwner` claim/lifecycle — the bridge carries a
   plain disposal boolean, not a Scope root: every listener it owns rides the
   claim's caller signal and the had-scope held no signal consumers and no
