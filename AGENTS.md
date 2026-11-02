@@ -963,7 +963,37 @@ stop at the first failure:
   measured baseline, so the tripwire catches shape regressions (an
   accidental allocation loop, a megamorphic rewrite) and never CI jitter;
   nothing earned an adoption — the loops are already engine-tight and the
-  measured verdicts are the batch's record),
+  measured verdicts are the batch's record). The end-to-end allocation
+  sweep inventoried every spread/map/split/slice/pool site across the 24
+  modules against the frequency axes and found no unmeasured hot
+  allocator: the per-event axis rides pooled scratch end to end (forge's
+  per-name pooled gesture event + detail, the pooled toast payload,
+  scrubToLatched = clamp + `currentTime` write with no object on the
+  path, the setPositionState scratch against the 4Hz clock), the
+  per-render axis is preallocated-or-scalar (the walk's count-mutated
+  active-pool array, per-slot scratch, dirty-check-gated string builds)
+  plus the measured-declined picture box, the per-tick echo axis stays
+  fresh by the re-entry rule; everything fresh-and-allocating left on the
+  tree is human-rate (menu/reset dispatches, wheel-pinch session options,
+  subtitle drop spreads, module-init derived tables, per-save stringify at
+  the 0.1Hz checkpoint), so pools own every real-frequency axis and the
+  audited population is complete. The shared/reusable pass then asked which
+  sites could pool beyond themselves; most already pool at the strongest
+  scope: the per-name detail payloads and the pinch-pair scratch are
+  module-level singles shared by every engine and shell in the realm (each
+  src file evaluates once per realm, and objects cannot cross a realm
+  boundary - the same fact the pool's realm-safe lazy CustomEvent
+  resolution rides), so the only per-instance machinery left is the
+  gesture event pool whose per-engine scope is the safety contract itself
+  (one gesture per name in flight per engine; multi-touch can drive two
+  engines over the same name at once, so cross-engine sharing would
+  corrupt an in-flight read), the hold machines are durable one-per-table-
+  row rather than rebuilt per press (autorepeat arms the existing machine),
+  and panel rows build once and sync by assignment. The two fresh-but-
+  shareable survivors are declined as human-rate: the kernel menu/reset
+  dispatch details ({ method: "menu" } per menu tap) and a formatter
+  memoization, which would trade a measured-bounded HUD loop for an
+  unbounded-by-duration cache.
   `gm` (info mirror, own-echo exactly-once shape, remote-write cross-tab
   adoption surviving a seeked-flush save, the debug mirror: a foreign
   configs write flips the running kernel mid-flight (mirror line + real
