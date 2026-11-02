@@ -601,7 +601,20 @@ iframes, same-origin and cross-origin:
   `onSettingsChanged`, `SETTING_KEYS`, cross-tab live-reload cache;
   `SETTING_KEYS` is the ONE key-vocabulary table — the four machine-read
   root handles plus the `subtitles` group the subtitle state machines ride
-  through raw-config handles, so no second table spells a dotted key),
+  through raw-config handles, and the key-census sweep proved the handle
+  discipline: every `getSetting`/`setSetting` site passes a table handle
+  (`SETTING_KEYS.*`, `definition.key` from the schema,
+  `GESTURES.*.setting`/`SETTING_KEYS.hotkeys` in INPUT_ACTIONS) — zero
+  raw strings. The other dotted families of the configs doc each keep
+  exactly one spell site derived from their own source table (the real
+  source-table-law claim; this rewords the formerly over-broad "no second
+  table spells a dotted key"): `settings.<row>`
+  via the schema + `SETTINGS_PREFIX` in config.js, `gestures.<id>`
+  formula-derived contract-side (`gestures.${id}` like the event names),
+  `filter.<channel>` via the filter defs + `CONFIG_PREFIX` in filter.js;
+  the only hand-spelled literals are entry's `meta.firstRun` plus the
+  two legacy names (`pf:first-run`, `firstRun`) its boot absorbs and
+  sweeps once — all three spelled in exactly that migration line),
   `panel.js` (the `Panel` builder + settings/history section renderers;
   `startViewTransition` runs plain `{ update }` — the old `types` array and
   its `pf-panel-open`/`pf-panel-close` strings were vocabulary with no CSS
