@@ -89,6 +89,29 @@ hostname-anchored work the header cannot — rejecting ad/captcha *frames* of
 sites the header allows, whose hostnames may appear only in a path or query
 of a legitimate video page.
 
+**Sweep #5 record (exclusion-vs-registry non-overlap, audit-clean).** The two
+ban surfaces were cross-checked against the 15-record `SDK_REGISTRY` per
+banned platform, both directions exhaustively: (A) no host is spelled on both
+surfaces — `facebook.com`/`fb.watch` (header, platform) vs `facebook.net`
+(runtime skip, the SDK-loader embed family) are complementary families, not a
+dual spelling; the skip's 10 suffix families + `adservice.google.` prefix
+touch no header pattern and vice versa. (B) no record is unreachable behind a
+ban — every banned platform runs a proprietary player (studio DRMs, feed
+players, the bilibili in-house player that is not the third-party DPlayer SDK
+it shares history with; v.redd.it serves bare video files, correctly unbooted
+under the no-generic-fallback law), and record identity rides names + CSS
+anchor vocabulary, which cannot host-match — no record scopes a banned host.
+The sweep also re-verified the matcher ground truth the banner comment rests
+on against Violentmonkey's released source (`src/background/utils/tester.js`):
+`hostMatcher()` maps `*.` to `RE_STR_ANY = (?:|[^:/]*?\.)`, whose empty
+alternative covers the apex domain, so `*://*.youtube.com/*` bans
+youtube.com itself; `RE_GLOB_HOST_SUFFIX` rejects trailing-`*` TLD hosts in
+favor of the `.tld` vocabulary — none of the 24 patterns is at risk. No gate
+row added: the bundle stage already pins the strict `@exclude-match` surface
+(and fails on any `@exclude` glob returning), and the audit surfaced no
+further machine-enforceable invariant — the check's artifact is this record
+(`check/.tmp/overlap-audit.mjs`, left uncommitted per sweep convention).
+
 **Commands:** `npm run build` (or `--watch`), `npm run lint` (eslint src/),
 `npm test` — the alias for `check/run.mjs`, the repo's one testing interface.
 `npm run check:browser`, `check:flaws` (the syntax+flaws pair),
