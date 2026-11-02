@@ -814,7 +814,36 @@ new code-level evidence:
    owner listener natively on whichever path ends first), and the census of
    `removeEventListener` across src comes back empty: zero live manual
    removals remain, Fan's handle included — its handle now tears down by
-   abort like every other machine's.
+   abort like every other machine's. The steady-state listener & observer
+   census (sweep): 127 static registration sites, 31 at document/window
+   level, zero manual removals — and every unscoped-looking site verified
+   either `{ signal }` on a continuation line, an options-var binding,
+   the panel's per-open dismissal scope, or a deliberate page-lifetime
+   plane — three exist, all load-bearing: the bridge's ONE window `message`
+   listener (`installContextBridge`; its returned teardown is consumed
+   nowhere, the same page-lifetime arrangement as the kernel's shell-ready
+   handle — sibling routes are isolated inside the single handler, and the
+   two other page.js `message` listeners ride per-request settle signals),
+   the FsGate singleton's three listeners (document `fullscreenchange` +
+   the pagehide/pageshow pair on the document's *view* — those lifecycle
+   events fire at the Window and never traverse the tree — with the `#doc`
+   latch making a double script eval re-seed without stacking), and
+   DomWatch's one page-level MutationObserver (the shared mutation feed IS
+   the page plane). Everything else is scope-settled or element-owned —
+   listeners on nodes the feature DOM discards ride natural GC teardown; a
+   signal there would be ceremony, not scope. Per-state live table:
+   pre-boot = bridge 1 + DomWatch MO + 1 visibilitychange + discovery's 3
+   document media taps + the kernel's pageshow/resume/pagehide triple +
+   the entry hint trio (armed only in the first-run hint window) + the 4
+   `watchStorageKey` consumers (the GM echo channel, not DOM events);
+   live shell = resume's 7-event drive cluster + its IO + media's
+   loadedmetadata listener + 2 witness MOs + subtitles' rVFC crank (an
+   arm, not a listener) with its video RO/IO + 4 video events + 2 host
+   gesture relays + ReferenceBox's RO/orientation/scroll + forge's
+   machine-owned streams + the shell's document-level wires; panel open
+   adds exactly the dismissal trio + the CloseWatcher close listener on a
+   per-open scope; scrubbing adds zero listeners (the rAF commit chain is
+   one callback swap, not a socket).
 6. **Imports:** one per realm-form, combined; `shared` below package imports;
    module files import only downward across planes (kernel → contract,
    shell → shared/kernel-contract), never sideways into a sibling's consumer
