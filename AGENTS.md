@@ -81,7 +81,18 @@ Firefox-MV2 wrapper honors `timeout`/`ontimeout` and gates nothing). The
 explicit `@connect subtitlecat` line predates the umbrella (`004bd6e`, a
 per-domain pre-approval) and has no dedicated caller left — inert
 documentation under the matcher, kept as a header surface (header edits are
-interventions). The two exclusion vocabularies are complementary, not
+interventions; sweep #5 re-verified the apex-coverage matcher semantics this
+rests on). **The network floor is census-pinned (sweep #6)**: the census
+stage derives the src-side counts (one `GM_xmlhttpRequest` relay site, one
+`gmRequestText` consumer = the `loadFromUrl` voucher, zero plain
+`fetch`/XHR/WebSocket/EventSource/`sendBeacon`/`importScripts`, zero
+`.src =`/`srcset`/`createObjectURL` and script/iframe/img/track/link element
+creation — closing the DOM-shaped channels the API can never grant — plus the
+one `file.text()` drop-ingest read), and the bundle stage pins the header
+half (exactly 2 `@connect` lines with the `*` umbrella among them; exactly 1
+`@resource` — pfStyle is the one manager-fetched asset).
+
+The two exclusion vocabularies are complementary, not
 redundant: the 24 `@exclude-match` patterns ban the player *platforms* the
 match-all lets sitewide, while `entry.js`'s runtime skip
 (`AD_HOST_SUFFIXES`/`AD_HOST_PREFIXES` + the about:blank/data: gate) does the
@@ -1055,8 +1066,8 @@ stop at the first failure:
 2. **flaws** — repo eslint + isolated module-import smoke per module.
 3. **census** — the executable census: the recorded AGENTS.md counts
    (ten Fans, eleven Scope roots, the zero-timer pipeline, zero manual
-   teardowns, the empty-catch belt, the wall-clock reads) re-derived
-   statically as literal occurrence counts over **comment-stripped** source —
+   teardowns, the empty-catch belt, the wall-clock reads, the network
+   egress floor) re-derived statically as literal occurrence counts over **comment-stripped** source —
    prose that names a pattern (`runtime.js` mentions `catch {}` in a
    docstring, `kernel.js` names `removeEventListener` in a comment) must not
    count, so a naive grep would misreport the record. Each row carries its
@@ -1092,7 +1103,11 @@ stop at the first failure:
    artifact shape validation (header fields, IIFE shape, css companion) and
    the manager-contract pins: the exclusion list only ever rides the strict
    `@exclude-match` surface, `@downloadURL` stays present for the updater,
-   and the HUD class-vocabulary agreement scan — every `pf-*` class the
+   exactly the 2 `@connect` lines ship with the `*` umbrella among them (the
+   census's network block's header half — a dropped umbrella kills every
+   user-supplied subtitle URL against CORS with no error a user could act
+   on), exactly 1 `@resource` ships (pfStyle; a second resource is new
+   manager-lifecycle egress), and the HUD class-vocabulary agreement scan — every `pf-*` class the
    source JS spells must have a reader on styles.css or the inject-side
    sheet (a class no CSS consumes is a dead vocabulary token, the same
    audit shape as the grant-coverage check; `pf-debug` is the

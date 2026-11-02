@@ -71,6 +71,28 @@ export async function run() {
     if (!/^\/\/ @downloadURL\s+https:\/\//m.test(source)) {
       fails.push({ name: "updater surface", note: "@downloadURL missing from header" });
     }
+    // Connect/resource surface: the census's network block pins the src side
+    // (one manager relay, one consumer); this pins the header half those rows
+    // voucher. The `*` umbrella is what user-supplied subtitle URLs load
+    // under - dropping it kills every URL ingest against CORS with no error
+    // a user could act on. The subtitlecat line is documented-inert (it
+    // predates the umbrella, has no dedicated caller) and kept as a header
+    // surface; the pfStyle resource is the one manager-fetched asset - a
+    // second @resource is new manager-lifecycle egress joining silently.
+    const connects = [...source.matchAll(/^\/\/\s*@connect\s+(\S+)$/gm)].map((m) => m[1]);
+    if (connects.length !== 2 || !connects.includes("*")) {
+      fails.push({
+        name: "connect surface",
+        note: `@connect lines=${connects.length} (${connects.join(", ")}) - expected exactly the * umbrella + the documented-inert subtitlecat entry`
+      });
+    }
+    const resources = [...source.matchAll(/^\/\/\s*@resource\s+(\S+)/gm)].length;
+    if (resources !== 1) {
+      fails.push({
+        name: "resource surface",
+        note: `@resource lines=${resources} - pfStyle is the one manager-fetched asset; a second resource is a network decision, not a style tweak`
+      });
+    }
     const sizeKb = (source.length / 1024).toFixed(1);
     rows.push({ name: `bundle emitted (${sizeKb} KB), header + IIFE shape valid`, status: "pass", ms: null });
   }
