@@ -1509,4 +1509,17 @@ stop at the first failure:
 story: see `git log` — the pass era is `8c560e6..a044fe1`, the tool era
 `b226fe8.."1dbf397"`, the input pass `3971636`/`1637549`, the stateful-class
 turn `cff0ab0` + `c95db6a`, the layer unifications `4737f84`-`6a9411d`, the
-redesign `3d0a772`-`c439fec`, and the tool hardening `b226fe8`..HEAD.*
+redesign `3d0a772`-`c439fec`, and the tool hardening `b226fe8`..`98b17fa`; and
+then the review-sweep series `7ffd3eb`..`a68f076` — nineteen A→Z/census
+passes, each recorded in place above: kernel layer (`7ffd3eb`), rVFC/rAF
+floor probes (`3177185`), fs-ui branch closure (`dfaceee`), allocations
+end-to-end (`2369e3f`), media plane (`90c8a62`), listener/observer census
+(`28a408a`), error-path census + header↔runtime cross-check (`49e1f80`),
+settings key occupancy (`d7d82b0`), HUD token sweep (`b61ec2c`), resume
+plane (`980d6d1`), build pipeline — the minifier fix (`ecc36a8`),
+bfcache/freeze-recovery plane (`4f2ea18`), exclusion-vs-registry
+non-overlap (`f8149cf`), network egress census (`1b95cc2`), manager floor
+at premise level (`b52821c`), shell lifecycle (`b89b8bd`), chrome modules
+(`b92c7a0`), and store.js proper (`a68f076`). The series' record-only
+commits changed AGENTS.md alone; every src-touching pass proved itself on
+the full gate battery before its commit.*
