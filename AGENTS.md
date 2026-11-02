@@ -397,6 +397,48 @@ iframes, same-origin and cross-origin:
   **synchronous GM storage, deliberately not IndexedDB** (manager-space
   portability; a cross-tab live-reload needs echo events, not thread offload).
 
+  **Sweep #10 record (store.js proper A→Z, audit-clean).** The module read
+  front-to-back with every seam reconciled against the wider records, no src
+  gap: the **grant guards are the deliberate survivor class** — the §4
+  single-backend census retired double-typeof *platform-capability* checks but
+  kept "grant guards (manager policy, not platform)", and every GM wrapper
+  here (`gmRegisterMenu`/`gmUnregisterMenu`/`gmAddValueChangeListener`/
+  `gmRemoveValueChangeListener`/`gmGetResourceText`, plus `gmRequestText`'s
+  route) is exactly that shape: `typeof GM_*` guards the grant surface, not a
+  platform capability — a missing grant degrades to a null handle / null
+  resource, never a throw. `watchStorageKey` owns the echo contract the tree
+  rides: the `args[3] === false` own-write filter in exactly one place, the
+  lenient default (a 4th-arg-omitting implementation behaves as foreign writes
+  — the contract only ever widens deliverability, never silently drops), the
+  `{ stop() }` handle idempotent across double-stop and failed-install
+  (callback-first order: an install throw still returns a usable stop), and
+  its premises are the sweep-#7 source-cited manager truths (per-tab+frame
+  broadcast, `remote=false` only on the writer's own delivery). `ConfigStore`
+  carries the census's storage claims exactly: the parse-once `#cache`
+  (`loadJsonObject(configs, { version: 1 })` boot default) served from the
+  module cache with `invalidate()` as the cross-tab refresh arm; the
+  copy-on-write descent (whole-doc `structuredClone` was the dominant CPU cost
+  of one stepper-step write) with the for-in-with-own-guard attr-walk repeating
+  ui.js's measured ~78→~20 ns/op finding; the `isSafeKeySegment` guard is
+  applied along BOTH the read path (get — "a hostile stored doc must not turn
+  a read path into prototype traversal either") and the write/delete paths
+  (`__proto__`/`constructor`/`prototype` rejected as segments), with
+  `Array.isArray` gates in the `setFields`/`deleteField` walkers refusing
+  arrays as intermediate nodes (the strict-CSP census's dead `structuredClone`
+  vocabulary is gone — the walkers ARE the shape guarantee). The two-dot
+  divergence is deliberate and stays unshared: `setFields` warns-and-drops the
+  whole batch on an unsafe segment ("a write must stay visible"), while
+  `deleteField`'s walker silently no-ops — the documented "four behaviors
+  under one mode flag" refusal where a shared walker with a mode flag would
+  tie two error verbs to one table. `#persist` is the log-then-continue class
+  (log, return `false`, keep the cache as-was — a failed write leaves memory
+  ahead of disk, and the next cross-tab echo re-serves the foreign doc).
+  `loadJsonObject` itself is the plain truthiness-object read — missing/corrupt
+  yields the fallback; no array-read gate exists at load level because the
+  tree's writers project through field whitelists (the resume entry
+  projection; the configs doc's setFields shape guards) and the walkers make
+  an array-valued segment inert rather than polluting.
+
 ### kernel/ — policy layer
 - **contract.js** — the shared vocabulary both layers import in isolation:
   gesture registry (`GESTURES`/`GESTURE_IDS` are formula-derived from `{id:
