@@ -311,13 +311,16 @@ iframes, same-origin and cross-origin:
   verified in the served rmp 10.7.9 `wc.rmp.min.css` class set), and the
   media element's own `.rmp-video` is deliberately not an anchor — a 0-hop
   match would resolve the video element as the shell home, a box the shell
-  cannot host its DOM in. One deliberate exception rides under review:
-  Laravel Video Embed's anchors are Inertia's `data-page` vocabulary, not
+  cannot host its DOM in. One deliberate exception stands, closed: Laravel
+  Video Embed's anchors are Inertia's `data-page` vocabulary, not
   the package's own (every Laravel embed package renders iframes), so the
   record matches any Inertia app with a bare video — it was added for a
-  real-target site with a named fullscreen fix and stays per the audit's
-  user direction until the diagnostics dump prints its topology field
-  facts, where the retire-vs-narrow decision re-opens. The registry is
+  real-target site with a named fullscreen fix. The record-and-weigh-later
+  path rode the problem-site diagnostics pass that served the
+  reverted fs-ui plan; with that pass closed (not master work — it died with
+  its branch), retire-vs-narrow has no standing re-open: the exception is
+  deliberate, and re-opening it needs a new named site with real markup
+  facts. The registry is
   exported as `SDK_REGISTRY` so the check's registry-coverage case proves
   every record against a real anchor-satisfying stub per record.
 - **discovery.js** — presence machinery: min-size thresholds (100×60),
