@@ -931,9 +931,12 @@ export class InputForge {
     window.addEventListener("pointercancel", (event) => this.#handlePointerCancel(event), options);
     document.addEventListener("keydown", (event) => this.#handleKeydown(event), { capture: true, signal });
     document.addEventListener("keyup", (event) => this.#handleKeyup(event), { capture: true, signal });
-    // A window blur, a hidden tab, or a Page Lifecycle freeze can each swallow
-    // the matching Space keyup and/or pointerup; end every live session through
-    // the normal release paths so no rate/scrub/hold stays latched.
+    // A window blur or a hidden tab can each swallow the matching Space keyup
+    // and/or pointerup; end every live session through the normal release
+    // paths so no rate/scrub/hold stays latched. (The former Page Lifecycle
+    // freeze interrupt retired by probe: Firefox 159 exposes freeze in no
+    // realm, and visibilitychange-hidden precedes every real suspension
+    // shape, so the swallow classes stay covered.)
     const interrupt = () => this.#releaseSessions();
     window.addEventListener("blur", interrupt, { signal });
     document.addEventListener("visibilitychange", () => {
@@ -941,7 +944,6 @@ export class InputForge {
         interrupt();
       }
     }, { signal });
-    document.addEventListener("freeze", interrupt, { signal });
 
     subscribeFullscreen(() => {
       this.setTrackpadPinchEnabled(fs);

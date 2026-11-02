@@ -138,7 +138,27 @@ iframes, same-origin and cross-origin:
   nothing answers, the frame falls back to its own
   context rather than losing resume.
 - Navigation: `pagehide` tears the kernel down unless `event.persisted`
-  (bfcache keeps it); `pageshow`/`resume` (freeze recovery) re-arm it.
+  (bfcache keeps it); `pageshow` re-arms it — restoration re-adoption rides
+  the orphan reconcile (`#reconcileOrphan`: a detached shell video is
+  destroyed and the registry-empty edge re-arms the full discovery tap) —
+  and the non-persisted hide tears the probe's capture listeners down with
+  the realm (entry.js). The bfcache/freeze-recovery plane sweep (A→Z) probed
+  the Page Lifecycle vocabulary on the floor: **Firefox 159 exposes
+  `freeze`/`resume` in no realm and has no `document.wasDiscarded`** —
+  Chromium-only surfaces — so every arm keyed to them retired: the kernel's
+  `resume` reconciliation listener (its work was one duplicate of the
+  pageshow reconcile), resume.js's `freeze` flush, forge.js's `freeze`
+  session interrupt (blur + `visibilitychange` hidden cover the swallow
+  classes on Firefox; the freeze interrupt could never add a third onset),
+  and `#onPageShow`'s `wasDiscarded` guard clause (a Chromium discard-restore
+  is a reload — a fresh realm boots a fresh kernel — so the clause bought no
+  reconciliation even hypothetically). Recovery on the floor is exactly:
+  `visibilitychange` hidden + `pagehide` flushes (the pagehide belt is live
+  on the persisted leg only — a real pagehide dispatches the kernel's own
+  pagehide listener first, whose scope dispose aborts the tracker belt
+  mid-dispatch, and that leg's final save rides the shell destroy inside
+  the kernel's destroyAll), persisted-hide state preserved, `pageshow`
+  reconcile + registry-empty re-arm.
 
 ## 3. Module map (A→Z)
 
@@ -398,7 +418,9 @@ iframes, same-origin and cross-origin:
   videos with per-video SDK identity + min-size + on-screen, the live
   shell's SDK name, the mid-boot latch, fullscreenElement, and the debug
   flag),
-  pagehide teardown, freeze/pageshow recovery, per-boot
+  pagehide teardown, pageshow recovery (the orphan reconcile; the freeze/
+  resume arm retired — its reconcile duplicated the pageshow one and Firefox
+  exposes no Page Lifecycle events), per-boot
   manage-ability downgrades, and the universal-container-identity seam on
   `RemovalWatch`'s re-parent branch: container identity is a shell-lifetime
   fact resolved by detection alone — a live re-home re-runs
@@ -476,7 +498,9 @@ iframes, same-origin and cross-origin:
   lifetime — a same-document route change is out of scope (see the page.js
   bullet), so there is no route-follow/`#adopting` machinery. Save cadence
   = 10s checkpoint span; flushes on `seeked`, on pause, on visibility loss,
-  on freeze; `RESUME_MIN_POSITION` (5s) floor; bounds cutoff; the entry
+  on pagehide (persisted leg; the freeze leg retired — Firefox exposes no
+  freeze, and pagehide is the belt's one suspension surface);
+  `RESUME_MIN_POSITION` (5s) floor; bounds cutoff; the entry
   carries per-viewing extras (`subOffset`, `subsUrl`); cross-tab merges
   arrive through `watchStorageKey` and require the tracker's `#loaded`
   latch (`#adoptExternal`, which announces so grain consumers re-resolve).
@@ -889,7 +913,7 @@ new code-level evidence:
    `removeEventListener` across src comes back empty: zero live manual
    removals remain, Fan's handle included — its handle now tears down by
    abort like every other machine's. The steady-state listener & observer
-   census (sweep): 127 static registration sites, 31 at document/window
+   census (sweep): 124 static registration sites, 28 at document/window
    level, zero manual removals — and every unscoped-looking site verified
    either `{ signal }` on a continuation line, an options-var binding,
    the panel's per-open dismissal scope, or a deliberate page-lifetime
@@ -907,10 +931,11 @@ new code-level evidence:
    listeners on nodes the feature DOM discards ride natural GC teardown; a
    signal there would be ceremony, not scope. Per-state live table:
    pre-boot = bridge 1 + DomWatch MO + 1 visibilitychange + discovery's 3
-   document media taps + the kernel's pageshow/resume/pagehide triple +
+   document media taps + the kernel's pageshow/pagehide pair (the resume
+   arm retired - freeze/resume unreachable on the Firefox floor) +
    the entry hint trio (armed only in the first-run hint window) + the 4
    `watchStorageKey` consumers (the GM echo channel, not DOM events);
-   live shell = resume's 7-event drive cluster + its IO + media's
+   live shell = resume's 6-event drive cluster + its IO + media's
    loadedmetadata listener + 2 witness MOs + subtitles' rVFC crank (an
    arm, not a listener) with its video RO/IO + 4 video events + 2 host
    gesture relays + ReferenceBox's RO/orientation/scroll + forge's
@@ -1223,7 +1248,10 @@ stop at the first failure:
   >512KiB drop through the real panel path proving the cooperative
   parse (the arm the retired Worker offloader left as sole backend)
   drains and lands its overloaded cue), `robust`
-  (freeze-flush without user pause, checkpoint cadence on the native
+  (hidden-flush without user pause - a real second tab sets the document
+  hidden and the native visibilitychange flush must land the position; the
+  freeze surface the row once dispatched synthetically is Chromium vocabulary
+ Firefox 159 has no realm for, probed - , checkpoint cadence on the native
   timeupdate media clock at 4x, 1000-echo
   < 400ms, 400 remote-adoption merges < 800ms),
   `scheduler` (the postTask façade unit, imported into the page realm:

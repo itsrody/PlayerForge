@@ -1,9 +1,9 @@
 import { sleep } from "../../lib/driver.mjs";
 /**
- * The robustness floor: backing churn during background lives (page frozen
+ * The robustness floor: backing churn during background lives (page hidden
  * mid-playback, storage echo floods from cross-tab merges) raises the stakes
  * on everything PlayerForge persists through SYNCHRONOUS GM storage at
- * playback boundaries. Rows: the freeze flush must land the played position
+ * playback boundaries. Rows: the hidden flush must land the played position
  * with no user pause, the checkpoint cadence must ride the native timeupdate
  * media clock (no presented-frame crank), and the storage echo/merge hot
  * paths must stay inside a tiering-era wall-clock budget (the engine's
@@ -16,10 +16,15 @@ export async function run({ session, boot }) {
 
   await boot();
 
-  // Freeze-flush row: the kernel's Page Lifecycle flush (freeze -> #saveProgress
+  // Hidden-flush row: the tracker's suspension flush (visibilitychange -> hidden
   // at the playback boundary) must persist WITHOUT a user pause. Regression
   // surface: if a future refactor moves persistence onto async backends (IDB/
-  // fetch), a freeze discards the in-flight write and this row goes red.
+  // fetch), a suspension discards the in-flight write and this row goes red.
+  // The boundary is REAL: a genuine second tab sets the fixture document's
+  // visibilityState to hidden and fires the native visibilitychange (the
+  // Page Lifecycle freeze surface this row once dispatched synthetically is
+  // Chromium vocabulary Firefox 159 has no realm for - probed; hidden is the
+  // flush belt's real suspension surface on the floor).
   await session.waitFor(
     "return (() => { const v = document.querySelector('#check-video'); return v && v.duration > 3 ? v.duration : false; })()",
     6000
@@ -43,22 +48,39 @@ export async function run({ session, boot }) {
     };
     tick();
   });
-  // Synthetic freeze: resume.js flushes on the document freeze event; the
-  // kernel's teardown keys on pagehide instead, so the session survives.
-  const flushed = await session.evalAsync(function main(done) {
-    const v = document.querySelector("#check-video");
-    document.dispatchEvent(new Event("freeze"));
-    setTimeout(() => done(v.currentTime), 300);
+  const pageHandle = await session.raw.getWindowHandle();
+  // Real suspension: a second tab takes the window's focus; the fixture page
+  // witnesses its own transition through a planted listener (the resume
+  // realm holds the flush path, this flag is only the row's witness), and
+  // the second document carries no script instance (about:blank - the
+  // entry's skip gate refuses it) to write the store concurrently.
+  await session.eval(function main() {
+    window.__pfHiddenSeen = false;
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") {
+        window.__pfHiddenSeen = true;
+      }
+    });
   });
+  await session.raw.switchTo().newWindow("tab");
+  await sleep(400); // the fixture page's flush runs synchronously on hidden
+  await session.raw.switchTo().window(pageHandle);
+  await sleep(200); // context switch back settles before the store read
+  const seen = await session.eval("return { hiddenSeen: window.__pfHiddenSeen, state: document.visibilityState }");
   const after = await session.eval(function main() {
     const store = window.__pfBacking["pf:resume"] ?? { entries: [] };
     const own = (store.entries ?? []).find((e) => e && e.path === "/check");
     return own ? own.resume : -1;
   });
   status(
-    "freeze-flush persists the played position without a user pause",
-    typeof before === "number" && Number(played) >= 9.2 && Number(flushed) >= 9.0 && after >= 9.0 && after > Math.max(0, before),
-    `before=${before} played=${played} flushedAt=${flushed} after=${after}`
+    "real second-tab suspension reaches the fixture page",
+    seen.hiddenSeen === true && seen.state === "visible",
+    `after return hiddenSeen=${seen.hiddenSeen} visibilityState=${seen.state}`
+  );
+  status(
+    "hidden-flush persists the played position without a user pause",
+    typeof before === "number" && Number(played) >= 9.2 && after >= 9.0 && after > Math.max(0, before),
+    `before=${before} played=${played} after=${after}`
   );
 
   // Checkpoint cadence: the save drive is the element's OWN timeupdate

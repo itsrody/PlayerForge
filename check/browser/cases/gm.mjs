@@ -63,7 +63,7 @@ export async function run({ session, boot, header, version: bundleVersion }) {
   // #debugWatchLast) keeps unrelated foreign filter/settings writes from
   // churning the runtime.
   const consoleRows = () => session.eval(function main() {
-    return (window.__pfConsoleLog ?? []).filter((l) => l.includes("Debug logs") || l.includes("Page resumed"));
+    return (window.__pfConsoleLog ?? []).filter((l) => l.includes("Debug logs") || l.includes("press owned"));
   });
   const beforeFlip = await consoleRows();
   await session.eval(function main() {
@@ -73,16 +73,32 @@ export async function run({ session, boot, header, version: bundleVersion }) {
     window.__gmTest.remoteWrite("pf:configs", doc);
   });
   await sleep(220);
+  // Replayable debug chatter: one synthetic pointerdown on the SDK container
+  // (the gesture engine's zone) followed by pointercancel. The press is
+  // owned decision-only (prevent-scope rule), nothing latches, and the
+  // cancel path releases the tracked pointer without a bare-tap toggle -
+  // the only effects are the two debug-gated forge lines the flip-on probe
+  // reads and the flip-off probe expects silence from. (The former probe
+  // dispatched a synthetic `resume` and read the kernel's reconcile log -
+  // that listener retired with the freeze/resume arm after the floor probe
+  // proved Firefox 159 exposes no Page Lifecycle events; the press pair is
+  // the replacement free-chatter surface, and the pair is identical on both
+  // probes so the console difference is attributable to debug itself.)
   await session.eval(function main() {
-    document.dispatchEvent(new Event("resume"));
+    const el = document.querySelector(".pf-shell")?.parentElement ?? document.body;
+    const r = el.getBoundingClientRect();
+    const x = Math.round(r.left + r.width / 2);
+    const y = Math.round(r.top + r.height / 2);
+    el.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "mouse", isPrimary: true, pointerId: 7, bubbles: true, clientX: x, clientY: y }));
+    el.dispatchEvent(new PointerEvent("pointercancel", { pointerType: "mouse", isPrimary: true, pointerId: 7, bubbles: true }));
   });
   await sleep(220);
   const afterFlip = await consoleRows();
   const mirrored = afterFlip.some((l) => l.includes("Debug logs mirrored on"));
-  const resumed = afterFlip.some((l) => l.includes("Page resumed"));
+  const resumed = afterFlip.some((l) => l.includes("press owned"));
   status(
     "foreign debug flip reaches the running kernel mid-flight",
-    mirrored && resumed && !beforeFlip.some((l) => l.includes("Page resumed")),
+    mirrored && resumed && !beforeFlip.some((l) => l.includes("press owned")),
     `before=${JSON.stringify(beforeFlip)} after=${JSON.stringify(afterFlip)}`
   );
   await session.eval(function main() {
@@ -100,9 +116,9 @@ export async function run({ session, boot, header, version: bundleVersion }) {
   // 2c - the flip OFF. The mirror's disable-and-log order is forced: the
   // machinery that would print the announcement is the one going silent, so
   // the off direction is proven behaviorally instead - after the foreign
-  // off-flip, a synthetic resume produces NO new console lines (before the
-  // batch, frames stayed debug-deaf in exactly this shape). This also
-  // restores the boot-like stored state (debug off) the menu census below
+  // off-flip, the same replayable press pair produces NO new console lines
+  // (before the batch, frames stayed debug-deaf in exactly this shape). This
+  // also restores the boot-like stored state (debug off) the menu census below
   // assumes.
   const consoleCount = () => session.eval(function main() {
     return (window.__pfConsoleLog ?? []).length;
@@ -118,7 +134,10 @@ export async function run({ session, boot, header, version: bundleVersion }) {
     return window.__pfBacking["pf:configs"]?.debug?.logs === false;
   });
   await session.eval(function main() {
-    document.dispatchEvent(new Event("resume"));
+    const el = document.querySelector(".pf-shell")?.parentElement ?? document.body;
+    const r = el.getBoundingClientRect();
+    el.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "mouse", isPrimary: true, pointerId: 9, bubbles: true, clientX: Math.round(r.left + r.width / 2), clientY: Math.round(r.top + r.height / 2) }));
+    el.dispatchEvent(new PointerEvent("pointercancel", { pointerType: "mouse", isPrimary: true, pointerId: 9, bubbles: true }));
   });
   await sleep(220);
   const afterOff = await consoleCount();

@@ -370,26 +370,18 @@ export class Kernel {
   #debugWatchLast = null;
 
   #onPageShow = (event) => {
-    // bfcache restores report persisted; a discarded page comes back with
-    // persisted false but wasDiscarded true. Both hand back a document whose
-    // shells may reference detached videos, so both reconcile.
-    if (!event.persisted && !document.wasDiscarded) {
+    // bfcache restores report persisted. The discarded-page arm
+    // (`document.wasDiscarded`) is Chromium vocabulary retired here by probe:
+    // Firefox 159 exposes no wasDiscarded property in any realm, and even a
+    // Chromium discard-restore is a reload (a fresh realm re-runs this script
+    // and boots a fresh kernel), so there is no resurrected-realm shape to
+    // reconcile. A restored document whose shell video went detached during
+    // the hide is the one restore shape; the reconcile below destroys the
+    // orphan and the registry-empty edge re-arms discovery.
+    if (!event.persisted) {
       return;
     }
     logger.log("kernel", "Restored from bfcache - reconciling");
-    this.#reconcileOrphan();
-  };
-
-  /**
-   * Page Lifecycle freeze -> resume fires no pageshow, yet the player tree may
-   * have been mutated while frozen (or a shell orphaned by a swap), so run the
-   * same orphan sweep on the native resume event.
-   */
-  #onResume = () => {
-    if (this.#scope.disposed) {
-      return;
-    }
-    logger.log("kernel", "Page resumed - reconciling");
     this.#reconcileOrphan();
   };
 
@@ -585,7 +577,6 @@ export class Kernel {
       },
       () => this.#armDebugWatch(),
       () => document.addEventListener("pageshow", this.#onPageShow, { signal }),
-      () => document.addEventListener("resume", this.#onResume, { signal }),
       () => window.addEventListener("pagehide", this.#onPageHide, { signal }),
       () => this.#armDiscoveryTap()
     ]);

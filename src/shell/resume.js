@@ -528,7 +528,7 @@ class ResumeStore {
  * and resumes where the user left off, with a "Start over" toast action.
  * Saves are playback-status driven: native playback events (timeupdate while
  * the clock advances) checkpoints every duration-scaled span of content, and
- * every boundary - pause, seeked, ended, hidden, freeze, pagehide, destroy -
+ * every boundary - pause, seeked, ended, hidden, pagehide, destroy -
  * flushes immediately. No wall-clock interval.
  */
 export class ResumeTracker {
@@ -752,7 +752,7 @@ export class ResumeTracker {
     // the position read is `currentTime` - the decoder's authoritative
     // playhead. It idles for free whenever the element is paused or stalled
     // (no advancing -> no event), and the boundaries below flush at hidden /
-    // freeze before throttling can eat a write; the rVFC per-frame crank
+    // pagehide before throttling can eat a write; the rVFC per-frame crank
     // retired with user direction - a presented-frame callback (~15x the
     // event cost of timeupdate) bought sub-frame flush precision the 10s
     // checkpoint span never consumed. NOT a script clock and stays on this
@@ -787,9 +787,18 @@ export class ResumeTracker {
         flush();
       }
     }, { signal });
-    // Page Lifecycle: freeze and pagehide cover OS freeze / tab close / bfcache,
-    // where destroy() may never run.
-    document.addEventListener("freeze", flush, { signal });
+    // The flush belt's pagehide leg carries floor truth: the Page Lifecycle
+    // freeze flush retired by probe (Firefox 159 exposes freeze/resume in no
+    // realm - Chromium-only). The belt is live on the persisted leg only: a
+    // real pagehide dispatches the kernel's own pagehide listener first
+    // (armed at kernel init, before this tracker existed), whose scope
+    // dispose aborts this signal mid-dispatch and drops the belt - that
+    // leg's final position rides the shell destroy the kernel's destroyAll
+    // step races through. A persisted (bfcache) hide returns early from the
+    // kernel teardown, so this flush runs and carries the position past the
+    // suspend; window/visibility leg ordering makes visibilitychange hidden
+    // precede it either way. window pagehide, not rebuild - the tracker is
+    // created inside the shell and shares no teardown path with it.
     window.addEventListener("pagehide", flush, { signal });
   }
 
