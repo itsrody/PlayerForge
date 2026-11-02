@@ -103,17 +103,43 @@ const banner = `// ==UserScript==
 /**
  * Conservative CSS minifier. Safe for this stylesheet's constructs (var(),
  * calc(), min(), content:'', @starting-style): comments are dropped, whitespace
- * runs collapse to one space, and whitespace is stripped only when adjacent to a
- * structural delimiter ({ } ; : , ( )). Whitespace that separates two tokens -
- * notably calc("100% - 24px") arithmetic and descendant selectors - is left
- * alone, so collapsing can never merge tokens into a different rule.
+ * runs collapse to one space, and whitespace is stripped only when adjacent to
+ * a structural delimiter ({ } ; : , ( )) — guarded by two token-merge rules:
+ * stripping the run between an identifier-ish character and "(" (or ":")
+ * would merge two tokens into one — " and (" into the function token and(...),
+ * ":is(" into a compound-pseudo colon+function — and stripping the run between
+ * ")" and the calc infix ("+" or "-") cuts the whitespace the calc-sum grammar
+ * requires on both sides of the operator. Both classes are probed-on-the-floor
+ * facts: Firefox silently rewrites `)and(` to `@media not all` (a media row
+ * that never applies), so the run is re-emitted as one space wherever either
+ * class exists. Whitespace that merely separates two otherwise-unmergeable
+ * tokens — calc("100% - 24px") arithmetic, descendant selectors — is left
+ * collapsed to a single space, so collapsing can never merge tokens into a
+ * different rule.
  */
 function minifyCss(css) {
   const noComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
   const collapsed = noComments.replace(/\s+/g, " ");
-  const slim = collapsed
-    .replace(/\s*([{};:,(])\s*/g, "$1")
-    .replace(/\s*\)\s*/g, ")");
+  // Pass 1: whitespace around {} ; : , ( — the run before a delimiter is
+  // preserved (as one space) when dropping it would merge the preceding
+  // identifier into a function token (ident+"(") or a compound pseudo
+  // (ident+":"); the run after is always strippable, since "("+"ident" and
+  // ":"+"ident" stay separate tokens in that direction.
+  const delimSlim = collapsed.replace(/\s*([{};:,(])\s*/g, (match, delim, offset, text) => {
+    const hadRun = match[0] === " ";
+    const before = offset > 0 ? text[offset - 1] : "";
+    const runMerges = delim === "(" || delim === ":";
+    return runMerges && hadRun && /[A-Za-z0-9_%.@#-]/.test(before) ? " " + delim : delim;
+  });
+  // Pass 2: whitespace after ")". Preserved for the two grammar classes that
+  // require the separator: the media-query keyword ("and", "not" — the MQ
+  // prelude silently rewrites a row parsed without this whitespace to
+  // `@media not all`), and calc's +/- infix, which must be surrounded by
+  // whitespace on BOTH sides even after a closing paren (") + var").
+  // A run before ")" is strippable ("%)" tokenizes as number+paren).
+  const slim = delimSlim.replace(/\)\s*/g, (match, offset, text) => (
+    /[A-Za-z+-]/.test(text[offset + match.length] ?? "") ? ") " : ")"
+  ));
   return slim.trim();
 }
 

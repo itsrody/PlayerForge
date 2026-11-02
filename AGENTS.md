@@ -51,6 +51,21 @@ xmlhttpRequest`), `@connect *` + subtitlecat,
 deliberately **no `@noframes`**: every frame gets the script (§2).
 `@downloadURL` pins the branch dist for VM's updater. Version is
 derived from `package.json` by the build; never hand-edit the header version.
+The bundled sheet rides the hand minifier (`minifyCss` in esbuild.config.mjs),
+whose whitespace stripping carries two grammar-critical preservation rules
+(build-pipeline A→Z sweep, probed on the floor): the run before `(`/`:` is
+kept when an identifier-ish character precedes it — dropping it merges two
+tokens into one, `) and (` into the function token `and(...)`, which Firefox
+silently rewrites to `@media not all` (a media row that never applies; the
+coarse-pointer bottom-sheet rows shipped inert for releases under this bug),
+and the run after `)` is kept when a letter or `+`/`-` follows — calc's `+`/`-`
+infix demands whitespace on both sides of the operator even after a paren
+(`)+ var(` dies at substitution time: the probe read the computed fallback
+where the spaced form computes). Stripping elsewhere still collapses to one
+space; calc arithmetic and descendant selectors survive as single spaces. The
+shipped damage this fixed: the bottom-sheet row's `bottom` and `max-height`
+calcs and the landscape coarse compact-panel row were all inert. The bundle
+gate pins both glue signatures as a static artifact row.
 The header↔runtime cross-check (sweep): the 8 `@grant`s map 1:1 onto real
 call sites — setValue/getValue/addValueChangeListener/removeValueChangeListener
 (store.js's storage plane), registerMenuCommand/unregisterMenuCommand
@@ -1034,7 +1049,13 @@ stop at the first failure:
    sheet (a class no CSS consumes is a dead vocabulary token, the same
    audit shape as the grant-coverage check; `pf-debug` is the
    `DEBUG_HASH_TAG` vocabulary, never a class, and trailing-hyphen tokens
-   are template id prefixes).
+   are template id prefixes); plus the sheet-fidelity row — the shipped
+   sheet must contain no grammar-token glue (`)and(`/`) or`-family after a
+   `)`, `)[+-]` for the calc infix), the signature of a minifier regression
+   that shipped the two compound coarse-pointer media rows inert — the
+   mobile coarse bottom-sheet block and the landscape coarse compact-panel
+   block never applied, and the two calc infix glues inside the bottom-sheet
+   block died double-covered, dead rows owning the glued declarations.
 5. **browser** — real browser + real bundle in a GM realm: **real native
    Firefox 159** headless, driven by geckodriver (this branch's floor, not a
    fork shim). Proves: boot, gesture contract, media semantics, resume,

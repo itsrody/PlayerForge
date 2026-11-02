@@ -112,6 +112,35 @@ export async function run() {
     fails.push({ name: "HUD class vocabulary", note: `source spells pf-* classes with no CSS reader: ${dead.join(", ")}` });
   }
 
+  // Sheet fidelity: the minifier's whitespace stripping must never merge two
+  // grammar-required tokens. `) and (` in a media prelude glued to `)and(`
+  // parses on Firefox into an and() function prelude and the whole row is
+  // silently rewritten to `@media not all` — a rule that never applies (the
+  // shipped coarse-pointer bottom-sheet rows were inert for releases before
+  // the fix). The same glue class in calc — `)+ var(`, `)- var(` — cuts the
+  // whitespace the +/- infix requires on both sides of the operator, and the
+  // declaration dies at substitution time (probed on the floor: computed
+  // bottom falls back to auto). The glue sites the minifier produces are
+  // exact: pass 2 strips after ")" (giving `)and(` / `)+ var(`) and pass 1
+  // strips before "(" (giving `) and(`); the keyword-in-the-middle shape
+  // (`) and(`-led) cannot false-positive on a legitimate `:not(`.
+  let sheet = "";
+  try {
+    sheet = readFileSync(join(HERE, "dist/playerforge.css"), "utf8");
+  } catch {
+    // The css companion always ships with the bundle (esbuild writes both).
+  }
+  const gluedTokens = [
+    ...(sheet.match(/\)(and|or|not|only)\(/gi) ?? []),
+    ...(sheet.match(/\)[+-]/g) ?? [])
+  ];
+  if (gluedTokens.length > 0) {
+    fails.push({
+      name: "sheet fidelity",
+      note: `glued grammar tokens in shipped sheet: ${gluedTokens.slice(0, 6).join(", ")}`
+    });
+  }
+
   if (fails.length > 0) {
     return { rows: [...rows, ...fails.map((f) => ({ name: f.name, status: "fail", note: f.note, ms: null }))], ok: false };
   }
