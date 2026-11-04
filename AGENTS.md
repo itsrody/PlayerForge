@@ -310,6 +310,41 @@ iframes, same-origin and cross-origin:
   one debug flag, private to the instance; the LoAF arm retired — probed
   unreachable: Firefox 159 exposes the entry type in no realm, page or
   worker), logger facade.
+  **Sweep #13 record (core + runtime A→Z, audit-clean; the sweep map
+  closes).** core.js and runtime.js read front-to-back — the last pair
+  without a series record. **core.js**: the zero-import leaf claim holds,
+  and the pass's one mechanical audit ran reference-counted: every
+  `TUNING` leaf key, every timing constant, and every formatter carries at
+  least one live consumer — the dead-constant class this file's own history
+  records (13 exports retired once, which was where "single source of
+  truth" went honest) has not regrown. `isBenignMediaPolicyError` is
+  exactly the two-name classification the media record names. One
+  ownership note verified deliberate: `FRAMEWORK_TUNING` (contract.js) is
+  the kernel's single constant — `removalGraceMs`, consumed once at
+  kernel.js's removal-grace delay — disjoint from the behavior `TUNING` by
+  domain and by owned key, so no duplicate-tuning-table drift exists.
+  **runtime.js**: the facade choreography verified at statement level —
+  the fire path aborts ONLY the release controller (the two-controller
+  shape's measured reason: aborting the task signal inside the body would
+  reject the completed task's promise); `end()` aborts both on the
+  handle/owner paths; and every rejection lands behind
+  `task.catch(() => {})`. Newly pinned: that swallow IS the timer-callback
+  boundary semantics — a throw inside a `delay`/`debounce` callback lands
+  silent, never on the page error surface (the deliberate inverse of Fan's
+  native-dispatch reporting sentence; both real debounce consumers'
+  writes — filter's `#writePersist`, subtitles' `#write` — carry their own
+  log-then-continue classes, so nothing depends on a callback throw
+  surfacing). `debounce`'s `.flush()`/`.cancel()` hold their
+  sinks-with-owners shape — exactly one real consumer each (filter destroy
+  flush; subtitles destroy cancel), matching the trailing-write-before-
+  teardown premise spelled in the export. Scope's abort-flip idempotency
+  and the late-`defer`-runs-now path verified against `#runDisposer` (the
+  census's one catch-log-never-rethrow isolation site); Fan's handle
+  carries `[Symbol.dispose]` unconditionally — the same Disposable over a
+  spent release on the aborted fast path, exactly the one-shape contract
+  the §4 record pins. `DebugRuntime` is the one console-flag owner; the
+  `setRuntime` alias survives as the consumed path (`setDebugRuntime` →
+  `setRuntime` → `setLogs`), not a dead surface.
 - **dom.js** — the shared mutation feed (`onDomMutations`: ONE page-level
   MutationObserver; its four real subscribers are discovery's media tap +
   detached-target prune, the page.js pipe diff, and inject.js's reconnect
@@ -1654,7 +1689,9 @@ non-overlap (`f8149cf`), network egress census (`1b95cc2`), manager floor
 at premise level (`b52821c`), shell lifecycle (`b89b8bd`), chrome modules
 (`b92c7a0`), and store.js proper (`a68f076`), closing with the allocation
 drift re-audit (Nov 2026, record-only — see §4's drift block), the inputs
-plane (`2d67422`), and the shared geometry/context planes — dom.js +
-page.js (this sweep's commit). The series' record-only commits changed
+plane (`2d67422`), the shared geometry/context planes — dom.js + page.js
+(`4893b78`), and core + runtime (this sweep's commit) closing the sweep
+map — every src module family now carries a dedicated record. The series'
+record-only commits changed
 AGENTS.md alone; every src-touching pass proved
 itself on the full gate battery before its commit.*
