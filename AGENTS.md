@@ -439,6 +439,59 @@ iframes, same-origin and cross-origin:
   projection; the configs doc's setFields shape guards) and the walkers make
   an array-valued segment inert rather than polluting.
 
+  **Sweep #12 record (shared geometry/context planes A→Z, audit-clean).**
+  dom.js and page.js read front-to-back — the last two shared planes without
+  a series pass — and both seam rings reconciled against the wider records,
+  no src gap. **dom.js**: the census claims re-derived live exactly as
+  recorded — one mutation feed with its four real subscribers (discovery's
+  media tap + detached-target prune, the iframe registry's added-node diff,
+  inject.js's detach watch), ten Fans, eleven Scope roots with the
+  DOMManager as the shared-side root. Newly pinned: the feed's two
+  proven-bug stories are measured engineering record, worth holding — the
+  pooled batch double-buffer swaps then re-arms the incoming buffer EMPTY
+  (without it, every flush from the third onward re-delivered stale records
+  witnessed as `[1,1,2,2,3]`; each a redundant DOM walk over already-handled
+  mutations), and the `PUSH_APPLY_LIMIT` index walk exists because
+  `apply()` spread on a mass-DOM-teardown batch hits the engine's
+  applied-args RangeError (measured: V8 at ~124k) that would escape the
+  observer callback before `#queued` is set — the whole batch silently
+  dropped (the fast path stays apply, the walk is the safe arm); the 4:1
+  tombstone compaction rides slot-IDENTITY unsubscribe (the returned
+  `off()` closes over its slot object, so reindexing can never orphan a
+  handle — the positional-tombstone zombie the comment records); the
+  hidden-tab belt parks dispatch on a background-priority postTask capped
+  500ms and resumes on visibilitychange (the zero-timer census's
+  coalescer class, armed only while the feed awaits). FsGate: the
+  persisted-pagehide force-false writes the `fs` binding DIRECTLY, not
+  through `#set` — silent by design: no emit to subscribers on a page going
+  away, the restore's `#update()` then no-ops (fs already false), and the
+  erased on-claim was a stale future anyway (the browser exits fullscreen
+  on navigation; the belt exists because a persisted restore would never
+  fire fullscreenchange to correct it). ReferenceBox's four invalidate arms
+  verified (container RO, fs flip, orientation, capture-phase scroll), its
+  audience is exactly the four fullscreen subscribers the census names
+  (ReferenceBox, the forge pinch fill-release, `ViewershipTransform`'s
+  reset, the panel close-on-fs), and the two traversal helpers + the ONE
+  layout-viewport read hold their consumer lists (forge's control-focus
+  gate and zone width, the panel's focus-return, shell's shadow-host
+  check, discovery's presence gate). **page.js**: the census holds — zero
+  timers; both of the module's deadline classes are activity-paired, not
+  polled (TopFrameResponder evicts idle pipes inside `#touchPipe` on
+  request activity — a truly idle pipe closes only on messageerror or a
+  later request; FrameRelay's nonce TTL sweep runs per incoming
+  request/ready echo). Newly pinned: `isOwnFrame`'s nested-frame walk caps
+  at depth 4 and only while layers stay same-origin-readable — a
+  cross-origin `contentDocument` catch ends the subtree (the strict vouch
+  posture unchanged, merely visibility-bounded); the single-bridge-handler
+  ordering is load-bearing (iframeRegistry.arm runs first inside the
+  dispatch so the synchronously-seeded cache lands before the next
+  handler's vouch, re-establishing the old listener-registration-order
+  guarantee the three-listener shape got for free); and the
+  fullscreenerror remediation seam is closed on both sides — the gate's
+  own docstring names shell.js as the HUD-layer owner, and shell's
+  `#watchFullscreen` re-arms + re-hops via `retryFullscreenProvision`
+  exactly on the failure path the provision latch re-opens for.
+
 ### kernel/ — policy layer
 - **contract.js** — the shared vocabulary both layers import in isolation:
   gesture registry (`GESTURES`/`GESTURE_IDS` are formula-derived from `{id:
@@ -1589,7 +1642,7 @@ story: see `git log` — the pass era is `8c560e6..a044fe1`, the tool era
 `b226fe8.."1dbf397"`, the input pass `3971636`/`1637549`, the stateful-class
 turn `cff0ab0` + `c95db6a`, the layer unifications `4737f84`-`6a9411d`, the
 redesign `3d0a772`-`c439fec`, and the tool hardening `b226fe8`..`98b17fa`; and
-then the review-sweep series `7ffd3eb`..`a68f076` — nineteen A→Z/census
+then the review-sweep series — twenty-one A→Z/census
 passes, each recorded in place above: kernel layer (`7ffd3eb`), rVFC/rAF
 floor probes (`3177185`), fs-ui branch closure (`dfaceee`), allocations
 end-to-end (`2369e3f`), media plane (`90c8a62`), listener/observer census
@@ -1600,6 +1653,8 @@ bfcache/freeze-recovery plane (`4f2ea18`), exclusion-vs-registry
 non-overlap (`f8149cf`), network egress census (`1b95cc2`), manager floor
 at premise level (`b52821c`), shell lifecycle (`b89b8bd`), chrome modules
 (`b92c7a0`), and store.js proper (`a68f076`), closing with the allocation
-drift re-audit (Nov 2026, record-only — see §4's drift block). The series'
-record-only commits changed AGENTS.md alone; every src-touching pass proved
+drift re-audit (Nov 2026, record-only — see §4's drift block), the inputs
+plane (`2d67422`), and the shared geometry/context planes — dom.js +
+page.js (this sweep's commit). The series' record-only commits changed
+AGENTS.md alone; every src-touching pass proved
 itself on the full gate battery before its commit.*
