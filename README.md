@@ -35,16 +35,22 @@ its video.
 
 ## What you get
 
-**Gestures** (pointer/touch over the video, all individually toggleable in
-settings):
+**Gestures** (pointer/touch over the video; the press-and-hold works
+anywhere, the drag gestures are fullscreen-only — inline screens leave
+every tap and drag to the host page natively):
 
-| Gesture            | Action                                        |
-| ------------------ | --------------------------------------------- |
-| Press and hold     | Speed up playback while held (2×)               |
-| Horizontal drag    | Scrub seeking with a live time readout          |
-| Vertical drag      | Swipe: drag the picture off-axis; it eases back |
-| Double-tap         | Skip ±1 step (configurable)                     |
-| Two-finger pinch   | Pinch to fill: zoom the video to edge-to-edge   |
+**Gestures** (pointer/touch over the video; the press-and-hold works
+anywhere, the drag gestures are fullscreen-only — inline screens leave
+every tap and drag to the host page natively):
+
+| Gesture            | Works      | Action                                               |
+| ------------------ | ---------- | ---------------------------------------------------- |
+| Press and hold     | Everywhere | Speed up playback while held (2×)                    |
+| Horizontal drag    | Fullscreen | Scrub seeking with a live time readout               |
+| Vertical drag down | Fullscreen | Picture follows the drag; a long drag exits fullscreen |
+| Vertical drag up   | Fullscreen | Opens the PlayerForge panel                          |
+| Double-tap         | Fullscreen | Screen edges skip ±1 step; center play/pause         |
+| Two-finger pinch   | Fullscreen | Pinch out to fill edge-to-edge; pinch in to release  |
 
 **Hotkeys** (all on a single toggle):
 

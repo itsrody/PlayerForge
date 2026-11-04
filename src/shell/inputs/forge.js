@@ -1509,22 +1509,16 @@ export class InputForge {
     this.#cancelTrackedPointer(event.pointerId);
   }
 
-  /**
-   * The browser reclaimed a captured pointer with no pointerup/pointercancel
-   * (capture target removed, hit-test takeover). That press is over and no
-   * click follows, so reclaim it through the same cancellation path.
-   */
-  /**
-   * Capture loss mid-session cancels the tracked pointer - EXCEPT our own
-   * retarget churn: switching capture to the zone fires lostpointercapture
-   * at the PREVIOUS capture element, which for a touch pointer is the
-   * UA-implied holder at the press target (mouse never carries implied
-   * capture, which is why scrub strokes drove from mouse dies only under
-   * touch). hasPointerCapture reflects the pending override synchronously
-   * (spec: true before gotpointercapture delivery), so it still reads ours
-   * while the old element's farewell passes through - only a genuine
-   * unrelated loss (element removal, hit-test takeover) reaches the cancel.
-   */
+  /** Capture loss mid-session cancels the tracked pointer - EXCEPT our own
+    *  retarget churn: switching capture to the zone fires lostpointercapture
+    *  at the PREVIOUS capture element, which for a touch pointer is the
+    *  UA-implied holder at the press target (mouse never carries implied
+    *  capture, which is why scrub strokes drove from mouse dies only under
+    *  touch). hasPointerCapture reflects the pending override synchronously
+    *  (spec: true before gotpointercapture delivery), so it still reads ours
+    *  while the old element's farewell passes through - only a genuine
+    *  unrelated loss (element removal, hit-test takeover) reaches the cancel.
+    */
   #handleLostCapture(event) {
     if (!this.#pointers.has(event.pointerId)) {
       return;

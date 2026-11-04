@@ -764,6 +764,44 @@ iframes, same-origin and cross-origin:
   `scale(s)` — pinch-to-fill's transform, released on pinch-in or fullscreen
   exit) — the one class allowed to write the video transform, exposed on
   the shell as `shell.view`.
+
+  **Sweep #11 record (inputs plane A→Z, audit-clean).** Both modules read
+  front-to-back — the pair's first dedicated series pass — and the seam
+  ring reconciled against the wider records, no src gap:
+  the pooled-detail rewrite discipline holds at every dispatch site
+  (advance/hold/release/scrub-end/pinch/swipe/dbltap/key each rewrite every
+  field its payload owns, the no-stale-carry contract stands intact), the
+  pool boundary is exactly the allocation record's (events per engine via
+  the per-instance `GestureChannel` — the in-flight-re-dispatch hazard is
+  event-scoped; details module-level singles whose consumers never
+  retain), and the two release-tail bare catches the error census named
+  ARE the pointer-lift races (`#pointerOp`'s NotFoundError lift race, the
+  lost-capture `hasPointerCapture` read — the farewell subtlety that a
+  stale pre-subtlety docblock over `#handleLostCapture` duplicated; the
+  stale block deleted, the surviving one carries the hasPointerCapture
+  story). Newly pinned facts: the engine idempotently pairs its zone
+  pointerup/pointercancel with window-level twins (both run the same
+  handlers; the second dispatch no-ops on emptied tracking state); the
+  `#gestureFsActive` session latch is dropped on every session-end path
+  (up, cancel, lost-capture, destroy teardown, pinch re-entry,
+  blur/hidden release); the hold bookkeeping's `#savedRate` ordering is
+  proven safe (the second-source attempt returns BEFORE the rate
+  capture, so a foreign release can never restore a rate it didn't
+  save); `#cancelHoldOnPause`'s set-drain makes a trailing stray release
+  a no-op, as the docstring claims; `attachInputActions` runs exactly
+  once per shell (no re-attach duplication risk for
+  `ViewershipTransform`'s video listeners, which the single call's
+  signal owns); and `detail.timestamp` has exactly ONE consumer
+  (ScrubSession's per-move clock, with its in-situ synthetic fallback).
+  Recorded product fact: the swipe verb has TWO consumers, one per
+  direction — the down direction exits fullscreen through ShellActions,
+  and the UP direction toggles the panel (the section's `#wireEvents`
+  consumes `GESTURE_EVENTS.swipe` detail.direction "up"); the engine's
+  fs-gated swipe intent makes both fullscreen-only, as the README's
+  gesture table now states. The IntentGates snapshot plan stays
+  verified-as-recorded (bus re-sample + per-query fs revalidate; keys
+  live-read per keystroke); the stacked TransformEase docblocks
+  re-classified as prologue + class doc (both live, left).
 - **subtitles/** — `forgevtt.js` = the parse engine (~.srt→WEBVTT normalizing)
   whose async variant IS the ingest arm — a 50ms block budget hands the
   thread back through scheduler.yield, so even a multi-megabyte track drains
