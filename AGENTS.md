@@ -1074,6 +1074,47 @@ new code-level evidence:
   (readers emit the CSS-default neutrals `"100vh"`/`"0px"` while
   `vv.scale !== 1`, real values at scale 1).
 
+**The allocation drift re-audit (Nov 2026, record-only; the sweep-series
+close).** The pools-and-shared-scratch record from the allocations sweep
+(`2369e3f`) re-derives over the tree as shipping now, driven by a fresh
+comment-stripped ripgrep inventory (`check/.tmp/alloc-slim.mjs`,
+uncommitted per sweep convention — ~310 slim hits over the seven true
+allocator vocabularies: spread, map/split/slice array-builds,
+map/set/controller constructors, event constructors, clone/JSON/site-walk
+APIs, rest params; every hit carries line context for the axis
+classification). The census-proven drift fact comes first: between the
+allocation sweep and this audit exactly ONE commit touched src (`4f2ea18`,
+the Page Lifecycle retirement) and it is pure subtraction — three listener
+arms deleted, comment prose swapped, no new statement that can allocate.
+So the hot axes were re-verified, not re-measured: forge's pooled per-name
+gesture event + detail (module scratch, the per-engine scope still the
+safety contract), media's `setPositionState` scratch, dom's pooled
+mutation buffer + DomPool + ReferenceBox's one-read pooled box, and
+toast's pooled pill all hold byte-true; the declined poolings (fresh
+CustomEvent per emit for the re-entrancy rule, the per-render picture
+derive, the sync-offset cue-list rebuild) stay declined and their hotpaths
+tripwires — the only honest re-measuring surface — sit green in the gate
+battery. The inventory's claims not already in the sweep record, audited:
+(a) every `logger.log` site sits at boot/refuse/gesture-start boundaries —
+zero on a per-event or per-render path — so the disabled-logger cost is
+one rest-array per human gesture (the disabled-path doc's promise held
+beyond its own wording; `log`'s rest param allocates before the gate, but
+nothing hot ever calls it); (b) every `getBoundingClientRect`/
+`getComputedStyle` read on the tree is claimed by an explicit rule —
+ReferenceBox's one-read-per-invalidation, forge's press-arm/session-start,
+the subtitles render (the measured shape), discovery's boot gate,
+shell's inject-time style read; no unclaimed hot read; (c) page.js's
+iframe-registry diff is already added-node-scoped (`#diff` walks only the
+added element's subtree — the full-document reseed is retired prose), so
+the per-mutation-batch host tax is one `nodeType` check per added node and
+zero on text/attribute batches; (d) the remaining hits are boot/
+module-init derived tables (config's schema maps, filter defaults,
+media's sync-event set, panel's section maps) or per-subscription release
+controllers — the human-rate tail the sweeps already classify. No
+allocation change on the tree earned adoption; the sharing posture is
+maximal under the recorded constraints, and the sweep's artifact is this
+record plus the inventory scripts under `check/.tmp/`.
+
 ## 5. Conventions (the change bar)
 
 1. **Comments explain WHY with reasoning** — the rejected alternatives and
@@ -1520,6 +1561,7 @@ plane (`980d6d1`), build pipeline — the minifier fix (`ecc36a8`),
 bfcache/freeze-recovery plane (`4f2ea18`), exclusion-vs-registry
 non-overlap (`f8149cf`), network egress census (`1b95cc2`), manager floor
 at premise level (`b52821c`), shell lifecycle (`b89b8bd`), chrome modules
-(`b92c7a0`), and store.js proper (`a68f076`). The series' record-only
-commits changed AGENTS.md alone; every src-touching pass proved itself on
-the full gate battery before its commit.*
+(`b92c7a0`), and store.js proper (`a68f076`), closing with the allocation
+drift re-audit (Nov 2026, record-only — see §4's drift block). The series'
+record-only commits changed AGENTS.md alone; every src-touching pass proved
+itself on the full gate battery before its commit.*
