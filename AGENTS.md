@@ -1582,6 +1582,111 @@ the comment now records the measured same-value skip and the real
 value-flush axis, guard shape unchanged) after 3x green full-battery
 runs (79.4/79.5/79.6s).
 
+**The kernel-plane substrate audit (Nov 2026, user-directed "deeper than
+operators", scoped to src/kernel/ + src/entry.js; post-`20b07da`,
+record-only, audit-clean).** The same substrate discipline as the
+tree-wide audit, descended on the boot/adoption plane's own engine
+premises — the claims written into detection.js, discovery.js,
+kernel.js, and entry.js. Artifacts: `check/.tmp/kernel-substrate-probe.mjs`
+(a 7-axis PLAN runner — H entry skip surface, I ANCHOR_PROBE at
+substrate depth, J removal record shapes, K observation gates, L1/L2/L3
+sequencing-timer + moveBefore semantics — each axis filterable on the
+CLI), isolates `kernel-substrate-isolate{,2..6}.mjs` (the bisection
+trail), and `kernel-substrate-report.json` (the consolidated,
+all-axes-green run), all uncommitted per sweep convention. Harness
+lessons worth holding for any future floor probe: a replica must ride
+SIGNAL-abort (native `TaskResult.abort()` from inside a running task
+throws `TypeError` on self-abort, and an abort on an unrelated PENDING
+task does not cancel it — two bisection isolates pinned each; a replica
+built on direct handle-aborts hangs by construction, the same
+first-fire-wins lockout shape in miniature); a subtree re-home
+observation needs `{ childList: true, subtree: true }` (a stage-level
+childList-only watch sees nothing on grandchildren — the cross-parent
+arm's first pass recorded empty on exactly this miss); and the page's
+timers fire exactly on a steady page (a sanity isolate landed a
+delay-50 `postTask` at 50.0ms — the hard-hang shape earlier in the
+batch was the replica's own backend mischoice, not throttle/cache).
+
+- **(H) entry skip substrate — boot-rate trivial, audit-clean.** A
+  `data:`-iframe cross-origin realm throws `SecurityError` on
+  `top.location.href` at ~1000ns/throw-catch; warm `new URL` parse
+  800ns; `hostname` getter 50ns; the suffix/prefix scan misses at
+  ~150ns (the common miss walks most of the 10-suffix list) and hits at
+  ~0 (the first suffix's `endsWith` short-circuits the ad-host case);
+  the whole skip-probe pass lands 0–500ns. `shouldSkipUrl`'s shape and
+  cost premises hold at substrate depth.
+- **(I) detection ANCHOR_PROBE substrate — the compiled-selector cache
+  IS the module-constant string.** The REAL 27-arm registry list, warm
+  `matches()` at 375ns median per call, hit or miss, zero
+  hit-position discount (re-confirming substrate B's whole-list charge
+  at this list's length); a FRESH unique selector string per call costs
+  3333ns (~9x) — Gecko's compiled-selector cache is the warming, so the
+  single-constant probe string is a measured caching decision, not
+  style. The full 16-hop miss walk lands at 8500ns (~530ns/hop including
+  the chain build). The descriptor-cache steady state (the ~70ns/hit
+  repeated-resolve budget) is a distinct plane and stays pinned by its
+  own hotpath row.
+- **(K) observation substrate — PresenceGate's gates are all
+  frame-scale, audit-clean.** MO delivery for an append lands within
+  0–2ms across runs; RO initial 1–7ms / grow 1–8ms; IO initial 1–7ms
+  all run-to-run bands inside one-frame territory. Delivered-box reads
+  over one captured RO batch: `borderBoxSize` read ≈ rect read (≈5ns/
+  entry at 200 entries) — the layout flush amortizes across the batch
+  (substrate C's law at observer scale), so `entryBoxSize`'s served
+  form and a rect re-read cost the same inside one invalidation window
+  and the one-read law stands on the hot-path frequency argument it
+  always carried, not a per-window flush gap. The
+  `contentvisibilityautostatechange` event fires exactly once on
+  reveal, target = the `cv:auto` element, non-bubbling — capture-at-document is the only delivery
+  route, confirming discovery.js's reveal-listener wiring as the
+  measured necessity, not a convention.
+- **(J/L3) removal substrate — record-shape identity confirmed in all
+  four shapes; one engine finding.** Every state-preserving move
+  delivers the IDENTICAL one-batch pair (removed:1 then added:1, targets
+  naming the two parent DIVs): `moveBefore` reorder, cross-parent
+  `appendChild` re-home, and remove+reinsert-in-one-task alike —
+  RemovalWatch's "lands as the same removed/added records" docstring
+  premise confirmed at the batch level. Hot reads: `isConnected`
+  30–80ns, `parentElement` 30–60ns median. **The engine finding:
+  Firefox 159's `Element.moveBefore` performs a CROSS-PARENT
+  state-preserving re-home without throwing** — `p1.moveBefore(el,
+  null)` with el parented in p2 FLIPS the parent (probed twice,
+  isolated + in-axis; the element stays connected) — while
+  `document.moveBefore` (a parented child) and a detached-parent call
+  both throw `HierarchyRequestError`, and the cross-parent move STILL
+  delivers the standard removed/added pair. This is more permissive
+  than the same-parent-only reading the era's prose assumed. No src
+  premise binds a throw there — the watch re-derives from live DOM
+  state and carries no per-shape code, so the extra freedom costs
+  nothing and needs nothing; recorded so a future reader does not
+  "harden" a TypeError arm into existence at the cross-parent shape.
+- **(L) sequencing-timer substrate — DomSettleWait's realized edges
+  land where the tuning claims, audit-clean; the facade's cancellation
+  channel gains its substrate citation.** On a replica of the kernel's
+  quiet/cap shape: a quiet page settles at 50–53ms (≈ quietMs 50); a
+  churning container (1 append/10ms) settles exactly at the cap
+  (150–152ms), the deadline winning over the churn as designed; a
+  burst-then-quiet container settles 49–50ms after the LAST mutation,
+  the trailing window re-armed per mutation. `AbortSignal.timeout(1200)`
+  (the entry hint cap's deadline class) fires with median 0ms drift,
+  max 1ms over 10 samples; `AbortSignal.any` costs ~2.6–7.3µs/creation
+  and propagates an abort synchronously (0ms). The measured caveat is
+  the harness finding above: the CANCEL channel on this floor is
+  signal-abort — a task's own `signal`, which is exactly the facade's
+  release-controller shape — because a native `Task` handle cannot
+  cancel (pending-abort is a no-op) and cannot even be touched from
+  inside its own task (self-abort throws TypeError). DomSettleWait and
+  every other postTask consumer on the tree ride the facade, so nothing
+  is exposed to the unusable channel.
+
+Sweep disposition: no src change earned adoption — every re-measured
+premise is the shape the tree already rides, the one engine finding
+(cross-parent `moveBefore`) widens a spec-reading rather than moving any
+src claim, and the two docstring premises named in the axes (RemovalWatch
+record identity, the capture-only reveal route) were re-proven, not
+corrected. Artifact scripts under `check/.tmp/`, uncommitted per sweep
+convention.
+
 **The redesign-class decisions (Nov 2026; user direction opened the ledger).**
 The saturation audit closed with "everything further is a redesign
 decision of its own" — this batch is that decision, taken with receipts.
