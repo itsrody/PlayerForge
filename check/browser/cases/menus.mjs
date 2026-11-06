@@ -87,5 +87,76 @@ export async function run({ session, boot }) {
     ms: null
   });
 
+  // The directional panel motion: the flips carry their direction as a
+  // view-transition type (pf-panel-open / pf-panel-close), the HUD sheet's
+  // :active-view-transition-type() rules are their reader, and the motion
+  // rides the R9 ink unchanged (the redesign decision is motion-lane only).
+  // Measured here: the types the two real flips deliver (spy on
+  // startViewTransition wrapping the real call), the sheet's consumption of
+  // both type words, and the panel's ink pins across open/animated close
+  // (before vs during-move vs after-move computed colors).
+  const typed = await session.evalAsync(async function main(done) {
+    const orig = document.startViewTransition.bind(document);
+    const flips = [];
+    document.startViewTransition = (opts) => {
+      flips.push((opts && opts.types && opts.types.join(",")) || String(opts && opts.types));
+      return orig(opts);
+    };
+    const host = document.querySelector(".pf-shell");
+    const panelEl = () => host?.shadowRoot?.querySelector(".pf-panel");
+    const inkOf = () => {
+      const p = panelEl();
+      if (!p) return null;
+      const cs = getComputedStyle(p);
+      return `${cs.backgroundColor}|${cs.borderTopColor}`;
+    };
+    const until = async (cond, budgetMs) => {
+      const start = performance.now();
+      while (!(await cond()) && performance.now() - start < budgetMs) {
+        await new Promise((r) => setTimeout(r, 60));
+      }
+      return cond();
+    };
+    const isOpen = () => !!panelEl()?.classList.contains("pf-open");
+    host.dispatchEvent(new CustomEvent("pf:gesture-panel", { detail: { method: "keyboard" } }));
+    let opened = await until(isOpen, 2000);
+    if (!opened) {
+      // One retry: if the gesture event races boot, a second tap re-opens.
+      host.dispatchEvent(new CustomEvent("pf:gesture-panel", { detail: { method: "keyboard" } }));
+      opened = await until(isOpen, 2000);
+    }
+    if (!opened) {
+      done({ ok: false, why: "panel never opened via the gesture event", flips: flips.join(" ; ") });
+      return;
+    }    const inkBefore = inkOf();
+    const closeBtn = panelEl()?.querySelector(".pf-panel-close");
+    if (!closeBtn) { done({ ok: false, why: "no close button", flips: flips.join(" ; ") }); return; }
+    closeBtn.click();
+    const closed = await until(() => !panelEl()?.classList.contains("pf-open"), 2000);
+    const inkAfter = inkOf();
+    // The sheet consumption: the HUD sheet (adopted sheets + page style
+    // elements) must carry a reader for both type words.
+    const sheetText = [...document.styleSheets, ...document.adoptedStyleSheets ?? []]
+      .map((sheet) => { try { return [...sheet.cssRules].map((r) => r.cssText).join("\n"); } catch { return ""; } })
+      .join("\n");
+    const consumesOpen = sheetText.includes(":active-view-transition-type(pf-panel-open)");
+    const consumesClose = sheetText.includes(":active-view-transition-type(pf-panel-close)");
+    done({
+      ok: flips[0] === "pf-panel-open" && flips[1] === "pf-panel-close"
+        && consumesOpen && consumesClose && opened && closed && inkBefore === inkAfter,
+      flips: flips.join(" ; "),
+      consumesOpen, consumesClose, opened, closed,
+      inkBefore, inkAfter
+    });
+  });
+  rows.push({
+    name: "the panel flips carry directional view-transition types and the sheet reads them (ink unchanged)",
+    status: typed.ok === true ? "pass" : "fail",
+    note: typed.ok !== true
+      ? (typed.why ?? JSON.stringify(typed))
+      : "open=pf-panel-open close=pf-panel-close, both consumed, ink pinned",
+    ms: null
+  });
+
   return rows;
 }

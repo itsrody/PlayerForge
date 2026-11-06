@@ -956,11 +956,16 @@ iframes, same-origin and cross-origin:
   two legacy names (`pf:first-run`, `firstRun`) its boot absorbs and
   sweeps once — all three spelled in exactly that migration line),
   `panel.js` (the `Panel` builder + settings/history section renderers;
-  `startViewTransition` runs plain `{ update }` — the old `types` array and
-  its `pf-panel-open`/`pf-panel-close` strings were vocabulary with no CSS
-  reader: the HUD animation keys the static `pf-panel` transition-name, so
-  a direction-differentiated variant would need the CSS to consume the
-  types (a visual redesign decision, not a spelling fix). The UA schedules
+  `startViewTransition` runs `{ types: [PANEL_VT_TYPES.open|close], update }`
+  — the flips carry their direction as a view-transition type and the sheet's
+  `:active-view-transition-type()` rules key directional motion on them:
+  open arrives from below on the bounce curve, close sinks back on the plain
+  ease-out, endpoint pose identical, ink untouched (the redesign-verdict
+  ledger's earlier
+  "types with no CSS reader" record closed its adoption on reader-absence;
+  Firefox 159 ships both faces and the reader landed with the redesign
+  decision — the un-typed `::view-transition-old/new(pf-panel)` pair stays
+  as the fallback for any future untyped flip). The UA schedules
   each flip's update callback on its own clock, so both flips are
   null-guarded against the destroy-between-scheduling-and-callback window
   (a shell destroyed mid-flight nulls the DOM refs before the UA runs the
@@ -1295,6 +1300,41 @@ contain` ×2, the scroll-timeline R4 band, `@property` tokens, the
 `@container` style query bus) with nothing left that a native operator
 claims. No src change earned adoption; the artifact is this record plus
 the saturation inventory script.
+
+**The redesign-class decisions (Nov 2026; user direction opened the ledger).**
+The saturation audit closed with "everything further is a redesign
+decision of its own" — this batch is that decision, taken with receipts.
+**The floor probe** (`check/.tmp/redesign-floor-probe.mjs`, uncommitted)
+ran the real Firefox 159.0.1 through the redesign-class operator set:
+SHIPPED — view-transition `types` + `:active-view-transition-type()`
+(the `types` slice is a live `ViewTransitionTypeSet`, not an array — the
+first probe's `Array.isArray` test misread it), `scrollbar-color`/
+`scrollbar-width`/`scrollbar-gutter`, `text-wrap-style: balance`,
+`text-box-trim`/`text-box-edge`, `field-sizing`, `scroll-snap-type`,
+`zoom`, `color-mix()` + relative color, and the full CSS anchor-
+positioning module (`anchor-name`/`position-anchor`/`position-area`/
+`position-try-fallbacks`/`position-visibility`/`anchor-center`); NOT
+SHIPPED — `corner-shape` (the squircle HUD radii stay unclaimable),
+`interpolate-size`/`calc-size()`, `text-wrap-style: pretty`. The `popover`
+reflection probe corrected: the attribute ships (the first check compared
+the wrong default value). **Adopted: directional panel motion** — the
+one closure on the ledger the floor now unblocked, the frame model's own
+vocabulary completing itself rather than a new feature: the panel flips
+carry `PANEL_VT_TYPES` (open `pf-panel-open`, close `pf-panel-close`) and
+the sheet's `:active-view-transition-type()` rules key route-specific
+motion on them — open arrives from below on `--pf-ease-bounce`, close
+sinks back on `--pf-ease-out`; endpoint pose identical in both
+directions, zero ink movement (R1/R4/R6 untouched, no gradient, no
+backdrop-filter — the panel motion is a motion-lane change only), and
+the un-typed `::view-transition-old/new(pf-panel)` pair stays as the
+fallback for any future untyped flip. R9 asserted at full depth in the
+menus case: types delivered per flip (spy on the real
+`startViewTransition`), both type words consumed by the sheet, and the
+panel's computed surface/border ink pinned identical across the motion
+endpoints. Staying open on the ledger until their own product direction:
+scrollbar inking, pointer-anchored readouts (which would CREATE the first
+JS-positioned consumer for anchor positioning), balance/trims, steppers'
+`field-sizing`, history `scroll-snap`, `zoom` density.
 
 ## 5. Conventions (the change bar)
 
@@ -1668,7 +1708,12 @@ stop at the first failure:
   in place and a cross-parent re-home of the running shell, both
   floor-real), `menus` (menu command → panel effect; the targeted
   reset row seeds a non-default color filter and proves the bare command
-  restores it — no panel involved),
+  restores it — no panel involved, and the directional-motion row: the
+  panel flips spy-deliver their view-transition types (open=
+  `pf-panel-open`, close=`pf-panel-close`), the HUD sheet carries a
+  `:active-view-transition-type()` reader for both words, and the R9 ink
+  pin rides the row (the panel's computed surface/border identical
+  before-open vs after-close — motion-lane-only, asserted at full depth),
   `persist` (storage seeding, resume restore across reboot, the sync-grain
   row: one nudge gesture lands `subOffset` in the tracker's entry, the
   Start-over row proving the explicit boundary writes past the drift

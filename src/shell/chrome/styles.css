@@ -1501,4 +1501,27 @@
     from { opacity: 0; transform: scale(0.96); }
     to   { opacity: 1; transform: scale(1); }
   }
+  /* Directional panel motion (view-transition types): the flips carry
+     pf-panel-open / pf-panel-close and these rules are their reader - open
+     arrives from below with the bounce curve, close sinks back with the
+     plain ease-out, so the two directions differ in distance and curve, not
+     just in which snapshot pair exists. The un-typed pair above stays as the
+     fallback for any future flip the call sites leave untyped. Endpoint pose
+     of the panel is identical in both directions and no ink moves: the
+     redesign decision is motion-lane only (AGENTS §4 record, R9 asserted in
+     menus.mjs - the spectral ink row rides the unchanged tokens). */
+  :root:active-view-transition-type(pf-panel-open)::view-transition-new(pf-panel) {
+    animation: pf-panel-open-in var(--pf-ease-bounce);
+  }
+  :root:active-view-transition-type(pf-panel-close)::view-transition-old(pf-panel) {
+    animation: pf-panel-close-out var(--pf-ease-out);
+  }
+  @keyframes pf-panel-open-in {
+    from { opacity: 0; transform: translate3d(0, 14px, 0) scale(0.99); }
+    to   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+  }
+  @keyframes pf-panel-close-out {
+    from { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+    to   { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.975); }
+  }
 }

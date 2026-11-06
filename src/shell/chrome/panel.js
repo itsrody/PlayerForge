@@ -8,6 +8,14 @@ import { getSetting, onSettingsChanged, setSetting, SETTINGS_SCHEMA, SETTING_KEY
 /** Stepper drag-follow: pointer travel that crosses one step of sweep. */
 const DRAG_STEP_PX = 14;
 const TAB_NAV_KEYS = new Set(["ArrowLeft", "ArrowRight", "Home", "End"]);
+
+/**
+ * The view-transition type vocabulary the panel flips deliver and the sheet's
+ * `:active-view-transition-type()` rules key the directional motion on. One
+ * source of truth for both, like every machine-facing vocabulary table.
+ */
+const PANEL_VT_TYPES = Object.freeze({ open: "pf-panel-open", close: "pf-panel-close" });
+
 /** Auto-detect compact lives in CSS: the stage container query + pointer media
  *  query drive it through the hud layer's compact bus (styles.css compact
  *  writers). The only JS state is the ui.compact setting's explicit value,
@@ -449,7 +457,7 @@ export class SettingsPanel {
       if (activeTab && deepestActiveElement(this.#shellHost) !== activeTab) {
         activeTab.focus();
       }
-    });
+    }, PANEL_VT_TYPES.open);
   }
 
   close() {
@@ -461,7 +469,7 @@ export class SettingsPanel {
       // synchronous destroy, which nulls #root before the UA runs this.
       this.#runWithViewTransition(() => {
         this.#root?.classList.remove("pf-open");
-      });
+      }, PANEL_VT_TYPES.close);
       // Dismissal dies before focus moves: the focusin containment handler
       // would yank an outside-the-shell opener straight back to the tab.
       this.#teardownDismissal();
@@ -1042,17 +1050,16 @@ export class SettingsPanel {
     return this.#root.querySelector(".pf-panel-tab-active") || this.#closeButton;
   }
 
-  #runWithViewTransition(update) {
+  #runWithViewTransition(update, type) {
     // The floor guarantees startViewTransition (Chromium 111+): one arm, the
     // UA clips the animation itself whenever it must (reduced motion,
     // overlapping transitions) while `update` always drives the DOM flip.
-    // The old `types: ["pf-panel-open"|"pf-panel-close"]` argument retired:
-    // those two type strings were vocabulary with no reader — the HUD
-    // animation keys the static `pf-panel` view-transition-name, so the
-    // types never selected anything. A direction-differentiated variant
-    // needs the CSS to consume the types; that is a visual redesign
-    // decision, not a spelling fix.
-    const transition = document.startViewTransition({ update });
+    // The flips carry their direction as a view-transition type and the
+    // sheet's :active-view-transition-type() rules key the directional
+    // motion on it - the vocabulary the earlier panel verdict recorded with
+    // no reader now has one (Firefox 159 probes :active-view-transition-type()
+    // true; the typed face is the closure, not the redesign decision itself).
+    const transition = document.startViewTransition({ types: [type], update });
     // An overlapping open/close skips the older transition by design; the
     // browser then rejects `ready` (and settles `finished`), and those
     // rejections must not surface as unhandled promise errors in user
