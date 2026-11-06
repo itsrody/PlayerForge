@@ -499,6 +499,76 @@ export async function run({ session, baseUrl, boot }) {
         (window.__pfEvents.includes("scrub-end") || window.__pfEvents.includes("scrub-release"));
     }), `events=${JSON.stringify(await session.eval(function main() { return window.__pfEvents; }))}`);
 
+  // The pointer-anchored readout: the scrub pill rides the gesture point via
+  // CSS anchor positioning (the ledger's first JS-positioned consumer). The
+  // witness runs BEFORE the drag and every scrub beat snapshots its own
+  // instant - pose class, computed anchor word, ink, and the pill-vs-point
+  // geometry the position-area contract promises (the pill's bottom edge on
+  // the anchor point's top edge). A final eval reads the record and the
+  // post-stroke resting state; nothing interleaves with the driver's action
+  // stream (a pending evalAsync script would defer the actions command past
+  // its own deadlines). Cleanup drops the witness listener on its signal.
+  await session.eval(function main() {
+    const host = document.querySelector(".pf-shell");
+    window.__pfBeats = [];
+    const witness = (e) => {
+      const pillEl = host.shadowRoot?.querySelector("pf-toast");
+      if (!pillEl) { window.__pfBeats.push("NO-PILL"); return; }
+      const cs = getComputedStyle(pillEl);
+      const point = host.shadowRoot.querySelector(".pf-gesture-point");
+      window.__pfBeats.push({
+        anchored: pillEl.classList.contains("pf-toast-anchored"),
+        anchor: cs.positionAnchor ?? cs.getPropertyValue("position-anchor"),
+        ink: cs.backgroundColor + "|" + cs.borderTopColor,
+        bottom: pillEl.getBoundingClientRect().bottom,
+        pointTop: point ? point.getBoundingClientRect().top : null,
+        insideViewport: pillEl.getBoundingClientRect().top >= -0.5 &&
+          pillEl.getBoundingClientRect().left >= -0.5 &&
+          pillEl.getBoundingClientRect().right <= innerWidth + 0.5
+      });
+    };
+    host.addEventListener("pf:gesture-scrub", witness);
+    host.addEventListener("pf:gesture-scrub-end", () => host.removeEventListener("pf:gesture-scrub", witness), { once: true });
+  });
+  // Drive the scrub drag - the same move chain the scrub row above proves
+  // latching with.
+  await raw.actions({ async: true })
+    .move({ origin: "viewport", x: Math.round(center.x), y: Math.round(center.y) })
+    .press()
+    .move({ origin: "viewport", x: Math.round(center.x) + 60, y: Math.round(center.y) })
+    .move({ origin: "viewport", x: Math.round(center.x) + 140, y: Math.round(center.y) })
+    .release()
+    .pause(150)
+    .perform();
+  await sleep(300);
+  // The stroke is over - read the witness record and the post-stroke resting
+  // state. The beat witnesses ARE the mid-drag sample (each beat snapshots
+  // its own layout instant); clearedAfter proves the pose died with the
+  // stroke (the hide path), the resting translate/pose back at neutral.
+  const read = await session.eval(function main() {
+    const host = document.querySelector(".pf-shell");
+    const pill = host?.shadowRoot?.querySelector("pf-toast");
+    const beats = window.__pfBeats ?? [];
+    const anchoredBeat = beats.find((b) => b && b.anchored === true);
+    return {
+      beatCount: beats.length,
+      anchored: anchoredBeat ?? null,
+      clearedAfter: pill ? !pill.classList.contains("pf-toast-anchored") &&
+        !pill.classList.contains("pf-visible") : "NO-PILL"
+    };
+  });
+  const beatsOk = typeof read?.anchored === "object" && read?.anchored !== null &&
+    read?.beatCount > 0;
+  status(rows, "scrub readout rides the gesture point (anchored beat: above point, clamped, ink unchanged) and clears at stroke end",
+    beatsOk &&
+    read.anchored.anchor === "--pf-gesture-point" &&
+    read.anchored.insideViewport === true &&
+    typeof read.anchored.pointTop === "number" &&
+    read.anchored.bottom <= read.anchored.pointTop + 2 &&
+    read.anchored.ink === "rgb(14, 14, 16)|rgba(255, 255, 255, 0.18)" &&
+    read.clearedAfter === true,
+    JSON.stringify(read));
+
   // Pointer-universality proof, real TOUCH: the mouse drag row above and this
   // row feed the SAME recognizer letters through two faces of the one W3C
   // input plane (the W3C touch pointer type arrives as pointer events with

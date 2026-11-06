@@ -26,6 +26,19 @@ export class ToastManager {
   #icon;
   #text;
   #actions;
+  /**
+   * The pointer-anchored readout's anchor point: one zero-size fixed element
+   * (`.pf-gesture-point`, anchor-name --pf-gesture-point) beside the pill in
+   * the HUD layer. It is the tree's first JS-positioned consumer: the producer
+   * writes ONLY the point's inset (raw gesture coordinates, no DOM reads here),
+   * and the CSS anchor lattice (position-anchor + position-area +
+   * position-try-fallbacks, resolved natively) carries the pill around it -
+   * edge clamping included. It must precede the pill in tree order (CSS
+   * anchor validity), so it is inserted before the pooled acquisition below.
+   * One page-lifetime element, carried out of the document with the whole
+   * HUD layer like the held pill.
+   */
+  #point;
   /** Cancel handle for the pending auto-hide, null when none is scheduled. */
   #cancelAutoHide = null;
   /** Whether the pointer/focus is over the toast (auto-hide held for WCAG 2.2.1). */
@@ -36,6 +49,7 @@ export class ToastManager {
   #autoHide = () => {
     this.#cancelAutoHide = null;
     this.#isVisible = false;
+    this.#applyPose(false, 0, 0);
     this.#toast.classList.remove("pf-visible");
   };
   #activeGroup = null;
@@ -49,6 +63,8 @@ export class ToastManager {
   #lastText = "";
   #lastColor = "";
   #lastHadActions = false;
+  /** Mirrors the `pf-toast-anchored` class so pose writes are idempotent. */
+  #anchoredActive = false;
 
   constructor(hudLayer) {
     const doc = hudLayer.ownerDocument;
@@ -89,16 +105,62 @@ export class ToastManager {
         return toast;
       }
     });
+    // The point is a SIBLING that must come BEFORE the pill: CSS anchor
+    // validity excludes an anchor positioned after the anchored element in
+    // tree order (the fallback then reads the pill at its static spot -
+    // probed both orders), so the point is appended first and the pooled
+    // pill lands after it.
+    this.#point = doc.createElement("div");
+    this.#point.className = "pf-gesture-point";
+    hudLayer.appendChild(this.#point);
     this.#toast = this.#pool.acquire();
     this.#icon = this.#toast.querySelector(".pf-toast-icon");
     this.#text = this.#toast.querySelector(".pf-toast-text");
     this.#actions = this.#toast.querySelector(".pf-toast-actions");
   }
 
-  show({ icon, text, duration = 0, color, group, actions } = {}) {
+  /** The anchored-readout pose. A truthy `anchored` payload field claims it
+   *  and this beat's gesture point repositions the anchor element; anything
+   *  else restores the resting top-center pose. Runs before the visibility
+   *  write in both show() arms, so a pose flip never paints the wrong pose.
+   *  The class toggle is dirty-checked; the point inset is not (the stroke
+   *  moves it every beat by definition). */
+  #applyPose(anchored, atX, atY) {
+    if (anchored && Number.isFinite(atX) && Number.isFinite(atY)) {
+      this.#point.style.left = `${atX}px`;
+      this.#point.style.top = `${atY}px`;
+      if (!this.#anchoredActive) {
+        this.#anchoredActive = true;
+        this.#toast.classList.add("pf-toast-anchored");
+        // Anchored-claim rewarm. Gecko re-derives an element's anchor plan
+        // only at frame construction: a pose claimed on an element already
+        // in the tree resolves as static fallback forever - per-poke probes
+        // on the real HUD (aug 2026 diagnosis) exhausted every restyle arm:
+        // sheet re-cascade, pocket re-adopt, class retoggle, inline
+        // anchor-name/position-anchor rewrites, hud paint writes, point
+        // reinsertion - all stale; reinserting the QUERY element (this
+        // pill) is the one arm that re-plans it. So the one transition that
+        // can claim the pose re-appends the pill to its parent (an
+        // already-parented appendChild is a pure move - same parent, same
+        // last-child slot, listeners live). Subsequent pose claims go
+        // through the re-warmed element still-live: no further arm needed.
+        this.#toast.parentElement?.appendChild(this.#toast);
+      }
+      return;
+    }
+    if (this.#anchoredActive) {
+      this.#anchoredActive = false;
+      this.#toast.classList.remove("pf-toast-anchored");
+    }
+  }
+
+  show({ icon, text, duration = 0, color, group, actions, anchored, atX, atY } = {}) {
     const prevGroup = this.#activeGroup;
     this.#activeGroup = group ?? null;
     const hadActions = !!(actions?.length);
+    // Pose first, both arms: the skip arm below means the pose write must
+    // not be buried behind the fingerprint bail.
+    this.#applyPose(anchored, atX, atY);
     // Repeated-show skip: the scrub hint re-calls show() every ~100ms tick with
     // an unchanged icon/text. Resolving a cloned SVG icon, rewriting text, and
     // re-rendering buttons each tick is pure churn when the toast is already
@@ -194,6 +256,7 @@ export class ToastManager {
       this.#cancelAutoHide?.();
       this.#cancelAutoHide = null;
       this.#isVisible = false;
+      this.#applyPose(false, 0, 0);
       this.#toast.classList.remove("pf-visible");
     }
   }

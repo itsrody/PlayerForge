@@ -22,6 +22,7 @@ export const SETTING_KEYS = Object.freeze({
   hotkeys: "gestures.hotkeys",
   edgeToEdge: "fullscreen.edgeToEdge",
   compact: "ui.compact",
+  panelScale: "ui.panelScale",
   // Subtitle drives ride raw config handles (getConfigValue/setConfigValue on
   // the dotted path, no schema defaults): the subtitle module owns their
   // seed/reset/persist protocol. Grouped here so the whole key vocabulary
@@ -82,6 +83,23 @@ export const SETTINGS_SCHEMA = [
     type: "bool",
     label: "Compact Panel",
     default: false,
+    group: "Interface"
+  },
+  {
+    key: SETTING_KEYS.panelScale,
+    type: "options",
+    // The zoom-based panel scale (the `zoom` density claim): the panel root
+    // rescales uniformly, so fonts, paddings and the R5 radii chain all
+    // scale by one factor (concentricity is preserved by uniformity - the
+    // zoom adoption's own why). This is deliberately NOT the compact
+    // reader's replacement: compact is a token tier, not an uniform scale
+    // (it holds coarse hit targets thumb-sized while type shrinks, and
+    // carries the bottom-sheet swap), and a uniform zoom cannot express
+    // either. The stored values are the actual zoom factors, so the panel's
+    // inline write is the value itself.
+    options: [0.9, 1, 1.15, 1.3],
+    fmt: (v) => `${Math.round(v * 100)}%`,
+    default: 1,
     group: "Interface"
   }
 ];

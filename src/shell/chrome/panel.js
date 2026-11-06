@@ -368,10 +368,19 @@ export class SettingsPanel {
   }
 
   /**
-   * Compact mode: the setting override wins as the data-compact attribute
-   * ("on"/"off"); an unset setting clears the attribute and the stage
+   * The panel's per-open setting read, both visual states in one pass:
+   * compact (the setting override wins as the data-compact attribute
+   * "on"/"off"; an unset setting clears the attribute and the stage
    * container query auto-detects - live, in the style pipeline, with no
-   * listener (styles.css compact writers).
+   * listener - styles.css compact writers) and the zoom scale (the
+   * schema-constrained ui.panelScale factor, an inline zoom on the panel
+   * root; the value 1 clears the write so the sheet's form is the resting
+   * pose. The chosen site is the panel root itself: zoom is inherited -
+   * everything inside scales together through one write, while the panel's
+   * own container query (pf-panel density) keeps reading the UNZOOMED
+   * layout box, so the density triggers stay stage-driven regardless of
+   * the scale - probed). A foreign cross-tab write takes effect on the
+   * next open, like every other per-open read.
    */
   #applyCompactSetting() {
     const explicit = getSetting(SETTING_KEYS.compact);
@@ -381,6 +390,8 @@ export class SettingsPanel {
     } else {
       this.#root.dataset.compact = state;
     }
+    const scale = getSetting(SETTING_KEYS.panelScale);
+    this.#root.style.zoom = scale === 1 ? "" : String(scale);
   }
 
   get element() {

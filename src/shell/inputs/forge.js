@@ -136,8 +136,11 @@ const keyDetail = { method: "keyboard", direction: undefined };
 // Scrub's per-name detail payload, refilled in place by ScrubStroke.advance
 // (same
 // mutate-in-place discipline as the other per-family payloads; actions.js
-// reads it synchronously within the scrub handler).
-const scrubDetail = { zone: "", method: "pointer", dx: 0, dy: 0, velocity: 0, timestamp: 0 };
+// reads it synchronously within the scrub handler). x/y is the gesture
+// point - the live pointer sample, refilled per advance exactly like dx -
+// the readout's anchor ride (see actions.js #scrub / the sheet's
+// pf-toast-anchored pose).
+const scrubDetail = { zone: "", method: "pointer", dx: 0, dy: 0, velocity: 0, timestamp: 0, x: 0, y: 0 };
 
 /** The gesture-zone fallback: a press outside every named edge zone lives
  *  on "screen" - the one zone-free detail value the action layer's zone
@@ -352,6 +355,10 @@ class ScrubStroke {
     scrubDetail.dy = totalStepY;
     scrubDetail.velocity = this.#velocity;
     scrubDetail.timestamp = now;
+    // The gesture point: the live sample (not a coalesced one - the fill is
+    // the summary write, and the event is the freshest truth).
+    scrubDetail.x = event.clientX;
+    scrubDetail.y = event.clientY;
     this.#dispatch(GESTURE_EVENTS.scrub, scrubDetail);
   }
 

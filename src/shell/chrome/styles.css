@@ -541,6 +541,15 @@
       }
     }
 
+    /* The pointer-anchored readout's pose rides the inject.js real-<style>
+       pocket, not this sheet: the sheet ships as adoptedStyleSheets, and the
+       CSS anchor lattice does not resolve inside it under a scoped sheet's
+       @scope (gate-probed: scoped+adopted falls back to the static position
+       while a same-rule <style> twin anchors live - the defect family the
+       container pockets already dodge). Keep this block as the pointer only;
+       the rules live in ANCHOR_POCKET_CSS, carried by the same real <style>
+       element as the container pockets. */
+
     /* - Panel (universal plugin panel) - */
     /* Dark sheet centered on the shell on both axes via auto margins. Open/close
        flips display via the pf-open class (allow-discrete) and fades opacity in
@@ -815,6 +824,16 @@
            section headers so they read as sentences; `uppercase` overrode that
            convention. Labels ship in title case in the markup. */
         color: var(--pf-text-soft);
+        /* Optical alignment on the one-line title-case label (text-box-trim,
+           Firefox 159): both edges trim to the cap-top/baseline font
+           extents, so the line box hugs the glyphs and the half-leading
+           above/below stops reading as extra gap under the section. This is
+           a deliberate geometry decision - the label box loses its
+           half-leading (the trimmed height is pinned in menus.mjs with the
+           computed read) - asserted as endpoint, not as a visual
+           screenshot. */
+        text-box-trim: trim-both;
+        text-box-edge: cap alphabetic;
         margin-bottom: var(--pf-space-xs);
       }
 

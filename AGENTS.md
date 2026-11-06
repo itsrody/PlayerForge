@@ -980,8 +980,15 @@ iframes, same-origin and cross-origin:
   the shell scope's signal into the resume store's Fan),
   `ui.js` (`el`/`button` construction, the SVG icon factory, `flashElement`
   WAAPI), `inject.js` (`ShellStyle` sheet lifecycle: adopt-once, monotonic
-  `@resource` upgrade; viewport-fit-cover), `toast.js` (`ToastManager`,
-  pooled custom element), **styles.css** (the HUD — §6).
+  `@resource` upgrade; viewport-fit-cover; the pocket `<style>` carrier now
+  owns the anchor lattice too — `ANCHOR_POCKET_CSS` joined into the same
+  carrier as `CONTAINER_POCKET_CSS`, for the two blind-engine rule sets the
+  constructive sheet cannot evaluate), `toast.js` (`ToastManager`, pooled
+  custom element, plus the `.pf-gesture-point` anchor sibling and the
+  pose-claim rewarm that keeps the pill's anchor plan live), `panel.js`
+  (the `ui.panelScale` write rides `#applyCompactSetting()` as the panel
+  root's inline `style.zoom`, per-open like compact), **styles.css** (the
+  HUD — §6; the section labels carry the `text-box-trim` cap rule).
 
   **Sweep #9 record (chrome/ A→Z, audit-clean).** The three small modules
   read front-to-back with no src gap:
@@ -1362,10 +1369,64 @@ the shipped rows, caught on the dist-CSS review.)
   in persist.mjs, with the floor fact recorded: Firefox 159 computes
   `y proximity` as `y` (the default strictness elides in the computed
   form; `y mandatory` would show whole) — the row accepts both
-  serializations and documents this. Remaining open ledger:
-  pointer-anchored readouts (anchor positioning's first JS-positioned
-  consumer), header `text-box-trim` (a geometry-moving deliberate
-  decision), `zoom` density.
+  serializations and documents this.
+
+**Adopted: anchored readout + trims + zoom (the third redesign batch,
+  closing the ledger).** The three remaining items all adopted, each with
+  its own R9-level row in the battery and one engine diagnosis worth
+  holding:
+  - **Pointer-anchored scrub readout.** The gesture-scrub hint pill now
+    rides CSS anchor positioning at a zero-size `.pf-gesture-point`
+    element (a fixed sibling inserted BEFORE the pooled pill — anchor
+    validity is tree order): the producers write ONLY the point's inset
+    at the ~100ms beat cadence, and the pose class carries
+    `position-anchor`/`position-area: top center`/
+    `position-try-fallbacks: flip-block, flip-inline` — above the point,
+    flipped inside the viewport at both edges, ink untouched. Two floor
+    defects had to be dodged and diagnosed, both gate-probed with
+    receipts: (a) the anchor lattice does not resolve inside
+    `adoptedStyleSheets` under a scoped sheet's `@scope` (scoped+adopted
+    falls back to the static position; the verbatim rule set in a real
+    `<style>` anchors live, unscoped doc-level and scoped shadow-level
+    both proved) — the pose rules therefore ride a real-`<style>` pocket
+    (`ANCHOR_POCKET_CSS`) joined into the same carrier as the container
+    pockets; (b) **Gecko re-derives an element's anchor plan only at
+    frame construction** — a pose claimed on an element already in the
+    tree resolves as static fallback forever, and the per-poke exhaust
+    proved every restyle arm stale (sheet re-cascade, pocket re-adopt,
+    class retoggle, inline anchor-name/position-anchor rewrites, hud
+    paint writes, anchor-element reinsertion): only reinserting the
+    QUERY element (the pill) re-plans it. The repair is a one-arm
+    structural rewarm at the pose-claim transition — the pose class add
+    re-appends the pill to its parent (an already-parented appendChild
+    is a pure move: same parent, same last-child slot, listeners live);
+    subsequent pose claims ride the re-warmed element. Also probed and
+    recorded: anchor geometry is read from the untransformed layout box
+    (the point must move via left/top — a transform-moved point parks
+    the readout at the origin) and per-move cost is ~13µs. The row is a
+    witness pattern (per-beat listeners + post-drag eval, never an
+    interleaved evalAsync/actions command — that interleave provably
+    defers the command past its deadline): ≥1 anchored beat with correct
+    association, ink unchanged, pill above the point and inside the
+    viewport, pose cleared at stroke end.
+  - **`text-box-trim: trim-both` + `text-box-edge: cap alphabetic`** on the
+    section labels (`.pf-panel-label`) — the label's content box
+    tightens to the cap height, computed serializations pinned verbatim,
+    with the height assertion on a zoom-immune ratio band
+    (`h/fs` in a range covering the zoom variants) so the row holds
+    under the zoom write below.
+  - **`zoom` panel scale** as the new `ui.panelScale` setting (0.9, 1,
+    1.15, 1.3, default 1, percent format), applied per-open as inline
+    `style.zoom` on the panel root next to compact. NOT a compact-reader
+    replacement (declined on semantics: compact is non-uniform —
+    thumb-sized coarse targets and the bottom-sheet swap — while zoom is
+    a uniform monotone scale). The R9 row pins the R5 identity at full
+    depth: rects scale by the seeded factor while computed radii and
+    font-size read unzoomed authored px, computed `zoom` reads the
+    inline write, and the resting ink is byte-identical before/after (a
+    zoom-immune motion lane).
+  With the three adopters landed the redesign-class ledger is closed;
+  nothing further remains open on it.
 
 ## 5. Conventions (the change bar)
 
@@ -1646,7 +1707,12 @@ stop at the first failure:
   video keeps its null answer, the Clappr compound beats the Core on fewest
   hops, and a record without a stub builder fails its row),
   `frames` (§ above),
-  `gestures` (skip/mute/volume/panel/PiP/scrub with real driver input),
+  `gestures` (skip/mute/volume/panel/PiP/scrub with real driver input, and
+  the readout row as a witness pattern: per-beat listeners on
+  `pf:gesture-scrub` record the anchored pose (association, ink, pill
+  above the point, inside the viewport), a final eval asserts ≥1 anchored
+  beat plus pose cleared at stroke end — no interleaved evalAsync/actions
+  command, which provably defers past its deadline),
   `hotpaths` (the hot-path budgets: the per-frame/echo loops the tree rides,
   benchmarked in the REAL engine as regression tripwires — fan dispatch at
   100k emissions (10-subscriber echo-audience shape and the zero-subscriber
@@ -1744,7 +1810,15 @@ stop at the first failure:
   `pf-panel-open`, close=`pf-panel-close`), the HUD sheet carries a
   `:active-view-transition-type()` reader for both words, and the R9 ink
   pin rides the row (the panel's computed surface/border identical
-  before-open vs after-close — motion-lane-only, asserted at full depth),
+  before-open vs after-close — motion-lane-only, asserted at full depth);
+  the trim row: a seeded section label's computed
+  `text-box-trim: trim-both` / `text-box-edge: cap alphabetic` serializations
+  plus a zoom-immune height ratio band (`h/fs` bounds hold across the zoom
+  variants); the zoom row: the panel measured open vs `ui.panelScale: 1.15`
+  seeded — computed `zoom` reflects the inline write, rects scale by the
+  factor while computed radii/font-size stay unzoomed authored px (the R5
+  identity), and resting ink unchanged — with a panel-open wait and a
+  close-panel restore before the typed row keeps later rows undisturbed),
   `persist` (storage seeding, resume restore across reboot, the sync-grain
   row: one nudge gesture lands `subOffset` in the tracker's entry, the
   Start-over row proving the explicit boundary writes past the drift

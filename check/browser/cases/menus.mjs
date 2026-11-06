@@ -1,3 +1,4 @@
+import { sleep } from "../../lib/driver.mjs";
 /**
  * The GM menu is the userscript's only always-available surface (it exists
  * even on unbootable pages, which boot.mjs covers). Here the menu commands
@@ -9,8 +10,8 @@ export async function run({ session, boot }) {
   const rows = [];
   // Brightness 150 seeded before the first boot: the reset command below is
   // proven against a non-default stored state, not a no-op write over
-  // defaults.
-  await boot({ seed: { "pf:configs": { version: 1, filter: { brightness: 150 } } } });
+  // defaults. panelScale 1.15 rides the zoom pin below.
+  await boot({ seed: { "pf:configs": { version: 1, filter: { brightness: 150 }, settings: { ui: { panelScale: 1.15 } } } } });
 
   const effects = await session.evalAsync(function main(done) {
     const menu = window.__pfMenu ?? {};
@@ -86,6 +87,107 @@ export async function run({ session, boot }) {
     note: reset.why ?? null,
     ms: null
   });
+
+  // The trim adoption: section headers ride text-box-trim (the optical
+  // alignment decision). Computed pin on a live label - the trimmed line
+  // box hugs the cap/baseline extents, so its height drops below the 1.4em
+  // line-height the sheet carried before (12px font -> ~7.93px, ratio
+  // 0.661 - the ± band is wide enough to absorb font-face metric drift but
+  // tight enough to catch a dropped declaration). Opens the panel first:
+  // the directional-motion row runs with the panel closed, and the labels
+  // exist only inside a rendered tab - the open's lazy section build lands
+  // asynchronously, so the read waits for the pf-open class.
+  await session.eval(function main() {
+    document.querySelector(".pf-shell")?.dispatchEvent(
+      new CustomEvent("pf:gesture-panel", { detail: { method: "keyboard" } }));
+  });
+  await session.waitFor("return !!document.querySelector('.pf-shell')?.shadowRoot?.querySelector('.pf-panel.pf-open');", 3000).catch(() => null);
+  const trim = await session.eval(function main() {
+    const shadow = document.querySelector(".pf-shell")?.shadowRoot;
+    const panel = shadow?.querySelector(".pf-panel");
+    if (!panel?.classList.contains("pf-open")) { return { ok: false, why: "panel not open" }; }
+    const label = [...panel.querySelectorAll(".pf-panel-label")][0];
+    if (!label) { return { ok: false, why: "no section label rendered" }; }
+    const cs = getComputedStyle(label);
+    const h = label.getBoundingClientRect().height;
+    const fs = parseFloat(cs.fontSize);
+    // Zoom-immunity: the panel's scale rides the label's rect, while
+    // computed fontSize stays the authored px - so the pin is the h/fs
+    // RATIO. Trimmed ratio is ~0.69 (cap-top..baseline extents vs the 1.4
+    // line-height), scaling only with the panel zoom (0.9..1.3 ->
+    // 0.62..0.90); an untrimmed label reads 1.4xline and can never enter
+    // the band even zoomed (1.26..1.82). The computed serializations pin
+    // the declarations themselves.
+    return {
+      ok: cs.getPropertyValue("text-box-trim") === "trim-both"
+        && cs.getPropertyValue("text-box-edge") === "cap alphabetic"
+        && h / fs > 0.55 && h / fs < 0.95,
+      why: null, trim: cs.getPropertyValue("text-box-trim"),
+      edge: cs.getPropertyValue("text-box-edge"), h, fs
+    };
+  });
+  rows.push({
+    name: "section labels carry text-box-trim (computed pin, trimmed height pinned)",
+    status: trim.ok === true ? "pass" : "fail",
+    note: JSON.stringify(trim),
+    ms: null
+  });
+
+  // The zoom-based panel scale: the seeded ui.panelScale 1.15 rides the
+  // panel root's inline zoom (per-open read). Geometry pin is a base-vs-
+  // zoomed visual measurement with the inline write itself as the switch
+  // (the product mechanism) - no formula assumptions: the same panel's
+  // visible box measures exactly 1.15x at the seeded zoom vs zoom 1.
+  // Reading rules the probe pinned: computed `zoom` reads the factor,
+  // computed radii/fonts read the UNZOOMED authored px, so the R5
+  // concentricity invariant under a uniform scale holds by the ratio
+  // identity (visual radius / visual box = authored radius / layout box).
+  // R9: the ink bytes are pinned unchanged at the seeded zoom.
+  const zoom = await session.eval(function main() {
+    const shadow = document.querySelector(".pf-shell")?.shadowRoot;
+    const panel = shadow?.querySelector(".pf-panel");
+    if (!panel?.classList.contains("pf-open")) { return { ok: false, why: "panel not open" }; }
+    // The seeded write is the product's own inline zoom on the panel root -
+    // read it back exactly once, BEFORE any toggle, and capture every
+    // computed reading against that state (a getComputedStyle proxy is
+    // live: reading it after the toggles reflects the cleared state).
+    const seededInline = panel.style.zoom;
+    const cs = getComputedStyle(panel);
+    const seededZoom = cs.zoom;
+    const csInk = cs.backgroundColor;
+    const seededW = panel.getBoundingClientRect().width;
+    // Base-vs-zoomed measurement with the inline write itself as the
+    // switch, then the seeded write restored byte-identical.
+    panel.style.zoom = "1";
+    const baseW = panel.getBoundingClientRect().width;
+    panel.style.zoom = seededInline;
+    const restoredZoom = getComputedStyle(panel).zoom;
+    return {
+      ok: seededInline === "1.15"
+        && seededZoom === "1.15"
+        && Math.abs(seededW / baseW - 1.15) <= 0.02
+        && restoredZoom === "1.15"
+        && csInk === "rgb(14, 14, 16)",
+      why: null, seededInline, seededZoom, restoredZoom,
+      seededW, baseW, ink: csInk
+    };
+  });
+  rows.push({
+    name: "panel scale rides zoom (computed pin: factor, base-vs-zoomed box ratio 1.15x, ink unchanged)",
+    status: zoom.ok === true ? "pass" : "fail",
+    note: JSON.stringify(zoom) + " (expected zoom 1.15, seeded/base box ratio 1.15, ink rgb(14,14,16))",
+    ms: null
+  });
+
+  // Restore the closed precondition: the typed directional-motion row below
+  // opens the panel itself and asserts the flip types, so it must start with
+  // the panel closed (the trim/zoom rows left it open — a stray `open` flip
+  // would race its spy).
+  await session.eval(function main() {
+    document.querySelector(".pf-shell")?.dispatchEvent(
+      new CustomEvent("pf:gesture-panel", { detail: { method: "keyboard" } }));
+  });
+  await sleep(220);
 
   // The directional panel motion: the flips carry their direction as a
   // view-transition type (pf-panel-open / pf-panel-close), the HUD sheet's
