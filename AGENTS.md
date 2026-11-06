@@ -1361,6 +1361,125 @@ the saturation inventory script.
   probe's NOT-SHIPPED set holds. No src change earned adoption; the
   artifact is this record plus the three census/probe scripts.
 
+**The belt-and-suspenders loop-body walk (Nov 2026, user-directed;
+post-`d9e229f`, record-only, audit-clean).** A per-module re-read at the
+narrowest grain the earlier audits can be wrong at: every loop body in
+every JS module spot-read against the module's own sweep/saturation/
+drift record, asking not "is there a faster shape" (the saturation and
+C++-ops scans answered that exhaustively) but "does the shipped body
+still match the shape its record claims" — a trust-but-verify pass over
+the records themselves. All 22 JS modules read whole or spent at their
+bodies (styles.css carries no loops); every flagged site reconciled;
+**no adoptable site and no record drift found** — the verdict is
+byte-true confirmation, recorded because an unverified record is a
+premise, not a fact. The walker's bar held throughout: a body earns
+adoption only on a measured win or an unclaimed behavior, for-of is
+already the single native op, and pool/dirty-check shapes are recorded
+allocation contracts, not candidates. The confirmation roll, per module
+against its record:
+
+- `subtitles/subtitles.js` (1584) — pooled dirty-checked slot render,
+  amortized dead floor, ParseMemo FNV-1a keyed hash: the drift audit's
+  record classes, byte-true. `forgevtt.js` (447) — the C++-ops A/B
+  record confirmed live-shaped: charCode timecode walk (measured
+  parity), single-capture timing scanner (the regex twin declined on
+  the live A/B), blank-line pre-scan fused into the one-pass line
+  walk, shape-stable `DEFAULT_CUE_SETTINGS` frozen default, in-place
+  `sortCues` (copy-verb decline), the 50ms budget with the `(i & 127)`
+  yield throttle; the sync fast path / async ingest split stands.
+- `inputs/forge.js` (1778, effectively whole) — pooled detail walk,
+  ScrubStroke's coalesced samples without a materialized array, scalar
+  exp-velocity filter, indexed wheel-panel scan, `#shouldHandleKeys`
+  vacancy arbitration, `#ownedKeyCodes` repeat shield: all engine-tight
+  or recorded contract.
+- `chrome/panel.js` (1449) — Stepper drag `while` payback (bounded,
+  scalar), `#rollbackTo` spread confined to failure rate, History's
+  pooled positional index reconcile + `replaceChildren()` clears, the
+  indexed `querySelectorAll` walk kept spread-free as its comment
+  records.
+- `page.js` (1275) — `DomainKeyCache` quarter-bounded eviction, bounded
+  Levenshtein over reusable `Int32` scratch (no native exists),
+  `hashEntry` djb2 (the declined no-seed shape), `stripNonAscii` 8
+  single-native regex passes + one-slot memo, bridge resolves already
+  on `Promise.withResolvers()`, depth-4 capped `isOwnFrame`,
+  added-node-scoped `#diff`.
+- `inputs/actions.js` (1068) — ScrubSession's sqrt fast path (measured
+  ~1.6×, gated on the exact exponent), pooled toast payload refilled
+  in place, dirty-checked toast string cache, the rAF commit pump,
+  IntentGates' early-break recompute at settings-bus rate, the
+  `Map.groupBy` derived tables.
+- `resume.js` (868) — `toSorted` adopted where the record claims it;
+  `foreignIds` walk (the `Set.difference` decline — the removal
+  predicate bounds on `updatedAt`, not membership); deliberate
+  in-place `#enforceBounds` sort; allocation-free `#diskEchoMatches`/
+  `#stampDiskEcho`; the groupBy path bucket.
+- `kernel/kernel.js` (1013) — `RemovalWatch`'s bounded parent-chain
+  walk (≤8 hops + margin, multi-root native observe), live-DOM
+  re-derivation (`#checkAnchors`, zero queued-record reads),
+  `DomSettleWait` on `Promise.withResolvers()`.
+- `dom.js` (860) — the pooled double-buffer with the re-armed-empty
+  swap (the `[1,1,2,2,3]` proof), `PUSH_APPLY_LIMIT` index walk (the
+  ~124k RangeError story), slot-identity tombstone compaction,
+  `ReferenceBox.get`'s ONE read into the pooled box.
+- `discovery.js` (578) — `forEachVideoInMutations`' indexed NodeList
+  drain (the generator allocation decline recorded in-file),
+  PresenceGate's WeakMap + lazy prune, `entryBoxSize` delivering
+  observation (no forced reflow), `isOnScreen`'s claimed rect read,
+  the probe gates all floor-guaranteed single-native arms.
+- `detection.js` (270) — `#fillComposedChain`'s indexed flat walk into
+  the reusable scratch (length truncated against detachment),
+  hop-ascending one-native-`matches()`-per-hop probe + the ordered tie
+  loop: the measured ~2µs/walk / ~70ns/hit budget shapes, byte-true.
+- `entry.js` (242) — the ad-host suffix/prefix scans: boot rate, one
+  realm eval. `contract.js` (136) — module-init derived tables only.
+- `core.js` (205) — zero loop statements exist in the file;
+  `formatTime` is the recorded integer-arithmetic + concat shape.
+- `filter.js` (323) — `presetMatches`' ~11ns/op literal-field shape,
+  the closure-free index scan, native joins; per-key table loops at
+  human/interaction rate over the 9-key schema.
+- `shell.js` (607) — `cssVarSyncer`'s for-of over a ≤2-spec array with
+  the Map-diff invalidation-only guard (the measured shape); the
+  `MEDIA_SESSION_SYNC_EVENTS` loop arms nine listeners once per shell;
+  the section destroy loop under the release-tail belt;
+  `PANEL_SECTIONS` construction at first-open rate.
+- `media.js` (498) — the `CLEAR_ACTIONS` teardown loop, the pooled
+  `#positionState` scratch on the ~4Hz clock (the recorded alloc row),
+  scalar clamp/quantum/dedup math, `URL.parse` adopted as the one-call
+  null-guard.
+- `runtime.js` (534) — loops only at boot/teardown rate
+  (`runSteps`/`runStepsAsync`, `Scope.dispose`'s reverse walk); the
+  per-task `AbortController` pair is the recorded measured
+  two-controller contract, not a pooling candidate; `debounce`'s
+  bookkeeping scalar.
+- `store.js` (337) — byte-true to sweep #10: the for-in +
+  `Object.hasOwn` walk (the measured ~78→~20 ns/op finding), the
+  copy-on-write descents with the deliberate two-dot divergence,
+  `split(".")` at interaction rate, `gmRequestText` on
+  `Promise.withResolvers()`.
+- `inject.js` (380) — one `[...adoptedStyleSheets, sheet]` copy at
+  boot; `watchShellHost`'s nested walk riding the scoped childList
+  observer at eviction rate; the viewport-fit regex passes at boot
+  rate.
+- `ui.js` (259) — `el`/`button`'s measured for-in + one-mutated-attrs
+  shapes verbatim; the document-keyed WeakMap icon-template cache
+  with `cloneNode` derivation; `flashElement`'s `getAnimations` scan
+  at per-human-flash rate with its scan rule in the comment.
+- `toast.js` (217) — the action-button build loop at per-show rate,
+  the 4-field render-fingerprint skip, `replaceChildren()` pooled
+  clears, scalar timer bookkeeping; `config.js` (219) — schema walks
+  at constructor + echo rate (the budgeted 1000-echo storm path),
+  derived tables at init.
+
+The walk's one structural observation worth holding (no action): the
+operator floor is saturated enough that every remaining loop on the
+tree is either (a) the recorded allocation contract itself, (b)
+rate-bounded below measurement, or (c) the semantics the feature
+means — and none of the three classes can be rewritten native without
+deleting the behavior. The allocator/operator record series is
+re-verified all the way down; no artifact script was produced (the
+reads were full-file reads, and the committed census scripts remain
+the machine-checkable distillation).
+
 **The redesign-class decisions (Nov 2026; user direction opened the ledger).**
 The saturation audit closed with "everything further is a redesign
 decision of its own" — this batch is that decision, taken with receipts.
