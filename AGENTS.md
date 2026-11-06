@@ -1332,9 +1332,12 @@ menus case: types delivered per flip (spy on the real
 `startViewTransition`), both type words consumed by the sheet, and the
 panel's computed surface/border ink pinned identical across the motion
 endpoints. Staying open on the ledger until their own product direction:
-scrollbar inking, pointer-anchored readouts (which would CREATE the first
+pointer-anchored readouts (which would CREATE the first
 JS-positioned consumer for anchor positioning), balance/trims, steppers'
-`field-sizing`, history `scroll-snap`, `zoom` density.
+`field-sizing`, history `scroll-snap`, `zoom` density. (Scrollbars
+corrected: the panel and history list already ride `scrollbar-width: thin`
++ `scrollbar-color` in the sheet — that ledger entry was a miss against
+the shipped rows, caught on the dist-CSS review.)
 
 ## 5. Conventions (the change bar)
 
