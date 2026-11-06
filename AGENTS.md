@@ -1249,6 +1249,53 @@ allocation change on the tree earned adoption; the sharing posture is
 maximal under the recorded constraints, and the sweep's artifact is this
 record plus the inventory scripts under `check/.tmp/`.
 
+**The native-operator saturation audit (Nov 2026, record-only; post-`75437f2`,
+audit-clean).** After the adoption probe batch took the matrix's last
+hot-path JS loop into the C++ selector engine, every remaining JS-facing
+call site was re-inventoried per operator family over comment-stripped
+source (`check/.tmp/native-saturation.mjs`, uncommitted per sweep
+convention; 23 modules) with one question per row: is this call already a
+single native-engine operation, and if JS work survives around it, does a
+named native operator exist that can take the rest? Verdicts, each with its
+rate axis: **(1) DOM-query families are fully native-delivered** — the
+three matcher `matches()` sites (the probe, the tie loop, the host-override
+walk), forge's press-arm `closest(SDK_CONTROLS_SELECTOR)` (module-static
+selector string; the affordance-cursor clause's one `getComputedStyle` read
+is the claimed press-arm shape), page.js's iframe-registry `#diff` riding
+native `node.querySelectorAll("iframe")` per added subtree, flashElement's
+element-scoped `el.getAnimations()`, and the panel/toast builders' scoped
+`querySelector` meshes — no per-anchor JS loop survives anywhere.
+**(2) The cleared-family backend is native wholesale** — `replaceChildren()`
+is the pooled-clear backend at every pooled render site (panel title/meta,
+toast icon/actions), leaving no `removeChild` loop or `textContent=""`
+reparse in src. **(3) The relational operators already ride the sheet** —
+the compact band's `:not(:has(...))` style query is the live `:has()`
+adoption (inject.js), `:is()` rides the matcher probe, and `Map.groupBy`
+is the derived-table backend at both real sites (the `POINTER_INTENTS`
+family map at module scope, resume's `#buildByPath` on the merge path) —
+the constructor's C++ hashing replaced the hand loops the derived-table
+law used to spell. **(4) The survivors audited and DECLINED**, each recorded
+so none re-opens silently: entry.js's skip-probe `new URL` parses (boot-rate
+— the try is the cross-origin `top.location` read belt, not a parse guard;
+`URL.parse` would index null into the identical TypeError arm with zero
+call-site saving), `hashEntry`'s djb2 `charCodeAt` loop (checkpoint-rate,
+~30 short strings, and no native in-realm hash exists — `crypto.subtle.digest`
+is async and sized for the wrong job), `shouldSkipUrl`/`URL.canParse`
+(the two-call form duplicates a parse `URL.parse` already does in one),
+the forgevtt timecode `charCodeAt` fast paths (measured engine-tight at
+11ms/1.1MB — the census's own tripwire row), a `Float64Array` numeric sort
+for the 19k-cue ordering (no native key-sort API exists; the comparator
+closure is log-n and the whole parse is budgeted), and the subtitle
+placement/re-anchor rects (getBoundingClientRect reads all claimed per the
+drift audit's reading rule, and `anchor()`/`position-anchor` cannot express
+object-fit picture math anyway — the earlier anchor-positioning verdict
+stands with no JS-positioned consumer). The sheet side already saturates
+the CSS-native operator ledger (`contain` variants, `overscroll-behavior:
+contain` ×2, the scroll-timeline R4 band, `@property` tokens, the
+`@container` style query bus) with nothing left that a native operator
+claims. No src change earned adoption; the artifact is this record plus
+the saturation inventory script.
+
 ## 5. Conventions (the change bar)
 
 1. **Comments explain WHY with reasoning** — the rejected alternatives and
@@ -1715,8 +1762,12 @@ at premise level (`b52821c`), shell lifecycle (`b89b8bd`), chrome modules
 (`b92c7a0`), and store.js proper (`a68f076`), closing with the allocation
 drift re-audit (Nov 2026, record-only — see §4's drift block), the inputs
 plane (`2d67422`), the shared geometry/context planes — dom.js + page.js
-(`4893b78`), and core + runtime (this sweep's commit) closing the sweep
-map — every src module family now carries a dedicated record. The series'
+(`4893b78`), and core + runtime — closing the sweep
+map with every src module family carrying a dedicated record — plus the
+adoption identity plane (`0f06dbd`, the measured hotpath budgets) and the
+two post-close record-only audits: the allocation drift re-audit and the
+native-operator saturation audit (post-`75437f2`, the probe batch). The
+series'
 record-only commits changed
 AGENTS.md alone; every src-touching pass proved
 itself on the full gate battery before its commit.*
