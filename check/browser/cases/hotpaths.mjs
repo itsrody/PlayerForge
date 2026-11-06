@@ -346,7 +346,7 @@ export async function run({ session, baseUrl }) {
   st(
     "adoption identity: 1000 first-resolve walks resolve (thoroughness) inside the miss-rate budget",
     stats.adoptFirstHits === 1000 && stats.adoptFirstMs < 50,
-    `${stats.adoptFirstHits}/1000 resolved in ${noteOf("adoptFirstMs")} - ~5us per composed walk over the real registry is the measured baseline; this row catches a walker regression at ~10x`
+    `${stats.adoptFirstHits}/1000 resolved in ${noteOf("adoptFirstMs")} - ~2us per composed walk is the measured baseline (one native probe call per hop, the registry-wide selector list; was ~5us under the per-anchor JS loop); this row catches a walker regression at ~10x`
   );
   st(
     "adoption identity: 100k repeat resolves ride the hit-path budget (the descriptor cache's steady state)",

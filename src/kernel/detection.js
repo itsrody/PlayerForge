@@ -81,8 +81,23 @@ const REGISTRY = [
 /** The registry as a check-tool surface: the registry-coverage case derives
  *  its per-record stub rows from these records, so a new record added without
  *  an anchor-satisfying stub shape turns the gate red. Frozen - the matcher
- *  holds the same array by reference. */
+ *  holds the same array by reference, and the per-hop probe below is derived
+ *  from this same table. */
 export const SDK_REGISTRY = REGISTRY;
+
+/**
+ * The per-hop probe: every registry anchor joined into one selector list,
+ * evaluated natively. `el.matches(list)` is the C++ selector engine answering
+ * "does ANY anchor arm match" in one call - per-anchor JS looping between
+ * matches() calls is what that call replaces (the `:is(list)` spelling is
+ * equivalent; the bare joined list skips the wrapper tokens). Derivation is
+ * from the registry table itself, so adding a record re-arms the probe with
+ * no second spelling. Constraint the join carries: an anchor must not carry a
+ * top-level comma (an attribute value like [data-x="a,b"] would split into two
+ * arms - the same hazard the `:is()` form would carry); every current anchor
+ * is a class/attribute/tag/simple-combinator shape with no comma.
+ */
+const ANCHOR_PROBE = REGISTRY.flatMap((record) => record.anchors).join(", ");
 
 /**
  * The whole identity engine as one class: the composed-ancestry scratch, the
@@ -140,36 +155,35 @@ class SdkMatcher {
   }
 
   #matchSdk(video) {
-    // Single composed walk (uBO's one-pass-over-tokens shape): the rich-path
-    // ancestors re-walked once per anchor, then walked again per hit to count
-    // hops. Chain index IS the hop count, so one pass serves every anchor.
-    // Selection semantics: fewest hops wins, ties keep registry order then
-    // anchor order (strict < keeps the first).
+    // Single composed walk + one native probe call per hop (the `:is()`-grade
+    // selector-list evaluation the C++ engine owns): each ancestor answers
+    // "any registry anchor match?" in ONE matches() call, so the miss path is
+    // hops x 1 native call instead of anchors x hops JS-looped calls. The
+    // hop-ascending scan IS the fewest-hops law - the first probe hit is the
+    // winning depth, no later hop can beat it, so record/anchor identity at
+    // that hop comes from one ordered tie loop (registry order, then anchor
+    // order) instead of the per-anchor walk's best-tracking with strict <.
     const chain = this.#chain;
     const len = this.#fillComposedChain(video);
-    let best = null;
-    for (let r = 0; r < REGISTRY.length; r++) {
-      const record = REGISTRY[r];
-      const anchors = record.anchors;
-      for (let a = 0; a < anchors.length; a++) {
-        const anchor = anchors[a];
-        // Bound the walk by the best hops so far: a match at or beyond that
-        // index cannot win (strict < keeps the earlier record/anchor), so the
-        // chain is only scanned as deep as a real improvement would need. A
-        // 0-hop best collapses the bound to 0 and the rest of the registry is
-        // walked with zero chain scans.
-        const limit = best ? best.hops : len;
-        for (let hop = 0; hop < limit; hop++) {
-          if (chain[hop].matches(anchor)) {
-            if (!best || hop < best.hops) {
-              best = { record, el: chain[hop], hops: hop };
-            }
-            break;
+    for (let hop = 0; hop < len; hop++) {
+      const node = chain[hop];
+      if (!node.matches(ANCHOR_PROBE)) continue;
+      for (let r = 0; r < REGISTRY.length; r++) {
+        const record = REGISTRY[r];
+        const anchors = record.anchors;
+        for (let a = 0; a < anchors.length; a++) {
+          if (node.matches(anchors[a])) {
+            return { record, el: node, hops: hop };
           }
         }
       }
+      // A tick the per-anchor tie loop cannot confirm means the registry and
+      // the derived probe have drifted apart (structurally impossible - both
+      // read the same table): answer the no-shape null rather than keep
+      // scanning, where a deeper hop would win under the fewest-hops law.
+      return null;
     }
-    return best;
+    return null;
   }
 
   /**

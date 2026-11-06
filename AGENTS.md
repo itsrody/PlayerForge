@@ -545,8 +545,16 @@ iframes, same-origin and cross-origin:
   MediaElement.js, XGPlayer, Aliplayer, Fluid Player, Flowplayer, Clappr,
   Vidstack, Mux Player, Radiant, Laravel Video Embed), each a set of
   **SDK-namespaced anchor selectors** resolved through composed ancestry
-  (`closest()`, shadow-boundary aware); the matched element with the fewest
-  ancestor hops wins. There is deliberately **no generic fallback** — a bare
+  (shadow-boundary aware); the matched element with the fewest
+  ancestor hops wins, the answer per hop coming from ONE native
+  selector-list probe (`ANCHOR_PROBE` — every registry anchor joined into one
+  list, one C++ `matches()` call per hop answering "any anchor match?",
+  replacing the per-anchor JS loop between `matches()` calls; the
+  hop-ascending scan IS the fewest-hops law, and record/anchor identity at
+  the winning hop comes from one ordered tie loop — registry order, then
+  anchor order — the same tie law the old best-tracking applied;
+  measured ~5µs → ~2µs per miss-walk in §7's hotpath row). An anchor must
+  carry no top-level comma (the join constraint; currently none does). There is deliberately **no generic fallback** — a bare
   `<video>` with no SDK anchor never boots. Record provenance is
   source-verified, not assumed: Clappr's compound lead anchor
   `.container[data-container]` (the vendor-set `{ class: "container",
@@ -1542,12 +1550,16 @@ stop at the first failure:
   measured verdicts are the batch's record). **The adoption identity
   plane rides the same gate** (the kernel's uBO-grade path pinned as
   budgets): 1000 first-resolve composed walks over the REAL served
-  registry resolve whole at the measured ~5µs/walk (the one-pass shape —
-  per-anchor `matches()` bounded by best-hops — riding the native
-  selector engine; a walker regression shows at ~10x), and 100k repeat
-  resolves ride the descriptor cache's steady state at the measured
-  ~70ns/hit (one WeakMap read + one parentNode compare + the record
-  alloc — the ~570x hit/miss ratio IS the cache's value measured; the
+  registry resolve whole at the measured ~2µs/walk (the probe shape — the
+  registry anchors joined into ONE selector list, one native
+  `matches()` call per hop answering "any anchor match?" in the C++
+  selector engine, then one ordered registry/anchor tie loop at the
+  winning hop — was ~5µs/walk under the per-anchor `matches()` loop
+  bounded by best-hops; a walker regression shows at ~10x), and 100k
+  repeat resolves ride the descriptor cache's steady state at the measured
+  ~70ns/hit (unchanged by the probe — one WeakMap read + one parentNode
+  compare + the record alloc — the ~30x hit/miss ratio IS the cache's
+  value measured; the
   hit row is the tripwire for "the walk leaked into the steady state").
   The measured audit behind the budgets: the plane's remaining
   candidates (cached-home identity, early occupied-guard refuse,
