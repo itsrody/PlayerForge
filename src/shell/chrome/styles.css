@@ -541,15 +541,6 @@
       }
     }
 
-    /* The pointer-anchored readout's pose rides the inject.js real-<style>
-       pocket, not this sheet: the sheet ships as adoptedStyleSheets, and the
-       CSS anchor lattice does not resolve inside it under a scoped sheet's
-       @scope (gate-probed: scoped+adopted falls back to the static position
-       while a same-rule <style> twin anchors live - the defect family the
-       container pockets already dodge). Keep this block as the pointer only;
-       the rules live in ANCHOR_POCKET_CSS, carried by the same real <style>
-       element as the container pockets. */
-
     /* - Panel (universal plugin panel) - */
     /* Dark sheet centered on the shell on both axes via auto margins. Open/close
        flips display via the pf-open class (allow-discrete) and fades opacity in

@@ -322,15 +322,7 @@ class ScrubSession {
   #toastText = null;
   #toastSecDuration = NaN;
   #toastSecCurrent = NaN;
-  #toast = {
-    icon: "left-arrows", text: "", group: "scrub",
-    // The anchored-readout pose scratch: true while a pointer stroke feeds
-    // the readout, with the gesture point this beat carries. All pooled -
-    // ScrubSession owns this object alone (other toast callers build their
-    // own payloads), and #scrubEnd flips the flag so no stroke residue
-    // outlives its own gesture.
-    anchored: false, atX: 0, atY: 0
-  };
+  #toast = { icon: "left-arrows", text: "", group: "scrub" };
 
   constructor(shell) {
     this.#shell = shell;
@@ -484,15 +476,6 @@ class ScrubSession {
     }
     this.#toast.icon = this.#momentum >= 0 ? "right-arrows" : "left-arrows";
     this.#toast.text = this.#toastText;
-    // The anchored-readout ride: a pointer stroke carries its gesture point
-    // (pooled detail fill in forge.js); the beat rate is the readout's own
-    // cadence, so the point steps with the text, not per-move. A
-    // method-less or keyboard-shaped detail never claims the pose.
-    if (detail.method === "pointer" && Number.isFinite(detail.x) && Number.isFinite(detail.y)) {
-      this.#toast.anchored = true;
-      this.#toast.atX = detail.x;
-      this.#toast.atY = detail.y;
-    }
     shell.toast(this.#toast);
   }
 
@@ -520,9 +503,6 @@ class ScrubSession {
     this.#toastText = null;
     this.#toastSecDuration = NaN;
     this.#toastSecCurrent = NaN;
-    // The pose flag dies with the stroke: the pill's hide (next line) clears
-    // the anchored class, and the scratch is clean for whatever shows next.
-    this.#toast.anchored = false;
     this.#shell.hideToast("scrub");
   }
 }

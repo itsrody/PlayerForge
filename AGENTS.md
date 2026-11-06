@@ -980,12 +980,8 @@ iframes, same-origin and cross-origin:
   the shell scope's signal into the resume store's Fan),
   `ui.js` (`el`/`button` construction, the SVG icon factory, `flashElement`
   WAAPI), `inject.js` (`ShellStyle` sheet lifecycle: adopt-once, monotonic
-  `@resource` upgrade; viewport-fit-cover; the pocket `<style>` carrier now
-  owns the anchor lattice too — `ANCHOR_POCKET_CSS` joined into the same
-  carrier as `CONTAINER_POCKET_CSS`, for the two blind-engine rule sets the
-  constructive sheet cannot evaluate), `toast.js` (`ToastManager`, pooled
-  custom element, plus the `.pf-gesture-point` anchor sibling and the
-  pose-claim rewarm that keeps the pill's anchor plan live), `panel.js`
+  `@resource` upgrade; viewport-fit-cover), `toast.js` (`ToastManager`,
+  pooled custom element), `panel.js`
   (the `ui.panelScale` write rides `#applyCompactSetting()` as the panel
   root's inline `style.zoom`, per-open like compact), **styles.css** (the
   HUD — §6; the section labels carry the `text-box-trim` cap rule).
@@ -1371,24 +1367,30 @@ the shipped rows, caught on the dist-CSS review.)
   form; `y mandatory` would show whole) — the row accepts both
   serializations and documents this.
 
-**Adopted: anchored readout + trims + zoom (the third redesign batch,
-  closing the ledger).** The three remaining items all adopted, each with
-  its own R9-level row in the battery and one engine diagnosis worth
-  holding:
-  - **Pointer-anchored scrub readout.** The gesture-scrub hint pill now
-    rides CSS anchor positioning at a zero-size `.pf-gesture-point`
-    element (a fixed sibling inserted BEFORE the pooled pill — anchor
-    validity is tree order): the producers write ONLY the point's inset
-    at the ~100ms beat cadence, and the pose class carries
+**Adopted: trims + zoom; the anchored readout shipped and was reverted
+  the same day by user direction (the third redesign batch, closing the
+  ledger).** Two of the three remaining items ride the sheet; the third
+  rode the probe record the furthest before real use returned the
+  verdict:
+  - **Pointer-anchored scrub readout — shipped, then REVERTED by user
+    direction.** The gesture-scrub pill rode CSS anchor positioning at a
+    zero-size `.pf-gesture-point` element (a fixed sibling inserted
+    BEFORE the pooled pill — anchor validity is tree order): the
+    producers wrote ONLY the point's inset at the ~100ms beat cadence,
+    and the pose class carried
     `position-anchor`/`position-area: top center`/
     `position-try-fallbacks: flip-block, flip-inline` — above the point,
-    flipped inside the viewport at both edges, ink untouched. Two floor
+    flipped inside the viewport at both edges, ink untouched. Two engine
     defects had to be dodged and diagnosed, both gate-probed with
-    receipts: (a) the anchor lattice does not resolve inside
+    receipts — the durable survey artifacts of the batch (kept because
+    they bind any future anchor-positioning retry; the per-poke exhaust
+    and the fs geometry census live under `check/.tmp/
+    anchor-warm-probe.mjs` and `fs-box-census.mjs`, uncommitted per
+    sweep convention): (a) the anchor lattice does not resolve inside
     `adoptedStyleSheets` under a scoped sheet's `@scope` (scoped+adopted
     falls back to the static position; the verbatim rule set in a real
     `<style>` anchors live, unscoped doc-level and scoped shadow-level
-    both proved) — the pose rules therefore ride a real-`<style>` pocket
+    both proved) — the pose rules therefore rode a real-`<style>` pocket
     (`ANCHOR_POCKET_CSS`) joined into the same carrier as the container
     pockets; (b) **Gecko re-derives an element's anchor plan only at
     frame construction** — a pose claimed on an element already in the
@@ -1396,19 +1398,31 @@ the shipped rows, caught on the dist-CSS review.)
     proved every restyle arm stale (sheet re-cascade, pocket re-adopt,
     class retoggle, inline anchor-name/position-anchor rewrites, hud
     paint writes, anchor-element reinsertion): only reinserting the
-    QUERY element (the pill) re-plans it. The repair is a one-arm
+    QUERY element (the pill) re-plans it. The repair was a one-arm
     structural rewarm at the pose-claim transition — the pose class add
-    re-appends the pill to its parent (an already-parented appendChild
-    is a pure move: same parent, same last-child slot, listeners live);
-    subsequent pose claims ride the re-warmed element. Also probed and
-    recorded: anchor geometry is read from the untransformed layout box
-    (the point must move via left/top — a transform-moved point parks
-    the readout at the origin) and per-move cost is ~13µs. The row is a
-    witness pattern (per-beat listeners + post-drag eval, never an
-    interleaved evalAsync/actions command — that interleave provably
-    defers the command past its deadline): ≥1 anchored beat with correct
-    association, ink unchanged, pill above the point and inside the
-    viewport, pose cleared at stroke end.
+    re-appended the pill to its parent (an already-parented appendChild
+    is a pure move: same parent, same last-child slot, listeners live).
+    Also probed and recorded: anchor geometry reads from the
+    untransformed layout box (the point must move via left/top — a
+    transform-moved point parks the readout at the origin) and per-move
+    cost is ~13µs. The revert landed on the user's one-line report
+    ("the scrub broke the toast?! it follows the pointer" — a real-fs
+    repro, `fs-scrub-repro.mjs`, entered REAL fullscreen headless
+    through a trusted WebDriver `sendKeys("f")`: script-launched
+    `requestFullscreen` is denied for missing user activation, not for
+    headless — the trusted keydown grants it, a harness fact worth
+    holding for any future real-fs row) whose full diagnosis proved
+    the report was the design verdict itself, not a defect: detail x/y
+    == client coords == the written inset, the hud layer sits at the
+    viewport origin in real fullscreen (the box census; the "−40/+15
+    drift" the first repro chased was geckodriver move-interpolation
+    comparing a mid-drag beat against the final move target), the seek
+    commits, the pose clears — mechanics sound end to end, and the
+    product question was the one the user answered: the readout made
+    the resting toast follow the pointer, and the resting pose stays.
+    All readout surfaces retired wholesale — toast.js/inject.js/
+    forge.js/actions.js/styles.css byte-true from the pre-batch commit,
+    gestures.mjs's readout row removed; trim + zoom stay.
   - **`text-box-trim: trim-both` + `text-box-edge: cap alphabetic`** on the
     section labels (`.pf-panel-label`) — the label's content box
     tightens to the cap height, computed serializations pinned verbatim,
@@ -1425,8 +1439,8 @@ the shipped rows, caught on the dist-CSS review.)
     font-size read unzoomed authored px, computed `zoom` reads the
     inline write, and the resting ink is byte-identical before/after (a
     zoom-immune motion lane).
-  With the three adopters landed the redesign-class ledger is closed;
-  nothing further remains open on it.
+  With trim + zoom landed and the readout reverted, the redesign-class
+  ledger is closed; nothing further remains open on it.
 
 ## 5. Conventions (the change bar)
 
@@ -1707,12 +1721,7 @@ stop at the first failure:
   video keeps its null answer, the Clappr compound beats the Core on fewest
   hops, and a record without a stub builder fails its row),
   `frames` (§ above),
-  `gestures` (skip/mute/volume/panel/PiP/scrub with real driver input, and
-  the readout row as a witness pattern: per-beat listeners on
-  `pf:gesture-scrub` record the anchored pose (association, ink, pill
-  above the point, inside the viewport), a final eval asserts ≥1 anchored
-  beat plus pose cleared at stroke end — no interleaved evalAsync/actions
-  command, which provably defers past its deadline),
+  `gestures` (skip/mute/volume/panel/PiP/scrub with real driver input),
   `hotpaths` (the hot-path budgets: the per-frame/echo loops the tree rides,
   benchmarked in the REAL engine as regression tripwires — fan dispatch at
   100k emissions (10-subscriber echo-audience shape and the zero-subscriber

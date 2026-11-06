@@ -216,57 +216,6 @@ const CONTAINER_POCKET_CSS = `
   }
 `;
 
-/* The anchor-positioning pocket rides the same real-<style> carrier as the
-   container pockets, for a second adoptedSheet-blind engine surface: the CSS
-   anchor lattice (anchor-name / position-anchor / position-area) does not
-   resolve inside an adoptedStyleSheets sheet under a scoped sheet's @scope -
-   gate-probed both ways (scoped+adopted falls back to the pill's static
-   document position; the verbatim rule set in a real <style> anchors live,
-   unscoped doc-level and scoped shadow-level both proved). These selectors
-   exist only in this shadow (the gesture point and the anchored pill pose),
-   so a document-realm adoption of this pocket is inert.
-   - .pf-gesture-point is the single JS-written anchor: the producers write
-     ONLY the point's inset (raw gesture coordinates, no DOM reads here);
-   - the pose neutralizes the pill's resting top:12px/left:50% + translate
-     centering with explicit autos (position-area owns the addressing
-     insets in the pose, and the autos guarantee the resting values cannot
-     leak in), places it above the point, and flips it inside the viewport
-     at both screen edges via the try-fallbacks.
-   Floor notes probed with the floor probe: Gecko resolves anchors from the
-   UNTRANSFORMED layout box - the point moves via left/top, a transform-moved
-   point would park the readout at the origin - and per-move cost is ~13us,
-   so the producers write the point only at the readout's own beat cadence. */
-const ANCHOR_POCKET_CSS = `
-  .pf-gesture-point {
-    position: fixed;
-    left: 0;
-    top: 0;
-    width: 0;
-    height: 0;
-    pointer-events: none;
-    anchor-name: --pf-gesture-point;
-  }
-
-  pf-toast.pf-toast-anchored {
-    position-anchor: --pf-gesture-point;
-    position-area: top center;
-    position-try-fallbacks: flip-block, flip-inline;
-    left: auto;
-    right: auto;
-    top: auto;
-    bottom: auto;
-    translate: none;
-    transform: none;
-
-    /* The anchored pill keeps the resting entry's drop (the
-       transform: translateY(-4px) hidden form) relative to its
-       point-anchored position - same motion lane, no special case. */
-    &.pf-visible {
-      transform: none;
-    }
-  }
-`;
-
 /**
  * Apply the shell stylesheet as early as possible - ideally from
  * document-start, the real timing Violentmonkey MV2's registered
@@ -303,12 +252,10 @@ export function injectShell(container) {
 
   const hudLayer = el("div", { class: "pf-hud-layer" }, shadow);
   const cueLayer = el("div", { class: "pf-cue-layer", "aria-hidden": "true" }, hudLayer);
-  // The pocket carrier: one real <style> element (same adoption defect the
-  // container and anchor pockets dodge), namespaced subjects, zero cascade
-  // intersections. The container and anchor pockets ride it together - one
-  // carrier, two blind-engine rule sets.
+  // The container-pocket carrier: style-element only (same adoption defect the
+  // compact pocket dodges), namespaced subject, zero cascade intersections.
   const pocket = document.createElement("style");
-  pocket.textContent = CONTAINER_POCKET_CSS + ANCHOR_POCKET_CSS;
+  pocket.textContent = CONTAINER_POCKET_CSS;
   shadow.appendChild(pocket);
 
   logger.log("inject", `Shell DOM built inside ${container.tagName}#${container.id || container.className}`);
