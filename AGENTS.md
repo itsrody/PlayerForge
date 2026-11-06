@@ -1539,7 +1539,20 @@ stop at the first failure:
   measured baseline, so the tripwire catches shape regressions (an
   accidental allocation loop, a megamorphic rewrite) and never CI jitter;
   nothing earned an adoption — the loops are already engine-tight and the
-  measured verdicts are the batch's record). The end-to-end allocation
+  measured verdicts are the batch's record). **The adoption identity
+  plane rides the same gate** (the kernel's uBO-grade path pinned as
+  budgets): 1000 first-resolve composed walks over the REAL served
+  registry resolve whole at the measured ~5µs/walk (the one-pass shape —
+  per-anchor `matches()` bounded by best-hops — riding the native
+  selector engine; a walker regression shows at ~10x), and 100k repeat
+  resolves ride the descriptor cache's steady state at the measured
+  ~70ns/hit (one WeakMap read + one parentNode compare + the record
+  alloc — the ~570x hit/miss ratio IS the cache's value measured; the
+  hit row is the tripwire for "the walk leaked into the steady state").
+  The measured audit behind the budgets: the plane's remaining
+  candidates (cached-home identity, early occupied-guard refuse,
+  shared gate rect) were explored and DECLINED as noise-scale, each
+  recorded with its rate axis in the exploration record. The end-to-end allocation
   sweep inventoried every spread/map/split/slice/pool site across the 24
   modules against the frequency axes and found no unmeasured hot
   allocator: the per-event axis rides pooled scratch end to end (forge's
