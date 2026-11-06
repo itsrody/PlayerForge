@@ -24,12 +24,16 @@ const EDITABLE_SELECTOR =
 
 /**
  * Equal-write custom-property sync onto the shell host, the one guard both
- * CSS-var mirrors run through. A setProperty on a hot style invalidates
- * (recolors) the host subtree even when the value matches, so event storms -
- * volumechange under a volume drag, visualViewport resize/scroll while the
- * URL bar collapses per frame - would pay that cost per event to no-op the
- * paint unless each prop writes only on an actual flip (measured in the
- * media-vars row this guard replaces).
+ * CSS-var mirrors run through. The engine skips a same-value setProperty
+ * outright (measured clean on 159: 375ns next to a 250ns clean read on a
+ * 4200-node tree), but a CHANGED custom property walks every inheriting
+ * descendant - ~90ns/node, ~379us over that tree - even with no consumer of
+ * the var, where a changed class/attribute costs only an element-local ~333ns.
+ * Event storms - volumechange under a volume drag, visualViewport
+ * resize/scroll while the URL bar collapses per frame - carry real flips per
+ * event, so each prop must write only on an actual flip and the compare must
+ * cost nothing the write would not (measured in the media-vars row this
+ * guard replaces; the state Map is that free compare).
  */
 function cssVarSyncer(host, specs) {
   const state = new Map();

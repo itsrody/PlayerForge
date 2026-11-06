@@ -1480,6 +1480,108 @@ re-verified all the way down; no artifact script was produced (the
 reads were full-file reads, and the committed census scripts remain
 the machine-checkable distillation).
 
+**The C++ substrate audit (Nov 2026, user-directed "deeper than operators";
+post-`23c0cb2`, record-only, one drift surfaced).** The operator audits
+proved every JS-facing call is ONE native op; this probe descends a layer
+and re-measures the load-bearing *engine-behavior premises* — what Gecko's
+C++ actually does UNDER the ops — on real Firefox 159.0.1 headless.
+Artifacts: `check/.tmp/substrate-floor-probe.mjs` (7-axis PLAN runner,
+per-axis try/catch with an in-body watchdog that always fires `done`;
+`node ... [axis ...]` filters) and its `check/.tmp/substrate-report.json`,
+plus `check/.tmp/substrate-isolate.mjs` (the harness-semantics single-taps),
+all uncommitted per sweep convention. Harness premises worth holding for
+any future floor probe: an `executeAsyncScript` body that never settles its
+`done` strands as a ScriptTimeout (a missing `done` call or a never-ending
+await — both ship as a bare timeout, not an error), so bodies ride the
+watchdog `done` belt; an abort scheduled before a postTask task starts
+prevents the task from ever running (the yield-inheritance re-probe aborts
+AFTER the park, not synchronously after scheduling); MutationObserver
+callbacks deliver at microtask checkpoints, so any count read needs a
+settle before it; and page-realm `performance.now` on this build quantizes
+coarsely, so sub-µs per-op rides many-iteration division and premise rows
+must run at a subtree scale (A was re-run at 4200 nodes) where any flush
+dominates quanta rather than contesting them. Verdicts, one per axis:
+
+- **(A) style substrate — the engine SKIPS same-value writes; custom-
+  property inheritance is the expensive axis.** On a 4200-node descendant
+  tree: clean rect read 250ns; same-value `setProperty`+read 375ns (the
+  write API call itself, no flush — same-value class-add 187ns and
+  attr-set 187ns read the same); a CHANGED custom property costs
+  ~379µs/pair (≈90ns/node — the invalidation walks every inheriting
+  descendant even with no consumer of the var), while a changed
+  class/attribute on the host costs ~333ns/pair (element-local
+  invalidation). Premise reconciliation: the shell's `cssVarSyncer`
+  docstring claims a same-value setProperty "invalidates (recolors) the
+  host subtree even when the value matches" — **contradicted on this
+  floor** (same-value ≈ clean read). The guard itself stays exactly
+  right-shaped: the Map-diff write-on-flip is what keeps the 379µs
+  value-change flush entirely off the per-event path, and a `state.get`
+  compare is free against the write's ~125ns — but the docstring's flush
+  rationale is written as an engine fact the probe now measures false
+  (docstring correction landed with user direction, post-record: the
+  comment now states the measured skip + the inherited-tree flush axis,
+  riding 3x green battery runs).
+- **(B) selector substrate — `matches()` scales linearly in list length;
+  NO hit-position discount.** list1 100ns → list15 900 → list60 2900 →
+  list120 5600 (~47ns per selector entry); a hit costs ~3000ns regardless
+  of position (hitFirst 3000 ≈ hitLast 3000 ≈ a full 60-miss scan) —
+  Gecko charges the whole list, no ordering shortcut. ANCHOR_PROBE's
+  folded-list premise holds proportionally, and the tie loop's
+  registry-order law was never engine-assisted — this confirms nothing
+  was lost by assuming it isn't.
+- **(C) layout substrate — the flush amortizes.** Clean read 250ns;
+  write+rect-read 1600ns/pair; write+2 reads 1133ns/3 ops (the second
+  read ~free — layout happens once); write+`checkVisibility` 700ns/pair
+  (flushes too, but cheaper than a rect read — no box construction).
+  ReferenceBox's one-read-per-invalidation law confirmed at substrate
+  depth: reads after the first within one invalidation window cost
+  ~nothing, so the layout-free hot path is real, and a second read in
+  the same window buys nothing extra.
+- **(D) dispatch substrate — delivery-dominated, no boundary tax.**
+  EventTarget: 0 listeners 133ns/emit; 10 → ~1233 (~110ns/listener);
+  100 → ~11400 (~114ns/listener) — dispatch cost is pure delivery,
+  linear in audience. Node dispatch (`bubbles`+`composed`): 250ns at 0
+  listeners, ~195ns/listener at 10. Dispatching ON a shadow host with an
+  empty outer audience: 250ns — no shadow-boundary crossing tax when no
+  outer listeners exist. Fan's recorded premises (delivery-dominated,
+  the zero-subscriber warm read, the audience snapshot) hold.
+- **(E) mutation substrate — per-turn coalescing is absolute; the C++
+  filter never wakes on unrelated churn.** One document-level observer +
+  one 5000-append turn = ONE callback invocation carrying all 5000
+  records; four rAF-separated turns = four invocations of 1000 each
+  (turn granularity, the shared-feed batch-per-turn premise).
+  **Filter locality: an `attributeFilter`'d subtree observer over 402,000
+  unrelated writes woke 0 times (121ms of churn), while 200 related
+  writes produced one ~1ms delivery sweep** — filtering is engine-side,
+  so container-scoped attribute observers are invisible to unrelated
+  host churn; the shared-feed premise holds.
+- **(F) scheduler substrate — honest deadlines, absolute priority, the
+  yield divergence exactly as recorded.** `postTask` delay:100ms over 30
+  sequential samples: median drift 0ms, max 2ms. A 400-task mixed burst:
+  all 200 user-visible tasks landed before the first background
+  (`firstBgIndex` 200/400) — priority honored absolutely at burst scale,
+  not probabilistically. Yield inheritance: yield called inside an
+  own-aborted task **rejects AbortError** (the runtime.js `yield_()`
+  guard recovers exactly this), and a yield parked while pending
+  **resolves** when an external abort fires after the park — the
+  two-controller shape's reason (an abort landing in/after the parked
+  yield does not reject the aligned completion) confirmed in both
+  directions.
+- **(G) sheets substrate — replaceSync propagation wins per root.** 100
+  shadow roots adopting one sheet: `replaceSync` ≈ 2µs/root;
+  per-root re-adopt of a fresh sheet ≈ 3µs/root. The inject.js
+  warmStyles parity guard's premise (re-parsing + re-adopting buys
+  nothing) holds with the measured margin — the adopt-once,
+  replace-on-upgrade shape is also the cheaper path.
+
+Sweep disposition: no src change earned adoption — every re-measured
+premise is the shape the tree already rides, except the one record drift
+surfaced (A): the cssVarSyncer docstring's "even when the value matches"
+flush claim. That correction landed on user direction (docstring-only:
+the comment now records the measured same-value skip and the real
+value-flush axis, guard shape unchanged) after 3x green full-battery
+runs (79.4/79.5/79.6s).
+
 **The redesign-class decisions (Nov 2026; user direction opened the ledger).**
 The saturation audit closed with "everything further is a redesign
 decision of its own" — this batch is that decision, taken with receipts.
