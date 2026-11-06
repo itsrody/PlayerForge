@@ -1304,6 +1304,63 @@ contain` ×2, the scroll-timeline R4 band, `@property` tokens, the
 claims. No src change earned adoption; the artifact is this record plus
 the saturation inventory script.
 
+**The C++-operators-first re-audit (Nov 2026, record-only; post-`eb2f34c`,
+  audit-clean).** The user-directed re-audit asked one question of the whole
+  tree: is every JS-facing operation already one Firefox C++/engine operation,
+  and where it is not, does the operator floor now supply the named operator?
+  Three artifacts under `check/.tmp/`, uncommitted per sweep convention:
+  `cpp-ops-census.mjs` (comment-stripped call-site census over all 23
+  modules, prior families re-derived + the new twin classes scanned),
+  `cpp-ops-floor-probe.mjs` (the candidate operator ledger evaluated in REAL
+  Firefox 159.0.1), and `cpp-ops-scanner-ab.mjs` (the ingest scanner's A/B,
+  below). **(0) The floor probe pinned the ledger** — Firefox 159 ships the
+  full modern operator surface: `Promise.withResolvers`/`Promise.try`, the
+  whole Set-integration family (`union`/`intersection`/`difference`/
+  `symmetricDifference`/`isXSubsetOf` + `isDisjointFrom`), the whole Iterator
+  helpers family, the Array copy verbs (`toSorted`/`toReversed`/`toSpliced`/
+  `with`) + `findLast`, `RegExp.escape`, `URL.parse`/`canParse`,
+  `Object.groupBy`/`hasOwn`, well-formed-string verbs, `structuredClone`,
+  `using`. Every one audited for a matching tree shape: all
+  **declined on consumer-absence** — runtime.js's one `new Promise(`
+  consumes its resolver inside the constructor (not a deferred shape; no
+  stored-resolver site exists), the tree's nine `new Set(` sites are
+  module tables or work-carrying walks (the one algebra candidate,
+  resume's `foreignIds` removal predicate, is bounded by `updatedAt`
+  comparisons, not pure membership — `Set.difference` cannot express the
+  predicate), every iteration is for-of (already the single native op;
+  helpers would ADD wrapper allocation), the three `.sort(` sites are
+  deliberate in-place (resume's 0.1Hz snapshot, cue ordering under the
+  parse budget — a copy verb is strictly more allocation), and no untrusted
+  string is ever built into a regex (the two `new RegExp(` sites assemble
+  from the module-constant `SUBTITLE_EXTS`; `RegExp.escape` has no input,
+  no twin exists). The `hasOwnProperty`-class census also came back empty —
+  every ownership probe already rides `Object.hasOwn`/`hasOwn`-gated shapes
+  from the allocation sweep. **(1) All prior saturation families re-derived
+  clean over the reverted tree** (the only src commit since the audit is
+  the readout revert — pure subtraction, no new statement that can carry a
+  loop). **(2) The ingest engine's manual scanner is the one place a
+  full C++-regexp rewrite could claim, and the A/B proved the recorded
+  verdict holds live**: the `CUE_LINE_RE`-removal docstring's history
+  (a capture-heavy regex state machine once ran over every line of every
+  block) re-applied on today's floor with one-exec twins built from the
+  corpus both engines agree byte-behavior on (0 mismatches across 38k
+  timecodes + 19k timing lines): the timing-line twin is ~3x faster at the
+  narrow unit (1ms vs 3ms / 19k lines) but that unit is ~2ms of the
+  11ms/1.1MB whole-parse tripwire, at ingest rate — once per explicit
+  subtitle load, under the file's own 50ms block budget — so the shave is
+  noise-scale on the recorded rate axes, and the twin's hybrid-gate shape
+  (an `indexOf` pre-guard to keep the regex off the 57k non-candidate
+  lines, or the twin's 8 capture-slice allocs ×19k per load) is strictly
+  more code and allocation than the landed scanner; declined, measured.
+  The timecode unit is parity (2ms vs 2ms / 38k tokens) and the
+  blank-line pre-scan twin is fused into the line walk with no separate
+  pass to claim (manual ≈ regex/`.test` per line, all sub-ms at 76k
+  lines). **(3) The two not-yet-shipped CSS operator words re-probed
+  unchanged** on 159.0.1: `corner-shape` and `interpolate-size`
+  (and `text-wrap-style: pretty`) still false — the redesign-floor
+  probe's NOT-SHIPPED set holds. No src change earned adoption; the
+  artifact is this record plus the three census/probe scripts.
+
 **The redesign-class decisions (Nov 2026; user direction opened the ledger).**
 The saturation audit closed with "everything further is a redesign
 decision of its own" — this batch is that decision, taken with receipts.
