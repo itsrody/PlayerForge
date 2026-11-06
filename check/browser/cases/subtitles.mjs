@@ -133,7 +133,7 @@ export async function run({ session, boot }) {
       return null;
     }
     const cs = getComputedStyle(slot);
-    return { top: cs.top, left: cs.left, maxWidth: cs.maxWidth, text: slot.textContent };
+    return { top: cs.top, left: cs.left, maxWidth: cs.maxWidth, textWrap: cs.textWrapStyle };
   });
   rows.push({
     name: "letterboxed stream anchors to the displayed picture",
@@ -142,6 +142,17 @@ export async function run({ session, boot }) {
       && Math.abs(parseFloat(readSlot?.maxWidth ?? "x") - 640) < 1.5
       ? "pass" : "fail",
     note: JSON.stringify(readSlot) + " (expected top=557.5px left=400px maxWidth=640px)",
+    ms: null
+  });
+  // The cue balance adoption (computed pin on the same visible slot): the
+  // sheet declares text-wrap-style: balance on .pf-cue so the centered
+  // multi-line cue rebalances its internal breaks. The row is a vocabulary
+  // presence pin, not a geometry one - balance reflows line breaks within
+  // the same line count, so the pixel-top row above is the geometry guard.
+  rows.push({
+    name: "cue text wraps balanced (text-wrap-style pin on the visible slot)",
+    status: readSlot?.textWrap === "balance" ? "pass" : "fail",
+    note: `${readSlot?.textWrap ?? "no visible slot to read"} (expected balance)`,
     ms: null
   });
 

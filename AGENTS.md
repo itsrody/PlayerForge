@@ -1339,6 +1339,34 @@ corrected: the panel and history list already ride `scrollbar-width: thin`
 + `scrollbar-color` in the sheet — that ledger entry was a miss against
 the shipped rows, caught on the dist-CSS review.)
 
+**Adopted: Balance + snap (the second redesign batch, same receipts).**
+  A shipped-sibling re-verification over the dist caught one more ledger
+  miss first: `content-visibility: auto` already rides `.pf-history-card`
+  (`contain-intrinsic-size: auto 56px`) — it never was an open item. And
+  `field-sizing` is DECLINED on a consumer-absence axis: every HUD text
+  input is flex-filled (`width: 100%`/`flex: 1`), so no unconstrained
+  auto-sizing input exists for `field-sizing: content` to change.
+  **`text-wrap-style: balance`** adopted on the two multi-line prose
+  surfaces that exist — the cue slot (`.pf-cue`, after `text-align:
+  center`) and the panel hint (`.pf-panel-hint` base arm; the
+  load-row's nested nowrap arm is unaffected by construction) — balance
+  reflows internal line breaks only, so line count/height and the
+  anchored slot geometry stay identical (the subtitles case's pixel-top
+  rows are the geometry guard and stayed whole: top=557.5px etc.;
+  computed `text-wrap-style: balance` pinned on the visible slot in a
+  new row). **`scroll-snap-type: y proximity` + `scroll-snap-align:
+  start`** adopted on the History list/cards — a rest near a card edge
+  settles it to the top edge, motion away is untouched (proximity, not
+  mandatory: the list still scrolls freely); asserted as a computed pin
+  (list snap-type + card snap-align) riding the open-panel pool stages
+  in persist.mjs, with the floor fact recorded: Firefox 159 computes
+  `y proximity` as `y` (the default strictness elides in the computed
+  form; `y mandatory` would show whole) — the row accepts both
+  serializations and documents this. Remaining open ledger:
+  pointer-anchored readouts (anchor positioning's first JS-positioned
+  consumer), header `text-box-trim` (a geometry-moving deliberate
+  decision), `zoom` density.
+
 ## 5. Conventions (the change bar)
 
 1. **Comments explain WHY with reasoning** — the rejected alternatives and
@@ -1721,7 +1749,10 @@ stop at the first failure:
   row: one nudge gesture lands `subOffset` in the tracker's entry, the
   Start-over row proving the explicit boundary writes past the drift
   epsilon, and the foreign-omission row proving a removal adoption with no
-  write-back resurrection),
+  write-back resurrection, plus the scroll-snap pin riding the open-panel
+  pool stages: the History list's computed snap-type (`y` — Firefox 159
+  elides the default proximity strictness in the computed form) and a
+  card's `snap-align: start`),
   `subtitles` (the picture-anchor case: a letterbox stage — square element
   in a taller stage — proves percent cue fields land on the displayed
   picture rect, not the layer box, with the panel drop as the real ingest
@@ -1735,7 +1766,10 @@ stop at the first failure:
   re-anchors the running slot the same frame) and the scale row, a
   >512KiB drop through the real panel path proving the cooperative
   parse (the arm the retired Worker offloader left as sole backend)
-  drains and lands its overloaded cue), `robust`
+  drains and lands its overloaded cue, and the balance pin: the visible
+  cue's computed `text-wrap-style` is exactly `balance` (vocabulary
+  presence — the pixel-top rows are the geometry guard balance must not
+  move), `robust`
   (hidden-flush without user pause - a real second tab sets the document
   hidden and the native visibilitychange flush must land the position; the
   freeze surface the row once dispatched synthetically is Chromium vocabulary

@@ -284,6 +284,32 @@ export async function run({ session, boot }) {
       note: shrink.why ?? null,
       ms: null
     });
+
+    // The scroll-snap adoption pin (rides the open panel): the list carries
+    // y-proximity snapping and the cards align to their start edge — computed
+    // reads, so a dropped or renamed declaration fails the row rather than
+    // shipping inert. No motion is asserted (proximity snap is a settle
+    // behavior, not a paint), only the vocabulary presence.
+    const snap = await session.eval(function main() {
+      const shadow = document.querySelector(".pf-shell")?.shadowRoot;
+      const list = shadow?.querySelector(".pf-history-list");
+      const card = shadow?.querySelector(".pf-history-card");
+      if (!list || !card) { return { ok: false, why: "history list or card not present" }; }
+      const cs = getComputedStyle(list);
+      const cardCs = getComputedStyle(card);
+      return {
+        ok: (cs.scrollSnapType === "y" || cs.scrollSnapType === "y proximity")
+          && cardCs.scrollSnapAlign === "start",
+        why: null,
+        snapType: cs.scrollSnapType, snapAlign: cardCs.scrollSnapAlign
+      };
+    });
+    rows.push({
+      name: "History list carries y-proximity snap, cards align start (computed pin)",
+      status: snap.ok === true ? "pass" : "fail",
+      note: JSON.stringify(snap) + " (Firefox 159 computes `y proximity` as `y` - the default strictness is elided in the computed form, `y mandatory` would show whole)",
+      ms: null
+    });
   } else {
     rows.push({
       name: "cross-tab merge re-renders the pooled History cards keeping the live node",

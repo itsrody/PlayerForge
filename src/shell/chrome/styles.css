@@ -376,6 +376,12 @@
       text-shadow: var(--pf-cue-text-shadow, 1px 1px 3px rgba(0, 0, 0, 0.9));
       white-space: pre-wrap;
       text-align: center;
+      /* Balanced cue line breaks (Firefox 159 ships text-wrap-style): the
+         centered multi-line cue reads better with even line lengths; the
+         wrap reflows internal breaks only - line count, line height and the
+         anchored slot geometry stay identical (asserted in subtitles.mjs:
+         the pixel-top rows must not move). */
+      text-wrap-style: balance;
       pointer-events: none;
       /* Slot entry/exit morph over the hidden flip (the panel's keyed
          pattern): a 3px settle-in and fade on entry, the mirrored targets
@@ -816,6 +822,9 @@
         font-size: var(--pf-font-sm);
         color: var(--pf-text-dim);
         margin: var(--pf-space-sm) 0;
+        /* Balanced two-line hint prose, same as the cue rule (the load-row
+           instance below is nowrap and unaffected). */
+        text-wrap-style: balance;
       }
 
       /* Subtitles tab - upload / remove buttons on the left, the status line
@@ -1318,6 +1327,11 @@
       /* Wheel/trackpad momentum at the ends must die inside the list, not
          rubber-band the panel (or the page behind it) once it's exhausted. */
       overscroll-behavior: contain;
+      /* Proximity snap on the history cards (Firefox 159 ships scroll-snap):
+         a rest near a card edge settles it to the top edge; motion away from
+         the edge is untouched - the list still scrolls freely like a feed,
+         it just settles cleaner. Asserted in the case that owns the cards. */
+      scroll-snap-type: y proximity;
     }
 
     .pf-history-card {
@@ -1330,6 +1344,7 @@
       background: var(--pf-surface-soft);
       content-visibility: auto;
       contain-intrinsic-size: auto 56px;
+      scroll-snap-align: start;
 
       @media (hover: hover) {
         &:hover {
