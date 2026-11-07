@@ -2106,6 +2106,112 @@ change, the toast), not a layered background pulse on the button; the
 identity finding above stands as the record of why name-selecting could
 never replace the scan it measured.
 
+**The census-premise substrate audit (Nov 2026, user-directed "explore
+firefox' C++ audit for censuses", record-only, audit-clean;
+post-`ef8393e`).** The census stage (check/stages/census.mjs) is pure
+source counting — comment-stripped literal occurrences — so its real
+premises live in the engine-behavior cells BEHIND the recorded counts
+and constants, exactly the layer the earlier substrate batches (which
+went after the kernel/boot/media planes) never descended to. Artifacts:
+`check/.tmp/census-substrate-probe.mjs` (a 5-axis PLAN runner — G0 grain,
+C1 wall-clock, C2 apply-args, C3 catch belt, C4 table units; every
+evaluated body self-contained and watchdog-belted) and
+`census-substrate-report.json`, all uncommitted per sweep convention.
+Verdicts, one per axis:
+
+- **(G0) grain — `performance.now()` quantizes to EXACTLY 1ms on this
+  floor** (re-derived live: distinct steps {1, 3, 5}ms, median/min 1ms —
+  the 3–5ms steps are scheduler hiccups, not finer grain), confirming
+  wave-2's G0 premise; every axis sizes totals ≥20× the latched grain.
+- **(C1) the wall-clock floor — `Date.now()` reads at ~36ns;
+  `performance.now()` reads at ~425ns on the page realm (12× more
+  expensive), both at exactly 1ms resolution.** The zero-timer deadline
+  class (page.js nonce/TTL + pipe idle eviction, resume staleness
+  cutoffs, the 9 `Date.now()` sites) rides the CHEAP clock at call
+  time — the measured-correct choice, not incidental; the 1ms
+  resolution is irrelevant at the class's scales (3s drift epsilon,
+  10s checkpoint, seconds-scale deadlines). The wave-2 harness
+  premise — that page-realm `performance.now` is the expensive read —
+  is now a pinned floor number.
+- **(C2) the apply-args RangeError floor on THIS engine is exactly
+  500,000 (verified at the boundary: 500000 applies, 500001 throws) —
+  the dom.js `PUSH_APPLY_LIMIT` guard (65536, sized against a V8-era
+  ~124k reading) rides at 13% of the Firefox floor.** The fast path
+  (`push.apply` under the limit) can never die under a real
+  MutationObserver batch on Firefox: the V8 reading was the
+  conservative one, and the Firefox margin is 7.6×. At limit scale the
+  fast path costs 1.9ns/record vs the index-walk fallback's 3.8ns —
+  the walk's safety premium is ~2×/record on a path that exists only
+  above 65k records.
+- **(C3) the bare-catch belt unit — a thrown-into `catch {}` cycle
+  costs ~52ns warm; the miss path (try entry, no throw) ~1.9ns.** The
+  error census's release-tail/witness classes sit under a 28× hit/miss
+  ratio: misses are engine-free at the belt's real rate, each hit is a
+  rare edge priced at ~52ns — the 7 verb-less belts' cost model is
+  measured, not assumed.
+- **(C4) module-table unit costs, all in the declared boot/
+  interaction-rate band** — `new Set(ten words)` ~54ns, an
+  `Object.hasOwn` 4-key attr walk ~20ns (~5ns/key, the measured shape
+  behind the attr-walk rows), `Map.groupBy` over a 10k-row
+  50-group-bucket shape ~83µs per construction (~8.3ns/row) — none competes with
+  a real scan; the census's "boot/interaction-rate trivial"
+  classifications hold on the floor.
+
+Sweep disposition: record-only, no src change earned adoption — every
+re-measured premise is the shape the tree already rides (the cheap
+epoch clock, the conservative apply guard, the belt cost model, the
+trivial table units). Artifact scripts under `check/.tmp/`, uncommitted
+per sweep convention.
+
+**Deepening round (same day, user direction "take on the 4 items"; the
+four axes extended in place as C1b–C4b in the same probe, record-only,
+audit-clean).** Second-round probes over the same five-axis harness,
+no src change. Verdicts:
+
+- **(C1b) the real call-site shapes land 38–41ns per check** — the
+  eviction-walk shape (one `Date.now()` read at fn top + 10 stamp
+  compares) 39ns, the merge-stamp field write (`updatedAt =
+  Date.now()`) 41ns, the per-echo staleness compare 38ns. Derived duty
+  budgets: the 4Hz checkpoint drive spends ~40ns per 250ms (0.016%);
+  a 1000-echo storm spends ~40µs total against the 400ms window
+  (0.01%). The class rides the cheap clock in its cheapest shape —
+  one read amortized over the whole check, never per compare.
+- **(C2b) the guard's limit operates on RECORD count, not record
+  payload — two live batches on the real engine decide it.** Fragment
+  hydration of 70,000 nodes delivers as ONE coalesced childList record
+  whose `addedNodes` carries the whole count: `records.length` = 1, the
+  fast path drains it for free (`applyFastPath65535` = 1.9ns/record;
+  the walk's safety premium holds at 3.8ns/record on plain-array
+  object-record sources). Individual `appendChild` calls in one task
+  (70,000 of them — the E-axis per-append precedent scaled) reach
+  `records.length` = 70,000: the WALK arm engages on a real batch and
+  drains all 70,000 records intact in ~6ms — correct, not merely safe.
+  Engine note: this refines the shell-substrate E-axis premise —
+  its per-append-records shape holds for a loop of separate append
+  calls; a whole DocumentFragment append coalesces into one record
+  with multi-node `addedNodes` (the feed's downstream pipes walk
+  `addedNodes`, so the payload survives either record shape).
+- **(C3b) the belt's edge shapes: depth-5 unwind ~200ns/cycle, and the
+  fresh-code cold reading is an honest UPPER BOUND ~2µs/cycle**
+  (fresh `new Function` parse+compile amortized into the throw —
+  subtraction-based cold estimates proved meaningless: a no-capture
+  arrow's allocation is elided on discard, so a create-only baseline
+  measured ABOVE create+call). Warm ~52ns (C3); the rare-edge price
+  holds to ~2µs at the absolute coldest credible fire.
+- **(C4b) the tables at TREE scale: AD vocabulary `Set(11)` ~194ns**
+  (longer strings hash slower than the generic ten-word probe's
+  ~54ns), **resume's `Map.groupBy` at real bounds** — ~19µs per merge
+  at 500 entries, ~85µs at 2000 (~40ns/entry on real path-string
+  keys) — and the config schema's 30-row derive loop ~780ns. All
+  boot/interaction-rate; the merge-path window (one groupBy per
+  foreign-write merge) is within microseconds at the store's real
+  entry bound, never a hot path.
+
+Deepening disposition: record-only, no src change earned adoption —
+every axis lands on the shape already shipped; the one NEW engine fact
+(C2b's fragment record coalescing) refines the XML-mutation-batch
+premise recorded for the shared feed without moving any src claim.
+
 ## 5. Conventions (the change bar)
 
 1. **Comments explain WHY with reasoning** — the rejected alternatives and
@@ -2598,6 +2704,7 @@ two post-close record-only audits: the allocation drift re-audit and the
 native-operator saturation audit (post-`75437f2`, the probe batch), then
 the substrate series (C++ `20b07da`, kernel-plane `ea5a8f1`, shell-plane
 `5479871`) and the native-replacement wave-2 probe (post-`5479871`,
+record-only), then the census-premise substrate audit (post-`ef8393e`,
 record-only). The
 series'
 record-only commits changed
