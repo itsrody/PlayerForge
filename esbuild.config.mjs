@@ -113,12 +113,14 @@ function buildManifest() {
       "96": "icon.svg"
     },
     // "storage" backs the store plane; "<all_urls>" is the host permission
-    // the background fetch relay rides (the package's one network egress);
-    // "webRequest" is the background ledger's OBSERVE-only surface - the
-    // media hint never blocks or rewrites a request, so no
-    // webRequestBlocking ever joins (a blocking grant would be a redesign
-    // decision of its own).
-    permissions: ["storage", "webRequest", "<all_urls>"],
+    // the background fetches ride (the subtitle relay + the ledger's
+    // manifest-ingest fallback); "webRequest" is the background ledger's
+    // observation surface; "webRequestBlocking" is Reforge's execute arm
+    // (batch 3): the roster's claim answers ride it - a {rewrite} claim
+    // serves text through filterResponseData, a {reload} claim redirects
+    // to the roster's freshest capture. The re-grade's product reason IS
+    // the reforge port; the testimony rides the census + probe B.
+    permissions: ["storage", "webRequest", "webRequestBlocking", "<all_urls>"],
     content_scripts: [
       {
         // The frame model's full reach: every frame of every page, top and
@@ -190,14 +192,14 @@ function verifyManifest(manifest) {
   if (!manifest.permissions.includes("storage") || !manifest.permissions.includes("<all_urls>")) {
     throw new Error("manifest: storage + <all_urls> host permission missing");
   }
-  // Observe-only posture: webRequest listens, nothing blocks. webRequestBlocking
-  // in the list would make the match-all content plane's observation grant a
-  // blocking power the ledger never uses and the census cannot audit.
+  // The reforge posture (batch 3): webRequest listens AND the execute arm
+  // claims through webRequestBlocking (probe B proved the lever on 159).
+  // webRequestBlocking absent would strand the roster's claim answers.
   if (!manifest.permissions.includes("webRequest")) {
     throw new Error("manifest: webRequest observation permission missing");
   }
-  if (manifest.permissions.includes("webRequestBlocking")) {
-    throw new Error("manifest: webRequestBlocking must never ship (observe-only posture)");
+  if (!manifest.permissions.includes("webRequestBlocking")) {
+    throw new Error("manifest: webRequestBlocking missing - the reforge execute arm's claim lever (probe B)");
   }
   if (!manifest.background?.scripts?.includes("background.js")) {
     throw new Error("manifest: background page missing");

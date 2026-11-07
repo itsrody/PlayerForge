@@ -136,13 +136,23 @@ re-graded in the same commit, never bumped alone):
    sole veto (unknown verdicts on the latched frame go presumed-protected,
    new records refused). The execute arm (`webRequestBlocking`) rides batch
    3 exactly as planned.
-3. **The execute arm** — `webRequestBlocking` joins the manifest permission
-   set and the background listener farm answers claims with redirect
-   (`reload` claim shape) and `filterResponseData` (`rewrite` claim shape);
-   the census row that pinned `webRequestBlocking must NEVER ship` re-grades
-   to shipped-then-by-name in the same commit — reforge IS that re-grade's
-   product reason. `dist/extension/manifest.json` is build-derived; the
-   permission change rides the build config with its census why.
+3. **The execute arm (SHIPPED — this batch)** — `webRequestBlocking` joined
+   the manifest permission set via the build config and the SAME one
+   `onBeforeRequest` listener grew the manifest claim question: an armed
+   claim source answers `{reload: url}` with a one-shot `redirectUrl` to
+   the roster's freshest capture, or `{rewrite: {text}}` with a
+   `filterResponseData` serve (probe B's measured semantics — the page
+   reads pinned bytes while status/headers ride the real response); null
+   rides native. The first-seen manifest sighting ABSORBS through a
+   pass-through filter — the page's own request is the transport and the
+   roster stamps the verdict from the real body with zero extra egress —
+   so the batch-2 fetch ingest COLLAPSED to the failure fallback only.
+   The census row that pinned `webRequestBlocking must NEVER ship`
+   re-graded to shipped-by-name in the same commit — reforge IS that
+   re-grade's product reason. `dist/extension/manifest.json` is
+   build-derived; the permission change rides the build config with its
+   census why. Claims stay UNARMED until batch 4 (the shipped default
+   source is null — nothing about any page changes silently).
 4. **EnhanceSession + the controls** — the claim policy surface
    (`enhancer.<id>` dotted configs; `ENHANCE_CONTROLS`) lands on the
    background with the settings schema rows and the panel's Reforge group
@@ -275,11 +285,12 @@ those hosts): the subtitle `loadFromUrl` path's one relay fetch inside
 `src/background/relay.js` (single-flight, `AbortSignal.timeout`,
 body drained before the reply — the user-supplied-URL cross-origin leg),
 and — the reforge port's claim composition — the ledger's single-flight
-manifest ingest (`fetch(fileUrl)`, the background fetching the body of a
-manifest family it already witnessed; probe C measured
-`filterResponseData` unavailable without `webRequestBlocking`, so there
-is no observe-only body read — fetching what was classified is the whole
-ingest story; one `parseHlsPlaylist`/`manifestVerdict` consumer inside
+manifest ingest (`fetch(fileUrl)`), now the FAILURE FALLBACK only: batch 3's
+`webRequestBlocking` grant opened the filter seam, so a manifest family's
+first sighting rides the page's own request through the execute arm's
+pass-through `filterResponseData` (the roster stamps the verdict with zero
+extra egress), and this fetch re-arms only when that body never landed
+(one `parseHlsPlaylist`/`manifestVerdict` consumer inside
 `ledger.js` = the witness voucher). No page-context egress: zero
 websocket/EventSource/`sendBeacon`/XHR; zero `.src =`/`srcset`/
 `createObjectURL` and script/iframe/img/track/link element creation —
@@ -765,21 +776,29 @@ iframes, same-origin and cross-origin (`all_frames: true`,
   directly (`tabs.sendMessage` delivers only to the calling extension's own
   content scripts).
 - **ledger.js** — the Reforge witness floor: the webRequest observation
-  ledger (observe-only today; the `webRequestBlocking` execute lever joins
-  THIS farm when its re-grade batch lands — Probe B proved the lever live
-  on 159, and the reforge port IS the re-grade's product reason), one
-  frame-targeted hint to the frame that carried media traffic, and the
-  per-(tab, frame) family records the roster's witness floor holds — every
-  media/xhr request classified through the plane's vocabulary, the hint
-  carrying the classified shape. The claim composition (batch 2) hangs here
-  too: a manifest record ingests its own body ONCE (single-flight per
-  roster identity, `BODY_READ_CAP`-bounded, feeding tables.js's
-  `parseHlsPlaylist`/`manifestVerdict`) and stamps `verdict` + parse facts;
-  `latchDrm` receives the content realm's DRM veto (the `DRM_LATCH` arm on
-  the relay's one receiver) — unknown-verdict manifests on the latched
-  (tab, frame) go presumed-protected, body evidence outranks the page
-  context, and new records for a latched frame are refused outright; the
-  census's second fetch lives here.
+  ledger whose ONE `onBeforeRequest` listener carries the whole execute
+  arm (batch 3): `["blocking"]` rides the same navigation
+  invalidation (main_frame clears the tab, sub_frame clears the frame,
+  `tabs.onRemoved` drops it), and the manifest family's request edge
+  answers the claim question — an armed claim source (setClaimSource;
+  batch 4's EnhanceSession is the intended installer, shipped default
+  null) gets (method, url, record) and answers a one-shot `redirectUrl`
+  (`reload` shape, the roster's freshest capture) or a `filterResponseData`
+  serve (`rewrite` shape — the page reads pinned bytes while status,
+  headers and content-type ride the real response, probe B's measured
+  semantics); null rides native. A first-seen manifest (no verdict yet)
+  ABSORBS through a pass-through filter instead — the page's own request
+  is the transport, the roster stamps the verdict from the real body,
+  zero extra egress. The fetch ingest (single-flight per roster identity,
+  `BODY_READ_CAP`-bounded, feeding tables.js's
+  `parseHlsPlaylist`/`manifestVerdict`, stamping `verdict` + parse facts)
+  remains as the FAILURE fallback only; `latchDrm` receives the content
+  realm's DRM veto (the `DRM_LATCH` arm on the relay's one receiver) —
+  unknown-verdict manifests on the latched (tab, frame) go
+  presumed-protected, body evidence outranks the page context, and new
+  records for a latched frame are refused outright; the census's second
+  fetch lives here, and the filterRewrites census row counts its two
+  honest occurrences in one arm.
 
 ### kernel/ — policy layer
 - **contract.js** — the shared vocabulary both layers import in isolation:
@@ -2754,12 +2773,15 @@ stop at the first failure:
    why-docstring: a red row is answered by updating the gate's expect **and**
    the AGENTS.md census in the same commit, with the change's why — never by
    bumping the number alone. The error-path A→Z sweep classified every
-   throw/catch under comment-stripped src (6 throws, 34 catches) into
+   throw/catch under comment-stripped src (6 throws, 34 catches, now
+   joined by the reforge execute arm's ledger catches) into
    eight named classes, each with its why: **throw-through** (media's
    play/PiP rethrow non-benign after the AbortError/NotAllowedError
    filter — callers own a failure surface), **release-tail bare
    catches** (panel-section destroy loop, MediaSession destroy belt,
-   forge's two pointer-lift races — teardown must complete, not report),
+   forge's two pointer-lift races, and — reforge batch 3 — the ledger
+   filter's onstop close-time race and onerror disconnect bookkeeping —
+   teardown must complete, not report),
    the **Scope isolation site** (`#runDisposer`: catch-log-never-rethrow,
    the only machine given that verb), **witness-absence fallbacks**
    (shouldSkipUrl's belt-owns-the-contract, discovery's rect
@@ -2786,9 +2808,12 @@ stop at the first failure:
    model), the 24-pattern strict `exclude_matches` surface
    (globs/double-CSS injection fail loudly — no new injection surfaces
    join silently), the permission set (`storage` = the whole store plane,
-   `<all_urls>` host permission = the background relay's one fetch,
-   `webRequest` = the ledger's observe-only hint; `webRequestBlocking`
-   must NEVER ship), `content.js` the lone content script riding the
+   `<all_urls>` host permission = the background fetches,
+   `webRequest` = the ledger's observation floor, `webRequestBlocking` =
+   the reforge execute arm's claim lever — probe B proved the redirect +
+   `filterResponseData` claims live on the 159 floor; the observe-only
+   zero-row re-graded shipped-by-name with the execute batch),
+   `content.js` the lone content script riding the
    classic-loader split (kernel.js dynamic-imports shell.js through a
    shared chunk — two store singletons in one realm would fork the
    storage echo contract), a persistent background page (the awaited

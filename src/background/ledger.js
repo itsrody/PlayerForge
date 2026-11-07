@@ -25,20 +25,36 @@ import {
  * rostered (the recovered branch's ignore-by-design class: per-segment
  * rostering floods the records on an ABR page).
  *
- * THE INGEST ARM (batch 2, probe-decided): a manifest record fetches its
- * own body ONCE - the background page's fetch rides the <all_urls> host
- * permission (the relay's grant applied to the manifest family; a
- * content-side fetch would inherit the page's CORS, the same wall the
- * subtitle relay exists to bypass), caps at BODY_READ_CAP, and feeds
- * tables.js's parser + verdict. Probe C's red verdict settled the route:
- * `filterResponseData` does NOT exist without `webRequestBlocking`, so
- * there is no observe-only body read alongside these headers - re-fetching
- * what the witness classified is the whole ingest story. Single-flight per
- * family key (Map<key, promise>) bundles the ABR token-rotation burst (a
- * master request races its token-refreshed re-request) into one fetch, and
- * an attempted latch keeps the record from re-fetching on every segment
- * witness of the same manifest for the document's lifetime; navigation
- * clears the records and re-arms the attempt naturally.
+ * THE INGEST ARM (batch 2, probe-decided; batch 3 collapsed it into the
+ * page's own traffic): a manifest family's FIRST sighting rides a
+ * pass-through `filterResponseData` capture - the page reads its native
+ * bytes (the Network row stays real), the roster stamps the verdict from
+ * the real body, and NO second GET exists: probe C's red verdict killed
+ * the observe-only body read WITHOUT blocking, and batch 3's
+ * `webRequestBlocking` grant (probe B proved the lever) opened the filter
+ * seam the collision always wanted. The batch-2 fetch ingest remains as
+ * the FAILURE fallback only (the filter failed or died unle witnessed):
+ * single-flight per roster identity bundles token-rotation bursts, an
+ * attempt is done-once per record lifetime, failures settle verdict
+ * "unknown" - never a retry loop.
+ *
+ * THE EXECUTE ARM (batch 3): the SAME onBeforeRequest listener grew the
+ * claim question for manifest families. A claim source (setClaimSource;
+ * batch 4's EnhanceSession is the intended installer) is asked
+ * (method, url, record) and answers:
+ *   - `{ rewrite: { text } }` - the body filter serves OUR text:
+ *     the page reads the pinned bytes while status, headers and
+ *     content-type ride the real response (probe B's measured serve
+ *     semantics - the Network row exists and the real request completes);
+ *   - `{ reload: url }` - one-shot redirectUrl to the roster's freshest
+ *     capture: the page's request redirects transparently to the fresh
+ *     spelling (its token-rotation sibling), the fresh bytes arrive under
+ *     the target's own response facts, and the request row stays real;
+ *   - null - the native ride (first-seen manifests absorb instead of
+ *     claiming; a stale-verdict record rides native).
+ * The source belts its own throw (the branch's decideRequest contract); a
+ * null source (the shipped default until batch 4) means nothing about any
+ * page changes silently.
  *
  * THE DRM LATCH (the records' sole veto, batch 2): a realm whose document
  * fed an EME-protected stream sends one DRM_LATCH message (the passive
@@ -65,6 +81,19 @@ import {
  *  makes that the map's tail). */
 const FAMILY_BOUND = 64;
 
+/** Pull the captured chunks into one BODY_READ_CAP-bounded buffer (the
+ *  absorb state's chunks are ArrayBuffers; the roster's decoder needs
+ *  one contiguous view). One scratch pass per absorbed manifest. */
+function mergeChunks(chunks, total) {
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(new Uint8Array(chunk), offset);
+    offset += chunk.byteLength;
+  }
+  return merged;
+}
+
 /** The verdict vocabulary riding records: "clear" (AES-128 / keyless /
  *  decryptable by an external player), "protected" (SAMPLE-AES /
  *  ContentProtection / clearkey-needed - the ignore-by-design class),
@@ -88,10 +117,29 @@ export class NetHintLedger {
    *  DRM_LATCH message). Cleared at the same navigation boundaries and
    *  tab drop as the records. */
   #latched = new Map();
+  /** requestId -> filter state: the manifest body filter's per-request
+   *  bookkeeping (absorb mode captures the body for the roster; serve
+   *  mode holds a claim's rewrite). Entries die at the filter's own
+   *  stop/error; a race-clear at main_frame is harmless (the stamp on a
+   *  detached record object writes an unlinked object). */
+  #filters = new Map();
+  /** The claim source (batch 4's EnhanceSession installs): (method, url,
+   *  record) -> { rewrite: { text } } | { reload: url } | null. Belts
+   *  its own throw per the decideRequest contract. */
+  #claimSource = null;
+
+  /** The execute arm's claim hook. Batch 4's EnhanceSession is the sole
+   *  intended installer; the shipped default (null) rides every request
+   *  native. */
+  setClaimSource(source) {
+    this.#claimSource = typeof source === "function" ? source : null;
+  }
 
   install() {
     // Invalidation rides the two request types that MEAN navigation, so
-    // hint freshness is event-driven all the way down.
+    // hint freshness is event-driven all the way down; the blocking
+    // extra (reforge batch 3) is what lets the SAME listener answer the
+    // manifest claim question synchronously.
     browser.webRequest.onBeforeRequest.addListener((details) => {
       if (details.tabId === -1) {
         // Non-tab traffic (this page's own requests, devtools) owns no
@@ -107,7 +155,8 @@ export class NetHintLedger {
         this.#families.get(details.tabId)?.delete(details.frameId);
         this.#latched.get(details.tabId)?.delete(details.frameId);
       }
-    }, { urls: ["<all_urls>"] });
+      return this.#claimManifest(details);
+    }, { urls: ["<all_urls>"] }, ["blocking"]);
 
     // media / xhr: the <video> element's own src loads + the MSE/xhr
     // streaming routes both land in this set; a document/html content-type
@@ -130,6 +179,161 @@ export class NetHintLedger {
         }
       }
     });
+  }
+
+  /** The claim question at the manifest family's request edge (execute
+   *  arm, reforge batch 3). Non-manifest families and non-tab traffic
+   *  ride native. First-seen manifests (no record, or a verdict-less
+   *  one whose fetch ingest never landed) absorb through the body
+   *  filter instead of claiming - the page's own request supplies the
+   *  body. An ingested manifest met by an armed claim source answers
+   *  per the claim contract above; the source's own belt stands (its
+   *  throw is its contract, the native ride degrades nothing here). */
+  #claimManifest(details) {
+    if (details.type !== "media" && details.type !== "xhr") {
+      return {};
+    }
+    if (typeof browser.webRequest.filterResponseData !== "function") {
+      // The lever is manifest-floor fact (probe B with the blocking
+      // grant, probe C without); a floor that loses it rides native.
+      return {};
+    }
+    const byUrl = classifyUrl(details.url);
+    if (!byUrl || byUrl.family !== "manifest") {
+      return {};
+    }
+    const url = URL.parse(String(details.url ?? ""));
+    const familyKey = url ? url.origin + url.pathname : String(details.url ?? "");
+    const tabId = details.tabId;
+    const record = this.#families.get(tabId)?.get(details.frameId)?.get(familyKey) ?? null;
+    const armed = this.#claimSource !== null;
+    if (armed && record && "verdict" in record && record.verdict !== "unknown") {
+      const claim = this.#claimSource(details.method ?? "GET", details.url, record);
+      if (claim) {
+        if (typeof claim.reload === "string" && claim.reload) {
+          return { redirectUrl: claim.reload };
+        }
+        if (claim.rewrite && typeof claim.rewrite.text === "string") {
+          this.#interpose(details, {
+            mode: "serve",
+            familyKey,
+            text: claim.rewrite.text
+          });
+          return {};
+        }
+      }
+      return {};
+    }
+    if (!this.#filters.has(details.requestId)) {
+      // First-seen (or a body-less retry) manifest: absorb. The page's
+      // own request is the transport - the filter captures, echoes
+      // native bytes through unchanged, and the roster stamps the
+      // verdict from the real body.
+      this.#interpose(details, { mode: "absorb", familyKey });
+    }
+    return {};
+  }
+
+  /** The one body seam (the census's filterRewrites row): pass-through
+   *  capture for absorb mode (the page reads its native bytes - the
+   *  roster witnesses without a second GET), byte substitution for serve
+   *  mode (probe B's measured semantics: OUR bytes, the real response's
+   *  status/headers/content-type). The BODY_READ_CAP bounds capture
+   *  memory; echoing never caps (the page gets everything it asked
+   *  for). */
+  #interpose(details, state) {
+    state.tabId = details.tabId;
+    state.record = null;
+    state.chunks = [];
+    state.size = 0;
+    this.#filters.set(details.requestId, state);
+    try {
+      const filter = browser.webRequest.filterResponseData(details.requestId);
+      filter.ondata = (event) => {
+        if (state.mode === "absorb") {
+          filter.write(event.data);
+          if (state.size < BODY_READ_CAP) {
+            state.chunks.push(event.data);
+            state.size += event.data.byteLength;
+          }
+        }
+        // serve mode writes at onstop only: the native stream is
+        // swallowed whole and OUR bytes are the single body the page
+        // reads.
+      };
+      filter.onstop = () => {
+        try {
+          if (state.mode === "serve" && state.text) {
+            filter.write(new TextEncoder().encode(state.text));
+          }
+          filter.close();
+        }
+        // The close-time race (the request already ended) is the
+        // release-tail class: the page's response finished; nothing
+        // the roster can recover is behind the throw.
+        catch {}
+        this.#filterSettled(details.requestId, state, false);
+      };
+      filter.onerror = () => {
+        try {
+          filter.disconnect();
+        }
+        // Same release-tail class - the filter already reported the
+        // failure; disconnecting is bookkeeping.
+        catch {}
+        this.#filterSettled(details.requestId, state, true);
+      };
+    } catch {
+      // The seam's availability guard (probe C measured the API's
+      // existence as the permission's product) - a throw here rides
+      // native: the roster keeps its record and the fetch ingest path
+      // remains the fallback.
+      this.#filters.delete(details.requestId);
+    }
+  }
+
+  /** The filter's settled edge: a successful absorb stamps the roster
+   *  from the real body; a failed one re-arms the result-fallback fetch
+   *  ingest. Serve mode never stamps (the roster record is the claim's
+   *  own source). */
+  #filterSettled(requestId, state, failed) {
+    this.#filters.delete(requestId);
+    if (state.mode !== "absorb") {
+      return;
+    }
+    const record = state.record;
+    if (!record) {
+      // The headers stage never paired this request with a record (an
+      // aborted request, a non-media type): nothing to stamp.
+      return;
+    }
+    if (failed) {
+      if (!("verdict" in record)) {
+        this.#ingestManifest(state.tabId, record);
+      }
+      return;
+    }
+    if (state.size > 0 && !("verdict" in record)) {
+      const body = new TextDecoder().decode(mergeChunks(state.chunks, state.size));
+      this.#stampManifest(record, body);
+    }
+  }
+
+  /** The manifest stamp: parse + verdict + facts, the ONE body-vocabulary
+   *  reader both ingest arms share. */
+  #stampManifest(record, body) {
+    const parsed = record.kind === "dash"
+      ? null
+      : parseHlsPlaylist(body, record.url);
+    record.verdict = manifestVerdict(record.kind, parsed, body);
+    if (record.kind === "hls" && parsed?.kind === "master") {
+      record.variantCount = parsed.variants.length;
+      record.topVariant = parsed.variants[0]?.uri ?? null;
+    } else if (record.kind === "hls" && parsed?.kind === "media") {
+      record.segmentCount = parsed.segmentCount;
+      record.live = parsed.live;
+      record.keyMethod = parsed.keyMethod;
+    }
   }
 
   #onHeaders(details) {
@@ -222,6 +426,15 @@ export class NetHintLedger {
       existing.url = url.href;
       records.delete(key);
       records.set(key, existing);
+      const pending = this.#filters.get(details.requestId);
+      if (pending) {
+        pending.record = existing;
+      } else if (family === "manifest" && !("verdict" in existing)) {
+        // A verdict-less refresh (the first-seen filter died unseen, an
+        // unknown-verdict fetch ingest never fired): the fallback fetch
+        // re-arms at the next sighting.
+        this.#ingestManifest(details.tabId, existing);
+      }
       return;
     }
     // The DRM latch vetoes NEW records for a latched frame outright: the
@@ -238,19 +451,27 @@ export class NetHintLedger {
       records.delete(oldest);
     }
     if (family === "manifest") {
+      const pending = this.#filters.get(details.requestId);
+      if (pending) {
+        // The first-seen absorb is already capturing this request's
+        // body - the page's own traffic is the transport, and a second
+        // GET would be the double-fetch the absorb exists to prevent.
+        pending.record = record;
+        return;
+      }
       this.#ingestManifest(details.tabId, record);
     }
   }
 
-  /** The manifest ingest arm: fetch the record's own body once, parse it
-   *  through tables.js, and stamp the verdict + parse facts on the
-   *  record. Single-flight per roster identity - the key is
-   *  origin + pathname (#recordFacts's identity, not the full URL), so
-   *  the ABR page's token-rotated re-request of the same manifest lands
-   *  in the one in-flight promise instead of racing a second fetch. The
-   *  attempt is done-once per record lifetime: every failure settles
-   *  verdict "unknown" (never a retry loop) and navigation clears the
-   *  records wholesale, which re-arms the attempt naturally. */
+  /** The manifest ingest FALLBACK (execute arm deployed): the fetch leg
+   *  runs only when the page's own body never landed through the filter
+   *  (an un-witnessed death, a rare non-GET shape). Single-flight per roster
+   *  identity - the key is origin + pathname (#recordFacts's identity,
+   *  not the full URL), so the ABR page's token-rotated re-request of
+   *  the same manifest lands in the one in-flight promise instead of
+   *  racing a second fetch. The attempt is done-once per record
+   *  lifetime: every failure settles verdict "unknown" (never a retry
+   *  loop) and navigation clears the records wholesale. */
   #ingestManifest(tabId, record) {
     const url = URL.parse(record.url);
     const familyKey = url ? url.origin + url.pathname : record.url;
@@ -268,18 +489,7 @@ export class NetHintLedger {
           record.verdict = "unknown";
           return;
         }
-        const parsed = record.kind === "dash"
-          ? null
-          : parseHlsPlaylist(body, fileUrl);
-        record.verdict = manifestVerdict(record.kind, parsed, body);
-        if (record.kind === "hls" && parsed?.kind === "master") {
-          record.variantCount = parsed.variants.length;
-          record.topVariant = parsed.variants[0]?.uri ?? null;
-        } else if (record.kind === "hls" && parsed?.kind === "media") {
-          record.segmentCount = parsed.segmentCount;
-          record.live = parsed.live;
-          record.keyMethod = parsed.keyMethod;
-        }
+        this.#stampManifest(record, body);
       } catch {
         // The bounded-failure contract (relay.js's own shape): every
         // failure is a result state, never a retry loop - verdict

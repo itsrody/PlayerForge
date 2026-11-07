@@ -4,7 +4,8 @@
  * Builds the shipping extension and validates what the browser (and the
  * check's own browser stage) rely on: the manifest parses and carries the
  * frame model's contract (all frames, document_start, the exclusion
- * platform floor, the storage + webRequest-observe + host permissions),
+ * platform floor, the storage + webRequest(+Blocking, the reforge execute
+ * arm) + host permissions),
  * the three script bundles match their kind (the kernel/shell entries are
  * ESM build output with code splitting - the shell lazy-loads through the
  * kernel's dynamic import - and background.js is IIFE build output of
@@ -142,8 +143,8 @@ export async function run() {
     if (!manifest.permissions?.includes("webRequest")) {
       fails.push({ name: "webRequest permission", note: "missing - the background ledger's media-hint observation is the only webRequest surface" });
     }
-    if (manifest.permissions?.includes("webRequestBlocking")) {
-      fails.push({ name: "webRequestBlocking", note: "must never ship - the observe-only posture: the hint never blocks or rewrites a request" });
+    if (!manifest.permissions?.includes("webRequestBlocking")) {
+      fails.push({ name: "webRequestBlocking", note: "missing - the reforge execute arm rides it (batch 3): the roster's claim answers serve text through filterResponseData and redirect to the freshest capture; probe B proved the lever live on the 159 floor" });
     }
     if (cs && cs.js?.join(",") !== "content.js") {
       fails.push({ name: "content script list", note: "must be exactly [content.js] - the classic loader that imports the kernel module" });

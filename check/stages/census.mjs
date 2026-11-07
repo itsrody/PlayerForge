@@ -144,8 +144,8 @@ const ROWS = [
   {
     name: "bare catch blocks",
     pattern: "catch {}",
-    expect: 8,
-    why: "the verified-empty-catch belt: each one swallows a named-throwaway failure on purpose (the entry ad-host skip probe, the two forge pointer-capture lift races, the ui icon parse belt, the media session release/metadata writes, the shell section-destroy loop, the runtime debug-rail mirror) - a new bare catch needs its own named why in the record"
+    expect: 10,
+    why: "the verified-empty-catch belt: each one swallows a named-throwaway failure on purpose (the entry ad-host skip probe, the two forge pointer-capture lift races, the ui icon parse belt, the media session release/metadata writes, the shell section-destroy loop, the runtime debug-rail mirror, and - reforge batch 3 - the ledger's two filter release-tail catches: the onstop close-time race where the page's response already finished, and the onerror disconnect bookkeeping where the filter already reported the failure; each why rides the comment above the catch) - a new bare catch needs its own named why in the record"
   },
   {
     name: "Date.now reads",
@@ -166,7 +166,7 @@ const ROWS = [
     name: "fetch calls",
     pattern: "fetch(",
     expect: 2,
-    why: "the package's two network egresses, both background-plane fetches riding the <all_urls> host permission (a content-side fetch would ride the page's CORS): relay.js's single relayed text GET (AbortSignal.timeout, body drained inside the handler before the reply) and - reforge batch 2 - ledger.js's single-flight manifest ingest, the background fetching the body of a manifest family it already witnessed (probe C measured filterResponseData unavailable without webRequestBlocking, so there is no observe-only body read; fetching what was classified is the whole ingest story). A return to one is a claim-plane regression, not a cleanup"
+    why: "the package's two network egresses, both background-plane fetches riding the <all_urls> host permission (a content-side fetch would ride the page's CORS): relay.js's single relayed text GET (AbortSignal.timeout, body drained inside the handler before the reply) and - reforge batch 2, re-scoped by batch 3 - ledger.js's single-flight manifest ingest, now the FAILURE FALLBACK only: a manifest family's first sighting rides the page's own request through the execute arm's pass-through filter (no second GET), and this fetch re-arms only when that body never landed (an un-witnessed filter death). Probe C measured filterResponseData unavailable without webRequestBlocking - with the blocking grant landed (probe B), the absorb is free and the fetch is the belt. A return to one means the absorb arm died"
   },
   {
     name: "GM vocabulary (src)",
@@ -186,20 +186,27 @@ const ROWS = [
     expect: 6,
     why: "the six runtime/tabs senders: store.js requestText (content -> background relay), popup.js (pages -> the active tab's commander), the ledger's one hint send (background -> the frame that carried media traffic, frame-targeted), the background's command arm (the debug handle's pfCommand relayed over the popup's exact tabs.sendMessage hop - a cross-extension caller structurally cannot make that call, tabs.sendMessage delivers only to the calling extension's own content scripts), the debug handle's one runtime.sendMessage (content -> background, the same chrome only triggers in debug mode), and - reforge batch 2 - the DRM latch's one runtime.sendMessage (entry.js, content -> background, the passive `encrypted` listener's per-realm one-shot veto)"
   },
-  // The background ledger's observe-only webRequest floor: two listeners +
-  // one tab-drop hook, the whole uBO-grade substrate the hint plane rides.
-  // Blocking (webRequestBlocking) is pinned absent at the manifest.
+  // The background ledger's webRequest floor: two listeners + one tab-drop
+  // hook + the reforge execute arm's one filterResponseData seam (batch 3).
+  // The blocking grant is shipped by name (see the manifest pins at the
+  // bundle gate) and the claim answers ride the SAME one onBeforeRequest.
   {
     name: "webRequest navigation hooks",
     pattern: "onBeforeRequest",
     expect: 1,
-    why: "the ledger's one navigation hook: main_frame clears the tab's hinted set, sub_frame clears the frame's entry - hint freshness is event-driven all the way down (the zero-timer pipeline holds in the background plane), no second observer and no clock joins"
+    why: "the ledger's one navigation hook grown into the execute arm (reforge batch 3): navigation invalidation (main_frame clears the tab, sub_frame clears the frame) PLUS the manifest claim question - a {rewrite} claim interposes the body filter, a {reload} claim answers redirectUrl with the roster's freshest capture. Blocking extra rides the same listener; no second observer and no clock joins"
+  },
+  {
+    name: "webRequest filterRewrites",
+    pattern: "filterResponseData",
+    expect: 2,
+    why: "the execute arm's body plane (reforge batch 3), counted honestly on its two occurrences in ONE arm: the availability witness inside #claimManifest (probe C measured the API's existence itself as the permission's product - a floor that loses it rides native) and the one interpose seam #interpose drives. The first-seen manifest sighting ABSORBS through a pass-through filter (the page reads native bytes, the roster stamps the verdict from the real body - the ingest fetch collapses to the failure fallback), and an armed claim answer serves its rewrite the same way (probe B measured the serve semantics on 159: page reads pinned bytes, status/headers/content-type ride the real response). A third occurrence is a second interception surface the census cannot audit"
   },
   {
     name: "webRequest media observers",
     pattern: "onHeadersReceived",
     expect: 1,
-    why: "the ledger's one response observer: media/xhr requests in all frames, answering a video/audio content-type with ONE frame-targeted hint (contract's NET_HINT) - observation only, never blocking, no rewrite, no second sniffing surface"
+    why: "the ledger's one response observer: media/xhr requests in all frames, answering a video/audio content-type with ONE frame-targeted hint (contract's NET_HINT) - observation only; the blocking surfaces are the execute arm's own"
   },
   {
     name: "tabs.onRemoved hooks",
