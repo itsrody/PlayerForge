@@ -86,6 +86,22 @@ Two premises were floor-probed before any port batch (both temp addons under
   farm covers every carrier (fetch, XHR, element src, MSE) with no
   content-realm wrap anywhere.
 
+- **Probe C — the observe-only body read (the claim composition's ingest
+  route).** RED, and the red verdict is the decision: with permissions
+  `[\"webRequest\", \"<all_urls>\"]` (NO `webRequestBlocking`),
+  `browser.webRequest.filterResponseData` does not exist — the background's
+  own notes read `filterOk: 0, filterError: "filterResponseData is not a
+  function"` while the page's bodies stayed native (the first run's
+  "inconclusive" was the filter never applying, structurally
+  indistinguishable from a thrown filter until the background's notes rode
+  out through a probe content script). There is NO free body-read alongside
+  observe-only headers on this floor: `filterResponseData` requires
+  `webRequestBlocking` outright. CONSEQUENCE (batch 2): the manifest ingest
+  is the FETCH LEG — the background fetches the body of a manifest family
+  it already witnessed (single-flight per roster identity, BODY_READ_CAP
+  bounded), the recovered branch's own resolved-manifest path with the
+  on-page wrap leg retired by Probe A's verdict.
+
 **User direction (2026‑11, probe outcome read together):** Reforge becomes
 the **background engine monitor — detect and execute reforge on all non-DRM
 media requests (including direct mp4) with lifecycle management**, and
@@ -108,10 +124,18 @@ re-graded in the same commit, never bumped alone):
    the Reforge plane in docs and docstrings; `NetHintLedger` grows the roster
    detection it already hints for (manifest/file shapes; media-type census
    rows re-derived beside the ledger's video/\* vocabulary).
-2. **The claim composition** — the proof text/content supplies its verdict
-   via the relay (`requestText` already exists; the background fetches what
-   it classified), the DRM latch arms from content (a message the frame
-   realm sends on `encrypted`), and the sole-veto contract stays the latch.
+2. **The claim composition** — the claim plane's roster identity + the
+   single-veto latch: `tables.js` grows the recovered parser/verdict
+   (`parseAttrs`/`parseHlsPlaylist`/`manifestVerdict`/`BODY_READ_CAP`,
+   verbatim); the ledger's manifest families INGEST their own body once
+   (probe C's red verdict settled the route — the background fetches what
+   it classified, the wrap leg retired) and stamp `verdict` + parse facts;
+   the DRM latch arms from content (a one-shot `encrypted` listener per
+   realm, a `DRM_LATCH` message riding the relay's existing receiver —
+   receivers stay 3, senders re-grade 5→6), and `latchDrm` is the records'
+   sole veto (unknown verdicts on the latched frame go presumed-protected,
+   new records refused). The execute arm (`webRequestBlocking`) rides batch
+   3 exactly as planned.
 3. **The execute arm** — `webRequestBlocking` joins the manifest permission
    set and the background listener farm answers claims with redirect
    (`reload` claim shape) and `filterResponseData` (`rewrite` claim shape);
@@ -130,7 +154,8 @@ re-graded in the same commit, never bumped alone):
    two probes' report rows). The relic `gm-realm.mjs` standalone harness file
    is not resurrected.
 The recovered docs' details (roster shape, family vocabulary, table records)
-come from `git show reforge:...`; the census deltas ride per-batch re-grades.
+come from `git show reforge:...`; the census deltas ride per-batch re-grades
+(batch 2's: fetch calls 1→2, message senders 5→6).
 
 
 ---
@@ -185,12 +210,12 @@ TAB_COMMAND})` → TabCommands → the reply lands on a
 `dataset["pfCmd-…"]`: a hyphen-lowercase DOMStringMap key throws
 SyntaxError on set, the silent no-reply shape the harness once saw. The
 relay exists because a cross-extension caller structurally cannot make the
-hop (browser isolates `runtime.onMessage` per extension). Census: 5
+hop (browser isolates `runtime.onMessage` per extension). Census: 6
 senders (store.js requestText, popup.js, ledger's hint, the relay's
-tabs.sendMessage arm, the handle's runtime.sendMessage), 3 receivers
-(relay, TabCommands, the entry hint).
+tabs.sendMessage arm, the handle's runtime.sendMessage, the DRM latch's
+one-shot), 3 receivers (relay, TabCommands, the entry hint).
 
-**Repo shape (26 source modules, ~15k LOC):**
+**Repo shape (27 source modules, ~15k LOC):**
 
 ```
 src/
@@ -243,18 +268,25 @@ gate pins both glue signatures as a static artifact row.
 The userscript-era header↔runtime cross-check (sweep) is now ported history —
 the 8 `@grant`s and the `@connect`/`@resource` pins died with the manager plane;
 their extension-plane descendants carry the same audit shape and ride the
-census. There is exactly one network egress family in the tree: the subtitle
-`loadFromUrl` path, user-supplied URLs from arbitrary hosts — one `fetch`
-inside `src/background/relay.js` (single-flight, `AbortSignal.timeout`,
-body drained before the reply), riding the background page's `<all_urls>`
-host permission because a content-side fetch inherits the PAGE's CORS and
-silently dies on exactly the user-supplied hosts the ingest serves. The
-census stage pins the src-side floor (that one relay fetch; one
-`requestText` consumer in store.js = the `loadFromUrl` voucher; zero
+census. There are exactly two network egress families in the tree, both
+background-plane `fetch`es riding the `<all_urls>` host permission (a
+content-side fetch inherits the PAGE's CORS and silently dies on exactly
+those hosts): the subtitle `loadFromUrl` path's one relay fetch inside
+`src/background/relay.js` (single-flight, `AbortSignal.timeout`,
+body drained before the reply — the user-supplied-URL cross-origin leg),
+and — the reforge port's claim composition — the ledger's single-flight
+manifest ingest (`fetch(fileUrl)`, the background fetching the body of a
+manifest family it already witnessed; probe C measured
+`filterResponseData` unavailable without `webRequestBlocking`, so there
+is no observe-only body read — fetching what was classified is the whole
+ingest story; one `parseHlsPlaylist`/`manifestVerdict` consumer inside
+`ledger.js` = the witness voucher). No page-context egress: zero
 websocket/EventSource/`sendBeacon`/XHR; zero `.src =`/`srcset`/
 `createObjectURL` and script/iframe/img/track/link element creation —
 closing the DOM-shaped channels the permission cannot audit — plus the one
-`file.text()` drop-ingest read), and the bundle stage pins the package half
+`file.text()` drop-ingest read. The census stage pins the src-side floor
+(those two fetches; one `requestText` consumer in store.js = the
+`loadFromUrl` voucher), and the bundle stage pins the package half
 (chrome members verbatim, `content.js` the lone content script, the
 manifest's `exclude_matches` surface strict).
 
@@ -739,7 +771,15 @@ iframes, same-origin and cross-origin (`all_frames: true`,
   frame-targeted hint to the frame that carried media traffic, and the
   per-(tab, frame) family records the roster's witness floor holds — every
   media/xhr request classified through the plane's vocabulary, the hint
-  carrying the classified shape.
+  carrying the classified shape. The claim composition (batch 2) hangs here
+  too: a manifest record ingests its own body ONCE (single-flight per
+  roster identity, `BODY_READ_CAP`-bounded, feeding tables.js's
+  `parseHlsPlaylist`/`manifestVerdict`) and stamps `verdict` + parse facts;
+  `latchDrm` receives the content realm's DRM veto (the `DRM_LATCH` arm on
+  the relay's one receiver) — unknown-verdict manifests on the latched
+  (tab, frame) go presumed-protected, body evidence outranks the page
+  context, and new records for a latched frame are refused outright; the
+  census's second fetch lives here.
 
 ### kernel/ — policy layer
 - **contract.js** — the shared vocabulary both layers import in isolation:
@@ -2582,7 +2622,9 @@ the rate call on the two networks that also pay back in shape:
    `removeEventListener` across src comes back empty: zero live manual
    removals remain, Fan's handle included — its handle now tears down by
    abort like every other machine's. The steady-state listener & observer
-   census (sweep): 124 static registration sites, 28 at document/window
+   census (sweep): 125 static registration sites (reforge batch 2's +1 is
+   the DRM latch's `encrypted` capture listener — the deliberate unscoped
+   page-lifetime arm the pre-boot table records below), 28 at document/window
    level, zero manual removals — and every unscoped-looking site verified
    either `{ signal }` on a continuation line, an options-var binding,
    the panel's per-open dismissal scope, or a deliberate page-lifetime
@@ -2603,7 +2645,9 @@ the rate call on the two networks that also pay back in shape:
    document media taps + the kernel's pageshow/pagehide pair (the resume
    arm retired - freeze/resume unreachable on the Firefox floor) +
    the entry hint trio (armed only in the first-run hint window) + the 4
-   `watchStorageKey` consumers (the GM echo channel, not DOM events);
+   `watchStorageKey` consumers (the GM echo channel, not DOM events) +
+   the DRM latch's one document `encrypted` capture listener (reforge
+   batch 2; per-realm one-shot, page-lifetime like the bridge install);
    live shell = resume's 6-event drive cluster + its IO + media's
    loadedmetadata listener + 2 witness MOs + subtitles' rVFC crank (an
    arm, not a listener) with its video RO/IO + 4 video events + 2 host

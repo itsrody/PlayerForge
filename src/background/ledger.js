@@ -1,10 +1,18 @@
 import { NET_HINT } from "../kernel/contract.js";
-import { classifyUrl, classifyContentType, fileFormat } from "./tables.js";
+import {
+  classifyUrl,
+  classifyContentType,
+  fileFormat,
+  parseHlsPlaylist,
+  manifestVerdict,
+  BODY_READ_CAP
+} from "./tables.js";
 
 /**
- * The Reforge witness floor: background webRequest observation with the
- * frame topology Firefox attaches to every request (frameId, tabId) and NO
- * DOM access anywhere - the background never touches a document.
+ * The Reforge witness floor + claim composition: background webRequest
+ * observation with the frame topology Firefox attaches to every request
+ * (frameId, tabId) and NO DOM access anywhere - the background never
+ * touches a document.
  *
  * The rebrand (2026-11): this ledger is the Reforge plane's witness floor.
  * What it holds: a URL/headers classification of every media/xhr request
@@ -17,6 +25,30 @@ import { classifyUrl, classifyContentType, fileFormat } from "./tables.js";
  * rostered (the recovered branch's ignore-by-design class: per-segment
  * rostering floods the records on an ABR page).
  *
+ * THE INGEST ARM (batch 2, probe-decided): a manifest record fetches its
+ * own body ONCE - the background page's fetch rides the <all_urls> host
+ * permission (the relay's grant applied to the manifest family; a
+ * content-side fetch would inherit the page's CORS, the same wall the
+ * subtitle relay exists to bypass), caps at BODY_READ_CAP, and feeds
+ * tables.js's parser + verdict. Probe C's red verdict settled the route:
+ * `filterResponseData` does NOT exist without `webRequestBlocking`, so
+ * there is no observe-only body read alongside these headers - re-fetching
+ * what the witness classified is the whole ingest story. Single-flight per
+ * family key (Map<key, promise>) bundles the ABR token-rotation burst (a
+ * master request races its token-refreshed re-request) into one fetch, and
+ * an attempted latch keeps the record from re-fetching on every segment
+ * witness of the same manifest for the document's lifetime; navigation
+ * clears the records and re-arms the attempt naturally.
+ *
+ * THE DRM LATCH (the records' sole veto, batch 2): a realm whose document
+ * fed an EME-protected stream sends one DRM_LATCH message (the passive
+ * `encrypted` listener in entry.js - no wrap). latchDrm flips that
+ * (tab, frame)'s records: unknown-verdict manifests go presumed-protected,
+ * body-evidence verdicts outrank the page context (a genuinely clear
+ * AES-128 manifest survives the latch), and NEW records for the latched
+ * frame are refused outright. Claims execute only against these records,
+ * so the latch is the claim plane's veto by construction.
+ *
  * No clock, no timers: the zero-timer pipeline holds here too. The roster
  * is event-invalidated - a main_frame request clears the tab's records (a
  * new document maps the whole topology), a sub_frame request clears that
@@ -26,13 +58,18 @@ import { classifyUrl, classifyContentType, fileFormat } from "./tables.js";
  * stream's media requests never re-wake the kernel for nothing.
  */
 
-/** The roster floor's per-frame bound (see the busted-by-bound note at
+/** The roster floor's per-frame bound (see the bounded note at
  *  #recordFacts): media families are human-scale per document; the bound
  *  exists so a hostile or pathological page cannot grow the background
  *  page's memory, and eviction is oldest-first (the newest-first order
  *  makes that the map's tail). */
 const FAMILY_BOUND = 64;
 
+/** The verdict vocabulary riding records: "clear" (AES-128 / keyless /
+ *  decryptable by an external player), "protected" (SAMPLE-AES /
+ *  ContentProtection / clearkey-needed - the ignore-by-design class),
+ *  "unknown" (no body evidence), plus the latch-stamped "presumed" state
+ *  unknowns carry once a frame latches. */
 export class NetHintLedger {
   /** tabId -> Set(frameId): the (tab, frame) pairs this session's media
    *  traffic already hinted. Smallest state that can do the job. */
@@ -41,6 +78,16 @@ export class NetHintLedger {
    *  floor. One record per manifest/file family, newest-first order, the
    *  whole subtree cleared at the navigation boundaries above. */
   #families = new Map();
+  /** familyKey -> in-flight ingest promise: the single-flight belt for
+   *  the manifest ingest. Cleared with the record when a family's body
+   *  attempt settles (success or failure - a failed body is verdict
+   *  "unknown", NOT a re-fetch loop; the next navigation re-arms). */
+  #ingesting = new Map();
+
+  /** tabId -> Set(frameId): frames whose document latched DRM (the
+   *  DRM_LATCH message). Cleared at the same navigation boundaries and
+   *  tab drop as the records. */
+  #latched = new Map();
 
   install() {
     // Invalidation rides the two request types that MEAN navigation, so
@@ -54,9 +101,11 @@ export class NetHintLedger {
       if (details.type === "main_frame") {
         this.#hinted.delete(details.tabId);
         this.#families.delete(details.tabId);
+        this.#latched.delete(details.tabId);
       } else if (details.type === "sub_frame") {
         this.#hinted.get(details.tabId)?.delete(details.frameId);
         this.#families.get(details.tabId)?.delete(details.frameId);
+        this.#latched.get(details.tabId)?.delete(details.frameId);
       }
     }, { urls: ["<all_urls>"] });
 
@@ -72,6 +121,14 @@ export class NetHintLedger {
     browser.tabs.onRemoved.addListener((tabId) => {
       this.#hinted.delete(tabId);
       this.#families.delete(tabId);
+      this.#latched.delete(tabId);
+      // In-flight ingests ride #ingestKey = `tabId|familyKey` and die with
+      // the tab - a settled fetch must never stamp resurrected state.
+      for (const key of this.#ingesting.keys()) {
+        if (key.startsWith(`${tabId}|`)) {
+          this.#ingesting.delete(key);
+        }
+      }
     });
   }
 
@@ -167,11 +224,99 @@ export class NetHintLedger {
       records.set(key, existing);
       return;
     }
+    // The DRM latch vetoes NEW records for a latched frame outright: the
+    // frame's document is mid-EME-handshake, so its manifests are presumed
+    // CDM-fed until it proves otherwise by its own content - which the
+    // latch's existing-record flip handles per-record, not here.
+    if (this.#latched.get(details.tabId)?.has(details.frameId)) {
+      return;
+    }
     const record = { url: url.href, family, kind, contentType: contentType ?? null, method: details.method ?? null };
     records.set(key, record);
     if (records.size > FAMILY_BOUND) {
       const oldest = records.keys().next().value;
       records.delete(oldest);
+    }
+    if (family === "manifest") {
+      this.#ingestManifest(details.tabId, record);
+    }
+  }
+
+  /** The manifest ingest arm: fetch the record's own body once, parse it
+   *  through tables.js, and stamp the verdict + parse facts on the
+   *  record. Single-flight per roster identity - the key is
+   *  origin + pathname (#recordFacts's identity, not the full URL), so
+   *  the ABR page's token-rotated re-request of the same manifest lands
+   *  in the one in-flight promise instead of racing a second fetch. The
+   *  attempt is done-once per record lifetime: every failure settles
+   *  verdict "unknown" (never a retry loop) and navigation clears the
+   *  records wholesale, which re-arms the attempt naturally. */
+  #ingestManifest(tabId, record) {
+    const url = URL.parse(record.url);
+    const familyKey = url ? url.origin + url.pathname : record.url;
+    const ingestKey = `${tabId}|${familyKey}`;
+    if (this.#ingesting.has(ingestKey)) {
+      return;
+    }
+    const fileUrl = record.url;
+    const attempt = (async () => {
+      try {
+        const response = await fetch(fileUrl, { signal: AbortSignal.timeout(30000) });
+        const text = await response.text();
+        const body = text.slice(0, BODY_READ_CAP);
+        if (!response.ok || !body) {
+          record.verdict = "unknown";
+          return;
+        }
+        const parsed = record.kind === "dash"
+          ? null
+          : parseHlsPlaylist(body, fileUrl);
+        record.verdict = manifestVerdict(record.kind, parsed, body);
+        if (record.kind === "hls" && parsed?.kind === "master") {
+          record.variantCount = parsed.variants.length;
+          record.topVariant = parsed.variants[0]?.uri ?? null;
+        } else if (record.kind === "hls" && parsed?.kind === "media") {
+          record.segmentCount = parsed.segmentCount;
+          record.live = parsed.live;
+          record.keyMethod = parsed.keyMethod;
+        }
+      } catch {
+        // The bounded-failure contract (relay.js's own shape): every
+        // failure is a result state, never a retry loop - verdict
+        // "unknown", the next navigation re-arms.
+        record.verdict = "unknown";
+      } finally {
+        this.#ingesting.delete(ingestKey);
+      }
+    })();
+    this.#ingesting.set(ingestKey, attempt);
+    attempt.catch(() => {});
+  }
+
+  /** The DRM latch receiver: one message per realm whose document fed a
+   *  CDM-protected stream. Flips the frame's ledger - unknown-verdict
+   *  manifests go presumed-protected - and joins the frame to #latched
+   *  so new records are refused until its next navigation. */
+  latchDrm(tabId, frameId) {
+    if (!Number.isInteger(tabId) || tabId === -1 || !Number.isInteger(frameId)) {
+      return;
+    }
+    let frames = this.#latched.get(tabId);
+    if (!frames) {
+      frames = new Set();
+      this.#latched.set(tabId, frames);
+    }
+    frames.add(frameId);
+    const records = this.#families.get(tabId)?.get(frameId);
+    if (!records) {
+      return;
+    }
+    for (const record of records.values()) {
+      // Body evidence (an ingested verdict) outranks the page context -
+      // only unknowns join the presumption.
+      if (record.family === "manifest" && (!("verdict" in record) || record.verdict === "unknown")) {
+        record.verdict = "presumed-protected";
+      }
     }
   }
 }

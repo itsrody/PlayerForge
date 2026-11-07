@@ -165,8 +165,8 @@ const ROWS = [
   {
     name: "fetch calls",
     pattern: "fetch(",
-    expect: 1,
-    why: "the package's one network egress: the background relay's single fetch (AbortSignal.timeout, body drained inside the handler before the reply) - a content-side fetch would ride the page's CORS and silently die on exactly the user-supplied hosts the ingest serves"
+    expect: 2,
+    why: "the package's two network egresses, both background-plane fetches riding the <all_urls> host permission (a content-side fetch would ride the page's CORS): relay.js's single relayed text GET (AbortSignal.timeout, body drained inside the handler before the reply) and - reforge batch 2 - ledger.js's single-flight manifest ingest, the background fetching the body of a manifest family it already witnessed (probe C measured filterResponseData unavailable without webRequestBlocking, so there is no observe-only body read; fetching what was classified is the whole ingest story). A return to one is a claim-plane regression, not a cleanup"
   },
   {
     name: "GM vocabulary (src)",
@@ -183,8 +183,8 @@ const ROWS = [
   {
     name: "message senders",
     pattern: "sendMessage(",
-    expect: 5,
-    why: "the five runtime/tabs senders: store.js requestText (content -> background relay), popup.js (pages -> the active tab's commander), the ledger's one hint send (background -> the frame that carried media traffic, frame-targeted), the background's command arm (the debug handle's pfCommand relayed over the popup's exact tabs.sendMessage hop - a cross-extension caller structurally cannot make that call, tabs.sendMessage delivers only to the calling extension's own content scripts), and the debug handle's one runtime.sendMessage (content -> background, the same chrome only triggers in debug mode) - every untracked message channel is egress the census cannot see"
+    expect: 6,
+    why: "the six runtime/tabs senders: store.js requestText (content -> background relay), popup.js (pages -> the active tab's commander), the ledger's one hint send (background -> the frame that carried media traffic, frame-targeted), the background's command arm (the debug handle's pfCommand relayed over the popup's exact tabs.sendMessage hop - a cross-extension caller structurally cannot make that call, tabs.sendMessage delivers only to the calling extension's own content scripts), the debug handle's one runtime.sendMessage (content -> background, the same chrome only triggers in debug mode), and - reforge batch 2 - the DRM latch's one runtime.sendMessage (entry.js, content -> background, the passive `encrypted` listener's per-realm one-shot veto)"
   },
   // The background ledger's observe-only webRequest floor: two listeners +
   // one tab-drop hook, the whole uBO-grade substrate the hint plane rides.

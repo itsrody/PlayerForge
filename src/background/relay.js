@@ -1,9 +1,9 @@
 import { TEXT_RELAY } from "../shared/store.js";
-import { TAB_COMMAND, COMMAND_RELAY } from "../kernel/contract.js";
+import { TAB_COMMAND, COMMAND_RELAY, DRM_LATCH } from "../kernel/contract.js";
 
 /**
  * The background page's shared receiver: the one network egress (the
- * cross-origin text relay) plus one command arm.
+ * cross-origin text relay) plus one command arm plus one latch arm.
  *
  * Content scripts inherit the PAGE's CORS, so a cross-origin subtitle
  * ingest dies on exactly the user-supplied hosts the feature serves; the
@@ -28,9 +28,20 @@ import { TAB_COMMAND, COMMAND_RELAY } from "../kernel/contract.js";
  * can never make directly (tabs.sendMessage delivers only to the calling
  * extension's own content scripts), and the receiver answers undefined for
  * one-way commands (diag) - a null reply is the popup's own no-reply shape,
- * not an error. */
-export function installTextRelay() {
-  browser.runtime.onMessage.addListener(async (message) => {
+ * not an error.
+ *
+ * The latch arm (reforge's sole claim veto, batch 2) rides the receiver
+ * too: the passive `encrypted` listener (entry.js) sends DRM_LATCH per
+ * realm whose document fed a CDM-protected stream, and the arm hands
+ * (sender's tabId, frameId) to the ledger's latchDrm - the roster's veto
+ * by construction. It answers undefined and the content side consumes no
+ * reply (one-way). */
+export function installTextRelay(ledger = null) {
+  browser.runtime.onMessage.addListener(async (message, sender) => {
+    if (message?.type === DRM_LATCH) {
+      ledger?.latchDrm(sender?.tab?.id ?? -1, sender?.frameId ?? undefined);
+      return undefined;
+    }
     if (message?.type === COMMAND_RELAY) {
       const command = typeof message.command === "string"
         ? message.command.slice(0, 40) : "";

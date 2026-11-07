@@ -80,6 +80,19 @@ export const COMMAND_RELAY = "pf:command-relay";
 export const NET_HINT = "pf:net-media";
 
 /**
+ * The Reforge plane's DRM latch channel: content -> background, one
+ * message per realm whose document fed an EME-protected stream (the
+ * passive `encrypted` listener sees it, no verb anywhere). The background
+ * flips the frame's roster verdicts and refuses new ones for the frame:
+ * the request plane's witness has no per-request "this stream is CDM-fed"
+ * signal - the `encrypted` event is the ONLY reliable one - so the latch
+ * message carries the veto. Unknown-verdict records go presumed-protected;
+ * body-evidence verdicts (the ingest read the manifest text) outrank the
+ * page context. The host page's vocabulary; the background receiver
+ * spells it through the same table. */
+export const DRM_LATCH = "pf:drm-latch";
+
+/**
  * The gesture families: ONE hand-written entry per family - the id (the key)
  * and its settings-panel label (the value). Everything machine-facing is
  * formula-derived below, so a new family is a one-line addition: its semantic

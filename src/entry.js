@@ -1,5 +1,5 @@
 import { Kernel } from "./kernel/kernel.js";
-import { DEBUG_HASH_TAG, NET_HINT, COMMAND_RELAY } from "./kernel/contract.js";
+import { DEBUG_HASH_TAG, NET_HINT, COMMAND_RELAY, DRM_LATCH } from "./kernel/contract.js";
 import { installTabCommands, installFrameDiagnostics, dumpFrameState } from "./kernel/kernel.js";
 import { installContextBridge, requestFullscreenProvision } from "./shared/page.js";
 import { installVideoProbe } from "./kernel/discovery.js";
@@ -415,6 +415,36 @@ async function bootstrap() {
       stopProbe();
     }
   });
+
+  armDrmLatch();
+}
+
+/**
+ * The Reforge plane's DRM latch, content side - PASSIVE duty per the port's
+ * premise (probe A): no verb wrap, a document-level listener for the
+ * `encrypted` event (EME is spec-level, long on this floor). The event
+ * bubbles out of the media element, so one capture listener per realm is
+ * the whole surface. The realm's first latch sends one DRM_LATCH message
+ * to the background (fire-and-forget: the reply is never consumed; a
+ * rejection rides the log-then-continue class - the latch is one-way by
+ * contract, so a failed send carries no retry surface). Per-realm dedup:
+ * one send per realm at most - the listener is page-lifetime (survives
+ * kernel boots and bfcache restores like the frame bridge does), and a
+ * second `encrypted` after the first is the same already-demonstrated
+ * fact. `encrypted` fires only inside an EME handshake, so a non-EME
+ * page pays one listener and nothing else.
+ */
+function armDrmLatch() {
+  "use strict";
+
+  let latched = false;
+  document.addEventListener("encrypted", () => {
+    if (latched) {
+      return;
+    }
+    latched = true;
+    browser.runtime.sendMessage({ type: DRM_LATCH }).catch(() => {});
+  }, { capture: true });
 }
 
 bootstrap();

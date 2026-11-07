@@ -1,22 +1,31 @@
 /* The Reforge witness vocabulary - the plane's pure classification tables.
  *
- * Ported from the recovered reforge branch (`reforge:src/shell/reforge/
- * tables.js`, the engine's source tables) with the branch's own vocabulary
- * - the names ARE the machine spelling (classifyUrl/classifyContentType/
- * fileFormat, family manifest/file/segment, kind hls/dash/file/segment).
- * Import-free: the node-realm flaw smoke imports this module alone and the
- * background bundle rides only this import edge from the ledger.
+ * Ported verbatim from the recovered reforge branch (`reforge:src/shell/
+ * reforge/tables.js`, the engine's source tables) with the branch's own
+ * vocabulary - the names ARE the machine spelling (classifyUrl/
+ * classifyContentType/fileFormat/parseAttrs/parseHlsPlaylist/
+ * manifestVerdict/BODY_READ_CAP, family manifest/file/segment, kind
+ * hls/dash/file/segment). Import-free: the node-realm flaw smoke imports
+ * this module alone and the background bundle rides only this import edge
+ * from the ledger.
  *
  * Located in the background plane (the rebrand, 2026-11): this file is the
  * SOURCE of the census's one-classification-owner law - the ledger consumes
  * it, no second classification site exists, and a fork of the shape tables
- * would drift the family identity the claim composition (next batches)
- * depends on.
+ * would drift the family identity the claims execute against.
  *
- * The HLS/DASH body parser and the per-resource DRM verdict stay on the
- * recovered branch's shape for the claim-composition batch (they need
- * response TEXT, which the witness floor never reads - the witness is
- * URL/headers facts only).
+ * The ingestion premise (the port's decision, probe-redirected): the
+ * recovered branch read manifest BODIES two ways - the on-page verb wraps
+ * (the wrap saw the body as the page fetched it, zero egress) and the
+ * relay fetch leg (gmRequestText's resolved-manifest path). Probe A measured
+ * the verb-wrap shape per-carrier fragile on the extension plane (three
+ * carriers x three Xray walls on the serve half), so the wraps retired and
+ * the FETCH LEG is the whole ingest route now: the witness classifies from
+ * URL/headers, and when the family is a manifest the background fetches
+ * what it classified (probe C's red verdict settled this - filterResponseData
+ * pass-through observation does NOT exist without webRequestBlocking, so
+ * there is no free body-read alongside observe-only headers). The parse +
+ * verdict below are what that fetch feeds.
  */
 
 /**
@@ -120,4 +129,138 @@ export function classifyContentType(contentType) {
     }
   }
   return null;
+}
+
+/** Manifest body text the ingest may read before capping (masters are
+ *  bytes; media playlists of long VODs reach tens of KB - 256KiB is the
+ *  belt, the recovered branch's own constant). */
+export const BODY_READ_CAP = 262144;
+
+/**
+ * Split "KEY=value,KEY="quoted, comma-bearing value",... attribute lists
+ * per the HLS attribute grammar: quoted strings may carry commas, so a
+ * plain comma split would shred CODECS lists. The ONE attribute reader -
+ * the parser and (later batches) the claim composition both read
+ * stream-inf attrs through it; a second BANDWIDTH spelling diverged once
+ * already on the branch and dropped every block.
+ */
+export function parseAttrs(source) {
+  const attrs = {};
+  const pattern = /([A-Za-z-]+)=("[^"]*"|[^,]*)(?:,|$)/g;
+  let match;
+  while ((match = pattern.exec(source))) {
+    let value = match[2];
+    if (value.startsWith('"')) {
+      value = value.slice(1, -1);
+    }
+    attrs[match[1]] = value;
+  }
+  return attrs;
+}
+
+/**
+ * Pure HLS text classifier: a master playlist parses into bandwidth-sorted
+ * variants, a media playlist into segment/live/encryption facts, plain text
+ * into null. Encryption rides labels only - AES-128 is what an external
+ * player decrypts natively, SAMPLE-AES is the protected arm (ignore by
+ * design). baseUrl supplies the variant URIs' resolution base (the
+ * background plane has no document.baseURI - the record's request URL is
+ * the base, the same relative-manifest grammar HLS itself serves).
+ */
+export function parseHlsPlaylist(text, baseUrl) {
+  const body = String(text || "").slice(0, BODY_READ_CAP);
+  if (!/#EXTM3U/.test(body)) {
+    return null;
+  }
+  const lines = body.split(/\r?\n/);
+  const variants = [];
+  const sessionKeys = [];
+  let pendingAttrs = null;
+  let segmentCount = 0;
+  let keyMethod = "";
+  let live = true;
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    if (line.startsWith("#EXT-X-STREAM-INF:")) {
+      pendingAttrs = parseAttrs(line.slice(18));
+      continue;
+    }
+    if (line.startsWith("#EXT-X-KEY:")) {
+      const attrs = parseAttrs(line.slice(11));
+      if (attrs.METHOD && attrs.METHOD !== "NONE" && !keyMethod) {
+        keyMethod = attrs.METHOD;
+      }
+      continue;
+    }
+    if (line.startsWith("#EXT-X-SESSION-KEY:")) {
+      const attrs = parseAttrs(line.slice(19));
+      if (attrs.METHOD && attrs.METHOD !== "NONE") {
+        sessionKeys.push(attrs.METHOD);
+      }
+      continue;
+    }
+    if (line.startsWith("#EXTINF:")) {
+      segmentCount++;
+      continue;
+    }
+    if (line === "#EXT-X-ENDLIST") {
+      live = false;
+      continue;
+    }
+    if (line.startsWith("#")) {
+      continue;
+    }
+    if (pendingAttrs) {
+      variants.push({
+        uri: new URL(line, baseUrl).href,
+        bandwidth: Number(pendingAttrs.BANDWIDTH) || 0,
+        resolution: pendingAttrs.RESOLUTION || "",
+        codecs: pendingAttrs.CODECS || "",
+        name: pendingAttrs.NAME || ""
+      });
+      pendingAttrs = null;
+    }
+  }
+  if (variants.length) {
+    variants.sort((a, b) => b.bandwidth - a.bandwidth);
+    if (sessionKeys.length) {
+      for (const variant of variants) {
+        variant.keys = sessionKeys;
+      }
+    }
+    return { kind: "master", variants };
+  }
+  if (segmentCount) {
+    return { kind: "media", segmentCount, live, keyMethod };
+  }
+  return null;
+}
+
+/**
+ * Per-resource DRM verdict from parsed manifest evidence. AES-128 and
+ * keyless playlists are CLEAR (external players handle them); SAMPLE-AES,
+ * any DASH `<ContentProtection>` and clearkey-needed say PROTECTED - the
+ * ignore-by-design class. "unknown" is the not-evidence answer: a 404
+ * page must not mint a usable manifest verdict.
+ */
+export function manifestVerdict(kind, parsed, text) {
+  if (kind === "dash") {
+    // DASH verdict rides the XML vocabulary: not MPD-shaped text is not
+    // evidence (a 404 page must not mint a usable entry).
+    if (!/<(?:[\w-]+:)?MPD[\s>]/i.test(String(text || ""))) {
+      return "unknown";
+    }
+    return /<ContentProtection[\s>]/i.test(String(text || "")) ? "protected" : "clear";
+  }
+  if (!parsed || (parsed.kind !== "master" && parsed.kind !== "media")) {
+    return "unknown";
+  }
+  if (parsed.kind === "media") {
+    return parsed.keyMethod === "SAMPLE-AES" ? "protected" : "clear";
+  }
+  const sampleAes = parsed.variants.some((v) => (v.keys ?? []).includes("SAMPLE-AES"));
+  return sampleAes ? "protected" : "clear";
 }

@@ -28,5 +28,6 @@
 import { installTextRelay } from "./relay.js";
 import { NetHintLedger } from "./ledger.js";
 
-installTextRelay();
-new NetHintLedger().install();
+const ledger = new NetHintLedger();
+installTextRelay(ledger);
+ledger.install();
