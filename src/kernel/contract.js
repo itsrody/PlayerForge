@@ -112,6 +112,40 @@ export function isAdHost(hostname) {
 }
 
 /**
+ * The Reforge controls: ONE hand-written entry per claim lever - the id
+ * (the key), its configs-doc dotted key (derived one spell site), and its
+ * settings-panel label. The machine spelling stays the recovered branch's
+ * (enhance.js, EnhanceSession, ENHANCE_*); "Reforge" is the panel
+ * surface name. The table lives here because BOTH planes consume it: the
+ * background's EnhanceSession (its claim gates read the ids + the configs
+ * keys through it) and the shell's schema (its Reforge group builds the
+ * rows from it; the panel may not import the background, so the contract's
+ * vocabulary holds both sides).
+ *
+ * The two-row port (batch 4, user direction): the branch carried five
+ * controls; segProxy/elemSrc/fullProxy were PAGE-VERB planes (header-
+ * forwarding relays + the src-setter wrap) that retired with the wrap
+ * legs - probe A's verdict - and have no background translation (a
+ * segment redirect-to-self loops; a rewrite is a text serve, not a byte
+ * relay; the browser's own request already substitutes nothing). Every
+ * row ships UNARMED: nothing about any page changes silently.
+ */
+export const ENHANCE_PREFIX = "enhancer";
+
+export const ENHANCE_CONTROLS = Object.freeze([
+  { id: "abrPin", label: "ABR Pin" },
+  { id: "tokenSplice", label: "Token Splice" }
+].map((control) => ({
+  ...control,
+  key: `${ENHANCE_PREFIX}.${control.id}`
+})));
+
+/** Preset ids, derived from the source table (one spell site). */
+export const ENHANCE_PRESETS = Object.freeze(Object.fromEntries(
+  ENHANCE_CONTROLS.map((control) => [control.id, control.id])
+));
+
+/**
  * The command-relay channel: content -> backgrounds, one message per command
  * the debug console handle's pfCommand arm forwards. The background answers
  * with the exact browserAction-popup hop - browser.tabs.sendMessage onto the

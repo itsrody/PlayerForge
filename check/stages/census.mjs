@@ -175,6 +175,12 @@ const ROWS = [
     why: "the vocabulary's consumer sites: the one definition in contract.js, entry.js's two boot-gate reads (own-document host + the cross-origin top host - the leg the manifest matcher cannot express), and ledger.js's one frame-identity mark (a frame whose own main/sub_frame navigation named an ad host refuses the witness floor: no record, no ingest, no hint, no claim). Resource requests never mark - a legitimate page loading gtm.js in its top keeps its video witness"
   },
   {
+    name: "Reforge control table spellings",
+    pattern: "ENHANCE_CONTROLS",
+    expect: 6,
+    why: "the recovered branch's one claim-control source table, spelled exactly six times over deriving files: contract.js holds the declaration + its ENHANCE_PRESETS derivation, background/enhance.js consumes it (import + the one preset-apply loop over the table's key/label facts), shell/chrome/config.js consumes it (import + the schema-row derive that builds the panel's Reforge group). A panel row that re-spells an id or label is a forked vocabulary - the contract's table is the machine spelling both planes read"
+  },
+  {
     name: "fetch calls",
     pattern: "fetch(",
     expect: 2,

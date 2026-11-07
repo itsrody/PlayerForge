@@ -49,7 +49,7 @@ import {
  *
  * THE EXECUTE ARM (batch 3): the SAME onBeforeRequest listener grew the
  * claim question for manifest families. A claim source (setClaimSource;
- * batch 4's EnhanceSession is the intended installer) is asked
+ * batch 4's EnhanceSession ships it) is asked
  * (method, url, record) and answers:
  *   - `{ rewrite: { text } }` - the body filter serves OUR text:
  *     the page reads the pinned bytes while status, headers and
@@ -371,15 +371,18 @@ export class NetHintLedger {
   }
 
   /** The manifest stamp: parse + verdict + facts, the ONE body-vocabulary
-   *  reader both ingest arms share. */
+   *  reader both ingest arms share. Masters retain body + the parsed
+   *  variant list (bandwidth-sorted) - the claim policy's abrPin lever
+   *  serves the retention through the filter (batch 4); media bodies are
+   *  never retained (live churn + no lever's material). */
   #stampManifest(record, body) {
     const parsed = record.kind === "dash"
       ? null
       : parseHlsPlaylist(body, record.url);
     record.verdict = manifestVerdict(record.kind, parsed, body);
     if (record.kind === "hls" && parsed?.kind === "master") {
-      record.variantCount = parsed.variants.length;
-      record.topVariant = parsed.variants[0]?.uri ?? null;
+      record.body = body;
+      record.variants = parsed.variants;
     } else if (record.kind === "hls" && parsed?.kind === "media") {
       record.segmentCount = parsed.segmentCount;
       record.live = parsed.live;

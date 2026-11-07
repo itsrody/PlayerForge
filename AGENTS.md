@@ -161,11 +161,24 @@ re-graded in the same commit, never bumped alone):
    build-derived; the permission change rides the build config with its
    census why. Claims stay UNARMED until batch 4 (the shipped default
    source is null — nothing about any page changes silently).
-4. **EnhanceSession + the controls** — the claim policy surface
-   (`enhancer.<id>` dotted configs; `ENHANCE_CONTROLS`) lands on the
-   background with the settings schema rows and the panel's Reforge group
-   reading them through the echo plane (import direction: the panel may not
-   import the background, so the contract's vocabulary holds both sides).
+4. **EnhanceSession + the controls (SHIPPED — this batch)** — the claim
+   policy surface (`enhancer.<id>` dotted configs; `ENHANCE_CONTROLS`,
+   contract.js) landed on the background with the settings schema rows and
+   the panel's Reforge group reading them through the echo plane (import
+   direction: the panel may not import the background, so the contract's
+   vocabulary holds both sides). The two-row port (user direction:
+   "Retire dead rows"): abrPin + tokenSplice ship — the branch's other
+   three carried PAGE-VERB planes (segProxy's per-segment byte relay, the
+   elemSrc src-setter wrap, fullProxy's header-forwarding substitute) that
+   retired with the wrap legs (probe A) and have no honest background
+   translation (a segment redirect-to-self loops; `{rewrite}` is a text
+   serve, not a byte relay; the background's browser-made requests already
+   carry the page's own headers — the substitution fullProxy existed for
+   is native on this plane). Every row UNARMED; claims stay null-source
+   until armed (the batch-3 un-armed posture is the shipped default
+   state). Master stamp facts re-graded with the lever: `variantCount`/
+   `topVariant` retired into the retained `body` + bandwidth-sorted
+   `variants` (one fact, one holder — the lever serves the retention).
 5. **The gate case** — `stream.mjs` is rewritten from the package-member GM
    fixture to the XPI + companion ceremony (`registerFixture`,
    `installAddon` probe addons under `.tmp/`, page-fact assertions like the
@@ -173,7 +186,9 @@ re-graded in the same commit, never bumped alone):
    is not resurrected.
 The recovered docs' details (roster shape, family vocabulary, table records)
 come from `git show reforge:...`; the census deltas ride per-batch re-grades
-(batch 2's: fetch calls 1→2, message senders 5→6).
+(batch 2's: fetch calls 1→2, message senders 5→6; batch 4's: the
+watchStorageKey consumers 4→5 — enhance.js's echo-driven preset sync — and
+the new Reforge control table spellings row, 6).
 
 
 ---
@@ -233,13 +248,14 @@ senders (store.js requestText, popup.js, ledger's hint, the relay's
 tabs.sendMessage arm, the handle's runtime.sendMessage, the DRM latch's
 one-shot), 3 receivers (relay, TabCommands, the entry hint).
 
-**Repo shape (27 source modules, ~15k LOC):**
+**Repo shape (28 source modules, ~16k LOC):**
 
 ```
 src/
   entry.js            install-time contract: which frames run the script
-  background/  (3)    index, reforge plane: relay (text + command),
-                      tables (classification), ledger (witness + roster)
+  background/  (4)    index, reforge plane: relay (text + command),
+                      tables (classification), ledger (witness + roster
+                      + execute + skip), enhance (claim policy)
   kernel/  (4)        contract, detection, discovery, kernel orchestrator
   shared/  (5)        core, runtime, dom, page, store — the data planes
   shell/   (14)       shell, media, resume, filter, forge+actions,
@@ -778,13 +794,19 @@ iframes, same-origin and cross-origin (`all_frames: true`,
   exactly on the failure path the provision latch re-opens for.
 
 ### background/ — the extension page (the Reforge background robust core)
-- **index.js** — install entry: wires relay.js's receiver, the witness
-  vocabulary, and ledger.js's listeners; a persistent background page (the
-  awaited relay fetch overlaps request lifetime — no re-wake machinery to
-  write). The plane's rebrand sentence (user direction 2026‑11): this
-  directory IS Reforge — the stream enhancer's extension port — the
-  background engine that witnesses and re-forges the page's non-DRM media
-  requests; the growth batches hang detection/claims/execution on this farm.
+- **index.js** — install entry: the THREE installs, all
+  event-listener-shaped, zero DOM, zero timers — relay.js's receiver, the
+  witness vocabulary, ledger.js's listeners, and enhance.js's claim policy
+  (wired through `ensuringClaims()`: the awaited `enhancer.install()`
+  returns the claim verb handed to `ledger.setClaimSource`; a failed
+  install falls to the null source with an error log — nothing about any
+  page changes silently — while `ledger.install()` runs unconditionally);
+  a persistent background page (the awaited relay fetch overlaps request
+  lifetime — no re-wake machinery to write). The plane's rebrand sentence
+  (user direction 2026‑11): this directory IS Reforge — the stream
+  enhancer's extension port — the background engine that witnesses and
+  re-forges the page's non-DRM media requests; the growth batches hang
+  detection/claims/execution on this farm.
 - **relay.js** — the ONE network egress: `pf:request-text` → single-flight
   `fetch` with `AbortSignal.timeout`, body drained inside the handler
   before the reply; every failure answers as a result object (a rejection
@@ -800,8 +822,8 @@ iframes, same-origin and cross-origin (`all_frames: true`,
   invalidation (main_frame clears the tab, sub_frame clears the frame,
   `tabs.onRemoved` drops it), and the manifest family's request edge
   answers the claim question — an armed claim source (setClaimSource;
-  batch 4's EnhanceSession is the intended installer, shipped default
-  null) gets (method, url, record) and answers a one-shot `redirectUrl`
+  batch 4's EnhanceSession installs it) gets (method, url, record) and
+  answers a one-shot `redirectUrl`
   (`reload` shape, the roster's freshest capture) or a `filterResponseData`
   serve (`rewrite` shape — the page reads pinned bytes while status,
   headers and content-type ride the real response, probe B's measured
@@ -827,6 +849,23 @@ iframes, same-origin and cross-origin (`all_frames: true`,
   page loading `gtm.js` in its top keeps its own video witness, and the
   hint refusal doubles as correctness (the content plane's boot gate never
   booted a kernel there — the hint was a dead letter).
+- **enhance.js** — the claim policy surface (batch 4): the recovered
+  branch's EnhanceSession ported verbatim in composition, translated onto
+  the background claim contract. The claim question answers, in
+  precedence: tokenSplice (fresh && armed → `{reload: record.url}` — the
+  roster's family URL is the freshest fired request string, and a request
+  for a different string of the same family is a stale-token fetch) before
+  abrPin (armed + a master retention → `{rewrite: {text}}` —
+  `rewriteMasterBody`'s verbatim block walk drops every `#EXT-X-STREAM-INF`
+  block outside the top variant, parseAttrs's BANDWIDTH as the one reader;
+  null on an identity serve); claims only `verdict === "clear"`; a throw
+  degrades to the native ride (the branch's decideRequest contract). Preset
+  state rides the configs echo plane: one spell site for the keys
+  (contract's `ENHANCE_CONTROLS`, `enhancer.<id>`), the warm read at
+  install, foreign flips (panel/tab/frame) through `watchStorageKey` — a
+  census-counted consumer (4→5). Every row ships UNARMED; the two-row
+  table (abrPin + tokenSplice) retired the branch's three page-verb
+  controls with the translation story recorded in contract.js's docstring.
 
 ### kernel/ — policy layer
 - **contract.js** — the shared vocabulary both layers import in isolation:
@@ -836,7 +875,12 @@ iframes, same-origin and cross-origin (`all_frames: true`,
   (`AD_HOST_SUFFIXES`/`AD_HOST_PREFIXES` → the compiled `isAdHost`
   alternation, moved here from entry.js by user direction 2026-11 as the
   planes' one source table — the declaration + its one derivation are the
-  census's two spellings), and `AdoptionHome` — the frozen adoption
+  census's two spellings), and the **Reforge control table**
+  (`ENHANCE_PREFIX`/`ENHANCE_CONTROLS`/`ENHANCE_PRESETS` — batch 4; one
+  hand-written row per claim lever with the id, its derived
+  `enhancer.<id>` configs key, and its panel label; the census's
+  "spellings = 6" row pins declaration + the PRESETS derivation + the two
+  consuming planes' imports/uses), and `AdoptionHome` — the frozen adoption
   identity the kernel→shell watcher protocol carries (one record per
   adoption through the provider, the `RemovalWatch` anchors, and the
   destroy-readopt compare; every seam previously re-spelled the
@@ -1256,6 +1300,9 @@ iframes, same-origin and cross-origin (`all_frames: true`,
   table spells a dotted key"): `settings.<row>`
   via the schema + `SETTINGS_PREFIX` in config.js, `gestures.<id>`
   formula-derived contract-side (`gestures.${id}` like the event names),
+  `enhancer.<id>` formula-derived contract-side (batch 4's
+  ENHANCE_CONTROLS — the Reforge group's schema rows build from the same
+  table),
   `filter.<channel>` via the filter defs + `CONFIG_PREFIX` in filter.js;
   the only hand-spelled literals are entry's `meta.firstRun` plus the
   two legacy names (`pf:first-run`, `firstRun`) its boot absorbs and
@@ -2695,8 +2742,9 @@ the rate call on the two networks that also pay back in shape:
    pre-boot = bridge 1 + DomWatch MO + 1 visibilitychange + discovery's 3
    document media taps + the kernel's pageshow/pagehide pair (the resume
    arm retired - freeze/resume unreachable on the Firefox floor) +
-   the entry hint trio (armed only in the first-run hint window) + the 4
-   `watchStorageKey` consumers (the GM echo channel, not DOM events) +
+   the entry hint trio (armed only in the first-run hint window) + the 5
+   `watchStorageKey` consumers (the storage echo channel, not DOM events —
+   reforge batch 4 adds enhance.js's preset sync) +
    the DRM latch's one document `encrypted` capture listener (reforge
    batch 2; per-realm one-shot, page-lifetime like the bridge install);
    live shell = resume's 6-event drive cluster + its IO + media's

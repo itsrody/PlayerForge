@@ -4,7 +4,7 @@
  * beside the panel API it programs against.
  */
 import { KEYS, getConfigValue, setConfigValue, watchStorageKey } from "../../shared/store.js";
-import { GESTURES, GESTURE_IDS } from "../../kernel/contract.js";
+import { GESTURES, GESTURE_IDS, ENHANCE_CONTROLS } from "../../kernel/contract.js";
 import { logger, Fan } from "../../shared/runtime.js";
 import { fmtSeconds } from "../../shared/core.js";
 
@@ -50,6 +50,23 @@ const GESTURE_TOGGLES = GESTURE_IDS.map((id) => ({
   label: GESTURES[id].label,
   default: true,
   group: "Features"
+}));
+
+/**
+ * One bool toggle per Reforge control, derived from the contract's source
+ * table (batch 4): the key is the control's configs gate
+ * (`enhancer.<id>` - the one derived spell site) and the label its panel
+ * text. The panel settings renderer is schema-generic by `definition.group`,
+ * so no panel edit rides this — the group walks last in schema order and
+ * renders as the last section. Every row UNARMED: nothing about any page
+ * changes silently.
+ */
+const ENHANCE_TOGGLES = ENHANCE_CONTROLS.map((control) => ({
+  key: control.key,
+  type: "bool",
+  label: control.label,
+  default: false,
+  group: "Reforge"
 }));
 
 /** The schema is consumed by its renderer (panel.js); state stays here. */
@@ -102,7 +119,8 @@ export const SETTINGS_SCHEMA = [
     fmt: (v) => `${Math.round(v * 100)}%`,
     default: 1,
     group: "Interface"
-  }
+  },
+  ...ENHANCE_TOGGLES
 ];
 
 /** Defaults ride their schema definitions - one source, no drift. */
