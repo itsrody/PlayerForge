@@ -1,17 +1,17 @@
 import { Kernel } from "./kernel/kernel.js";
 import { DEBUG_HASH_TAG } from "./kernel/contract.js";
 import { Shell } from "./shell/shell.js";
-import { installMenuCommands, installFrameDiagnostics } from "./kernel/kernel.js";
+import { installTabCommands, installFrameDiagnostics, dumpFrameState } from "./kernel/kernel.js";
 import { installContextBridge, requestFullscreenProvision } from "./shared/page.js";
 import { installVideoProbe } from "./kernel/discovery.js";
 import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/discovery.js";
 import { logger } from "./shared/runtime.js";
-import { getConfigValue, setConfigValue, deleteConfigField } from "./shared/store.js";
+import { getConfigValue, setConfigValue, warmStorage } from "./shared/store.js";
 import { initFullscreenGate } from "./shared/dom.js";
 
-// The version lives in the banner and is read from the installed script at
-// runtime via GM_info, so what the UI reports is always what the manager
-// actually runs - never a stale build-time constant.
+// The version lives in the manifest and is read from the installed extension
+// at runtime via browser.runtime.getManifest(), so what the UI reports is
+// always what the browser actually runs - never a stale build-time constant.
 
 /**
  * Any match skips the document entirely (ad/track/captcha frames host no
@@ -63,6 +63,11 @@ function isAdHost(hostname) {
   return AD_HOST_RE.test(hostname);
 }
 
+// Read once at module eval: the manifest is immutable for the document's
+// lifetime, so a getter adds nothing - the version reports what this
+// loaded build actually is even if the package updates underneath.
+const manifestVersion = browser.runtime.getManifest().version;
+
 function shouldSkipUrl() {
   try {
     const href = location.href;
@@ -85,7 +90,7 @@ function shouldSkipUrl() {
   return false;
 }
 
-function bootstrap() {
+async function bootstrap() {
   "use strict";
 
   if (shouldSkipUrl()) {
@@ -97,29 +102,41 @@ function bootstrap() {
   // paths have a live boolean the moment they first query it.
   initFullscreenGate();
 
-  // The shell stylesheet is warmed lazily at first shell construction
-  // (shell.js #injectDom): the embedded sheet is adopted synchronously there,
-  // and the @resource fetch is a background async upgrade - so first-video
-  // dimming never waits on the network, and non-video / skipped pages never
-  // pay for a pointless adopted-sheet injection or remote CSS fetch.
+  // One wholesale storage read gates the boot. The storage plane is async
+  // IPC under the hood and every config/resume read (the command receiver's
+  // debug query, kernel init, the first-run flag, resume warm) is served
+  // from its warmed value map. Content-script -> parent-process IPC is a
+  // few milliseconds - immaterial against document_start, where the DOM is
+  // not parsed yet anyway: the video probe arms after warm and a first-
+  // frame video is still caught by the mutation tap, which is when the
+  // document was being settled on the userscript plane too.
+  await warmStorage();
 
-  // GM menu commands exist from script eval - not from first video
-  // discovery. Registration used to live inside kernel.init(), so pages
-  // without a supported player showed NO menu entries at all. The kernel
-  // (which the reset commands resolve their shell host through) boots after
-  // this call, so the commands read it through a resolver hook at click time.
+  // The shell stylesheet is warmed lazily at first shell construction
+  // (shell.js #injectDom): the bundled sheet is adopted synchronously there -
+  // no network fetch anywhere on this path (the userscript plane's @resource
+  // upgrade relied on a remote CSS source; the extension ships its sheet in
+  // the package), so first-video dimming never waits and non-video /
+  // skipped pages never pay for an adopted-sheet injection.
+
+  // BrowserAction commands exist from script eval - not from first video
+  // discovery. The receiver owns the commands from this call (a video-less
+  // page still answers the popup), while the kernel - whose shell host the
+  // reset commands resolve through - boots below, so the commands read it
+  // through a resolver hook at command time. Top-frame only internally
+  // (the popup acts on the active tab's top document, the same reach the
+  // top-frame-only menu registration this surface replaces had).
   const menuKernelRef = { current: null };
-  if (window.top === window) {
-    installMenuCommands(() => menuKernelRef.current);
-  }
+  installTabCommands(() => menuKernelRef.current);
   // The diagnostics responder is EVERY frame's (the command is top-frame
   // only, the echo answer is realm-wide - each script instance reports its
   // own document, which is the whole point of the surface). Same kernel
-  // resolver as the menu commands: the dump reads identity through the
+  // resolver as the command receiver: the dump reads identity through the
   // entry's reference at dump time, not at install.
   installFrameDiagnostics(() => menuKernelRef.current);
+
   const boot = () => {
-    if (window.PlayerForge) {
+    if (window.wrappedJSObject?.PlayerForge || window.PlayerForge) {
       logger.warn("entry", "Kernel already initialized");
       return;
     }
@@ -139,16 +156,11 @@ function bootstrap() {
 
     // One subscription serves both duties: readiness log always, first-run
     // welcome toast only until the flag flips. The flag lives under the single
-    // "meta" subtree of the configs doc. Installs from before that move carry
-    // it as a flat "pf:first-run" field (the previous name) or a bare
-    // "firstRun" field (the oldest) - absorb either once, then sweep it.
-    const seenBefore = getConfigValue(
-      "meta.firstRun",
-      getConfigValue("pf:first-run", getConfigValue("firstRun", undefined) !== false)
-    );
-    let welcomePending = seenBefore;
-    deleteConfigField("pf:first-run");
-    deleteConfigField("firstRun");
+    // "meta" subtree of the configs doc. The "pf:first-run"/"firstRun" names
+    // the userscript plane absorbed once are retired here: extension storage
+    // is a fresh namespace (per-extension, not the manager's), so no install
+    // of this build can carry the legacy fields there is nothing to sweep.
+    let welcomePending = getConfigValue("meta.firstRun", true);
     kernel.onShellCreated((shell) => {
       logger.log("entry", `Shell ready: ${shell.sdk.name}`);
       // Nested embeds can silently lose fullscreen (browsers require
@@ -196,26 +208,39 @@ function bootstrap() {
       document.addEventListener("wheel", cancelHint, { capture: true, passive: true, once: true, signal: hintSignal });
     });
 
-    // Wrapping surface, not public surface: the sentinel lives inside the
-    // manager's sandbox wrapper (Violentmonkey's makeGlobalWrapper routes
-    // defineProperty onto the wrapper's private target), so a page - or
-    // another script with its own wrapper - can neither read nor overlap
-    // PlayerForge. The name still does the two honest jobs the wrapper
-    // grants it: re-entry guard for this script's own boot path, and a
-    // console-debug handle for the wrapper's context.
+    // Wrapping surface, not public surface. The userscript plane froze this
+    // as a non-configurable property inside the manager's sandbox (a page
+    // could neither read nor overlap it); content scripts share the page's
+    // window through an Xray, so custom properties must cross the waiver
+    // (wrappedJSObject) to be visible to the page at all - a page CAN
+    // legally own the name first. The re-entry guard (the truthiness above,
+    // read through the same waiver) and the diagnostic console handle
+    // survive as the honest jobs; a pre-existing definition degrades the
+    // install to the belt (console only) instead of crashing the boot.
     const debugMode = location.hash.includes(DEBUG_HASH_TAG);
-    Object.defineProperty(window, "PlayerForge", {
-      value: Object.freeze(debugMode
-        ? { kernel, version: GM_info.script.version }
-        : { version: GM_info.script.version }),
-      writable: false,
-      configurable: false
-    });
+    try {
+      const target = window.wrappedJSObject ?? window;
+      Object.defineProperty(target, "PlayerForge", {
+        value: Object.freeze(debugMode
+          ? { kernel, dumpFrameState, version: manifestVersion }
+          : { version: manifestVersion }),
+        writable: false,
+        configurable: false
+      });
+    } catch (error) {
+      logger.warn("entry", "PlayerForge console handle unavailable (page owns the name)", error);
+    }
+    // Driver-debug observability: a plain string on the document, readable
+    // from both realms (the live kernel object cannot cross an Xray, so the
+    // version mirror is what the harness pins; debug mode only, the same
+    // gate the sentinel's rich shape sits behind).
+    if (debugMode) {
+      document.documentElement.dataset.pfVersion = manifestVersion;
+    }
 
     logger.log(
       "entry",
-      `Kernel booted (${window.top === window ? "top" : "frame"}) - ` +
-        `${GM_info.scriptHandler} ${GM_info.version}, script ${GM_info.script.version}`
+      `Kernel booted (${window.top === window ? "top" : "frame"}) - PlayerForge ${manifestVersion}`
     );
   };
 

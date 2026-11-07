@@ -1,23 +1,25 @@
-/* - 1. Manager API - */
+/* - 1. Extension API - */
 /**
  * Storage data plane.
  *
  * One module for everything that persists or crosses script instances:
- *   1. Manager API    - the GM wrappers (menu, value listeners, requests)
- *   2. Configs doc    - the whole pf:configs doc, cached once
+ *   1. Extension API - the browser.storage / runtime wrappers
+ *   2. Configs doc    - the whole pf:configs doc, cached in the value map
  *   3. Cross-instance watch - watchStorageKey (the owned echo contract)
+ *   4. Cross-origin text fetch - requestText through the background relay
  *
- * Manager-API policy: a manager API is used only where it uniquely supplies
- * a page-impossible capability (multi-tab storage + change notification,
- * CORS-bypassing XHR, menu, GM_info) - see the policy block inside.
+ * Extension-API policy: a browser API is used only where it uniquely
+ * supplies a page-impossible capability (multi-realm storage + change
+ * notification, CORS-bypassing fetch via the background host permission) -
+ * see the policy block inside.
  */
 import { logger } from "./runtime.js";
 
-/** The whole GM storage namespace: every root key lives here. */
+/** The whole storage namespace: every root key lives here. */
 export const KEYS = {
   configs: "pf:configs",
   resume: "pf:resume",
-  // The frame-diagnostics trigger - NOT a persisted state. A menu command
+  // The frame-diagnostics trigger - NOT a persisted state. A command
   // writes it; every realm's echo listener answers with its own one-line
   // state dump and that is the whole protocol. Values are fresh randomUUIDs
   // per tap (a wall-clock stamp would add a Date.now read the census would
@@ -27,162 +29,217 @@ export const KEYS = {
   diag: "pf:diag"
 };
 
-function gmGetValue(key, fallback) {
-  return GM_getValue(key, fallback);
-}
-
-export function gmSetValue(key, value) {
-  GM_setValue(key, value);
-}
-
-/** Returns a handle for gmUnregisterMenu, or null when unavailable. */
-export function gmRegisterMenu(title, onClick, options) {
-  if (typeof GM_registerMenuCommand !== "function") {
-    return null;
-  }
-  return GM_registerMenuCommand(title, onClick, options);
-}
-
-/** Takes the handle returned by gmRegisterMenu. */
-export function gmUnregisterMenu(handle) {
-  if (handle == null || typeof GM_unregisterMenuCommand !== "function") {
-    return;
-  }
-  GM_unregisterMenuCommand(handle);
-}
-
-function gmAddValueChangeListener(key, callback) {
-  if (typeof GM_addValueChangeListener !== "function") {
-    return null;
-  }
-  return GM_addValueChangeListener(key, callback);
-}
-
-function gmRemoveValueChangeListener(handle) {
-  if (handle == null || typeof GM_removeValueChangeListener !== "function") {
-    return;
-  }
-  GM_removeValueChangeListener(handle);
-}
-
 /**
- * Subscribe to foreign-instance writes of one storage key (owned here so
- * both cache consumers share one explanation of the echo contract instead
- * of each restating it). GM change listeners fire for OUR OWN writes too,
- * flagged `remote === false`: the writing instance's in-memory state is by
- * definition already that value, so reacting would be a duplicate parse
- * per save - own echoes are filtered. Under Violentmonkey (read from its
- * released GM-values source) every foreign instance hears a `remote=true`
- * delivery - another TAB, and another FRAME of this tab - so the filter
- * keeps the contract this module documents: own instance silent,
- * everything else delivered. Implementations that omit the 4th listener
- * arg behave as external writes (as before). Returns `{ stop() }`, safe
- * to call on a failed install or twice.
+ * Own-write dedup identity. storage.onChanged delivers OUR OWN writes back
+ * to this realm exactly as it delivers foreign ones - the API carries no
+ * writer identity (the userscript plane's GM_addValueChangeListener had an
+ * explicit `remote` 4th arg; browser.storage has none) - so every write
+ * carries its realm's clientId in an envelope and the echo is matched
+ * against it. clientId is minted per realm at module eval (per document for
+ * content scripts, per page-load for the popup/background), which is
+ * precisely the granularity the userscript contract defined an "instance"
+ * at: another tab, another frame, and now the extension's own popup page
+ * all hear each other, while a writer never hears itself.
  */
-export function watchStorageKey(key, handler) {
-  const id = gmAddValueChangeListener(key, (...args) => {
-    if (args[3] === false) {
-      return;
-    }
-    handler(...args);
-  });
-  return { stop: () => gmRemoveValueChangeListener(id) };
+const CLIENT_ID = crypto.randomUUID();
+
+/** The envelope: value + writer identity. storage.onChanged exposes
+ *  old/new as whole envelope objects, so the plane unwraps on delivery. */
+function box(value) {
+  return { v: value, from: CLIENT_ID };
 }
 
-export function gmGetResourceText(name) {
-  if (typeof GM_getResourceText !== "function") {
-    return null;
-  }
-  return GM_getResourceText(name);
+/** Unwrap one envelope, null-safe (a warm boot may see no old value). */
+function unbox(envelope) {
+  // The shape check is belt, not trust: storage is our namespace (per-
+  // extension), but a user could theoretically inspect/modify it through
+  // devtools; a malformed record degrades to a foreign delivery with the
+  // payload it carries rather than a crash.
+  return envelope && typeof envelope === "object" && "from" in envelope
+    ? { from: envelope.from, value: envelope.v }
+    : { from: null, value: envelope };
 }
 
 /**
- * Manager-API policy: a manager API is used only where it uniquely supplies a
- * capability the page cannot - multi-tab manager storage + change
- * notification (configs/resume), CORS-bypassing XHR (subtitle fetch from
- * arbitrary user-supplied hosts), manager-cached resource warm-load, the
- * popup menu, GM_info. Everything DOM/media/styling-side
- * (MutationObserver, TextTrack/VTTCue, adoptedStyleSheets, fullscreen)
- * stays native; the efficient, reliable implementation wins, and for those
- * domains the native one always does. GM_setClipboard is deliberately NOT
- * granted/used: no feature calls it, so the grant is dead permission
- * surface. Any future clipboard write should go through the native
- * navigator.clipboard path, not the manager.
+ * The value map: the module's one cache, owned here so every sync read
+ * stays a Map lookup. Populated wholesale at warm (one storage.local.get
+ * round trip at boot) and updated by every write we make and every
+ * foreign delivery the echo brings - nothing else ever re-reads storage.
+ * This replaces the userscript-plane's ConfigStore parse-once cache AND
+ * its invalidate-on-echom mechanism: the echo now carries the new VALUE
+ * (storage.onChanged ships oldValue/newValue), so a foreign write lands
+ * its payload directly in the map and a subsequent sync read serves it.
+ * The invalidateConfigCache verb died with that seam - there is no second
+ * cache to drop.
+ */
+const values = new Map();
+
+/**
+ * Extension-API policy: only page-impossible capabilities ride the APIs -
+ * multi-realm storage + change notification (configs/resume), CORS-bypassing
+ * fetch (subtitle ingest from arbitrary user-supplied hosts, backgrounds's
+ * host permission), and the browserAction command surface. Everything
+ * DOM/media/styling-side (MutationObserver, TextTrack/VTTCue,
+ * adoptedStyleSheets, fullscreen) stays native; the efficient, reliable
+ * implementation wins, and for those domains the native one always does.
+ * No clipboard, no tabs beyond the popup's command targeting, no webRequest,
+ * no alarms: no feature calls them, so they are dead permission surface.
  *
- * Manager surface: Violentmonkey ships MV3 on Chrome (service-worker
- * relay) and MV2 on Firefox - this product's floor. The released-source
- * facts below are quoted from the Chrome-MV3 build, the one whose relay
- * mechanics they describe; the Firefox-MV2 build keeps the same response
- * contract for callers (timeout honored, no @connect gate). GM_xmlhttpRequest relays through the manager's background
- * process with declarativeNetRequest header accommodations (it backfills an
- * Origin when the caller omits one), `timeout`/`ontimeout` are honored, and
- * no @connect whitelist gates it. Our ingest is single-flight (one
- * user-triggered subtitle URL load at a time), so the request queue's
- * throughput shape has no caller. The echo contract driving
- * watchStorageKey is also VM-sourced: own-instance writes awake the
- * writer's hooks with remote=false; every foreign instance - another tab
- * or another frame of this tab - hears the UpdatedValues broadcast with
- * remote=true. Page CSP is never relaxed, and fetch-mode request handling is
- * invisible to us behind the wrapper's onload/ontimeout contract.
+ * Storage: browser.storage.local, async IPC under the hood - the plane
+ * hides that behind warm() + the write-behind map, so consumers keep the
+ * sync read shape they had on the userscript plane (GM_getValue was sync).
+ *
+ * Fetch relay: content-script fetch follows the page's CORS; the
+ * background page's fetch with the manifest's <all_urls> host permission
+ * does not - so cross-origin subtitle ingest relays through runtime
+ * messages to background.js. Firefox keeps MV2 event pages' event-page
+ * termination out of the picture by shipping this build persistent: the
+ * single-flight, user-triggered relay (one subtitle URL load at a time)
+ * gets a plain await fetch with AbortSignal.timeout and no re-wake logic.
  */
-/**
- * Cross-origin text fetch through the manager - CORS cannot block it.
- * The banner declares @connect * because subtitle URLs are user-supplied
- * from arbitrary hosts; a per-domain consent gate would be friction on the
- * hot subtitle-loading path. Request errors still surface normally, so a
- * dead link fails loudly rather than silently.
- */
-export function gmRequestText(url, { timeoutMs = 30000 } = {}) {
-  const { promise, resolve, reject } = Promise.withResolvers();
-  GM_xmlhttpRequest({
-    url,
-    method: "GET",
-    timeout: timeoutMs,
-    onload: (res) => {
-      if (res.status >= 200 && res.status < 300) {
-        resolve(res);
-      } else {
-        reject(new Error(`HTTP ${res.status}`));
-      }
-    },
-    onerror: () => reject(new Error("Network error")),
-    ontimeout: () => reject(new Error(`Timed out after ${timeoutMs}ms`))
-  });
-  return promise;
+export async function warmStorage() {
+  // One wholesale boot read. onMessage/onChanged handlers below this point
+  // keep the map authoritative.
+  const stored = await browser.storage.local.get(null);
+  for (const key of Object.keys(KEYS)) {
+    const envelope = stored[KEYS[key]];
+    values.set(KEYS[key], envelope == null ? null : unbox(envelope).value);
+  }
 }
 
-/** Read a stored JSON object, or the fallback when missing/corrupt. */
+/** Read one stored object from the map, or the fallback when missing/corrupt. */
 export function loadJsonObject(key, fallback) {
-  const raw = gmGetValue(key, null);
+  const raw = values.get(key);
   return raw && typeof raw === "object" ? raw : fallback;
 }
 
-/** Hostile segment guard: a stored doc must never enable prototype traversal. */
+/**
+ * Write one key. Memory-first, disk write-behind: the value map is
+ * updated synchronously (so subsequent reads see the write immediately)
+ * and the storage IPC resolves in the background - a failed write leaves
+ * memory ahead of disk and lands on the log-then-continue belt (the next
+ * foreign echo re-serves the disk doc, the same posture the userscript
+ * plane's #persist carried). The envelope rides the stored bytes.
+ */
+export function setValue(key, value) {
+  values.set(key, value);
+  browser.storage.local.set({ [key]: box(value) }).catch((err) => {
+    logger.error("storage", "Failed to persist:", key, err);
+  });
+}
+
+let echoWatchers = null;
+
+/**
+ * Subscribe to foreign-realm writes of one storage key (owned here so
+ * both cache consumers share one explanation of the echo contract instead
+ * of each restating it). storage.onChanged fires for our own writes too -
+ * the envelope's `from` matches this realm's CLIENT_ID exactly once, so
+ * the echo is filtered by identity, not by timing: a second callback
+ * registered by the same realm still never sees its own writes, and a
+ * foreign delivery always lands, the contract the userscript plane
+ * documented (own instance silent, everything else delivered). The new
+ * value is passed unwrapped - a consumer whose state derives from the
+ * DELIVERED doc (resume cross-tab merges) must not re-read storage, both
+ * to save the IPC and because an older tab's echo may race its read.
+ * Returns `{ stop() }`, safe to call on a failed install or twice.
+ */
+export function watchStorageKey(key, handler) {
+  if (!echoWatchers) {
+    echoWatchers = new Map();
+    browser.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== "local") {
+        return;
+      }
+      for (const key of echoWatchers.keys()) {
+        if (!Object.hasOwn(changes, key)) {
+          continue;
+        }
+        const { from, value } = unbox(changes[key].newValue);
+        if (from === CLIENT_ID) {
+          continue;
+        }
+        // Foreign delivery lands its value in the map (below) BEFORE the
+        // watchers run, so a sync read inside a watcher serves the fresh
+        // doc for free.
+        if (values.has(key)) {
+          values.set(key, value);
+        }
+        const watchers = echoWatchers.get(key);
+        if (watchers) {
+          for (const watcher of watchers) {
+            try {
+              watcher(key, null, value);
+            } catch (err) {
+              logger.error("storage", "storage watch handler failed", err);
+            }
+          }
+        }
+      }
+    });
+  }
+  let watchers = echoWatchers.get(key);
+  if (!watchers) {
+    watchers = new Set();
+    echoWatchers.set(key, watchers);
+  }
+  const watcher = handler;
+  watchers.add(watcher);
+  return {
+    stop() {
+      echoWatchers.get(key)?.delete(watcher);
+    }
+  };
+}
+
+/**
+ * Cross-origin text fetch through the background relay - CORS cannot block
+ * the background page's fetch (the manifest's <all_urls> host permission
+ * backs it; a content-script's own fetch follows the page's CORS and dies
+ * on exactly the user-supplied hosts the ingest serves). Request errors
+ * still surface normally, so a dead link fails loudly rather than
+ * silently. The response mirrors the fields the old GM response object
+ * exposed (status/ok, finalUrl, responseText) so consumers keep their
+ * shape.
+ */
+export function requestText(url, { timeoutMs = 30000 } = {}) {
+  const { promise, resolve, reject } = Promise.withResolvers();
+  // The relay answers every failure as a result object (fetch cannot throw
+  // across the message channel) - the contract this export owes its caller
+  // is rejection on failure, so the answer is re-thrown here. A null reply
+  // means no receiver: the background page is gone (disabled, crashed) -
+  // wrapped in the same belt, surfaced as a plain Error.
+  browser.runtime.sendMessage({ type: "pf:request-text", url, timeoutMs }).then(
+    (response) => {
+      if (response == null) {
+        reject(new Error("Relay unavailable"));
+      } else if (response.ok) {
+        resolve(response);
+      } else {
+        reject(new Error(response.error || `HTTP ${response.status}`));
+      }
+    },
+    (err) => reject(err instanceof Error ? err : new Error(String(err)))
+  );
+  return promise;
+}
+
+/** Unsafe-segment guard: a stored doc must never enable prototype traversal. */
 function isSafeKeySegment(key) {
   return key !== "__proto__" && key !== "constructor" && key !== "prototype";
 }
 
 /**
- * The whole configs-document engine as one class: the parse-once cache, the
- * copy-on-write read-modify-write, and the deletion sweep are private fields
- * and methods on the one instance. The module singleton wires the exported
- * call surface below.
+ * The whole configs-document engine as one class: the map-backed doc read
+ * and the copy-on-write read-modify-write are private fields and methods
+ * on the one instance. The module singleton wires the exported call
+ * surface below. The parse-once cache the userscript plane kept died into
+ * the store's value map - every read serves the map (warmed at boot,
+ * refreshed by echo deliveries), so this class is pure document walking.
  */
 class ConfigStore {
-  /**
-   * The whole configs document, parsed at most once and served from a module
-   * cache afterwards. GM storage is a sync localStorage parse per call - the
-   * hot read paths (repeated getConfigValue, the cross-tab refresh loop) were
-   * re-parsing the entire doc every time. Writers refresh the cache in place;
-   * external (cross-tab) writes invalidate it via invalidateConfigCache().
-   */
-  #cache = null;
-
   #readDoc() {
-    if (this.#cache == null) {
-      this.#cache = loadJsonObject(KEYS.configs, { version: 1 });
-    }
-    return this.#cache;
+    return loadJsonObject(KEYS.configs, { version: 1 });
   }
 
   /** Read one dotted path, or the fallback when missing/unsafe. */
@@ -202,26 +259,15 @@ class ConfigStore {
     return node === undefined ? fallback : node;
   }
 
-  /** Drop the cached configs doc after an external (cross-tab) write. */
-  invalidate() {
-    this.#cache = null;
-  }
-
   #persist(doc) {
-    try {
-      gmSetValue(KEYS.configs, doc);
-    } catch (err) {
-      logger.error("storage", "Failed to persist config:", err);
-      return false;
-    }
-    this.#cache = doc;
+    setValue(KEYS.configs, doc);
     return true;
   }
 
   /**
    * Apply several dotted config fields (and their values) in one read-modify-
    * write of the configs document. Preset/flush paths that touch many fields at
-   * once avoid N serialized gmSetValue round trips (each of which re-reads and
+   * once avoid N serialized round trips (each of which re-reads and
    * re-serializes the whole doc).
    *
    * Clone discipline: COPY-ON-WRITE along the touched paths instead of a full
@@ -314,11 +360,6 @@ class ConfigStore {
 }
 
 const configStore = new ConfigStore();
-
-/** Drop the cached configs doc after an external (cross-tab) write. */
-export function invalidateConfigCache() {
-  configStore.invalidate();
-}
 
 export function getConfigValue(path, fallback) {
   return configStore.get(path, fallback);

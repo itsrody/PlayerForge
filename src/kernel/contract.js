@@ -29,6 +29,26 @@ export const SHELL_MARKER = "data-pf-shell";
 
 export const DEBUG_LOGS_KEY = "debug.logs";
 
+/**
+ * The browserAction command channel: the popup (dist/popup.js) is pure
+ * chrome - it owns no storage and gestures at nothing - it sends one
+ * message type and the top frame's receiver (kernel.js TabCommands)
+ * answers. The names are command nouns distinct from the gesture event
+ * vocabulary (pf:gesture-*): the receiver maps reset commands onto
+ * GESTURE_EVENTS dispatches, the debug pair through the debug gate, and
+ * the diag write through the pf:diag echo. Derived nouns, one table -
+ * the message type is spelled once here and imported by both surfaces.
+ */
+export const TAB_COMMAND = "pf:command";
+
+export const COMMANDS = Object.freeze({
+  debugToggle: "debug-toggle",
+  debugQuery: "debug-query",
+  diag: "diag",
+  filterReset: "filter-reset",
+  syncReset: "sync-reset"
+});
+
 /** The hash tag that flips debug mode for one page load (never persisted).
  *  An explicit menu "Off" wins over it. */
 export const DEBUG_HASH_TAG = "pf-debug";

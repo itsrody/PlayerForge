@@ -3,73 +3,50 @@ import { logger } from "../../shared/runtime.js";
 import { onDomMutations } from "../../shared/dom.js";
 import { SHELL_MARKER } from "../../kernel/contract.js";
 import { el } from "./ui.js";
-import { gmGetResourceText } from "../../shared/store.js";
 
 // Re-export the single contract-sourced marker so shell/forge keep importing
 // it from here - one source of truth, no mirrored literal to drift.
 export { SHELL_MARKER };
 
 /**
- * One owner of the shell stylesheet lifecycle: the embedded sheet applied
- * synchronously at document-start, the @resource upgrade in the background
- * (replaceSync in place, propagating to every adopted reference), and its
- * adoption into the document. The three loose variables it replaced are
- * private fields so "adopted once, upgraded monotonically" is one object's
- * story; warmStyles()/injectShell() stay plain-call façades.
+ * One owner of the shell stylesheet lifecycle: the sheet applied
+ * synchronously at document-start and its adoption into the document. The
+ * three loose variables it replaced are private fields so "adopted once"
+ * is one object's story; warmStyles()/injectShell() stay plain-call
+ * façades.
+ *
+ * The userscript plane carried a second source here - the @resource CSS
+ * fetched from the manager in the background and upgraded into the sheet
+ * - whose only job was letting a CSS hot-fix reach installed scripts
+ * without an AMO-style update. An extension ships its CSS inside the
+ * signed package (the same minifier output rides a plain string import),
+ * so there is exactly one source and the upgrade story (a monotonic
+ * background swap with its parity guard and last-good-keep belt) retires
+ * with the resource.
  */
 class ShellStyle {
   #sheet = null;
   #adopted = false;
-  #load = null;
 
   /** The live sheet - attached to every shadow root inject() creates. */
   get sheet() {
     return this.#sheet;
   }
 
-  /** Apply now (synchronously available CSS), arm the @resource upgrade. */
+  /** Apply now (synchronously available CSS). Idempotent. */
   warm() {
     if (this.#sheet) {
       return this.#sheet;
     }
     this.#sheet = new CSSStyleSheet();
+    // replaceSync throws on malformed CSS; the string is build output the
+    // bundle gate already shape-pins, so a throw here means a broken
+    // release - rethrown to the boot surface rather than silently
+    // half-installed.
     this.#sheet.replaceSync(SHELL_CSS);
     if (!this.#adopted) {
       this.#adopted = true;
       document.adoptedStyleSheets = [...document.adoptedStyleSheets, this.#sheet];
-    }
-    this.#load = this.#warmFromResource();
-    return this.#sheet;
-  }
-
-  /** Resolve the authoritative (post-@resource) stylesheet. Never rejects. */
-  settled() {
-    return this.#load;
-  }
-
-  async #warmFromResource() {
-    let css = null;
-    try {
-      css = await gmGetResourceText("pfStyle");
-    } catch (err) {
-      logger.error("inject", "Failed to load @resource stylesheet:", err);
-    }
-    // Parity guard: only ever swap in STRICTLY better CSS. An empty or
-    // malformed resource must not clobber the working embedded sheet - the
-    // upgrade is strictly-monotonic, so the shell can never go blank from a
-    // pathological fetch. replaceSync throws on invalid CSS; catch it and
-    // keep the last-good sheet rather than risk a blank UI. In production the
-    // @resource text is byte-identical to the embedded sheet (same esbuild
-    // minifier, same source), so skip the redundant replaceSync: re-parsing
-    // 19 KB and restyling the document + every adopted shadow root right at
-    // first-video dimming buys nothing.
-    if (css && css !== SHELL_CSS && css.trim().length > 0) {
-      try {
-        // Replace in place: adopted sheets everywhere see the upgrade.
-        this.#sheet.replaceSync(css);
-      } catch (err) {
-        logger.error("inject", "Rejected malformed @resource stylesheet:", err);
-      }
     }
     return this.#sheet;
   }

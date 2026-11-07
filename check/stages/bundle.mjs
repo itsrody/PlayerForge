@@ -1,10 +1,14 @@
 /**
- * Gate 3 - the artifact itself.
+ * Gate 4 - the artifact itself.
  *
- * Builds the esb bundle the browser gate will load and validates the parts a
- * userscript environment actually relies on: the ==UserScript== header parses
- * out of the top of the file, and the bundle body is IIFE-wrapped (no import/
- * export survives esbuild's userscript transform).
+ * Builds the shipping extension and validates what the browser (and the
+ * check's own browser stage) rely on: the manifest parses and carries the
+ * frame model's contract (all frames, document_start, the exclusion
+ * platform floor, the storage + host permissions), the content bundle is
+ * IIFE build output with no userscript vocabulary while the chrome members
+ * ship verbatim from the package tree they hand-maintain, and the XPI zip
+ * carries exactly the six members the manifest references, verifyable
+ * against the dist tree.
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
@@ -13,7 +17,78 @@ import { fileURLToPath } from "node:url";
 import { stripComments } from "./census.mjs";
 
 const HERE = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const BUNDLE = join(HERE, "dist", "playerforge.user.js");
+const EXT = join(HERE, "dist", "extension");
+const XPI = join(HERE, "dist", "playerforge.xpi");
+
+/**
+ * Minimal STORE-mode ZIP reader (the writer's inverse, no compression):
+ * the central directory only - name list + a manifest-bytes extraction.
+ * The XPI is the signed-binary stand-in the harness installs, so the gate
+ * asserts what the install consumes, not zip internals Firefox re-reads
+ * itself.
+ */
+function zipMembers(bytes) {
+  const sig = Buffer.from([0x50, 0x4b, 0x05, 0x06]);
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= 0 && eocd === -1; i--) {
+    if (bytes[i] === sig[0] && bytes[i + 1] === sig[1] && bytes[i + 2] === sig[2] && bytes[i + 3] === sig[3]) eocd = i;
+  }
+  if (eocd < 0) return null;
+  const count = bytes.readUInt16LE(eocd + 10);
+  const dirOffset = bytes.readUInt32LE(eocd + 16);
+  const names = [];
+  const files = new Map();
+  let p = dirOffset;
+  for (let n = 0; n < count; n++) {
+    if (bytes.readUInt32LE(p) !== 0x02014b50) return null;
+    const compressedSize = bytes.readUInt32LE(p + 20);
+    const nameLen = bytes.readUInt16LE(p + 28);
+    const extraLen = bytes.readUInt16LE(p + 30);
+    const commentLen = bytes.readUInt16LE(p + 32);
+    const localOffset = bytes.readUInt32LE(p + 42);
+    const name = bytes.subarray(p + 46, p + 46 + nameLen).toString("utf8");
+    names.push(name);
+    // Extract the member data (STORE: method 0 verified per entry).
+    const method = bytes.readUInt16LE(p + 10);
+    const localNameLen = bytes.readUInt16LE(localOffset + 26);
+    const localExtraLen = bytes.readUInt16LE(localOffset + 28);
+    if (method !== 0) return null;
+    files.set(name, bytes.subarray(localOffset + 30 + localNameLen + localExtraLen, localOffset + 30 + localNameLen + localExtraLen + compressedSize));
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return { names, files };
+}
+
+/**
+ * Extract string literals longer than min bytes from a minified JS body,
+ * escape-aware (backslash pairs, both quote characters). Used to scope the
+ * sheet-fidelity scan to the embedded CSS string - the only giant literal
+ * in the content bundle.
+ */
+function longStringLiterals(source, min) {
+  const out = [];
+  let i = 0;
+  let quote = null;
+  let start = -1;
+  while (i < source.length) {
+    const c = source[i];
+    if (quote) {
+      if (c === "\\") { i += 2; continue; }
+      if (c === quote) {
+        if (i - start - 1 >= min) out.push(source.slice(start + 1, i));
+        quote = null;
+      }
+      i += 1;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      quote = c;
+      start = i;
+    }
+    i += 1;
+  }
+  return out;
+}
 
 export async function run() {
   const start = Date.now();
@@ -27,103 +102,134 @@ export async function run() {
   }
 
   const fails = [];
-  if (!existsSync(BUNDLE)) {
-    fails.push({ name: "dist/playerforge.user.js", note: "bundle not produced" });
+  const manifestPath = join(EXT, "manifest.json");
+  if (!existsSync(manifestPath)) {
+    fails.push({ name: "manifest.json", note: "manifest not produced" });
   } else {
-    const source = readFileSync(BUNDLE, "utf8");
-    if (!source.startsWith("// ==UserScript==") || !source.includes("==/UserScript==")) {
-      fails.push({ name: "userscript header", note: "==UserScript== header missing from top of bundle" });
-    }
-    const headerVersion = source.match(/^\/\/ @version\s+(\S+)/m)?.[1] ?? null;
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
     const pkgVersion = JSON.parse(readFileSync(join(HERE, "package.json"), "utf8")).version;
-    if (headerVersion !== pkgVersion) {
-      fails.push({ name: "header version", note: `bundle @version ${headerVersion ?? "missing"} != package.json ${pkgVersion}` });
+    if (manifest.version !== pkgVersion) {
+      fails.push({ name: "manifest version", note: `manifest ${manifest.version} != package.json ${pkgVersion}` });
     }
-    if (/\b(export|import)\b\s*[({"']/.test(source.slice(source.indexOf("==/UserScript==")))) {
-      fails.push({ name: "module syntax", note: "import/export statements leaked into the bundle body" });
+    const cs = manifest.content_scripts?.[0];
+    if (!cs || manifest.content_scripts.length !== 1) {
+      fails.push({ name: "content script entry", note: "content_scripts missing or not exactly one" });
+    } else {
+      if (cs.matches?.join() !== "<all_urls>" || cs.all_frames !== true || cs.run_at !== "document_start") {
+        fails.push({ name: "frame contract", note: `matches=${cs.matches} all_frames=${cs.all_frames} run_at=${cs.run_at} - every frame, document_start, is the ported frame model` });
+      }
+      // The exclusion floor: exactly the platform table's worth of strict
+      // match-pattern exclusions, the ported @exclude-match surface (the
+      // platform count lives in esbuild.config.mjs; the shape contract -
+      // every pattern a `*://*.<host>/*` wildcard - is pinned here).
+      const excludes = cs.exclude_matches ?? [];
+      const malformed = excludes.filter((p) => !/^\*:\/\/\*\.[A-Za-z0-9.-]+\/\*$/.test(p));
+      if (excludes.length !== 24 || malformed.length > 0) {
+        fails.push({ name: "exclusion floor", note: `exclude_matches=${excludes.length} malformed=${malformed.join(", ") || "none"}` });
+      }
+      if (cs.include_globs || cs.exclude_globs || cs.css?.length) {
+        fails.push({ name: "content script vocabulary", note: "globs/second-css injection present - new manager-lifecycle surfaces joined silently" });
+      }
     }
-    // Static drift: every GM_ name the bundle body calls must appear in the
-    // @grant list - at runtime an ungranted call is simply undefined (real VM
-    // semantics), so only this check makes the omission audible. GM_info is
-    // manager-provided, never granted.
-    const granted = new Set([...source.matchAll(/^\/\/\s*@grant\s+GM_\w+$/gm)].map((m) => m[0].match(/GM_\w+/)[0]));
-    const called = new Set([...source.slice(source.indexOf("==/UserScript==")).matchAll(/\bGM_[A-Za-z]+/g)].map((m) => m[0]));
-    const ungranted = [...called].filter((name) => name !== "GM_info" && !granted.has(name));
-    if (ungranted.length > 0) {
-      fails.push({ name: "grant coverage", note: `body calls ${ungranted.join(", ")} without a matching @grant` });
+    if (!manifest.permissions?.includes("storage")) {
+      fails.push({ name: "storage permission", note: "missing - store.js's whole plane rides browser.storage.local" });
     }
-    // Matching surface: the exclusion list ships on VM's strict surface
-    // (@exclude-match, Chrome match-pattern semantics). A loose @exclude glob
-    // line returning would silently re-open the any-characters overmatch the
-    // migration collapsed away.
-    const looseExcludes = [...source.matchAll(/^\/\/\s*@exclude\s+\S/gm)].length;
-    const matchExcludes = [...source.matchAll(/^\/\/\s*@exclude-match\s+(\S+)$/gm)].map((m) => m[1]);
-    const malformed = matchExcludes.filter((rule) => !/^\*:\/\/[^/]+\/\*$/.test(rule));
-    if (looseExcludes > 0 || malformed.length > 0 || matchExcludes.length === 0) {
-      fails.push({
-        name: "exclude surface",
-        note: `@exclude lines=${looseExcludes} @exclude-match=${matchExcludes.length} malformed=${malformed.join(", ") || "none"}`
-      });
+    if (!manifest.permissions?.includes("<all_urls>")) {
+      fails.push({ name: "host permission", note: "missing - the background relay's fetch is the one CORS-bypassing egress" });
     }
-    // Updater surface: VM's updater compares @version against @downloadURL -
-    // a header without it pins auto-update to whatever URL the user installed
-    // from (a local install gets none).
-    if (!/^\/\/ @downloadURL\s+https:\/\//m.test(source)) {
-      fails.push({ name: "updater surface", note: "@downloadURL missing from header" });
+    if (manifest.background?.persistent !== true || !manifest.background?.scripts?.includes("background.js")) {
+      fails.push({ name: "background page", note: "must be a persistent background.js - the awaited relay fetch never suspends" });
     }
-    // Connect/resource surface: the census's network block pins the src side
-    // (one manager relay, one consumer); this pins the header half those rows
-    // voucher. The `*` umbrella is what user-supplied subtitle URLs load
-    // under - dropping it kills every URL ingest against CORS with no error
-    // a user could act on. The subtitlecat line is documented-inert (it
-    // predates the umbrella, has no dedicated caller) and kept as a header
-    // surface; the pfStyle resource is the one manager-fetched asset - a
-    // second @resource is new manager-lifecycle egress joining silently.
-    const connects = [...source.matchAll(/^\/\/\s*@connect\s+(\S+)$/gm)].map((m) => m[1]);
-    if (connects.length !== 2 || !connects.includes("*")) {
-      fails.push({
-        name: "connect surface",
-        note: `@connect lines=${connects.length} (${connects.join(", ")}) - expected exactly the * umbrella + the documented-inert subtitlecat entry`
-      });
+    if (manifest.browser_action?.default_popup !== "popup.html") {
+      fails.push({ name: "popup surface", note: "the browserAction popup is the command surface replacing the GM menu" });
     }
-    const resources = [...source.matchAll(/^\/\/\s*@resource\s+(\S+)/gm)].length;
-    if (resources !== 1) {
-      fails.push({
-        name: "resource surface",
-        note: `@resource lines=${resources} - pfStyle is the one manager-fetched asset; a second resource is a network decision, not a style tweak`
-      });
+    if (manifest.manifest_version !== 2) {
+      fails.push({ name: "manifest version", note: `manifest_version=${manifest.manifest_version} - Firefox has no MV2 deprecation on this floor` });
     }
-    const sizeKb = (source.length / 1024).toFixed(1);
-    rows.push({ name: `bundle emitted (${sizeKb} KB), header + IIFE shape valid`, status: "pass", ms: null });
+    if (manifest.browser_specific_settings?.gecko?.id) {
+      const version = manifest.browser_specific_settings.gecko.strict_min_version;
+      if (version !== "159.0") {
+        fails.push({ name: "gecko floor", note: `strict_min_version=${version} - the ES target floor is Firefox 159` });
+      }
+    } else {
+      fails.push({ name: "gecko id", note: "browser_specific_settings.gecko.id missing - storage namespace + update identity" });
+    }
+    rows.push({ name: "manifest shape (frame contract, permissions, background, popup)", status: "pass", ms: null });
+  }
+
+  // The `import|export` leak check and the userscript-vocabulary scan run
+  // over the content bundle (IIFE build output) and the two verbatim chrome
+  // scripts alike - the chrome members must stay plain, import-free
+  // scripts, and no plane may spell GM vocabulary by any route.
+  const shouldNotLeak = [
+    [/GM_[A-Za-z]+/, "GM_ vocabulary"],
+    [/@resource /, "@resource line"],
+    [/@grant /, "@grant line"],
+    [/\b(stub|GM\.info)\b/, null]
+  ];
+  for (const name of ["content.js", "background.js", "popup.js"]) {
+    const path = join(EXT, name);
+    if (!existsSync(path)) {
+      fails.push({ name, note: "member not produced/present" });
+      continue;
+    }
+    const source = readFileSync(path, "utf8");
+    if (/\b(import|export)\s*[({"']/.test(source)) {
+      fails.push({ name, note: "import/export statements leaked into the IIFE build" });
+    }
+    // The vocabulary scan rides the comment-stripped text (the census's own
+    // stripper): the chrome members now ship their own docstrings verbatim,
+    // so prose about the retired plane must stay out of the counts the
+    // content bundle's raw-minified text would have answered for free.
+    const stripped = name === "content.js" ? source : stripComments(source);
+    const leaked = shouldNotLeak.slice(0, 3).filter(([re]) => re.test(stripped)).map(([, label]) => label);
+    if (leaked.length > 0) {
+      fails.push({ name, note: `userscript vocabulary leaked: ${leaked.join(", ")}` });
+    }
+    rows.push({ name: `${name} (plain script, no userscript vocabulary)`, status: "pass", ms: null });
+  }
+
+  // Sheet fidelity rides the embedded sheet. The minified sheet lives as
+  // one giant string literal in the content bundle; a document-wide scan
+  // cannot run - `)+` is ordinary JS outside the CSS string. Extract the
+  // long string literals (escape-aware, quote-pair scan) and run the glue
+  // regexes over them: the sheet is the only >1KB literal in the bundle,
+  // and the glue classes `)and(`/`)[+-]` are exactly what the minifier's
+  // two preservation rules exist to prevent.
+  const contentSource = readFileSync(join(EXT, "content.js"), "utf8");
+  const sheetStrings = longStringLiterals(contentSource, 1000);
+  const gluedTokens = [
+    ...sheetStrings.flatMap((s) => [...s.match(/\)(and|or|not|only)\(/gi) ?? []]),
+    ...sheetStrings.flatMap((s) => [...s.match(/\)[+-]/g) ?? []])
+  ];
+  if (gluedTokens.length > 0) {
+    fails.push({ name: "sheet fidelity (embedded)", note: `glued grammar tokens in the shipped sheet: ${gluedTokens.slice(0, 6).join(", ")}` });
   }
 
   // HUD class-vocabulary agreement: every pf-* class the source JS spells
   // must have a reader on the HUD's one styling surface (styles.css or the
   // inject-side compact sheet). A JS class no CSS consumes is a dead
-  // vocabulary token, the way an ungranted GM_ call is a silent undefined -
-  // the same audit shape as the grant-coverage row above. Two deliberate
-  // scan exclusions: "pf-debug" is the DEBUG_HASH_TAG vocabulary (the
-  // contract writes that exact literal exactly once; it keys hash
-  // detection, never a class), and a trailing-hyphen token is a template
-  // prefix (pf-panel-tab-${n} id derivation), not a whole class name.
+  // vocabulary token. Two deliberate scan exclusions: "pf-debug" is the
+  // DEBUG_HASH_TAG vocabulary (contract constant, never a class), and a
+  // trailing-hyphen token is a template id prefix (pf-panel-tab-${n}).
   let cssCorpus = "";
   try {
     cssCorpus = readFileSync(join(HERE, "src/shell/chrome/styles.css"), "utf8")
       + readFileSync(join(HERE, "src/shell/chrome/inject.js"), "utf8");
   } catch {
-    // The styling surfaces always ship; an unreadable corpus fails below
-    // with every class unstyled, never silently passes.
     cssCorpus = "";
   }
-  const srcWalker = (dir, out = []) => {
+  // Same directory walk shape as the census stage (statSync directory
+  // check); the shared file list feeds one vocabulary scan.
+  const srcFiles = [];
+  (function walkSrc(dir) {
     for (const name of readdirSync(dir)) {
-      const path = join(dir, name);
-      if (statSync(path).isDirectory()) srcWalker(path, out);
-      else if (name.endsWith(".js")) out.push(path);
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) walkSrc(p);
+      else if (name.endsWith(".js")) srcFiles.push(p);
     }
-    return out;
-  };
-  const strippedSrc = srcWalker(join(HERE, "src")).map((p) => stripComments(readFileSync(p, "utf8"))).join("\n");
+  })(join(HERE, "src"));
+  const strippedSrc = srcFiles.map((p) => stripComments(readFileSync(p, "utf8"))).join("\n");
   const classTokens = new Set(
     [...strippedSrc.matchAll(/(?<=["'`\s(,=])pf-[a-z][a-z-]+/g)]
       .map((m) => m[0])
@@ -134,37 +240,33 @@ export async function run() {
     fails.push({ name: "HUD class vocabulary", note: `source spells pf-* classes with no CSS reader: ${dead.join(", ")}` });
   }
 
-  // Sheet fidelity: the minifier's whitespace stripping must never merge two
-  // grammar-required tokens. `) and (` in a media prelude glued to `)and(`
-  // parses on Firefox into an and() function prelude and the whole row is
-  // silently rewritten to `@media not all` — a rule that never applies (the
-  // shipped coarse-pointer bottom-sheet rows were inert for releases before
-  // the fix). The same glue class in calc — `)+ var(`, `)- var(` — cuts the
-  // whitespace the +/- infix requires on both sides of the operator, and the
-  // declaration dies at substitution time (probed on the floor: computed
-  // bottom falls back to auto). The glue sites the minifier produces are
-  // exact: pass 2 strips after ")" (giving `)and(` / `)+ var(`) and pass 1
-  // strips before "(" (giving `) and(`); the keyword-in-the-middle shape
-  // (`) and(`-led) cannot false-positive on a legitimate `:not(`.
-  let sheet = "";
-  try {
-    sheet = readFileSync(join(HERE, "dist/playerforge.css"), "utf8");
-  } catch {
-    // The css companion always ships with the bundle (esbuild writes both).
-  }
-  const gluedTokens = [
-    ...(sheet.match(/\)(and|or|not|only)\(/gi) ?? []),
-    ...(sheet.match(/\)[+-]/g) ?? [])
-  ];
-  if (gluedTokens.length > 0) {
-    fails.push({
-      name: "sheet fidelity",
-      note: `glued grammar tokens in shipped sheet: ${gluedTokens.slice(0, 6).join(", ")}`
-    });
+  // The XPI: the shipping artifact the harness installs - exactly the six
+  // members, manifest at the zip root, each byte-identical to its dist file.
+  if (!existsSync(XPI)) {
+    fails.push({ name: "playerforge.xpi", note: "xpi not produced" });
+  } else {
+    const zip = zipMembers(readFileSync(XPI));
+    const expected = ["manifest.json", "content.js", "background.js", "popup.html", "popup.js", "icon.svg"];
+    if (!zip) {
+      fails.push({ name: "playerforge.xpi", note: "central directory unreadable (method/structure)" });
+    } else {
+      const missing = expected.filter((n) => !zip.names.includes(n));
+      const extra = zip.names.filter((n) => !expected.includes(n));
+      if (missing.length > 0 || extra.length > 0) {
+        fails.push({ name: "playerforge.xpi members", note: `missing=${missing.join(", ") || "none"} extra=${extra.join(", ") || "none"}` });
+      } else {
+        const drift = expected.filter((n) => !zip.files.get(n).equals(readFileSync(join(EXT, n))));
+        if (drift.length > 0) {
+          fails.push({ name: "playerforge.xpi fidelity", note: `zip members differ from dist: ${drift.join(", ")}` });
+        }
+      }
+    }
+    const sizeKb = (readFileSync(XPI).length / 1024).toFixed(1);
+    rows.push({ name: `playerforge.xpi (${sizeKb} KB, 6 members, zip==dist)`, status: "pass", ms: null });
   }
 
   if (fails.length > 0) {
     return { rows: [...rows, ...fails.map((f) => ({ name: f.name, status: "fail", note: f.note, ms: null }))], ok: false };
   }
-  return { rows, ok: true, bundle: BUNDLE };
+  return { rows, ok: true, bundle: join(EXT, "content.js") };
 }

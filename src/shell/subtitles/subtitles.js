@@ -19,7 +19,7 @@
 import { parseSubtitlesAsync, srtToVtt, ensureVttHeader } from "./forgevtt.js";
 import { logger, Scope, debounce, Fan } from "../../shared/runtime.js";
 import { DOMManager } from "../../shared/dom.js";
-import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/store.js";
+import { getConfigValue, setConfigValue, requestText } from "../../shared/store.js";
 import { TUNING, clamp, fmtPercent, fmtEm, fmtPercentOrOff, signedSeconds } from "../../shared/core.js";
 import { GESTURE_EVENTS } from "../../kernel/contract.js";
 import { SETTING_KEYS } from "../chrome/config.js";
@@ -1141,7 +1141,7 @@ export class SubtitleSession {
     }
   }
 
-  /** Fetch a subtitle file from the web through the manager's xhr. */
+  /** Fetch a subtitle file from the web through the background relay. */
   async loadFromUrl(rawUrl) {
     if (this.#scope.disposed) {
       return;
@@ -1152,7 +1152,7 @@ export class SubtitleSession {
     }
     let response;
     try {
-      response = await gmRequestText(url);
+      response = await requestText(url);
     } catch (err) {
       this.#fail("fetch", url, err);
       return;

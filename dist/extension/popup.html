@@ -1,0 +1,68 @@
+<!doctype html>
+<!--
+  The browserAction command surface - the four commands the userscript
+  plane's manager menu carried, rebuilt as extension chrome. The page owns
+  no storage and dispatches no events: every row is a message to the active
+  tab's top document (kernel.js TabCommands), whose reply relabels the row
+  or fills the hint line. One tiny hand-rolled surface; its ink matches the
+  HUD sheet (#0e0e10 + hairline) so the two chromes read as one product,
+  but it is NOT the HUD and carries no HUD sheet - panel law does not bind
+  a 216px static page.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      margin: 0;
+      width: 216px;
+      background: #0e0e10;
+      color: #ffffff;
+      font: 13px system-ui, sans-serif;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 10px 12px 8px;
+      border-bottom: 1px solid #26262b;
+    }
+    .brand { font-weight: 600; font-size: 13px; }
+    .version { color: #a2a2a8; font-variant-numeric: tabular-nums; }
+    button {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      padding: 9px 12px;
+      border: none;
+      border-bottom: 1px solid #1c1c20;
+      background: transparent;
+      color: #ffffff;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    button:hover, button:focus-visible { background: #1c1c21; outline: none; }
+    #hint {
+      margin: 0;
+      padding: 8px 12px 10px;
+      color: #a2a2a8;
+      border-bottom: 1px solid #1c1c20;
+    }
+    .strip { height: 3px; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="brand">PlayerForge</span>
+    <span class="version" id="version"></span>
+  </header>
+  <button id="debug-toggle" title="Toggle PF debug logging">Debug logs</button>
+  <button id="diag" title="Print one state line per PlayerForge realm (frame) to the console">Dump frame state</button>
+  <button id="filter-reset" title="Restore the default color filter">Reset color filter</button>
+  <button id="sync-reset" title="Restore the default subtitle sync offset">Reset subtitle sync</button>
+  <p id="hint" hidden></p>
+  <div class="strip"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "manifest_version": 2,
+  "name": "pf-check-harness",
+  "version": "1.0.0",
+  "description": "Temporary companion addon for the PlayerForge check tool. Not for distribution.",
+  "permissions": ["tabs"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": true
+  }
+}

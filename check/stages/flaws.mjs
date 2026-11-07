@@ -10,9 +10,15 @@
  *     circular-contract export, a missing name) is attributed to exactly one
  *     file and cannot be masked by another module's boot order.
  *
- * entry.js is consciously outside the smoke set: it boots the page pipeline
- * by design (its import IS a document bootstrap), so its evaluation belongs
- * to the bundle and browser gates, which run it in a real realm.
+ * entry.js and the extension chrome members (background.js, popup.js - they
+ * live in dist/extension, the package they ship from) are consciously
+ * outside the smoke set: all three boot their realm by design (the
+ * content-script entry runs the page pipeline; background.js/popup.js
+ * top-level ARE their activation - eval-time they touch browser.runtime /
+ * document directly), so their evaluation belongs to the bundle and
+ * browser gates, which run them in a real realm. store.js passes the smoke
+ * because its browser.* calls sit behind lazy call sites (clients per
+ * realm), not module-eval touches.
  */
 import { execFileSync } from "node:child_process";
 import { readdirSync, statSync } from "node:fs";
@@ -22,6 +28,9 @@ import { inParallel } from "../lib/pool.mjs";
 
 const HERE = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SRC = join(HERE, "src");
+/** The chrome members lint from their shipped home; content.js (generated)
+ *  stays globally ignored in eslint.config.js. */
+const EXT = join(HERE, "dist", "extension");
 
 function walk(dir, out = []) {
   for (const name of readdirSync(dir)) {
@@ -37,7 +46,7 @@ function lint() {
   try {
     out = execFileSync(
       process.execPath,
-      [join(HERE, "node_modules", "eslint", "bin", "eslint.js"), SRC],
+      [join(HERE, "node_modules", "eslint", "bin", "eslint.js"), SRC, EXT],
       { stdio: "pipe", encoding: "utf8" }
     );
     return null;
@@ -68,12 +77,14 @@ const importSmoke = (files) =>
 
 export async function run() {
   const start = Date.now();
+  // src/** walks the player plane; entry.js is the content-script entry (its
+  // import IS its activation), and the chrome members are not in src at all
+  // - they are the dist/extension package tree, linted at the EXT path.
   const files = walk(SRC).filter((f) => !f.endsWith(join("src", "entry.js")));
   const failures = [];
-
   const lintOut = lint();
   if (lintOut) {
-    failures.push({ name: "eslint src/", note: lintOut.split("\n")[0].slice(0, 160) });
+    failures.push({ name: "eslint src/ + extension chrome", note: lintOut.split("\n")[0].slice(0, 160) });
   }
 
   for (const b of (await importSmoke(files)).filter((x) => x !== null)) {
@@ -88,7 +99,7 @@ export async function run() {
   }
   return {
     rows: [
-      { name: `eslint src/ (${join("repo rules")})`, status: "pass", ms: null },
+      { name: `eslint (${join("src/ + dist/extension chrome")})`, status: "pass", ms: null },
       { name: `${files.length + 1} modules import clean (isolated children)`, status: "pass", ms: Date.now() - start }
     ],
     ok: true

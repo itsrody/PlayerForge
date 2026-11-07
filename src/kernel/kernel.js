@@ -1,7 +1,7 @@
 import { logger, setDebugRuntime, postTask, Scope, runSteps, Fan } from "../shared/runtime.js";
-import { KEYS, watchStorageKey, gmSetValue, invalidateConfigCache, getConfigValue, setConfigValue, gmRegisterMenu, gmUnregisterMenu } from "../shared/store.js";
+import { KEYS, watchStorageKey, setValue, getConfigValue, setConfigValue } from "../shared/store.js";
 import { getDomainKey } from "../shared/page.js";
-import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, DEBUG_HASH_TAG, FRAMEWORK_TUNING } from "./contract.js";
+import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, DEBUG_HASH_TAG, FRAMEWORK_TUNING, TAB_COMMAND, COMMANDS } from "./contract.js";
 import { resolveAdoptionHome } from "./detection.js";
 import { forEachVideoInDocument, meetsMinSize, createLayoutGate, createOnScreenGate, isOnScreen, createDiscoveryTap } from "./discovery.js";
 
@@ -585,23 +585,21 @@ export class Kernel {
 
   /**
    * Mirror foreign-instance flips of the debug setting mid-flight. The
-   * manager's echo contract decides the reach (Violentmonkey's
-   * GM-values source): a local write notifies the writer's own hooks with
-   * remote=false, while every FOREIGN instance - another tab OR another
-   * frame of this tab - re-delivers through the UpdatedValues broadcast
-   * with remote=true. watchStorageKey filters the own echo, so this handler
-   * sees exactly the outside write: the top-frame menu toggle reaching the
-   * video embed, the remote tab's settings panel, a sibling tab's command.
+   * storage echo's delivery contract decides the reach: the envelope
+   * dedup in watchStorageKey filters this realm's own writes by identity,
+   * while every FOREIGN realm - another tab OR another frame of this tab,
+   * and the extension's own popup page - delivers once. This handler sees
+   * exactly the outside write: the popup's top-frame toggle reaching the
+   * video embed, a remote tab's settings panel, a sibling tab's command.
    * Frames boot silent - a flip must reach them after boot, or the frame
    * stays debug-deaf ("no logs at all" degenerates into a diagnosis trap).
-   * The handler owns its read freshness (invalidate then read - the configs
-   * cache's invalidation ordering with other handlers is none of this
-   * one's business) and the pre-write latch from init() keeps value-neutral
-   * writes from clobbering the boot-time hash override.
+   * Freshness is free (the echo lands the delivered doc into the store's
+   * value map before watchers run, so this read serves the fresh state)
+   * and the pre-write latch from init() keeps value-neutral writes from
+   * clobbering the boot-time hash override.
    */
   #armDebugWatch() {
     watchStorageKey(KEYS.configs, () => {
-      invalidateConfigCache();
       const next = getConfigValue(DEBUG_LOGS_KEY, false);
       if (next === this.#debugWatchLast) {
         return;
@@ -865,18 +863,21 @@ export class Kernel {
 }
 
 /**
- * The frame diagnostics: one console line per script realm, and the whole
- * field-triage surface. It exists because the fs-ui field loop burned about
- * ten console probes on one question - "which document is the player's
- * state in?" - that this one menu tap answers for every realm at once, no
- * devtools frame-context dance. logger.warn (not log) carries it: warn is
- * not debug-gated, and the dump MUST land on a stock install without
- * debug mode - that gate is the surface's reason to exist. Composition:
- * page facts here, kernel facts through the same lazy resolver the menu
- * commands ride (kernel boots after eval; a video-less host frame still
- * dumps - "shell:null, videos:0" is itself the diagnosis).
+ * The frame-state dump itself: one console line per script realm, and the
+ * whole field-triage surface. It exists because the fs-ui field loop burned
+ * about ten console probes on one question - "which document is the
+ * player's state in?" - that one popup tap answers for every realm at
+ * once, no devtools frame-context dance. logger.warn (not log) carries it:
+ * warn is not debug-gated, and the dump MUST land on a stock install
+ * without debug mode - that gate is the surface's reason to exist.
+ * Composition: page facts here, kernel facts through the same lazy
+ * resolver the commands ride (kernel boots after eval; a video-less host
+ * frame still dumps - "shell:null, videos:0" is itself the diagnosis).
+ * Also exported for the debug sentinel (the console twin of the popup's
+ * dump command - a debug-mode boot can answer "which document holds the
+ * player's state" without the popup).
  */
-function dumpFrameState(resolveKernel) {
+export function dumpFrameState(resolveKernel) {
   const videos = [];
   forEachVideoInDocument((video) => {
     const home = resolveAdoptionHome(video);
@@ -902,8 +903,8 @@ function dumpFrameState(resolveKernel) {
 /**
  * Install the diagnostics responder: the pf:diag echo listener, per realm.
  * The watch contract filters own-write echoes, so the originating top frame
- * dumps directly in its menu click and every OTHER instance of this script
- * - another tab OR another frame, the same reach the settings bus already
+ * dumps directly in its command click and every OTHER instance of this
+ * script - another tab OR another frame, the same reach the settings bus already
  * rides - answers on the echo. Page-lifetime install like the frame bridge:
  * the returned stop is never consumed, and a real unload disposes with it.
  */
@@ -911,22 +912,22 @@ export function installFrameDiagnostics(resolveKernel = null) {
   watchStorageKey(KEYS.diag, () => dumpFrameState(resolveKernel));
 }
 
-/** GM menu wiring, owned at the kernel layer instead of inside the Kernel so
- *  the commands exist from script eval - not just after a video is
- *  discovered. The debug toggle works fully without a kernel: it persists the
- *  setting and flips the shared debug runtime (the console log flag). The
- *  one-shot reset commands need a live shell, resolved lazily through the
- *  entry's kernel reference at click time (the kernel boots after eval).
- *  One instance owns the handles; the debug toggle re-registers with its
- *  previously returned handle so the manager updates the item in place. */
-class MenuCommands {
-  #debugId = null;
-  #diagId = null;
-  #filterId = null;
-  #syncId = null;
+/** BrowserAction command wiring, owned at the kernel layer instead of
+ *  inside the Kernel so the command surface exists from script eval - not
+ *  just after a video is discovered. The debug toggle works fully without a
+ *  kernel: it persists the setting and flips the shared debug runtime (the
+ *  console log flag). The one-shot reset commands need a live shell,
+ *  resolved lazily through the entry's kernel reference at command time
+ *  (the kernel boots after eval). The popup (dist/popup.js) sends
+ *  TAB_COMMAND messages; this receiver answers them. One instance owns the
+ *  surface; the debug toggle answers its fresh state so the popup's row
+ *  relabels in place. */
+class TabCommands {
   /** () -> kernel: the entry keeps the kernel reference for commands to
-   *  resolve their target shell host at click time. */
+   *  resolve their target shell host at command time. */
   #resolveKernel = null;
+  /** The message-surface teardown, owned so install stays idempotent. */
+  #teardown = null;
 
   constructor(resolveKernel = null) {
     this.#resolveKernel = resolveKernel ?? null;
@@ -945,69 +946,65 @@ class MenuCommands {
     const host = this.#hostFor(label);
     if (host) {
       host.dispatchEvent(new CustomEvent(GESTURE_EVENTS[eventKey], {
-        detail: { method: "menu" }
+        detail: { method: "extension" }
       }));
     }
+    return host != null;
   }
 
-  #refreshDebug() {
-    const enabled = getConfigValue(DEBUG_LOGS_KEY, false);
-    // Passing the previously returned handle as options.id (VM 2.15.9+) makes
-    // the manager update the live item in place - the caption flip no longer
-    // pays the unregister/re-register churn. autoClose stays unset: true is
-    // the manager default. Registered top-frame only so an embed-heavy page
-    // runs one command set, not one per video frame (VM's popup does list
-    // commands registered from frames - we simply register none there); the
-    // same same-tab storage bus that re-arms fullscreen provisioning carries
-    // each frame's copy of the flip (see #armDebugWatch).
-    this.#debugId = gmRegisterMenu(
-      `\u{1F41B} Debug Logs:${enabled ? "On" : "Off"}`,
-      () => {
-        const next = !getConfigValue(DEBUG_LOGS_KEY, false);
-        setConfigValue(DEBUG_LOGS_KEY, next);
-        this.#resolveKernel?.()?.noteDebugFlip?.(next);
-        setDebugRuntime(next);
-        this.#refreshDebug();
-      },
-      { id: this.#debugId, title: "Toggle PF debug logging" }
-    );
+  /** The debug toggle flips the stored setting and the shared runtime; the
+   *  storage echo (foreign realms) and the popup's own return value carry
+   *  the result. Returns the fresh state so the popup relabels without a
+   *  second query. */
+  #toggleDebug() {
+    const next = !getConfigValue(DEBUG_LOGS_KEY, false);
+    setConfigValue(DEBUG_LOGS_KEY, next);
+    this.#resolveKernel?.()?.noteDebugFlip?.(next);
+    setDebugRuntime(next);
+    return next;
   }
 
   install() {
-    this.#refreshDebug();
-    this.#diagId = gmRegisterMenu(
-      "\u{1F50D} Dump Frame State",
-      () => {
-        // The consumers are every instance of this script through the
-        // pf:diag echo; the watch filters own writes, so the originator
-        // reports itself here and the echo brings every other realm in -
-        // one click, one console line per frame.
-        gmSetValue(KEYS.diag, crypto.randomUUID());
-        dumpFrameState(this.#resolveKernel);
-      },
-      { title: "Print one state line per PlayerForge realm (frame) to the console" }
-    );
-    this.#filterId = gmRegisterMenu(
-      "\u{1FAA8} Reset Color Filter",
-      () => this.#resetEvent("filterReset", "Color filter reset"),
-      { title: "Restore the default color filter" }
-    );
-    this.#syncId = gmRegisterMenu(
-      "\u{1F4AC} Reset Subtitle Sync",
-      () => this.#resetEvent("syncReset", "Subtitle sync reset"),
-      { title: "Restore the default subtitle sync offset" }
-    );
-    return () => {
-      for (const id of [this.#debugId, this.#diagId, this.#filterId, this.#syncId]) {
-        if (id != null) {
-          gmUnregisterMenu(id);
-        }
+    // The command surface is the browserAction popup's: this receiver is
+    // TOP-FRAME ONLY (the popup acts on the active tab's top document, the
+    // same reach the userscript's top-frame-only menu registration had).
+    // The commands exist from script eval - they do not wait for video
+    // discovery - so a page without a supported player still answers the
+    // popup (the resets answer false, the popup toasts "no player active").
+    if (window.top !== window) {
+      return () => {};
+    }
+    const listener = (message) => {
+      if (message?.type !== TAB_COMMAND) {
+        return undefined;
       }
-      this.#debugId = this.#filterId = this.#syncId = null;
+      switch (message.command) {
+        case COMMANDS.debugToggle:
+          return Promise.resolve(this.#toggleDebug());
+        case COMMANDS.debugQuery:
+          return Promise.resolve(getConfigValue(DEBUG_LOGS_KEY, false) === true);
+        case COMMANDS.diag:
+          // The consumers are every instance of this script through the
+          // pf:diag echo; the watch filters own writes, so the originator
+          // reports itself here and the echo brings every other realm in -
+          // one click, one console line per frame.
+          setValue(KEYS.diag, crypto.randomUUID());
+          dumpFrameState(this.#resolveKernel);
+          return undefined;
+        case COMMANDS.filterReset:
+          return Promise.resolve(this.#resetEvent("filterReset", "Color filter reset"));
+        case COMMANDS.syncReset:
+          return Promise.resolve(this.#resetEvent("syncReset", "Subtitle sync reset"));
+        default:
+          return undefined;
+      }
     };
+    browser.runtime.onMessage.addListener(listener);
+    this.#teardown = () => browser.runtime.onMessage.removeListener(listener);
+    return () => this.#teardown?.();
   }
 }
 
-export function installMenuCommands(resolveKernel = null) {
-  return new MenuCommands(resolveKernel).install();
+export function installTabCommands(resolveKernel = null) {
+  return new TabCommands(resolveKernel).install();
 }

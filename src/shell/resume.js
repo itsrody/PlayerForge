@@ -1,6 +1,6 @@
 import { getPageContext, domainsMatch, domainScore, hashEntry } from "../shared/page.js";
 import { TUNING, formatTime } from "../shared/core.js";
-import { KEYS, gmSetValue, loadJsonObject, watchStorageKey } from "../shared/store.js";
+import { KEYS, setValue, loadJsonObject, watchStorageKey } from "../shared/store.js";
 import { logger, Scope, Fan } from "../shared/runtime.js";
 
 /** Sort entries by updatedAt - ascending (oldest-first, for eviction) or
@@ -315,7 +315,7 @@ class ResumeStore {
       // conceding to, per LWW) - #diskEcho is minted only in write paths.
     } else {
       this.#state = { version: 1, entries: [] };
-      gmSetValue(KEYS.resume, this.#state);
+      setValue(KEYS.resume, this.#state);
       logger.warn("resume", "Resume store missing or corrupt - reset");
     }
     this.#invalidateLookupCaches();
@@ -362,7 +362,7 @@ class ResumeStore {
       }
       const now = Date.now();
       this.#state.updatedAt = now;
-      gmSetValue(KEYS.resume, this.#state);
+      setValue(KEYS.resume, this.#state);
       this.#stampDiskEcho(now);
       this.#notify(structural);
     } catch (err) {

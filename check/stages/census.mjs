@@ -144,8 +144,8 @@ const ROWS = [
   {
     name: "bare catch blocks",
     pattern: "catch {}",
-    expect: 7,
-    why: "the verified-empty-catch belt: each one swallows a named-throwaway failure on purpose (the entry ad-host skip probe, the two forge pointer-capture lift races, the ui icon parse belt, the media session release/metadata writes, the shell section-destroy loop) - a new bare catch needs its own named why in the record"
+    expect: 8,
+    why: "the verified-empty-catch belt: each one swallows a named-throwaway failure on purpose (the entry ad-host skip probe, the two forge pointer-capture lift races, the ui icon parse belt, the media session release/metadata writes, the shell section-destroy loop, the runtime debug-rail mirror) - a new bare catch needs its own named why in the record"
   },
   {
     name: "Date.now reads",
@@ -153,31 +153,50 @@ const ROWS = [
     expect: 9,
     why: "the wall-clock reads, page.js and resume.js only: resume entry timestamps and staleness cutoffs, plus page-context nonce/deadline math - the zero-timer pipeline's deadline class reads it at call time; a new consumer must join page/resume or name its own when-why (one resume read left with the never-written 'pending' vocabulary: its load-time sweep was the tenth)"
   },
-  // Network egress floor: the product's one network story, pinned. The relay
-  // is exactly one GM_xmlhttpRequest call (store.js gmRequestText), its one
-  // consumer is the subtitle loadFromUrl ingest - which is what @connect *
-  // is FOR (header side pinned in the bundle stage). Every native or
-  // DOM-shaped channel counts 0: a return of any of these is a redesign
-  // decision that must argue its why against the manager-relayed single
-  // path, never an innocent-looking "second ingest" half-built on XHR or a
-  // blob/img/src channel the API cannot grant.
-  {
-    name: "GM_xmlhttpRequest relay sites",
-    pattern: "GM_xmlhttpRequest(",
-    expect: 1,
-    why: "the one cross-origin relay (store.js gmRequestText): timeout/ontimeout honored, no @connect gate - all egress must stay auditable at one function, the single-flight ingest story rests on it"
-  },
-  {
-    name: "gmRequestText call sites",
-    pattern: "gmRequestText(",
-    expect: 2,
-    why: "the relay definition plus its exactly-one consumer (subtitles.js loadFromUrl) - the voucher for @connect *; a third site is a new egress consumer joining the umbrella without the design conversation"
-  },
+  // Network egress floor: the product's one network story, pinned. The
+  // relay is exactly one background-page fetch (dist/extension/background.js)
+  // - the background's <all_urls> host permission is what cross-origin
+  // subtitle ingest is FOR (manifest side pinned in the bundle stage).
+  // Every page-context or DOM-shaped channel counts 0: a return of any of
+  // these is a redesign decision that must argue its why against the
+  // background-relayed single path, never an innocent-looking "second
+  // ingest" half-built on XHR or a blob/img/src channel the page's CORS
+  // cannot grant.
   {
     name: "fetch calls",
     pattern: "fetch(",
+    expect: 1,
+    why: "the package's one network egress: the background relay's single fetch (AbortSignal.timeout, body drained inside the handler before the reply) - a content-side fetch would ride the page's CORS and silently die on exactly the user-supplied hosts the ingest serves"
+  },
+  {
+    name: "GM vocabulary (src)",
+    pattern: "GM_",
     expect: 0,
-    why: "no plain fetch anywhere in src: cross-origin text rides the manager relay (CORS bypass + grant) - a page-context fetch cannot load arbitrary-host subtitle files and silently dies on CORS"
+    why: "the userscript plane's manager vocabulary left with the GM-realm port; a return is a mixed-plane build, not a port - the two adapter surfaces are store.js (browser.* wrappers) and the extension chrome"
+  },
+  {
+    name: "message receivers",
+    pattern: "onMessage.addListener",
+    expect: 2,
+    why: "the package's two runtime.onMessage receivers: the background page's one egress relay (pf:request-text) and kernel.js TabCommands' one command receiver (pf:command, top-frame) - a third receiver is a new message surface joining without a design conversation"
+  },
+  {
+    name: "message senders",
+    pattern: "sendMessage(",
+    expect: 2,
+    why: "the two runtime/tabs senders: store.js requestText (content -> background relay) and popup.js (pages -> the active tab's commander, the popup's whole surface) - every untracked message channel is egress the census cannot see"
+  },
+  {
+    name: "storage.local call sites",
+    pattern: "browser.storage.local",
+    expect: 2,
+    why: "the storage data plane's two call sites, both in store.js: the warm wholesale get(null) and setValue's write-behind set - a storage call outside store.js is an escaped cache plane (sync reads serve the map, never IPC)"
+  },
+  {
+    name: "storage echo listeners",
+    pattern: "storage.onChanged",
+    expect: 1,
+    why: "the one onChanged listener (store.js) owns the whole cross-instance echo contract: envelope unwrap, own-write identity dedup, value-map delivery, per-key watcher fan-out - a second listener would fork the delivery contract"
   },
   {
     name: "XMLHttpRequest constructions",
@@ -255,7 +274,7 @@ const ROWS = [
     name: "createElement(\"link\")",
     pattern: "createElement(\"link\")",
     expect: 0,
-    why: "no linked resources: the HUD sheet rides @resource pfStyle + adoptedStyleSheets - a link tag is UA-scheduled prefetch the header vocabulary cannot audit"
+    why: "no linked resources: the HUD sheet rides the package's own stylesheet (adoptedStyleSheets from the bundled string) - a link tag is UA-scheduled prefetch the manifest vocabulary cannot audit"
   },
   {
     name: "local file text reads",
@@ -266,7 +285,17 @@ const ROWS = [
 ];
 
 export async function run() {
-  const files = walk(SRC);
+  // The corpus is the whole shipped package's hand-maintained JS: the
+  // player plane (src/**) PLUS the chrome members that live in the
+  // dist/extension package tree they ship from. The network/message floor
+  // (background's one fetch, the two senders, the one TabCommands
+  // receiver) counts the package, so a corpus limited to src/ would
+  // silently stop auditing the extension's own egress.
+  const files = [
+    ...walk(SRC),
+    join(HERE, "dist", "extension", "background.js"),
+    join(HERE, "dist", "extension", "popup.js")
+  ];
   const countsPerRow = ROWS.map((row) => ({ ...row, total: 0, sites: [] }));
   for (const file of files) {
     const label = file.replace(HERE + "/", "");

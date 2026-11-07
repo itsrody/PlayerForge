@@ -7,7 +7,7 @@
   "scripts": {
     "build": "node esbuild.config.mjs",
     "dev": "node esbuild.config.mjs --watch",
-    "lint": "eslint src/",
+    "lint": "eslint src/ dist/extension/",
     "test": "node check/run.mjs",
     "check": "node check/run.mjs",
     "check:browser": "node check/run.mjs browser",

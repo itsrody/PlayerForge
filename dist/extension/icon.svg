@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
+  <!-- PlayerForge tile: the HUD sheet ink with a play arrow and rail.
+       Firefox accepts SVG manifest icons; one file serves 48 and 96. -->
+  <rect x="6" y="6" width="84" height="84" rx="18" fill="#0e0e10" stroke="#3a3a40" stroke-width="2"/>
+  <path d="M32 66h32" stroke="#4d4d55" stroke-width="6" stroke-linecap="round"/>
+  <path d="M32 26v36l30-18z" fill="#ffffff"/>
+</svg>

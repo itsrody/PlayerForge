@@ -2,8 +2,12 @@
  * Child-realm prelude for the import smoke (flaws gate).
  *
  * A handful of src modules touch realm globals at import time by design:
- * - GM_getValue (config bootstrap reads through the store)
- * - ./styles.css - esbuild's userscript transform is what makes that import
+ * - browser.storage.onChanged.addListener - config.js constructs the
+ *   Settings singleton at eval, which registers its cross-tab echo through
+ *   the store plane; the seeded noop keeps the registration mechanics real
+ *   (a second registration harnessing still exercises the same seam) while
+ *   the page's actual storage stays untouched.
+ * - ./styles.css - esbuild's bundle transform is what makes that import
  *   meaningful; plain Node needs the loader hook this prelude registers.
  *
  * Seeding exactly these (nothing more) keeps the smoke honest: any import
@@ -31,8 +35,19 @@ registerHooks({
   }
 });
 
-globalThis.GM_info ??= { script: { version: "0.0.0-check" }, scriptHandler: "check", version: "0.0.0" };
-globalThis.GM_getValue ??= (key, fallback = null) => fallback;
+// The one extension-realm seed the eval-time surfaces need: nothing in
+// the smoke imports the content entry (its `browser.*` scope is only the
+// bundle/browser gates' business) - the chrome members live in the
+// dist/extension package and ship through those gates too.
+globalThis.browser ??= {
+  runtime: {},
+  storage: {
+    local: {},
+    onChanged: {
+      addListener() {}, removeListener() {}
+    }
+  }
+};
 
 const url = process.argv[2];
 await import(url);

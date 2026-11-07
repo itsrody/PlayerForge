@@ -13,9 +13,10 @@
  * script the page itself imports, where the platform's report the
  * exception to the window error surface is the by-design behavior the
  * kernel's retired per-listener try/catch trusted. Witnesses run on both
- * listeners and the deliberate, asserted error sentences itself out of
- * __pfErrors: a deliberate exception is not an accidental uncaught page
- * error (the menus case holds the same position for command throws).
+ * listeners and the deliberate, asserted error sentences itself out of the
+ * companion error rail (dataset.plErr's last-3 ledger): a deliberate
+ * exception is not an accidental uncaught page error (the menus case holds
+ * the same position for command throws).
  */
 import { readFile } from "node:fs/promises";
 import { Buffer } from "node:buffer";
@@ -189,18 +190,20 @@ export async function run({ session, baseUrl }) {
 
   // Native dispatch isolation, witnessed from a page-realm stack. Two
   // probed harness facts shape this row: exceptions raised inside a
-  // Marionette eval stack - synchronously or from a task it scheduled -
+  // geckodriver eval stack - synchronously or from a task it scheduled -
   // report nowhere (the sandbox realm's error surface is not the page's),
   // while the same throw from a page-stack module script reports to the
   // window error surface normally. So the witness module script injected
   // from the eval turn owns the import, the dispatch, and the throw's
   // surface reading, the poll settles on the report (queued as a DOM task
   // around the throw), and the deliberate, asserted error is then
-  // sentenced out of __pfErrors - it entered through the forensic listener
-  // EARLIER in registration order than anything this case can install, so
-  // no preventDefault ordering can keep it off the surface - spelling it
-  // into the audit's own ledger terms is the only honest accounting (the
-  // menus case holds the same position for deliberate command throws).
+  // sentenced out of the companion rail (dataset.plErr, the stage's
+  // per-case error ledger) - the companion's listener predates everything
+  // this case can install, so no preventDefault ordering can keep the
+  // line off the rail; removing the marker line in place (the rail keeps
+  // its last-3 shape) rewrites the ledger this session's audit reads,
+  // which is the only honest accounting (the menus case holds the same
+  // position for deliberate command throws).
   const isoMarker = `pf-fan-iso-${Math.random().toString(36).slice(2, 8)}`;
   const iso = await session.evalAsync(function main(asset, marker, done) {
     window.__isoMsg = null;
@@ -223,23 +226,28 @@ export async function run({ session, baseUrl }) {
     document.body.append(script);
     const deadline = performance.now() + 5000;
     const tick = () => {
-      const errs = window.__pfErrors ?? [];
+      const rail = document.documentElement.dataset.plErr ?? "";
       const settled = window.__isoThrew !== "pending"
-        && (errs.some((e) => e.includes(marker)) || String(window.__isoMsg ?? "").includes(marker));
+        && (rail.includes(marker) || String(window.__isoMsg ?? "").includes(marker));
       const timedOut = performance.now() > deadline;
       if (!settled && !timedOut) {
         setTimeout(tick, 100);
         return;
       }
-      const idx = errs.findIndex((e) => e.includes(marker));
-      if (idx >= 0) {
-        errs.splice(idx, 1);
+      // Sentence the deliberate error out of the ledger: drop the marker
+      // line from the rail, keep the rest (the last-3 append discipline
+      // re-fills the ledger from any later uncaught error).
+      const lines = rail.split("\n");
+      const line = lines.find((l) => l.includes(marker));
+      if (line !== undefined) {
+        const rest = lines.filter((l) => l !== line);
+        document.documentElement.dataset.plErr = rest.join("\n");
       }
       done({
         threw: window.__isoThrew === "pending" ? "unsettled" : window.__isoThrew,
         seen: window.__isoSeen,
         surfaced: String(window.__isoMsg ?? "").includes(marker),
-        reported: idx >= 0
+        reported: line !== undefined
       });
     };
     tick();

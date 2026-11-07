@@ -1,11 +1,12 @@
 /**
  * Native Firefox session boot for the check tool.
  *
- * Owns everything between "run the gates" and "real page running the real
- * bundle": driver discovery (geckodriver from the disk, Selenium Manager
- * cache fallback), the headless isolated-profile Firefox session the GM
- * realm and bundle get injected into, and a same-origin fixture server the
- * kernel's ad-host guard will not skip.
+ * Owns everything between "run the gates" and "a real page running the real
+ * extension": driver discovery (geckodriver from the disk, Selenium Manager
+ * cache fallback), the headless isolated-profile Firefox session, the real
+ * XPI install (temp addon, the full shipping artifact), a harness-companion
+ * addon (error rail + command trigger, harness-only), and a same-origin
+ * fixture server the kernel's ad-host guard will not skip.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync, mkdirSync } from "node:fs";
@@ -14,7 +15,6 @@ import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
-import { installGMRealm } from "./gm-realm.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
@@ -138,8 +138,7 @@ function brewReinstallGeckodriver() {
  * it. Firefox shapes: a refused binary (wrong product path, quarantine),
  * the marionette handshake (geckodriver started but the browser port never
  * opened - a real Firefox launch failure), and timeouts.
- */
-function classifyDriverFailure(err) {
+ */function classifyDriverFailure(err) {
   const text = String(err?.message ?? err);
   if (/session not created/i.test(text)) {
     if (/binary|Failed to start|launcher|not found/i.test(text)) return "geckodriver could not start the browser";
@@ -180,12 +179,12 @@ export function ensureFirefoxDriver() {
 }
 
 /**
- * Boot a headless, isolated-profile native Firefox session with the
- * userscript realm injected. Reused across cases; destroyed once per tool
- * run. geckodriver manufactures its own temporary profile when none is
- * given, so per-launch isolation is the driver's default, not an argument
- * the ladder has to thread; the temp dir this class makes is only the
- * owner of teardown bookkeeping for anything else per-run.
+ * Boot a headless, isolated-profile native Firefox session with the real
+ * extension installed. Reused across cases; destroyed once per tool run.
+ * geckodriver manufactures its own temporary profile when none is given, so
+ * per-launch isolation is the driver's default, not an argument the ladder
+ * has to thread; the temp dir this class makes is only the owner of teardown
+ * bookkeeping for anything else per-run.
  */
 export class BrowserSession {
   #driver;
@@ -194,9 +193,8 @@ export class BrowserSession {
   #crossServer;
   #fixturePort;
   #fixtureRoutes = new Map();
-  /** Session-level GM backing store: what `harvestGm()` last pulled off the
-   *  live page. Opt-in persistence for the realm (opt-out stays isolated). */
-  #gmHead = new Map();
+  /** The addon ids the install step minted (informational). */
+  #addons = [];
 
   static async launch() {
     const browserBinary = BROWSERS[0];
@@ -464,47 +462,68 @@ export class BrowserSession {
     return `http://localhost:${this.#fixturePort}`;
   }
 
-  /** GM realm a fresh page needs before bundle injection. A full surface is
-   *  built from `grants` (+ GM_info); `storage` seeds the backing so a reboot
-   *  can play out with prior-session state in place. */
-  injectGMRealm({ version, storage = {}, grants = null, resources = null, header = null } = {}) {
-    return this.eval(installGMRealm, { version, storage, grants, resources, header });
-  }
-
-  /** GM realm inside a frame chain - exact manager semantics: every frame
-   *  document a userscript manager touches gets the userscript surface. */
-  injectGMRealmFrame(path, { version, grants = null, resources = null, header = null } = {}) {
-    return this.evalInFrame(path, installGMRealm, { version, grants, resources, header });
-  }
-
-  /** Pull the live page's GM backing into the session-level store. */
-  async harvestGm() {
-    const backing = await this.eval(function main() {
-      return { ...(window.__pfBacking ?? {}) };
-    }).catch(() => null);
-    if (backing) {
-      this.#gmHead = new Map(Object.entries(backing));
+  /**
+   * Install the real shipping extension (dist/playerforge.xpi, temporary)
+   * and its harness-only companion (check/lib/companion/, temporary
+   * directory addon). Temporary installs need no signing and vanish with
+   * the browser process - per-session isolation is free. Order matters:
+   * PlayerForge first, companion second, so the error rail arms from the
+   * same install step on and no later case can attribute a rail line to a
+   * pre-companion document.
+   */
+  async install() {
+    const xpi = join(ROOT, "dist", "playerforge.xpi");
+    if (!existsSync(xpi)) {
+      throw new Error("dist/playerforge.xpi missing - run the bundle gate first");
     }
-    return backing;
-  }
-
-  gmHeadSnapshot() {
-    return Object.fromEntries(this.#gmHead);
-  }
-
-  /** Inject a bundled userscript after the GM realm exists. */
-  injectBundle(bundleSource) {
-    const body = bundleSource.slice(bundleSource.indexOf("==/UserScript==") + 16);
-    return this.eval(body);
-  }
-
-  /** Wake post-injection so the discovery probe sees already-present videos. */
-  async wakeVideos() {
-    await this.eval(function main() {
-      for (const v of document.querySelectorAll("video")) {
-        v.dispatchEvent(new Event("loadeddata", { bubbles: true }));
-      }
+    const playerId = await this.#driver.installAddon(xpi, true).then((id) => id, (err) => {
+      throw new Error(`PlayerForge XPI install refused: ${String(err.message ?? err).slice(0, 200)}`);
     });
+    const companionDir = join(HERE, "companion");
+    const companionId = await this.#driver.installAddon(companionDir, true).then((id) => id, (err) => {
+      throw new Error(`companion addon install refused: ${String(err.message ?? err).slice(0, 200)}`);
+    });
+    this.#addons = [playerId, companionId].filter(Boolean);
+    return this.#addons;
+  }
+
+  /**
+   * The popup channel's exact round trip, driven through the companion
+   * addon: navigate the CURRENT page with ?pfCmd=<command>, the companion
+   * background sends browser.tabs.sendMessage into the (reloaded) top
+   * document's PlayerForge commander, and the reply lands in
+   * dataset.plReply. Navigation is part of the deal - the command reloads
+   * the document (a fresh kernel boots; storage is the product's, so
+   * command effects persist across the reload exactly as the popup's
+   * effects do), so callers re-wait for whatever live state the row needs.
+   */
+  async triggerCommand(pagePath, command, second = null) {
+    const bust = `${pagePath}?boot=${Date.now()}${second ? `&pfCmd=${command}&pfCmd2=${second}` : `&pfCmd=${command}`}`;
+    await this.navigate(`${this.baseUrl}${bust}`);
+    await this.waitFor("return document.documentElement.dataset.plReply !== undefined;", 9000);
+    const raw = await this.eval(function main() {
+      const v = document.documentElement.dataset.plReply ?? null;
+      delete document.documentElement.dataset.plReply;
+      return v;
+    });
+    const replies = JSON.parse(raw ?? "[]");
+    if (second) {
+      return replies;
+    }
+    return replies[0];
+  }
+
+  /** The page-error rail: last 3 uncaught errors / unhandled rejections the
+   *  document (or the frame chain's document) saw since document_start. */
+  async errors(path = null) {
+    try {
+      const fn = function main() {
+        return document.documentElement.dataset.plErr ?? "";
+      };
+      return path ? await this.evalInFrame(path, fn) : await this.eval(fn);
+    } catch {
+      return "";
+    }
   }
 
   async waitFor(checkFn, timeoutMs = 5000, intervalMs = 40) {
@@ -570,16 +589,19 @@ export class BrowserSession {
   }
 
   /** Frame-scoped failure forensics: what the deep frame actually looks like
-   *  when a row failed - mirrors snapshot()'s page-state dump. */
+   *  when a row failed - mirrors snapshot()'s page-state dump. Dataset
+   *  surfaces only: the error rail (companion), pfVersion/pfLog (the debug
+   *  rail), shells and videos. */
   async snapshotFrameState(path) {
     try {
       return await this.evalInFrame(path, function main() {
         return {
           url: String(location.href),
-          errors: [...(window.__pfErrors ?? [])].slice(0, 5),
+          errors: (document.documentElement.dataset.plErr ?? "").split("\n").slice(0, 3),
           shells: document.querySelectorAll(".pf-shell").length,
           videos: document.querySelectorAll("video").length,
-          version: window.PlayerForge?.version ?? null
+          version: document.documentElement.dataset.pfVersion ?? null,
+          log: (document.documentElement.dataset.pfLog ?? "").slice(0, 200)
         };
       });
     } catch {
@@ -588,7 +610,7 @@ export class BrowserSession {
   }
 
   /** Failure forensics: screenshot + page-state dump into check/.tmp/ for the
-   * report note. Best effort - never let capture itself fail the gate. */
+   *  report note. Best effort - never let capture itself fail the gate. */
   async snapshot(label) {
     try {
       const outDir = join(ROOT, "check", ".tmp");
@@ -598,11 +620,11 @@ export class BrowserSession {
       const state = await this.#driver.executeScript(function main() {
         return {
           url: String(location.href),
-          errors: window.__pfErrors ?? [],
-          console: (window.__pfConsole ?? []).slice(-5),
+          errors: (document.documentElement.dataset.plErr ?? "").split("\n").slice(0, 3),
           videos: document.querySelectorAll("video").length,
           shells: document.querySelectorAll(".pf-shell").length,
-          version: window.PlayerForge?.version ?? null
+          version: document.documentElement.dataset.pfVersion ?? null,
+          log: (document.documentElement.dataset.pfLog ?? "").slice(0, 400)
         };
       });
       writeFileSync(join(outDir, "last-failure.json"), JSON.stringify({ label, at: new Date().toISOString(), ...state }, null, 2));

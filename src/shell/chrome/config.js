@@ -3,7 +3,7 @@
  * the panel renderer for this schema (addSettingsSection) lives in panel.js
  * beside the panel API it programs against.
  */
-import { KEYS, getConfigValue, setConfigValue, invalidateConfigCache, watchStorageKey } from "../../shared/store.js";
+import { KEYS, getConfigValue, setConfigValue, watchStorageKey } from "../../shared/store.js";
 import { GESTURES, GESTURE_IDS } from "../../kernel/contract.js";
 import { logger, Fan } from "../../shared/runtime.js";
 import { fmtSeconds } from "../../shared/core.js";
@@ -185,9 +185,10 @@ class Settings {
    * as no-ops.
    */
   #refreshFromStorage() {
-    // A cross-tab writer replaced pf:configs behind our back - drop the cached
-    // doc so the per-key re-reads below come from the fresh manager value.
-    invalidateConfigCache();
+    // A foreign realm replaced pf:configs behind our back - the echo already
+    // landed the fresh doc into the store's value map before this watcher
+    // ran (the store owns the echo's value delivery), so the per-key
+    // re-reads below serve it directly.
     let changed = 0;
     for (const definition of SETTINGS_SCHEMA) {
       const key = definition.key;

@@ -7,15 +7,10 @@ export default [
       ecmaVersion: 2025,
       sourceType: "module",
       globals: {
-        // Tampermonkey API
-        GM_getValue: "readonly",
-        GM_setValue: "readonly",
-        GM_addValueChangeListener: "readonly",
-        GM_removeValueChangeListener: "readonly",
-        GM_registerMenuCommand: "readonly",
-        GM_unregisterMenuCommand: "readonly",
-        GM_xmlhttpRequest: "readonly",
-        GM_info: "readonly",
+        // Firefox WebExtension API. MV2 globals, not Tampermonkey's: the
+        // GM_* names left with the userscript plane (the extension branch's
+        // adapter plane lives in store.js; nothing in src spells GM words).
+        browser: "readonly",
         // Browser globals not in default env
         scheduler: "readonly",
         screen: "readonly",
@@ -129,8 +124,7 @@ export default [
         MessagePort: "readonly",
         Worker: "readonly",
         self: "readonly",
-        __VTT_WORKER_SOURCE__: "readonly",
-        GM_getResourceText: "readonly"
+        __VTT_WORKER_SOURCE__: "readonly"
       }
     },
     rules: {
@@ -172,7 +166,11 @@ export default [
   },
   {
     ignores: [
-      "dist/**",
+      // dist/extension is the extension's SOURCE home (the package tree it
+      // ships from), so only the one generated member is ignored - by exact
+      // name, never a blanket "dist/**" that would leave product chrome
+      // (background.js, popup.js) outside the repo's rules.
+      "dist/extension/content.js",
       "node_modules/**"
     ]
   }

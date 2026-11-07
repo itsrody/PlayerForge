@@ -1,0 +1,71 @@
+{
+  "manifest_version": 2,
+  "name": "PlayerForge",
+  "version": "1.2.3",
+  "description": "native Firefox 159+ (desktop and Android) / Violentmonkey 2.50+ (MV2) exclusive HTML5 video player enhancer with gestures, hotkeys, progress resume, subtitles, and an extensible plugin system",
+  "author": "PlayerForge",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "playerforge@itsrody.dev",
+      "strict_min_version": "159.0"
+    }
+  },
+  "icons": {
+    "48": "icon.svg",
+    "96": "icon.svg"
+  },
+  "permissions": [
+    "storage",
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "exclude_matches": [
+        "*://*.youtube.com/*",
+        "*://*.youtu.be/*",
+        "*://*.vimeo.com/*",
+        "*://*.netflix.com/*",
+        "*://*.disneyplus.com/*",
+        "*://*.primevideo.com/*",
+        "*://*.hulu.com/*",
+        "*://*.max.com/*",
+        "*://*.hbomax.com/*",
+        "*://*.tv.apple.com/*",
+        "*://*.peacocktv.com/*",
+        "*://*.paramountplus.com/*",
+        "*://*.crunchyroll.com/*",
+        "*://*.bilibili.com/*",
+        "*://*.dailymotion.com/*",
+        "*://*.twitch.tv/*",
+        "*://*.facebook.com/*",
+        "*://*.fb.watch/*",
+        "*://*.x.com/*",
+        "*://*.twitter.com/*",
+        "*://*.instagram.com/*",
+        "*://*.tiktok.com/*",
+        "*://*.reddit.com/*",
+        "*://*.tumblr.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_origin_as_fallback": true
+    }
+  ],
+  "background": {
+    "scripts": [
+      "background.js"
+    ],
+    "persistent": true
+  },
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_title": "PlayerForge",
+    "default_icon": "icon.svg"
+  }
+}

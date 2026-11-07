@@ -447,11 +447,43 @@ function styleFor(channel) {
   return STYLES[channel] || "";
 }
 
+/**
+ * The debug log rail: the console's machine twin. geckodriver serves no
+ * console endpoint and the marionette realm cannot patch the page console
+ * nor read content-realm JS objects (both probed on this floor), but it
+ * reads DOM string attributes across the Xray on both sides - so when
+ * debug mode is on, the last logger line is mirrored to
+ * `document.documentElement.dataset.pfLog` and a driver `eval` answers
+ * "what did this realm just say". Stock installs never arm it: the mirror
+ * is latched only when the debug flag flips on (the #pf-debug hash /
+ * debug setting gate), so the per-line cost sits behind the same boolean
+ * the console path already pays.
+ */
+let mirrorArmed = false;
+
+function mirrorLine(channel, args) {
+  if (!mirrorArmed) {
+    return;
+  }
+  try {
+    const el = document.documentElement;
+    // Last line only - the rail is a read surface for probes and triage,
+    // not a transcript; every log/warn/error call rewrites one attribute.
+    if (el) {
+      el.dataset.pfLog = `${channel} ${args.map((a) => (typeof a === "string" ? a : String(a))).join(" ")}`;
+    }
+  } catch {}
+  // The catch is the record's 8th bare belt: the mirror is observability,
+  // never a failure surface - a document torn down mid-line (bfcache drop,
+  // navigation race) must not interrupt the logger itself.
+}
+
 function log(channel, ...args) {
   if (!debug.logsEnabled) {
     return;
   }
   console.log(`%c${PREFIX}%c[${channel}]`, "color: #FF6B35", styleFor(channel), ...args);
+  mirrorLine(channel, args);
 }
 
 function group(channel, label) {
@@ -467,10 +499,12 @@ function groupEnd() {
 
 function warn(channel, ...args) {
   console.warn(`%c${PREFIX}%c[${channel}]`, "color: #FF6B35", STYLES.warn, ...args);
+  mirrorLine(channel, args);
 }
 
 function error(channel, ...args) {
   console.error(`%c${PREFIX}%c[${channel}]`, "color: #FF6B35", STYLES.error, ...args);
+  mirrorLine(channel, args);
 }
 
 /**
@@ -498,6 +532,10 @@ class DebugRuntime {
 
   setLogs(on) {
     this.#logsEnabled = on;
+    // The debug rail arms with the flag (and only with it): flipped on
+    // here so every arm path - kernel init's setting/hash reads, the
+    // popup's debug-toggle command - converges on one latch.
+    mirrorArmed = on;
   }
 
   // setRuntime collapsed onto setLogs when the LoAF arm retired - the

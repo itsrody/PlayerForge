@@ -49,7 +49,7 @@ const VOLATILE_PAGE = `<!DOCTYPE html>
 </body>
 </html>`;
 
-export async function run({ session, baseUrl, bundle }) {
+export async function run({ session, baseUrl }) {
   const rows = [];
   session.registerFixture("/check/bare", BARE_PAGE);
   session.registerFixture("/check/small", SMALL_PAGE);
@@ -57,12 +57,9 @@ export async function run({ session, baseUrl, bundle }) {
 
   const bootAttempt = async (path) => {
     await session.navigate(`${baseUrl}${path}?boot=${Date.now()}`);
-    await session.injectGMRealm();
-    await session.injectBundle(bundle);
-    await session.wakeVideos();
     await sleep(900);
     return session.eval(function main() {
-      return { shell: document.querySelector(".pf-shell") !== null, version: typeof window.PlayerForge };
+      return { shell: document.querySelector(".pf-shell") !== null };
     });
   };
 
@@ -94,8 +91,6 @@ export async function run({ session, baseUrl, bundle }) {
   // connected video and boot ordinarily - the row asserts the recovery
   // outcome, which every permutation reaches with the fix.
   await session.navigate(`${baseUrl}/check/volatile?boot=${Date.now()}`);
-  await session.injectGMRealm();
-  await session.injectBundle(bundle);
   await sleep(600);
   const flapped = await session.evalAsync(function main(done) {
     const wr = document.querySelector(".plyr__video-wrapper");
