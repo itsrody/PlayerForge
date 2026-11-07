@@ -23,6 +23,116 @@ network egress rides the background page's `<all_urls>` host permission (the
 in-frame model is the manifest's `all_frames: true` document_start injection,
 same reach as the `matches: <all_urls>` MV2 build of the userscript era.
 
+**Branch state (the Reforge port — the standing plan, 2026‑11).** The deleted
+`reforge` branch (the stream enhancer: the network plane — witness the page's
+media requests and reforge them; renamed from `stream-enhancer`, tip
+`828f06b`) is recovered as a local ref and audited, not merged and not pushed.
+It branched at `f69477d` (sweep #13, the userscript-era master) BEFORE the
+extension port, and 14 of its 18 touched files were then rewritten under it —
+a text merge has no seam, so the plane ports onto the extension architecture
+batch by batch (see the plan at the end of this block). NEW files it carries:
+`src/shell/reforge/` (sniff.js 1304 lines, enhance.js 534, tables.js 247 —
+the pure classification vocabulary) + a `stream.mjs` check case; its userscript
+legs died in the port (`gmRequestText`/`gmRequestBuffer`, `gmSetValue`,
+`gmRegisterMenu`, `GM_info`, `unsafeWindow`, `@downloadURL`) and their extension
+descendants are named in the plan. The save rail (`createObjectURL`/anchor
+delivery) stays retired per the branch's own record — Reforge observes and
+CONTROLS requests, never delivers to disk.
+
+Two premises were floor-probed before any port batch (both temp addons under
+`check/.tmp/`, uncommitted per convention; `probeA-addon` + `probeA.mjs`,
+`probeB-addon` + `probeB.mjs` on real Firefox 159.0.1 headless):
+
+- **Probe A — content-realm wrap visibility (the on-page verb arms).** The
+  VM-literal shape is NOT portable: a plain assignment of a content-realm
+  function onto `window.wrappedJSObject.fetch` (the unsafeWindow analog)
+  installs — the page's `fetch` binding evaluates to it — but every page call
+  of the unexported function throws `Permission denied to access object`;
+  the same fate hits the XHR prototype and element-`src` shapes. WEBSANDBOXED
+  verbs are therefore mandatory on the extension plane: `exportFunction`-ed
+  wraps installed, were WITNESSED (page fetch/XHR opens routed into the
+  content realm), passed through natively with full return-value parity (the
+  page read a live `Response`, status 200, the native body bytes), and the
+  media-element `src` accessor wrap executed end to end (a page assignment
+  hit the wrapped setter, the decideSrc-style rewrite landed in the element's
+  own state machine — attribute + property read back OUR string, `currentSrc`
+  and real metadata followed it, the element loaded OUR rewritten URL).
+  Three Xray walls were measured for the SERVE half of any on-page shape and
+  each is a one-seam translation, not a premise break: a content-crafted
+  promise is not page-consumable (`Permission denied to access property
+  "then"` — a serve/reload claim must return a PAGE-realm promise, e.g.
+  `new PAGE_WINDOW.Promise` composed over the content promise); object-valued
+  page reads are denied (`response.headers` off a page `Response` — the
+  rewritten Response must compose its headers from primitives at construct
+  time, the ctor does the cloning in); cross-realm `arguments` access inside
+  an exported wrapper needs the explicit-args rewrite (`srcOpen.call(this,
+  method, url)` — the recovered reforge path itself once corrected exactly
+  this shape for a sandbox). CONSEQUENCE: the content-realm verb wraps are
+  per-carrier fragile (three carriers × three walls), and the on-page serve
+  plane reforge shipped as fetch/XHR/element arms would need all three walls
+  translated per arm.
+
+- **Probe B — the background lever (the network-layer arm).** ALL GREEN: a
+  MV2 temp addon's persistent background page on Firefox 159 accepts
+  `webRequestBlocking`; `onBeforeRequest` with `["blocking"]` redirects both
+  fetch-initiated AND element-initiated loads (an undecodable placeholder
+  route handed a `<video>` delivered real MP4 metadata ONLY obtainable
+  through the redirect — element traffic rides the redirect identically; note
+  `currentSrc` per spec mirrors the src attribute, never the network target,
+  so it is the wrong observable); `filterResponseData` rewrites the response
+  body stream so the page reads the PINNED bytes while status, headers and
+  content-type ride the real response — `serveRewrite`'s exact semantics at
+  one network seam; observe-only families stay byte-untouched. ONE listener
+  farm covers every carrier (fetch, XHR, element src, MSE) with no
+  content-realm wrap anywhere.
+
+**User direction (2026‑11, probe outcome read together):** Reforge becomes
+the **background engine monitor — detect and execute reforge on all non-DRM
+media requests (including direct mp4) with lifecycle management**, and
+`src/background/` is rebranded as the Reforge background plane — PlayerForge's
+background robust core. The probes explain the fit: the background lever
+covers every carrier at one seam and needs no Xray translation, so detection
+grows where `NetHintLedger` already observes (webRequest, frame-level tags
+already attached) and execution rides the same `webRequestBlocking` listener
+farm; the content side keeps only PASSIVE duty — the DRM latch is the `encrypted`
+event listener (no wrap needed; the veto rides a message to the background,
+the sole claim veto), the panel's Reforge group reads the roster through the
+storage echo plane, and any remaining per-document facts ride messages, never
+verb wraps. The roster/listener lifecycle is already the ledger's grammar —
+main_frame clears the tab, sub_frame clears the frame, `tabs.onRemoved` drops
+it — extended with the family records keyed `(tabId, frameId, family)`.
+
+The batch plan (each src batch rides the full green battery ≥3×; census rows
+re-graded in the same commit, never bumped alone):
+1. **The rebrand + the witness floor** — `src/background/` restates itself as
+   the Reforge plane in docs and docstrings; `NetHintLedger` grows the roster
+   detection it already hints for (manifest/file shapes; media-type census
+   rows re-derived beside the ledger's video/\* vocabulary).
+2. **The claim composition** — the proof text/content supplies its verdict
+   via the relay (`requestText` already exists; the background fetches what
+   it classified), the DRM latch arms from content (a message the frame
+   realm sends on `encrypted`), and the sole-veto contract stays the latch.
+3. **The execute arm** — `webRequestBlocking` joins the manifest permission
+   set and the background listener farm answers claims with redirect
+   (`reload` claim shape) and `filterResponseData` (`rewrite` claim shape);
+   the census row that pinned `webRequestBlocking must NEVER ship` re-grades
+   to shipped-then-by-name in the same commit — reforge IS that re-grade's
+   product reason. `dist/extension/manifest.json` is build-derived; the
+   permission change rides the build config with its census why.
+4. **EnhanceSession + the controls** — the claim policy surface
+   (`enhancer.<id>` dotted configs; `ENHANCE_CONTROLS`) lands on the
+   background with the settings schema rows and the panel's Reforge group
+   reading them through the echo plane (import direction: the panel may not
+   import the background, so the contract's vocabulary holds both sides).
+5. **The gate case** — `stream.mjs` is rewritten from the package-member GM
+   fixture to the XPI + companion ceremony (`registerFixture`,
+   `installAddon` probe addons under `.tmp/`, page-fact assertions like the
+   two probes' report rows). The relic `gm-realm.mjs` standalone harness file
+   is not resurrected.
+The recovered docs' details (roster shape, family vocabulary, table records)
+come from `git show reforge:...`; the census deltas ride per-batch re-grades.
+
+
 ---
 
 ## 1. What PlayerForge is
@@ -85,7 +195,8 @@ tabs.sendMessage arm, the handle's runtime.sendMessage), 3 receivers
 ```
 src/
   entry.js            install-time contract: which frames run the script
-  background/  (3)    index, relay (text + command), ledger (hint ledger)
+  background/  (3)    index, reforge plane: relay (text + command),
+                      tables (classification), ledger (witness + roster)
   kernel/  (4)        contract, detection, discovery, kernel orchestrator
   shared/  (5)        core, runtime, dom, page, store — the data planes
   shell/   (14)       shell, media, resume, filter, forge+actions,
@@ -604,10 +715,14 @@ iframes, same-origin and cross-origin (`all_frames: true`,
   `#watchFullscreen` re-arms + re-hops via `retryFullscreenProvision`
   exactly on the failure path the provision latch re-opens for.
 
-### background/ — the extension page (the tree's one fetch + one hint sender)
-- **index.js** — install entry: wires relay.js's receiver and ledger.js's
-  listeners; a persistent background page (the awaited relay fetch overlaps
-  request lifetime — no re-wake machinery to write).
+### background/ — the extension page (the Reforge background robust core)
+- **index.js** — install entry: wires relay.js's receiver, the witness
+  vocabulary, and ledger.js's listeners; a persistent background page (the
+  awaited relay fetch overlaps request lifetime — no re-wake machinery to
+  write). The plane's rebrand sentence (user direction 2026‑11): this
+  directory IS Reforge — the stream enhancer's extension port — the
+  background engine that witnesses and re-forges the page's non-DRM media
+  requests; the growth batches hang detection/claims/execution on this farm.
 - **relay.js** — the ONE network egress: `pf:request-text` → single-flight
   `fetch` with `AbortSignal.timeout`, body drained inside the handler
   before the reply; every failure answers as a result object (a rejection
@@ -617,10 +732,14 @@ iframes, same-origin and cross-origin (`all_frames: true`,
   active tab's top document — the hop a cross-extension caller cannot make
   directly (`tabs.sendMessage` delivers only to the calling extension's own
   content scripts).
-- **ledger.js** — the webRequest observation ledger: the hint sender
-  (`webRequest` observe-only; `webRequestBlocking` must never ship — the
-  census pins the posture), one frame-targeted hint to the frame that
-  carried media traffic.
+- **ledger.js** — the Reforge witness floor: the webRequest observation
+  ledger (observe-only today; the `webRequestBlocking` execute lever joins
+  THIS farm when its re-grade batch lands — Probe B proved the lever live
+  on 159, and the reforge port IS the re-grade's product reason), one
+  frame-targeted hint to the frame that carried media traffic, and the
+  per-(tab, frame) family records the roster's witness floor holds — every
+  media/xhr request classified through the plane's vocabulary, the hint
+  carrying the classified shape.
 
 ### kernel/ — policy layer
 - **contract.js** — the shared vocabulary both layers import in isolation:
