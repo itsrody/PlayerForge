@@ -2065,6 +2065,31 @@ though the OUTER loop of a verb is engine code. Artifacts:
   the loaded element (ours + a foreign loop running; bare
   `getAnimations()` alone 1.4µs) at per-human-flash rate, zero unhandled
   rejections across 150k passes.
+- **(T1b, same-day extension by user direction "take on T1") the zero
+  tax generalizes to tree-real predicate shapes.** T1 proved the re-entry
+  tax zero for the JIT's best case (one numeric compare); T1b re-asked
+  the question for the four predicate shapes the tree's scans actually
+  carry, all-miss corpora with parity asserts, all rows above grain:
+  (a) **string-suffix scan** — the entry.js `isAdHost` shape replicated
+  verbatim (the exact 10-suffix loop with its per-check template
+  allocation) over 50k hosts: manual inline 70.0 ns/element, the same
+  loop through the `isAdHost` closure 72.5 (+2.5 = the observable closure
+  call, 3% against the work), the verb `some(isAdHost)` 72.5 — callback
+  tax over the closure **0–2.5ns across runs**; (b) **object field
+  reads** (the cue-lookup start/end shape, 200k): inline 0.97, pred 1.06,
+  verb 1.03 — tax −0.03 (absorbed); (c) **megamorphic property shapes**
+  (50/50 shape churn, 200k): inline 3.13, pred 3.38, verb 2.88–4.25 —
+  tax −0.5..+0.9, the JIT installs the closure fine inside the verb over
+  shape churn; (d) **DOM getter reads** (`isConnected`, 40k detached):
+  inline 36.9, pred 37.5, verb 38.1 — tax +0.63. The verb's apparatus
+  (dispatch + element bookkeeping) adds NOTHING on top of the closure
+  call itself on any shape; the only visible "tax" is the closure call,
+  and its ceiling here is ~2.5ns/element against a 70ns/element body.
+  Harness lesson worth holding: the first T1b draft's megamorphic verb
+  read O(1) with parity false — the predicate returned a NUMBER and
+  `some()` coerces truthiness, so it early-EXITED at the first truthy
+  sum; parity asserts before every cost comparison are what catch a
+  silently early-exiting corpus.
 
 Sweep disposition: no src change earned adoption. The wave-2 probe
 re-measured the one premise the saturation audits never priced and the
