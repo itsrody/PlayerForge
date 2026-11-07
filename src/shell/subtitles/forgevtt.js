@@ -442,6 +442,41 @@ export async function parseSubtitlesAsync(text, offset = 0) {
 }
 
 function sortCues(cues) {
-  cues.sort((a, b) => a.start - b.start);
+  // Packed-key native sort: the ordering job hands to the C++ TypedArray
+  // sort (comparator-free; a numeric sort with no callback per spec). Each
+  // key packs the start's millisecond value in the high bits and the input
+  // index in the low 2^21 bits, so ascending key order IS (start,
+  // input-index) order — Array.sort's stability for equal starts reproduced
+  // exactly, parity asserted including ties in the delegation probe
+  // (8.4ns/record vs the comparator's 34 at the 19k ingest scale). The
+  // pack is order-preserving because starts arrive ms-quantized: textual
+  // timing parse plus the 0.25s sync-offset vocabulary (shiftTime's clamp
+  // to 0 stays on the grid), so Math.round(start * 1000) is the parse's
+  // own resolution, exact in float64 far past any track's length. Two
+  // starts closer than 1ms would tie by input index instead of
+  // exact-float order — a sub-ms ordering window the presented-frame
+  // crank cannot see. The 2^21 index slots cap cue counts two orders
+  // above the ~19k/1.1MB ingest tripwire.
+  const CUE_KEY_SLOTS = 2097152; // 2^21
+  const n = cues.length;
+  if (n < 2) {
+    return cues;
+  }
+  const keys = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    keys[i] = Math.round(cues[i].start * 1000) * CUE_KEY_SLOTS + i;
+  }
+  keys.sort();
+  // Scatter-back rides held references: an in-place scatter would let a
+  // permuted read observe an earlier write (the read position can run
+  // behind the write position), so the refs pass through one scratch
+  // array before committing.
+  const ordered = new Array(n);
+  for (let i = 0; i < n; i++) {
+    ordered[i] = cues[keys[i] % CUE_KEY_SLOTS];
+  }
+  for (let i = 0; i < n; i++) {
+    cues[i] = ordered[i];
+  }
   return cues;
 }

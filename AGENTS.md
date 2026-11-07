@@ -2212,6 +2212,126 @@ every axis lands on the shape already shipped; the one NEW engine fact
 (C2b's fragment record coalescing) refines the XML-mutation-batch
 premise recorded for the shared feed without moving any src claim.
 
+**The C++-internals delegation probe (Nov 2026, user-directed "explore
+firefox' C++ internals usage possibilities to improve native-like
+performance", record-only, audit-clean; post-`d5c2b81`).** The audit
+series walked the space from the JS side (every call site already one
+native op); this batch walked it in reverse — jobs still EXECUTED by
+JS that a Firefox C++ facility could take over WHOLE, priced with
+both-arms parity asserts before every cost row (axes D1–D4 + G0 grain
+in `check/.tmp/cpp-internals-{probe.mjs,report.json}`, uncommitted per
+sweep convention; rows auto-sized by geometric-batch sizing). Verdicts:
+
+- **(D1) the cue comparator sort CAN be a comparator-free native sort
+  — and it is not an adoption.** The 19k-cue
+  `sort((a,b)=>a.start-b.start)` vs a `Float64Array` of
+  `(ms-start << 21 | input-idx)` packed keys under the TypedArray
+  DEFAULT sort (pure C++ numeric per spec, no callback at all):
+  parity exact at both scales including ties — the low-bit index
+  reproduces `Array.sort`'s stability, and ms-quantized starts are the
+  real parsing output so the pack is order-preserving (exact in
+  float64 to 2^53). **8.4ns/record vs 34ns (4×) at ingest scale,
+  7.5 vs 32.6ns at live scale.** But the raw saving is ~0.5ms against
+  the recorded 11ms/1.1MB ingest tripwire — noise on the rate axis —
+  and the adoption code carries two extra encode/decode passes plus an
+  ms-quantize premise: declined on rate, the scanner-A/B verdict class.
+  The C++-ops record's decline wording ("no native key-sort API
+  exists") is refined: one exists via the pack; the decline stands on
+  rate.
+- **(D2) the compiled C++ alternation beats the suffix loop 3.6×/host
+  and still declines.** One prebuilt `RegExp` (suffix alternation +
+  prefix lead) reproduces the entry.js `isAdHost` semantics EXACTLY
+  (5/5 hit agreement + the full 20k miss corpus, throw-guarded):
+  **24.5ns/host vs the loop's 90.5** — but the scan runs once per
+  realm and the kernel-plane substrate H axis measured the whole skip
+  probe at 0–500ns total; a ~0.06µs saving at boot rate is nothing
+  against a regexp semantics twin that must stay in lockstep with the
+  loop's prefix/suffix vocabulary. Declined on rate.
+- **(D3) Intl delegation loses 23× — and DurationFormat is shipped but
+  not the product's shape.** A cached `Intl.DateTimeFormat` (hour/
+  minute/second UTC) measured **305ns/call vs formatTime's 13.2ns**
+  concat (the per-read `Date` allocation is the shape) — migrating the
+  HUD formatter to ICU pays 23× on the hotpath battery's 250k-call
+  synthetic for zero real gain at human-gesture rate.
+  `Intl.DurationFormat` IS shipped on 159 but costs **706ns/call**
+  and its `digital` style does NOT produce the numeric composite
+  (default and digital both sample the same "1 hr, 23 min, 47 sec")
+  — the one ICU surface shaped like h:mm:ss can neither express the
+  product's format nor beat the concat. Declined.
+- **(D4) `structuredClone` declines as a device at batch scale,
+  re-affirming the walker decisions.** 1000 flat cue-shaped records:
+  structuredClone **594ns/obj**, JSON round-trip 281ns, manual spread
+  loop **19ns** — the native deep-copy device is 31× slower than the
+  spread at the shapes the tree would face; the copy-on-write walker's
+  adoption re-prices as correctness, not just pruning.
+- **Delegations already complete (verified from source, not probed):**
+  the fill-transform eased snap rides WAAPI `fill: "both"` (a
+  compositor animation, one owned cancel handle, final commit on
+  finish); the scrub/readout rides the native rAF pump; resume
+  checkpoints ride the native `timeupdate` media clock; cue slots ride
+  the CSS engine (`@container`, `@starting-style`, scroll-timeline,
+  `text-box-trim`, view-transition types); every remaining JS loop is
+  one of the recorded allocation contracts, rate-bounded below
+  measurement, or the feature's semantics.
+
+Harness lessons worth holding for future probes: (a) nested template
+literals inside an eval'd body TERMINATE the outer `makeAsync`
+template — string concat only (the D2 first draft hung the parser);
+(b) single-call timing reads are invisible under the page's 1ms clock
+(a 160µs arm reads 0ms), so sizing rides a geometric batch (×4) until
+the total crosses 5ms, and the sizing helper's first draft carried a
+µs/ms unit mismatch that turned a 100ms budget into 65s rounds; (c)
+the hit corpus initially included `adservices.google.com` (plural
+"services") — the shipped prefix vocabulary claims only continuations
+OF "adservice.google.", so that host is claimed by NEITHER arm: a
+vocabulary fact, not a parity failure (the throw-guard's 5/5
+agreement surfaced it).
+
+Sweep disposition: record-only, no src change earned adoption — the
+delegation surface is already maximal on every rate axis that matters;
+the one genuinely faster native unit (D1's packed sort) saves noise at
+its real rate and the placed margins (D2/D3/D4) lose to the shipped
+shapes. Recorded so any future "hand the whole job to C++" argument
+must first beat these numbers.
+
+**Adoption addendum (user direction: "Adopt the 2 winners" — D1 and D2
+landed in src; D3/D4 stay declined per the record).** The record's
+declines were rate-motivated, not semantic; the user direction overrode
+the rate call on the two networks that also pay back in shape:
+
+- **D1 landed — `sortCues` rides the packed-key native sort**
+  (`forgevtt.js`). The `Float64Array` of `(ms-start × 2^21 + input-idx)`
+  keys sorts comparator-free under the TypedArray default sort and
+  scatters back through held references (an in-place scatter would let
+  a permuted read observe an earlier write — one scratch pass commits).
+  The order-preserving premise is now the docstring's: starts arrive
+  ms-quantized (textual timing parse + the 0.25s sync-offset vocabulary,
+  `shiftTime`'s clamp to 0 stays on the grid; both parse call sites are
+  fed offset 0 by the parse memo — sync offsets rebuild through
+  `subtitles.js`'s own `#applyBase` comparator sort, untouched), exact in
+  float64; two starts closer than 1ms would tie by input index — a
+  sub-ms window the presented-frame crank cannot see. Lives in the file
+  as content, not a procedure: the parity story (equal starts keep
+  input order = `Array.sort`'s stability) rides the probe record + this
+  addendum.
+- **D2 landed — `isAdHost` rides one compiled alternation**
+  (`entry.js`), derived from the two source tables (the suffix
+  alternation **end-anchored**, the prefix alternation lead-anchored;
+  dots escaped so a suffix's literal dots stay literal;
+  `new URL().hostname` is spec-lowercase, no flag). The end anchor is a
+  semantic fix over the probe draft, which used `(?:\.|$)`: that form
+  accepts a trailing-suffix trap `doubleclick.net.evil.com` the loop (=
+  the shipped semantics) refuses; the adoption pins `(?:^|\.)(suffixes)$`
+  and node-verified exact agreement with the loop on that trap, the
+  neither-arm `adservices.google.com` vocabulary shape, case handling,
+  and the hit/miss corpus. The tables stay the ONE source vocabulary —
+  they are now consumed exactly once, by the regex build. The tree
+  carries a third `new RegExp(` site (joined to the two `SUBTITLE_EXTS`
+  assemblers the C++-ops record names); the census carries no
+  `new RegExp` row, so no gate move was needed.
+- **D3/D4 stay declined** — 23× and 31× slower than the shipped shapes
+  on the floor; adoption never earned.
+
 ## 5. Conventions (the change bar)
 
 1. **Comments explain WHY with reasoning** — the rejected alternatives and
@@ -2705,6 +2825,7 @@ native-operator saturation audit (post-`75437f2`, the probe batch), then
 the substrate series (C++ `20b07da`, kernel-plane `ea5a8f1`, shell-plane
 `5479871`) and the native-replacement wave-2 probe (post-`5479871`,
 record-only), then the census-premise substrate audit (post-`ef8393e`,
+record-only) and the C++-internals delegation probe (post-`d5c2b81`,
 record-only). The
 series'
 record-only commits changed
