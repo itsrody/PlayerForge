@@ -1,7 +1,7 @@
 import { logger, Scope } from "../../shared/runtime.js";
 import { DomPool, deepestActiveElement, subscribeFullscreen } from "../../shared/dom.js";
 import { formatTime, clamp } from "../../shared/core.js";
-import { button, createIconElement, flashElement, el } from "./ui.js";
+import { button, createIconElement, el } from "./ui.js";
 import { GESTURE_EVENTS } from "../inputs/actions.js";
 import { getSetting, onSettingsChanged, setSetting, SETTINGS_SCHEMA, SETTING_KEYS } from "./config.js";
 
@@ -1370,7 +1370,6 @@ class HistorySection {
     const shell = this.#shell;
     if (btn.dataset.action === "reset") {
       shell.resume?.resetEntry(card.dataset.entryId);
-      flashElement(btn);
       shell.toastInfo("reload", "Resume Entry Reset", "history");
     } else if (btn.dataset.action === "remove") {
       // The store's #persist(true) fires onChange synchronously, so the

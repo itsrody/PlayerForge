@@ -1,5 +1,4 @@
 import { getConfigValue, setConfigFields } from "../shared/store.js";
-import { flashElement } from "./chrome/ui.js";
 import { debounce, Scope, Fan } from "../shared/runtime.js";
 import { clamp, TUNING, fmtPercent, fmtSigned } from "../shared/core.js";
 import { GESTURE_EVENTS } from "../kernel/contract.js";
@@ -244,7 +243,7 @@ export class FilterSession {
 export class VideoFilter {
   #session;
   #presetSelect = null;
-  #resetBtn = null;
+
   #steppers = {};
   #scope = new Scope();
 
@@ -271,14 +270,13 @@ export class VideoFilter {
     });
     this.#presetSelect.style.marginLeft = "auto";
 
-    this.#resetBtn = panel.addControl(head, {
+    panel.addControl(head, {
       type: "button",
       icon: "reload",
       title: "Reset all",
       ariaLabel: "Reset all",
       ghost: true,
       onClick: () => {
-        flashElement(this.#resetBtn);
         this.#session?.reset();
       }
     });

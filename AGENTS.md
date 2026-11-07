@@ -978,8 +978,8 @@ iframes, same-origin and cross-origin:
   teardown source of truth, so attempt-rollback and shell destroy call
   `section.destroy?.()` on real handles, and the history subscription rides
   the shell scope's signal into the resume store's Fan),
-  `ui.js` (`el`/`button` construction, the SVG icon factory, `flashElement`
-  WAAPI), `inject.js` (`ShellStyle` sheet lifecycle: adopt-once, monotonic
+  `ui.js` (`el`/`button` construction, the SVG icon factory), `inject.js`
+  (`ShellStyle` sheet lifecycle: adopt-once, monotonic
   `@resource` upgrade; viewport-fit-cover), `toast.js` (`ToastManager`,
   pooled custom element), `panel.js`
   (the `ui.panelScale` write rides `#applyCompactSetting()` as the panel
@@ -2074,7 +2074,12 @@ delta, the walks carry floors the verbs cannot, and the per-element
 predicates ride string/DOM data no array verb accepts). The scanner
 primacy and the flash scan's cancel-by-scan identity re-recorded with
 floor numbers. Artifact scripts under `check/.tmp/`, uncommitted per
-sweep convention.
+sweep convention. Postscript (same-day, user direction): the
+`flashElement` surface axis T3 priced is now RETIRED wholesale — design
+language: a press's feedback is the action's own surface (the state
+change, the toast), not a layered background pulse on the button; the
+identity finding above stands as the record of why name-selecting could
+never replace the scan it measured.
 
 ## 5. Conventions (the change bar)
 

@@ -1,6 +1,6 @@
 import { DomPool } from "../../shared/dom.js";
 import { delay } from "../../shared/runtime.js";
-import { flashElement, button, createIconElement } from "./ui.js";
+import { button, createIconElement } from "./ui.js";
 
 /**
  * Single toast surface hosted in the shell HUD layer: icon + text +
@@ -149,7 +149,6 @@ export class ToastManager {
         buttonEl.addEventListener("click", (event) => {
           event.preventDefault();
           event.stopPropagation();
-          flashElement(buttonEl);
           action.onClick?.();
         });
       }

@@ -160,11 +160,6 @@ export const EASE_SNAPPY_CURVE = "cubic-bezier(0.16, 1, 0.3, 1)";
 /** Tight snap duration for video-transform animations. */
 export const EASE_SNAPPY_MS = 120;
 
-/** Linear ease for flash background animation. */
-export const FLASH_EASING = "ease-out";
-
-/** Accent flash duration. */
-export const FLASH_MS = 400;
 /* - 4. Formatting - */
 /** Shared unit-format functions for stepper display. */
 export const fmtPercent = (v) => `${v}%`;

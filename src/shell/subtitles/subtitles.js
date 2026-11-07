@@ -23,7 +23,7 @@ import { getConfigValue, setConfigValue, gmRequestText } from "../../shared/stor
 import { TUNING, clamp, fmtPercent, fmtEm, fmtPercentOrOff, signedSeconds } from "../../shared/core.js";
 import { GESTURE_EVENTS } from "../../kernel/contract.js";
 import { SETTING_KEYS } from "../chrome/config.js";
-import { flashElement, el } from "../chrome/ui.js";
+import { el } from "../chrome/ui.js";
 
 /* - Track renderer - */
 /* Tuning rides the shared TUNING table (forge-style aliases); the local
@@ -1524,7 +1524,6 @@ export class SubtitlesSection {
         subtitleSync.set(0);
         subtitlePlacement.setLine(PLACE_DEFAULTS.line);
         subtitlePlacement.setPosition(PLACE_DEFAULTS.position);
-        flashElement(this.#resetBtn);
         this.#shell?.toastFlash("reload", "Subtitle Style Reset", "subtitles");
       }
     });

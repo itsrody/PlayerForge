@@ -1,19 +1,16 @@
 /**
- * Shell UI kit: construction helpers, the icon factory, and the flash effect -
- * everything every HUD/panel/toast/subtitle surface composes.
+ * Shell UI kit: construction helpers and the icon factory - everything
+ * every HUD/panel/toast/subtitle surface composes.
  *
  * Sections:
  *   1. Construction  - el / button (createElement + attributes + append)
  *   2. Icons         - SVG markup factory + per-document template cache
- *   3. Effects       - flashElement (WAAPI accent flash)
  *
  * App-local (not shared/) since the framework never constructs UI: shared/
  * stays limited to modules the framework and the app use together. These
  * helpers stay plain module-scope functions - they run per element on shell
  * boot, so the hot callsites stay monomorphic.
  */
-
-import { FLASH_MS, FLASH_EASING } from "../../shared/core.js";
 
 /* - 1. Construction - */
 
@@ -202,58 +199,7 @@ export function createIconElement(name, doc = document) {
   }
   return parsedIcon(canonical, doc)?.cloneNode(true) ?? null;
 }
+/* - 3. Effects - retired: the flashElement accent flash is gone by design
+   direction - a press's feedback is the action's own surface (the state
+   change, the toast), not a layered background pulse on the button. */
 
-/* - 3. Effects - */
-
-/**
- * Restart the accent "flash" on an element natively via the Web Animations
- * API (Element.animate). This replaces the classic
- * remove-class -> void offsetWidth (forced reflow) -> re-add pattern: the
- * WAAPI path hands the job to the compositor, needs no synchronous layout
- * flush, and guarantees a clean restart by cancelling any prior background
- * animation on the element. Mirrors the retired @keyframes pf-reset-flash
- * rule (transparent -> accent -> transparent, 0.4s ease-out).
- *
- * Shell-owned UI effect; lives here (not in shared/) because every consumer
- * is chrome/subtitles, so shared/ stays limited to modules the framework and
- * the app use together.
- */
-export function flashElement(el, { duration = FLASH_MS } = {}) {
-  // `!el` is the only guard this carries: every caller passes an
-  // el-factory element, and WAAPI is floor-guaranteed (Element.animate 48+,
-  // getAnimations 84+) - the capability arms over both retired with the
-  // element-level capability purge this batch re-derived.
-  if (!el) {
-    return;
-  }
-  // Deliberately main-thread: color interpolation is not compositor-backed,
-  // and the flash is a one-shot, brief, non-repeating accent - swapping it for
-  // an opacity pulse to chase compositor frames would dim the content
-  // underneath, a visual change, not a smoothness one.
-  // Single pass over the element's active animations: finished entries are
-  // always accumulated prior flashes (backgroundColor - this module is the
-  // only background animator on flash targets), so they cancel without a
-  // keyframe scan; running/pending animations are scanned so unrelated CSS /
-  // WAAPI animations (transforms, view-transitions) survive the restart.
-  for (const anim of el.getAnimations()) {
-    if (anim.playState === "finished") {
-      anim.cancel();
-      continue;
-    }
-    // The null half stays: an Animation's effect is spec-nullable. The
-    // typeof arm over getKeyframes does not - every participant effect is
-    // a KeyframeEffect on this floor.
-    const keyframes = anim.effect ? anim.effect.getKeyframes() : [];
-    if (keyframes.some((kf) => "backgroundColor" in kf)) {
-      anim.cancel();
-    }
-  }
-  el.animate(
-    [
-      { backgroundColor: "transparent" },
-      { backgroundColor: "var(--pf-fg)" },
-      { backgroundColor: "transparent" }
-    ],
-    { duration, easing: FLASH_EASING }
-  );
-}
