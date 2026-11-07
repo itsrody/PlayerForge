@@ -1,123 +1,71 @@
 import { sleep } from "../../lib/driver.mjs";
 /**
- * The storage data plane end to end: the kernel must (a) write the configs
- * doc and the resume tracker through the GM backing, (b) a reboot seeded
- * with prior-session storage must surface exactly that state through the
- * store again - the whole reason pf:configs/pf:resume live in manager
- * space, (c) a foreign doc that omits a known entry adopts the removal
- * (cross-tab delete convergence), and (d) an explicit boundary ("Start
- * over") persists regardless of the drift-epsilon gate. (e) is the DomPool
- * reuse contract at the History cards: a cross-tab structural merge
- * re-renders the section, and a live card keeps its NODE across both a
- * grow (two forged foreign entries adopted) and a shrink (the excess
- * released back) - node identity, not a rebuilt tree.
+ * The storage data plane end to end, on the extension's own surfaces:
+ * (a) real playback persists a tracker entry through browser.storage, (b) a
+ * reboot restores that position - proven by a REAL navigation replay, not a
+ * seed (storage IS the product's persistent plane, so prior state carries
+ * exactly like the user's browser state), (c) an explicit boundary
+ * ("Start over") persists the reset past the drift-epsilon gate, (d) the
+ * DomPool reuse contract at the History cards: a cross-tab structural merge
+ * (a REAL second tab's playback adding its entry) re-renders the open list
+ * keeping the live card's NODE, and a removal from the other tab's panel
+ * (a real foreign write) reconciles back down releasing the excess, and
+ * (e) cross-tab delete convergence: a foreign removal of OUR entry is
+ * adopted, and this tab's next flush must not resurrect it.
+ *
+ * Reads ride the debug storageDump sentinel; the case runs on /check with
+ * the debug hash. The second tab is a REAL tab (driver new window), whose
+ * writes flow back as genuine storage broadcasts.
  */
-export async function run({ session, boot }) {
+export async function run({ session, boot, baseUrl }) {
   const rows = [];
-  await boot();
+  const row = (name, ok, note = null) => rows.push({ name, status: ok ? "pass" : "fail", note, ms: null });
 
-  const backingKeys = () => session.eval(function main() {
-    return Object.keys(window.__pfBacking ?? {});
-  });
+  await boot({ pagePath: "/check#pf-debug" });
 
-  // The kernel settles through boot re-anchoring after the shell attaches
-  // (the ceremony's late seeks get reset beneath the tracker's init chain),
-  // so the position drive starts only after both the duration and the
-  // settle window. The sweep starts past RESUME_MIN_POSITION (5s,
-  // src/shared/core.js) because restore only applies what survives it.
-  await session.waitFor(
-    `return (() => { const v = document.querySelector("#check-video"); return v && v.duration > 3 ? v.duration : false; })()`,
-    5000
-  );
-  await sleep(900);
+  // (a) Real playback above the resume floor leaves a persisted entry: the
+  // pause is the flush edge (a save edge any user action produces) - assert
+  // the STORE carries it, not video memory.
   await session.eval(function main() {
     const v = document.querySelector("#check-video");
-    v.currentTime = 6;
+    v.currentTime = 6.2;
     v.play().catch(() => {});
   });
-  await sleep(2200);
-  const resume = await session.eval(function main() {
-    return window.__pfBacking["pf:resume"] ?? null;
+  await sleep(1100);
+  await session.eval(function main() {
+    document.querySelector("#check-video")?.pause();
   });
-  rows.push({
-    name: "playback writes resume state (pf:resume)",
-    status: resume !== null && typeof resume === "object" ? "pass" : "fail",
-    note: resume === null ? "pf:resume absent from GM backing" : `${Object.keys(resume).length} entries`,
-    ms: null
-  });
+  const saved = await session.waitFor(function check() {
+    try {
+      const entries = (JSON.parse(window.PlayerForge?.storageDump?.() ?? "{}").resume?.entries) ?? [];
+      const entry = entries.find((e) => e && e.path === "/check");
+      return entry && entry.resume >= 5 ? entry : false;
+    } catch { return false; }
+  }, 5000).then((v) => v, () => null);
+  row("real playback persists the tracker entry (pause flush, above the 5s floor)",
+    !!saved, saved ? `resume=${saved.resume}` : "entry never reached the store with a restored position");
 
-  const configs = await session.eval(function main() {
-    return window.__pfBacking["pf:configs"] ?? null;
-  });
-  rows.push({
-    name: "configs doc reaches the GM backing (pf:configs)",
-    status: configs !== null ? "pass" : "fail",
-    note: configs === null ? "pf:configs absent from GM backing" : null,
-    ms: null
-  });
+  // (b) The reboot restore: a real navigation replay replays the stored
+  // position after metadata. The debug hash rides along (per-load debug
+  // mode, never a storage write) so the case's storage reads - which arm
+  // the debug sentinel - work on the replayed document too.
+  await session.navigate(`${baseUrl}/check?boot=${Date.now()}#pf-debug`);
+  await session.waitFor("return !!document.querySelector('.pf-shell');", 6000);
+  const seek = await session.waitFor(function check() {
+    const v = document.querySelector("#check-video");
+    return v && v.readyState >= 1 && v.currentTime > 4 && v.currentTime < 11 ? v.currentTime : false;
+  }, 6000).then((at) => Number(at).toFixed(2), () => null);
+  row("resume restores the saved position after a real navigation replay",
+    seek !== null, seek === null ? "no restored seek within 6s" : `currentTime=${seek}`);
 
-  // The sync nudge persists into the per-entry grain: one gesture nudge lands
-  // in the tracker's entry (subOffset, 0.25s step; persist debounce <= 150ms)
-  // instead of only touching the global fallback key - the grain a reboot
-  // reloads.
-  const nudge = await session.evalAsync(function main(done) {
-    const host = document.querySelector(".pf-shell");
-    if (!host) { done({ ok: false, why: "no shell to host the gesture" }); return; }
-    host.dispatchEvent(new CustomEvent("pf:gesture-sub-sync", {
-      detail: { direction: "right", method: "pointer" }
-    }));
-    setTimeout(() => {
-      const entries = window.__pfBacking["pf:resume"]?.entries ?? [];
-      const entry = entries.find((e) => typeof e.subOffset === "number" && e.subOffset !== 0);
-      done({ ok: !!entry, why: entry ? `${entry.id} subOffset=${entry.subOffset}` : `entries=${entries.length} none carried subOffset` });
-    }, 600);
+  // (c) The explicit boundary: the restored boot's action toast carries
+  // "Start over". Paused at the saved position, clicking it must write the
+  // reset through the store (a plain seek-to-0 would sit inside the save
+  // epsilon and be reverted by the next flush).
+  await session.eval(function main() {
+    document.querySelector("#check-video")?.pause();
   });
-  rows.push({
-    name: "subtitle sync nudge lands in the resume entry grain",
-    status: nudge.ok === true && nudge.why.endsWith("subOffset=0.25") ? "pass" : "fail",
-    note: nudge.why ?? null,
-    ms: null
-  });
-
-  // Reboot the page seeded with everything session one wrote; the store must
-  // hand the same state back out and the resume tracker must apply it.
-  const priorState = await session.eval(function main() {
-    return { ...window.__pfBacking };
-  });
-  await boot({ seed: priorState });
-  const restoredKeys = await backingKeys();
-  const missing = Object.keys(priorState).filter((k) => !restoredKeys.includes(k));
-  rows.push({
-    name: "storage seeds the reboot realm end to end",
-    status: missing.length === 0 ? "pass" : "fail",
-    note: missing.length === 0 ? `${restoredKeys.length} keys round-tripped` : `missing: ${missing.join(", ").slice(0, 80)}`,
-    ms: null
-  });
-
-  const seek = await session
-    .waitFor(
-      `return (() => { const v = document.querySelector("#check-video"); return v && v.readyState >= 1 && v.currentTime > 0.2 ? v.currentTime : false; })()`,
-      6000
-    )
-    .then((at) => Number(at).toFixed(2), () => null);
-  rows.push({
-    name: "resume restores the saved position after reboot",
-    status: seek !== null ? "pass" : "fail",
-    note: seek === null ? "no restored seek within 6s" : `currentTime=${seek}`,
-    ms: null
-  });
-
-  // The explicit boundary: the restored boot's action toast carries "Start
-  // over". Paused at the saved position, clicking it must write the reset
-  // through the store - a plain seek-to-0 leaves the entry's last resume
-  // intact because the flushed seek lands inside the save epsilon (and the
-  // next boot would resume the position the user just discarded).
   const startOver = await session.evalAsync(function main(done) {
-    const video = document.querySelector("#check-video");
-    video.pause();
-    // The HUD (toasts included) lives inside the shell host's open shadow
-    // root - the light DOM carries only the host (.pf-shell), so the toast
-    // probe must cross the boundary explicitly.
     const probe = () => document.querySelector(".pf-shell")?.shadowRoot?.querySelector(
       'pf-toast .pf-toast-actions button[title="Start over"]');
     let polled = 0;
@@ -128,9 +76,14 @@ export async function run({ session, boot }) {
         clearInterval(poll);
         button.click();
         setTimeout(() => {
-          const entries = window.__pfBacking["pf:resume"]?.entries ?? [];
-          done({ ok: entries[0]?.resume === 0, why: `resume=${entries[0]?.resume}` });
-        }, 400);
+          try {
+            const entries = (JSON.parse(window.PlayerForge?.storageDump?.() ?? "{}").resume?.entries) ?? [];
+            const entry = entries.find((e) => e && e.path === "/check");
+            done({ ok: entry?.resume === 0, why: `resume=${entry?.resume}` });
+          } catch (err) {
+            done({ ok: false, why: `read failed: ${String(err.message ?? err).slice(0, 80)}` });
+          }
+        }, 500);
         return;
       }
       if (polled > 24) {
@@ -146,223 +99,234 @@ export async function run({ session, boot }) {
       }
     }, 60);
   });
-  rows.push({
-    name: "Start over writes the reset past the drift-epsilon gate",
-    status: startOver.ok === true ? "pass" : "fail",
-    note: startOver.why ?? null,
-    ms: null
-  });
+  row("Start over writes the reset past the drift-epsilon gate",
+    startOver.ok === true, startOver.why ?? null);
 
-  // The DomPool reuse contract at the History cards. The section renders
-  // off the tracker's structural merge announcements, so the witness rides
-  // a cross-tab add: a foreign doc (newer stamp) carries two forged
-  // entries, the open History list must grow by acquisitions, and the
-  // card already on screen must keep its node - the reconcile walks
-  // #activeCards by index and only the missing slots acquire from the
-  // pool. A property stamped on the live card is the identity witness: a
-  // rebuilt tree would lose it.
-  const poolGrow = await session.evalAsync(function main(done) {
-    const shadow = document.querySelector(".pf-shell")?.shadowRoot;
-    if (!shadow) { done({ ok: false, why: "no shell shadow" }); return; }
-    // The panel opens on the shared hotkey (the same KeyS route the
-    // subtitles case rides); the History section builds lazily at first
-    // activation, so the tab click precedes the card wait.
-    document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyS", bubbles: true }));
-    const deadline = Date.now() + 5000;
-    let opened = false;
-    const start = () => {
-      const shadow2 = document.querySelector(".pf-shell")?.shadowRoot;
-      const historyTab = shadow2?.querySelector('.pf-panel-tab[data-title="History"]');
-      if (!opened && historyTab) {
-        opened = true;
-        historyTab.click();
-      }
-      if (opened) {
-        const list = shadow2.querySelector(".pf-history-list");
+  // (d1) The DomPool reuse contract at the History cards: the witness card is
+  // the /check entry's card (the card whose node must survive the merge),
+  // located by entry id - the render order varies with updatedAt, so the
+  // marker rides that entry, not an index.
+  const checkId = saved?.id ?? null;
+  const marked = await session.evalAsync(function main(entryId, done) {
+    const deadline = Date.now() + 6000;
+    const step = () => {
+      const shadow = document.querySelector(".pf-shell")?.shadowRoot;
+      const historyTab = shadow?.querySelector('.pf-panel-tab[data-title="History"]');
+      if (!historyTab) {
+        // The panel opens on the shared hotkey (the same KeyS route the
+        // subtitles case rides); the History section builds lazily at first
+        // activation, so the tab click precedes the card wait.
+        document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyS", bubbles: true }));
+      } else {
+        const list = shadow.querySelector(".pf-history-list");
         const cards = list ? [...list.querySelectorAll(".pf-history-card")] : [];
-        if (cards.length >= 1) {
-          const live = cards[0];
+        const live = cards.find((c) => c.dataset.entryId === entryId) ?? cards[0];
+        if (live) {
           live.__pfPoolWitness = true;
-          window.__pfPoolBaseId = live.dataset.entryId;
-          done({ ok: true, live: live.dataset.entryId, cards: cards.length, why: null });
+          done({ ok: true, at: live.dataset.entryId, cards: cards.length, why: null });
           return;
         }
-      } else if (Date.now() > deadline) {
-        done({ ok: false, why: "History tab never appeared (panel never opened)" });
-        return;
       }
       if (Date.now() > deadline) {
-        done({ ok: false, why: "History cards never rendered" });
+        done({ ok: false, why: "witness card never rendered (History list empty)" });
         return;
       }
-      setTimeout(start, 80);
+      setTimeout(step, 80);
     };
-    setTimeout(start, 120);
-  });
-  if (poolGrow.ok) {
-    const grow = await session.evalAsync(function main(done) {
-      const doc = window.__pfBacking["pf:resume"];
-      const base = (doc?.entries ?? [])[0];
-      if (!base) { done({ ok: false, why: "no base entry to build the foreign doc from" }); return; }
-      const stamp = Math.max(doc.updatedAt || 0, base.updatedAt || 0) + 5000;
-      const forged = (n) => ({
-        id: "pf-pool-forged-" + n, title: "Pool Forge " + n, domain: "127-0-0-1",
-        duration: 12, resume: 0, subOffset: 0, updatedAt: stamp
-      });
-      window.__gmTest.remoteWrite("pf:resume", {
-        version: 1,
-        entries: [{ ...base }, forged(1), forged(2)],
-        updatedAt: stamp
-      });
-      const deadline = Date.now() + 5000;
-      const poll = () => {
-        const cards = [...document.querySelector(".pf-shell")?.shadowRoot
-          ?.querySelectorAll(".pf-history-card") ?? []];
-        const witness = cards.find((c) => c.__pfPoolWitness === true);
-        if (cards.length === 3 && witness) {
-          done({
-            ok: true,
-            // The marker is NODE identity: pool nodes are interchangeable,
-            // the reconcile may re-map the marked card onto any entry, and
-            // the sorted render order can put a forged id first - reuse is
-            // attested by the marked node still riding the list.
-            why: `3 cards; marked node still riding the list (now renders ${witness.dataset.entryId}); forged ids adopted`
-          });
-          return;
-        }
-        if (Date.now() > deadline) {
-          done({
-            ok: false,
-            why: `cards=${cards.length} witness=${witness ? "preserved" : "lost"} ids=${cards.map((c) => c.dataset.entryId).join(",")}`
-          });
-          return;
-        }
-        setTimeout(poll, 80);
-      };
-      setTimeout(poll, 120);
-    });
-    rows.push({
-      name: "cross-tab merge re-renders the pooled History cards keeping the live node",
-      status: grow.ok === true ? "pass" : "fail",
-      note: grow.why ?? null,
-      ms: null
-    });
+    setTimeout(step, 120);
+  }, checkId);
+  row("open History list renders the persisted entry as a card",
+    marked.ok === true, marked.why ?? null);
 
-    // The shrink half: a foreign doc back to ONE entry is an adopted
-    // removal of the two forged cards - the reconcile releases the excess
-    // (real pool release, not DOM-only removal) and the live card rides
-    // its same node again.
-    const shrink = await session.evalAsync(function main(done) {
-      const doc = window.__pfBacking["pf:resume"];
-      const entry = (doc?.entries ?? []).find((e) => e.id === window.__pfPoolBaseId);
-      if (!entry) { done({ ok: false, why: "base entry vanished before the shrink stage" }); return; }
-      window.__gmTest.remoteWrite("pf:resume", {
-        version: 1,
-        entries: [{ ...entry }],
-        updatedAt: Math.max(doc.updatedAt || 0, entry.updatedAt || 0) + 10000
-      });
-      const deadline = Date.now() + 5000;
-      const poll = () => {
-        const cards = [...document.querySelector(".pf-shell")?.shadowRoot
-          ?.querySelectorAll(".pf-history-card") ?? []];
-        const witness = cards.find((c) => c.__pfPoolWitness === true);
-        if (cards.length === 1 && witness) {
-          done({ ok: true, why: "1 card, live node kept through the shrink" });
-          return;
-        }
-        if (Date.now() > deadline) {
-          done({ ok: false, why: `cards=${cards.length} witness=${witness ? "preserved" : "lost"}` });
-          return;
-        }
-        setTimeout(poll, 80);
-      };
-      setTimeout(poll, 120);
-    });
-    rows.push({
-      name: "shrink reconciles the History list releasing excess members (pool release)",
-      status: shrink.ok === true ? "pass" : "fail",
-      note: shrink.why ?? null,
-      ms: null
-    });
-
-    // The scroll-snap adoption pin (rides the open panel): the list carries
-    // y-proximity snapping and the cards align to their start edge — computed
-    // reads, so a dropped or renamed declaration fails the row rather than
-    // shipping inert. No motion is asserted (proximity snap is a settle
-    // behavior, not a paint), only the vocabulary presence.
-    const snap = await session.eval(function main() {
-      const shadow = document.querySelector(".pf-shell")?.shadowRoot;
-      const list = shadow?.querySelector(".pf-history-list");
-      const card = shadow?.querySelector(".pf-history-card");
-      if (!list || !card) { return { ok: false, why: "history list or card not present" }; }
-      const cs = getComputedStyle(list);
-      const cardCs = getComputedStyle(card);
-      return {
-        ok: (cs.scrollSnapType === "y" || cs.scrollSnapType === "y proximity")
-          && cardCs.scrollSnapAlign === "start",
-        why: null,
-        snapType: cs.scrollSnapType, snapAlign: cardCs.scrollSnapAlign
-      };
-    });
-    rows.push({
-      name: "History list carries y-proximity snap, cards align start (computed pin)",
-      status: snap.ok === true ? "pass" : "fail",
-      note: JSON.stringify(snap) + " (Firefox 159 computes `y proximity` as `y` - the default strictness is elided in the computed form, `y mandatory` would show whole)",
-      ms: null
-    });
-  } else {
-    rows.push({
-      name: "cross-tab merge re-renders the pooled History cards keeping the live node",
-      status: "fail",
-      note: poolGrow.why ?? null,
-      ms: null
-    });
-    rows.push({
-      name: "shrink reconciles the History list releasing excess members (pool release)",
-      status: "fail",
-      note: "skipped: the grow stage never established a witness card",
-      ms: null
-    });
-  }
-
-  // Cross-tab removal convergence: a foreign doc (another tab's whole-store
-  // write) that omits one of OUR entries is a deletion made elsewhere - the
-  // catalog LWW merge must adopt it, not resurrect the entry on this tab's
-  // next checkpoint write. The forged doc stamps a timestamp newer than the
-  // entry's last revision, so the doc-side LWW guard attests to the absence.
-  const removal = await session.evalAsync(function main(done) {
-    const doc = window.__pfBacking["pf:resume"];
-    const entry = (doc?.entries ?? [])[0];
-    if (!entry) { done({ ok: false, why: "no entry to remove" }); return; }
-    window.__gmTest.remoteWrite("pf:resume", {
-      version: 1,
-      entries: [],
-      updatedAt: Math.max(doc.updatedAt || 0, entry.updatedAt || 0) + 5000
-    });
-    // Provoke this tab's own write path (a pause flush) after the echo: the
-    // stale entry must not be rewritten back onto the disk.
-    const video = document.querySelector("#check-video");
-    video.play().catch(() => {});
-    setTimeout(() => {
-      video.pause();
-      setTimeout(() => {
-        const after = window.__pfBacking["pf:resume"];
-        const resurrected = (after?.entries ?? []).length > 0;
-        done({
-          ok: (after?.entries ?? []).length === 0,
-          why: resurrected
-            ? `resurrected: ${JSON.stringify(after.entries[0]).slice(0, 80)}`
-            : "removal adopted, no write-back"
-        });
-      }, 500);
-    }, 250);
+  // (d2) The grow: a REAL second tab plays its own page; its entry write
+  // echoes to this hidden tab, the structural merge re-renders the open list
+  // by acquisition, and the live card keeps its NODE (a rebuilt tree would
+  // lose the __pfPoolWitness stamp).
+  const pageHandle = await session.raw.getWindowHandle();
+  await session.raw.switchTo().newWindow("tab");
+  await sleep(400);
+  const tabHandle = await session.raw.getWindowHandle();
+  await session.navigate(`${baseUrl}/sdk/plyr?boot=${Date.now()}#pf-debug`);
+  await session.waitFor("return !!document.querySelector('.pf-shell');", 6000);
+  await session.eval(function main() {
+    const v = document.querySelector("video");
+    v.currentTime = 6.5;
+    v.play().catch(() => {});
   });
-  rows.push({
-    name: "foreign doc omission adopts the removal (delete convergence)",
-    status: removal.ok === true ? "pass" : "fail",
-    note: removal.why ?? null,
-    ms: null
+  await sleep(1100);
+  await session.eval(function main() {
+    document.querySelector("video")?.pause();
   });
+  const plyrEntry = await session.waitFor(function check() {
+    try {
+      const entries = (JSON.parse(window.PlayerForge?.storageDump?.() ?? "{}").resume?.entries) ?? [];
+      return entries.find((e) => e && e.path === "/sdk/plyr") || false;
+    } catch { return false; }
+  }, 7000).then((v) => v, () => null);
+  const plyrId = plyrEntry?.id ?? null;
+  // Back to the open panel before the merge read.
+  await session.raw.switchTo().window(pageHandle);
+  await sleep(300);
+  // The merge read as a string body: executeScript serializes source, so a
+  // case-side variable must be inlined (a closure over plyrId never rides).
+  const grew = await session.waitFor(`
+    const cards = [...document.querySelector(".pf-shell")?.shadowRoot
+      ?.querySelectorAll(".pf-history-card") ?? []];
+    const witness = cards.find((c) => c.__pfPoolWitness === true);
+    return witness && cards.some((c) => c.dataset.entryId === ${JSON.stringify(plyrId)});
+  `, 7000).then(() => true, (err) => String(err.message).slice(0, 60));
+  const cardIds = await session.eval(function main() {
+    return [...document.querySelector(".pf-shell")?.shadowRoot
+      ?.querySelectorAll(".pf-history-card") ?? []].map((c) => c.dataset.entryId);
+  });
+  row("the second tab's real playback merges into the open list keeping the live node",
+    grew === true && cardIds.includes(plyrId) && cardIds.length > 1,
+    `grew=${JSON.stringify(grew)} cards=${JSON.stringify(cardIds)} plyrId=${plyrId} (base entry id=${checkId})`);
+
+  // (d3) The scroll-snap adoption pin (rides the open panel): the list
+  // carries y-proximity snapping and the cards align to their start edge -
+  // computed reads, so a dropped or renamed declaration fails the row
+  // rather than shipping inert.
+  const snap = await session.eval(function main() {
+    const shadow = document.querySelector(".pf-shell")?.shadowRoot;
+    const list = shadow?.querySelector(".pf-history-list");
+    const card = shadow?.querySelector(".pf-history-card");
+    if (!list || !card) { return { ok: false, why: "history list or card not present" }; }
+    const cs = getComputedStyle(list);
+    const cardCs = getComputedStyle(card);
+    return {
+      ok: (cs.scrollSnapType === "y" || cs.scrollSnapType === "y proximity")
+        && cardCs.scrollSnapAlign === "start",
+      why: null,
+      snapType: cs.scrollSnapType, snapAlign: cardCs.scrollSnapAlign
+    };
+  });
+  row("History list carries y-proximity snap, cards align start (computed pin)",
+    snap.ok === true, JSON.stringify(snap) + " (Firefox 159 computes `y proximity` as `y` - the default strictness is elided in the computed form, `y mandatory` would show whole)");
+
+  // (d4) The shrink: a REAL removal written by the other tab's panel button
+  // (remove /sdk/plyr from history); this tab's open list reconciles down
+  // and the witness card rides its same node again.
+  const removedInTabB = await removeEntryInTab(tabHandle, plyrId);
+  await session.raw.switchTo().window(pageHandle);
+  await sleep(300);
+  const shrank = await session.waitFor(`
+    const cards = [...document.querySelector(".pf-shell")?.shadowRoot
+      ?.querySelectorAll(".pf-history-card") ?? []];
+    const witness = cards.find((c) => c.__pfPoolWitness === true);
+    return witness && !cards.some((c) => c.dataset.entryId === ${JSON.stringify(plyrId ?? "")});
+  `, 7000).then(() => true, (err) => String(err.message).slice(0, 60));
+  row("the foreign removal reconciles the list releasing the excess member (pool release)",
+    removedInTabB === true && shrank === true,
+    `removedInTabB=${removedInTabB} shrank=${JSON.stringify(shrank)} (witness card=${marked.ok ? "marked" : "unmarked"})`);
+
+  // (e) Cross-tab delete convergence: the other tab's panel removes OUR
+  // /check entry too - a deletion made elsewhere must be adopted here (the
+  // LWW doc-side guard attests the absence), and this tab's own subsequent
+  // flush (a short low play below the resume floor) must not resurrect it.
+  const removedCheck = await removeEntryInTab(tabHandle, checkId);
+  await session.raw.switchTo().window(pageHandle);
+  await sleep(300);
+  const converged = await session.waitFor(`
+    const cards = [...document.querySelector(".pf-shell")?.shadowRoot
+      ?.querySelectorAll(".pf-history-card") ?? []];
+    return !cards.some((c) => c.dataset.entryId === ${JSON.stringify(checkId ?? "")});
+  `, 7000).then(() => true, (err) => String(err.message).slice(0, 60));
+  await session.eval(function main() {
+    const v = document.querySelector("#check-video");
+    v.currentTime = 0.8;
+    v.play().catch(() => {});
+  });
+  await sleep(1500);
+  await session.eval(function main() {
+    document.querySelector("#check-video")?.pause();
+  });
+  await sleep(400);
+  const resurrected = await session.eval(function main() {
+    try {
+      const entries = (JSON.parse(window.PlayerForge?.storageDump?.() ?? "{}").resume?.entries) ?? [];
+      return entries.some((e) => e && e.path === "/check");
+    } catch { return true; }
+  });
+  const checkCardAfter = await session.eval(`
+    return [...document.querySelector(".pf-shell")?.shadowRoot
+      ?.querySelectorAll(".pf-history-card") ?? []].some((c) => c.dataset.entryId === ${JSON.stringify(checkId ?? "")});
+  `);
+  row("foreign doc omission adopts the removal (delete convergence, no write-back)",
+    removedCheck === true && converged === true && resurrected === false && checkCardAfter === false,
+    `removedCheck=${removedCheck} converged=${JSON.stringify(converged)} resurrected=${resurrected} checkCardAfter=${checkCardAfter}`);
+
+  // Close the helper tab: the later cases must see the single-tab session
+  // the standalone install produces.
+  await session.raw.switchTo().window(tabHandle);
+  await sleep(200);
+  await session.raw.close().catch(() => {});
+  await session.raw.switchTo().window(pageHandle);
 
   return rows;
+
+  /** Tab helper: open the OTHER tab's panel, find the card with the given
+   *  entry id, click its remove button, and poll ITS store until the entry
+   *  leaves. Fails loudly (a fail row) when the click never landed. */
+  async function removeEntryInTab(handle, entryId) {
+    if (entryId == null) {
+      row("tab helper remove click", false, "entry id unavailable (an earlier stage never produced it)");
+      return false;
+    }
+    await session.raw.switchTo().window(handle);
+    await sleep(300);
+    const clicked = await session.evalAsync(function main(id, done) {
+      const deadline = Date.now() + 6000;
+      const step = () => {
+        const shadow = document.querySelector(".pf-shell")?.shadowRoot;
+        const historyTab = shadow?.querySelector('.pf-panel-tab[data-title="History"]');
+        if (!historyTab) {
+          document.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyS", bubbles: true }));
+        } else {
+          const card = shadow.querySelector(`.pf-history-card[data-entry-id="${id}"]`);
+          const btn = card?.querySelector("[data-action=\"remove\"]");
+          if (btn) {
+            btn.click();
+            done({ ok: true, why: null });
+            return;
+          }
+        }
+        if (Date.now() > deadline) {
+          done({ ok: false, why: "card/button never rendered in the helper tab" });
+          return;
+        }
+        setTimeout(step, 120);
+      };
+      setTimeout(step, 120);
+    }, entryId);
+    if (clicked?.ok !== true) {
+      row("tab helper remove click", false, clicked?.why ?? "click never landed");
+      return false;
+    }
+    // Poll in the helper tab's own realm: the removal is ITS write, so the
+    // entry leaves this tab's store first.
+    const gone = await session.evalAsync(function main(id, done) {
+      const deadline = Date.now() + 7000;
+      const step = () => {
+        try {
+          const entries = (JSON.parse(window.PlayerForge?.storageDump?.() ?? "{}").resume?.entries) ?? [];
+          if (!entries.some((e) => e && e.id === id)) {
+            done({ ok: true });
+            return;
+          }
+        } catch {}
+        if (Date.now() > deadline) {
+          done({ ok: false, why: `entry ${id} still in the helper tab's store after 7s` });
+          return;
+        }
+        setTimeout(step, 120);
+      };
+      setTimeout(step, 120);
+    }, entryId);
+    if (gone?.ok !== true) {
+      row("tab helper removal landed", false, gone?.why ?? "removal never landed");
+      return false;
+    }
+    return true;
+  }
 }

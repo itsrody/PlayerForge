@@ -202,6 +202,15 @@ export function watchStorageKey(key, handler) {
  * exposed (status/ok, finalUrl, responseText) so consumers keep their
  * shape.
  */
+/**
+ * The sub-crossing vocabulary of the relay: the message type requestText
+ * sends and the background relay filters for. Owned here because this file
+ * owns the relay's consumer half; the background imports it (a background ->
+ * shared edge is the same downward direction every other plane rides), so
+ * the two ends of the channel cannot drift apart.
+ */
+export const TEXT_RELAY = "pf:request-text";
+
 export function requestText(url, { timeoutMs = 30000 } = {}) {
   const { promise, resolve, reject } = Promise.withResolvers();
   // The relay answers every failure as a result object (fetch cannot throw
@@ -209,7 +218,7 @@ export function requestText(url, { timeoutMs = 30000 } = {}) {
   // is rejection on failure, so the answer is re-thrown here. A null reply
   // means no receiver: the background page is gone (disabled, crashed) -
   // wrapped in the same belt, surfaced as a plain Error.
-  browser.runtime.sendMessage({ type: "pf:request-text", url, timeoutMs }).then(
+  browser.runtime.sendMessage({ type: TEXT_RELAY, url, timeoutMs }).then(
     (response) => {
       if (response == null) {
         reject(new Error("Relay unavailable"));

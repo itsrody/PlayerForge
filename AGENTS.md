@@ -7,51 +7,114 @@ HUD design law that still binds any visual change, and the testing tool that
 proves a change real. Sections 1–3 and 5–8 are load-bearing; section 4 is the
 history that explains why those conventions exist.
 
+**Branch state (the extension port).** The userscript plane is retired: the
+branch ships a native Firefox MV2 WebExtension built from the same `src/` tree
+(`#playerforge@itsrody.dev`, floor 159.0), and the Violentmonkey manager
+vocabulary was replaced plane by plane. Where the sections below still name
+the userscript-era surfaces (`GM_*`, menu commands, `@exclude-match`), read
+them as the ported premise's history: the two files §1's adapters name are
+store.js (browser.storage.local wrappers) and the extension chrome
+(dist/extension), and the manager-floor proofs (§4's sweep #7) trace to the
+extension runtime's own tunnels: the storage echo contract rides
+`storage.onChanged` (own-write dedup = the writer's envelope identity, so
+`watchStorageKey`'s remote filter is structural, not manager-arg), the
+network egress rides the background page's `<all_urls>` host permission (the
+`GM_xmlhttpRequest` CORS-bypass reduced to `fetch` in relay.js), and the
+in-frame model is the manifest's `all_frames: true` document_start injection,
+same reach as the `matches: <all_urls>` MV2 build of the userscript era.
+
 ---
 
 ## 1. What PlayerForge is
 
-A Userscript-exclusive HTML5 video player enhancer for **native Firefox** on
-both platforms:
+A native **Firefox MV2 WebExtension** HTML5 video player enhancer for
+**native Firefox** on both platforms (`src/` = the player plane; the one
+extension tree is `dist/extension/`, zip = `dist/playerforge.xpi`):
 
 - **Firefox desktop** (macOS/Windows/Linux), **Firefox for Android**
-- Firefox **159+** platform floor, **Violentmonkey 2.50+ (MV2)** manager
+- Firefox **159+** platform floor; installs as a real addon
 - Features: pointer/keyboard gestures, hotkeys, progress resume, watch
   history, subtitles (.srt/.vtt with per-cue placement, per-entry sync
   offset, URL/file restore), color filters with presets, fullscreen
   pinch-to-fill fill/fit, in-player settings panel, toasts, extensible
   shell surface
 - Not a general browser tool: ad-heavy hosts and player platforms are
-  excluded in the header (YouTube, Vimeo, Netflix, streams, socials…), and
-  `entry.js` keeps a runtime skip list above that.
+  excluded in the manifest (`exclude_matches`, YouTube, Vimeo, Netflix,
+  streams, socials…), and `entry.js` keeps a runtime skip list above that.
 
-**Repo shape (23 source modules, ~15k LOC):**
+**The command surface.** The Violentmonkey menu became the browserAction
+popup (dist/extension/popup.js, pure chrome — no storage, no DOM dispatch):
+every row is one `browser.tabs.sendMessage` of `{type: TAB_COMMAND,
+command}` onto the active tab's top document, where kernel.js `TabCommands`
+(top-frame only by install guard) answers from script eval — the commands
+exist before any video discovery. The vocabulary is one table
+(kernel/contract.js: `TAB_COMMAND` + `COMMANDS`: debug-query, debug-toggle,
+diag, filter-reset, sync-reset); the popup mirrors it verbatim (a package
+member cannot import src) and the census pins both halves by name.
+
+**The debug handle.** The userscript-era debug console handle survives as an
+eval-scoped door: `window.PlayerForge` installs at **script eval** (not
+kernel boot — the red row that proved it: a video-less embed-host top is the
+popup's receiver surface and must keep the door before any video discovery;
+kernel-bound arms resolve through the entry's `menuKernelRef` hook at call
+time like TabCommands does). Debug-gated on the `#pf-debug` hash like its
+siblings; arms are `diagnosticSnapshot`/`dumpFrameState`/`storageDump`/
+`vtFlipsDump` (a same-realm `startViewTransition` wrapper recording each
+flip's `types` — a page-realm or harness-side patch is invisible across the
+Xray, probed)/`pfCommand`. Compartment law: the object clones into the page
+realm via `cloneInto` (`cloneFunctions: true`), and every arm returns a
+primitive (JSON strings).
+
+**The command-relay architecture.** `pfCommand` is the one debug-mode door
+that replays the browserAction popup's machinery end to end:
+content → `browser.runtime.sendMessage({type: COMMAND_RELAY})` → the
+background's existing receiver (relay.js, one listener, the text-relay and
+command arm riding it) → `browser.tabs.sendMessage(activeTab, {type:
+TAB_COMMAND})` → TabCommands → the reply lands on a
+`data-pf-cmd-<command>` rail attribute via `setAttribute` — **never**
+`dataset["pfCmd-…"]`: a hyphen-lowercase DOMStringMap key throws
+SyntaxError on set, the silent no-reply shape the harness once saw. The
+relay exists because a cross-extension caller structurally cannot make the
+hop (browser isolates `runtime.onMessage` per extension). Census: 5
+senders (store.js requestText, popup.js, ledger's hint, the relay's
+tabs.sendMessage arm, the handle's runtime.sendMessage), 3 receivers
+(relay, TabCommands, the entry hint).
+
+**Repo shape (26 source modules, ~15k LOC):**
 
 ```
 src/
   entry.js            install-time contract: which frames run the script
+  background/  (3)    index, relay (text + command), ledger (hint ledger)
   kernel/  (4)        contract, detection, discovery, kernel orchestrator
   shared/  (5)        core, runtime, dom, page, store — the data planes
   shell/   (14)       shell, media, resume, filter, forge+actions,
                       subtitles(2), chrome(5 + styles.css)
 check/                the one testing tool (see §7)
-dist/                 generated, not the review target
-esbuild.config.mjs    single build: IIFE userscript + css resource
+dist/extension/       the ONE extension tree: build output (content.js,
+                      manifest.json) + hand-maintained chrome shipping
+                      verbatim (background.js, popup.js/popup.html,
+                      icon.svg); zip = dist/playerforge.xpi
+esbuild.config.mjs    one build: bundles src/** into content.js +
+                      dist/extension/background.js, generates the
+                      manifest, verifies the tree, zips the xpi
 ```
 
-**Shipping artifact** (`dist/playerforge.user.js`, ~165 KB one IIFE +
-`dist/playerforge.css` via `@resource pfStyle`): match-all userscript with a
-24-pattern exclusion list (`@exclude-match`, VM's strict match-pattern
-surface — the old `@exclude` glob any-character semantics is why the bare
-apex pairs existed; the released matcher's `*.` covers the apex), 8 grants
-(`GM_setValue/getValue/registerMenuCommand/unregisterMenuCommand/
-addValueChangeListener/removeValueChangeListener/getResourceText/
-xmlhttpRequest`), `@connect *` + subtitlecat,
-**`@run-at document-start`** (real under VM's MV2 registration),
-deliberately **no `@noframes`**: every frame gets the script (§2).
-`@downloadURL` pins the branch dist for VM's updater. Version is
-derived from `package.json` by the build; never hand-edit the header version.
-The bundled sheet rides the hand minifier (`minifyCss` in esbuild.config.mjs),
+**Shipping artifact** (`dist/playerforge.xpi`, built from `dist/
+extension/`): MV2 WebExtension with id `#playerforge@itsrody.dev`, floor
+159.0 — `permissions: ["storage", "webRequest", "<all_urls>"]`,
+`content_scripts` running the bundle match-all with a 24-pattern
+`exclude_matches` list (YouTube, Vimeo, Netflix, streams, socials…) plus
+`entry.js`'s runtime skip above it, `all_frames: true` + `run_at:
+document_start` (every frame boots the full bundle, §2), and a persistent
+`background.js` (the text relay's fetch rides the `<all_urls>` host
+permission; a persistent page is what lets the awaited fetch overlap
+request lifetime). The hand-maintained chrome members (popup.js,
+popup.html, background.js, icon.svg) ship **verbatim** — a package member
+cannot import src, so popup.js mirrors contract.js's command vocabulary
+byte-for-byte and the bundle gate pins both halves. Version is derived
+from `package.json` by the build; never hand-edit the manifest. The
+embedded sheet rides the hand minifier (`minifyCss` in esbuild.config.mjs),
 whose whitespace stripping carries two grammar-critical preservation rules
 (build-pipeline A→Z sweep, probed on the floor): the run before `(`/`:` is
 kept when an identifier-ish character precedes it — dropping it merges two
@@ -66,31 +129,23 @@ space; calc arithmetic and descendant selectors survive as single spaces. The
 shipped damage this fixed: the bottom-sheet row's `bottom` and `max-height`
 calcs and the landscape coarse compact-panel row were all inert. The bundle
 gate pins both glue signatures as a static artifact row.
-The header↔runtime cross-check (sweep): the 8 `@grant`s map 1:1 onto real
-call sites — setValue/getValue/addValueChangeListener/removeValueChangeListener
-(store.js's storage plane), registerMenuCommand/unregisterMenuCommand
-(kernel.js's MenuCommands), getResourceText (inject.js's `pfStyle` warm),
-xmlhttpRequest (store.js's `gmRequestText`, the CORS-bypass subtitle ingest);
-`GM_info` needs no grant (entry's version mirror) and `GM_setClipboard` is
-deliberately absent — the store.js docstring's dead-permission-surface record
-and the banner agree. There is exactly one network egress family in the tree:
-the subtitle `loadFromUrl` path, user-supplied URLs from arbitrary hosts,
-which is what `@connect *` is FOR; there is no plain `fetch` or
-XMLHttpRequest anywhere in src (all cross-origin text rides the manager, whose
-Firefox-MV2 wrapper honors `timeout`/`ontimeout` and gates nothing). The
-explicit `@connect subtitlecat` line predates the umbrella (`004bd6e`, a
-per-domain pre-approval) and has no dedicated caller left — inert
-documentation under the matcher, kept as a header surface (header edits are
-interventions; sweep #5 re-verified the apex-coverage matcher semantics this
-rests on). **The network floor is census-pinned (sweep #6)**: the census
-stage derives the src-side counts (one `GM_xmlhttpRequest` relay site, one
-`gmRequestText` consumer = the `loadFromUrl` voucher, zero plain
-`fetch`/XHR/WebSocket/EventSource/`sendBeacon`/`importScripts`, zero
-`.src =`/`srcset`/`createObjectURL` and script/iframe/img/track/link element
-creation — closing the DOM-shaped channels the API can never grant — plus the
-one `file.text()` drop-ingest read), and the bundle stage pins the header
-half (exactly 2 `@connect` lines with the `*` umbrella among them; exactly 1
-`@resource` — pfStyle is the one manager-fetched asset).
+The userscript-era header↔runtime cross-check (sweep) is now ported history —
+the 8 `@grant`s and the `@connect`/`@resource` pins died with the manager plane;
+their extension-plane descendants carry the same audit shape and ride the
+census. There is exactly one network egress family in the tree: the subtitle
+`loadFromUrl` path, user-supplied URLs from arbitrary hosts — one `fetch`
+inside `src/background/relay.js` (single-flight, `AbortSignal.timeout`,
+body drained before the reply), riding the background page's `<all_urls>`
+host permission because a content-side fetch inherits the PAGE's CORS and
+silently dies on exactly the user-supplied hosts the ingest serves. The
+census stage pins the src-side floor (that one relay fetch; one
+`requestText` consumer in store.js = the `loadFromUrl` voucher; zero
+websocket/EventSource/`sendBeacon`/XHR; zero `.src =`/`srcset`/
+`createObjectURL` and script/iframe/img/track/link element creation —
+closing the DOM-shaped channels the permission cannot audit — plus the one
+`file.text()` drop-ingest read), and the bundle stage pins the package half
+(chrome members verbatim, `content.js` the lone content script, the
+manifest's `exclude_matches` surface strict).
 
 **Sweep #7 record (manager floor, premise-level, all verified against
 Violentmonkey master at the v2.50.0-era HEAD — the same release the floor
@@ -160,17 +215,18 @@ further machine-enforceable invariant — the check's artifact is this record
 `npm test` — the alias for `check/run.mjs`, the repo's one testing interface.
 `npm run check:browser`, `check:flaws` (the syntax+flaws pair),
 `check:census` — the individual quick gates.
-A clean run is ~60s.
+A clean run is ~75s.
 
 ---
 
 ## 2. Frame model (the most load-bearing fact)
 
-The manager injects the script into **every frame** of every page — top and
-iframes, same-origin and cross-origin:
+The manifest injects the script into **every frame** of every page — top and
+iframes, same-origin and cross-origin (`all_frames: true`,
+`run_at: document_start`):
 
 - Each frame document runs the full bundle: its own kernel, its own bridge
-  installation, its own GM realm. A kernel boots only when **its own
+  installation, its own script realm. A kernel boots only when **its own
   document** holds a qualifying video, and it adopts exactly **one main
   video per document** — the product's scope law: the first qualifying
   candidate wins (detection + presence gates order = the pick), later
@@ -181,7 +237,8 @@ iframes, same-origin and cross-origin:
   separate-iframe video still yields two shells. Exactly one document boots
   a shell per embedded player, neighbors stay inert, and a video-less host
   page never boots.
-- Menu commands install **top-frame only**.
+- The command receivers install **top-frame only** (`TabCommands`; the popup
+  and the relay both target the active tab's top document).
 - `window.top !== window` frames push fullscreen provisioning up the chain on
   shell creation: every ancestor document grants `allowfullscreen` on its
   *direct child* iframe only (`installContextBridge` /
@@ -252,12 +309,20 @@ iframes, same-origin and cross-origin:
   throw; the `#disposed` flag died into `signal.aborted` — the abort flip
   completes synchronously before any listener runs, so a re-entrant dispose
   no-ops from the flip onward), `Fan` — the ONE plain-fan-out
-  owner, a native `EventTarget` carrying one event per instance
+  owner, a dispatch surface one per instance
   (`emit(payload)`/`subscribe(cb, { signal })`; the FsGate, FilterSession,
   ResumeStore, ConfigStore, SubtitleSyncState,
   SubtitleSession, and kernel shell-ready audiences all rode it — the
   kernel's per-listener try/catch retired with the conversion, native
-  dispatch isolation is the real thing). Audited census: ten instances —
+  dispatch isolation is the real thing). **The dispatch surface is a
+  detached Comment node** (runtime.js, probed on the extension port): the
+  MV2 content-script isolated realm answers a standalone `EventTarget`'s
+  `dispatchEvent` with silence — plain/subclass/signal shapes all measured
+  dead — while Node surfaces deliver, so the class rides
+  `document.createComment` on the Node dispatch path both realms deliver on
+  (document-less harness realms keep Node's own standalone EventTarget;
+  the surface is lazy and memoized one per instance, Fans are constructed
+  at module eval and the import smoke runs document-less). Audited census: ten instances —
   kernel shell-ready (entry's page-lifetime only; its returned handle is
   never consumed), FsGate, ReferenceBox change-ticks (exactly ONE
   subscriber: the subtitle renderer; every gesture consumer
@@ -423,14 +488,19 @@ iframes, same-origin and cross-origin:
   one-shot "dump now" gesture consumed by its own echo, `randomUUID` values
   mean no read ever re-acts and a stale residue is inert, so it owes no
   cleanup deadline),
-  `gmSetValue`/`loadJsonObject`, and `watchStorageKey(key,
+  `setValue`/`loadJsonObject`, and `watchStorageKey(key,
   handler)` — the cross-instance subscription that filters own-write echoes
-  (`remote === false`) in exactly one place. The echo contract is VM-truth
-  (read from its released GM-values source): own-instance writes flag false,
-  every foreign instance — another tab OR another frame of this tab — hears
-  `remote=true`, so a top-frame menu flip reaches sibling frames. Storage is
-  **synchronous GM storage, deliberately not IndexedDB** (manager-space
-  portability; a cross-tab live-reload needs echo events, not thread offload).
+  in exactly one place. The echo contract is ported truth:
+  `browser.storage.onChanged` delivers OUR OWN writes back to this realm
+  exactly as it delivers foreign ones (the GM 4th-arg `remote` is gone), so
+  every write carries an envelope (clientId = per-realm UUID at module
+  eval) and the filter is structural: the watcher skips deliveries `from`
+  this own realm, every foreign instance — another tab, another frame of
+  this tab, or the extension's own popup — hears the change, so a
+  top-frame toggle reaches sibling frames. Storage is
+  **`browser.storage.local`, deliberately not IndexedDB** (one store shared
+  across content/page/background realms; a cross-tab live-reload needs
+  echo events, not thread offload).
 
   **Sweep #10 record (store.js proper A→Z, audit-clean).** The module read
   front-to-back with every seam reconciled against the wider records, no src
@@ -473,6 +543,13 @@ iframes, same-origin and cross-origin:
   tree's writers project through field whitelists (the resume entry
   projection; the configs doc's setFields shape guards) and the walkers make
   an array-valued segment inert rather than polluting.
+
+  Port note (extension plane): the grant-guard class died with the manager
+  plane (there is no grant surface to guard — `browser.storage` needs
+  none), and the echo filter moved from the manager's 4th arg into
+  store.js's own envelope (the per-realm `CLIENT_ID`); the lenient-default
+  and `{ stop() }` idempotence premises survive as the extension-plane
+  shapes.
 
   **Sweep #12 record (shared geometry/context planes A→Z, audit-clean).**
   dom.js and page.js read front-to-back — the last two shared planes without
@@ -526,6 +603,24 @@ iframes, same-origin and cross-origin:
   own docstring names shell.js as the HUD-layer owner, and shell's
   `#watchFullscreen` re-arms + re-hops via `retryFullscreenProvision`
   exactly on the failure path the provision latch re-opens for.
+
+### background/ — the extension page (the tree's one fetch + one hint sender)
+- **index.js** — install entry: wires relay.js's receiver and ledger.js's
+  listeners; a persistent background page (the awaited relay fetch overlaps
+  request lifetime — no re-wake machinery to write).
+- **relay.js** — the ONE network egress: `pf:request-text` → single-flight
+  `fetch` with `AbortSignal.timeout`, body drained inside the handler
+  before the reply; every failure answers as a result object (a rejection
+  cannot cross the message channel). The command arm rides the SAME one
+  receiver: the debug handle's `pfCommand` forwards a command, and this arm
+  replays the browserAction popup's exact `tabs.sendMessage` hop onto the
+  active tab's top document — the hop a cross-extension caller cannot make
+  directly (`tabs.sendMessage` delivers only to the calling extension's own
+  content scripts).
+- **ledger.js** — the webRequest observation ledger: the hint sender
+  (`webRequest` observe-only; `webRequestBlocking` must never ship — the
+  census pins the posture), one frame-targeted hint to the frame that
+  carried media traffic.
 
 ### kernel/ — policy layer
 - **contract.js** — the shared vocabulary both layers import in isolation:
@@ -2404,8 +2499,9 @@ the rate call on the two networks that also pay back in shape:
    (the import graph is enforced by the flaws gate's isolated import
    smoke).
 7. **No comments in check/ code beyond the why-docstrings it already
-   carries; `installGMRealm` must stay a single self-contained function**
-   (it ships as an executeScript payload — no closure references).
+   carries; the harness companion's `content.js` must stay a single
+   self-contained script** (it ships as a package member the build never
+   touches — no imports, no build vocabulary).
 8. **ES target floor: Firefox 159.** `?.` chains, top-level field syntax,
    `data-transfer` file APIs, View Transitions, CloseWatcher — all in scope;
    nothing below the floor, no polyfill arms.
@@ -2521,14 +2617,22 @@ stop at the first failure:
    rethrow or reportError sentence must always be deliberate by
    construction — the classes are the map behind that ceremony.
 4. **bundle** — real esbuild build (version derivation) +
-   artifact shape validation (header fields, IIFE shape, css companion) and
-   the manager-contract pins: the exclusion list only ever rides the strict
-   `@exclude-match` surface, `@downloadURL` stays present for the updater,
-   exactly the 2 `@connect` lines ship with the `*` umbrella among them (the
-   census's network block's header half — a dropped umbrella kills every
-   user-supplied subtitle URL against CORS with no error a user could act
-   on), exactly 1 `@resource` ships (pfStyle; a second resource is new
-   manager-lifecycle egress), and the HUD class-vocabulary agreement scan — every `pf-*` class the
+   artifact shape validation (manifest contract + generated tree) and
+   the extension-contract pins: the manifest frame contract (`<all_urls>`
+   match + `all_frames` + `run_at: document_start` — the ported frame
+   model), the 24-pattern strict `exclude_matches` surface
+   (globs/double-CSS injection fail loudly — no new injection surfaces
+   join silently), the permission set (`storage` = the whole store plane,
+   `<all_urls>` host permission = the background relay's one fetch,
+   `webRequest` = the ledger's observe-only hint; `webRequestBlocking`
+   must NEVER ship), `content.js` the lone content script riding the
+   classic-loader split (kernel.js dynamic-imports shell.js through a
+   shared chunk — two store singletons in one realm would fork the
+   storage echo contract), a persistent background page (the awaited
+   relay fetch never suspends), the browserAction popup as the command
+   surface, `manifest_version: 2` + gecko floor 159, and the hand-written
+   chrome members shipping verbatim; the HUD class-vocabulary
+   agreement scan — every `pf-*` class the
    source JS spells must have a reader on styles.css or the inject-side
    sheet (a class no CSS consumes is a dead vocabulary token, the same
    audit shape as the grant-coverage check; `pf-debug` is the
@@ -2539,12 +2643,14 @@ stop at the first failure:
    that shipped the two compound coarse-pointer media rows inert — the
    mobile coarse bottom-sheet block and the landscape coarse compact-panel
    block never applied, and the two calc infix glues inside the bottom-sheet
-   block died double-covered, dead rows owning the glued declarations.
-5. **browser** — real browser + real bundle in a GM realm: **real native
-   Firefox 159** headless, driven by geckodriver (this branch's floor, not a
-   fork shim). Proves: boot, gesture contract, media semantics, resume,
-   menus, GM env, frame scenarios, subtitle picture anchoring, edge
-   robustness. ~60s.
+   block died double-covered, dead rows owning the glued declarations —
+   and the xpi rows: exactly the dist members, zip == dist byte-fidelity.
+5. **browser** — real browser + real bundle loaded as the REAL XPI:
+   **native Firefox 159** headless, driven by geckodriver (this branch's
+   floor, not a fork shim). Proves: boot, gesture contract (real driver
+   input), media semantics, resume, the popup command channel, the
+   background text relay, frame scenarios, subtitle picture anchoring,
+   edge robustness. ~75s.
 
 ### Browser gate mechanics
 - **Row statuses are binary: only an explicit `"pass"` passes.** A case file
@@ -2562,15 +2668,20 @@ stop at the first failure:
   `navigate()` verifies the landing (origin+path, one retry) because a
   `get()` that resolves before navigation can eat a whole case.
 - **Ceremony per case:** `navigate(page?boot=<ts>)` (query-bust, same-URL
-  reload would eat the bundle) → GM realm → bundle (everything after
-  `==/UserScript==` in the dist IIFE) → `wakeVideos` (dispatch `loadeddata`
-  so the probe sees present videos) → `.pf-shell` up to 9s.
-- **GM realm** (`check/lib/gm-realm.mjs`): a faithful per-`@grant` surface —
-  exactly the shipped grants, no more; a synchronous `__pfBacking` store;
-  `__gmTest` audit surface (`remoteWrite`, `usage()`, `aliveMenuIds`); timeout
-  + cold-cache wiring; forensics hooks (`__pfErrors`, `__pfConsole`, capped
-  `__pfConsoleLog` capturing console chatter incl. `Shell registered: <sdk>`);
-  `installGMRealm` is one self-contained function by design (§5.7).
+  reload would eat the bundle) → XPI + companion install → `wakeVideos`
+  (dispatch `loadeddata` so the probe sees present videos) → `.pf-shell` up
+  to 9s.
+- **XPI + companion install** (`driver.mjs`): the harness loads the REAL
+  shipping artifact (`dist/playerforge.xpi`) as a temporary addon first,
+  then its harness-only companion addon (check/lib/companion/, temporary)
+  second — the error rail must arm from the first document. The companion
+  is the cross-extension caller: content.js waits for the debug handle and
+  scans the top doc + same-origin child iframes for `.pf-shell`
+  (`waitShell` opt), then carries `triggerCommand`'s raw-reply poll.
+  Forensics hooks (companion-owned `__pfErrors`, `__pfConsole`, capped
+  `__pfConsoleLog` capturing console chatter incl. `Shell registered:
+  <sdk>`); the debug plane's own surfaces (pfVersion/pfLog mirrors,
+  storageDump) ride the product.
 - **Fixture server** (`driver.mjs`): dual-loopback listener — the same
   handler and port on `127.0.0.1` **and** `::1`, so `http://localhost:P` is
   a genuinely cross-origin route versus `http://127.0.0.1:P` with zero second
@@ -2587,15 +2698,13 @@ stop at the first failure:
   whose placeholder iframe swaps between three SDK stubs playing the same
   video. Proven rows: only-innermost-boot, cross-origin bridge context in
   the resume entry (`domain=127-0-0-1` proves the TOP answered; a fallback would
-  write `localhost`), fullscreen provisioning on every ancestor, per-variant
-  single-shell, a 6s attach-latency budget row, and the VM echo reach: a
-  foreign settings write live-reloads the running frame's kernel and the
-  event-time hotkeys gate sees it (blocked mid-flight, then re-armed), and
-  the diagnostics reach: the top's menu tap answers top (own write
-  echo-filtered), and the frame realm's responder answers an IN-FRAME
-  foreign `pf:diag` write through the audit surface — cross-realm delivery
-  itself stays manager-truth (every harness realm is an echo island;
-  the same premise the settings live-reload row rides).
+  write `localhost`), fullscreen provisioning on every ancestor
+  (including the `fullscreenerror` re-arm without a new shell), the walk
+  chain (ctx route vouching + the provisioner's non-direct-child
+  refusal), per-variant single-shell across the switchboard, and a
+  6s attach-latency budget row (the cross-extension settings
+  live-reload echo now rides the extension case: the top-frame debug
+  toggle reaches the running frame realm through storage.onChanged).
 - **Cases (14):** `boot` (install contract, positive/negative discovery),
   `discovery` (min size, no-anchor, tiny-video),
   `fan` (the fan-out owner unit, imported into the page realm: positional
@@ -2678,17 +2787,34 @@ stop at the first failure:
   dispatch details ({ method: "menu" } per menu tap) and a formatter
   memoization, which would trade a measured-bounded HUD loop for an
   unbounded-by-duration cache.
-  `gm` (info mirror, own-echo exactly-once shape, remote-write cross-tab
-  adoption surviving a seeked-flush save, the debug mirror: a foreign
-  configs write flips the running kernel mid-flight (mirror line + real
-  debug chatter), the reverse flip is proven silent, and a value-neutral
-  rewrite never re-mirrors, xhr shape + `ontimeout` on a
-  held route, pfStyle resource warmth, menu-handle census (four live
-  commands: debug toggle, the frame-state dump, the two resets), the
-  diagnostics dump row (one menu tap prints the realm's own state line
-  through the warn plane — identity, live registry, per-video attribution
-  parsed whole), harvest-seeded
-  reboot), `media` (stream, gesture events, kernel re-anchoring onto a
+  `commands` (the popup's command channel end to end: debug-query answers
+  through the relayed channel — the harness companion is a CROSS-EXTENSION
+  caller, so the hop is provable nowhere else; the one-shot resets dispatch
+  through the live shell host without the panel; the seeded color preset
+  persists, reboots, and the filter-reset command restores defaults
+  bare-command; plus the panel-cosmetics rows that outlived the
+  userscript-era case: the directional view-transition types (open=
+  `pf-panel-open`, close=`pf-panel-close`) with the sheet's
+  `:active-view-transition-type()` reader and the R9 ink pin (computed
+  surface/border identical before-open vs after-close — motion-lane-only,
+  asserted at full depth), the label `text-box-trim: trim-both` /
+  `text-box-edge: cap alphabetic` computed pins with the zoom-immune
+  height ratio band, and the zoom row — computed `zoom` reflects the
+  inline write, rects scale by the factor while computed radii/font-size
+  stay unzoomed authored px (the R5 identity), resting ink unchanged; the
+  case closes leaving settings at defaults for the session's later cases),
+  `extension` (the extension-runtime case: the debug toggle answers its
+  fresh stored state and a persisted debug arms the pfLog mirror on a
+  PLAIN navigation (no hash) while a stock install keeps it unlatched; the
+  diag dump answers the top realm's parsed frame state — and the per-realm
+  split: the video-less top answers its kernel-less diagnosis (`realm:
+  "top"`, shell null, videos 0) while the frame answers
+  `realm:"frame"`, Plyr shell, 1 video; the top-frame debug toggle
+  storage-echoes into the running frame realm mid-flight; the background
+  text relay ingests a cross-origin subtitle URL (driven through the
+  panel's own prompt path) into a running track, then reverts the
+  per-viewing subs extra so no later case races a restore),
+  `media` (stream, gesture events, kernel re-anchoring onto a
   replacement video, the containment re-wrap (a second SDK container — the
   destroy-readopt seam, one shell ends in the new home), the one-main
   refusal row (a second Plyr wrapper with a second video appended while the
@@ -2702,23 +2828,7 @@ stop at the first failure:
   recovery path, is the row's fail), and the
   state-preserving move: a `moveBefore` reorder
   in place and a cross-parent re-home of the running shell, both
-  floor-real), `menus` (menu command → panel effect; the targeted
-  reset row seeds a non-default color filter and proves the bare command
-  restores it — no panel involved, and the directional-motion row: the
-  panel flips spy-deliver their view-transition types (open=
-  `pf-panel-open`, close=`pf-panel-close`), the HUD sheet carries a
-  `:active-view-transition-type()` reader for both words, and the R9 ink
-  pin rides the row (the panel's computed surface/border identical
-  before-open vs after-close — motion-lane-only, asserted at full depth);
-  the trim row: a seeded section label's computed
-  `text-box-trim: trim-both` / `text-box-edge: cap alphabetic` serializations
-  plus a zoom-immune height ratio band (`h/fs` bounds hold across the zoom
-  variants); the zoom row: the panel measured open vs `ui.panelScale: 1.15`
-  seeded — computed `zoom` reflects the inline write, rects scale by the
-  factor while computed radii/font-size stay unzoomed authored px (the R5
-  identity), and resting ink unchanged — with a panel-open wait and a
-  close-panel restore before the typed row keeps later rows undisturbed),
-  `persist` (storage seeding, resume restore across reboot, the sync-grain
+  floor-real), `persist` (storage seeding, resume restore across reboot, the sync-grain
   row: one nudge gesture lands `subOffset` in the tracker's entry, the
   Start-over row proving the explicit boundary writes past the drift
   epsilon, and the foreign-omission row proving a removal adoption with no

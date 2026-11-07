@@ -1,12 +1,11 @@
 import { Kernel } from "./kernel/kernel.js";
-import { DEBUG_HASH_TAG } from "./kernel/contract.js";
-import { Shell } from "./shell/shell.js";
+import { DEBUG_HASH_TAG, NET_HINT, COMMAND_RELAY } from "./kernel/contract.js";
 import { installTabCommands, installFrameDiagnostics, dumpFrameState } from "./kernel/kernel.js";
 import { installContextBridge, requestFullscreenProvision } from "./shared/page.js";
 import { installVideoProbe } from "./kernel/discovery.js";
 import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/discovery.js";
-import { logger } from "./shared/runtime.js";
-import { getConfigValue, setConfigValue, warmStorage } from "./shared/store.js";
+import { logger, setDebugRuntime } from "./shared/runtime.js";
+import { loadJsonObject, KEYS, getConfigValue, setConfigValue, warmStorage } from "./shared/store.js";
 import { initFullscreenGate } from "./shared/dom.js";
 
 // The version lives in the manifest and is read from the installed extension
@@ -96,36 +95,26 @@ async function bootstrap() {
   if (shouldSkipUrl()) {
     return;
   }
-
   // Build the single fullscreen gate (src/shared/dom.js `fs`) off the
   // native fullscreenchange event. Runs before any shell exists so fs-gated
   // paths have a live boolean the moment they first query it.
   initFullscreenGate();
 
-  // One wholesale storage read gates the boot. The storage plane is async
-  // IPC under the hood and every config/resume read (the command receiver's
-  // debug query, kernel init, the first-run flag, resume warm) is served
-  // from its warmed value map. Content-script -> parent-process IPC is a
-  // few milliseconds - immaterial against document_start, where the DOM is
-  // not parsed yet anyway: the video probe arms after warm and a first-
-  // frame video is still caught by the mutation tap, which is when the
-  // document was being settled on the userscript plane too.
-  await warmStorage();
-
-  // The shell stylesheet is warmed lazily at first shell construction
-  // (shell.js #injectDom): the bundled sheet is adopted synchronously there -
-  // no network fetch anywhere on this path (the userscript plane's @resource
-  // upgrade relied on a remote CSS source; the extension ships its sheet in
-  // the package), so first-video dimming never waits and non-video /
-  // skipped pages never pay for an adopted-sheet injection.
-
-  // BrowserAction commands exist from script eval - not from first video
-  // discovery. The receiver owns the commands from this call (a video-less
-  // page still answers the popup), while the kernel - whose shell host the
-  // reset commands resolve through - boots below, so the commands read it
-  // through a resolver hook at command time. Top-frame only internally
-  // (the popup acts on the active tab's top document, the same reach the
-  // top-frame-only menu registration this surface replaces had).
+  // BrowserAction commands + the diagnostics responder exist from script
+  // eval - not from the storage warm, and not from first video discovery.
+  // The red row that surfaced this: the popup channel's trigger lands a few
+  // IPC hops after its own script evals, INSIDE the warm await's gap under
+  // the extension realm, so a receiver registered after the warm misses it
+  // ("Could not establish connection" on nearly every page load). The
+  // handlers already read the config map at message-delivery time, so a
+  // command raced ahead of the warm answers from the empty map - the exact
+  // stock-storage shapes these commands are specified to answer.
+  // The receiver owns the commands from this call (a video-less page still
+  // answers the popup), while the kernel - whose shell host the reset
+  // commands resolve through - boots below, so the commands read it through
+  // a resolver hook at command time. Top-frame only internally (the popup
+  // acts on the active tab's top document, the same reach the top-frame-only
+  // menu registration this surface replaces had).
   const menuKernelRef = { current: null };
   installTabCommands(() => menuKernelRef.current);
   // The diagnostics responder is EVERY frame's (the command is top-frame
@@ -135,8 +124,150 @@ async function bootstrap() {
   // entry's reference at dump time, not at install.
   installFrameDiagnostics(() => menuKernelRef.current);
 
+  // The debug console handle installs at script eval, not at kernel boot:
+  // the command channel's door must exist on every frame's document BEFORE
+  // any video discovery (the red row that surfaced this: a video-less embed
+  // host top - the popup's own receiver surface - never boots a kernel, so
+  // its pfCommand arm was unreachable and the frame rows' top-frame channel
+  // had no door). Kernel-bound arms resolve through the same menuKernelRef
+  // hook the commands ride; the arms are debug-gated like their siblings and
+  // every arm hands back a primitive per the compartment law.
+  //
+  // Compartment law (probed on the real floor): EVERY value an arm returns
+  // is a string. An object created in the content-script compartment reads
+  // Permission-denied from every other realm - the page, the driver's
+  // executor, and a user's devtools console all hit the same wall (a probe
+  // measured `typeof window.PlayerForge === "object"` with Permission
+  // denied on the first property read) - so the object itself must be
+  // cloned into the page's own realm via the content script's native waiver
+  // (cloneInto with cloneFunctions: the arms become page-local functions
+  // marshaling into the extension's compartment) and each arm must hand
+  // back a primitive. JSON strings are the one shape every reader can
+  // legally unwrap.
+  const debugMode = location.hash.includes(DEBUG_HASH_TAG);
+  // The debug hash arms the sentinel at script eval, not at kernel boot:
+  // the debug surface (handle, pfVersion mirror, pfLog rail) is a property
+  // of this document's load, and a video-less embed-host top never boots a
+  // kernel - without this the top's own diag dump logged nothing (the
+  // pfLog mirror latch never flipped), and the "top direct" leg of the
+  // diagnostics echo answered silence. Never a disarm - a stored debug
+  // setting (persisted toggle) still arms through kernel init; this only
+  // moves the hash's per-load override earlier, before any boot-gated
+  // lifecycle line could clobber or precede it.
+  if (debugMode) {
+    setDebugRuntime(true);
+  }
+  try {
+    // The view-transition spy: the panel flips carry their direction as
+    // types, and observing those types is impossible from OUTSIDE the
+    // content-script realm (probed: a page-realm or harness-side
+    // document.startViewTransition patch is invisible across the Xray -
+    // the panel calls the content realm's own surface). In debug mode the
+    // handle becomes the sanctioned marshal: a same-realm wrapper records
+    // each flip's types and an arm hands them back as a JSON string.
+    // Debug-gated like the rest of the surface; the wrapper is transparent
+    // (the flip itself is not altered).
+    const vtFlips = [];
+    if (debugMode && typeof document.startViewTransition === "function") {
+      const realVt = document.startViewTransition.bind(document);
+      document.startViewTransition = (update, options) => {
+        // The panel rides the options-object form (one argument carrying
+        // both update and types); the two-arg native form is recorded the
+        // same way a caller passing it would want.
+        const types = Array.isArray(update?.types) ? update.types
+          : Array.isArray(options?.types) ? options.types : [];
+        vtFlips.push(types.join(","));
+        return realVt(update, options);
+      };
+    }
+    const target = window.wrappedJSObject ?? window;
+    const handle = Object.freeze(debugMode
+      ? {
+          version: manifestVersion,
+          diagnosticSnapshot: () => {
+            const kernel = menuKernelRef.current;
+            return JSON.stringify(kernel?.diagnosticSnapshot?.()
+              ?? { error: "no kernel on this document yet" });
+          },
+          dumpFrameState: () => JSON.stringify(dumpFrameState(() => menuKernelRef.current)),
+          storageDump: () => JSON.stringify({
+            configs: loadJsonObject(KEYS.configs, null),
+            resume: loadJsonObject(KEYS.resume, null)
+          }),
+          vtFlipsDump: (mode) => {
+            const current = JSON.stringify(vtFlips);
+            if (mode === "clear") {
+              vtFlips.length = 0;
+            }
+            return current;
+          },
+          // The popup-machinery door: one command string in, the command
+          // relayed to this package's own background (runtime.sendMessage)
+          // where relay.js replays the browserAction popup's exact
+          // tabs.sendMessage hop onto the active tab's top document. The
+          // reply lands as a data-pf-cmd-<command> rail attribute on the
+          // shared documentElement - strings cross the Xray, a live reply
+          // object cannot - so the harness reads the settled outcome the
+          // way it reads its own rails. Returns "accepted" immediately:
+          // every arm hands back a primitive, and the command's real answer
+          // is the rail write, not a cross-compartment promise.
+          pfCommand: (command) => {
+            const label = /^[a-z-]+$/.test(String(command))
+              ? String(command) : "";
+            // The rail is a plain attribute write, not a dataset write:
+            // dataset["pfCmd-debug-query"] throws SyntaxError on set (a
+            // hyphen-lowercase property name is an invalid DOMStringMap
+            // key) - the silent no-reply shape the harness once saw.
+            browser.runtime.sendMessage({ type: COMMAND_RELAY, command: label }).then(
+              (reply) => {
+                document.documentElement.setAttribute("data-pf-cmd-" + label,
+                  JSON.stringify(reply ?? null));
+              },
+              (err) => {
+                document.documentElement.setAttribute("data-pf-cmd-" + label,
+                  JSON.stringify({ ok: false, error: String(err?.message ?? err) }));
+              }
+            );
+            return "accepted";
+          }
+        }
+      : { version: manifestVersion });
+    const exposed = typeof cloneInto === "function"
+      ? cloneInto(handle, target, { cloneFunctions: true })
+      : handle;
+    Object.defineProperty(target, "PlayerForge", {
+      value: exposed,
+      writable: false,
+      configurable: false
+    });
+  } catch (error) {
+    logger.warn("entry", "PlayerForge console handle unavailable (page owns the name)", error);
+  }
+
+  // One wholesale storage read gates the boot. The storage plane is async
+  // IPC under the hood and every config/resume read (the kernel init, the
+  // first-run flag, resume warm) is served from its warmed value map.
+  // Content-script -> parent-process IPC is a few milliseconds - immaterial
+  // against document_start, where the DOM is not parsed yet anyway: the
+  // video probe arms after warm and a first-frame video is still caught by
+  // the mutation tap, which is when the document was being settled on the
+  // userscript plane too.
+  await warmStorage();
+
+  // The shell stylesheet is warmed lazily at first shell construction
+  // (shell.js #injectDom): the bundled sheet is adopted synchronously there -
+  // no network fetch anywhere on this path (the userscript plane's @resource
+  // upgrade relied on a remote CSS source; the extension ships its sheet in
+  // the package), so first-video dimming never waits and non-video /
+  // skipped pages never pay for an adopted-sheet injection.
+
   const boot = () => {
-    if (window.wrappedJSObject?.PlayerForge || window.PlayerForge) {
+    // The re-entry identity is THIS instance's kernel reference, not the
+    // window.PlayerForge name: the console handle installs at script eval
+    // (the command door's contract), so its presence no longer means
+    // "already booted" - every funnel into boot's caller set (probe
+    // candidate, net hint, hint callback) still lands on one kernel.
+    if (menuKernelRef.current) {
       logger.warn("entry", "Kernel already initialized");
       return;
     }
@@ -144,11 +275,26 @@ async function bootstrap() {
     menuKernelRef.current = kernel;
     // The shell plugin's "main", inlined from its former register.js home:
     // the kernel (framework) never imports the shell - it only calls the
-    // provider registered here at boot. Holding the Shell import down in the
-    // entry (and out of the kernel) is what keeps the shell a plug-in rather
-    // than something the framework constructs directly.
+    // provider registered here at boot. The provider is ASYNC on purpose:
+    // the shell is lazy-loaded (import of the package's shell.js module on
+    // the FIRST confirmed adoption), so a non-player frame never evals the
+    // shell - the module load rides the boot path's own #booting latch, and
+    // a failed import behaves like any provider throw (kernel #abandonBoot
+    // re-arms discovery). The failed promise clears the cache so a later
+    // adoption retries the import instead of handing back the rejection.
+    let shellModule = null;
+    const loadShellModule = () => {
+      if (!shellModule) {
+        shellModule = import(browser.runtime.getURL("shell.js"));
+        shellModule.catch(() => {
+          shellModule = null;
+        });
+      }
+      return shellModule;
+    };
     kernel.registerShellProvider({
-      create({ home, onDestroy }) {
+      async create({ home, onDestroy }) {
+        const { Shell } = await loadShellModule();
         return new Shell({ home, onDestroy });
       }
     });
@@ -208,28 +354,6 @@ async function bootstrap() {
       document.addEventListener("wheel", cancelHint, { capture: true, passive: true, once: true, signal: hintSignal });
     });
 
-    // Wrapping surface, not public surface. The userscript plane froze this
-    // as a non-configurable property inside the manager's sandbox (a page
-    // could neither read nor overlap it); content scripts share the page's
-    // window through an Xray, so custom properties must cross the waiver
-    // (wrappedJSObject) to be visible to the page at all - a page CAN
-    // legally own the name first. The re-entry guard (the truthiness above,
-    // read through the same waiver) and the diagnostic console handle
-    // survive as the honest jobs; a pre-existing definition degrades the
-    // install to the belt (console only) instead of crashing the boot.
-    const debugMode = location.hash.includes(DEBUG_HASH_TAG);
-    try {
-      const target = window.wrappedJSObject ?? window;
-      Object.defineProperty(target, "PlayerForge", {
-        value: Object.freeze(debugMode
-          ? { kernel, dumpFrameState, version: manifestVersion }
-          : { version: manifestVersion }),
-        writable: false,
-        configurable: false
-      });
-    } catch (error) {
-      logger.warn("entry", "PlayerForge console handle unavailable (page owns the name)", error);
-    }
     // Driver-debug observability: a plain string on the document, readable
     // from both realms (the live kernel object cannot cross an Xray, so the
     // version mirror is what the harness pins; debug mode only, the same
@@ -260,6 +384,23 @@ async function bootstrap() {
   } catch (error) {
     logger.error("entry", "Frame bridge install failed", error);
   }
+  // The background's network hint receiver (contract's NET_HINT): media-
+  // shaped traffic flowed through this frame, so the boot the probe's
+  // candidate callback would eventually have waited for replays NOW - a
+  // hint can land long before the <video> fires its first media event on a
+  // slow network path. The hint never decides anything: boot() is the same
+  // idempotent entry (its own re-entry guard + the kernel's scope law), and
+  // a false hint (ad frames stream video/* too) is a free no-op. Undefined
+  // is the explicit no-async-reply answer every sibling onMessage listener
+  // (TabCommands) filters correctly; the listener is page-lifetime, the
+  // same arrangement the probe's capture listeners ride.
+  browser.runtime.onMessage.addListener((message) => {
+    if (message?.type !== NET_HINT) {
+      return undefined;
+    }
+    boot();
+    return undefined;
+  });
   const stopProbe = installVideoProbe({
     minWidth: MIN_VIDEO_WIDTH,
     minHeight: MIN_VIDEO_HEIGHT,

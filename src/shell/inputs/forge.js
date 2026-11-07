@@ -182,10 +182,47 @@ function captureFirstTwo(pointers, out) {
 class GestureChannel {
   #pool = new Map();
 
+  /**
+   * The dispatch-legible detail for this floor. A content script shares the
+   * page's window through an Xray, and the events dispatch onto the page's
+   * element tree: a detail object created in the content-script compartment
+   * is opaquely sealed to every OTHER realm - the page, a devtools console,
+   * a driver executor - the first property read Permission-denies (the same
+   * compartment law entry.js's cloneInto handle waiver treats). So on the
+   * waivable floor the dispatch carries a clone living in the page's own
+   * realm: built once per event name at entry creation, and every dispatch
+   * copies the caller's own fields across - property writes on the pooled
+   * clone, no allocation - so the pooled-detail zero-alloc discipline holds
+   * while the page-legible surface rides the same event. `typeof` guard is
+   * the entry.js shape: the waiver exists only inside a content script, and
+   * a direct-handle floor (no content-script wrapper) keeps today's raw
+   * pooled detail reference untouched. Copy-all-own-fields is the pooled
+   * payload contract itself: each dispatch site rewrites every field its
+   * payload owns, so the clone can never carry a stale field a fresh
+   * dispatch didn't set.
+   */
+  #legibileDetail(detail, entry) {
+    if (entry.pageDetail === undefined) {
+      entry.pageDetail = typeof cloneInto === "function"
+        ? cloneInto({}, window.wrappedJSObject ?? window)
+        : null;
+    }
+    const page = entry.pageDetail;
+    if (page === null) {
+      return detail;
+    }
+    for (const key in detail) {
+      if (Object.hasOwn(detail, key)) {
+        page[key] = detail[key];
+      }
+    }
+    return page;
+  }
+
   event(name, detail) {
     const Ctor = globalThis.CustomEvent;
-    const stale = this.#pool.get(name);
-    if (stale && stale.Ctor === Ctor) {
+    let entry = this.#pool.get(name);
+    if (!entry || entry.Ctor !== Ctor) {
       // CustomEvent.detail is a prototype getter over an internal slot on
       // spec engines (the old jsdom host matched) - plain assignment throws in
       // strict mode and never updates the slot, which silently killed every
@@ -194,14 +231,16 @@ class GestureChannel {
       // below (no write at all); a genuinely fresh object re-owns the
       // property via defineProperty, whose own data property shadows the
       // prototype getter on every engine.
-      if (stale.event.detail !== detail) {
-        Object.defineProperty(stale.event, "detail", { value: detail, configurable: true, writable: true });
-      }
-      return stale.event;
+      entry = { Ctor, event: null, pageDetail: undefined };
+      entry.event = new Ctor(name, { detail: this.#legibileDetail(detail, entry), bubbles: false, composed: false });
+      this.#pool.set(name, entry);
+      return entry.event;
     }
-    const event = new Ctor(name, { detail, bubbles: false, composed: false });
-    this.#pool.set(name, { Ctor, event });
-    return event;
+    const legibile = this.#legibileDetail(detail, entry);
+    if (entry.event.detail !== legibile) {
+      Object.defineProperty(entry.event, "detail", { value: legibile, configurable: true, writable: true });
+    }
+    return entry.event;
   }
 }
 

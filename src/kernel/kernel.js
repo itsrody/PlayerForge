@@ -422,9 +422,12 @@ export class Kernel {
   /**
    * The shell plugin registers its host provider here; the framework never
    * imports the shell, it only calls the provider it was handed. Provider
-   * shape: `{ create({ home, onDestroy }) -> host }` - the frozen adoption
-   * home (contract's AdoptionHome) is the identity record the shell stores;
-   * the framework never passes bare video/container/sdk refs across this seam.
+   * shape: `{ create({ home, onDestroy }) -> host | Promise<host> }` - the
+   * frozen adoption home (contract's AdoptionHome) is the identity record
+   * the shell stores; the framework never passes bare video/container/sdk
+   * refs across this seam. The async shape is the lazy-shell surface: the
+   * entry's provider awaits the shell module's first import, and the boot's
+   * #booting latch covers the whole wait (see #onVideoFound).
    */
   registerShellProvider(provider) {
     this.#shellProvider = provider;
@@ -454,6 +457,12 @@ export class Kernel {
    * identity the shell boots with is the one adoption resolved. A boot that
    * ends without a shell is handed to #abandonBoot - the pin and the
    * downgrade were placed before the wait, and nothing else releases them.
+   * The #booting latch spans the WHOLE boot now - settle AND construction -
+   * because construction is async twice over on the lazy-shell shape: the
+   * provider's first create awaits the shell module import, and the
+   * one-main-video refusal guard (this.#registry.occupied || #booting)
+   * must refuse candidates for that whole window or a second candidate
+   * could pass it while the first shell is still mid-import.
    */
   async #onVideoFound({ home, watch }) {
     const { video, container, sdk } = home;
@@ -472,46 +481,49 @@ export class Kernel {
     this.#booting = video;
     try {
       await whenDomSettled(container, { signal: this.#scope.signal });
+      if (this.#scope.disposed) {
+        // Pagehide disposal aborted this wait (settle rides the kernel scope's
+        // signal): the guards below run inside a leaving document where
+        // isConnected still reads true and the destroyed registry no longer
+        // refuses, so without this the continuation booted a shell onto a page
+        // the teardown had already swept.
+        return;
+      }
+      if (!video.isConnected || !container.isConnected) {
+        this.#abandonBoot(watch, `${sdk.name} video left the document before settle`);
+        return;
+      }
+      if (this.#registry.getByVideo(video)) {
+        return;
+      }
+      let shell = null;
+      try {
+        shell = await this.#createShell({ home });
+        await shell?.ready;
+        this.#notifyShellCreated(shell);
+        logger.log("lifecycle", `Shell created for ${sdk.name}`);
+      } catch (err) {
+        logger.error("lifecycle", `Failed to create shell for ${sdk.name}:`, err);
+        // A shell that throws mid-boot (or rejects ready - including a failed
+        // shell-module import) may already have injected DOM, timers, and
+        // listeners. destroy() is scope-guarded and idempotent, so it reaps
+        // the partial state without double-freeing a shell that never got
+        // registered.
+        await shell?.destroy?.();
+        // The destroy either never registered (creation threw) or just
+        // emptied the registry (a registered shell whose ready rejected), so
+        // #onRegistryEmpty will not fire from this failure: without the
+        // release below the pin refuses every later event for this video and
+        // the downgrade strands.
+        this.#abandonBoot(watch);
+      }
     } finally {
-      // Cleared on every exit path: the guarded body below may return early
-      // (video or container left the document before settle), and a rejected
-      // wait must not strand the slot - see the field doc.
+      // Cleared on every exit path: the guarded body may return early
+      // (video or container left the document before settle), a rejected
+      // wait must not strand the slot (see the field doc), and the two
+      // creation outcomes (registered or abandoned) end the boot either
+      // way. The latch is the one-main-video law's mid-boot half.
       this.#booting = null;
-    }
-    if (this.#scope.disposed) {
-      // Pagehide disposal aborted this wait (settle rides the kernel scope's
-      // signal): the guards below run inside a leaving document where
-      // isConnected still reads true and the destroyed registry no longer
-      // refuses, so without this the continuation booted a shell onto a page
-      // the teardown had already swept.
-      return;
-    }
-    if (!video.isConnected || !container.isConnected) {
-      this.#abandonBoot(watch, `${sdk.name} video left the document before settle`);
-      return;
-    }
-    if (this.#registry.getByVideo(video)) {
-      return;
-    }
-    let shell = null;
-    try {
-      shell = this.#createShell({ home });
-      await shell?.ready;
-      this.#notifyShellCreated(shell);
-      logger.log("lifecycle", `Shell created for ${sdk.name}`);
-    } catch (err) {
-      logger.error("lifecycle", `Failed to create shell for ${sdk.name}:`, err);
-      // A shell that throws mid-boot (or rejects ready) may already have
-      // injected DOM, timers, and listeners. destroy() is scope-guarded and
-      // idempotent, so it reaps the partial state without double-freeing a
-      // shell that never got registered.
-      await shell?.destroy?.();
-      // The destroy either never registered (creation threw) or just
-      // emptied the registry (a registered shell whose ready rejected), so
-      // #onRegistryEmpty will not fire from this failure: without the
-      // release below the pin refuses every later event for this video and
-      // the downgrade strands.
-      this.#abandonBoot(watch);
     }
   }
 
@@ -804,10 +816,13 @@ export class Kernel {
     this.#adoptVideo(video);
   }
 
-  #createShell({ home }) {
+  async #createShell({ home }) {
     // The provider is guaranteed present - #onVideoFound checks and reports
     // before reaching here, and this is a private method with one caller.
-    const shell = this.#shellProvider.create({
+    // The provider's create is allowed to be async (the shell is lazy-loaded
+    // on first confirmed adoption: the module import rides the boot), so the
+    // awaited shape is the provider contract at this seam.
+    const shell = await this.#shellProvider.create({
       home,
       onDestroy: () => this.#registry.unregister(shell)
     });
@@ -898,6 +913,10 @@ export function dumpFrameState(resolveKernel) {
     booting: snapshot?.booting === true
   };
   logger.warn("diag", JSON.stringify(record));
+  // The record returns so the caller decides the surface (the warn line is
+  // the console twin's own write; the debug handle's arm JSON-serializes
+  // this return, the only shape that crosses a compartment boundary).
+  return record;
 }
 
 /**

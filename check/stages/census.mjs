@@ -154,14 +154,14 @@ const ROWS = [
     why: "the wall-clock reads, page.js and resume.js only: resume entry timestamps and staleness cutoffs, plus page-context nonce/deadline math - the zero-timer pipeline's deadline class reads it at call time; a new consumer must join page/resume or name its own when-why (one resume read left with the never-written 'pending' vocabulary: its load-time sweep was the tenth)"
   },
   // Network egress floor: the product's one network story, pinned. The
-  // relay is exactly one background-page fetch (dist/extension/background.js)
-  // - the background's <all_urls> host permission is what cross-origin
-  // subtitle ingest is FOR (manifest side pinned in the bundle stage).
-  // Every page-context or DOM-shaped channel counts 0: a return of any of
-  // these is a redesign decision that must argue its why against the
-  // background-relayed single path, never an innocent-looking "second
-  // ingest" half-built on XHR or a blob/img/src channel the page's CORS
-  // cannot grant.
+  // relay is exactly one background-page fetch (src/background/relay.js,
+  // bundled into the generated background.js) - the background's <all_urls>
+  // host permission is what cross-origin subtitle ingest is FOR (manifest
+  // side pinned in the bundle stage). Every page-context or DOM-shaped
+  // channel counts 0: a return of any of these is a redesign decision that
+  // must argue its why against the background-relayed single path, never an
+  // innocent-looking "second ingest" half-built on XHR or a blob/img/src
+  // channel the page's CORS cannot grant.
   {
     name: "fetch calls",
     pattern: "fetch(",
@@ -177,14 +177,35 @@ const ROWS = [
   {
     name: "message receivers",
     pattern: "onMessage.addListener",
-    expect: 2,
-    why: "the package's two runtime.onMessage receivers: the background page's one egress relay (pf:request-text) and kernel.js TabCommands' one command receiver (pf:command, top-frame) - a third receiver is a new message surface joining without a design conversation"
+    expect: 3,
+    why: "the package's three runtime.onMessage receivers: the background relay's one text-relay surface (pf:request-text), kernel.js TabCommands' one command receiver (pf:command, top-frame), and the entry's one hint receiver (pf:net-media, every frame) - a fourth receiver is a new message surface joining without a design conversation"
   },
   {
     name: "message senders",
     pattern: "sendMessage(",
-    expect: 2,
-    why: "the two runtime/tabs senders: store.js requestText (content -> background relay) and popup.js (pages -> the active tab's commander, the popup's whole surface) - every untracked message channel is egress the census cannot see"
+    expect: 5,
+    why: "the five runtime/tabs senders: store.js requestText (content -> background relay), popup.js (pages -> the active tab's commander), the ledger's one hint send (background -> the frame that carried media traffic, frame-targeted), the background's command arm (the debug handle's pfCommand relayed over the popup's exact tabs.sendMessage hop - a cross-extension caller structurally cannot make that call, tabs.sendMessage delivers only to the calling extension's own content scripts), and the debug handle's one runtime.sendMessage (content -> background, the same chrome only triggers in debug mode) - every untracked message channel is egress the census cannot see"
+  },
+  // The background ledger's observe-only webRequest floor: two listeners +
+  // one tab-drop hook, the whole uBO-grade substrate the hint plane rides.
+  // Blocking (webRequestBlocking) is pinned absent at the manifest.
+  {
+    name: "webRequest navigation hooks",
+    pattern: "onBeforeRequest",
+    expect: 1,
+    why: "the ledger's one navigation hook: main_frame clears the tab's hinted set, sub_frame clears the frame's entry - hint freshness is event-driven all the way down (the zero-timer pipeline holds in the background plane), no second observer and no clock joins"
+  },
+  {
+    name: "webRequest media observers",
+    pattern: "onHeadersReceived",
+    expect: 1,
+    why: "the ledger's one response observer: media/xhr requests in all frames, answering a video/audio content-type with ONE frame-targeted hint (contract's NET_HINT) - observation only, never blocking, no rewrite, no second sniffing surface"
+  },
+  {
+    name: "tabs.onRemoved hooks",
+    pattern: "tabs.onRemoved",
+    expect: 1,
+    why: "the ledger's tab-drop invalidation: the (tab, frame) hint Map never outlives its tab - a hook per hint-channel is the lease the state is held under"
   },
   {
     name: "storage.local call sites",
@@ -286,14 +307,15 @@ const ROWS = [
 
 export async function run() {
   // The corpus is the whole shipped package's hand-maintained JS: the
-  // player plane (src/**) PLUS the chrome members that live in the
-  // dist/extension package tree they ship from. The network/message floor
-  // (background's one fetch, the two senders, the one TabCommands
-  // receiver) counts the package, so a corpus limited to src/ would
-  // silently stop auditing the extension's own egress.
+  // player plane (src/**, the background ledger/relay included) PLUS the
+  // hand-written chrome members that live in the dist/extension package
+  // tree (the content loader, the popup). background.js is BUILD OUTPUT of
+  // src/background now - counting it would double-count the relay - and
+  // the kernel/shell/chunk bundles are the same src counted once, so only
+  // the hand-maintained members join the walk.
   const files = [
     ...walk(SRC),
-    join(HERE, "dist", "extension", "background.js"),
+    join(HERE, "dist", "extension", "content.js"),
     join(HERE, "dist", "extension", "popup.js")
   ];
   const countsPerRow = ROWS.map((row) => ({ ...row, total: 0, sites: [] }));

@@ -1,5 +1,5 @@
 import { build, context } from "esbuild";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import process from "node:process";
 
@@ -113,8 +113,12 @@ function buildManifest() {
       "96": "icon.svg"
     },
     // "storage" backs the store plane; "<all_urls>" is the host permission
-    // the background fetch relay rides (the package's one network floor).
-    permissions: ["storage", "<all_urls>"],
+    // the background fetch relay rides (the package's one network egress);
+    // "webRequest" is the background ledger's OBSERVE-only surface - the
+    // media hint never blocks or rewrites a request, so no
+    // webRequestBlocking ever joins (a blocking grant would be a redesign
+    // decision of its own).
+    permissions: ["storage", "webRequest", "<all_urls>"],
     content_scripts: [
       {
         // The frame model's full reach: every frame of every page, top and
@@ -186,14 +190,26 @@ function verifyManifest(manifest) {
   if (!manifest.permissions.includes("storage") || !manifest.permissions.includes("<all_urls>")) {
     throw new Error("manifest: storage + <all_urls> host permission missing");
   }
+  // Observe-only posture: webRequest listens, nothing blocks. webRequestBlocking
+  // in the list would make the match-all content plane's observation grant a
+  // blocking power the ledger never uses and the census cannot audit.
+  if (!manifest.permissions.includes("webRequest")) {
+    throw new Error("manifest: webRequest observation permission missing");
+  }
+  if (manifest.permissions.includes("webRequestBlocking")) {
+    throw new Error("manifest: webRequestBlocking must never ship (observe-only posture)");
+  }
   if (!manifest.background?.scripts?.includes("background.js")) {
     throw new Error("manifest: background page missing");
   }
   if (manifest.browser_action?.default_popup !== "popup.html") {
     throw new Error("manifest: browserAction popup missing");
   }
-  // The verbatim chrome members are the dist tree's own input: they must
-  // exist where the manifest points and where the zip below reads them.
+  // The package members the zip reads must exist where the manifest points:
+  // the loader (content.js) is hand-maintained chrome shipping verbatim,
+  // popup/icon the same, and background.js/kernel.js/shell.js (validated
+  // below) are build output the manifest's scripts/background vocabulary
+  // reference - checked here for existence so a missing output dies here.
   for (const member of ["background.js", "popup.html", "popup.js", "icon.svg"]) {
     if (!existsSync(new URL(`./dist/extension/${member}`, import.meta.url))) {
       throw new Error(`chrome member missing from dist/extension: ${member}`);
@@ -414,28 +430,38 @@ async function buildPackage() {
   const distDir = new URL("./dist/extension/", import.meta.url);
   mkdirSync(distDir, { recursive: true });
 
-  // The chrome members (background.js, popup.html, popup.js, icon.svg) are
-  // hand-maintained IN dist/extension and ship verbatim - the only build
-  // output is the content bundle (src/entry.js + src/**) and the generated
-  // manifest. The chrome files reference only browser.* at eval and carry
-  // their vocabulary as spelled constants (popup.js mirrors contract.js's
-  // nouns in place: the package cannot import across the tree), so no
-  // bundling step exists for them.
-  const contentOpts = {
+  // The hand-maintained chrome members live here and ship verbatim. The  // three script bundles are build output: content.js is a hand-written
+  // classic loader (the manifest's js[] vocabulary is classic scripts), the
+  // kernel/shell entries are ESM build output with code splitting, and
+  // background.js is build output of src/background (an IIFE - the manifest's
+  // background scripts vocabulary is classic too).
+  const buildEntries = [
+    { in: "src/entry.js", out: "kernel" },
+    { in: "src/shell/shell.js", out: "shell" }
+  ];
+  const esmOpts = {
     ...shared,
-    entryPoints: ["src/entry.js"],
-    outfile: "dist/extension/content.js",
+    format: "esm",
+    splitting: true,
+    outdir: "dist/extension",
+    entryPoints: buildEntries,
     plugins: [minifyCssPlugin()],
+    minify: true
+  };
+  const backgroundOpts = {
+    ...shared,
+    entryPoints: ["src/background/index.js"],
+    outfile: "dist/extension/background.js",
     minify: true
   };
 
   if (watch) {
-    await (await context(contentOpts)).watch();
+    await (await context(esmOpts)).watch();
     console.log("[PlayerForge] watching (minified); manifest/xpi build once per npm run build");
     return;
   }
 
-  await build(contentOpts);
+  await Promise.all([build(esmOpts), build(backgroundOpts)]);
 
   const manifest = buildManifest();
   verifyManifest(manifest);
@@ -445,27 +471,60 @@ async function buildPackage() {
   // Determinism check: an identical source tree must produce an identical
   // package (the XPI is distributed; a non-deterministic build would make
   // two "same-version" releases differ at the byte level and erase the
-  // receipt value of a release's hash).
-  const second = await build({ ...contentOpts, write: false });
-  const onDisk = readFileSync(contentOpts.outfile, "utf8");
-  if (onDisk !== second.outputFiles[0].text) {
-    throw new Error("min build: non-deterministic content bundle (disk vs rebuild mismatch)");
-  }
-  verifyBundle(onDisk, "content");
-
-  // The zip ships the dist tree itself: chrome members read from
-  // dist/extension (their only home), byte-identical to what Firefox's
-  // unpacked install would load.
-  const zip = zipXpi([
-    { name: "manifest.json", data: Buffer.from(manifestText, "utf8") },
-    { name: "content.js", data: Buffer.from(onDisk, "utf8") },
-    { name: "background.js", data: readFileSync("dist/extension/background.js") },
-    { name: "popup.html", data: readFileSync("dist/extension/popup.html") },
-    { name: "popup.js", data: readFileSync("dist/extension/popup.js") },
-    { name: "icon.svg", data: readFileSync("dist/extension/icon.svg") }
+  // receipt value of a release's hash). All build outputs - the three
+  // script bundles and any shared chunk splitting emitted - compare
+  // byte-for-byte against a write:false rebuild.
+  const second = await Promise.all([
+    build({ ...esmOpts, write: false }),
+    build({ ...backgroundOpts, write: false })
   ]);
+  for (const outputs of second.map((b) => b.outputFiles)) {
+    for (const file of outputs) {
+      // readFileSync throws if a second-run output missed the disk, which
+      // is its own determinism failure (the build never wrote it).
+      if (!readFileSync(file.path).equals(Buffer.from(file.text, "utf8"))) {
+        throw new Error(`min build: non-deterministic bundle (disk vs rebuild mismatch: ${file.path})`);
+      }
+    }
+  }
+  const kernelText = readFileSync(new URL("kernel.js", distDir), "utf8");
+  const shellText = readFileSync(new URL("shell.js", distDir), "utf8");
+  const backgroundText = readFileSync(new URL("background.js", distDir), "utf8");
+  verifyBundle(kernelText, "kernel");
+  verifyBundle(shellText, "shell");
+  verifyBundle(backgroundText, "background");
+
+  // The zip ships the dist tree itself: every member read from
+  // dist/extension (its only home), byte-identical to what Firefox's
+  // unpacked install would load. Membership is audited, not trusted: the
+  // chrome members are known, the manifest names content.js/background.js,
+  // the two entries are kernel.js/shell.js, and any other member must be a
+  // splitting chunk - anything else is a stray in the package tree that
+  // would silently ship.
+  const memberNames = readdirSync(distDir).sort();
+  const known = new Set([
+    "manifest.json",
+    "content.js",
+    "background.js",
+    "kernel.js",
+    "shell.js",
+    "popup.html",
+    "popup.js",
+    "icon.svg"
+  ]);
+  for (const name of memberNames) {
+    if (!known.has(name) && !/^chunk-[0-9A-Za-z]+\.js$/.test(name)) {
+      throw new Error(`unknown member in dist/extension: ${name}`);
+    }
+  }
+  const zip = zipXpi(memberNames.map((name) => ({
+    name,
+    data: name === "manifest.json"
+      ? Buffer.from(manifestText, "utf8")
+      : readFileSync(new URL(name, distDir))
+  })));
   writeFileSync(new URL("./dist/playerforge.xpi", import.meta.url), zip);
-  console.log(`[PlayerForge] built dist/extension + dist/playerforge.xpi (${zip.length} bytes, v${PACKAGE_VERSION})`);
+  console.log(`[PlayerForge] built dist/extension + dist/playerforge.xpi (${zip.length} bytes, ${memberNames.length} members, v${PACKAGE_VERSION})`);
 }
 
 await buildPackage();

@@ -4,11 +4,13 @@
  * Builds the shipping extension and validates what the browser (and the
  * check's own browser stage) rely on: the manifest parses and carries the
  * frame model's contract (all frames, document_start, the exclusion
- * platform floor, the storage + host permissions), the content bundle is
- * IIFE build output with no userscript vocabulary while the chrome members
- * ship verbatim from the package tree they hand-maintain, and the XPI zip
- * carries exactly the six members the manifest references, verifyable
- * against the dist tree.
+ * platform floor, the storage + webRequest-observe + host permissions),
+ * the three script bundles match their kind (the kernel/shell entries are
+ * ESM build output with code splitting - the shell lazy-loads through the
+ * kernel's dynamic import - and background.js is IIFE build output of
+ * src/background), the hand-maintained chrome members ship verbatim from
+ * the package tree, and the XPI zip carries exactly the dist tree's
+ * members, verifiable against it.
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
@@ -137,6 +139,15 @@ export async function run() {
     if (!manifest.permissions?.includes("<all_urls>")) {
       fails.push({ name: "host permission", note: "missing - the background relay's fetch is the one CORS-bypassing egress" });
     }
+    if (!manifest.permissions?.includes("webRequest")) {
+      fails.push({ name: "webRequest permission", note: "missing - the background ledger's media-hint observation is the only webRequest surface" });
+    }
+    if (manifest.permissions?.includes("webRequestBlocking")) {
+      fails.push({ name: "webRequestBlocking", note: "must never ship - the observe-only posture: the hint never blocks or rewrites a request" });
+    }
+    if (cs && cs.js?.join(",") !== "content.js") {
+      fails.push({ name: "content script list", note: "must be exactly [content.js] - the classic loader that imports the kernel module" });
+    }
     if (manifest.background?.persistent !== true || !manifest.background?.scripts?.includes("background.js")) {
       fails.push({ name: "background page", note: "must be a persistent background.js - the awaited relay fetch never suspends" });
     }
@@ -157,47 +168,84 @@ export async function run() {
     rows.push({ name: "manifest shape (frame contract, permissions, background, popup)", status: "pass", ms: null });
   }
 
-  // The `import|export` leak check and the userscript-vocabulary scan run
-  // over the content bundle (IIFE build output) and the two verbatim chrome
-  // scripts alike - the chrome members must stay plain, import-free
-  // scripts, and no plane may spell GM vocabulary by any route.
+  // Membership kinds. The ESM build outputs (kernel, shell, the shared
+  // chunks) legitimately carry import/export grammar - splitting is the
+  // lazy-shell architecture's shape, the kernel entry dynamic-imports the
+  // shell module on first confirmed adoption. The three classic scripts -
+  // the hand-written loader, the IIFE background build, the verbatim popup -
+  // must stay import-free (the loader's one dynamic import IS the pointer
+  // and is asserted verbatim below). GM vocabulary is banned everywhere:
+  // no bundle plane may ever re-adopt the manager's names.
   const shouldNotLeak = [
     [/GM_[A-Za-z]+/, "GM_ vocabulary"],
     [/@resource /, "@resource line"],
     [/@grant /, "@grant line"],
     [/\b(stub|GM\.info)\b/, null]
   ];
-  for (const name of ["content.js", "background.js", "popup.js"]) {
+  const scriptNames = readdirSync(EXT).sort().filter((n) => n.endsWith(".js"));
+  const esmNames = scriptNames.filter((n) => /^(kernel|shell|chunk-[0-9A-Za-z]+)\.js$/.test(n));
+  const classicNames = scriptNames.filter((n) => ["content.js", "background.js", "popup.js"].includes(n));
+  const unclassified = scriptNames.filter((n) => !esmNames.includes(n) && !classicNames.includes(n));
+  if (unclassified.length > 0) {
+    fails.push({ name: "script membership", note: `unclassified members in dist/extension: ${unclassified.join(", ")}` });
+  }
+  for (const name of esmNames) {
+    const source = readFileSync(join(EXT, name), "utf8");
+    const leaked = shouldNotLeak.slice(0, 3).filter(([re]) => re.test(stripComments(source))).map(([, label]) => label);
+    if (leaked.length > 0) {
+      fails.push({ name, note: `userscript vocabulary leaked: ${leaked.join(", ")}` });
+    }
+    rows.push({ name: `${name} (esm build, no userscript vocabulary)`, status: "pass", ms: null });
+  }
+  for (const name of classicNames) {
     const path = join(EXT, name);
     if (!existsSync(path)) {
       fails.push({ name, note: "member not produced/present" });
       continue;
     }
     const source = readFileSync(path, "utf8");
-    if (/\b(import|export)\s*[({"']/.test(source)) {
-      fails.push({ name, note: "import/export statements leaked into the IIFE build" });
+    const stripped = stripComments(source);
+    if (name === "content.js") {
+      // The loader's whole body is the package pointer: the kernel module,
+      // imported by its moz-extension URL. The pointer asserted verbatim,
+      // and any further grammar (a second import, an export) is drift.
+      if (!/import\s*\(\s*browser\.runtime\.getURL\s*\(\s*["']kernel\.js["']\s*\)\s*\)/.test(stripped)) {
+        fails.push({ name, note: "the package pointer (import of browser.runtime.getURL('kernel.js')) missing" });
+      }
+      if (/\bexport\b/.test(stripped)) {
+        fails.push({ name, note: "export grammar in a classic content script" });
+      }
+    } else if (/\b(import|export)\s*[({"']|import\s+\w+\s+from/.test(stripped)) {
+      fails.push({ name, note: "import/export statements in a classic script" });
     }
-    // The vocabulary scan rides the comment-stripped text (the census's own
-    // stripper): the chrome members now ship their own docstrings verbatim,
-    // so prose about the retired plane must stay out of the counts the
-    // content bundle's raw-minified text would have answered for free.
-    const stripped = name === "content.js" ? source : stripComments(source);
     const leaked = shouldNotLeak.slice(0, 3).filter(([re]) => re.test(stripped)).map(([, label]) => label);
     if (leaked.length > 0) {
       fails.push({ name, note: `userscript vocabulary leaked: ${leaked.join(", ")}` });
     }
-    rows.push({ name: `${name} (plain script, no userscript vocabulary)`, status: "pass", ms: null });
+    const kind = name === "content.js" ? "classic loader" : name === "background.js" ? "iife build" : "plain script";
+    rows.push({ name: `${name} (${kind}, no userscript vocabulary)`, status: "pass", ms: null });
+  }
+
+  // The lazy-shell seam: the kernel entry must keep its dynamic import of
+  // the package's shell.js - a bundle change that erased it (a static
+  // import, a dropped call) evals the shell in every frame and silently
+  // undoes the split's whole point.
+  const kernelSource = readFileSync(join(EXT, "kernel.js"), "utf8");
+  if (!/import\s*\(\s*browser\.runtime\.getURL\s*\(\s*["']shell\.js["']\s*\)/.test(kernelSource)) {
+    fails.push({ name: "lazy shell seam", note: "kernel.js no longer dynamic-imports the package's shell.js - the lazy load (the split's point) would be dead" });
   }
 
   // Sheet fidelity rides the embedded sheet. The minified sheet lives as
-  // one giant string literal in the content bundle; a document-wide scan
-  // cannot run - `)+` is ordinary JS outside the CSS string. Extract the
-  // long string literals (escape-aware, quote-pair scan) and run the glue
-  // regexes over them: the sheet is the only >1KB literal in the bundle,
-  // and the glue classes `)and(`/`)[+-]` are exactly what the minifier's
-  // two preservation rules exist to prevent.
-  const contentSource = readFileSync(join(EXT, "content.js"), "utf8");
-  const sheetStrings = longStringLiterals(contentSource, 1000);
+  // one giant string literal inside the script build outputs (the shell
+  // module's inject-side sheet import); a document-wide scan cannot run -
+  // `)+` is ordinary JS outside a CSS string. Extract the long string
+  // literals (escape-aware, quote-pair scan) from every ESM bundle and run
+  // the glue regexes over them: the sheet is the only >1KB literal in the
+  // bundles, and the glue classes `)and(`/`)[+-]` are exactly what the
+  // minifier's two preservation rules exist to prevent.
+  const sheetStrings = esmNames
+    .map((name) => readFileSync(join(EXT, name), "utf8"))
+    .flatMap((source) => longStringLiterals(source, 1000));
   const gluedTokens = [
     ...sheetStrings.flatMap((s) => [...s.match(/\)(and|or|not|only)\(/gi) ?? []]),
     ...sheetStrings.flatMap((s) => [...s.match(/\)[+-]/g) ?? []])
@@ -240,29 +288,41 @@ export async function run() {
     fails.push({ name: "HUD class vocabulary", note: `source spells pf-* classes with no CSS reader: ${dead.join(", ")}` });
   }
 
-  // The XPI: the shipping artifact the harness installs - exactly the six
-  // members, manifest at the zip root, each byte-identical to its dist file.
+  // The XPI: the shipping artifact the harness installs - exactly the dist
+  // tree's members, manifest at the zip root, each byte-identical to its
+  // dist file. The build's own membership audit guarantees no stray file
+  // entered the tree; here the zip is what the install reads, so the same
+  // set + fidelity is pinned against the actual bytes the browser loads.
+  // The five members every shape must carry are named outright (the
+  // splitting chunks beyond the entries are the one variable count).
   if (!existsSync(XPI)) {
     fails.push({ name: "playerforge.xpi", note: "xpi not produced" });
   } else {
     const zip = zipMembers(readFileSync(XPI));
-    const expected = ["manifest.json", "content.js", "background.js", "popup.html", "popup.js", "icon.svg"];
+    const required = ["manifest.json", "content.js", "kernel.js", "shell.js", "background.js", "popup.html", "popup.js", "icon.svg"];
     if (!zip) {
       fails.push({ name: "playerforge.xpi", note: "central directory unreadable (method/structure)" });
     } else {
-      const missing = expected.filter((n) => !zip.names.includes(n));
-      const extra = zip.names.filter((n) => !expected.includes(n));
-      if (missing.length > 0 || extra.length > 0) {
-        fails.push({ name: "playerforge.xpi members", note: `missing=${missing.join(", ") || "none"} extra=${extra.join(", ") || "none"}` });
+      const distMembers = readdirSync(EXT).sort();
+      const chromeAndBuild = zip.names.filter((n) => !/^chunk-[0-9A-Za-z]+\.js$/.test(n));
+      const unknownZip = zip.names.filter((n) => !distMembers.includes(n));
+      const missingRequired = required.filter((n) => !zip.names.includes(n));
+      if (!zip.names.some((n) => /^chunk-[0-9A-Za-z]+\.js$/.test(n))) {
+        fails.push({ name: "code splitting", note: "no shared chunk member - the kernel/shell split must share the store/runtime planes through one chunk (two store singletons in one realm would fork the storage echo contract)" });
+      }
+      if (missingRequired.length > 0 || unknownZip.length > 0) {
+        fails.push({ name: "playerforge.xpi members", note: `missing=${missingRequired.join(", ") || "none"} unknown=${unknownZip.join(", ") || "none"}` });
+      } else if (zip.names.length !== distMembers.length) {
+        fails.push({ name: "playerforge.xpi members", note: `zip ${zip.names.length} vs dist ${distMembers.length} members` });
       } else {
-        const drift = expected.filter((n) => !zip.files.get(n).equals(readFileSync(join(EXT, n))));
+        const drift = zip.names.filter((n) => !zip.files.get(n).equals(readFileSync(join(EXT, n))));
         if (drift.length > 0) {
           fails.push({ name: "playerforge.xpi fidelity", note: `zip members differ from dist: ${drift.join(", ")}` });
         }
       }
     }
     const sizeKb = (readFileSync(XPI).length / 1024).toFixed(1);
-    rows.push({ name: `playerforge.xpi (${sizeKb} KB, 6 members, zip==dist)`, status: "pass", ms: null });
+    rows.push({ name: `playerforge.xpi (${sizeKb} KB, split kernel/shell, zip==dist)`, status: "pass", ms: null });
   }
 
   if (fails.length > 0) {

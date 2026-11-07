@@ -77,10 +77,16 @@ const importSmoke = (files) =>
 
 export async function run() {
   const start = Date.now();
-  // src/** walks the player plane; entry.js is the content-script entry (its
-  // import IS its activation), and the chrome members are not in src at all
-  // - they are the dist/extension package tree, linted at the EXT path.
-  const files = walk(SRC).filter((f) => !f.endsWith(join("src", "entry.js")));
+  // src/** walks the player plane plus the background plane's library
+  // modules; entry.js and background/index.js are the two self-activating
+  // entries excluded from the smoke (their top level IS their activation,
+  // like the content-script entry - they eval in the bundle/browser gates
+  // only), and the chrome members are not in src at all - they are the
+  // dist/extension package tree, linted at the EXT path.
+  const files = walk(SRC).filter((f) =>
+    !f.endsWith(join("src", "entry.js")) &&
+    !f.endsWith(join("src", "background", "index.js"))
+  );
   const failures = [];
   const lintOut = lint();
   if (lintOut) {

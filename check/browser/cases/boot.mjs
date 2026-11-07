@@ -11,9 +11,9 @@ import { sleep } from "../../lib/driver.mjs";
  * sentinel cannot cross the content Xray to the driver realm, and the
  * manifest IS the version source under this architecture.
  */
-export async function run({ session, baseUrl, boot }) {
+export async function run({ session, boot, baseUrl }) {
   const rows = [];
-  await boot("#pf-debug");
+  await boot({ pagePath: "/check#pf-debug" });
   const shellHost = await session.waitFor(
     `return !!document.querySelector(".pf-shell");`,
     5000
@@ -42,21 +42,54 @@ export async function run({ session, baseUrl, boot }) {
     ms: null
   });
 
-  // Video-less page: no shell, no version rail (not even in debug mode - the
-  // kernel never reaches the stamp), and still no boot error.
+  // Debug-plane storage read, on the BOOTED page (the handle installs at
+  // script eval, kernel-bound arms resolving through the menu reference):
+  // the storageDump answer must carry the state plane's configs root.
+  const storageOk = await session.eval(function main() {
+    const raw = window.PlayerForge?.storageDump?.() ?? null;
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed !== null
+      && typeof parsed === "object"
+      && parsed.configs !== null
+      && typeof parsed.configs === "object";
+  });
+  rows.push({
+    name: "debug storage read answers the state plane",
+    status: storageOk === true ? "pass" : "fail",
+    note: "window.PlayerForge.storageDump() (debug mode only) - reads pull the store's state plane",
+    ms: null
+  });
+
+  // Video-less page: no shell and no version rail - the KERNEL boots only on
+  // a real candidate (or a network hint); a nothing page never boots. The
+  // command door is the eval-scoped surface by design (it must exist BEFORE
+  // any video discovery - a video-less embed host top answers the popup):
+  // window.PlayerForge installs at script eval, and on this page the
+  // kernel-bound dump answers its honest no-kernel record (realm top, shell
+  // null, videos 0) - the empty shape IS the diagnosis. The channel census
+  // (commands.mjs triggerCommand) proves the same door answers a command
+  // end to end.
   await session.navigate(`${baseUrl}/check/blank?boot=${Date.now()}#pf-debug`);
   await session.waitFor("return document.readyState === 'complete';", 5000);
   await sleep(700);
   const unbooted = await session.eval(function main() {
+    let diag = null;
+    try { diag = JSON.parse(window.PlayerForge?.dumpFrameState?.() ?? "null"); } catch {}
     return {
       shells: document.querySelectorAll(".pf-shell").length,
-      version: document.documentElement.dataset.pfVersion ?? null
+      version: document.documentElement.dataset.pfVersion ?? null,
+      diagRealm: diag?.realm ?? null,
+      diagShell: diag?.shell ?? null,
+      diagVideos: Array.isArray(diag?.videos) ? diag.videos.length : null
     };
   });
   rows.push({
     name: "page without a player stays unbooted",
-    status: unbooted.shells === 0 && unbooted.version === undefined ? "pass" : "fail",
-    note: JSON.stringify(unbooted),
+    status: unbooted.shells === 0 && unbooted.version === null
+      && unbooted.diagRealm === "top" && unbooted.diagShell === null
+      && unbooted.diagVideos === 0 ? "pass" : "fail",
+    note: JSON.stringify(unbooted)
+      + " (no shell, no version stamp - boot is candidate-gated; the eval-scoped command door answers its kernel-less diagnosis)",
     ms: null
   });
 

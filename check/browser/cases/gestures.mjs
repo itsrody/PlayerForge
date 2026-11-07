@@ -63,7 +63,10 @@ export async function run({ session, baseUrl, boot }) {
   await boot();
   await recordGestureEvents(session);
 
-  const center = await session.eval(videoCenterScript);
+  // The coordinate frame re-measures across a real element fullscreen:
+  // entering moves the window to the screen box, so a const bound here
+  // would stale every fs-territory row's targets.
+  let center = await session.eval(videoCenterScript);
   if (center === null) {
     rows.push({ name: "shell host present for gestures", status: "fail", note: "no [data-pf-shell]", ms: null });
     return rows;
@@ -170,28 +173,67 @@ export async function run({ session, baseUrl, boot }) {
   }), `events=${JSON.stringify(await session.eval(function main() {
     return window.__pfEvents;
   }))}`);
-  // Element fullscreen, the synthetic-API-datum arc: the real driver
-  // fullscreen course needs a user-activated requestFullscreen (probed
-  // available to a Marionette click) but the entry resizes the window out
-  // from under the rows' viewport coordinate frame, so the arc mounts the
-  // Fullscreen API's own datum - document.fullscreenElement, the exact
-  // property the gate's truth reads (FsGate.#truth) - and a synthetic
-  // fullscreenchange fires the same update event a real entry would. The
-  // real-driver horizontal drag then scrubs fs-style, proving the armed
-  // end-to-end path; the dismount below re-seats the gate to the real
-  // truth before the inline rows.
+  // Element fullscreen, the real-API arc: the userscript plane's synthetic-
+  // API-datum device (a page-JS fullscreenElement getter the VM sandbox could
+  // read) is measure-dead on the extension floor - the engine's truth read
+  // goes through the content script's Xray, and page-JS-owned properties do
+  // not cross it (probed: the engine's own press rail prints fs=off after
+  // the page-level arming this block needed as fs=on). The honest arc drives
+  // REAL element fullscreen: a trusted driver keydown grants the page its
+  // own user activation (probed: script-launched requestFullscreen is denied
+  // only for missing activation - headless is no bar), the eval's
+  // requestFullscreen rides that same activation window, and the gate's own
+  // fullscreenchange re-seats the latch on the true state. The container is
+  // the fullscreen element, so its UA fullscreen box covers the viewport -
+  // the window-resize premise change is hand-reconciled by re-measuring the
+  // coordinate frame after each entry, and by exiting before rows that
+  // assert the inline state.
+  const enterRealFullscreen = async () => {
+    // The activation shape that answers by construction: the page's own
+    // keydown listener calls requestFullscreen from inside the trusted
+    // event's task (the eval-separated grant the userscript flat era rode
+    // does not survive this session's longer input histories - the probe
+    // run's fresh boot granted it, this session's post-rows state reads
+    // "Fullscreen request denied" for both the keydown and the tap arm).
+    // The 'f' key is unbound in INPUT_ACTIONS, so the keydown reaches the
+    // page untouched; the keyup follows after the request is already in
+    // flight (the entry resolves before it matters).
+    await session.eval(function main() {
+      window.__pfFsProbe = [];
+      document.addEventListener("keydown", (e) => {
+        window.__pfFsProbe.push("key:" + e.key);
+        if (e.key === "f" && !document.fullscreenElement) {
+          document.querySelector(".pf-shell")?.parentElement?.requestFullscreen?.()
+            ?.then?.(() => window.__pfFsProbe.push("fs:ok"))
+            ?.catch?.((err) => window.__pfFsProbe.push("fs:denied:" + err.name));
+        }
+      }, true);
+    });
+    await raw.actions({ async: true }).keyDown("f").keyUp("f").pause(80).perform();
+    try {
+      await session.waitFor("return !!document.fullscreenElement;", 3000);
+    } catch (err) {
+      const probe = await session.eval(function main() {
+        return JSON.stringify(window.__pfFsProbe ?? []);
+      }).catch((e) => `probe-read failed: ${e.message}`);
+      throw new Error(`real fullscreen never armed (in-task request); probe=${probe}`);
+    }
+    await sleep(250);
+    center = await session.eval(videoCenterScript);
+  };
+  const exitRealFullscreen = async () => {
+    await session.eval(function main() { document.exitFullscreen?.(); });
+    await session.waitFor("return !document.fullscreenElement;", 3000);
+    await sleep(250);
+    center = await session.eval(videoCenterScript);
+  };
+  await enterRealFullscreen();
   await session.eval(function main() {
     window.__pfEvents = [];
-    Object.defineProperty(document, "fullscreenElement", {
-      configurable: true,
-      get() { return document.querySelector(".pf-shell"); }
-    });
-    document.dispatchEvent(new Event("fullscreenchange"));
     const v = document.querySelector("#check-video");
     v.pause();
     v.currentTime = 2;
   });
-  await sleep(300);
   await acts()
     .move({ origin: "viewport", x: Math.round(center.x), y: Math.round(center.y) }).press()
     .move({ origin: "viewport", x: Math.round(center.x + 60), y: Math.round(center.y) })
@@ -201,7 +243,7 @@ export async function run({ session, baseUrl, boot }) {
     .release()
     .perform();
   await sleep(400);
-  status(rows, "fs-armed drag scrubs against the synthetic fullscreenElement", await session.eval(function main() {
+  status(rows, "real fullscreen drag scrubs through the Fullscreen API's own gate", await session.eval(function main() {
     const t = document.querySelector("#check-video").currentTime;
     return !!document.fullscreenElement &&
       window.__pfEvents.includes("scrub") && t > 2;
@@ -231,18 +273,14 @@ export async function run({ session, baseUrl, boot }) {
   }), `dbclicks=${JSON.stringify(await session.eval(function main() {
     return window.__pfDbclicks;
   }))}`);
+  await exitRealFullscreen();
   await session.eval(function main() {
-    // Dismount the synthetic datum: deleting the own property restores the
-    // prototype getter (real fullscreenElement), and the extra
-    // fullscreenchange re-seats the gate at the real truth (fs closed).
-    delete document.fullscreenElement;
-    document.dispatchEvent(new Event("fullscreenchange"));
     window.__pfEvents = [];
     const v = document.querySelector("#check-video");
     v.pause();
     v.currentTime = 2;
   });
-  await sleep(300);
+  await sleep(200);
   // Inline restore, the complement: with fs closed the same two-tap sequence
   // carries ONE native dblclick - inline the SDK's double tap is its own.
   await acts()
@@ -416,29 +454,21 @@ export async function run({ session, baseUrl, boot }) {
   status(rows, "Space keyup releases the boost back to 1x",
     spaceRelease.rate === 1 && spaceRelease.released, JSON.stringify(spaceRelease));
 
-  // KeyP asks for picture-in-picture through the kernel's semantic layer;
-  // the PiP window itself is not openable in headless automation, so the row
-  // asserts the contract, not the browser-side window.
-  await recordGestureEvents(session);
-  await fireKeys(["KeyP"]);
-  await sleep(400);
-  status(rows, "KeyP asks for picture-in-picture", await session.eval(function main() {
-    return window.__pfEvents.includes("pip");
-  }), "no pf:gesture-pip");
+  // KeyP moves below the fullscreen territory: a granted PiP poisons every
+  // later requestFullscreen in the session (probed: pip=VIDEO then denied
+  // TypeError in-task, +7s decay AND on a fresh document - Firefox 159
+  // headless grants requestPictureInPicture for real, and while the PiP
+  // session state exists no fullscreen request is answered), so the row
+  // asserts its contract and exits PiP, but only ever runs after the last
+  // fullscreen need is done.
 
-  // Scrub/swipe/pinch are fs:true-binding intents (actions.js): the mount
-  // re-arms the Fullscreen API's own datum (the fixture stays a boring page
-  // under a boring window - element fullscreen would resize the driver
-  // window out from under the rows' coordinate frame), and the synthetic
-  // fullscreenchange flips the kernel's fs latch the way a real fullscreen
-  // would. The stub persists through the fs territory below.
-  await session.eval(function main() {
-    Object.defineProperty(document, "fullscreenElement", {
-      configurable: true,
-      get() { return document.querySelector(".pf-shell"); }
-    });
-    document.dispatchEvent(new Event("fullscreenchange"));
-  });
+  // Scrub territory, the second real-fullscreen entry: scrub/swipe/pinch are
+  // fs:true-binding intents (actions.js), and on this floor the gate's truth
+  // is the Fullscreen API's own state - the userscript plane's page-JS
+  // synthetic datum does not cross the content script's Xray (probed in the
+  // first fullscreen block above), so the arc enters REAL element fullscreen
+  // and re-measures the coordinate frame the entry moved.
+  await enterRealFullscreen();
   await sleep(150);
 
   // Gate lifecycle re-arm: persisted pagehide force-falsy and pageshow
@@ -533,6 +563,29 @@ export async function run({ session, baseUrl, boot }) {
       (touchScrub.events.includes("scrub-end") || touchScrub.events.includes("scrub-release")) &&
       touchScrub.t > touchScrub.seed + 0.02,
     `t=${touchScrub.t} seed=${touchScrub.seed} events=${JSON.stringify(touchScrub.events)}`);
+  await exitRealFullscreen();
+
+  // KeyP asks for picture-in-picture through the kernel's semantic layer; the
+  // row asserts the gesture contract and exits the PiP state right after.
+  // Placement is load-bearing: a granted PiP poisons every LATER
+  // requestFullscreen in the session (probed: pip=VIDEO then denied TypeError
+  // in-task, not decayed at +7s, not cleared by a fresh document - Firefox
+  // 159 headless grants requestPictureInPicture for real, and while that
+  // session state exists no fullscreen request is answered), so the PiP row
+  // is the last fs-adjacent surface in this case: it only ever runs after
+  // the last fullscreen need is done.
+  await recordGestureEvents(session);
+  await fireKeys(["KeyP"]);
+  await sleep(400);
+  status(rows, "KeyP asks for picture-in-picture", await session.eval(function main() {
+    return window.__pfEvents.includes("pip");
+  }), "no pf:gesture-pip");
+  await session.eval(async function main() {
+    if (document.pictureInPictureElement) {
+      await document.exitPictureInPicture?.();
+    }
+  });
+  await sleep(200);
 
   // Dead-zone residue, the slow-stroke row: a genuine slow drag arrives as
   // sub-pixel per-move travel (0.3px per event) that per-event dropping

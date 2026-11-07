@@ -488,25 +488,42 @@ export class BrowserSession {
   }
 
   /**
-   * The popup channel's exact round trip, driven through the companion
-   * addon: navigate the CURRENT page with ?pfCmd=<command>, the companion
-   * background sends browser.tabs.sendMessage into the (reloaded) top
-   * document's PlayerForge commander, and the reply lands in
-   * dataset.plReply. Navigation is part of the deal - the command reloads
-   * the document (a fresh kernel boots; storage is the product's, so
-   * command effects persist across the reload exactly as the popup's
-   * effects do), so callers re-wait for whatever live state the row needs.
+   * The popup channel's round trip, driven through the product's own
+   * extension machinery: navigate with ?pfCmd=<command> + the #pf-debug
+   * tag (the debug console handle is where the door lives - debug-gated
+   * like its sibling arms), and the handle's pfCommand arm relays through
+   * the package's own background (relay.js) which replays the browserAction
+   * popup's exact browser.tabs.sendMessage hop onto the active tab's top
+   * document. The reply lands in dataset.plReply. Navigation is part of the
+   * deal - the command reloads the document (a fresh kernel boots; storage
+   * is the product's, so command effects persist across the reload exactly
+   * as the popup's effects do), so callers re-wait for whatever live state
+   * the row needs.
+   * The debug tag joins whatever hash the caller carried (a substring
+   * match flips debug mode) or opens the fragment fresh. Rows whose command
+   * needs a LIVE SHELL (the one-shot reset gestures answer "did the gesture
+   * reach a live shell host") pass opts.waitShell - the companion then waits
+   * for .pf-shell before calling the arm, the shape the popup's own use
+   * rides (real users tap it with the player already live), instead of the
+   * fresh-navigation race that answers the stock "no live shell" reply.
    */
-  async triggerCommand(pagePath, command, second = null) {
-    const bust = `${pagePath}?boot=${Date.now()}${second ? `&pfCmd=${command}&pfCmd2=${second}` : `&pfCmd=${command}`}`;
-    await this.navigate(`${this.baseUrl}${bust}`);
+  async triggerCommand(pagePath, command, second = null, opts = {}) {
+    // pagePath may carry a `#hash` (the hash is debug-tag-preserving; the
+    // query stays before the fragment because searchParams stop at `#`).
+    const at = pagePath.indexOf("#");
+    const path = at >= 0 ? pagePath.slice(0, at) : pagePath;
+    const rawHash = at >= 0 ? pagePath.slice(at) : "";
+    const hash = rawHash.includes("pf-debug")
+      ? rawHash
+      : rawHash ? `${rawHash}-pf-debug` : "#pf-debug";
+    const q = `${path}?boot=${Date.now()}${second ? `&pfCmd=${command}&pfCmd2=${second}` : `&pfCmd=${command}`}${opts.waitShell ? "&pfShell=1" : ""}${hash}`;
+    await this.navigate(`${this.baseUrl}${q}`);
     await this.waitFor("return document.documentElement.dataset.plReply !== undefined;", 9000);
     const raw = await this.eval(function main() {
       const v = document.documentElement.dataset.plReply ?? null;
-      delete document.documentElement.dataset.plReply;
       return v;
     });
-    const replies = JSON.parse(raw ?? "[]");
+    const replies = JSON.parse(raw ?? "[]").map((entry) => entry.reply);
     if (second) {
       return replies;
     }

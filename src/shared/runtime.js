@@ -330,8 +330,12 @@ export class Scope {
 /* - 3.5 Fan-out - */
 
 /**
- * The ONE plain-fan-out owner: a single native EventTarget carrying one
- * event per instance, dispatching one payload to the current audience.
+ * The ONE plain-fan-out owner: a detached Comment node carrying one event
+ * per instance, dispatching one payload to the current audience. (The port
+ * surface note: the standalone-EventTarget shape the userscript era rode
+ * does not deliver under the MV2 content-script realm - a same-realm
+ * listener on `new EventTarget()` never fires there, every Node surface
+ * does - probed; see the class body's #on() note.)
  * Every subscriber-set + notify-loop + manual abort-listener-pair machine
  * routes through this - the platform supplies the semantics those machines
  * hand-parsed: an already-aborted signal is a no-op subscription (the DOM
@@ -341,7 +345,8 @@ export class Scope {
  * mid-dispatch subscriptions join the next batch (dom-watch documents the
  * same rule as its length-hold).
  *
- *   - `emit(payload)`  — synchronous fan-out; dispatch is native, so an
+ *   - `emit(payload)`  — synchronous fan-out; dispatch is native (on the
+ *                        detached Comment surface), so an
  *                        uncaught subscriber throw reports to the page
  *                        error surface rather than aborting the emit call
  *                        (native dispatch isolation - the kernel's
@@ -377,17 +382,43 @@ export class Scope {
  * 1000 emissions strictly within 400ms dominated by delivery, not
  * allocation. Fresh allocation stays.
  */
-export class Fan extends EventTarget {
+export class Fan {
   #type;
+  /** Lazily-created detached Comment node - the one dispatch surface. */
+  #surface = null;
 
   constructor(tag) {
-    super();
     this.#type = `pf:fan-${tag}`;
+  }
+
+  /**
+   * The dispatch surface the realm actually delivers on. PROBED (extension
+   * port): the MV2 content-script isolated realm answers a standalone
+   * EventTarget's dispatchEvent with silence - a plain same-realm listener
+   * on `new EventTarget()` never fires (plain/subclass/signal shapes all
+   * measured dead) while Node surfaces deliver (detached div, document,
+   * window all measured live) - the page-realm premise the userscript-era
+   * class rode does not hold under the WebExtension sandbox. A detached
+   * Comment node rides the Node dispatch path both realms deliver on, keeps
+   * native dispatch isolation (a throwing subscriber strands neither
+   * followers nor emit), and scales structurally like per-instance
+   * EventTargets did. Lazy because Fans are constructed at module eval
+   * (the import smoke runs in a document-less Node realm - there the
+   * harness arm is Node's own standalone EventTarget, which that realm
+   * delivers on; every browser realm has a document and rides the Comment
+   * surface); the memo binds
+   * one surface per instance so subscribe/emit always meet, and instances
+   * holding subscribers carry it for as long as they live.
+   */
+  #on() {
+    return this.#surface ??= (typeof document === "undefined"
+      ? new EventTarget() // document-less harness realms (node import smoke)
+      : document.createComment(this.#type));
   }
 
   /** Fan one payload out synchronously. */
   emit(payload) {
-    this.dispatchEvent(new CustomEvent(this.#type, { detail: payload }));
+    this.#on().dispatchEvent(new CustomEvent(this.#type, { detail: payload }));
   }
 
   /**
@@ -414,7 +445,7 @@ export class Fan extends EventTarget {
       release.abort();
     } else {
       const handler = (event) => cb(event.detail);
-      this.addEventListener(this.#type, handler, { signal: release.signal });
+      this.#on().addEventListener(this.#type, handler, { signal: release.signal });
       signal?.addEventListener("abort", release.abort.bind(release), {
         once: true,
         signal: release.signal
@@ -472,8 +503,7 @@ function mirrorLine(channel, args) {
     if (el) {
       el.dataset.pfLog = `${channel} ${args.map((a) => (typeof a === "string" ? a : String(a))).join(" ")}`;
     }
-  } catch {}
-  // The catch is the record's 8th bare belt: the mirror is observability,
+  } catch {}  // The catch is the record's 8th bare belt: the mirror is observability,
   // never a failure surface - a document torn down mid-line (bfcache drop,
   // navigation race) must not interrupt the logger itself.
 }

@@ -48,6 +48,8 @@ export async function run() {
   const start = Date.now();
   const rows = [];
   let session = null;
+  // Hoisted for the outer catch: the abort row names the live case file.
+  let lastCaseFile = null;
   try {
     session = await BrowserSession.launch();
     await session.install();
@@ -57,18 +59,21 @@ export async function run() {
     session.registerFixture("/check/blank", FALLBACK_PAGE);
     // Frame lab: embed hosts carry no player themselves - the player lives in
     // the iframe(s). /check (and /sdk/*) are the embeddable playback pages.
-    session.registerFixture("/check/frames-so", embedHostPage("/check", "pf same-origin embed"));
-    session.registerFixture("/check/frames-cross", embedHostPage(`${session.crossBaseUrl}/check`, "pf cross-origin embed"));
+    // The hash on the player frame's own source arms that document's debug
+    // sentinel (kernel snapshot + storageDump + pfLog mirror) where the frame
+    // cases read identity and resume state; the host tops stay stock pages.
+    session.registerFixture("/check/frames-so", embedHostPage("/check#pf-debug", "pf same-origin embed"));
+    session.registerFixture("/check/frames-cross", embedHostPage(`${session.crossBaseUrl}/check#pf-debug`, "pf cross-origin embed"));
     // Nested: top -> cross-origin mid host -> same-origin (to the mid) embed
     // page. The mid's relative embed src stays on the cross origin, and only
     // reading window.top is cross - exactly the bridge's designed case.
-    session.registerFixture("/check/nested-mid", embedHostPage("/check", "pf nested mid"));
-    session.registerFixture("/check/frames-nested", embedHostPage(`${session.crossBaseUrl}/check/nested-mid`, "pf nested host"));
+    session.registerFixture("/check/nested-mid", embedHostPage("/check#pf-debug", "pf nested mid"));
+    session.registerFixture("/check/frames-nested", embedHostPage(`${session.crossBaseUrl}/check/nested-mid#pf-debug`, "pf nested host"));
     // Walk topology: top -> SAME-origin mid -> cross-origin player. The mid
     // being readable from the top is what lets the ctx route's isOwnFrame
     // deep walk vouch a nested descendant directly - the /check/frames-nested
     // chain (cross mid) deliberately cannot exercise that branch.
-    session.registerFixture("/check/frames-walk-mid", embedHostPage(`${session.crossBaseUrl}/sdk/plyr`, "pf walk mid"));
+    session.registerFixture("/check/frames-walk-mid", embedHostPage(`${session.crossBaseUrl}/sdk/plyr#pf-debug`, "pf walk mid"));
     session.registerFixture("/check/frames-walk", embedHostPage("/check/frames-walk-mid", "pf walk host"));
     // Switchboard: one placeholder iframe whose doc swaps between the SDK
     // stub pages - each registry-adopted by its namespaced anchor classes.
@@ -93,9 +98,22 @@ export async function run() {
       baseUrl
     });
 
+    // CASE=<name> filters to one case file for a single-case diagnosis cycle
+    // (CI/harness-only affordance; a full battery run leaves it unset).
+    const caseFilter = process.env.CASE ? process.env.CASE.replace(/\.mjs$/, "") : null;
     for (const caseFile of readdirSync(CASES_DIR).filter((f) => f.endsWith(".mjs")).sort()) {
+      if (caseFilter && caseFile.replace(/\.mjs$/, "") !== caseFilter) continue;
+      lastCaseFile = caseFile;
       const mod = await import(join(CASES_DIR, caseFile));
-      const caseRows = await mod.run({ session, baseUrl, crossBaseUrl: session.crossBaseUrl, boot: stepPage });
+      let caseRows;
+      try {
+        caseRows = await mod.run({ session, baseUrl, crossBaseUrl: session.crossBaseUrl, boot: stepPage });
+      } catch (err) {
+        // Case-local crash naming: the abort row and the stack print carry the
+        // live case file so a mid-gate driver timeout names where it landed.
+        console.log(`    [${caseFile}] case crashed: ${String(err?.name ?? "?")}: ${String(err?.message ?? err).slice(0, 200)}`);
+        throw err;
+      }
       // Status honesty: only an explicit "pass" passes. A case returning a
       // boolean or shorthand status (a real failure this once shipped as a
       // false row the aggregator skipped past) reads as fail here, so no
@@ -122,11 +140,13 @@ export async function run() {
       }
     }
   } catch (err) {
-    const aborted = { name: "browser gate aborted", status: "fail", note: err.message.slice(0, 160), ms: null };
+    // lastCaseFile may itself be unset if the failure predates the loop.
+    const at = typeof lastCaseFile === "string" ? lastCaseFile : "<pre-session>";
+    const aborted = { name: `browser gate aborted (${at})`, status: "fail", note: `${String(err?.name ?? "?")}: ${String(err?.message ?? err).slice(0, 160)}`, ms: null };
     const captured = await session?.snapshot?.("abort: " + err.message.slice(0, 40));
     if (captured) aborted.note += ` [capture: ${captured}]`;
     rows.push(aborted);
-    console.log(`    stack: ${String(err.stack ?? "").split("\n").slice(1, 5).join(" ")}`);
+    console.log(`    at: ${String(err.stack ?? "").split("\n").slice(1, 9).join(" ")}`);
     await session?.destroy();
     return { rows, ok: false };
   }

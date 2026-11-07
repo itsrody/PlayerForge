@@ -1,7 +1,8 @@
 # PlayerForge
 
-A userscript that upgrades HTML5 video players on the web — gestures, hotkeys,
-resume, subtitles, color filters — for **Firefox**, desktop and Android.
+A native **Firefox WebExtension** that upgrades HTML5 video players on the
+web — gestures, hotkeys, resume, subtitles, color filters — on desktop
+(macOS / Windows / Linux) and Firefox for Android.
 
 PlayerForge attaches to the recognized self-hostable players — JW Player,
 Video.js, Plyr, ArtPlayer, DPlayer, and more — and to plain videos in generic
@@ -11,37 +12,29 @@ Netflix, Vimeo and friends are deliberately excluded.
 ## Requirements
 
 - **Firefox 159 or newer** (desktop: macOS / Windows / Linux; also Android)
-- **Violentmonkey 2.50 or newer** as the userscript manager
+
+That's all — no userscript manager. It installs as a real browser extension.
 
 ## Installing
 
-Two options:
+1. **Build and install locally:** `npm ci && npm run build`, which produces
+   `dist/playerforge.xpi` (plus the extension tree it zips, `dist/extension/`).
 
-1. **Build and install locally:** `npm ci && npm run build`, then serve the
-   `dist/` folder over HTTP (e.g. `npx serve dist`) and install
-   `http://localhost:<port>/playerforge.user.js` from inside Violentmonkey.
-   The CSS companion (`playerforge.css`) is fetched by the script itself from
-   the same URL, which is why serving the folder — rather than opening the
-   file — is the reliable route.
+2. **Temporary install (testing):** open `about:debugging#/runtime/this-firefox`,
+   click **Load Temporary Add-on…**, and pick `dist/extension/manifest.json` —
+   or the `.xpi` directly at `about:addons` → gear icon → **Install Add-on From
+   File…** for a session install.
 
-2. **Install from a hosted dist:** point Violentmonkey at a hosted
-   `playerforge.user.js` (GitHub Pages works well) and the updater keeps it
-   fresh — the header pins the dist URL for this.
-
-PlayerForge runs on every frame of a page, so it also works **inside embedded
-players** (iframes), not just top-level pages. One instance per page video;
-embedded players on a big page get their own separate instance, each scoped to
-its video.
+PlayerForge runs on every frame of a page (`all_frames` content scripts), so
+it also works **inside embedded players** (iframes), not just top-level pages.
+One shell per page video; embedded players on a big page get their own
+separate shell, each scoped to its video.
 
 ## What you get
 
 **Gestures** (pointer/touch over the video; the press-and-hold works
-anywhere, the drag gestures are fullscreen-only — inline screens leave
-every tap and drag to the host page natively):
-
-**Gestures** (pointer/touch over the video; the press-and-hold works
-anywhere, the drag gestures are fullscreen-only — inline screens leave
-every tap and drag to the host page natively):
+anywhere, the drag gestures are fullscreen-only — inline screens leave every
+tap and drag to the host page natively):
 
 | Gesture            | Works      | Action                                               |
 | ------------------ | ---------- | ---------------------------------------------------- |
@@ -69,8 +62,8 @@ ended.
 
 **In-player settings panel** (`S`, or from the shell surface): skip step size
 (5/10/15 s), hotkeys on/off, per-gesture toggles, edge-to-edge fullscreen,
-compact panel mode. Settings live in your browser via the userscript
-manager's storage and sync live across tabs.
+compact panel mode. Settings live in the extension's own
+`browser.storage.local` and sync live across tabs.
 
 **Progress resume + watch history.** PlayerForge remembers where you left
 each video (per site/page, stored locally) and resumes on return — videos
@@ -102,9 +95,11 @@ Radiant Media Player, and Laravel Video Embeds**. A bare `<video>` with no
 recognizable player is left alone on purpose — no half-boots on unknown
 markup.
 
-## Menu commands
+## The toolbar popup
 
-Violentmonkey's menu (PlayerForge entry) carries:
+The extension's toolbar button (PlayerForge popup) carries the commands the
+userscript era put in the manager's menu. Every row sends one command to the
+active tab and answers in place:
 
 - **Toggle PF debug logging** — flip console chatter for one session
 - **Print one state line per realm** — field-triage dump: which frames
@@ -113,29 +108,33 @@ Violentmonkey's menu (PlayerForge entry) carries:
 - **Restore the default color filter**
 - **Restore the default subtitle sync offset**
 
+A row that answers "no reachable PlayerForge top frame" means the active tab
+has none — the site is excluded or the page has no video.
+
 For one-page debugging you can also open a page with `#pf-debug` appended to
-its URL. An explicit menu "Off" wins.
+its URL. An explicit popup "Off" wins.
 
 ## Privacy
 
 Everything is local: settings, resume points, history and subtitles live in
-your userscript manager's sync-tolerant storage. There is no analytics and no
-telemetry. The only network request PlayerForge ever makes is fetching the
-subtitle file at a URL you supply, via the manager (`GM_xmlhttpRequest`, so
-CORS-hostile hosts work); the HUD stylesheet is fetched by the manager from
-the bundle it ships with.
+`browser.storage.local` — plain browser storage on your machine, no account
+sync. There is no analytics and no telemetry. The only network request
+PlayerForge ever makes is fetching the subtitle file at a URL you supply,
+performed by the extension's background page under its host permission (so
+CORS-hostile hosts work — a content-page fetch would be blocked by the
+page's own origin).
 
 ## Troubleshooting
 
-- **"Nothing happens on this page"** — run the menu command **Print one
-  state line per realm**. If you see no state line at all, the script isn't
-  running (check it's enabled and the site isn't excluded); if the line lists
-  no videos, the player isn't recognized and PlayerForge leaves it alone by
-  design.
+- **"Nothing happens on this page"** — open the toolbar popup and use
+  **Print one state line per realm**. If the row says no reachable top frame,
+  the extension isn't running there (check the site isn't excluded); if the
+  dump lists no videos, the player isn't recognized and PlayerForge leaves
+  it alone by design.
 - **Platform sites (YouTube/Netflix/…) are intentionally out of scope** — the
-  script's header excludes them; that's support policy, not breakage.
-- **Embedded players** — the script runs in iframes; use the realm-state dump
-  to see which document (frame) has the video if the top page looks inert.
+  manifest's exclusion list bans them; that's support policy, not breakage.
+- **Embedded players** — the extension runs in iframes; the realm-state dump
+  tells you which document (frame) has the video if the top page looks inert.
   On an embedded player's own fullscreen, provisioning is pushed to all
   ancestor frames automatically.
 
@@ -150,11 +149,11 @@ in this repo cold.
 
 ```sh
 npm ci          # install deps
-npm run build   # write dist/playerforge.user.js + dist/playerforge.css
-npm test        # syntax + flaws + census + bundle + a real-Firefox browser gate (~2 min)
+npm run build   # build dist/extension/ + zip dist/playerforge.xpi
+npm test        # syntax + flaws + census + bundle + a real-Firefox browser gate (~1.5 min)
 npm run lint    # eslint src/
 ```
 
-The version is derived from `package.json` by the build — never hand-edited.
-See AGENTS.md §7 for how the check tool proves behavior on a real Firefox
-159 floor.
+The version is derived from `package.json` by the build — never hand-edited
+into the manifest. See AGENTS.md §7 for how the check tool proves behavior
+on a real Firefox.

@@ -11,6 +11,11 @@ export default [
         // GM_* names left with the userscript plane (the extension branch's
         // adapter plane lives in store.js; nothing in src spells GM words).
         browser: "readonly",
+        // Firefox content-script waiver helpers (the compartment law):
+        // wrappedJSObject is reached off the window object itself, but
+        // cloneInto exists only as a scope-injected global - the guard here
+        // is a typeof read, never a bare reference when absent.
+        cloneInto: "readonly",
         // Browser globals not in default env
         scheduler: "readonly",
         screen: "readonly",
@@ -166,11 +171,16 @@ export default [
   },
   {
     ignores: [
-      // dist/extension is the extension's SOURCE home (the package tree it
-      // ships from), so only the one generated member is ignored - by exact
-      // name, never a blanket "dist/**" that would leave product chrome
-      // (background.js, popup.js) outside the repo's rules.
-      "dist/extension/content.js",
+      // dist/extension is the extension's SOURCE home for its hand-written
+      // chrome (content.js loader, popup.js); the four generated members
+      // (the kernel/shell ESM bundles, their shared chunk, the IIFE
+      // background bundle) are minified build output, never hand source, so
+      // they are ignored by name - the repo's rules keep covering the files
+      // a human edits.
+      "dist/extension/chunk-*.js",
+      "dist/extension/kernel.js",
+      "dist/extension/shell.js",
+      "dist/extension/background.js",
       "node_modules/**"
     ]
   }

@@ -54,6 +54,32 @@ export const COMMANDS = Object.freeze({
 export const DEBUG_HASH_TAG = "pf-debug";
 
 /**
+ * The command-relay channel: content -> backgrounds, one message per command
+ * the debug console handle's pfCommand arm forwards. The background answers
+ * with the exact browserAction-popup hop - browser.tabs.sendMessage onto the
+ * active tab's top document, where kernel.js TabCommands receives - because
+ * an extension can only deliver tabs.sendMessage to its OWN content scripts
+ * (a second addon's companion/popup channel structurally never reaches this
+ * package's receiver; the browser isolates runtime.onMessage per extension).
+ * This is the one door the debug-mode surface opens into the popup's real
+ * machinery: the arm relays, the receiver stays the single command owner,
+ * and nothing new bypasses the top-frame-only posture. */
+export const COMMAND_RELAY = "pf:command-relay";
+
+/**
+ * The background's network hint channel: background -> content, one message
+ * per (tab, frame) that media-shaped traffic (video/audio content-type) was
+ * seen flowing through. A HINT, never a verdict - the content kernel answers
+ * by replaying the same boot its discovery probe would have run, and the
+ * DOM-truth pipeline (resolveAdoptionHome, presence gates, the SDK registry)
+ * still decides. A false hint is a free no-op (seen-pin + scope law refuse);
+ * a missed hint (cache hits, bundled CDNs, no-request players) costs nothing
+ * because the seed walk + media tap were already the whole detection story.
+ * The background imports this vocabulary; the content receiver spells it
+ * through the same table. */
+export const NET_HINT = "pf:net-media";
+
+/**
  * The gesture families: ONE hand-written entry per family - the id (the key)
  * and its settings-panel label (the value). Everything machine-facing is
  * formula-derived below, so a new family is a one-line addition: its semantic

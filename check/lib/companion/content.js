@@ -12,14 +12,21 @@
  *    real-Chrome-era "cases fail on any page error" contract's twin.
  *
  * 2. The command trigger. The browserAction popup is chrome UI no driver
- *    can reach, but its channel is exactly one call - browser.tabs.
- *    sendMessage(activeTab, {type: TAB_COMMAND, command}) - and the
- *    companion background page makes that same call on the case's behalf:
- *    the fixture page carries ?pfCmd= / ?pfCmd2=, this script forwards them
- *    to its own background, the background sends into the tab's PlayerForge
- *    commander, and the round-trip reply lands in dataset.plReply for the
- *    driver to read. The product's onMessage receiver is thereby exercised
- *    through the machinery the popup actually uses, not a forgery.
+ *    can reach. The popup's machinery is the package's own extension
+ *    channel - content -> background -> browser.tabs.sendMessage onto the
+ *    active tab's top document - and a second addon's tabs.sendMessage
+ *    structurally delivers only to its OWN content scripts (browser
+ *    isolates runtime.onMessage per extension), so the companion's own
+ *    background channel can never reach PlayerForge's commander. The door
+ *    exists inside the page: the product's debug console handle (document
+ *    #pf-debug, debug mode only) exposes pfCommand, which relays through
+ *    that same package-internal machinery and writes the settled reply to
+ *    a data-pf-cmd-<command> rail attribute. The companion waits for the
+ *    handle (the product boots after its storage warm - a few milliseconds
+ *    of IPC, not a race to fix), calls the arm, then assembles
+ *    dataset.plReply in the row shape the driver reads. Handle missing
+ *    after the deadline (skipped host, no debug hash) fails the row with a
+ *    readable why instead of a channel-shaped timeout.
  */
 (function () {
   "use strict";
@@ -49,12 +56,67 @@
   if (commands.length === 0) {
     return;
   }
-  Promise.all(commands.map((cmd) =>
-    browser.runtime.sendMessage({ pfTrigger: cmd }).then(
-      (reply) => ({ command: cmd, reply: reply === undefined ? null : reply }),
-      (err) => ({ command: cmd, reply: { ok: false, error: String(err?.message ?? err) } })
-    )
-  )).then((replies) => {
-    document.documentElement.dataset.plReply = JSON.stringify(replies);
+  // The live-shell gate: rows whose command answers "did the gesture reach
+  // a live shell host" mark ?pfShell=1 and the arm fires only once the
+  // shell exists - the popup's own shape (a user taps it with the player
+  // live), not the fresh-navigation race.
+  const waitShell = parsed.searchParams.get("pfShell") === "1";
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  // The product installs the debug handle after its storage warm; the
+  // deadline stays generous - handle-missing after it is the real failure
+  // shape (skipped host / no #pf-debug), never a boot we should wait harder
+  // for.
+  const arm = async (cmd) => {
+    const deadline = Date.now() + 6000;
+    const forge = () => window.wrappedJSObject?.PlayerForge?.pfCommand;
+    while (Date.now() < deadline && typeof forge() !== "function") {
+      await sleep(40);
+    }
+    if (typeof forge() !== "function") {
+      return { command: cmd, reply: { ok: false, error: "PlayerForge debug handle missing" } };
+    }
+    if (waitShell) {
+      // The shell may live in an embed frame the command targets (the
+      // popup acts on the top document but the row's live shell is the
+      // iframe's) - scan the top document first, then same-origin child
+      // iframes (cross-origin embeds stay dark here; no row rides one).
+      const shellIn = (doc) => {
+        try {
+          if (doc.querySelector(".pf-shell")) return true;
+          for (const frame of doc.querySelectorAll("iframe")) {
+            const inner = frame.contentDocument;
+            if (inner?.querySelector(".pf-shell")) return true;
+          }
+        } catch { /* cross-origin frame: skip, keep polling */ }
+        return false;
+      };
+      const shellDeadline = Date.now() + 9000;
+      while (Date.now() < shellDeadline && !shellIn(document)) {
+        await sleep(60);
+      }
+      if (!shellIn(document)) {
+        return { command: cmd, reply: { ok: false, error: "no .pf-shell within the shell-wait deadline" } };
+      }
+    }
+    const accepted = forge()(cmd);
+    const attr = `data-pf-cmd-${cmd}`;
+    const railDeadline = Date.now() + 9000;
+    let raw;
+    while (Date.now() < railDeadline &&
+      (raw = document.documentElement?.getAttribute(attr)) === null) {
+      await sleep(40);
+    }
+    return {
+      command: cmd,
+      reply: raw === null
+        ? { ok: false, error: `no reply on ${attr} (arm status: ${accepted})` }
+        : JSON.parse(raw)
+    };
+  };
+  Promise.all(commands.map(arm)).then((replies) => {
+    if (document.documentElement) {
+      document.documentElement.dataset.plReply = JSON.stringify(replies);
+    }
   });
 })();

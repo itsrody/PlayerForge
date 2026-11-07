@@ -88,6 +88,7 @@ export const SETTINGS_SCHEMA = [
   {
     key: SETTING_KEYS.panelScale,
     type: "options",
+    label: "Panel Scale",
     // The zoom-based panel scale (the `zoom` density claim): the panel root
     // rescales uniformly, so fonts, paddings and the R5 radii chain all
     // scale by one factor (concentricity is preserved by uniformity - the

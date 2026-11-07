@@ -16,6 +16,7 @@
   },
   "permissions": [
     "storage",
+    "webRequest",
     "<all_urls>"
   ],
   "content_scripts": [

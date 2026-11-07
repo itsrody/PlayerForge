@@ -1,30 +1,12 @@
 /*
- * Companion background page. One receiver: the pfTrigger round trip - the
- * popup channel's exact shape (browser.tabs.sendMessage into the active
- * tab's top document), owned here because a content script has no tabs
- * access. The reply is structured-cloneable plain data by construction.
- *
- * The TAB_COMMAND literal "pf:command" mirrors src/kernel/contract.js's
- * TAB_COMMAND (a static file cannot import src); suite rows exercise the
- * channel so a contract drift fails loudly, not silently.
+ * Companion background page. No receiver: the command round trip moved
+ * inside the product's own extension machinery - a cross-extension
+ * browser.tabs.sendMessage structurally delivers only to the calling
+ * extension's own content scripts (browser isolates runtime.onMessage per
+ * extension, MDN-pinned), so the popup-channel hop a second addon sends can
+ * never reach PlayerForge's commander. The trigger now rides the debug
+ * console handle's pfCommand arm (document #pf-debug), which relays through
+ * the package's own background -> the real tabs.sendMessage hop -> kernel.js
+ * TabCommands. The page stays installed to carry the content script; the
+ * tabs permission keeps the manifest's install shape.
  */
-browser.runtime.onMessage.addListener((message) => {
-  if (message?.pfTrigger === undefined) {
-    return undefined;
-  }
-  return (async () => {
-    try {
-      const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-      if (!tab || tab.id == null) {
-        return { ok: false, error: "no active tab" };
-      }
-      const reply = await browser.tabs.sendMessage(tab.id, {
-        type: "pf:command",
-        command: String(message.pfTrigger)
-      });
-      return { ok: true, reply: reply === undefined ? null : reply };
-    } catch (err) {
-      return { ok: false, error: String(err?.message ?? err).slice(0, 200) };
-    }
-  })();
-});
