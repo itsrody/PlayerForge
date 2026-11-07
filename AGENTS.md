@@ -1994,6 +1994,88 @@ the shipped rows, caught on the dist-CSS review.)
   With trim + zoom landed and the readout reverted, the redesign-class
   ledger is closed; nothing further remains open on it.
 
+**The native-replacement wave-2 audit (Nov 2026, user-directed "explore
+more Firefox's C++ replacing JS loops"; post-`5479871`, record-only,
+audit-clean).** The three loop-catalog walks (saturation audit,
+C++-operators-first, loop-body walk) closed the space from the JS side —
+every surviving loop was an allocation contract, rate-bounded, or product
+semantics. This wave re-entered from the engine side on the one lens
+those walks never priced: **the JS-callback re-entry tax inside native
+array verbs** — the assumed standing reason callback-shaped verbs
+(`findLastIndex`/`some`/`filter`) can never claim a manual walk even
+though the OUTER loop of a verb is engine code. Artifacts:
+`check/.tmp/native-wave2-probe.mjs` (G1/G0 sanity + three axes) and
+`native-wave2-report.json`, both uncommitted per sweep convention.
+
+- **Harness findings worth holding.** (a) The page-realm
+  `performance.now()` quantizes to EXACTLY **1ms** on this floor (G0:
+  every distinct step 1.000ms; a 20M-element burst reads 12ms on both
+  `performance.now()` and `Date.now()` — G1's clock cross-check). Any
+  measurement must size raw totals to ≥ ~20ms and derive per-element by
+  division, and every row carries its raw total plus a `quantized` flag
+  (min round < 20×grain) so an under-grain reading cannot masquerade as a
+  number. (b) The corpus must force honest work on BOTH arms — the first
+  draft ended its corpus on a predicate match, which let the
+  reverse-scanning `findLastIndex` answer after ONE element and read
+  0ms/scan while the manual walk paid the full N; the fix is structural
+  and recorded in the probe: an all-miss corpus (both arms walk all N)
+  with parity sanity rows (same answer from both arms) before any cost
+  comparison, plus a one-match corpus as its own honest row.
+- **(T1) the callback tax is ZERO on 159 — the old standing reason is
+  dead; shape, not per-element cost, defends the manual walks.** On an
+  all-miss 2M-element Float64Array (predicate never matches, so the verb
+  and both manual walks pay the full N): manual constant-folded walk
+  **0.46 ns/element** (23ms raw), the same walk calling the SAME
+  predicate through a JS closure **0.46** (+0.00), and the C++ verb
+  `findLastIndex` scanning the whole array with that JS predicate per
+  element **0.45** (−0.01, 72ms raw). SpiderMonkey inlines a simple
+  numeric predicate to parity with the hand loop — the callback re-entry
+  costs nothing beyond the scan. What stays for the manual walks: the
+  tree's scans answer at amortized windows (16-entry gesture/HUD
+  scale: manual window 0.59 ns/elem ≈ 9.4ns/window vs the verb paying the
+  forced full 16 at 0.92 ≈ 14.7ns/window), the loop body carries state
+  the verb's contract cannot (the sorted-start walk's moving dead floor),
+  and most tree scans ride strings/DOM/cue structures where no array-verb
+  shape exists. Engine finding recorded: `findLastIndex` scans BACKWARD
+  and stops at the match — forced match at N/2 lands 0.42 ns/elem while
+  walking half — the verb's native direction IS an amortized floor, the
+  shape the tree's manual dead-floor rides already; nothing to adopt,
+  a premise to know.
+- **(T2) scanner primacy re-derived with the shipped unit verbatim — the
+  regex return-path decline stands, now with a floor reading.** The
+  shipped `timecodeToSeconds` + `parseTimingLine` replicated verbatim
+  over a 38k-line corpus (19k timing lines + 19k junk): **13.2 ns/line**
+  (30ms raw), 0 semantic mismatches. The capture-array + `Number()`
+  regex twin — the shape the scanner was written to replace — measured
+  **27.2 ns/line** (62ms raw): 2.1× SLOWER today; the JIT did not shrink
+  the twin's per-line allocation tax (two capture arrays, three regex
+  entries, eight `Number` coercions per timing line). The unit is a
+  0.25ms share of the ~11ms/1.1MB whole-parse budget at ingest rate —
+  the same axis the original A/B declined on. The manual scanner is
+  re-recorded correct, not re-opened.
+- **(T3) flash-scan native identity — cancel-by-scan has no native
+  replacement, now measured above grain.** A runtime WAAPI
+  `Element.animate()` animation carries `animationName` = `undefined`
+  (`kindOf Animation`); a foreign looped CSS animation carries a readable
+  `@keyframes` name (`"wf-foreign"`, `kindOf CSSAnimation`). No native
+  filter can select only flashElement's flash — name-selecting would
+  INVERT the scan (drop the foreign background-animating animation the
+  scan must reap too). The shipped `getAnimations()` +
+  `getKeyframes().some(backgroundColor)` scan measured **3.8µs/pass** on
+  the loaded element (ours + a foreign loop running; bare
+  `getAnimations()` alone 1.4µs) at per-human-flash rate, zero unhandled
+  rejections across 150k passes.
+
+Sweep disposition: no src change earned adoption. The wave-2 probe
+re-measured the one premise the saturation audits never priced and the
+floor answers it at zero on 159 — but every callback-shaped verb row
+still loses to the manual shapes on the axes that matter (windows pay
+delta, the walks carry floors the verbs cannot, and the per-element
+predicates ride string/DOM data no array verb accepts). The scanner
+primacy and the flash scan's cancel-by-scan identity re-recorded with
+floor numbers. Artifact scripts under `check/.tmp/`, uncommitted per
+sweep convention.
+
 ## 5. Conventions (the change bar)
 
 1. **Comments explain WHY with reasoning** — the rejected alternatives and
@@ -2483,7 +2565,10 @@ plane (`2d67422`), the shared geometry/context planes — dom.js + page.js
 map with every src module family carrying a dedicated record — plus the
 adoption identity plane (`0f06dbd`, the measured hotpath budgets) and the
 two post-close record-only audits: the allocation drift re-audit and the
-native-operator saturation audit (post-`75437f2`, the probe batch). The
+native-operator saturation audit (post-`75437f2`, the probe batch), then
+the substrate series (C++ `20b07da`, kernel-plane `ea5a8f1`, shell-plane
+`5479871`) and the native-replacement wave-2 probe (post-`5479871`,
+record-only). The
 series'
 record-only commits changed
 AGENTS.md alone; every src-touching pass proved
