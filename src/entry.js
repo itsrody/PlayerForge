@@ -1,5 +1,5 @@
 import { Kernel } from "./kernel/kernel.js";
-import { DEBUG_HASH_TAG, NET_HINT, COMMAND_RELAY, DRM_LATCH } from "./kernel/contract.js";
+import { DEBUG_HASH_TAG, NET_HINT, COMMAND_RELAY, DRM_LATCH, isAdHost } from "./kernel/contract.js";
 import { installTabCommands, installFrameDiagnostics, dumpFrameState } from "./kernel/kernel.js";
 import { installContextBridge, requestFullscreenProvision } from "./shared/page.js";
 import { installVideoProbe } from "./kernel/discovery.js";
@@ -12,61 +12,25 @@ import { initFullscreenGate } from "./shared/dom.js";
 // at runtime via browser.runtime.getManifest(), so what the UI reports is
 // always what the browser actually runs - never a stale build-time constant.
 
-/**
- * Any match skips the document entirely (ad/track/captcha frames host no
- * players). Hostname-anchored on purpose: an ad domain may appear only in a
- * path or query on a legitimate video page (`/doubleclick-interview/`,
- * `?ref=taboola.com`), and substring-matching the whole href would silently
- * skip a real player. Suffix match covers subdomains; captcha widget frames
- * live on their own domains (hcaptcha.com, recaptcha.net), so dropping the
- * path-style `recaptcha` probe costs only a harmless script eval in the
- * occasional captcha iframe that hosts no video.
- */
-const AD_HOST_SUFFIXES = [
-  "doubleclick.net",
-  "googlesyndication.com",
-  "googleadservices.com",
-  "adnxs.com",
-  "taboola.com",
-  "outbrain.com",
-  "hcaptcha.com",
-  "googletagmanager.com",
-  "recaptcha.net",
-  "facebook.net"
-];
-/** Prefix families: adservice.google and its subdomains. */
-const AD_HOST_PREFIXES = ["adservice.google."];
-
-/**
- * The compiled alternation twin: the suffix family as one end-anchored
- * alternation, the prefix family as one lead alternation — both derived
- * from the two source tables below and built once at module init, so the
- * scan rides the C++ RegExp engine instead of a 10-iteration JS walk
- * (24.5ns/host vs the loop's 90.5 on the delegation probe; at boot rate
- * the absolute saving is noise, the shape gain is the one-op site). The
- * end anchor is the loop's own equality/endsWith semantics: a
- * trailing-suffix trap like `doubleclick.net.evil.com` must not match,
- * and the probe draft's un-anchored form would have accepted it. Dots are
- * escaped because a suffix's literal dots must not become wildcards;
- * hostnames from `new URL().hostname` are spec-lowercase, so no flag.
- */
-const AD_HOST_RE = new RegExp(
-  "(?:^|\\.)(" +
-    AD_HOST_SUFFIXES.map((suffix) => suffix.replace(/\./g, "\\.")).join("|") +
-  ")$|^(?:" +
-    AD_HOST_PREFIXES.map((prefix) => prefix.replace(/\./g, "\\.")).join("|") +
-  ")"
-);
-
-function isAdHost(hostname) {
-  return AD_HOST_RE.test(hostname);
-}
-
 // Read once at module eval: the manifest is immutable for the document's
 // lifetime, so a getter adds nothing - the version reports what this
 // loaded build actually is even if the package updates underneath.
 const manifestVersion = browser.runtime.getManifest().version;
 
+/**
+ * The content plane's boot gate over contract.js's shared skip vocabulary
+ * (isAdHost). The frame-level work the vocabulary does splits by plane on
+ * the extension floor: the Reforge background classifies FRAMES by network
+ * identity and refuses them at its witness floor (ledger.js), while THIS
+ * gate is the injection plane's own control - content_scripts inject
+ * manifest-matched at document_start, and no webRequest classification can
+ * reach a script eval that runs first, so the eval must carry its own
+ * hostname read. Any match skips the document entirely (ad frames host no
+ * players; the about:/data: gate covers the gate-less URLs the matcher
+ * cannot see). The top-host leg is the one the manifest matcher cannot
+ * express: exclude_matches matches each frame's own URL, so a nested frame
+ * under an ad-hosted top would still inject - the top read declines it.
+ */
 function shouldSkipUrl() {
   try {
     const href = location.href;

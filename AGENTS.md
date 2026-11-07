@@ -116,7 +116,15 @@ the sole claim veto), the panel's Reforge group reads the roster through the
 storage echo plane, and any remaining per-document facts ride messages, never
 verb wraps. The roster/listener lifecycle is already the ledger's grammar —
 main_frame clears the tab, sub_frame clears the frame, `tabs.onRemoved` drops
-it — extended with the family records keyed `(tabId, frameId, family)`.
+it — extended with the family records keyed `(tabId, frameId, family)` and
+the **skip floor** (user direction 2026‑11): the ad-host skip vocabulary
+moved to `kernel/contract.js` as the planes' one source table (`isAdHost`),
+the content plane keeps the boot gate (content_scripts inject
+manifest-matched at document_start — no webRequest classification reaches an
+eval that fast), and the Reforge background classifies FRAMES by network
+identity (a frame whose own main/sub_frame navigation named an ad host)
+refusing them at the witness floor — no record, no ingest, no hint, no claim,
+no filter; ads ride native, never blocked.
 
 The batch plan (each src batch rides the full green battery ≥3×; census rows
 re-graded in the same commit, never bumped alone):
@@ -336,11 +344,22 @@ artifacts under `check/.tmp/`, left uncommitted per convention).
 
 The two exclusion vocabularies are complementary, not
 redundant: the 24 `@exclude-match` patterns ban the player *platforms* the
-match-all lets sitewide, while `entry.js`'s runtime skip
-(`AD_HOST_SUFFIXES`/`AD_HOST_PREFIXES` + the about:blank/data: gate) does the
-hostname-anchored work the header cannot — rejecting ad/captcha *frames* of
-sites the header allows, whose hostnames may appear only in a path or query
-of a legitimate video page.
+match-all lets sitewide, while the ad-host skip vocabulary (`AD_HOST_SUFFIXES`/
+`AD_HOST_PREFIXES`, now living in `kernel/contract.js` after the userscript-era
+tables moved — user direction 2026-11) does the hostname-anchored work the
+header cannot — rejecting ad/captcha *frames* of sites the header allows,
+whose hostnames may appear only in a path or query of a legitimate video
+page. On the extension plane the vocabulary splits its duty by plane:
+`entry.js`'s boot gate keeps the eval-time hostname read (content_scripts
+inject manifest-matched at document_start — no webRequest classification
+reaches an eval that fast; the top-host leg covers the nested frame under an
+ad-hosted top, which exclude_matches cannot express because it matches each
+frame's own URL), and `ledger.js` carries the **skip floor** — a frame whose
+own main/sub_frame navigation named an ad host is refused the whole witness
+plane (no record, no roster ingest, no media hint, no claim, no body filter),
+while resource requests never mark (a legitimate page loading `gtm.js` in
+its top frame keeps its own video witness). Ads ride native at both planes —
+observed-and-ignored, never blocked.
 
 **Sweep #5 record (exclusion-vs-registry non-overlap, audit-clean).** The two
 ban surfaces were cross-checked against the 15-record `SDK_REGISTRY` per
@@ -798,13 +817,26 @@ iframes, same-origin and cross-origin (`all_frames: true`,
   presumed-protected, body evidence outranks the page context, and new
   records for a latched frame are refused outright; the census's second
   fetch lives here, and the filterRewrites census row counts its two
-  honest occurrences in one arm.
+  honest occurrences in one arm. The **skip floor** (user direction
+  2026-11) rides the same listener: a frame whose own main/sub_frame
+  navigation named an ad host (`isAdHost`, contract.js's one source table)
+  marks that (tab, frame) — a later navigation re-arms it — and every
+  witness surface refuses the mark's frames (`#onHeaders`: no record
+  fetched, no roster ingest, no media hint; `#claimManifest`: no absorb
+  filter, no claim answer); resource requests never mark, so a legitimate
+  page loading `gtm.js` in its top keeps its own video witness, and the
+  hint refusal doubles as correctness (the content plane's boot gate never
+  booted a kernel there — the hint was a dead letter).
 
 ### kernel/ — policy layer
 - **contract.js** — the shared vocabulary both layers import in isolation:
   gesture registry (`GESTURES`/`GESTURE_IDS` are formula-derived from `{id:
   label}` pairs), `GESTURE_EVENTS` (`pf:gesture-<id>`), `DEBUG_HASH_TAG =
-  "pf-debug"`, tuning knobs, and `AdoptionHome` — the frozen adoption
+  "pf-debug"`, tuning knobs, the **ad-host skip vocabulary**
+  (`AD_HOST_SUFFIXES`/`AD_HOST_PREFIXES` → the compiled `isAdHost`
+  alternation, moved here from entry.js by user direction 2026-11 as the
+  planes' one source table — the declaration + its one derivation are the
+  census's two spellings), and `AdoptionHome` — the frozen adoption
   identity the kernel→shell watcher protocol carries (one record per
   adoption through the provider, the `RemovalWatch` anchors, and the
   destroy-readopt compare; every seam previously re-spelled the

@@ -54,6 +54,64 @@ export const COMMANDS = Object.freeze({
 export const DEBUG_HASH_TAG = "pf-debug";
 
 /**
+ * The ad-host skip vocabulary, the planes' shared source table: an
+ * ad/track/captcha frame hosts no players, so every plane that controls a
+ * surface refuses it. Hostname-anchored on purpose: an ad domain may appear
+ * only in a path or query on a legitimate video page (`/doubleclick-interview/`,
+ * `?ref=taboola.com`), and substring-matching the whole href would silently
+ * skip a real player. Suffix match covers subdomains; captcha widget frames
+ * live on their own domains (hcaptcha.com, recaptcha.net).
+ *
+ * The vocabulary's moved story (user direction 2026-11): the eval-time gate
+ * was the userscript-era compensation - injected in every frame with no
+ * control, the content script refused by hostname at boot. The extension
+ * plane splits the control by plane: the content script keeps the boot gate
+ * (content_scripts inject manifest-matched, document_start - no webRequest
+ * classification can reach an eval that fast), while the Reforge background
+ * classifies FRAMES by network identity and refuses them at its witness
+ * floor (ledger.js). One source table - a second spelling site would fork
+ * the vocabulary, the exact same shape the census pins on SETTING_KEYS.
+ */
+export const AD_HOST_SUFFIXES = [
+  "doubleclick.net",
+  "googlesyndication.com",
+  "googleadservices.com",
+  "adnxs.com",
+  "taboola.com",
+  "outbrain.com",
+  "hcaptcha.com",
+  "googletagmanager.com",
+  "recaptcha.net",
+  "facebook.net"
+];
+/** Prefix families: adservice.google and its subdomains. */
+export const AD_HOST_PREFIXES = ["adservice.google."];
+
+/**
+ * The compiled alternation twin: derived from the two source tables above
+ * and built once at module init, so the scan rides the C++ RegExp engine
+ * instead of a 10-iteration JS walk (24.5ns/host vs the loop's 90.5 on the
+ * delegation probe; per-request in the background, the same shape). The
+ * end anchor is the loop's own equality/endsWith semantics: a
+ * trailing-suffix trap like `doubleclick.net.evil.com` must not match, and
+ * an un-anchored form would have accepted it. Dots are escaped because a
+ * suffix's literal dots must not become wildcards; hostnames from
+ * `new URL().hostname` are spec-lowercase, so no flag.
+ */
+const AD_HOST_RE = new RegExp(
+  "(?:^|\\.)(" +
+    AD_HOST_SUFFIXES.map((suffix) => suffix.replace(/\./g, "\\.")).join("|") +
+  ")$|^(?:" +
+    AD_HOST_PREFIXES.map((prefix) => prefix.replace(/\./g, "\\.")).join("|") +
+  ")"
+);
+
+/** The one consumer verb: a declined hostname skips the surface. */
+export function isAdHost(hostname) {
+  return AD_HOST_RE.test(hostname);
+}
+
+/**
  * The command-relay channel: content -> backgrounds, one message per command
  * the debug console handle's pfCommand arm forwards. The background answers
  * with the exact browserAction-popup hop - browser.tabs.sendMessage onto the

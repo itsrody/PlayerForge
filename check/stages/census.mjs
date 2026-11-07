@@ -163,6 +163,18 @@ const ROWS = [
   // innocent-looking "second ingest" half-built on XHR or a blob/img/src
   // channel the page's CORS cannot grant.
   {
+    name: "ad-host skip vocabulary spellings",
+    pattern: "AD_HOST_SUFFIXES",
+    expect: 2,
+    why: "contract.js's shared skip vocabulary, consumed exactly twice (the source-table declaration + the one compiled-alternation derivation in the same file): the userscript-era entry.js tables moved here (user direction 2026-11) as the one spelling both planes read (content boot gate + Reforge plane frame classification). A third occurrence is a forked vocabulary - the exact drift the single-source law pins on SETTING_KEYS"
+  },
+  {
+    name: "ad-host skip consumers",
+    pattern: "isAdHost(",
+    expect: 4,
+    why: "the vocabulary's consumer sites: the one definition in contract.js, entry.js's two boot-gate reads (own-document host + the cross-origin top host - the leg the manifest matcher cannot express), and ledger.js's one frame-identity mark (a frame whose own main/sub_frame navigation named an ad host refuses the witness floor: no record, no ingest, no hint, no claim). Resource requests never mark - a legitimate page loading gtm.js in its top keeps its video witness"
+  },
+  {
     name: "fetch calls",
     pattern: "fetch(",
     expect: 2,

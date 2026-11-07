@@ -1,4 +1,4 @@
-import { NET_HINT } from "../kernel/contract.js";
+import { NET_HINT, isAdHost } from "../kernel/contract.js";
 import {
   classifyUrl,
   classifyContentType,
@@ -25,6 +25,15 @@ import {
  * rostered (the recovered branch's ignore-by-design class: per-segment
  * rostering floods the records on an ABR page).
  *
+ * THE SKIP FLOOR (user direction 2026-11): the plane's own frame
+ * classification over contract.js's isAdHost vocabulary - a frame whose
+ * own document request named an ad host is ad-identified, and its whole
+ * network life refuses this plane (no record, no ingest, no hint, no
+ * claim, no filter). Resource requests never mark (a legitimate page
+ * loading GTM in its top keeps its video witness), the frame's own
+ * main/sub_frame navigation is the identity witness, and the mark rides
+ * native - ads are observed-and-ignored, never blocked.
+ *
  * THE INGEST ARM (batch 2, probe-decided; batch 3 collapsed it into the
  * page's own traffic): a manifest family's FIRST sighting rides a
  * pass-through `filterResponseData` capture - the page reads its native
@@ -33,7 +42,7 @@ import {
  * the observe-only body read WITHOUT blocking, and batch 3's
  * `webRequestBlocking` grant (probe B proved the lever) opened the filter
  * seam the collision always wanted. The batch-2 fetch ingest remains as
- * the FAILURE fallback only (the filter failed or died unle witnessed):
+ * the FAILURE fallback only (the filter failed or died un-witnessed):
  * single-flight per roster identity bundles token-rotation bursts, an
  * attempt is done-once per record lifetime, failures settle verdict
  * "unknown" - never a retry loop.
@@ -117,6 +126,16 @@ export class NetHintLedger {
    *  DRM_LATCH message). Cleared at the same navigation boundaries and
    *  tab drop as the records. */
   #latched = new Map();
+  /** tabId -> Set(frameId): frames whose witness identity is ad-hosted
+   *  (the Reforge skip floor, per contract.js's isAdHost vocabulary): the
+   *  frame's own document request named an ad host, and every later leg of
+   *  that frame's network life refuses the witness plane - no family
+   *  record, no roster ingest fetch, no media hint, no claim answer, no
+   *  body filter. The frame's own navigation request is its network
+   *  identity (main_frame/sub_frame only mark - a legitimate page loading
+   *  gtm.js in its top frame must not refuse its own video). Cleared at
+   *  the same navigation boundaries as the other frame state. */
+  #skipped = new Map();
   /** requestId -> filter state: the manifest body filter's per-request
    *  bookkeeping (absorb mode captures the body for the roster; serve
    *  mode holds a claim's rewrite). Entries die at the filter's own
@@ -150,10 +169,34 @@ export class NetHintLedger {
         this.#hinted.delete(details.tabId);
         this.#families.delete(details.tabId);
         this.#latched.delete(details.tabId);
+        this.#skipped.delete(details.tabId);
       } else if (details.type === "sub_frame") {
         this.#hinted.get(details.tabId)?.delete(details.frameId);
         this.#families.get(details.tabId)?.delete(details.frameId);
         this.#latched.get(details.tabId)?.delete(details.frameId);
+        this.#skipped.get(details.tabId)?.delete(details.frameId);
+      }
+      // The skip floor's mark (the Reforge plane's frame classification,
+      // user direction 2026-11): a frame whose OWN document request named
+      // an ad host rides the skip vocabulary - resource requests
+      // (script/img/media) do not mark, so a legitimate page loading GTM
+      // in its top frame keeps its video witness. Marking runs only on
+      // the two document types; the mark then refuses everything the
+      // witness plane does with that frame (below), while the request
+      // itself stays native - ads are observed-and-ignored, never
+      // blocked (the reforge premise: non-DRM media improves, other
+      // traffic holds byte-untouched).
+      if (details.type === "main_frame" || details.type === "sub_frame") {
+        const navUrl = URL.parse(String(details.url ?? ""));
+        if (navUrl && isAdHost(navUrl.hostname)) {
+          let skippedFrames = this.#skipped.get(details.tabId);
+          if (!skippedFrames) {
+            skippedFrames = new Set();
+            this.#skipped.set(details.tabId, skippedFrames);
+          }
+          skippedFrames.add(details.frameId);
+          return {};
+        }
       }
       return this.#claimManifest(details);
     }, { urls: ["<all_urls>"] }, ["blocking"]);
@@ -171,6 +214,7 @@ export class NetHintLedger {
       this.#hinted.delete(tabId);
       this.#families.delete(tabId);
       this.#latched.delete(tabId);
+      this.#skipped.delete(tabId);
       // In-flight ingests ride #ingestKey = `tabId|familyKey` and die with
       // the tab - a settled fetch must never stamp resurrected state.
       for (const key of this.#ingesting.keys()) {
@@ -196,6 +240,13 @@ export class NetHintLedger {
     if (typeof browser.webRequest.filterResponseData !== "function") {
       // The lever is manifest-floor fact (probe B with the blocking
       // grant, probe C without); a floor that loses it rides native.
+      return {};
+    }
+    if (this.#skipped.get(details.tabId)?.has(details.frameId)) {
+      // The skip floor: an ad-identified frame's media traffic refuses
+      // the witness plane wholesale - no absorb filter, no roster
+      // ingest fetch, no claim answer. (A video ad stream is exactly
+      // the traffic the product leaves byte-untouched.)
       return {};
     }
     const byUrl = classifyUrl(details.url);
@@ -338,6 +389,13 @@ export class NetHintLedger {
 
   #onHeaders(details) {
     if (details.tabId === -1) {
+      return;
+    }
+    if (this.#skipped.get(details.tabId)?.has(details.frameId)) {
+      // The skip floor: an ad-identified frame refuses record, roster
+      // ingest and hint alike (the hint would be a dead letter into the
+      // skipped frame's realm anyway - the content plane's own gate
+      // never booted its kernel there).
       return;
     }
     const contentType = (details.responseHeaders ?? []).find(
