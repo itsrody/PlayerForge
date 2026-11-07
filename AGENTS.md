@@ -1687,6 +1687,175 @@ record identity, the capture-only reveal route) were re-proven, not
 corrected. Artifact scripts under `check/.tmp/`, uncommitted per sweep
 convention.
 
+**The shell-plane substrate audit (Nov 2026, user-directed "deeper than
+operators", scoped to `src/shell/` — media, resume, subtitles, chrome,
+inputs — plus the chrome sheet's engine premises; post-`ea5a8f1`,
+record-only, with three premise-wording corrections and one src-relevant
+finding flagged for user direction).** The kernel-plane batch descended on
+the boot plane's engine premises; this one does the same for the feature
+layer's. Artifacts: `check/.tmp/shell-substrate-probe.mjs` (a 7-axis PLAN
+runner — S1 media clock, S2 cue motion lane, S3 picture geometry, S4
+pointer/click substrate + S6 Esc lattice driven by REAL geckodriver input
+in node mode, S5 WAAPI flash grammar, S7 R4 scroll-edge timeline — every
+evaluated body self-contained, watchdog-belted) and
+`shell-substrate-report.json` (the consolidated all-axes-green run; the
+trailing `done` line stripped at write time), all uncommitted per sweep
+convention. Verdicts, one per axis:
+
+- **(S1) media-clock substrate — the resume drive's clock reads exactly as
+  recorded; the clamp guards are engine-required.** Flight `timeupdate`
+  fired 4.0Hz (16 ticks / 3.97s, median inter-tick 280ms — the ~250ms
+  doc constant is the same neighborhood, no correction), PAUSED read
+  ZERO ticks over a quiet second (the first version of the axis measured
+  3+ ticks — it had not paused the video before its quiet window; the
+  pause ordering is part of the harness lesson), and the tick stream
+  carries seek-injected ticks (the seek targets 5/9/9.5 appear verbatim:
+  the clock broadcasts on seeks too — harmless for the tracker, whose
+  checkpoint math is span-clamped, but worth knowing before anyone reads
+  tick counts as a cadence witness). `fastSeek(9.5)` landed 9.5 in 44ms.
+  `setPositionState` throws TypeError on `position > duration` AND on a
+  negative duration, while negativeRate/zeroDuration/missingPosition are
+  all ok — media.js's quantize/clamp (`currentTime < duration` cap) is
+  measured-necessary, not defensive.
+- **(S2) cue motion-lane substrate — the ENTER fade is real; the EXIT
+  fade is not, and the exit prose needs its correction.** The replica
+  matched the shipped rows byte-for-byte (`transition: opacity, translate,
+  display … allow-discrete`, `@starting-style`, mirrored `&[hidden]`
+  targets). Enter: the curve tweens from the starting-style pose
+  (opacity 0→0.09→…→0.9 over ~15 frames with the 3px settle-in), reaching
+  rest inside the authored 0.2s; a mid-exit un-hide re-fades cleanly from
+  0. Exit: the display:none flip creates NO transition — the synchronous
+  in-flush probe (the flip's own forced recalc, the exact instant a
+  transition would be created) returns an EMPTY `getAnimations()`, display
+  none, opacity 0 from that first frame, identical for the attribute
+  flip and a class flip, while a control that flips opacity/visibility
+  WITHOUT touching display creates two running transitions at that same
+  flush (translate progress 8ms, opacity mid-flight 0.037). So on 159
+  Gecko builds enter transitions through `@starting-style` and the
+  allow-discrete lane, but never an exit transition across a display:none
+  flip — the sheet's "holds to a real fade" claim for cue exit is
+  measure-false, and shipped cue exit is an instant removal, not a 200ms
+  fade (invisible at cue cadence; no check row pins it; acceptance is
+  live). Correction candidate: the styles.css exit prose.
+- **(S3) picture substrate — the transform-split reading confirms; the
+  "any ancestor transform" universality does not.** GBCR carries the
+  element's OWN transform scale (1000×562.5 under scale(1.25) vs the
+  untransformed offsetWidth 800×450) — the rect-vs-offsetWidth
+  transform-split premise confirmed. Ancestor `translate(50px,50px)`:
+  the layer-relative delta equals the local write exactly (the shipped
+  formula lands 487.5 on screen — deltas cancel). Ancestor `scale(2,
+  origin 0 0)`: a viewport-derived delta written as a local px
+  OVERSHOOTS — a video top 450 local px lands on screen 1000 vs the
+  intended 775 (delta error = (s−1)×viewportDelta). `#derivePicture`'s
+  "deltas stay truthful under any ancestor transform" docstring is
+  measure-false for scale (true for translate). The mismatch class is
+  bounded on this tree — the reference and the layer live inside the SDK
+  container's own compose surface, which no known SDK puts under an
+  ancestor transform — but the universal wording needs its correction
+  (prose-only, correction candidate). The fill-claim premise confirmed:
+  the 1.25×-scaled stream clipped to the container yields exactly the
+  800×450 box, i.e. the stage clip is a no-op when fill/contain is
+  aspect-aligned with the container.
+- **(S4) pointer substrate (real geckodriver Actions input) — the
+  prevent-scope rule gains its click-survival pin; the lift-race belt is
+  unexercised by every tried shape.** Real driver taps: pointerdown/move/
+  up all `cancelable: true`; a plain tap keeps its whole sequence AND the
+  UA click; a pointerdown preventDefault suppresses the compat mousedown
+  (absent from the event census) but still delivers exactly 1 click —
+  forge's time-based `#suppressClickUntil` suppression is
+  measured-necessary: pointerdown cancellation does not own the click.
+  Lift race: release-in-up, double-release-in-up, and a DEFERRED release
+  (setTimeout-0) after the implicit release ALL landed `ok-noThrow` with
+  `hasPointerCapture` false — no NotFoundError shape was reachable from
+  any race tried on this floor/driver; the two recorded lift-race catch
+  belts stay as defensive release-tail machinery (teardown must complete,
+  the census's classification), now with the record that their named
+  shape did not fire under either probe arm.
+- **(S5) WAAPI flash substrate — flashElement's finished-cancel leg is a
+  belt with zero measured debt, and the restart pass is trivial.** A
+  finished fill:`none` animation is AUTO-REMOVED from `getAnimations()`
+  (count 0 after finish) on 159 — nothing accumulates for the scan to
+  reap; `cancel()` on finished and running entries surfaced zero
+  unhandled rejections and zero page errors across full cycles; the
+  restart pass (scan + cancel + animate) measures ~13–43µs on the page's
+  coarse clock with the animation count pinned steady at 1 through an
+  instrumented 30-pass growth probe (no accumulation).
+- **(S6) dismissal substrate (real trusted Esc through the driver) — the
+  lattice's ordering premise holds, but the keyup wording and one
+  sentence about cancellation are both due.** Three readings: (1) the
+  CloseWatcher's cancel+close deliver INSIDE the keydown — plain Esc:
+  keydown → `cw-cancel` → `cw-close` all at the same ms, keyup 1ms
+  later. panel.js's "the watcher fires on the Escape KEYUP" engine
+  sentence is measure-false; what the lattice actually needs — close
+  lands AFTER the page's keydown listeners ran, so a field's
+  `pfEscArmed` is already set when close re-enters — is measured TRUE,
+  and the design's own close-handler armed re-check
+  (`active.dataset.pfEscArmed`) is exactly the guard that defers the
+  watched close on the armed press; only the keyup wording needs
+  correcting (correction candidate). (2) A page's capture keydown with
+  stopPropagation cannot shadow the close request — both keydown
+  listeners ran, then `cw-cancel`/`cw-close` delivered anyway (the UA
+  close-request stage rides outside the DOM dispatch tree). (3)
+  **Cancellation is asymmetric on the keyboard path: the Esc-path cancel
+  arrives `cancelable: true`, but preventDefault on it does NOT suppress
+  close** (close fired, same ms), while a prevented `cancel` on the
+  programmatic `requestClose()` path DOES suppress close (close absent).
+  On 159 the keyboard-path close is not gated on cancel prevention. No
+  impact on this tree — the panel never relies on cancelled cancels
+  (its guards are armed-state re-checks inside the keydown and close
+  handlers) — recorded so a future consumer of cancel-prevention against
+  real Esc is not burned by this floor.
+- **(S7) scroll-edge substrate — the batch's src-relevant finding: the
+  shipped R4 band's ramp is arithmetically dead.** The replica carried
+  the shipped rows byte-for-byte (`@property --pf-scroll-edge: <percentage>`
+  / inherits false / initial 0%; keyframes animating it; `opacity:
+  calc(var(--pf-scroll-edge) / 1%)` over `scroll(nearest)` at `0px
+  24px`). Measured: the animated var interpolates PERFECTLY on this
+  floor (8.33333% at 2px → 16.6667% at 4px → 50% at 12px → 100% at 24px,
+  clock progress 0.4999… at the 12px sample) — the interpolator is not
+  the problem; the SHIPPED DIVISOR is. `calc(8.33% / 1%)` = 833 (the
+  idiom multiplies the 0–100% share by 100) and opacity clamps to [0,1],
+  so the band's computed opacity is exactly 0 at rest (0%/1% = 0) and 1
+  at ANY other timeline position: the 24px ramp never paints; the band
+  turns fully on with the first pixel of scroll. Both control routes
+  that carry the intended mapping ramp byte-identically — direct scalar
+  opacity keyframes AND the same var route with `/100%` (0.083 → 0.167 →
+  0.5 → 1.0 against scrollTop/24). Two replica-artifact classes closed
+  on the way: an UNregistered custom property animates discretely by
+  spec (midpoint flip between 12–14px — the first run's "hard flip"
+  verdict was the missing `@property`, corrected with a registration
+  control), and `%/% division evaluates fine (0%/1% = 0) — the failure
+  mode is the size, not invalidity (a div-by-invalid reading would have
+  pointed the fix the wrong way). Impact: visually benign in normal use
+  (passing content and scrolled state coincide; the 24px gradient tail
+  itself still fades), but the R4 engagement story ("ramped by the
+  scroll timeline") is not what ships. The one-line fix is `/ 1%` →
+  `/ 100%`, pending user direction (record-only batch).
+
+Sweep disposition: record-only at write time — no adoption earned; every
+re-measured premise held except four flagged items, ALL LANDED with user
+direction in the same batch: the styles.css cue-exit prose rewritten to
+the measured instant-removal fact (S2), the `#derivePicture` and
+`ReferenceBox` wording split into its report/write halves with the
+translate-true / scale-overshoot boundary and the probe numbers (S3), the
+panel's Escape ordering sentence corrected to the measured keydown
+post-dispatch delivery (S6), and the R4 divisor one-line fix `/ 1%` →
+`/ 100%` (S7) — the src pass rode 3x green full-battery runs
+(79.8/79.5/79.5s). Harness lessons worth holding for any future
+shell-floor probe: a
+media-clock quiet window must PAUSE first (the axis's own first version
+counted flight ticks into its paused bucket); exit-transition questions
+need synchronous in-flush `getAnimations()` probes at the flip's own
+forced recalc — per-frame sampling alone cannot separate "no transition
+created" from "not yet ticked" (S2); a CSS anime replica must carry its
+`@property` registrations or it answers a different question (S7's first
+verdict was a replica artifact); real-driver pointer taps ride
+`raw.actions({ async: true })` with viewport-origin moves (an
+element-origin move in the `bridge` chain delivered nothing in this
+harness) — and S6's real-Esc legs ride `sendKeys` over the same action
+chain. Artifact scripts under `check/.tmp/`, uncommitted per sweep
+convention.
+
 **The redesign-class decisions (Nov 2026; user direction opened the ledger).**
 The saturation audit closed with "everything further is a redesign
 decision of its own" — this batch is that decision, taken with receipts.

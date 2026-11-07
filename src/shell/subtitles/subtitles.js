@@ -524,8 +524,15 @@ export class ForgeTrack {
    * null when the geometry cannot be read honestly (zero rects - the
    * layer-relative resolution stands; see the class docstring). Both rects
    * are read in the same pass (GBCR viewport coords, each fresh per call),
-   * so the deltas stay truthful under any ancestor transform; object-fit
-   * resolves per pass against the element (site-set styles included).
+   * so the deltas are truthfully reported whatever the ancestors carry.
+   * Their mapping onto layer-local px writes is transform-shaped: it is
+   * exact under an ancestor TRANSLATE (the deltas cancel), while an
+   * ancestor SCALE re-scales the same write on the way out (delta error
+   * (s-1)x, probed 159.0.1 - scale(2) lands a 450-local write at screen
+   * 1000 where the intended point is 775). No known SDK host puts a
+   * transform between the container and its compose surface, so translate
+   * is the real case; object-fit resolves per pass against the element
+   * (site-set styles included).
    */
   #derivePicture() {
     const layer = this.#cueLayer;

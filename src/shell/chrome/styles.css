@@ -385,10 +385,14 @@
       pointer-events: none;
       /* Slot entry/exit morph over the hidden flip (the panel's keyed
          pattern): a 3px settle-in and fade on entry, the mirrored targets
-         on the hidden state so the display interpolation holds to a real
-         fade and release instead of painting the stale cue through the
-         discrete half. Text swaps within a visible slot stay instant - the
-         motion keys off the hidden flip only, so no per-sentence churn. */
+         on the hidden state. Measured on the floor (shell-substrate S2):
+         the ENTRY fade runs through the starting-style + allow-discrete
+         lane, but the EXIT across a display:none flip creates no
+         transition on this engine - exit is an instant removal; the
+         mirrored targets stand ready so an engine that ever builds the
+         exit leg fades without a rewrite. Text swaps within a visible
+         slot stay instant - the motion keys off the hidden flip only, so
+         no per-sentence churn. */
       transition:
         opacity var(--pf-ease-duration) var(--pf-ease-curve),
         translate var(--pf-ease-duration) var(--pf-ease-curve),
@@ -653,9 +657,16 @@
         background: linear-gradient(to bottom, var(--pf-sheet), transparent);
         border-bottom: 1px solid var(--pf-border-soft);
         /* The scroll timeline still owns engagement: it writes
-           --pf-scroll-edge (0% at rest, 100% after 24px), and the whole band
-           fades by that share. One layer, one operand, no second timeline. */
-        opacity: calc(var(--pf-scroll-edge) / 1%);
+           --pf-scroll-edge (0% at rest, 100% after 24px), and the whole
+           band fades by that share. The divisor maps the animated
+           <percentage> onto a number, and it must be /100%: the /1%
+           variant this line once rode multiplied the share by 100 and let
+           opacity's [0,1] clamp collapse the ramp into a rest-0 /
+           first-scroll-1 binary - the engagement ramp never painted
+           (probed on 159.0.1, shell-substrate S7; the animated var itself
+           interpolates perfectly over the 24px range). One layer, one
+           operand, no second timeline. */
+        opacity: calc(var(--pf-scroll-edge) / 100%);
         animation: pf-scroll-edge linear both;
         animation-timeline: scroll(nearest);
         animation-range: 0px 24px;

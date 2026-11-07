@@ -560,10 +560,14 @@ export class SettingsPanel {
     try {
       this.#closeWatcher = new CloseWatcher();
       this.#closeWatcher.addEventListener("close", () => {
-        // The watcher fires on the Escape KEYUP, after a focused field's
-        // keydown already consumed that press to revert its edit (armed
-        // via pfEscArmed). That first Esc must not dismiss the panel -
-        // the next one will, through either path.
+        // The watcher's close delivers inside the Escape KEYDOWN - after
+        // this document's keydown listeners have already run (probed on
+        // 159.0.1 with real driver input: keydown -> cw-cancel -> cw-close
+        // at the same dispatch, keyup after) - so a focused field's
+        // keydown handler has already consumed that press to revert its
+        // edit (armed via pfEscArmed) by the time this re-entry happens.
+        // That first Esc must not dismiss the panel - the next one will,
+        // through either path.
         const active = deepestActiveElement(this.#shellHost);
         if (active?.dataset?.pfEscArmed) {
           return;

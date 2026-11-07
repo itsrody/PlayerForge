@@ -770,8 +770,12 @@ export function layoutViewport() {
  * one non-gesture consumer anchors against it, not merely sizes: the
  * subtitle renderer derives the displayed video picture within this rect
  * and lays its slots relative to it (see subtitles.js). Deltas between two
- * GBCR reads in the same frame stay honest under any ancestor transform,
- * which is what the picture consumer actually couples - and the pooled
+ * GBCR reads in the same frame are truthfully reported under any ancestor
+ * transform (the reported coords are what they are); what narrows the
+ * consumer's formula is the WRITE side - deltas equal layer-local px only
+ * under ancestor translate (they cancel), while ancestor scale re-scales
+ * the same write on landing (probed, 159.0.1). No known host carries such
+ * a scale on the container's compose surface. The pooled
  * origin rides the same read, so a scroll- or fs-motion can never leave
  * dims and origin from different instants.
  *
