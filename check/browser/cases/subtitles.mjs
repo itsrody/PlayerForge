@@ -34,7 +34,10 @@ import { sleep } from "../../lib/driver.mjs";
  * track over the retired worker's threshold (512KiB) drains through the
  * cooperative parse - the forgevtt async arm, now THE ingest backend since
  * the dedicated-Worker offloader retired - and lands its overloaded cue
- * through the real panel drop path.
+ * through the real panel drop path. The last row machines the hostile
+ * column: a genuinely over-ceiling (>16MiB) synthetic "subtitle" through
+ * the same real drop path refuses at the admission belt with the fail
+ * toast and renders no bomb cue.
  */
 
 export async function run({ session, boot }) {
@@ -343,6 +346,55 @@ export async function run({ session, boot }) {
     name: "over-threshold ingest drains the cooperative parse and lands its cue",
     status: scaleRide.ok === true ? "pass" : "fail",
     note: scaleRide.why ?? null,
+    ms: null
+  });
+
+  // The admission ceiling's proof: a >16MiB synthetic "subtitle" through the
+  // REAL panel drop path must refuse at #ingest's belt (before normalization
+  // or the parser own the string), land the fail toast, and NOT load a track
+  // - the previous track's cue stays untouched (the prior track name rides
+  // the hint). The File pre-read gate (file.size) dies even before the
+  // text() allocation - the row rides the real event path with a genuinely
+  // oversized File, so both legs are exercised.
+  const sizeRefusal = await session.evalAsync(function main(done) {
+    // A genuinely over-ceiling File (~26M bytes of text, ~700k timed cues),
+    // built cheap: one repeated line unit keeps the in-page build O(repeat).
+    const huge = "1\n00:99:99,000 --> 99:99:99,900\nPF bomb cue\n\n".repeat(700000);
+    const shadow = document.querySelector(".pf-shell")?.shadowRoot;
+    const tab = shadow?.querySelector('.pf-panel-tab[data-title="Subtitles"]');
+    const section = tab && shadow.getElementById(tab.getAttribute("aria-controls"));
+    if (!section) {
+      done({ ok: false, why: "no Subtitles section to drop into" });
+      return;
+    }
+    const dt = new DataTransfer();
+    dt.items.add(new File([huge], "bomb.srt", { type: "text/plain" }));
+    section.dispatchEvent(new DragEvent("dragenter", { dataTransfer: dt }));
+    section.dispatchEvent(new DragEvent("drop", { dataTransfer: dt }));
+    const deadline = Date.now() + 4000;
+    const poll = setInterval(() => {
+      const toast = document.querySelector(".pf-shell")?.shadowRoot?.querySelector("pf-toast.pf-visible");
+      const toastText = toast?.textContent ?? "";
+      const refusalToast = toastText.includes("Failed to load subtitles");
+      // The refusal must not have swapped the live track: no bomb cue slot.
+      const slots = document.querySelector(".pf-shell")?.shadowRoot?.querySelectorAll(".pf-cue:not([hidden])") ?? [];
+      const bombLoaded = [...slots].some((s) => s.textContent.includes("PF bomb cue"));
+      if (refusalToast && !bombLoaded) {
+        clearInterval(poll);
+        done({ ok: true, why: "fail toast landed, no bomb cue rendered" });
+        return;
+      }
+      if (Date.now() > deadline) {
+        clearInterval(poll);
+        done({ ok: false, why: `deadline; bombLoaded=${bombLoaded} toastText='${toastText.slice(0, 60)}'` });
+        return;
+      }
+    }, 120);
+  });
+  rows.push({
+    name: "over-cap ingest refuses at the admission belt (fail toast, no track)",
+    status: sizeRefusal.ok === true ? "pass" : "fail",
+    note: sizeRefusal.why ?? null,
     ms: null
   });
 

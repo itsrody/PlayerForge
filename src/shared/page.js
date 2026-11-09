@@ -341,10 +341,20 @@ function stripNonAscii(raw) {
 }
 
 /** Map a CTX_RESPONSE message into the {domain, path, title} payload shape
- *  shared by every responder set (pipe replies, port replies, broadcasts). */
+ *  shared by every responder set (pipe replies, port replies, broadcasts).
+ *  Field spans are capped by DETERMINISTIC TRUNCATION at the bridge arrival:
+ *  a hostile frame may post strings past any sane span, and every downstream
+ *  consumer (the context re-post, resume hashing, the snapshot sort, the
+ *  title regex strip) works on the whole value. Truncation - not rejection -
+ *  because the payload must stay answer-shaped for sibling frames, and a
+ *  same-input truncation keeps ids stable across visits. */
+const MAX_DOMAIN_CHARS = 256;
+const MAX_PATH_CHARS = 2048;
+const MAX_TITLE_CHARS = 512;
+
 function mapContextPayload(data) {
   return {
-    domain: data.domain,
+    domain: data.domain.slice(0, MAX_DOMAIN_CHARS),
     // String admission for path: this payload rides the structured-clone
     // postMessage surface, whose re-post line throws DataCloneError
     // synchronously on Symbol/function values (floor-probed; lone surrogates
@@ -352,8 +362,8 @@ function mapContextPayload(data) {
     // classes). A non-string domain already refuses at the gate; path
     // degrades to "" here the same way title degrades below, so a poisoned
     // field degrades its own arm instead of the whole context answer.
-    path: typeof data.path === "string" ? data.path : "",
-    title: stripNonAscii(typeof data.title === "string" ? data.title : "")
+    path: typeof data.path === "string" ? data.path.slice(0, MAX_PATH_CHARS) : "",
+    title: stripNonAscii(typeof data.title === "string" ? data.title.slice(0, MAX_TITLE_CHARS) : "")
   };
 }
 

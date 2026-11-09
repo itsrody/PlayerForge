@@ -125,7 +125,15 @@ export const TUNING = {
     cueSlots: 8,
     /** Vertical offset (em) between two concurrently rendered cue slots in
      *  the stack, so overlapping cues read as a visible pile. */
-    cueStackOverlapEm: 1.6
+    cueStackOverlapEm: 1.6,
+    /** Hostile-file admission ceiling, UTF-16 chars: the ingest engine owns
+     *  the whole string (a `file.text()` read and the NFC normalization are
+     *  whole-input operations), so a multi-gigabyte "subtitle" drop or a
+     *  hostile URL response would take the frame's memory down with it. A
+     *  named ceiling turns the byte bomb into the ordinary fail toast.
+     *  16 MiB covers 100x the largest real track ingested on the floor (the
+     *  >512 KiB cooperative-parse case rides far below it too). */
+    maxFileChars: 16 * 1024 * 1024
   },
   toast: {
     /** Completed-action feedback: skip, volume, fullscreen exit, fill. */

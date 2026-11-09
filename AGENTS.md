@@ -2522,6 +2522,67 @@ trust-gated API call sites), two record-only verdicts (N2 native classes, C2
 census closure). Proved on 3 consecutive all-green battery runs (234 rows
 each, ~86s).
 
+**The uBO-grade additive wave (Nov 2026, user-directed "all functions that
+can't be native to be built on native ones with robust additives, uBO-like";
+post-`bcb4dc0`, five admission gates landed).** The audit series
+(saturation, C++-ops, callback tax, loop-body walk) had already closed the
+"can it be one native op" side: every remaining manual function is engine-
+tight, an allocation contract, or product semantics. The actionable side of
+the direction is the second half — every manual engine that takes EXTERNAL
+data now carries uBO-style total admission at its intakes, and every one of
+the landed gates is a single native operation (typeof, `length` read,
+`slice`, `size`, `URL.parse`) — no new manual machinery anywhere; hardening
+rides the C++ substrate to the last byte. The intake census first (what was
+audited and needed nothing): forgevtt's scanners are shape-total (digit-only
+fields, bounded decode), the dual stepper intakes ride their `Number.isFinite`
+commit gate, the placement grain's `readPlacement` is index-gated and the
+sync/style seeds coerce at their seeds, `coerceSetting` annihilates wrong-type
+bool/options rows (no numeric rows exist in the schema — nothing to add),
+`domainScore` is band-bounded with early exits over short keys, and the
+title/hash planes were proven total by the first robustness batch's R4/R6.
+None of those earned a change. The five landed gates, per intake:
+
+- **Subtitle ingest ceiling — `TUNING.subtitles.maxFileChars` (16 MiB of
+  UTF-16 text).** The drop and URL paths converge at `#ingest`, whose belt
+  fires before NFC normalization or the parser own the string; `load()` adds
+  a `file.size` byte pre-gate so the hostile byte bomb dies before the
+  whole-input `file.text()` allocation spends it. Real tracks (tens of KB;
+  the >512KiB cooperative-parse case rides far below) unaffected — a drop
+  of 18 MiB of junk now lands the ordinary fail toast instead of taking
+  the frame's memory down with it.
+- **URL-layer admission in `loadFromUrl`** — `URL.parse(url)` refuses a
+  garbage scalar before the manager request ever sees it (the restore URL
+  and the panel input arrive from foreign-writable surfaces; a typo'd panel
+  input keeps its fail-toast feedback, a hostile stored value stays
+  bounded and network-silent).
+- **`#nameFromUrl` percent-decode totality belt** (the census's eighth
+  bare catch, named why) — a served pathname with a bare `%`
+  (`http://host/sub%`) is left in place by URL parsing but throws `URIError`
+  in `decodeURIComponent`; today that poisoned an otherwise good fetch with
+  the parse-fail toast for a display NAME. The raw segment is the fine
+  fallback.
+- **`#tryRestore` string admission** — a non-string `subsUrl` in the
+  foreign-writable resume entry is refused outright instead of riding
+  `String()` coercion into a "[object Object]" fetch attempt.
+- **`mapContextPayload` deterministic truncation** — domain 256 / path
+  2048 / title 512 chars at the bridge arrival: every downstream consumer
+  (the context re-post, resume hashing, the snapshot sort, the title regex
+  strip) had been working on the whole hostile value; the caps fire once at
+  admission and stay stable (a same-input truncation keeps entry ids
+  consistent across visits). Proven by the census and the frames case's
+  cross-origin rows, which ride real short payloads (236-row battery
+  all-green three times over).
+
+The battery grew one honest row to prove the ceiling on the floor
+(subtitles case): an over-cap synthetic drop through the REAL panel path
+lands the fail toast and renders no bomb cue. Battery note: run 1 came
+back with two robust-case clock-row fails (hidden-flush, checkpoint
+cadence) — clean captures (no console/page errors, shell present), a green
+isolated rerun of the case, no src path into those rows, and neither recur
+in three subsequent all-green runs: environment-correlated scheduling flake,
+recorded so the next reader does not chase a ghost. Proved on 3 consecutive
+all-green runs (236 rows each, ~86s).
+
 ## 5. Conventions (the change bar)
 
 1. **Comments explain WHY with reasoning** — the rejected alternatives and
@@ -2929,7 +2990,10 @@ stop at the first failure:
   re-anchors the running slot the same frame) and the scale row, a
   >512KiB drop through the real panel path proving the cooperative
   parse (the arm the retired Worker offloader left as sole backend)
-  drains and lands its overloaded cue, and the balance pin: the visible
+  drains and lands its overloaded cue, the over-cap refusal row (an
+  18 MiB synthetic "subtitle" through the same real drop path refuses at
+  the admission ceiling with the fail toast and renders no bomb cue), and
+  the balance pin: the visible
   cue's computed `text-wrap-style` is exactly `balance` (vocabulary
   presence — the pixel-top rows are the geometry guard balance must not
   move), `robust`

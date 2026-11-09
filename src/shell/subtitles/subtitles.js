@@ -1136,6 +1136,14 @@ export class SubtitleSession {
     if (this.#scope.disposed) {
       return;
     }
+    // Byte-level refusal BEFORE the read: `file.text()` is a whole-input
+    // allocation, so the hostile byte bomb must die here, not after it
+    // materialized (the #ingest text belt below is the one authority; this
+    // pre-gate only avoids spending the allocation).
+    if (file.size > TUNING.subtitles.maxFileChars) {
+      this.#fail("load", file.name, new Error(`file too large (${file.size} bytes > ceiling)`));
+      return;
+    }
     try {
       const rawText = await file.text();
       // A file load does not remove the entry's saved URL (still useful next
@@ -1153,6 +1161,15 @@ export class SubtitleSession {
     }
     const url = String(rawUrl || "").trim();
     if (!url) {
+      return;
+    }
+    // URL-layer admission BEFORE the network: the restore URL and panel input
+    // arrive from foreign-writable surfaces, and the native URL.parse is the
+    // one total read — refuse the address here so the manager request never
+    // sees a garbage scalar (a typo'd panel input keeps its fail toast, a
+    // hostile stored value stays bounded).
+    if (!URL.parse(url)) {
+      this.#fail("fetch", url, new Error("the URL layer refuses this address"));
       return;
     }
     let response;
@@ -1184,6 +1201,15 @@ export class SubtitleSession {
 
   async #ingest(name, rawText, savedUrl) {
     if (this.#scope.disposed) {
+      return;
+    }
+    // THE hostile-size belt (URL and drop paths converge here): normalization
+    // (NFC re-encode) and the parser are whole-input operations, so the
+    // ceiling fires before either touches the string. The `load()` byte
+    // pre-gate avoids the allocation for File reads; this one is the owner
+    // for every other path (URL responses, future callers).
+    if (rawText.length > TUNING.subtitles.maxFileChars) {
+      this.#fail("load", name, new Error(`subtitle too large (${rawText.length} chars > ceiling)`));
       return;
     }
     const normalizedText = SRT_NAME_RE.test(name) ? srtToVtt(rawText) : ensureVttHeader(rawText);
@@ -1222,7 +1248,11 @@ export class SubtitleSession {
       return;
     }
     const url = this.#shell.resume?.subsUrl;
-    if (!url || url === this.#restoreAttemptedUrl) {
+    // String admission: the resume entry is a foreign-writable storage
+    // surface — a non-string subsUrl must not ride String() coercion into a
+    // manager request ("[object Object]"); loadFromUrl's URL-layer gate
+    // would catch it, but the restore path refuses the shape outright.
+    if (!url || typeof url !== "string" || url === this.#restoreAttemptedUrl) {
       return;
     }
     this.#restoreAttemptedUrl = url;
@@ -1235,7 +1265,15 @@ export class SubtitleSession {
     if (!parsed) {
       return SUBTITLE_NAME_FALLBACK;
     }
-    const last = decodeURIComponent(parsed.pathname.split("/").pop() || "");
+    // Percent-decode totality: a served pathname may carry a bare `%`
+    // ("http://host/sub%") that URL parsing leaves in place and
+    // decodeURIComponent throws URIError on — today that poisons an
+    // otherwise good fetch with the parse-fail toast for a display NAME.
+    // The raw segment is a fine fallback; the decode only ever improved it.
+    let last = parsed.pathname.split("/").pop() || "";
+    try {
+      last = decodeURIComponent(last);
+    } catch {}
     if (!last) {
       return SUBTITLE_NAME_FALLBACK;
     }
