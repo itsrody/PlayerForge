@@ -1,4 +1,5 @@
 import { logger, setDebugRuntime, postTask, Scope, runSteps, Fan } from "../shared/runtime.js";
+import { randomNonce } from "../shared/core.js";
 import { KEYS, watchStorageKey, gmSetValue, invalidateConfigCache, getConfigValue, setConfigValue, gmRegisterMenu, gmUnregisterMenu } from "../shared/store.js";
 import { getDomainKey } from "../shared/page.js";
 import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, DEBUG_HASH_TAG, FRAMEWORK_TUNING } from "./contract.js";
@@ -982,7 +983,7 @@ class MenuCommands {
         // pf:diag echo; the watch filters own writes, so the originator
         // reports itself here and the echo brings every other realm in -
         // one click, one console line per frame.
-        gmSetValue(KEYS.diag, crypto.randomUUID());
+        gmSetValue(KEYS.diag, randomNonce());
         dumpFrameState(this.#resolveKernel);
       },
       { title: "Print one state line per PlayerForge realm (frame) to the console" }

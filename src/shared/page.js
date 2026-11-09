@@ -13,6 +13,7 @@
  * unless the relay chain is already listening.
  */
 import { onDomMutations } from "./dom.js";
+import { randomNonce } from "./core.js";
 
 /* - 1. Domain identity - */
 
@@ -502,7 +503,7 @@ function requestPageContextOverPipe(timeoutMs) {
 
   pipe.port.addEventListener("message", onData, { signal: ac.signal });
   try {
-    pipe.port.postMessage({ type: CTX_REQUEST_TYPE, nonce: crypto.randomUUID() });
+    pipe.port.postMessage({ type: CTX_REQUEST_TYPE, nonce: randomNonce() });
   } catch {
     // Port already closed under us: re-establish from scratch on the next call.
     dropDeadPipe();
@@ -594,7 +595,7 @@ function requestPageContextFromParent(timeoutMs = CTX_REQUEST_TIMEOUT_MS) {
     if (settled || watchdog.aborted) {
       return;
     }
-    nonce = crypto.randomUUID();
+    nonce = randomNonce();
     const msg = { type: CTX_REQUEST_TYPE, nonce };
     try {
       const mc = new MessageChannel();

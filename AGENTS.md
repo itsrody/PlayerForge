@@ -2463,6 +2463,65 @@ Infinity-immortality class is measured real). Each is small, each is
 behavior-additive only on today's flows, and each needs its own green
 battery run if adopted.
 
+**The native-robustness wave-2 probe (Nov 2026, user-directed "explore more
+native-robustness adoption"; post-`29906fb`, one adoption carried and
+landed).** The first robustness batch re-entered at the axes its column shape
+suggested; this batch re-enters at the axes the column never reached. Artifacts:
+`check/.tmp/native-robustness2-probe.mjs` (N1 insecure-origin engine leg + N2
+delay-totality leg + a node-side C2 census, all uncommitted per sweep
+convention) and `native-robustness2-report.json`. **Harness finding worth
+holding: the loopback fixture origin is a SECURE CONTEXT — every probe, gate
+row, and screenshot in the battery's history ran where the trust-gated API
+surfaces hold — so any real-world trust-class gap is invisible to the gate by
+construction.** The insecure leg rode a tiny 0.0.0.0-bound http server
+navigated to the machine's LAN IP, the one way to reach a genuinely
+non-trustworthy origin without leaving the fixture harness. Findings:
+
+- (N1) **`crypto.randomUUID` is Secure Context Only — the wave-2 adoption.**
+  On a plain-http origin: `isSecureContext false`, `typeof crypto.randomUUID`
+  `"undefined"`, calling it throws `TypeError: "crypto.randomUUID is not a
+  function"` at the call site; `crypto.getRandomValues` ships in the same
+  realm and the fallback recipe builds a string. The three src consumers were
+  the pipe nonce (page.js, inside the transfer try — protected), the
+  first-attempt nonce (page.js `attempt()` at the boot resolve — a synchronous
+  TypeError), and the `pf:diag` dump write (kernel.js — the menu tap dies).
+  The blast radius mapped statically: `getPageContext`'s catch-block
+  `return await requestPageContextFromParent()` re-throws into a REJECTED
+  `#contextPromise`, whose `await` lands inside `#init()` — its `.catch`
+  logs `resume Init failed` — so on any insecure page with a cross-origin
+  embed, resume silently lost that document (no restore, no progress drive).
+  Battery/loopback runs never saw it because the fixture is trustworthy.
+  **Adopted: `randomNonce()` in core.js (a new Fresh-value mint section),
+  consumed at all three sites.** randomUUID stays the first choice (the
+  well-known shape on every trust level that has it), so secure pages are
+  byte-unchanged; the fallback rides `getRandomValues` (insecure realms ship
+  it) with a module counter making uniqueness exact rather than
+  probabilistic — the cross-reboot collision needs the same counter AND the
+  same 64-bit hex, and the `pf:diag` protocol only needs "fresh ⇒ no read
+  ever re-acts".
+- (N2) **`postTask` delay totality — native-honest, no adoption.** For
+  computed-delay future callers: `{delay: NaN}` and `{delay: Infinity}` throw
+  `TypeError: 'delay' member of SchedulerPostTaskOptions is not a finite
+  value`; `{delay: -5}` throws the out-of-range class; `{delay: true}` is
+  accepted (coerced). `AbortSignal.timeout(NaN)` builds (fires at ~grain).
+  Every current caller is a named constant; the engine's crash classes are
+  an honest floor, recorded so a future computed-delay call site chooses
+  deliberately.
+- (C2) **the static census over comment-stripped src**: 18
+  `.replace`/`.replaceAll` sites, ZERO with a dynamic replacement argument —
+  the native `$`-pattern injection class (`$&`/`$'` reinterpreting
+  host-authored text) is unreachable; every substitution rides a literal or
+  a callback. Zero `JSON.parse` in src — stored docs arrive manager-parsed
+  (`loadJsonObject`'s truthiness-object read documented in sweep #10), so the
+  hostile-JSON column has no intake. Both numeric parse intakes sit behind
+  measured gates (the stepper's `Number.isFinite` commit gate; forgevtt's
+  entity `parseInt` inside the shape scanner). Waves the census closes.
+
+Sweep disposition: one adoption (`randomNonce` totalization of the
+trust-gated API call sites), two record-only verdicts (N2 native classes, C2
+census closure). Proved on 3 consecutive all-green battery runs (234 rows
+each, ~86s).
+
 ## 5. Conventions (the change bar)
 
 1. **Comments explain WHY with reasoning** — the rejected alternatives and

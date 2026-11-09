@@ -198,3 +198,31 @@ export function formatTime(seconds) {
 export function isBenignMediaPolicyError(err) {
   return err?.name === "AbortError" || err?.name === "NotAllowedError";
 }
+
+/* - 6. Fresh-value mint - */
+let nonceSeq = 0;
+
+/**
+ * One fresh opaque value for "it's new" semantics: per-request bridge
+ * nonces and the diagnostics-dump storage trigger. crypto.randomUUID is
+ * Secure Context Only — undefined on a plain http page (measured N1: the
+ * realm throws "crypto.randomUUID is not a function" at the call site),
+ * which rejected resume init on insecure cross-origin embeds and killed
+ * the dump menu. randomUUID stays the first choice (the well-known shape
+ * on every trust level that has it); the fallback rides getRandomValues,
+ * which ships in insecure realms too, with a module counter making
+ * uniqueness exact rather than probabilistic.
+ */
+export function randomNonce() {
+  if (typeof crypto?.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  let hex = "";
+  const raw = crypto?.getRandomValues?.(new Uint16Array(4));
+  if (raw) {
+    for (const v of raw) {
+      hex += v.toString(16).padStart(4, "0");
+    }
+  }
+  return `pf-${++nonceSeq}-${hex}`;
+}
