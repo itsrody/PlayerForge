@@ -2738,6 +2738,47 @@ bounds-owning sinks: seek clamps saturate at the duration, a
 `translateY(1e9px)` string is real CSS and renders off-picture only for
 a session the user is already driving. No gate belonged in the engine.
 
+**Ledger batch 4 — the kernel/discovery plane (Nov 2026, directed
+batch; record-only, audit-clean, no rows, no src; one green battery run
+(~86.4s) as the receipt since nothing gate-relevant changed).** The
+family read at its intakes with the law's two-halves bar. The kernel
+plane's intake map, exhaustively: **the storage reads** — `debug.logs`
+(boot truthiness-OR with the hash tag, the mirror's strict `=== true`
+behind the value-neutral compare latch, the menu's boolean flip), the
+`pf:diag` echo (the value is NEVER read — the delivery itself is the
+one-shot trigger, exactly the sweep-#10 "no read ever re-acts"
+contract, and `dumpFrameState` stringifies own-realm data only: realm
+label, `getDomainKey` of the platform hostname, `fullscreenElement`'s
+tag name, `=== true` booting compare), and entry's first-run chain
+(`meta.firstRun` truthiness for the welcome pending plus the two legacy
+names each swept once, one `false` write, the hint flow bounded by the
+1.2s cap + the interaction abort — the feature-timer class). Every sink
+is a truthiness or strict-compare read; the configs getter's
+`isSafeKeySegment` read-path guard (sweep #10) covers the descent;
+manager-parsed docs carry no getters/Symbols; so a hostile truthy value
+flips debug on (bounded by the disabled-logger cost record) or shows
+one welcome hint — nothing crosses into numeric math, object descent,
+or a throw surface. **The DOM plane** (discovery.js, detection.js)
+delivers platform-computed numbers only: rects under the two
+witness-absence belts (`meetsMinSize` fails CLOSED — catch returns
+false, no boot; `isOnScreen` fails OPEN — catch defers to the
+screening gate's optimism, the recorded census class), ResizeObserver
+entry boxes, unsigned-long `videoWidth/videoHeight` with log-only
+consumers, and `matches()` over the constant ANCHOR_PROBE list — the
+C++ selector engine. No page-authored string/number crosses as data
+anywhere in the plane. **The machine surfaces** (MenuCommands click
+call sites, the frozen `AdoptionHome` identity, the derived
+`GESTURE_EVENTS` handles the menu resets dispatch) carry no foreign
+intake. The negative direction closed too: every catch in the four
+modules is a recorded lifecycle/witness class (boot-failure
+log-then-continue, the entry bridge install belt, the two rect belts,
+the URL skip-probe guard, native dispatch isolation) — none guards a
+hostile-data sink, so there is no admission-gate gap hiding under a
+belt. No adoption and no row: the eviction classes here are
+already covered by standing coverage (the gm case's foreign-write
+debug-flip mirror and the diagnostics-reach rows), and the shapes are
+statically total.
+
 ## 5. Conventions (the change bar)
 
 1. **Native-first implementation bar.** Every new or rewritten behavior asks
