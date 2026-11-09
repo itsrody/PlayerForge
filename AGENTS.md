@@ -2910,6 +2910,43 @@ JSON-parsed docs cannot carry prototype-traversal getters — the
 every shared-plane intake either rides a landed gate or is native-total
 in the recorded shape.
 
+**Law-ledger close-out (Nov 2026, user direction "close ledger";
+closes at family depth — every src module family has carried its
+dedicated pass).** Seven batches, the tally: **batch 1** the whole-tree
+audit-clean certification + the census's `RegExp.escape build sites`
+row; **batch 2** the subtitles family — two seed-clamp adoptions
+(`SubtitleSyncState`'s field seed + `#resolve()`, `readPlacement()`)
+plus the CSS hostile-value IACVT/no-fetch receipt as a battery row and
+the node-verified astral truncation note; **batch 3** the inputs
+family — the event-stream IDL conversion pinned as the engine's native
+admission gate (gestures row: the four rejectable init members + the
+unrestricted `movementX` witness) with the intake map audit-clean;
+**batch 4** the kernel/discovery plane — the intake map exhaustively
+total (storage truthiness/strict-compare sinks, platform-shaped DOM
+numbers, machine surfaces) and every catch reconciled as a non-data
+belt; **batch 5** the shell plane's top modules — the filter seed
+clamp (the seed-bypass class's third catch) with resume/media
+bound-complete; **batch 6** the chrome family — config/panel/ui/toast/
+inject total, three `pf:resume`-doc admission sites adopted (string
+fields at both `#mergeRaw` arrival seams + the LWW stamp gate); and
+**batch 7** the shared planes — core/runtime intake-free, dom
+platform-only, page gate-carved (the channel-structural requester
+narrowing recorded), store per sweep #10. Net adoption ledger:
+**six src adoption sites over five landing classes** (the seed clamp
+×3 catches, the string-field admission ×2 seams, the merge-stamp gate
+×1 seam, the trust-gated `randomNonce` totalization, the three earlier
+robustness-wave gates) — all one-native-op, no machinery, legit flows
+byte-unchanged. **Protocol going forward:** per batch 1's shape,
+future src work appends as per-commit delta classification at its law
+surface instead of tree walks — and anything on this tree violates
+the bar only if a live intake grows, so *every new external-data
+intake must land with its admission gate in the same commit, and its
+_consumer-side sink_ naming why manual reads are total.* **Reopen
+rule mirrors the redesign-verdict ledger:** reopening (a new audit
+series, a batch against the whole tree again, or re-litigating a
+recorded decline) needs explicit user direction AND fresh code-level
+evidence; recorded declines stand.
+
 ## 5. Conventions (the change bar)
 
 1. **Native-first implementation bar.** Every new or rewritten behavior asks
