@@ -2814,6 +2814,58 @@ intake beyond these is the metadata Witness observers reading
 `document.title`/`video.poster` — platform strings at fingerprint-compare
 rate, R4/R6-proven total. No roster moves needed: census unchanged.
 
+**Ledger batch 6 — the chrome family (Nov 2026, directed batch; three
+adoption sites landed in resume.js — the History render's unadmitted
+feed; proven on 3 consecutive all-green runs, ~86.5s each).** The
+family read at its intakes. **config.js: total, stays clean** — the
+SETTINGS_SCHEMA is all bool/options rows, so `coerceSetting`'s two arms
+(`typeof value === "boolean"`, strict `options.includes`) annihilate
+every wrong-type stored value including the zoom row's `[0.9, 1, 1.15,
+1.3]` (the batch-2-era "no numeric rows" note still holds verbatim:
+`panelScale` landed as an options row, not a number row); the cache is
+seeded/refreshed/set through that one coercion, so every
+`getSetting()` consumer (the gesture toggles' truthiness read, the
+`stepSeek` options member × the streak clock, `style.zoom` = a
+coerced member) trusts it as recorded. The SettingsSection stepper
+branch is dead for the current schema — a future number row must add
+its coerce arm in the same commit as the row (the schema's own
+docstring demands the single edit; recorded so the passthrough
+fallthrough is never taken as a number admission). **panel.js: total**
+— every text surface is `textContent`/`replaceChildren` (no markup
+vocab anywhere; `formatTime`'s `!(seconds > 0)` gate is a total numeric
+intake — NaN/strings/negatives all read "0:00" — and a 1e308 duration
+truncates through the bitwise ops in place); the zoom read is coerced;
+the `#rollbackTo`/build-rollback belt is the recorded release-tail
+class; the CloseWatcher lattice is armed-state-rechecked inside its own
+listeners. **ui.js / toast.js / inject.js: no foreign intake beyond
+their recorded surfaces** — the DOMParser-not-innerHTML belt and the
+document-keyed icon cache, the pooled toast payload refills,
+`ensureViewportFitCover`'s beltless totality (regex test + literal
+replacement + `setAttribute` — the C2 census's zero-dynamic-replacement
+record is exactly why no hostile meta content can throw any of the
+three ops), and the monotonic `@resource` upgrade with its bad-
+`replaceSync` keep. **The one real gap — adopted (3 sites,
+resume.js).** The History card's render is the family's downstream
+consumer of the resume doc, and the store's two foreign arrival seams
+(`toFixedShape` for a fresh adoption, the LWW update walk for a known
+entry — inside the one `#mergeRaw`) admitted `domain`/`title` as-is:
+a hostile `pf:resume` doc with `domain: 5` rode straight into
+`formatDomain`'s `.charAt(0)` — a TypeError inside the panel render
+(the Fan isolation contains it, but the history row is broken and an
+uncaught error sentence is on the page surface). The adoption is the
+`subsUrl` admission shape (b8e53c9: refuse outright, never
+String()-coerce into "[object Object]" garbage) applied at BOTH seams —
+string-field admission for `domain`/`title` — plus the R3-class stamp
+gate extended to the LWW branch: the copy loop ran BEFORE any
+reshaping, so a hostile non-finite `updatedAt` won the compare and
+rode into the known entry, the immortal shape the R3 floor probe
+measured; `stampOf` (awaiting the projection's epoch-0 degradation)
+now anchors the second seam too, and the comment records the honest
+posture — a finite beyond-horizon stamp stays the R3 posture, not
+re-decided. Our own writers are untouched: `createEntry` routes through
+`toFixedShape`, and the bridge context is type-gated upstream
+(`mapContextPayload`). Census unchanged.
+
 ## 5. Conventions (the change bar)
 
 1. **Native-first implementation bar.** Every new or rewritten behavior asks

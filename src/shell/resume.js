@@ -71,6 +71,19 @@ function toFixedShape(incoming) {
   // corrupt/future-writer insurance.
   out.createdAt = stampOf(out.createdAt);
   out.updatedAt = stampOf(out.updatedAt);
+  // String fields carry the same admission the subsUrl getter owns
+  // (b8e53c9: a non-string foreign value is refused outright, not String()
+  // -coerced into a garbage render): the History card's formatDomain calls
+  // string methods on `domain` (a truthy-number domain is a TypeError inside
+  // the panel render), and `title` feeds textContent/aria-label concats.
+  // Our own writers pass bridge-shaped strings, so this is pure
+  // foreign-writable-doc insurance like the stamp gates above.
+  if (typeof out.domain !== "string") {
+    out.domain = "";
+  }
+  if (typeof out.title !== "string") {
+    out.title = "";
+  }
   return out;
 }
 
@@ -188,6 +201,24 @@ class ResumeStore {
             known[key] = incoming[key];
           }
         }
+        // The same string-fields admission the fresh-entry shape applies:
+        // a foreign LWW update is this entry's second arrival seam, so the
+        // panel render's string-method consumers stay unreachable from a
+        // hostile doc (see the toFixedShape block below).
+        if (typeof known.domain !== "string") {
+          known.domain = "";
+        }
+        if (typeof known.title !== "string") {
+          known.title = "";
+        }
+        // ...and the same stamp gate: the copy loop runs BEFORE any
+        // reshaping, so a hostile non-finite stamp (R3's Infinity class)
+        // would win the LWW compare and ride into the known entry — never
+        // removable there either. stampOf anchors it to the same epoch-0
+        // degradation the projection applies; a FINITE beyond-horizon stamp
+        // stays the recorded R3 posture (accepted, Date.now()-shaped writers
+        // today), not re-decided here.
+        known.updatedAt = stampOf(known.updatedAt);
         updated++;
       }
     }
