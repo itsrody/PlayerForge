@@ -2694,6 +2694,50 @@ records: the ingest ceiling + `URL.parse` admission + decode belt +
 digit-only fields, and `MAX_SLOTS`' active-set bound over any parsed
 list.
 
+**Ledger batch 3 — the inputs family (Nov 2026, directed batch;
+record-only + one battery row, no src adoption; proven on 3 consecutive
+all-green runs, ~86s each).** The family read at its own intakes with
+the law's two-halves bar: the manual engines (ScrubStroke's
+coalesced-sample wash, SwipeStroke's transform writes, the pinch
+comparator, KeyHoldSession) ride their recorded receipts unchanged
+(saturation/loop-body swept, rate-bounded, or the feature's semantics);
+the question was the EVENT-STREAM plane — page-originated event payloads
+whose numeric members a hostile page can synthesize with garbage, and
+every math sink they feed. The full intake trace: the engine's numeric
+reads are `clientX/clientY` (press/move → pointer tracking, ScrubStroke
+samples, the hold-cancel distance), `deltaY` (trackpad pinch — sign
+read only), and the detail members forge itself re-spells from those
+raws (`dx`, the velocity filter); `movementX/movementY` are consumed by
+ZERO src code. The sinks behind them all own their bounds: ScrubSession
+accrues `#pendingDelta` and commits `clamp(currentTime + pending, 0,
+duration)` per rAF (clamp returns NaN for NaN input, but NaN is
+unreachable per the premise below); `scrubToLatched`'s unguarded clamp
+is the same shape and unreachable on the same grounds (media's
+`#clampTarget` carries the explicit isFinite gate: cold duration 0 →
+target 0); SwipeStroke writes the drag number into `translateY(px)`
+strings the CSSOM drops silently when unparseable, and `easeTransformTo`
+keyframes read the clean computed `#baseTransform`, never a hostile
+value; pinch dispatches `detail.direction` — a string derived from
+compare result, no number crosses; the wheel handler reads the deltaY
+sign only. **The load-bearing premise — the IDL conversion IS the
+native admission gate (pinned by a new gestures battery row).**
+`PointerEventInit`'s `clientX/clientY` and `WheelEventInit`'s `deltaY`
+are non-unrestricted doubles: a synthetic `new PointerEvent("...",
+{ clientX: NaN })`/`{ clientX: Infinity }`/`{ clientY: NaN }` and `new
+WheelEvent("wheel", { deltaY: NaN })` all throw TypeError at the
+dictionary conversion (measured, real realm, the row machines all four
+rejections against a finite-control ACCEPTED so it cannot pass
+vacuously) — a hostile page cannot deliver a non-finite coordinate into
+the engine at all. **The measured witness: `movementX` is an
+unrestricted double and rides NaN through** (the row carries it as a
+non-gated attempt) — inert by non-consumption today, recorded so any
+future engine reader of `movement*` knows that intake is NOT
+engine-gated and must carry its own bound. Finite garbage beyond the
+gate (1e308 coords, huge deltas) degrades through the same
+bounds-owning sinks: seek clamps saturate at the duration, a
+`translateY(1e9px)` string is real CSS and renders off-picture only for
+a session the user is already driving. No gate belonged in the engine.
+
 ## 5. Conventions (the change bar)
 
 1. **Native-first implementation bar.** Every new or rewritten behavior asks
@@ -2991,7 +3035,13 @@ stop at the first failure:
   video keeps its null answer, the Clappr compound beats the Core on fewest
   hops, and a record without a stub builder fails its row),
   `frames` (§ above),
-  `gestures` (skip/mute/volume/panel/PiP/scrub with real driver input),
+  `gestures` (skip/mute/volume/panel/PiP/scrub with real driver input,
+  plus the non-finite intake row: the four rejectable init members —
+  clientX NaN/Infinity, clientY NaN, WheelEvent deltaY NaN — throw
+  TypeError at the IDL dictionary conversion against a finite control
+  ACCEPTED, the native admission gate behind the engine's event-stream
+  intakes, with the unrestricted movementX rider as a measured
+  non-gated witness),
   `hotpaths` (the hot-path budgets: the per-frame/echo loops the tree rides,
   benchmarked in the REAL engine as regression tripwires — fan dispatch at
   100k emissions (10-subscriber echo-audience shape and the zero-subscriber

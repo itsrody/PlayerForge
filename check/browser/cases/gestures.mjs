@@ -988,5 +988,58 @@ export async function run({ session, baseUrl, boot }) {
   status(rows, "owned touch press leaves the video surface highlight-free",
     highlightFree ? true : "screenshots diverged across the owned press", "tap highlight mismatch");
 
+  // The engine's one total admission premise, pinned on the floor (ledger
+  // batch 3 — the inputs family): the event-stream intakes are NUMERIC,
+  // page-originated, and the engine feeds them into commit math
+  // (#pendingDelta += dx, then clamp at the seek). The load-bearing fact is
+  // the platform's own IDL, measured on this floor: PointerEventInit's
+  // clientX/clientY and WheelEventInit's deltaY are non-unrestricted
+  // doubles, so NaN/±Infinity throw TypeError at the dictionary conversion
+  // — the admission gate IS a native engine operation. movementX is an
+  // unrestricted double and rides NaN through, but the engine never
+  // consumes it (witness attempt below, not part of the pass gate). Every
+  // FINITE garbage value beyond the gate degrades through sinks that
+  // already own the bounds (the seek clamp saturates at the duration; the
+  // swipe transform's invalid-at-parse values are dropped by the CSSOM;
+  // the pinch payload carries a direction string only). This row machines
+  // the rejection on the real realm; a floor that accepts NaN on the
+  // rejectable surface would trip the row and reveal the premise.
+  const intakes = await session.eval(function main() {
+    const attempts = [];
+    for (const [label, make] of [
+      // Control first: a well-formed init must be ACCEPTED, so a broken
+      // harness can never pass this row vacuously.
+      ["control finite", () => new PointerEvent("pointermove", { clientX: 4, clientY: 4 })],
+      // The rejectable surface: PointerEventInit's clientX/clientY and
+      // WheelEventInit's deltaY are non-unrestricted doubles (measured
+      // TypeError at the dictionary conversion, this floor).
+      ["clientX NaN", () => new PointerEvent("pointermove", { clientX: NaN, clientY: 4 })],
+      ["clientX Infinity", () => new PointerEvent("pointermove", { clientX: Infinity, clientY: 4 })],
+      ["clientY NaN", () => new PointerEvent("pointermove", { clientX: 4, clientY: NaN })],
+      ["WheelEvent deltaY NaN", () => new WheelEvent("wheel", { deltaY: NaN, deltaX: 0 })],
+      // Measured witness, NOT part of the pass gate: movementX is an
+      // unrestricted double, so NaN rides the conversion — but the engine
+      // never consumes movementX (clientX/clientY and the deltaY sign are
+      // its only numeric reads), so the unrestricted member is inert by
+      // non-consumption. Recorded so a future engine reader of movement*
+      // knows the intake is NOT engine-gated and must carry its own bound.
+      ["movementX NaN (unrestricted)", () => new PointerEvent("pointermove", { movementX: NaN, clientX: 4 })]
+    ]) {
+      try {
+        make();
+        attempts.push(label + ": ACCEPTED");
+      } catch (err) {
+        attempts.push(label + ": rejected " + (err instanceof TypeError ? "TypeError" : String(err?.name ?? err)));
+      }
+    }
+    return attempts;
+  });
+  const controlOk = intakes[0]?.includes("control finite: ACCEPTED");
+  const gate = intakes.slice(1, 5); // control + the four rejectable attempts; movementX is the witness
+  const hostileOk = gate.every((a) => a.includes("rejected TypeError"));
+  status(rows, "non-finite event intake rejected at the IDL conversion (native admission gate)",
+    controlOk === true && hostileOk === true,
+    gate.length + " rejectable attempts all TypeError + " + intakes.join("; "));
+
   return rows;
 }
