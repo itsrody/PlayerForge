@@ -213,10 +213,20 @@ export class BrowserSession {
     const profileDir = mkdtempSync(join(tmpdir(), "check-driver-"));
     const { Builder } = await import("selenium-webdriver");
     const firefoxMod = await import("selenium-webdriver/firefox.js");
+    // Headed, not headless: the machine's Background Task Management kills
+    // windowless Firefox apps ~30s after launch (loginwindow BTM force-quit,
+    // floor-probed today - bare geckodriver + about:blank dies at 31s, bare
+    // -marionette dies at 30s, so the kill is platform-side, not harness
+    // noise). A real window makes the app eligible and it survives. The
+    // offscreen park idea is measured-dead: macOS clamps an offscreen rect
+    // into a corrupt geometry (viewport read 504x863 and one driver move
+    // landed out of bounds), so the gate works in a visible on-screen
+    // window. If a future macOS build stops this killing, headless can
+    // return.
     const options = new firefoxMod.Options()
       .setBinary(browserBinary)
       .setAcceptInsecureCerts(true)
-      .addArguments("-headless");
+      .addArguments("--window-size=1440,900");
 
     // Candidate ladder: the disk's geckodriver first (no major-matching: one
     // recent geckodriver serves every supported Firefox), Selenium Manager
@@ -313,10 +323,24 @@ export class BrowserSession {
     // supports. Best-effort - the deferral rows' layout math uses the
     // viewport, not a hard-coded size.
     try {
-      await driver.manage().window().setRect({ width: 1440, height: 900 });
+      await driver.manage().window().setRect({ x: 0, y: 0, width: 1440, height: 900 });
     } catch (err) {
       console.log(`  window rect: ${String(err.message ?? err).slice(0, 80)}`);
     }
+    // This machine runs a tiling manager (AeroSpace) that re-tiles new
+    // windows into its grid, overriding the rect above (measured: the
+    // second gate run read viewport 756x863 - half the 1512 logical width -
+    // and a driver move landed out of bounds). A floating window keeps the
+    // gate's geometry its own while the tiling desktop stays intact.
+    try {
+      const pid = (await driver.getCapabilities()).get("moz:processID");
+      const testWindows = execFileSync("aerospace", ["list-windows", "--all", "--format", "%{window-id} %{app-pid}"], { encoding: "utf8" })
+        .split("\n").map((line) => line.trim().split(" "))
+        .filter(([wid, aPid]) => wid && Number(aPid) === Number(pid)).map(([wid]) => wid);
+      for (const wid of testWindows) {
+        execFileSync("aerospace", ["layout", "floating", "--window-id", wid], { stdio: "ignore" });
+      }
+    } catch {}
 
     // Startup-tab hygiene: Firefox launches with exactly the driver's
     // about:blank tab in a fresh geckodriver profile, but a mid-flight
@@ -356,6 +380,25 @@ export class BrowserSession {
 
   evalAsync(fn, ...args) {
     return this.#driver.executeAsyncScript(fn, ...args);
+  }
+
+  /** Bring the working window back to the gate's canonical rect and keep it
+   *  floating over the user's tiling manager. Headed mode makes this
+   *  load-bearing: native fullscreen rows and real-driver drags can reshape
+   *  (and re-tiling re-take) the window between cases, and a shrunken or
+   *  auto-tiled viewport would fail later cases' move targets with
+   *  out-of-bounds errors that are harness artifacts, not behavior. */
+  async normalizeWindowRect() {
+    await this.#driver.manage().window().setRect({ x: 0, y: 0, width: 1440, height: 900 });
+    try {
+      const pid = (await this.#driver.getCapabilities()).get("moz:processID");
+      const testWindows = execFileSync("aerospace", ["list-windows", "--all", "--format", "%{window-id} %{app-pid}"], { encoding: "utf8" })
+        .split("\n").map((line) => line.trim().split(" "))
+        .filter(([wid, aPid]) => wid && Number(aPid) === Number(pid)).map(([wid]) => wid);
+      for (const wid of testWindows) {
+        execFileSync("aerospace", ["layout", "floating", "--window-id", wid], { stdio: "ignore" });
+      }
+    } catch {}
   }
 
   async navigate(url) {

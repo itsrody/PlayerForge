@@ -47,15 +47,21 @@ const AD_HOST_PREFIXES = ["adservice.google."];
  * the absolute saving is noise, the shape gain is the one-op site). The
  * end anchor is the loop's own equality/endsWith semantics: a
  * trailing-suffix trap like `doubleclick.net.evil.com` must not match,
- * and the probe draft's un-anchored form would have accepted it. Dots are
- * escaped because a suffix's literal dots must not become wildcards;
- * hostnames from `new URL().hostname` are spec-lowercase, so no flag.
+ * and the probe draft's un-anchored form would have accepted it. Each
+ * table entry rides `RegExp.escape` instead of a hand dot-escape: on
+ * today's tables the two builds share every verdict (floor-probed
+ * parity, 0 misses across both families and the legal/illegal
+ * host-shape column), while the hand-escape is measure-untotal on
+ * future table writes — a metachar entry silently drops under its
+ * grammar reinterpretation and a `{2}`-shaped one throws a SyntaxError
+ * at this construction, killing the realm's boot. Hostnames from
+ * `new URL().hostname` are spec-lowercase, so no flag.
  */
 const AD_HOST_RE = new RegExp(
   "(?:^|\\.)(" +
-    AD_HOST_SUFFIXES.map((suffix) => suffix.replace(/\./g, "\\.")).join("|") +
+    AD_HOST_SUFFIXES.map((suffix) => RegExp.escape(suffix)).join("|") +
   ")$|^(?:" +
-    AD_HOST_PREFIXES.map((prefix) => prefix.replace(/\./g, "\\.")).join("|") +
+    AD_HOST_PREFIXES.map((prefix) => RegExp.escape(prefix)).join("|") +
   ")"
 );
 

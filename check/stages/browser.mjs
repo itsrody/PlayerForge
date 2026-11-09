@@ -26,6 +26,13 @@ async function bootCasePage(session, { pagePath, baseUrl, version, bundle, seed 
   // A distinct query per boot forces a real document navigation: driver.get to
   // the identical URL can race as a same-URL reload and eat the injected
   // bundle mid-document.
+  // The headed window's real geometry is case-resilient workspace state, not
+  // boot artifact: a case that drives native fullscreen (frames, gestures)
+  // can hand back a resized/repositioned window, and later cases' driver
+  // moves would then land out of the shrunk viewport. Re-asserting the
+  // working rect here is the whole fix - the headless era never needed it
+  // because a headless window could not be reshaped.
+  await session.normalizeWindowRect();
   if (persist) {
     await session.harvestGm();
   }

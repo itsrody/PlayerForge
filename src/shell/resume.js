@@ -54,11 +54,23 @@ function isValidStore(raw) {
  * Foreign writers omit optional fields, which used to hand the engine a new
  * object shape per adopted entry and deoptimize every store scan over them.
  */
+const stampOf = (t) => (Number.isFinite(t) ? t : 0);
+
 function toFixedShape(incoming) {
   const out = {};
   for (const key of RESUME_ENTRY_FIELDS) {
     out[key] = incoming[key];
   }
+  // The two stamps are finite-gated at this ONE intake site (finite ->
+  // as-is, anything else -> 0): a non-finite timestamp is the corruption
+  // class the floor probe measured (R3) - Infinity wins every LWW `>`
+  // compare and never rides an eviction cutoff, so an Infinity-stamped
+  // entry is immortal in both merge planes. Epoch-0 anchors it to the
+  // removable/evictable degradation the comparators already answer for
+  // NaN; today's writers are Date.now()-shaped, so this is pure
+  // corrupt/future-writer insurance.
+  out.createdAt = stampOf(out.createdAt);
+  out.updatedAt = stampOf(out.updatedAt);
   return out;
 }
 

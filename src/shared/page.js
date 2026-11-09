@@ -344,7 +344,14 @@ function stripNonAscii(raw) {
 function mapContextPayload(data) {
   return {
     domain: data.domain,
-    path: data.path,
+    // String admission for path: this payload rides the structured-clone
+    // postMessage surface, whose re-post line throws DataCloneError
+    // synchronously on Symbol/function values (floor-probed; lone surrogates
+    // ride fine, so the string check alone covers the measured hostile
+    // classes). A non-string domain already refuses at the gate; path
+    // degrades to "" here the same way title degrades below, so a poisoned
+    // field degrades its own arm instead of the whole context answer.
+    path: typeof data.path === "string" ? data.path : "",
     title: stripNonAscii(typeof data.title === "string" ? data.title : "")
   };
 }

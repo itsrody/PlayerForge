@@ -2332,6 +2332,137 @@ the rate call on the two networks that also pay back in shape:
 - **D3/D4 stay declined** — 23× and 31× slower than the shipped shapes
   on the floor; adoption never earned.
 
+**The native-robustness probe (Nov 2026, user-directed "explore native
+firefox cpp operators and internals can be useful in polished and improve
+the project's robustness"; post-`a85dbc0`, record-only, three adoption
+candidates flagged for user direction).** The audit series priced SPEED
+(operators, saturation, callback tax, delegation, substrates); this probe
+prices HARDENING — which native Firefox operators/engine behaviors polish
+the tree's robustness surfaces (hostile inputs, non-finite data,
+cross-realm payloads, exotic strings). Artifacts: `check/.tmp/
+native-robustness-probe.mjs` (8-axis PLAN runner, R0–R7, every body
+self-contained and deadline-belted) and `native-robustness-report.json`,
+uncommitted per sweep convention. Harness lesson worth holding: the
+WebDriver wire's own serialization rejects lone surrogates BOTH in the
+command payload and the response value ("unexpected end of hex escape") —
+hostile-string corpora must be composed in-page via
+`String.fromCharCode` and returned as code-point summaries, never as raw
+strings (the probe's R4/R5 bootstrap documents the shape). Findings, one
+per axis:
+
+- **(R0) clock grain — both clocks quantize to exactly 1ms** (`Date.now()`
+  and `performance.now()` alike; the C1/G0 records re-derived live). An
+  earlier sampler shape (a summing spin before a tight loop) was
+  dead-code-eliminated and sampled zero steps — the probe now
+  busy-waits until the clock crosses a step, which cannot be elided.
+- **(R1) RegExp.escape totality — the adoption candidate #1.** The floor
+  ships `RegExp.escape`; an escape-per-entry rebuild of the shipped
+  `AD_HOST_RE` shares EVERY verdict with today's hand-escape build over
+  both table families and the full legal/illegal host-shape column
+  (0 parity misses) — adoption is byte-parity on today's tables. The
+  future-table column is where the shipped build fails: over an
+  11-entry metachar corpus (`a+b.c`, `[a-z].com`, `a|b.com`, …), the
+  escape build is truthful everywhere (escLie 0/11) while the
+  dots-only hand-escape lies on EVERY row — ten entries silently DROPPED
+  by the metachar's grammar reinterpretation (a future table entry like
+  `a+b.c` would simply never match any host) and one (`{2}.com`) throwing
+  a SyntaxError AT REGEXP CONSTRUCTION — a future table entry that kills
+  the realm's boot instead of degrading. The subtree sites carry the same
+  class worse: `subtitles.js`'s two `SUBTITLE_EXTS` assemblers do NO
+  escaping at all (a future `ext` value is constructed into the lattice
+  raw). Totalizing all three build sites through `RegExp.escape` per
+  table entry is the adoption; today's behavior is unchanged by
+  construction, tomorrow's table write becomes total.
+- **(R2) groupBy hostile keys — pollution-inert by spec.** Firefox 159's
+  `Object.groupBy` result carries a NULL prototype (the final-proposal
+  grounding; a plain `{}` control still matches `Object.prototype`) —
+  `__proto__`, `constructor`, `hasOwnProperty`, `toString` all land as
+  own data properties whose value is the group array (each own-key count
+  1, groups are plain arrays, `poisoned.__proto__` READS the group, the
+  object's own prototype link untouched; `Map.groupBy` control keyed the
+  same row set cleanly). The recorded derived-table premise holds at the
+  hostile pole: no adoption needed, the read is a floor fact.
+- **(R3) stamp comparator table — Infinity is the immortal shape
+  (adoption candidate #3).** The full semantic column over
+  NaN/±Infinity/""/null/undefined/0/1e13 through the tree's comparator
+  vocabulary (`(s || 0)`, `>`, `<=`, eviction cutoff, strict echo):
+  NaN/""/null/undefined/0 degrade to epoch-0 — they lose every LWW
+  compare and ride an immediate eviction cutoff (poisoned toward
+  removal, bounded damage); -Infinity degrades the same. **Infinity (and
+  any finite stamp beyond the horizon, e.g. 1e13) wins every `>` compare,
+  is never `<=` the doc stamp NOR the eviction cutoff — a
+  removal-adoption never lands and eviction never fires: an
+  Infinity-stamped resume entry is immortal in both merge planes**, and
+  the strict `===` echo fast path can never pin it either (Infinity
+  === Infinity dismisses, so no echo storm — the entry just silently
+  outlives every boundary). The count is a one-line
+  `Number.isFinite(stamp)` gate at resume's entry projection (the
+  load/projection path the resume record pins as the field whitelist),
+  not per-comparer surgery.
+- **(R4) lone surrogates — the persistence/bridge corpus, whole.**
+  `structuredClone` CARRIES them intact — no throw, no U+FFFD (the
+  DataCloneError class is NOT reachable through lone-surrogate strings on
+  this floor; the clone path preserves loneliness exactly, both the bare
+  string and an object carrier). JSON.stringify/parse round-trips them
+  EXACTLY (ES2019 well-formed JSON escapes; length arithmetic exact), so
+  the gmSetValue/realm decode surface is safe on the
+  surrogate axis by the floor's own default. `String.prototype`
+  ships both verbs: `isWellFormed()` witnesses the corpus false,
+  `toWellFormed()` delivers the U+FFFD twin (well-formed output). And the
+  pointer-recorded title note CONFIRMS: the sanitizer's `NON_LATIN_RE`
+  (u-flag Script=Latin/Common complement, script Unknown/Cs) strips
+  lone-surrogate code points whole — `sanitize()` output is well-formed,
+  the stored/bridged title path is already total. No adoption on the
+  title axis; the earlier note retracts to a confirmed claim.
+- **(R5) the bridge post surface — the hostile-path class pinned,
+  narrowed (adoption candidate #2).** The platform's structured-clone
+  gate is measured at the exact sites the frame model rides:
+  lone-surrogate-carrier payloads post through `window.postMessage` AND
+  `MessageChannel` ports delivered INTACT (no throw, no replacement —
+  the echo witnesses the d800 byte verbatim), so surrogates are not the
+  re-post hazard; **Symbols and functions throw `DataCloneError`
+  SYNCHRONOUSLY at the post site** ("unsupported type for structured
+  data" / "Function object could not be cloned"), which is exactly
+  `mapContextPayload`'s seam: its other fields are type-gated by
+  `looksLikeContextResponse` but `data.path` passes through unvalidated
+  onto the context re-post — a hostile in-frame document poisoning
+  `path` with a Symbol/function makes the TOP-frame re-post line throw
+  into the tree. The adoption is the same shape the gate already
+  enforces elsewhere: a `typeof data.path === "string"` admission
+  (lone-surrogate strings ride fine per this axis, so string admission
+  alone covers the measured classes).
+- **(R6) URL/host totality — the two-call identity is exactly already
+  total.** `URL.parse(u) === null` and `URL.canParse(u) === false` land
+  on precisely the constructor-throw rows (empty, port 65540, **a
+  lone-surrogate URL — the URL layer itself refuses them**, a space
+  host, a bare-userinfo host), while IDN/punycode parses to its punycode
+  form and a trailing-dot host lowercases cleanly. The AD matcher over
+  the lookalike column (soft-hyphen split, Cyrillic homoglyph, punycode,
+  wrong TLD, carrier suffix) reads 0/12 — the literal-matcher isolation
+  holds over the homoglyph class (an isolation record, no security
+  claim; punycode/soft-hyphen hostnames simply do not spell the
+  suffixes).
+- **(R7) the operator floor ledger — every prior-record operator
+  re-witnessed present on 159.0.1** (RegExp.escape, URL.parse/canParse,
+  Promise.withResolvers/try, both groupBys, the well-formed-string
+  verbs, Set algebra, iterator helpers, the Array copy verbs, findLast,
+  structuredClone, `using`, randomUUID, hasOwn).
+
+Sweep disposition: record-only at write time — no adoption earned on the
+floor's OWN behavior (the groupBy spec, the URL totality, the JSON and
+clone paths, the title sanitizer are all already total or exactly the
+shape the records claim); three adoption candidates carried to user
+direction because the measured gap is in src, not the engine: (1)
+`RegExp.escape` totalization of the three table-driven regex build sites
+(parity exact today, totality tomorrow, `{2}.com` is the construction
+throw the totality kills); (2) a `typeof data.path === "string"`
+admission gate in `mapContextPayload` (the Symbol/function
+DataCloneError class is measured real and unguarded); (3) a
+`Number.isFinite(stamp)` gate at resume's entry projection (the
+Infinity-immortality class is measured real). Each is small, each is
+behavior-additive only on today's flows, and each needs its own green
+battery run if adopted.
+
 ## 5. Conventions (the change bar)
 
 1. **Comments explain WHY with reasoning** — the rejected alternatives and

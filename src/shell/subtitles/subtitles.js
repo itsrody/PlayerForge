@@ -696,8 +696,13 @@ export class ForgeTrack {
  *  hand-spelled forms this once kept drifted apart inside the same file). */
 const SUBTITLE_EXTS = ["srt", "vtt"];
 const SUBTITLE_FILE_ACCEPT = SUBTITLE_EXTS.map((ext) => `.${ext}`).join(",");
-const SUBTITLE_EXT_RE = new RegExp(`\\.(${SUBTITLE_EXTS.join("|")})$`, "i");
-const SRT_NAME_RE = new RegExp(`\\.${SUBTITLE_EXTS[0]}$`, "i");
+/* The two regex assemblers ride `RegExp.escape` per entry, not a raw
+ * interpolation: a future `ext` table value built into the lattice raw
+ * re-interprets metachar grammar (and a `{2}`-shaped one throws at the
+ * construction), while the escape totalizes future table writes — and on
+ * today's literal-safe values the two builds match by construction. */
+const SUBTITLE_EXT_RE = new RegExp(`\\.(${SUBTITLE_EXTS.map((ext) => RegExp.escape(ext)).join("|")})$`, "i");
+const SRT_NAME_RE = new RegExp(`\\.${RegExp.escape(SUBTITLE_EXTS[0])}$`, "i");
 const SUBTITLE_NAME_FALLBACK = `subtitles.${SUBTITLE_EXTS[1]}`;
 
 /** The user-facing projection of the extension pair: the three controls
