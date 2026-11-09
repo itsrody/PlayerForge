@@ -2866,6 +2866,50 @@ re-decided. Our own writers are untouched: `createEntry` routes through
 `toFixedShape`, and the bridge context is type-gated upstream
 (`mapContextPayload`). Census unchanged.
 
+**Ledger batch 7 — the shared planes (Nov 2026, directed batch;
+record-only, audit-clean, no rows, no src; one green battery run
+(~86.6s) as the receipt).** The last family without a dedicated law
+pass, read at its intakes. **core.js: no intake** — the zero-import
+leaf is pure functions: `clamp` (the batch-2/5 admissions' own op),
+TUNING constants (own tables), `formatTime` (`!(seconds > 0)` is its
+total numeric intake — the batch-6 record), the two-name media-error
+classification. **runtime.js: no intake** — scheduling/scope/Fan
+control planes take no external data; the timer/deadline classes ride
+named constants and the batch-3-recorded engine commitment (N2's
+computed-delay totality note stands for any future caller).
+**dom.js: DOM-shaped observations only** — the shared mutation feed
+delivers platform records to its recorded four subscribers, DomPool
+recycles feature-owned elements, ReferenceBox's one read is
+platform-computed geometry, FsGate reads only the fullscreen API —
+nothing the host page can author as a VALUE crosses (the C2b fragment
+record and the E-axis filter-locality premise already pin the feed's
+shape). **page.js: the context plane — measured and gate-carved.**
+`getDomainKey` reads the platform hostname; the bridge context carries
+its three field admissions (`looksLikeContextResponse`'s domain gate +
+`mapContextPayload`'s path/title in-map strings, slice-capped 2048/512
+— the R5 adoption); `ownPageContext` reads platform strings; hostile
+window `postMessage` spoofing the bridge vocabulary is structurally
+narrowed — every route source-checks (`window.parent` for ready/relay,
+`iframeRegistry.child(event.source)` for context requests plus the
+string-typed nonce, origin/`isOwnFrame` for the tie-break arm), and
+the context REQUESTER narrows more than that: it listens on its own
+dedicated MessageChannel port, a channel the page cannot hold, so the
+answer surface is channel-structural; `hashEntry`/`stripNonAscii`/
+Levenshtein ride the truncated/band-bounded shapes the audits
+measured (the length-diff early exit + rowMin band prune + the
+`domainsMatch` ordering gate mean hostile-scale operands exit before
+the DP runs; only our own capped path/title strings ever hash).
+**store.js: the sweep-#10 record re-derived live** — `loadJsonObject`
+is the truthiness-object read (arrays pass `typeof "object"`, and each
+consumer gates: `isValidStore`'s `Array.isArray` refuses an array
+resume root, the configs walkers make array segments inert, and
+JSON-parsed docs cannot carry prototype-traversal getters — the
+`isSafeKeySegment` guards hold both read and write descents);
+`gmSetValue` passthrough serves only tree-shaped values; the echo/
+`randomNonce`/grant-guard rows are the recorded surfaces. No adoption:
+every shared-plane intake either rides a landed gate or is native-total
+in the recorded shape.
+
 ## 5. Conventions (the change bar)
 
 1. **Native-first implementation bar.** Every new or rewritten behavior asks
