@@ -2583,6 +2583,78 @@ in three subsequent all-green runs: environment-correlated scheduling flake,
 recorded so the next reader does not chase a ghost. Proved on 3 consecutive
 all-green runs (236 rows each, ~86s).
 
+**The Native-first bar law ledger — batch 1 (Nov 2026, user-directed "open a
+ledger for Native-first implementation bar law audit exploring the first
+sweep batch"; post-`6bbe8a3`, audit-clean, record-only).** The law (§5.1)
+became a receipt-bearing ledger: the first sweep batch audited the whole
+tree against it in three planes — the day-of-law delta, a per-module
+machine inventory, and the residual manual-engine roll — and certified the
+tree audit-clean. Artifacts: `check/.tmp/law-ledger-batch1.mjs` (the
+comment-stripped inventory; uncommitted per sweep convention), **one
+census addition**: `RegExp.escape build sites = 4` (the two
+`AD_HOST_RE` arms in entry.js, the two `SUBTITLE_EXT` assemblers — the
+reasoning-commit row pinning the totality adoption: a future table entry
+with a metachar must degrade as a literal, never reinterpret the grammar
+or throw at `RegExp` construction; a hand-dot-escape twin or an
+unescaped assembler returning is the law regression the row catches).
+Measurement note for the inventory class: template-interpolation content
+COUNTS as code (`RegExp.escape(ext)` lives inside a template literal;
+a naive comment-strip ate it until the stripper lifted `${...}` contents
+out of the backtick span before dropping it).
+
+1. **The day-of-law delta audit.** Every src commit between the loop-body
+   walk (`d9e229f`) and the law commit (`6bbe8a3`) — 7 commits, 15 files,
+   +252/−124 — classified from the diff, each native-ward, subtraction, or
+   a recorded prose/docstring correction: `20b07da` (shell.js docstring
+   only — the measured same-value skip), `5479871` (the four shell-plane
+   flag fixes: the S7 R4 divisor `/ 1%` → `/ 100%` one-line, S2/S3/S6
+   prose), `eb90825` (flashElement retirement, pure subtraction),
+   `a85dbc0` (the two delegation winners — forgevtt's packed-key sort
+   verified live in working src as `keys.sort()` on the `Float64Array`,
+   comparator-free per spec, and entry.js's compiled `AD_HOST_RE`
+   alternation with node-verified parity incl. the trailing-suffix trap),
+   `29906fb` (`RegExp.escape` ×3 build sites + the `typeof data.path`
+   admission + the `Number.isFinite` stamp gate), `bcb4dc0`
+   (`randomNonce()` + its 3 consumers), `b8e53c9` (the five uBO
+   admission gates), `6bbe8a3` (the law itself, AGENTS only). No commit
+   regressed toward hand-rolled work; the delta is the law's own history,
+   not a violation pool.
+
+2. **The machine inventory** (23 modules; 16 ride the counted
+   native-operator vocabulary, classified by verdict not by raw counts):
+   - **Native-delivered** (the implementation IS the operator: detection's
+     ONE `matches()` probe per hop; resume's `Map.groupBy`
+     path bucket + `toSorted` + seven `isFinite` gates; page's bridge
+     with `withResolvers` + `AbortSignal.any` + the truncation
+     `slice` caps; subtitles' escape-built tables + `URL.parse`
+     admission + the decode belt; media's `URL.parse` null-guard;
+     actions' `Object.groupBy` pointer-intents; panel/toast's
+     `replaceChildren` pooled clears; forge's `closest` press-arm and
+     kernel/entry/core's operator-floor sites).
+   - **Platform-API planes** (primaries are platform APIs the operator
+     vocabulary never counts; zero counted native hits is expected, not
+     a violation): dom (ResizeObserver/MutationObserver/FsGate — the
+     native observers story), runtime (the `scheduler.postTask` façade —
+     the native scheduling engine), store (the GM storage plane and its
+     echo contract), inject (`adoptedStyleSheets` + the `@container`
+     pockets), discovery (presence gates over MutationObserver), config/
+     contract/ui/shell (source-table derives, EventTarget Fan
+     construction, composition — init/interaction-rate loops in the
+     loop-body walk's recorded classes).
+   - **Manual engines, law-clean through receipts**: forgevtt's scanner
+     (the C++-ops A/B + wave-2 T2 measured declines; intakes shape-total;
+     its one native adoption = the packed sort), page's
+     Levenshtein/`hashEntry` (no native in-realm equivalent; band-bounded
+     over short keys; the string planes R4/R6-proven total), resume's
+     stamp comparators (the R3 `isFinite` gate over the immortal shape).
+
+3. **Verdict: audit-clean.** The residual manual set is exactly the
+   recorded declines — nothing on the tree violates the bar, no manual
+   engine duplicates a named native op, and every external-data intake
+   carries its admission gate. Next batches append to this ledger per
+   the delta-audit shape (each src commit classified at its law
+   surface), instead of re-walking the whole tree.
+
 ## 5. Conventions (the change bar)
 
 1. **Native-first implementation bar.** Every new or rewritten behavior asks

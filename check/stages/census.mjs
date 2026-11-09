@@ -148,6 +148,12 @@ const ROWS = [
     why: "the verified-empty-catch belt: each one swallows a named-throwaway failure on purpose (the entry ad-host skip probe, the two forge pointer-capture lift races, the ui icon parse belt, the media session release/metadata writes, the shell section-destroy loop, the subtitle percent-decode display-name belt - decodeURIComponent throws URIError on a bare-% served pathname segment, and the raw segment is the fine fallback for a display NAME) - a new bare catch needs its own named why in the record"
   },
   {
+    name: "RegExp.escape build sites",
+    pattern: "RegExp.escape(",
+    expect: 4,
+    why: "the native-first bar's totality adoption, pinned: both table-driven regex derivations escape EVERY entry through RegExp.escape at build time (entry.js's two AD_HOST_RE arms per table, subtitles.js's two SUBTITLE_EXT assemblers) - a future table entry carrying a metachar must degrade as a literal, never silently reinterpret the grammar or throw at RegExp construction; a hand-dot-escape twin or an unescaped assembler returning is a law regression (the R1 probe: the hand-escape build lies on every metachar row)"
+  },
+  {
     name: "Date.now reads",
     pattern: "Date.now(",
     expect: 9,
