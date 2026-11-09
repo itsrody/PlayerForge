@@ -282,7 +282,7 @@ iframes, same-origin and cross-origin:
   subscribe). Five relays, five true fans. The relays stay on purpose
   (the few-fans review batch): a direct callback drops native dispatch
   isolation (a throwing subscriber strands the notify chain) and
-  hand-rolls signal teardown the §5.5 census retired — and three of the
+  hand-rolls signal teardown the §5.6 census retired — and three of the
   five exist because of import direction (`shared` cannot import
   `shell`; `dispose` has no reverse surface on this floor). The one true
   reducer audited and declined: merging the four subtitle-module Fans
@@ -2585,24 +2585,42 @@ all-green runs (236 rows each, ~86s).
 
 ## 5. Conventions (the change bar)
 
-1. **Comments explain WHY with reasoning** — the rejected alternatives and
+1. **Native-first implementation bar.** Every new or rewritten behavior asks
+   one question first: is there a Firefox C++ engine operation or platform
+   API that owns it natively? When there is, the implementation IS that call
+   — no JS hand-off machinery may grow around it, and a manual engine that
+   duplicates it is a defect, not a style (the operator-floor records name
+   the vocabulary: `RegExp.escape`, `URL.parse`/`canParse`,
+   `Map.groupBy`/`Object.groupBy`/`structuredClone`, the abort-composition
+   family, `replaceChildren`, the C++ selector/cParsing engines the probes
+   priced; the substrate series is the receipts). Only where no direct
+   native approach has been named may a manual engine be built — and THAT
+   build must then be uBO-graded: every intake where hostile or over-large
+   data can arrive carries ONE total admission gate (a typeof/length/shape
+   read, itself a native op), so unbounded work, boot-reaching throws, and
+   whole-value downstream consumers are unreachable from the outside. A
+   manual engine is warranted native-side only through the audit series
+   (saturation, C++-ops, callback tax, loop-body walk); the recorded declines
+   stand until reopened with evidence, so the law cannot silently regress
+   into hand-rolled work.
+2. **Comments explain WHY with reasoning** — the rejected alternatives and
    the measured/probed finding. No restating code, no TODOs, no status
    adjectives.
-2. **One owner per behavior.** A duplicate is either absorbed or, if both
+3. **One owner per behavior.** A duplicate is either absorbed or, if both
    are real users, promoted into the shared plane. There is one registry,
    one response gate, one close path, one timer backend, one mutation feed,
    one storage watch contract.
-3. **Everything machine-facing is derived from a source table** (§3 lists
+4. **Everything machine-facing is derived from a source table** (§3 lists
    them). Adding an SDK = one record + check rows (the registry-coverage case
    demands a stub builder for every record, so the fixture promise is
    machine-enforced). Adding a gesture = one
    table row; the schema, bindings, and events derive.
-4. **Stateful ownership = private classes.** If state is mutated in more
+5. **Stateful ownership = private classes.** If state is mutated in more
    than one public flow, it belongs to one object with `#`-fields, not to
    module-level lets. Given a choice between a stateful factory (closure
    machine) and a class, choose the class; keep the factory as a plain
    enclosing function only when one thin wrapper name must not change.
-5. **Signal-scoped teardown.** Every listener accepts `{ signal: scope }`;
+6. **Signal-scoped teardown.** Every listener accepts `{ signal: scope }`;
    teardown paths call `scope.dispose()` and nothing else; the single
    abort-fire tears everything down. Never build removal-list pairs. The
    deliberate-machines census holds this byte-true: every hand-rolled
@@ -2649,18 +2667,18 @@ all-green runs (236 rows each, ~86s).
    adds exactly the dismissal trio + the CloseWatcher close listener on a
    per-open scope; scrubbing adds zero listeners (the rAF commit chain is
    one callback swap, not a socket).
-6. **Imports:** one per realm-form, combined; `shared` below package imports;
+7. **Imports:** one per realm-form, combined; `shared` below package imports;
    module files import only downward across planes (kernel → contract,
    shell → shared/kernel-contract), never sideways into a sibling's consumer
    (the import graph is enforced by the flaws gate's isolated import
    smoke).
-7. **No comments in check/ code beyond the why-docstrings it already
+8. **No comments in check/ code beyond the why-docstrings it already
    carries; `installGMRealm` must stay a single self-contained function**
    (it ships as an executeScript payload — no closure references).
-8. **ES target floor: Firefox 159.** `?.` chains, top-level field syntax,
+9. **ES target floor: Firefox 159.** `?.` chains, top-level field syntax,
    `data-transfer` file APIs, View Transitions, CloseWatcher — all in scope;
    nothing below the floor, no polyfill arms.
-9. **Version is derived** (esbuild reads package.json). Header updates are
+10. **Version is derived** (esbuild reads package.json). Header updates are
    interventions, not edits.
 
 ## 6. HUD design law (binds any visual change)
@@ -2821,7 +2839,7 @@ stop at the first failure:
   `__gmTest` audit surface (`remoteWrite`, `usage()`, `aliveMenuIds`); timeout
   + cold-cache wiring; forensics hooks (`__pfErrors`, `__pfConsole`, capped
   `__pfConsoleLog` capturing console chatter incl. `Shell registered: <sdk>`);
-  `installGMRealm` is one self-contained function by design (§5.7).
+  `installGMRealm` is one self-contained function by design (§5.8).
 - **Fixture server** (`driver.mjs`): dual-loopback listener — the same
   handler and port on `127.0.0.1` **and** `::1`, so `http://localhost:P` is
   a genuinely cross-origin route versus `http://127.0.0.1:P` with zero second
