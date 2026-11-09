@@ -191,7 +191,16 @@ export class FilterSession {
         // the old `Number(raw) || def` treated it as absent and silently
         // reset those to their default on the next load. Only a missing or
         // non-finite value falls back now.
-        this.#values[key] = raw == null || raw === "" || !Number.isFinite(num) ? def : num;
+        // The present-and-finite answer rides the SAME schema min/max the
+        // steppers commit with (Stepper's clamp-at-every-write-path:
+        // roundTo(clamp(parsed, lo, hi))): foreign-writable storage is one
+        // of this grain's intakes, and an unclamped 1e9 seed would apply
+        // `brightness(1000000000%)` straight off the video — the bound the
+        // FILTER_SCHEMA row already declares, normalized at every intake,
+        // not only the UI commit.
+        this.#values[key] = raw == null || raw === "" || !Number.isFinite(num)
+          ? def
+          : clamp(num, FILTER_SCHEMA[key].min, FILTER_SCHEMA[key].max);
       } else {
         this.#values[key] = raw ?? def;
       }

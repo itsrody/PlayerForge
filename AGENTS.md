@@ -2779,6 +2779,41 @@ already covered by standing coverage (the gm case's foreign-write
 debug-flip mirror and the diagnostics-reach rows), and the shapes are
 statically total.
 
+**Ledger batch 5 — the shell plane's top modules (Nov 2026, directed
+batch; one adoption — the filter seed clamp; proven on 3 consecutive
+all-green runs, ~86–89s each).** The family read at its intakes:
+shell.js, media.js, resume.js, filter.js. **The adoption** — the
+seed-bypass class (batch 2's) regROWN one grain over: `FilterSession`
+carried the same shape `SubtitleSyncState`/`SubtitlePlacementState` had
+— commit intakes bounded (the panel Stepper's clamp-at-every-write-path
+`roundTo(clamp(parsed, lo, hi))`, consuming the `FILTER_SCHEMA` row's
+own min/max) but the STORAGE SEED bypassing the same bound: `#load()`
+accepted any finite stored value, so a hostile `pf:configs
+filter.brightness = 1e9` applied `brightness(1000000000%)` straight off
+the video at boot (paint-bounded damage, but the bound the schema row
+already declares was not applied at every intake). The adoption is the
+one native `clamp(num, FILTER_SCHEMA[key].min, FILTER_SCHEMA[key].max)`
+at the seed — no new machinery, legit storage (steppers write in-range)
+byte-unchanged. **Per-file verdicts.** shell.js: the one non-DOM read
+is `getSetting(edgeToEdge) !== false` (boolean semantics; the
+cssVarSyncer's map-diff write-on-flip guard is the measured substrate
+record); the boot/watcher lists and the frozen `AdoptionHome` carry no
+foreign intake. media.js: zero storage reads — the entire module rides
+the media element and the gesture/API callers (scrub/seek targets are
+the batch-3 sinks); the metadata build is the recorded native-total
+pair (`document.title` trimmed into `MediaMetadata` — platform data,
+no throw surface — and the `URL.parse`-null-guarded poster artwork).
+resume.js: the restore chain is bound-complete — the whitelist entry
+projection + the `Number.isFinite` stamp gates (29906fb) + the
+`subsUrl` string admission (b8e53c9), the tracked `subOffset` read
+served unclamped to exactly one render consumer that carries the
+batch-2 clamp, and a hostile huge `position` restore value clamps at
+the media sink (`#clampTarget`'s duration clamp); `updateSubOffset`'s
+write is caller-bounded (the sync grain clamps at commit). The one
+intake beyond these is the metadata Witness observers reading
+`document.title`/`video.poster` — platform strings at fingerprint-compare
+rate, R4/R6-proven total. No roster moves needed: census unchanged.
+
 ## 5. Conventions (the change bar)
 
 1. **Native-first implementation bar.** Every new or rewritten behavior asks
