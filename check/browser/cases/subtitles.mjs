@@ -398,5 +398,56 @@ export async function run({ session, boot }) {
     ms: null
   });
 
+  // The hostile-style-value column (the law's uBO-grade receipt for the CSS
+  // intake): SubtitleStyleState writes stored color/size/shadow/font/stroke
+  // STRINGS into custom properties via setProperty — exactly the call this
+  // row replicates on the cue layer with hostile token streams. The consume
+  // chain must carry NO fetch surface (a hostile value may hold url() tokens,
+  // but its consumers — color, font-family, font-size, text-shadow,
+  // -webkit-text-stroke — paint only) and degrade IACVT: an invalid value
+  // falls back at substitution time instead of resolving to a hostile
+  // render. The before/after resource-entries delta carries the no-fetch
+  // proof (the fixture's own media must not count), the computed font-size
+  // readback the degrade. Inline writes are removed after, so later rows
+  // start sheet-clean.
+  const cssHostile = await session.evalAsync(function main(done) {
+    const shadow = document.querySelector(".pf-shell")?.shadowRoot;
+    const layer = shadow?.querySelector(".pf-cue-layer");
+    if (!layer) {
+      done({ ok: false, why: "no cue layer found" });
+      return;
+    }
+    const before = performance.getEntriesByType("resource").length;
+    layer.style.setProperty("--pf-cue-color", 'url("http://127.0.0.1:9/pf-css-leak") ; red');
+    layer.style.setProperty("--pf-cue-font-family", 'var(--pf-unknown), url(//127.0.0.1:9/x), "x');
+    layer.style.setProperty("--pf-cue-font-size", "1em; background-image: url(//127.0.0.1:9/y)");
+    layer.style.setProperty("--pf-cue-text-shadow", "} .pf-shell * { color: green }");
+    layer.style.setProperty("--pf-cue-stroke", "99999999999999cm");
+    setTimeout(() => {
+      const computed = getComputedStyle(layer);
+      const out = {
+        ok: true,
+        delta: performance.getEntriesByType("resource").length - before,
+        color: computed.color,
+        fontSize: computed.fontSize
+      };
+      // inline writes off: later rows must see the sheet's own presentation
+      for (const p of ["--pf-cue-color", "--pf-cue-font-family", "--pf-cue-font-size", "--pf-cue-text-shadow", "--pf-cue-stroke"]) {
+        layer.style.removeProperty(p);
+      }
+      done(out);
+    }, 300);
+  });
+  rows.push({
+    name: "hostile cue-style values carry no fetch surface (CSS intake IACVT)",
+    status: cssHostile.ok === true && cssHostile.delta === 0 ? "pass" : "fail",
+    note: cssHostile.ok === false
+      ? cssHostile.why ?? null
+      : cssHostile.delta === 0
+        ? `no subresource fetch from hostile cue-style values (computed color '${cssHostile.color}', fontSize '${cssHostile.fontSize}')`
+        : `${cssHostile.delta} resource entries after hostile style writes!`,
+    ms: null
+  });
+
   return rows;
 }

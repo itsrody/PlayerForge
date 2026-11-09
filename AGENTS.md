@@ -2655,6 +2655,45 @@ out of the backtick span before dropping it).
    the delta-audit shape (each src commit classified at its law
    surface), instead of re-walking the whole tree.
 
+**Ledger batch 2 — the subtitles family (Nov 2026, directed batch; two
+seed-clamp adoptions + the CSS intake receipt; proven on 3 consecutive
+all-green runs, ~86s each).** The family read at its own intakes with the
+law's two-halves bar: the manual engines (forgevtt scanner, the rVFC
+sampler, the placement derive) ride their recorded receipts unchanged; the
+new ground was the three state grains that consume FOREIGN-WRITABLE
+storage at their seeds. **The seed-bypass class — adopted (2 adoptions).**
+Both `SubtitleSyncState` and `SubtitlePlacementState` clamped their
+COMMIT intakes (`set()`'s ±`SYNC_BOUNDS`, the steppers' 0–100) but their
+seed paths — the field initializer, `#resolve()`'s entry-grain read, and
+`readPlacement()` — consumed storage values past the same bounds: a
+hostile `pf:configs` key or resume entry could ride a ±1e8 sync offset or
+a 1e7 placement override straight into the render math a commit could
+never reach (cues shifted out of existence, slots pushed off the picture —
+bounded damage, but the bound the owner already owned was not applied at
+every intake). The adoptions are the same native `clamp` op at the same
+bounds, three one-line sites, no new machinery; legit storage (steppers
+write in-range) is byte-unchanged. **The CSS intake receipt (row added,
+no adoption).** `SubtitleStyleState` writes stored size/color/shadow/
+font/stroke strings into custom properties via `setProperty` — the floor
+probe (a battery row after the over-cap refusal row) replicates the exact
+call with hostile token streams (`url()` fetch attempts, a selector-shape
+value, an overflowing unit, an unterminated string): computed color falls
+back to the sheet default (IACVT), computed font-size reads 14px, and the
+before/after `performance` resource census moves ZERO — the consume chain
+(color/font-family/font-size/text-shadow/-webkit-text-stroke) paints
+only, so the CSSOM value parser is the total engine and the string
+pass-through degrades safely; a `url()`-carrying custom-property value
+has no fetch surface on this floor. **The astral truncation boundary
+(node-verified, no change).** A `.slice()` cap can split a surrogate pair
+(locally ill-formed); the title strip's u-flag Script regex removes the
+lone halves whole, so every stored/bridged context value stays
+well-formed after truncation — the R4 record re-derived at the new cap
+sites. The remaining family intakes re-verified against their landed
+records: the ingest ceiling + `URL.parse` admission + decode belt +
+`#tryRestore` string admission (b8e53c9), the scanner's shape-total
+digit-only fields, and `MAX_SLOTS`' active-set bound over any parsed
+list.
+
 ## 5. Conventions (the change bar)
 
 1. **Native-first implementation bar.** Every new or rewritten behavior asks
@@ -3082,7 +3121,11 @@ stop at the first failure:
   parse (the arm the retired Worker offloader left as sole backend)
   drains and lands its overloaded cue, the over-cap refusal row (an
   18 MiB synthetic "subtitle" through the same real drop path refuses at
-  the admission ceiling with the fail toast and renders no bomb cue), and
+  the admission ceiling with the fail toast and renders no bomb cue), the
+  hostile-style-value row (the CSS intake receipt: url()/selector-shape/
+  overflowing-unit token streams through the exact `setProperty` call the
+  style state uses carry no fetch surface on the resource-entries census
+  and degrade IACVT to the sheet defaults), and
   the balance pin: the visible
   cue's computed `text-wrap-style` is exactly `balance` (vocabulary
   presence — the pixel-top rows are the geometry guard balance must not

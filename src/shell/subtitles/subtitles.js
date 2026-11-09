@@ -754,8 +754,13 @@ const SYNC_BOUNDS = TUNING.subtitles.syncMaxOffset;
  * front of them, and a subsequent set() migrates it to the entry grain.
  */
 class SubtitleSyncState {
-  /** Resolved current value; null until first resolution or bind attempt. */
-  #value = Number(getConfigValue(SETTING_KEYS.subtitles.syncOffset, 0)) || 0;
+  /** Resolved current value; null until first resolution or bind attempt.
+   *  The seed carries the SAME clamp the commit path applies (set()):
+   *  foreign-writable storage feeds both intakes, and one owner per
+   *  behavior means the bound normalizes at every intake, not only the
+   *  user-facing one — an unclamped ±1e8 seed would ride the render list
+   *  (cues shifted out of existence) where a nudge commit could never go. */
+  #value = clamp(Number(getConfigValue(SETTING_KEYS.subtitles.syncOffset, 0)) || 0, -SYNC_BOUNDS, SYNC_BOUNDS);
   #identity = false;
   #dirty = false;
   #tracker = null;
@@ -805,8 +810,12 @@ class SubtitleSyncState {
     const target = this.#identity
       ? tracker.subOffset
       : (Number(getConfigValue(SETTING_KEYS.subtitles.syncOffset, 0)) || 0);
-    if (!this.#dirty && target !== this.#value) {
-      this.#value = target;
+    // The entry-grain and fallback-grain reads land on the SAME bound the
+    // commit path and the field seed apply: a hostile resume entry's
+    // subOffset is just as foreign-writable as the raw config key.
+    const bounded = clamp(target, -SYNC_BOUNDS, SYNC_BOUNDS);
+    if (!this.#dirty && bounded !== this.#value) {
+      this.#value = bounded;
       this.#emit();
     }
   }
@@ -855,8 +864,12 @@ function readPlacement(key) {
   if (stored === null || stored === undefined || stored === "") {
     return null;
   }
+  // The present-and-finite answer rides the SAME clamp the commit path
+  // applies (setLine/setPosition: 0-100): a foreign-writable storage seed is
+  // one of this grain's intakes, and an unclamped ±1e7 seed would land its
+  // override past the steppers' whole grid (slots pushed off the picture).
   const value = Number(stored);
-  return Number.isFinite(value) ? value : null;
+  return Number.isFinite(value) ? clamp(value, 0, 100) : null;
 }
 
 /**
