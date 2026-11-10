@@ -3022,6 +3022,109 @@ task). Historical sweep records stay as date-stamped truth as
 measured on 159; the gate's own floor moves with the fleet engine it
 launches.
 
+**The C++ budget small-run on Firefox 160 (Nov 10 2026, release day;
+user direction "open the C++ budget small-run"; post-`4952c7c`,
+record-only, no src change, audit-guard resolved).** The recorded
+budget rows were all priced on 159 — the census-premise axes (C1
+clock prices, C3 belt unit, C4 table units), the delegation declines
+(D1 packed sort, D2 alternation, D3 Intl, D4 structuredClone), and the
+wave-2 re-prices (T1 callback tax, T2 scanner twin). This small-run
+re-priced each on the new fleet engine and re-asserted the parity
+behind the two LIVE adoption sites (`sortCues`' packed-key sort,
+`isAdHost`'s alternation) — an adoption's semantics must hold on the
+engine that now ships it. Artifact: `check/.tmp/
+cpp-budget-160-smallrun.mjs` + its report JSON, uncommitted per sweep
+convention. The draft round consumed six probe-bug classes before any
+recording — each now a harness lesson worth holding: (a) the
+serialized-body law again (the first draft rode module helpers and
+would have died "body is not defined"); (b) a `r & mask` indexing
+off-by-one (4095 mask over a 4000-row corpus reads `undefined` — use
+`r % rows.length`); (c) a "miss" arm that inherits the thrower's
+condition (`thrower(i + 1)` goes even half the time — hit≈miss
+hero-shape readings must assert the miss arm NEVER throws, e.g. odd
+arguments only); (d) fresh `new RangeError` per throw is object+stack
+construction (~290ns), not belt cost — preallocate the throw value;
+(e) a parity comparator that checked the wrong record index
+(`[0]` vs `[7]`) reported `parity: false` against correct engines —
+line-check the comparator against the asserted rows; (f) sub-grain
+raws (D2 re-arm 11ms, D1 packed 6ms, T2 8/15ms drafts) and a 50/50
+junk-mixed corpus (dilutes the priced unit) fail the sizing/corpus
+rules — bump passes to ≥20ms per arm and time the unit the budget
+names; plus arm-order cold-pass bias (report the pass-2 pair, both
+arms warm). Final values, one per axis:
+
+- **(G0quick) grain unchanged**: `performance.now()` steps 1ms on 160
+  (both clocks, re-derived live).
+- **(C1) the deadline class's clock holds**: `Date.now()` 39ns,
+  `performance.now()` 374–381ns (159: ~36/~425) — the zero-timer
+  deadline class still rides the 10×-cheaper clock, unchanged in shape.
+- **(C3) the belt unit holds**: preallocated-value throw-into-catch
+  60–73ns/cycle; miss path ~1ns (159: ~52/~1.9) — the miss is even
+  engine-freer on 160 and hits stay the rare-edge class; the ratio
+  widened (recorded 28×, now ~60×).
+- **(C4) table units**: `new Set(11 words)` 73–81ns (159: ~54, 1.4×);
+  4-key hasOwn walk 16ns (159: ~20, holds); `Map.groupBy` over 10k
+  rows/50 buckets 325–353µs (159: ~83µs — ~4× the 159 row). Linear
+  scaling puts the store's real bound (the RESUME_MERGE at ≤2000
+  entries) at ≤ ~70µs/merge, and the robust row (400 remote-adoption
+  merges < 800ms) then carries ~30× headroom — the boot/interaction-
+  rate classification is unchanged.
+- **(D1) the packed-key adoption HOLDS and got cheaper**: parity 0
+  mismatches, tie-stability true (50ms-wide bands exercised);
+  packed 1ns/rec (150×190k = 26ms raw) vs comparator 24ns (23ms raw)
+  — 25× (159: 4× at 8.4 vs 34). `sortCues` stands on the new engine.
+- **(D2) the alternation adoption HOLDS and got cheaper**: zero
+  disagreements over the hostile corpus incl. all trap anchors
+  (trailing-suffix, apex, `adoubleclick.net`, sub-suffix); alternation
+  10–11ns vs loop 51ns — 4.6× (159: 3.6× at 24.5 vs 90.5).
+  `isAdHost` stands on the new engine.
+- **(D3) the Intl decline holds**: concat 27–29ns vs
+  DateTimeFormat 248–253ns (9×; 159: 23×) and DurationFormat
+  633–706ns still shaping "1 hr, 23 min, 47 sec", not h:mm:ss.
+  Declined on both price and shape, as recorded.
+- **(D4) the structuredClone decline holds**: spread 29–35ns / JSON
+  148–165ns / clone 628–695ns per flat record (159: 19/281/594) —
+  clone still ~20× the spread (159: 31×), JSON ~5× (159: 15×); the
+  gap narrowed but adoption stays far behind the walkers. Parity
+  green after the comparator fix ended the draft's false negative.
+- **(T1) the callback-tax premise holds**: numeric all-miss 20M ×8
+  passes — manual 0.45ns/elem (73ms raw), the same predicate through
+  a closure ~1.8ns, the verb ~0.4ns; parity miss + one-match control
+  both true. Tax ≤ ~1.4ns on the JIT's best case on 160 — the manual
+  walks still win on shape, not cost.
+- **(T2) the scanner-twin decline HOLDS on rate, but the A/B's
+  DIRECTION FLIPPED on this replica** — the one divergence recorded,
+  flagged for any future re-open. The manual arm replicates the
+  shipped `timecodeToSeconds` + `parseTimingLine` verbatim
+  (slices/trimEnd/closure fielders included); 0 parity mismatches
+  over timing and junk corpora; both-warm pass-2 numbers: manual
+  188–204ns per TIMING line vs the 8-capture regex twin 132–136ns,
+  stable across runs and arm order — the twin is the FASTER unit on
+  160's replica, while the recorded 159 decline had the manual arm
+  ahead (13.2 vs 27.2). Reconciliation is not possible: the wave-2
+  probe files were consumed (uncommitted convention) and its per-line
+  metric can't be re-derived — these numbers stand as measured, with
+  the corpus-metric difference unresolved. The mixed reality (real
+  tracks interleave ~50% text lines: 10ns manual / 30ns twin per
+  junk line) narrows the twin's lead to ~19ns/line averaged, and the
+  absolute saving is ~0.4–1.1ms against the ~11ms/1.1MB whole-parse
+  ingest tripwire — single-digit-percent on the recorded rate axis.
+  **The decline stands** (the walk-into-adoption threshold the series
+  used was a measured win on the tree's real axes, not a direction
+  flip at sub-decision scale), and the flip is now measured evidence
+  on file for the reopen rule if the user directs a real adoption
+  probe against the hotpaths tripwire.
+
+Sweep disposition: record-only, no src change earned adoption — both
+live adoptions hold with widened margins (D1 25×, D2 4.6×), every
+decline's rate classification survives (C4's 4× groupBy bounded by
+store-scale math; D3/D4 ratios narrowed but unchanged in direction;
+T2's twin saving still single-digit-percent of the ingest tripwire),
+and the two budget classes the probes priced (the cheap epoch clock,
+the belt cost model) hold within shape on 160. Battery receipt: src
+untouched; the batch rides one green full-battery run per the
+record-only rule.
+
 ## 5. Conventions (the change bar)
 
 1. **Native-first implementation bar.** Every new or rewritten behavior asks
@@ -3546,8 +3649,10 @@ native-operator saturation audit (post-`75437f2`, the probe batch), then
 the substrate series (C++ `20b07da`, kernel-plane `ea5a8f1`, shell-plane
 `5479871`) and the native-replacement wave-2 probe (post-`5479871`,
 record-only), then the census-premise substrate audit (post-`ef8393e`,
-record-only) and the C++-internals delegation probe (post-`d5c2b81`,
-record-only). The
+record-only), the C++-internals delegation probe (post-`d5c2b81`,
+record-only), the native-robustness series and the Native-first law
+ledger (batches 1–7), the Firefox 160 release floor probe (`4952c7c`)
+and the C++ budget small-run on 160 (record-only). The
 series'
 record-only commits changed
 AGENTS.md alone; every src-touching pass proved
