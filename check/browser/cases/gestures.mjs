@@ -995,9 +995,10 @@ export async function run({ session, baseUrl, boot }) {
   // the platform's own IDL, measured on this floor: PointerEventInit's
   // clientX/clientY and WheelEventInit's deltaY are non-unrestricted
   // doubles, so NaN/±Infinity throw TypeError at the dictionary conversion
-  // — the admission gate IS a native engine operation. movementX is an
-  // unrestricted double and rides NaN through, but the engine never
-  // consumes it (witness attempt below, not part of the pass gate). Every
+  // — the admission gate IS a native engine operation. movementX is NOT
+  // engine-gated on either floor (the engine never consumes it —
+  // clientX/clientY and the deltaY sign are its only numeric reads;
+  // witness attempt below, not part of the pass gate). Every
   // FINITE garbage value beyond the gate degrades through sinks that
   // already own the bounds (the seek clamp saturates at the duration; the
   // swipe transform's invalid-at-parse values are dropped by the CSSOM;
@@ -1017,13 +1018,16 @@ export async function run({ session, baseUrl, boot }) {
       ["clientX Infinity", () => new PointerEvent("pointermove", { clientX: Infinity, clientY: 4 })],
       ["clientY NaN", () => new PointerEvent("pointermove", { clientX: 4, clientY: NaN })],
       ["WheelEvent deltaY NaN", () => new WheelEvent("wheel", { deltaY: NaN, deltaX: 0 })],
-      // Measured witness, NOT part of the pass gate: movementX is an
-      // unrestricted double, so NaN rides the conversion — but the engine
-      // never consumes movementX (clientX/clientY and the deltaY sign are
-      // its only numeric reads), so the unrestricted member is inert by
-      // non-consumption. Recorded so a future engine reader of movement*
+      // Measured witness, NOT part of the pass gate: movementX is NOT
+      // engine-gated - its init is a loose member on both floors. On 159 a
+      // NaN init rode the getter as NaN; Firefox 160 coerces the NaN init
+      // to 0 (probe: finite init honored verbatim, NaN→0, no exception -
+      // check/.tmp/firefox160-floor-probe.mjs MOVEMENT axis). Either
+      // reading is inert by non-consumption: the engine never reads
+      // movement* (clientX/clientY and the deltaY sign are its only
+      // numeric intakes). Recorded so a future engine reader of movement*
       // knows the intake is NOT engine-gated and must carry its own bound.
-      ["movementX NaN (unrestricted)", () => new PointerEvent("pointermove", { movementX: NaN, clientX: 4 })]
+      ["movementX NaN (non-gated)", () => new PointerEvent("pointermove", { movementX: NaN, clientX: 4 })]
     ]) {
       try {
         make();

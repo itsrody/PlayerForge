@@ -2947,6 +2947,81 @@ series, a batch against the whole tree again, or re-litigating a
 recorded decline) needs explicit user direction AND fresh code-level
 evidence; recorded declines stand.
 
+**The Firefox 160 release floor probe (Nov 10 2026, release-day batch;
+user direction "read the 160 release notes and explore a batch";
+post-`e8f3570`, record-only + one docstring correction; audit-clean).**
+The fleet engine moved: the machine's Firefox is 160.0, so the battery
+gate itself now runs the shipped bundle on 160. Artifacts:
+`check/.tmp/firefox160-floor-probe.mjs` (10 axes — G0 grain, OP
+operator ledger, CSS template check, TYPESETS types-slice shape, LIFE
+Page-Lifecycle vocabulary, MQ fullscreen media queries, IDL admission
+gates, ENGINE substrate facts, NEW160 platform deltas, OPRAW/DRIFT/
+MOVEMENT raw-witness axes for the suspect readings) and `firefox160-
+floor-report.json`, uncommitted per sweep convention. The 160 delta
+review first: SpeechRecognition (on-device, desktop) shipped —
+presence/shape recorded (`SpeechRecognition` + `webkitSpeechRecognition`
+both functions, constructor works with defaults `lang: ""`,
+`continuous/interimResults: false`, start/stop + the four event
+props), no tree scope direction carries it; the
+`::-webkit-input-placeholder` alias works (its computed
+`::placeholder` color reads the alias row) — the HUD sheet spells
+`::placeholder` nowhere, zero vocabulary surface; the
+`MozScrolledAreaChanged` removal — zero matches in src (grep); the
+experimental surfaces (`<video loading="lazy">`, render-blocking,
+Typed-OM arithmetic) are off by default and out of floor scope.
+Premise re-witness, one per axis: **G0** both clocks quantize to
+exactly 1ms (unchanged); **OP** the R7 operator-floor ledger is fully
+present on 160 (RegExp.escape/URL.parse+canParse/Promise.withResolvers
++try/Set algebra/iterator helpers/array copy verbs/findLast/hasOwn/
+both groupBys/iso methods/structuredClone/randomUUID/checkVisibility/
+postTask+yield/vv) — RegExp.escape's escape phase now witnessed by raw
+value (`"a+b.c"` → `"\x61\\+b\\.c"`, the spec's `\x61` leading-
+alphanumeric prefix; the adoption sites compare nothing by hand, so
+nothing there is touched); hostile groupBy keys still land on a null
+prototype (R2 holds). **CSS** the closed redesign ledger's NOT-SHIPPED set is
+still NOT SHIPPED on 160 (`corner-shape`, `interpolate-size`,
+`text-wrap-style: pretty` all false — the reopen trigger did not
+fire), and every adopted/shipped surface stands (balance, trim+edge,
+zoom, view transitions, allow-discrete, scrollbar pair, snap pair,
+content-visibility, contain, scroll-timeline, anchor trio, color-mix +
+relative color, `:has()`, calc infix). **TYPESETS** the panel-motion
+premise holds byte-true: `{ types: [...] }` drives `vt.types` as a live
+`ViewTransitionTypeSet` (Set-like, not an Array, size 2, constructor
+name read). **LIFE** the Page-Lifecycle retirement premise holds:
+`freeze`/`resume` exposed nowhere in the page realm, `wasDiscarded`
+undefined. **MQ** the FsGate premises hold: `(fullscreen)` and
+`(display-mode: fullscreen)` both false, `(pointer: fine)` true. **IDL**
+the batch-3 admission gates hold (clientX NaN/Infinity + clientY NaN +
+deltaY NaN all TypeError, finite control ACCEPTED) — with the batch's
+one genuine 160 delta: **`movementX: NaN` init no longer rides NaN —
+it delivers 0** (finite init honored verbatim: 7/−2; default 0), the
+measure-false sentence corrected in the gestures case comment (both
+floors' readings recorded in that comment; the intake's inertness is
+by NON-CONSUMPTION, not NaN passage — zero src consumption either
+way). **ENGINE**: apply-args boundary still exactly 500,000 (fast path
+green at 65536 = 13% margin unchanged); `moveBefore` cross-parent
+still FLIPPED (no structural change toward the TypeError the prose was
+warned not to harden); postTask delay-100 drift median 0ms max 1ms
+(F holds); one MO callback across 5000 per-turn appends (E holds);
+listener-throw containment in raw EventTarget delivery (D holds);
+200-user-visible-before-background burst consistent (the precise
+priority-choreography row remains the F-batch record). **Receipt:**
+the battery's own three documented runs on 160 are the behavioral
+floor proof — before any record landed, the 2.0.0 bundle shipped and
+the FULL battery proved itself on the new engine (239 rows, ~86–89s),
+then two more after the docstring correction (3 consecutive all-green:
+88.6/86.3/86.6s). Probe lessons: the serialized-body law is enforced
+at the page-realm stringifier (the first draft rode a node-side `body`
+closure and every axis answered "body is not defined" — each axis body
+is now fully self-contained); a CSS.supports declaration must carry a
+property (color-mix read false until `color:` was prefixed); the
+`RegExp.escape` verifier string ignored the `\x61` phase (verify by
+raw value, not a recomputed literal); the drift axis's first shape
+measured its own `setTimeout` cadence, not postTask (read inside the
+task). Historical sweep records stay as date-stamped truth as
+measured on 159; the gate's own floor moves with the fleet engine it
+launches.
+
 ## 5. Conventions (the change bar)
 
 1. **Native-first implementation bar.** Every new or rewritten behavior asks
