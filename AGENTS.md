@@ -535,7 +535,12 @@ iframes, same-origin and cross-origin:
   identity the kernel→shell watcher protocol carries (one record per
   adoption through the provider, the `RemovalWatch` anchors, and the
   destroy-readopt compare; every seam previously re-spelled the
-  `{video, container, sdk}` shape by hand). The frame bridge's message types derive from
+  `{video, container, sdk}` shape by hand). The record's single
+  vocabulary is `video` + `sdk.<fact>`: the descriptor (`name`/
+  `container`/`hops`) is the one holder of the SDK facts and no alias
+  getter re-spells them (user direction — rely on the sdk descriptor
+  alone; the container hop-count facts are per-match resolved and
+  cannot derive from the name alone). The frame bridge's message types derive from
   their own single prefix inside `page.js` (module-local by documented
   design); key bindings derive in `actions.js`. No machine-facing string is
   hand-spelled anywhere else.
@@ -602,7 +607,9 @@ iframes, same-origin and cross-origin:
   registry-empty edge re-arming the full discovery tap — identity flows as
   ONE frozen `AdoptionHome` (`resolveAdoptionHome` resolves at adoption and
   at the re-wrap seam; the provider, `RemovalWatch`, and the
-  container-equality compare all read the same record) — the `ShellSlot`
+  container-equality compare all read the same record, whose container
+  fact is read through the `sdk` descriptor after the alias getters
+  retired) — the `ShellSlot`
   (one shell per session; a displaced shell is **destroyed**, never
   orphaned; the adoption guard makes the displaced-destroy a backstop),
   `MenuCommands` (debug toggle + the two one-shot reset
@@ -648,7 +655,8 @@ iframes, same-origin and cross-origin:
   owns destroy and re-anchor paths. The shell stores the frozen
   `AdoptionHome` the provider hands it and exposes `video`/`container`/`sdk`
   as read-only aliases of the same record (identity is a shell-lifetime
-  fact). The panel-section destroy loop rides ONE uniform bare `catch` (the
+  fact; the container alias reads through the record's `sdk` descriptor
+  since the record's alias getters retired). The panel-section destroy loop rides ONE uniform bare `catch` (the
   release-tail class): a section destroy that throws must not strand the
   inputs/panel/toast/DOM teardown steps behind it — they are the shell's
   only unregister on that path, so the broken member dies contained and the

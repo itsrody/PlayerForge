@@ -87,19 +87,22 @@ export const FRAMEWORK_TUNING = {
  * The adoption identity, the kernel→shell watcher protocol: ONE record per
  * adoption, resolved once at discovery and handed unchanged through every
  * seam that speaks the boot identity - the provider (Shell), the removal
- * watch (its anchored roots derive from video/container/hops), and the
- * destroy-readopt compare (home.container === shell.home.container; a re-wrap
- * resolves a NEW record and the old one stays the boot identity it was -
- * identity is a shell-lifetime fact, read-only for every holder). Each of
- * these seams previously re-invented the shape as a hand-spelled
- * {video, container, sdk} object; the record is the one spelling.
+ * watch (its anchored roots derive from video and the SDK descriptor's
+ * container/hops), and the destroy-readopt compare (the container fact: a
+ * re-wrap resolves a NEW record and the old one stays the boot identity it
+ * was - identity is a shell-lifetime fact, read-only for every holder). Each
+ * of these seams previously re-invented the identity as hand-spelled objects;
+ * the record is the one spelling.
  *
- * Read-only by derivation, not by duplication: the identity fields are
- * getters over the one SDK descriptor the resolution produced (container and
- * hops alias its facts rather than copying them - one fact, one holder), and
- * every identity mutation answer throws in strict mode - the same write
- * seal Object.freeze gave the earlier stored-field shape, without the two
- * homes for the same fact.
+ * The record carries the subject video plus the ONE SDK descriptor the
+ * resolution produced - name against logs and error prose, the resolved
+ * shell-host container the destroy-readopt compare read, the anchor hop
+ * count the removal watch's depth input consumed. Read-only by derivation:
+ * the two fields are the whole state, every identity mutation answer throws
+ * in strict mode, and the descriptor's facts are read through their own
+ * holders (one fact, one holder - no alias getter spelling the same fact
+ * a second time). The single-vocabulary direction: consumers speak
+ * `video` + `sdk.<fact>` - one naming line for every identity read.
  */
 export class AdoptionHome {
   #video;
@@ -116,21 +119,11 @@ export class AdoptionHome {
     return this.#video;
   }
 
-  /** The shell-host container the descriptor resolved - the identity fact
-   *  the destroy-readopt compare reads. */
-  get container() {
-    return this.#sdk.container;
-  }
-
-  /** The SDK descriptor (name/container/hops): features reading SDK facts
-   *  (name in logs and error prose) read it here rather than through a
-   *  re-spelled field. */
+  /** The SDK descriptor (name/container/hops): every SDK fact - the name in
+   *  logs and error prose, the resolved shell-host container (the identity
+   *  fact the destroy-readopt compare reads), the anchor hop count (the
+   *  removal watch's depth input) - reads through here as the one holder. */
   get sdk() {
     return this.#sdk;
-  }
-
-  /** The SDK anchor's hop count, the removal watch's depth input. */
-  get hops() {
-    return this.#sdk.hops;
   }
 }

@@ -132,12 +132,12 @@ export async function run({ session, baseUrl }) {
         continue;
       }
       const ok = home.sdk.name === record.name
-        && home.container === target
-        && home.hops === 1
+        && home.sdk.container === target
+        && home.sdk.hops === 1
         && home.video === video;
       results[record.name] = ok
         ? { ok: true }
-        : { ok: false, why: `name=${home.sdk.name} hops=${home.hops} containerMatch=${home.container === target} videoMatch=${home.video === video}` };
+        : { ok: false, why: `name=${home.sdk.name} hops=${home.sdk.hops} containerMatch=${home.sdk.container === target} videoMatch=${home.video === video}` };
     }
 
     // The no-generic-fallback law: a bare video answers null.
@@ -163,8 +163,8 @@ export async function run({ session, baseUrl }) {
     const coreHome = resolveAdoptionHome(coreVideo);
     coreHolder.remove();
     results.__clapprCore = {
-      ok: !!coreHome && coreHome.sdk.name === "Clappr" && coreHome.container === coreOnly,
-      why: coreHome ? `${coreHome.sdk.name}@${coreHome.hops}` : "null"
+      ok: !!coreHome && coreHome.sdk.name === "Clappr" && coreHome.sdk.container === coreOnly,
+      why: coreHome ? `${coreHome.sdk.name}@${coreHome.sdk.hops}` : "null"
     };
 
     // The Laravel second arm: #app[data-page] matches the root itself.
@@ -179,8 +179,8 @@ export async function run({ session, baseUrl }) {
     const appHome = resolveAdoptionHome(appVideo);
     appHolder.remove();
     results.__laravelApp = {
-      ok: !!appHome && appHome.sdk.name === "Laravel Video Embed" && appHome.container === app,
-      why: appHome ? `${appHome.sdk.name}@${appHome.hops}` : "null"
+      ok: !!appHome && appHome.sdk.name === "Laravel Video Embed" && appHome.sdk.container === app,
+      why: appHome ? `${appHome.sdk.name}@${appHome.sdk.hops}` : "null"
     };
     return results;
   }, `${baseUrl}${base}/detection.js`);

@@ -116,7 +116,7 @@ export class Shell {
 
   constructor({ home, onDestroy }) {
     this.#home = home;
-    this.#refBox = new ReferenceBox(home.container, this.#scope.signal);
+    this.#refBox = new ReferenceBox(home.sdk.container, this.#scope.signal);
     this.#onDestroy = onDestroy;
     this.#media = createMediaControls({ video: home.video });
     this.ready = this.#boot();
@@ -129,7 +129,7 @@ export class Shell {
   }
 
   get container() {
-    return this.#home.container;
+    return this.#home.sdk.container;
   }
 
   get sdk() {

@@ -216,13 +216,13 @@ class RemovalWatch {
 
   constructor({ home, signal, onRemoved, onReparent, onStop }) {
     this.#video = home.video;
-    this.#container = home.container;
+    this.#container = home.sdk.container;
     this.#onRemoved = onRemoved;
     this.#onReparent = onReparent;
     this.#onStop = onStop;
     /** Adaptive watch depth: the matched anchor + a margin, never unbounded. */
-    this.#watchDepth = Number.isInteger(home.hops) && home.hops > 0
-      ? Math.min(home.hops + REMOVAL_DEPTH_MARGIN, MAX_REMOVAL_DEPTH)
+    this.#watchDepth = Number.isInteger(home.sdk.hops) && home.sdk.hops > 0
+      ? Math.min(home.sdk.hops + REMOVAL_DEPTH_MARGIN, MAX_REMOVAL_DEPTH)
       : MAX_REMOVAL_DEPTH;
     this.#signal = signal;
     this.#reanchor();
@@ -457,7 +457,8 @@ export class Kernel {
    * downgrade were placed before the wait, and nothing else releases them.
    */
   async #onVideoFound({ home, watch }) {
-    const { video, container, sdk } = home;
+    const { video, sdk } = home;
+    const container = sdk.container;
     logger.log("lifecycle", `video:found - ${sdk.name}`);
     if (this.#registry.getByVideo(video)) {
       logger.log("lifecycle", "Video already has a shell, skipping");
@@ -797,7 +798,7 @@ export class Kernel {
       return;
     }
     const redetected = resolveAdoptionHome(video);
-    const container = redetected?.container ?? null;
+    const container = redetected?.sdk.container ?? null;
     if (!container || container === shell.container) {
       return;
     }
