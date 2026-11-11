@@ -125,6 +125,68 @@ against a different manager means re-proving each file's semantics from
 that manager's released source (see the sweep's remote-verification
 artifacts under `check/.tmp/`, left uncommitted per convention).
 
+**Sweep #7 addendum (Nov 11 2026, re-audit against the RELEASED v2.50.0;
+user direction "VM floor re-audit"; audit-clean, one wording refinement).**
+The five premises were re-derived from the released v2.50.0 source itself
+(`check/.tmp/vm250-audit/` — the nine premise files fetched at the tag,
+uncommitted per sweep convention), not master HEAD, the first re-check
+against a real release since the premises were pinned. The release's
+v2.49.0→v2.50.0 commit log (53 commits) touches our planes in exactly four
+commits: `3f9ae1b` (#2716, matcher), and three xhr-plane fixes (`a003039`
+reqId strip on redirect, `b77352e` large incognito response, `5ce39a4`
+dlInTab abort); the rest are sync/cron/MCP/locale. Per premise:
+
+1. **Echo contract holds byte-true.** `gm-values.js` at the tag: own writes
+   fire `notifyChange(..., remote = false)` via the default parameter,
+   foreign updates ride `changedRemotely(..., remote = true)`; the
+   own-write echo is still deduped structurally (`raw !== oldRaw` — the
+   writer's `bridge.storages` was updated at write time); per-callback
+   try/catch isolation intact in `notifyChange`'s dispatch loop. The
+   background half (`values.js`): `broadcast()` walks `openers[id]` per
+   script → per tab → per frame, one `sendTabCmd('UpdatedValues')` per
+   opener frame, sibling frames of the writer included.
+2. **The xhr relay still gates nothing by metadata — one wording
+   refinement.** Zero `@connect` vocabulary across the whole pair at the
+   tag; the clamp survives verbatim
+   (`Math.max(0, Math.min(0x7FFF_FFFF, opts.timeout)) || 0`); the notify
+   event list still carries `'timeout'` (now in `injected/web/requests.js`,
+   the file that moved) so the user's `ontimeout` arms `events[0].timeout`
+   and propagates through `initXHR`'s handler wiring. The refinement: the
+   released `vetUrl` applies `testBlacklistNet(res)` — the
+   **user-configurable net blacklist** (`BLACKLIST_NET`, default-empty,
+   opt-in) can return a `Blacklisted` error for a host the user themselves
+   banned. So "vetUrl is URL-shape validation, not host consent" now reads:
+   no metadata consent; the one host gate is the user's own net blacklist,
+   which gates nothing on a stock install. New engine facts recorded:
+   `limitConcurrency(4-per-host)` applies ONLY to the `Request`
+   own-command (extension's own fetches) — the gmxhr `HttpRequest` path is
+   not throttled; every `__.MV3` branch (DNR rules, offscreen document,
+   chunked responses) skips on our Firefox-MV2 floor where `initXHR` runs
+   directly.
+3. **The frame model holds byte-true.** `manifest.yml` at the tag:
+   `matches: <all_urls>`, `run_at: document_start`, `all_frames: true`.
+4. **The `GM_info` mirror holds byte-true.** `makeGmInfo` sets
+   `scriptHandler = VIOLENTMONKEY` and `version = __.VM_VER` (the release
+   build's version define), plus the additive `userAgent`/`userAgentData`
+   getters.
+5. **The matcher surface holds, and the #2716 port fix is now measured
+   engine fact.** `RE_STR_ANY = '(?:|[^:/]*?\\.)'` (the `*.` apex
+   coverage) and `RE_GLOB_HOST_SUFFIX` are unchanged; `@exclude-match`
+   still rides the strict `MatchTest` surface (the new `testScriptDetailed`
+   is an additive MCP-tool wrapper over the same builders). The port fix:
+   `MatchTest` now `splitPort`s the host and `test()` matches when
+   `!this.port` — **a portless pattern matches any port**. All 24 of our
+   `@exclude-match` patterns are portless, so their ban coverage formally
+   widened to explicitly-ported URLs — the safe direction for exclusions
+   (we ban platforms, any port included); no pattern needed a change.
+
+New surface notes, none premise-relevant: MCP integration (#2699/#2715) and
+the cron update schedule are dashboard/updater planes the runtime never
+rides. Disposition: record-only, no src change earned adoption; the store.js
+docstring's "gates nothing" sentence stays correct under the refined
+reading (stock install = no blacklist). Artifact: `check/.tmp/vm250-audit/`
+(the fetched tag sources), uncommitted per sweep convention.
+
 The two exclusion vocabularies are complementary, not
 redundant: the 24 `@exclude-match` patterns ban the player *platforms* the
 match-all lets sitewide, while `entry.js`'s runtime skip
@@ -3702,7 +3764,8 @@ record-only), the native-robustness series and the Native-first law
 ledger (batches 1–7), the Firefox 160 release floor probe (`4952c7c`)
 and the C++ budget small-run on 160 (record-only), then the T2 reopen
 adoption (Nov 2026, src — the scanner twin landed on its measured
-verdict). The
+verdict), and the VM v2.50.0 floor re-audit addendum (record-only — the
+five manager premises re-derived from the released source). The
 series'
 record-only commits changed
 AGENTS.md alone; every src-touching pass proved
