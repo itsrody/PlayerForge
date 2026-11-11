@@ -610,10 +610,10 @@ iframes, same-origin and cross-origin:
   hand-spelled anywhere else.
 - **detection.js** — the SDK identity engine, registry-driven, importing only
   its contract.
-  17 supported SDK records (JW Player, Video.js, Plyr, ArtPlayer, DPlayer,
+  20 supported SDK records (JW Player, Video.js, Plyr, ArtPlayer, DPlayer,
   MediaElement.js, XGPlayer, Aliplayer, Fluid Player, Flowplayer, Clappr,
   Vidstack, Mux Player, Radiant, Laravel Video Embed, Shaka Player,
-  OpenPlayerJS), each a set of
+  OpenPlayerJS, Bitmovin Player, Kaltura PlayKit, NPlayer), each a set of
   **SDK-namespaced anchor selectors** resolved by the native `closest()`
   walk — the primary arm: `closest(ANCHOR_PROBE)` answers the nearest
   matching ancestor-or-self in ONE C++ call (light DOM AND shadow-internal
@@ -663,7 +663,30 @@ iframes, same-origin and cross-origin:
   ui.css, both releases read) — THEOplayer is Video.js-based at every
   release, the existing Video.js record already covers the topology, and
   a `.theoplayer-skin` record would be dead on real pages (the video.js
-  wrapper resolves nearer). One deliberate exception stands, closed: Laravel
+  wrapper resolves nearer). The registry's second growth round verified
+  three more records from vendor source: Bitmovin Player rides
+  `.bmpui-ui-uicontainer` (the UI container `UIManager.ts` appends into
+  `player.getContainer()` BESIDE the video — the sibling relationship is
+  the vendor's own comment that display:none on the outermost UI
+  container must not "block any events on the video"; the class ships
+  95× in the built bitmovinplayer-ui.css, prefix default `bmpui` from
+  _variables.scss), Kaltura PlayKit rides `.playkit-container`
+  (playkit-js's `_createPlayerContainer` stamps it and the README mount
+  contract appends `player.getView()` — that same div — into the page's
+  target; the video carries `.playkit-engine` ON itself, the 0-hop law
+  keeps it off), and NPlayer rides `.nplayer` (`player.ts`:
+  `this.el = $('.nplayer', …)` with the video appended directly into it;
+  the media's plain `.video` class is not vendor-namespaced and stays
+  off). Three more candidates verified and DECLINED: dash.js carries no
+  container vocabulary at all — the auto-embed attribute
+  `[data-dashjs-player]` rides the video element itself (the `create()`
+  requires `nodeName === VIDEO`, the 0-hop law) and the one
+  "dashjs-player" hit in the dist is the `_dashjs_player` JS expando, not
+  a DOM anchor; hls.js carries zero DOM vocabulary (no className/
+  classList writes anywhere in the min dist); Pillarbox is
+  Video.js-based (`<video-js class="pillarbox-js">`, `.video-js` ×293 +
+  `vjs-*` throughout its CSS) and is covered by the existing Video.js
+  record — the THEOplayer verdict shape. One deliberate exception stands, closed: Laravel
   Video Embed's anchors are Inertia's `data-page` vocabulary, not
   the package's own (every Laravel embed package renders iframes), so the
   record matches any Inertia app with a bare video — it was added for a
@@ -3305,6 +3328,28 @@ walk, ~5µs under the per-anchor loop) and **~60ns/hit** steady state
 with all 17 registry rows, no-fallback, Clappr, Laravel, and the
 shadow-boundary row green.
 
+**The registry-coverage batch 2 (Nov 11 2026, user direction "explore
+next batch" → "adopt all 3"; src — detection.js + sdk case).** The
+registry-verification method from the detection native-walk batch was
+run over the next candidate ring: six majors not yet in the registry,
+each verified from vendor source. **Three records added.** Bitmovin
+Player (`.bmpui-ui-uicontainer` — `UIManager.ts` appends the UI
+container into `player.getContainer()` beside the video, the sibling
+relationship proven by the vendor's own display:none comment, the class
+shipping 95× in the built CSS), Kaltura PlayKit (`.playkit-container` —
+`_createPlayerContainer` stamps it, the README's
+`playerContainer.appendChild(player.getView())` is the mount contract,
+and the video's `.playkit-engine` stays off under the 0-hop law), and
+NPlayer (`.nplayer` — `player.ts` line 75, the video appended directly
+into the player el). **Three declines recorded.** dash.js (no container
+vocabulary; `[data-dashjs-player]` rides the video itself — the 0-hop
+law — and `_dashjs_player` is a JS expando), hls.js (zero DOM
+vocabulary over the full dist), and Pillarbox (Video.js-based, covered
+by the Video.js record — the THEOplayer verdict shape). Registry is
+now 20 records; the sdk case carries a stub builder for each. Battery
+receipt: consecutive all-green full-battery runs with the three new
+stub rows green.
+
 ## 5. Conventions (the change bar)
 
 1. **Native-first implementation bar.** Every new or rewritten behavior asks
@@ -3840,7 +3885,9 @@ adoption (Nov 2026, src — the scanner twin landed on its measured
 verdict), the VM v2.50.0 floor re-audit addendum (record-only — the
 five manager premises re-derived from the released source), and the
 detection native-walk batch (Nov 2026, src — `closest()` primary arm,
-per-record probes, Shaka + OpenPlayerJS records). The
+per-record probes, Shaka + OpenPlayerJS records), and the
+registry-coverage batch 2 (Nov 2026, src — Bitmovin, Kaltura PlayKit,
+NPlayer records; dash.js/hls.js/Pillarbox verified declines). The
 series'
 record-only commits changed
 AGENTS.md alone; every src-touching pass proved

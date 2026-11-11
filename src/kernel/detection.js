@@ -95,6 +95,28 @@ const REGISTRY = [
   // .op-player__media class stays off the list - a 0-hop match would
   // resolve the video element as the shell home (the Radiant law).
   { name: "OpenPlayerJS", anchors: [".op-player"] },
+  // Bitmovin's UI container is appended into player.getContainer() BESIDE
+  // the video (bitmovin-player-ui develop UIManager.ts:
+  // uiWrapperElement.append(dom) over uiContainerElement = new
+  // DOM(player.getContainer())); the sibling relationship is the vendor's
+  // own comment - display:none on the outermost UI container must not
+  // "block any events (e.g. click events) on the video", so the video is
+  // outside it (the class ships 95x in the built bitmovinplayer-ui.css;
+  // the bmpui prefix is the documented _variables.scss default).
+  { name: "Bitmovin Player", anchors: [".bmpui-ui-uicontainer"] },
+  // Kaltura PlayKit: the core builds the container itself
+  // (kaltura/playkit-js, _createPlayerContainer stamps .playkit-container)
+  // and the README mount contract appends player.getView() - that same
+  // div - into the page's target. The video is prepended into it carrying
+  // .playkit-engine, which stays off the list: the class sits ON the video
+  // element (0-hop law).
+  { name: "Kaltura PlayKit", anchors: [".playkit-container"] },
+  // NPlayer (oyuyue/nplayer, packages/nplayer/src/ts/player.ts): the
+  // player el is $('.nplayer', ...) and the video is appended directly
+  // into it (this.el.appendChild(this.video); CLASS_PLAYER = 'nplayer').
+  // The video's own .video class is not vendor-namespaced and stays off
+  // the list - the anchor resolves the container at hop 1.
+  { name: "NPlayer", anchors: [".nplayer"] },
 ];
 
 /** The registry as a check-tool surface: the registry-coverage case derives

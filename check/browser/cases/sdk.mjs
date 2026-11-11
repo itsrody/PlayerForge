@@ -99,7 +99,10 @@ export async function run({ session, baseUrl }) {
         return { video, matched: wrapper, expect: wrapper, top: page };
       },
       "Shaka Player": () => stub({ "data-shaka-player-container": "" }),
-      OpenPlayerJS: () => stub({ class: "op-player" })
+      OpenPlayerJS: () => stub({ class: "op-player" }),
+      "Bitmovin Player": () => stub({ class: "bmpui-ui-uicontainer" }),
+      "Kaltura PlayKit": () => stub({ class: "playkit-container" }),
+      NPlayer: () => stub({ class: "nplayer" })
     };
 
     for (const record of SDK_REGISTRY) {
