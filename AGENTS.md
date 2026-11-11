@@ -3632,7 +3632,7 @@ stop at the first failure:
   foreign `pf:diag` write through the audit surface — cross-realm delivery
   itself stays manager-truth (every harness realm is an echo island;
   the same premise the settings live-reload row rides).
-- **Cases (14):** `boot` (install contract, positive/negative discovery),
+- **Cases (15):** `boot` (install contract, positive/negative discovery),
   `discovery` (min size, no-anchor, tiny-video),
   `fan` (the fan-out owner unit, imported into the page realm: positional
   fan, callable handle, native signal teardown, aborted-signal no-op,
@@ -3801,6 +3801,37 @@ stop at the first failure:
  Firefox 159 has no realm for, probed - , checkpoint cadence on the native
   timeupdate media clock at 4x, 1000-echo
   < 400ms, 400 remote-adoption merges < 800ms),
+  `robust2` (interrupted-state + hostile-storage robustness on the real
+  engine, four boots: Boot 1 drives every recorded session-end path live —
+  a window blur mid-hold releases the 2x boost with the stray keyup a
+  no-op (the forge blur belt), panel churn x10 ends closed with the toggle
+  still live (per-open dismissal scopes under overlapping view
+  transitions), a scrub storm x30 ends every stroke with playback state
+  untouched, pointercancel mid-drag/mid-swipe/mid-pinch-session each ends
+  the stroke cleanly with no stranded transform or latch and the
+  recognizer working for the next stroke (the pinch row pins the exact
+  close contract: after the live pair's recognition, the one-finger
+  cancel plus the trailing orphan release ADD nothing to the semantic
+  event stream and a fresh pair recognizes exactly once), a fullscreen
+  exit mid-fill releases the fill with the box handed back (the staged
+  embed-owned inline object-fit is the released value, not an
+  empty-vs-empty coincidence; the stage shape must be an explicit
+  mismatched wrapper box — the fixture video's width/height:100% CSS
+  auto-heights the wrapper to the video's own aspect at any width, an
+  aspect-matched box whose cover scale is exactly 1), and a
+  destroy-readopt thrash x20 converges to exactly one shell at the last
+  home; Boot 2 seeds a hostile pf:configs (brightness 1e9 clamps at the
+  FILTER_SCHEMA bound the steppers commit with — the seed-bypass class
+  the ledger adopted — contrast/hue non-numeric values degrade to the
+  defaults, saturate -50 clamps at 0); Boot 3 seeds a hostile pf:resume
+  doc (a 1e9 saved position restores clamped at the media sink, and an
+  entry with a non-string domain/title rides the string-field admission
+  into a clean History render with no [object Object]); Boot 4 seeds
+  non-object docs ("garbage"/42) which degrade to filter defaults
+  (buildFilterString's all-defaults string is the literal "none") and no
+  restore artifact, with playback parked first so the witness cannot
+  read drift as a restore; uncaught errors from any row fail the case
+  through the stage's audit net),
   `scheduler` (the postTask façade unit, imported into the page realm:
   firing order and delay honors, dead-handle/release/rejection-swallow
   choreography, the two-controller shape surviving an abort inside the
@@ -3887,8 +3918,26 @@ five manager premises re-derived from the released source), and the
 detection native-walk batch (Nov 2026, src — `closest()` primary arm,
 per-record probes, Shaka + OpenPlayerJS records), and the
 registry-coverage batch 2 (Nov 2026, src — Bitmovin, Kaltura PlayKit,
-NPlayer records; dash.js/hls.js/Pillarbox verified declines). The
-series'
+NPlayer records; dash.js/hls.js/Pillarbox verified declines), and the
+quality-and-robustness batch (Nov 2026, check-only — the new `robust2`
+browser case, 14 rows over four boots, no src change; the battery grew
+to 15 cases / 260 rows / ~107s). The batch pinned the Native-first
+ledger's admission adoptions live on the floor (the filter seed clamp,
+the resume string-field admission + media-sink restore clamp, the store
+truthiness-object read) and drove the engine's recorded session-end
+paths (blur, pointercancel, destroy-readopt, fs-exit-mid-fill) as
+interrupted-state rows. Two honest instrument findings worth holding:
+the pinch close contract needed the row to snapshot the live
+recognition as the baseline — the array is not re-seeded between the
+strokes, so the "phantom dispatch" the first draft counted was its own
+live recognition event, and the correct contract (cancel + orphan
+release ADD nothing) needed the per-step count compare; and the
+mismatched-fill stage must be an explicit wrapper box — the fixture
+video's width/height:100% CSS auto-heights the wrapper to the video's
+own aspect at any width, an aspect-matched box whose cover scale is
+exactly 1 (media.mjs's mismatch came from a fresh video that did not
+carry that CSS). Battery receipt: 4 consecutive all-green full-battery
+runs (107.0/106.9/107.1/106.8s). The series'
 record-only commits changed
 AGENTS.md alone; every src-touching pass proved
 itself on the full gate battery before its commit.*
