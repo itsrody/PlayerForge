@@ -12,9 +12,11 @@ import { AdoptionHome } from "./contract.js";
  *
  * Record schema:
  *   name    - label used for logging and shell metadata.
- *   anchors - selectors resolved against the video's composed ancestry
- *             (closest(), shadow-boundary aware). Each must be SDK-namespaced;
- *             ordered most specific first.
+ *   anchors - selectors resolved by the native closest() walk over the
+ *             video's ancestry (primary arm), with the composed-ancestry
+ *             walk kept as the shadow-boundary arm for matches closest()
+ *             cannot reach. Each must be SDK-namespaced; ordered most
+ *             specific first.
  *   host    - optional selector overriding which element hosts the shell's
  *             DOM; resolved against the matched element's composed ancestry
  *             (overriding default of the matched element itself). Not yet set
@@ -31,7 +33,11 @@ import { AdoptionHome } from "./contract.js";
  *
  * Selection: among all matching anchors across all records, the element with
  * the fewest composed ancestor hops from the video wins; ties break by
- * registry order, then anchor order.
+ * registry order. The primary arm hands the fewest-hops law to the engine:
+ * closest(ANCHOR_PROBE) returns the nearest matching ancestor-or-self in one
+ * C++ call, covering light DOM and shadow-internal trees; the composed walk
+ * (parentNode/.host) stays for exactly the shapes closest() cannot answer -
+ * an anchor above the video's shadow host, and detached videos.
  *
  * Caching is single-tier: the descriptor cache (see resolveAdoptionHome) is the
  * one repeat-query memo - its stamp (video.parentNode) is the exact
@@ -76,6 +82,19 @@ const REGISTRY = [
   // element as the shell home, a box the shell cannot host its DOM in.
   { name: "Radiant Media Player", anchors: [".rmp-container", "radiant-media-player"] },
   { name: "Laravel Video Embed", anchors: ["[data-page] > div:first-child", "#app[data-page]"] },
+  // Shaka Player stamps BOTH arms from vendor source (shaka-project main):
+  // the Overlay constructor sets videoContainer.dataset.shakaPlayerContainer
+  // on EVERY programmatic use (ui/ui.js), and the auto-setup div carries
+  // .shaka-video-container (ui/less/containers.less - "the auto-setup div
+  // which we populate"; the demo markup mounts both on one element). The
+  // attribute leads as the API surface every integration route sets.
+  { name: "Shaka Player", anchors: ["[data-shaka-player-container]", ".shaka-video-container"] },
+  // OpenPlayerJS wraps the media from vendor source (openplayerjs master,
+  // packages/player/src/ui.ts createUI): the injected wrapper carries
+  // .op-player on both the audio and the video path, and the media's own
+  // .op-player__media class stays off the list - a 0-hop match would
+  // resolve the video element as the shell home (the Radiant law).
+  { name: "OpenPlayerJS", anchors: [".op-player"] },
 ];
 
 /** The registry as a check-tool surface: the registry-coverage case derives
@@ -88,16 +107,29 @@ export const SDK_REGISTRY = REGISTRY;
 /**
  * The per-hop probe: every registry anchor joined into one selector list,
  * evaluated natively. `el.matches(list)` is the C++ selector engine answering
- * "does ANY anchor arm match" in one call - per-anchor JS looping between
- * matches() calls is what that call replaces (the `:is(list)` spelling is
- * equivalent; the bare joined list skips the wrapper tokens). Derivation is
+ * "does ANY anchor arm match" in one call; `closest(list)` rides the same
+ * engine for the whole walk. Derivation is
  * from the registry table itself, so adding a record re-arms the probe with
- * no second spelling. Constraint the join carries: an anchor must not carry a
- * top-level comma (an attribute value like [data-x="a,b"] would split into two
- * arms - the same hazard the `:is()` form would carry); every current anchor
- * is a class/attribute/tag/simple-combinator shape with no comma.
+ * no second spelling. Constraint the join carries: an anchor must not carry
+ * a top-level comma (a separator spelled into an anchor would silently
+ * become two arms under the record's name; a comma inside a quoted
+ * attribute value is one selector to the engine and fine); every current
+ * anchor is a class/attribute/tag/simple-combinator shape with no comma.
  */
 const ANCHOR_PROBE = REGISTRY.flatMap((record) => record.anchors).join(", ");
+
+/**
+ * The per-record probes: each record's anchors joined into ONE selector
+ * list, so identity resolution at a matched element is one native matches()
+ * call per record (registry order IS the tie law the loop walks) instead
+ * of one call per anchor. The join is also where the no-top-level-comma
+ * constraint lives: a comma anchor is still ONE selector to the CSS engine
+ * only when its comma sits inside a quoted attribute value, so an anchor
+ * spelled with a real separator would silently become two arms under the
+ * record's name - table hygiene, and the drift guard below answers the
+ * real failure mode if a probe ever stops agreeing with the table.
+ */
+const RECORD_PROBES = REGISTRY.map((record) => record.anchors.join(", "));
 
 /**
  * The whole identity engine as one class: the composed-ancestry scratch, the
@@ -129,8 +161,9 @@ class SdkMatcher {
   #descriptorCache = new WeakMap();
 
   /**
-   * The single composed-ancestry walk, shared by anchor matching and container
-   * resolution. Fills the reusable `#chain` with the element nodes from `start`
+   * The composed-ancestry walk, shared by the shadow-boundary match arm and
+   * container resolution. Fills the reusable `#chain` with the element nodes
+   * from `start`
    * upwards (crossing shadow boundaries via `.host`), and returns the filled
    * length. Flat indexed loop, no closure per call - the JIT's most reliably
    * optimized shape for this one-pass discovery walk. Chain index doubles as the
@@ -155,29 +188,53 @@ class SdkMatcher {
   }
 
   #matchSdk(video) {
-    // Single composed walk + one native probe call per hop (the `:is()`-grade
-    // selector-list evaluation the C++ engine owns): each ancestor answers
-    // "any registry anchor match?" in ONE matches() call, so the miss path is
-    // hops x 1 native call instead of anchors x hops JS-looped calls. The
-    // hop-ascending scan IS the fewest-hops law - the first probe hit is the
-    // winning depth, no later hop can beat it, so record/anchor identity at
-    // that hop comes from one ordered tie loop (registry order, then anchor
-    // order) instead of the per-anchor walk's best-tracking with strict <.
+    // Primary arm: closest() IS the native fewest-hops walk - the nearest
+    // matching ancestor-or-self in ONE C++ call, no JS chain build. It owns
+    // every in-tree topology: light DOM (the overwhelming majority) AND
+    // shadow-internal matches (closest searches the video's own tree up to
+    // its root). The answer is the fewest-hops answer by construction - any
+    // boundary-crossing match is strictly more hops than an in-tree one -
+    // so a hit needs no further scan. The hop count re-derives by the native
+    // parent walk (el is an in-tree ancestor-or-self, so the walk cannot
+    // overrun), and identity at the matched element comes from the ordered
+    // per-record tie loop (registry order): one matches() call per record,
+    // the joined probes answering "any of this record's anchors match" in
+    // the C++ engine.
+    const el = video.closest(ANCHOR_PROBE);
+    if (el) {
+      let hops = 0;
+      for (let node = video; node !== el; node = node.parentElement) {
+        hops += 1;
+      }
+      for (let r = 0; r < RECORD_PROBES.length; r++) {
+        if (el.matches(RECORD_PROBES[r])) {
+          return { record: REGISTRY[r], el, hops };
+        }
+      }
+      // A tick no record probe confirms means the derived tables have
+      // drifted apart (structurally impossible - all read the same table):
+      // answer the no-shape null rather than trust an unidentified element.
+      return null;
+    }
+    // Composed arm: the shadow-boundary + detached shapes closest() cannot
+    // answer - closest() stops at the ShadowRoot (and answers null on a
+    // disconnected node), so a video whose owning anchor sits ABOVE its
+    // shadow host, or a detached video carrying an anchor itself, is only
+    // reachable by walking parentNode/.host. Same law, hand-walked: the hop-
+    // ascending scan IS the fewest-hops law (the first probe hit is the
+    // winning depth), and identity at that hop rides the same per-record
+    // tie loop as the primary arm.
     const chain = this.#chain;
     const len = this.#fillComposedChain(video);
     for (let hop = 0; hop < len; hop++) {
       const node = chain[hop];
       if (!node.matches(ANCHOR_PROBE)) continue;
-      for (let r = 0; r < REGISTRY.length; r++) {
-        const record = REGISTRY[r];
-        const anchors = record.anchors;
-        for (let a = 0; a < anchors.length; a++) {
-          if (node.matches(anchors[a])) {
-            return { record, el: node, hops: hop };
-          }
+      for (let r = 0; r < RECORD_PROBES.length; r++) {
+        if (node.matches(RECORD_PROBES[r])) {
+          return { record: REGISTRY[r], el: node, hops: hop };
         }
       }
-      // A tick the per-anchor tie loop cannot confirm means the registry and
+      // A tick the per-record tie loop cannot confirm means the registry and
       // the derived probe have drifted apart (structurally impossible - both
       // read the same table): answer the no-shape null rather than keep
       // scanning, where a deeper hop would win under the fewest-hops law.

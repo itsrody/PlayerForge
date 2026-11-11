@@ -245,16 +245,18 @@ export async function run({ session, baseUrl }) {
       out.rebuildPooledMs = performance.now() - t0;
 
       // ---- The adoption identity path. Detection's engine is the uBO
-      // one-pass shape riding native C++ delegates: one composed chain per
-      // scan, per-anchor matches() bounded by the best hops so far, and the
-      // parent-stamped descriptor cache converting every repeat query into
-      // one WeakMap read + one parentNode compare. Two budgets pin the
-      // plane: the FIRST-RESOLVE walk (per distinct parenting state - the
-      // miss path matchSdk bounds) and the REPEAT resolve (the hit path
-      // every discovery re-entry and the kernel re-wrap seam ride). The
-      // hit row is the regression tripwire for the one shape failure this
-      // plane can suffer: a change that turns its steady state back into
-      // walk-rate work.
+      // one-pass shape riding native C++ delegates: the primary arm is ONE
+      // closest() call over the registry-wide selector list (the C++
+      // fewest-hops walk, covering light DOM and shadow-internal trees),
+      // the composed parentNode/.host walk stays as the shadow-boundary
+      // arm, and the parent-stamped descriptor cache converts every repeat
+      // query into one WeakMap read + one parentNode compare. Two budgets
+      // pin the plane: the FIRST-RESOLVE walk (per distinct parenting
+      // state - the miss path matchSdk bounds) and the REPEAT resolve (the
+      // hit path every discovery re-entry and the kernel re-wrap seam
+      // ride). The hit row is the regression tripwire for the one shape
+      // failure this plane can suffer: a change that turns its steady
+      // state back into walk-rate work.
       const { resolveAdoptionHome } = await import(`/check/hotpath/kernel/detection.js?ts=${bust}`);
       const mkStub = () => {
         const wrap = document.createElement("div");
@@ -346,12 +348,12 @@ export async function run({ session, baseUrl }) {
   st(
     "adoption identity: 1000 first-resolve walks resolve (thoroughness) inside the miss-rate budget",
     stats.adoptFirstHits === 1000 && stats.adoptFirstMs < 50,
-    `${stats.adoptFirstHits}/1000 resolved in ${noteOf("adoptFirstMs")} - ~2us per composed walk is the measured baseline (one native probe call per hop, the registry-wide selector list; was ~5us under the per-anchor JS loop); this row catches a walker regression at ~10x`
+    `${stats.adoptFirstHits}/1000 resolved in ${noteOf("adoptFirstMs")} - ~1us per resolve is the measured baseline (the primary arm is ONE native closest() call over the registry-wide selector list - the C++ fewest-hops walk - plus the per-record tie loop; was ~2us under the hand composed walk, ~5us under the per-anchor JS loop); this row catches a walker regression at ~10x`
   );
   st(
     "adoption identity: 100k repeat resolves ride the hit-path budget (the descriptor cache's steady state)",
     stats.adoptHitMs < 70,
-    `${noteOf("adoptHitMs")} - ~70ns per hit (one WeakMap read + one parentNode compare + the record alloc) is the measured baseline; a hit-path climb means the walk leaked into the steady state`
+    `${noteOf("adoptHitMs")} - ~60ns per hit (one WeakMap read + one parentNode compare + the record alloc) is the measured baseline; a hit-path climb means the walk leaked into the steady state`
   );
   return rows;
 }

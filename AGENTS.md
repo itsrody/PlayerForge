@@ -207,7 +207,9 @@ players, the bilibili in-house player that is not the third-party DPlayer SDK
 it shares history with; v.redd.it serves bare video files, correctly unbooted
 under the no-generic-fallback law), and record identity rides names + CSS
 anchor vocabulary, which cannot host-match — no record scopes a banned host.
-The sweep also re-verified the matcher ground truth the banner comment rests
+(The registry's growth after this sweep — Shaka Player, OpenPlayerJS —
+carries the same identity shape: names + anchor vocabulary only, so the
+non-overlap invariant holds without a re-walk.) The sweep also re-verified the matcher ground truth the banner comment rests
 on against Violentmonkey's released source (`src/background/utils/tester.js`):
 `hostMatcher()` maps `*.` to `RE_STR_ANY = (?:|[^:/]*?\.)`, whose empty
 alternative covers the apex domain, so `*://*.youtube.com/*` bans
@@ -608,20 +610,28 @@ iframes, same-origin and cross-origin:
   hand-spelled anywhere else.
 - **detection.js** — the SDK identity engine, registry-driven, importing only
   its contract.
-  15 supported SDK records (JW Player, Video.js, Plyr, ArtPlayer, DPlayer,
+  17 supported SDK records (JW Player, Video.js, Plyr, ArtPlayer, DPlayer,
   MediaElement.js, XGPlayer, Aliplayer, Fluid Player, Flowplayer, Clappr,
-  Vidstack, Mux Player, Radiant, Laravel Video Embed), each a set of
-  **SDK-namespaced anchor selectors** resolved through composed ancestry
-  (shadow-boundary aware); the matched element with the fewest
-  ancestor hops wins, the answer per hop coming from ONE native
-  selector-list probe (`ANCHOR_PROBE` — every registry anchor joined into one
-  list, one C++ `matches()` call per hop answering "any anchor match?",
-  replacing the per-anchor JS loop between `matches()` calls; the
-  hop-ascending scan IS the fewest-hops law, and record/anchor identity at
-  the winning hop comes from one ordered tie loop — registry order, then
-  anchor order — the same tie law the old best-tracking applied;
-  measured ~5µs → ~2µs per miss-walk in §7's hotpath row). An anchor must
-  carry no top-level comma (the join constraint; currently none does). There is deliberately **no generic fallback** — a bare
+  Vidstack, Mux Player, Radiant, Laravel Video Embed, Shaka Player,
+  OpenPlayerJS), each a set of
+  **SDK-namespaced anchor selectors** resolved by the native `closest()`
+  walk — the primary arm: `closest(ANCHOR_PROBE)` answers the nearest
+  matching ancestor-or-self in ONE C++ call (light DOM AND shadow-internal
+  trees; the answer is the fewest-hops answer by construction, since any
+  boundary-crossing match is strictly more hops), with the composed
+  parentNode/`.host` walk kept as the shadow-boundary arm for exactly the
+  shapes `closest()` cannot answer — an anchor above the video's shadow
+  host, and detached videos. Identity at the matched element comes from
+  the ordered per-record tie loop (`RECORD_PROBES` — each record's anchors
+  joined into one list, one C++ `matches()` call per record answering
+  "any of this record's anchors match"; registry order is the tie law,
+  and anchor order within a record is internal to the join); measured
+  ~2µs → ~1µs per first-resolve in §7's hotpath row (the composed arm's
+  miss path stays hop-ascending, one `matches()` call per hop). The join
+  constraint: an anchor must carry no top-level comma (a separator spelled
+  into an anchor would silently become two arms under the record's name; a
+  comma inside a quoted attribute value is one selector to the engine and
+  fine). There is deliberately **no generic fallback** — a bare
   `<video>` with no SDK anchor never boots. Record provenance is
   source-verified, not assumed: Clappr's compound lead anchor
   `.container[data-container]` (the vendor-set `{ class: "container",
@@ -640,7 +650,20 @@ iframes, same-origin and cross-origin:
   verified in the served rmp 10.7.9 `wc.rmp.min.css` class set), and the
   media element's own `.rmp-video` is deliberately not an anchor — a 0-hop
   match would resolve the video element as the shell home, a box the shell
-  cannot host its DOM in. One deliberate exception stands, closed: Laravel
+  cannot host its DOM in. The two newest records carry the same vendor
+  receipts: Shaka Player rides `[data-shaka-player-container]` (the
+  Overlay constructor stamps it on EVERY programmatic use, ui/ui.js)
+  leading `.shaka-video-container` (the auto-setup div's class,
+  ui/less/containers.less), and OpenPlayerJS rides `.op-player` (the
+  wrapper `createUI` injects on both the audio and video paths,
+  packages/player/src/ui.ts — the media's own `.op-player__media` stays
+  off the list, the 0-hop law). THEOplayer was verified and DECLINED as a
+  record: v5 through v11 (the OptiView-era latest) all document the
+  container as `<div class="video-js theoplayer-skin">` (npm README +
+  ui.css, both releases read) — THEOplayer is Video.js-based at every
+  release, the existing Video.js record already covers the topology, and
+  a `.theoplayer-skin` record would be dead on real pages (the video.js
+  wrapper resolves nearer). One deliberate exception stands, closed: Laravel
   Video Embed's anchors are Inertia's `data-page` vocabulary, not
   the package's own (every Laravel embed package renders iframes), so the
   record matches any Inertia app with a bare video — it was added for a
@@ -3235,6 +3258,53 @@ Historical records above stay date-stamped truth as measured on their
 floors. Battery receipt: 3 consecutive all-green full-battery runs
 (86.8/86.5/86.5s, 239 rows).
 
+**The detection native-walk batch (Nov 11 2026, user direction "make the
+SDK registration more native and dynamic"; src — detection.js + check rows;
+scope chosen: mechanism + new records).** The kernel A→Z audit had priced
+the engine's probe shape (`ANCHOR_PROBE` joined list, one `matches()` per
+hop); this batch moved the walk itself into the engine and grew the
+registry on vendor receipts. **Mechanism (2 arms, one law).** The primary
+arm is `closest(ANCHOR_PROBE)` — ONE C++ fewest-hops call answering the
+nearest matching ancestor-or-self, covering light DOM AND shadow-internal
+trees; the answer is the fewest-hops answer by construction (any
+boundary-crossing match is strictly more hops), and the hop count
+re-derives by the native parent walk over an in-tree ancestor-or-self (the
+walk cannot overrun). The composed `parentNode`/`.host` walk stays as the
+shadow-boundary arm for exactly the shapes `closest()` cannot answer — an
+anchor above the video's shadow host, and detached videos — hop-ascending,
+one `matches()` per hop, the fewest-hops law intact. Identity at the
+matched element comes from `RECORD_PROBES` (each record's anchors joined
+into one list; one C++ `matches()` call per record answering "any of this
+record's anchors match"), registry order remaining the tie law, anchor
+order internal to the join; the drift-guard null stands in both arms. The
+join constraint is now written where the probes derive: an anchor must
+carry no top-level comma (a separator spelled into an anchor would
+silently become two arms under the record's name; a comma inside a quoted
+attribute value is one selector to the engine and fine). **Two new
+records, vendor-verified.** Shaka Player (`[data-shaka-player-container]`
+leading `.shaka-video-container` — the Overlay constructor stamps the
+dataset on EVERY programmatic use, ui/ui.js; the auto-setup div carries
+the class, ui/less/containers.less) and OpenPlayerJS (`.op-player` — the
+wrapper `createUI` injects on both the audio and video paths,
+packages/player/src/ui.ts; the media's own `.op-player__media` stays off
+the list, the 0-hop law). **THEOplayer verified and DECLINED**: v5
+through v11 (the OptiView-era latest) all document the container as
+`<div class="video-js theoplayer-skin">` (npm README + ui.css, both
+releases read) — THEOplayer is Video.js-based at every release, the
+existing Video.js record already covers the topology, and a
+`.theoplayer-skin` record would be dead on real pages (the video.js
+wrapper resolves nearer). **Check rows.** The sdk case gains the two stub
+builders plus a shadow-boundary row: a video inside a custom element's
+shadow tree under a `.jwplayer` div resolves Vidstack at the in-tree host
+(hop 1), not JW at the boundary-crossing hop 2 — the composed arm
+provable, and the fewest-hops law riding across arms. The hotpaths
+adoption-identity budgets re-pinned to the new engine: **~1µs per
+first-resolve** (1000/1000 in 1.0ms; was ~2µs under the hand composed
+walk, ~5µs under the per-anchor loop) and **~60ns/hit** steady state
+(6.0ms/100k). Battery receipt: consecutive all-green full-battery runs
+with all 17 registry rows, no-fallback, Clappr, Laravel, and the
+shadow-boundary row green.
+
 ## 5. Conventions (the change bar)
 
 1. **Native-first implementation bar.** Every new or rewritten behavior asks
@@ -3530,7 +3600,11 @@ stop at the first failure:
   served working-tree module: every registry record resolves against a real
   anchor-satisfying stub — name, container element, and one hop — the bare
   video keeps its null answer, the Clappr compound beats the Core on fewest
-  hops, and a record without a stub builder fails its row),
+  hops, a record without a stub builder fails its row, and the
+  shadow-boundary row proves the composed arm still reaches across the
+  ShadowRoot — a video inside a custom element's shadow tree under a
+  `.jwplayer` div resolves Vidstack at the in-tree host (hop 1), not JW at
+  the boundary-crossing hop 2),
   `frames` (§ above),
   `gestures` (skip/mute/volume/panel/PiP/scrub with real driver input,
   plus the non-finite intake row: the four rejectable init members —
@@ -3559,15 +3633,14 @@ stop at the first failure:
   nothing earned an adoption — the loops are already engine-tight and the
   measured verdicts are the batch's record). **The adoption identity
   plane rides the same gate** (the kernel's uBO-grade path pinned as
-  budgets): 1000 first-resolve composed walks over the REAL served
-  registry resolve whole at the measured ~2µs/walk (the probe shape — the
-  registry anchors joined into ONE selector list, one native
-  `matches()` call per hop answering "any anchor match?" in the C++
-  selector engine, then one ordered registry/anchor tie loop at the
-  winning hop — was ~5µs/walk under the per-anchor `matches()` loop
-  bounded by best-hops; a walker regression shows at ~10x), and 100k
+  budgets): 1000 first-resolve resolves over the REAL served
+  registry resolve whole at the measured ~1µs/resolve (the primary arm is
+  ONE native `closest()` call over the registry-wide selector list — the
+  C++ fewest-hops walk — plus the per-record tie loop; the hand composed
+  walk measured ~2µs, the per-anchor `matches()` loop ~5µs; a walker
+  regression shows at ~10x), and 100k
   repeat resolves ride the descriptor cache's steady state at the measured
-  ~70ns/hit (unchanged by the probe — one WeakMap read + one parentNode
+  ~60ns/hit (unchanged by the probe — one WeakMap read + one parentNode
   compare + the record alloc — the ~30x hit/miss ratio IS the cache's
   value measured; the
   hit row is the tripwire for "the walk leaked into the steady state").
@@ -3764,8 +3837,10 @@ record-only), the native-robustness series and the Native-first law
 ledger (batches 1–7), the Firefox 160 release floor probe (`4952c7c`)
 and the C++ budget small-run on 160 (record-only), then the T2 reopen
 adoption (Nov 2026, src — the scanner twin landed on its measured
-verdict), and the VM v2.50.0 floor re-audit addendum (record-only — the
-five manager premises re-derived from the released source). The
+verdict), the VM v2.50.0 floor re-audit addendum (record-only — the
+five manager premises re-derived from the released source), and the
+detection native-walk batch (Nov 2026, src — `closest()` primary arm,
+per-record probes, Shaka + OpenPlayerJS records). The
 series'
 record-only commits changed
 AGENTS.md alone; every src-touching pass proved

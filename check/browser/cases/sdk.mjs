@@ -97,7 +97,9 @@ export async function run({ session, baseUrl }) {
         const video = document.createElement("video");
         wrapper.append(video);
         return { video, matched: wrapper, expect: wrapper, top: page };
-      }
+      },
+      "Shaka Player": () => stub({ "data-shaka-player-container": "" }),
+      OpenPlayerJS: () => stub({ class: "op-player" })
     };
 
     for (const record of SDK_REGISTRY) {
@@ -182,6 +184,29 @@ export async function run({ session, baseUrl }) {
       ok: !!appHome && appHome.sdk.name === "Laravel Video Embed" && appHome.sdk.container === app,
       why: appHome ? `${appHome.sdk.name}@${appHome.sdk.hops}` : "null"
     };
+
+    // The shadow-boundary arm: closest() stops at the ShadowRoot, so a video
+    // whose owning anchor sits ABOVE its shadow host is only reachable by
+    // the composed parentNode/.host walk. The stub nests the video inside a
+    // custom element's shadow tree (Vidstack's tag vocabulary, in-tree), so
+    // the boundary-crossing fewest-hops answer is the media-player host at
+    // hop 1 - NOT the .jwplayer div above it at hop 2 - proving the arm
+    // resolves through the boundary and still rides the fewest-hops law.
+    const jw = document.createElement("div");
+    jw.className = "jwplayer";
+    const shadowHost = document.createElement("media-player");
+    jw.append(shadowHost);
+    const shadowVideo = document.createElement("video");
+    shadowHost.attachShadow({ mode: "open" }).append(shadowVideo);
+    const shadowHolder = document.createElement("div");
+    document.body.append(shadowHolder);
+    shadowHolder.append(jw);
+    const shadowHome = resolveAdoptionHome(shadowVideo);
+    shadowHolder.remove();
+    results.__shadowBoundary = {
+      ok: !!shadowHome && shadowHome.sdk.name === "Vidstack" && shadowHome.sdk.container === shadowHost && shadowHome.sdk.hops === 1,
+      why: shadowHome ? `${shadowHome.sdk.name}@${shadowHome.sdk.hops}` : "null"
+    };
     return results;
   }, `${baseUrl}${base}/detection.js`);
 
@@ -219,6 +244,12 @@ export async function run({ session, baseUrl }) {
     name: "Laravel: the #app arm identifies at the root",
     status: probe.__laravelApp?.ok === true ? "pass" : "fail",
     note: probe.__laravelApp?.ok === true ? null : `app arm: ${probe.__laravelApp?.why}`,
+    ms: null
+  });
+  rows.push({
+    name: "shadow boundary: the composed arm resolves through the host at fewest hops",
+    status: probe.__shadowBoundary?.ok === true ? "pass" : "fail",
+    note: probe.__shadowBoundary?.ok === true ? null : `shadow arm: ${probe.__shadowBoundary?.why}`,
     ms: null
   });
   return rows;
