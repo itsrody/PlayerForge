@@ -73,92 +73,6 @@ export function ensureVttHeader(raw) {
  * Semantic match with the previous /^(?:(\d+):)?(\d{1,2}):(\d{2})[.,](\d{1,3})$/
  * - the same inputs parse, the same garbage returns null.
  */
-const ZERO = 48, NINE = 57, COLON = 58, DOT = 46, COMMA = 44;
-const SPACES_RE = /^\s+$/;
-
-function isDigitCode(c) {
-  return c >= ZERO && c <= NINE;
-}
-
-function timecodeToSeconds(timecode) {
-  const n = timecode.length;
-  let f = -1;
-  let colons = 0;
-  for (let k = 0; k < n; k++) {
-    const c = timecode.charCodeAt(k);
-    if (c === DOT || c === COMMA) {
-      if (f !== -1) {
-        return null;
-      }
-      f = k;
-    } else if (c === COLON) {
-      if (f !== -1) {
-        return null;
-      }
-      colons++;
-    } else if (!isDigitCode(c)) {
-      return null;
-    }
-  }
-  if (f === -1 || colons < 1 || colons > 2) {
-    return null;
-  }
-  const fdigits = n - f - 1;
-  if (fdigits < 1 || fdigits > 3) {
-    return null;
-  }
-
-  let i = 0;
-  const field = (_max) => {
-    let val = 0;
-    let count = 0;
-    while (i < f && isDigitCode(timecode.charCodeAt(i))) {
-      val = val * 10 + (timecode.charCodeAt(i) - ZERO);
-      i++;
-      count++;
-    }
-    return { val, count };
-  };
-
-  // H:M:S (2 colons) or M:S (1 colon). Two colons put the first group in hours.
-  if (colons === 2) {
-    const h = field(Number.MAX_SAFE_INTEGER); // \d+
-    if (h.count === 0 || i >= f || timecode.charCodeAt(i) !== COLON) {
-      return null;
-    }
-    i++;
-    const m = field(2); // \d{1,2}
-    if (m.count < 1 || m.count > 2 || i >= f || timecode.charCodeAt(i) !== COLON) {
-      return null;
-    }
-    i++;
-    const s = field(2); // \d{2} exactly
-    if (s.count !== 2 || i < f) {
-      return null;
-    }
-    let ms = 0;
-    for (let k = f + 1; k < n; k++) {
-      ms = ms * 10 + (timecode.charCodeAt(k) - ZERO);
-    }
-    return h.val * 3600 + m.val * 60 + s.val + ms / 1000;
-  }
-
-  const m = field(2); // \d{1,2}
-  if (m.count < 1 || m.count > 2 || i >= f || timecode.charCodeAt(i) !== COLON) {
-    return null;
-  }
-  i++;
-  const s = field(2); // \d{2} exactly
-  if (s.count !== 2 || i < f) {
-    return null;
-  }
-  let ms = 0;
-  for (let k = f + 1; k < n; k++) {
-    ms = ms * 10 + (timecode.charCodeAt(k) - ZERO);
-  }
-  return m.val * 60 + s.val + ms / 1000;
-}
-
 function decodeNumericEntity(entity) {
   const isHex = entity[2] === "x" || entity[2] === "X";
   const code = parseInt(entity.slice(isHex ? 3 : 2, -1), isHex ? 16 : 10);
@@ -218,74 +132,40 @@ function parseCueSettings(settings) {
 }
 
 /**
- * Recognition of a cue timing line without a capture-heavy regex
- * (CUE_LINE_RE was removed: it ran a regex state machine with 3 capture groups
- * over every line of every block). A line is a timing line iff it contains an
- * arrow with the shape `(timecode) \s+ --> \s+ (end-timecode) (rest)` where
- * timecodeToSeconds mirrors the old pattern's shape constraints exactly
- * (`MM:SS` with `[.,]` + 1-3 fractional digits, `SS` exactly two digits, and
- * the end timecode's `\d{1,3}` is capped at three digits with any overflow
- * becoming settings text - matching the regex engine's backtracking).
+ * Recognition of a cue timing line as one single-exec regex. The unit's
+ * history, newest first: today it rides the engine's C++ regex compiler - the
+ * T2 reopen probe (check/.tmp/t2-reopen.mjs, Nov 2026) measured this twin
+ * against the manual charCode scanner it replaced on the real engine at
+ * whole-parse scale, exact cue-output parity on every corpus plus a hostile
+ * column covering the grammar's every asymmetry (the start-side gap is
+ * general \s, the end-side gap only [ \t]; the end fraction's cap at three
+ * digits makes overflow settings text, which the greedy \d{1,3} + free tail
+ * reproduce by backtracking). Measured savings per parse, five alternating
+ * collections: 12-15% on the ingest tripwire shape itself (the hotpaths
+ * corpus mirror, 19,349 cues / 1.07MB: 8.2ms manual -> 7.2ms), 7-11% on real
+ * SRT/prose-heavy/VTT corpora at 2.4-2.7MB. Records before it: the
+ * CUE_LINE_RE removal (a capture-heavy state machine had run over every line
+ * of every block) and the manual scanner's own A/B era. The indexOf
+ * pre-guard stays the admission gate: no regex runs on an arrow-less line,
+ * the same guard the manual scanner opened with.
  */
+const TWIN_RE = /^(?:(?<sh>\d+):(?<sm>\d{1,2}):(?<ss>\d{2})|(?<sm2>\d{1,2}):(?<ss2>\d{2}))[.,](?<sf>\d{1,3})\s+-->[ \t]+(?:(?<eh>\d+):(?<em>\d{1,2}):(?<es>\d{2})|(?<em2>\d{1,2}):(?<es2>\d{2}))[.,](?<eff>\d{1,3})(?<settings>[\s\S]*)$/;
 function parseTimingLine(line) {
-  const arrow = line.indexOf("-->");
-  if (arrow < 0) {
+  if (line.indexOf("-->") < 0) {
     return null;
   }
-  const before = line.slice(0, arrow);
-  const left = before.trimEnd();
-  // The pattern requires `\s+` between the start timecode and the arrow; a
-  // tight `000-->` is not a timing line.
-  if (left === before || !SPACES_RE.test(before.slice(left.length))) {
+  const m = TWIN_RE.exec(line);
+  if (!m) {
     return null;
   }
-  const start = timecodeToSeconds(left);
-  if (start == null) {
-    return null;
-  }
-  // After the arrow, `\s+` then the end timecode token up to whitespace.
-  const after = line.slice(arrow + 3);
-  let k = 0;
-  while (k < after.length && (after.charCodeAt(k) === 32 || after.charCodeAt(k) === 9)) {
-    k++;
-  }
-  if (k === 0) {
-    return null;
-  }
-  let m = k;
-  while (m < after.length && after.charCodeAt(m) !== 32 && after.charCodeAt(m) !== 9) {
-    m++;
-  }
-  const run = after.slice(k, m);
-  let sep = -1;
-  for (let q = 0; q < run.length; q++) {
-    const c = run.charCodeAt(q);
-    if (c === DOT || c === COMMA) {
-      sep = q;
-      break;
-    }
-  }
-  if (sep < 0) {
-    return null;
-  }
-  // `\d{1,3}` caps the fraction at three digits; any overflow is settings text
-  // (the regex engine's backtrack into `(.*)`).
-  let digits = 0;
-  while (digits < 3 && sep + 1 + digits < run.length && isDigitCode(run.charCodeAt(sep + 1 + digits))) {
-    digits++;
-  }
-  if (digits === 0) {
-    return null;
-  }
-  const end = timecodeToSeconds(run.slice(0, sep + 1 + digits));
-  if (end == null) {
-    return null;
-  }
-  return {
-    start,
-    end,
-    settings: parseCueSettings(run.slice(sep + 1 + digits) + after.slice(m))
-  };
+  const g = m.groups;
+  const start = g.sh !== undefined
+    ? Number(g.sh) * 3600 + Number(g.sm) * 60 + Number(g.ss) + Number(g.sf) / 1000
+    : Number(g.sm2) * 60 + Number(g.ss2) + Number(g.sf) / 1000;
+  const end = g.eh !== undefined
+    ? Number(g.eh) * 3600 + Number(g.em) * 60 + Number(g.es) + Number(g.eff) / 1000
+    : Number(g.em2) * 60 + Number(g.es2) + Number(g.eff) / 1000;
+  return { start, end, settings: parseCueSettings(g.settings) };
 }
 
 function parseCueBlock(block, offset) {

@@ -915,7 +915,12 @@ iframes, same-origin and cross-origin:
   its one real-floor row could not produce a spawn in the shipped bundle,
   and the in-band fallback rendered byte-identical cues; the native `<track>`
   parse stays ledger-rejected on ingest ownership, so the cooperative arm
-  is the whole decision space), `subtitles.js` — the main-thread surface:
+  is the whole decision space). The timing-line recognizer is ONE
+  single-exec regex twin (the T2 reopen adoption, Nov 2026: 12-15% on
+  the ingest tripwire shape, 7-11% on real SRT/prose/VTT corpora, exact
+  cue-output parity + hostile column; the manual charCode scanner and its
+  `timecodeToSeconds`/`isDigitCode` engines died with the verdict), with the
+  `indexOf` pre-guard kept as the intake admission gate; `subtitles.js` — the main-thread surface:
   eager `SubtitleSession`
   (ForgeTrack renderer 8 concurrent cue slots, cue scheduling is OURS — no
   native TextTrack anywhere on the path: the file never enters the video's
@@ -3133,6 +3138,41 @@ the belt cost model) hold within shape on 160. Battery receipt: src
 untouched; the batch rides one green full-battery run per the
 record-only rule.
 
+**The T2 reopen adoption (Nov 11 2026, user-directed reopen of the
+small-run's flagged divergence; adoption landed).** The probe the
+flagged row asked for: the real engine, both arms pinned to HEAD source
+(ship = the pre-adoption charCode scanner verbatim, twin = that source
+with `parseTimingLine` swapped for one single-exec regex twin), real
+corpora plus the exact hotpaths tripwire corpus mirrored line-for-line
+(`check/.tmp/t2-reopen.mjs` + report, uncommitted per sweep convention).
+**Parity is exact on every collection**: cue-output JSON equality on
+all four corpora + the 0.25-offset rebuild, and a hostile column
+covering the manual scanner's every grammar asymmetry (the start-side
+gap general `\s` vs the end-side `[ \t]`-only; the end fraction's
+3-digit cap whose overflow becomes settings text — reproduced by the
+twin's greedy `\d{1,3}` + free-tail backtracking; `000-->` traps,
+NBSP/CRLF/FEFF shapes, leading junk, multi-arrow lines). **Measured
+savings per parse, five alternating collections, bulk 40-parse
+readings at ~0.2% resolution**: the tripwire shape itself
+(19,349 cues / 1.07MB) **8.2ms manual → 7.2ms twin (12-15%)**, real SRT
+(19k cues, two long text lines) 9.6-10.7%, prose-heavy 7.0-8.5%,
+VTT-with-settings-tails 9.8-11.3%. The wave-2 direction flip was real,
+not replica luck — but the honest instrument lesson surfaced first:
+per-parse quantized readings at the 1ms page clock could not resolve
+the 0.3-1.5ms delta (spread 0-14% across runs); bulk totals firmed it.
+The wave-2 harness lesson also transferred: its "averaged ~19ns/line"
+steer predicted ~1.8ms on the mixed corpus; measured ~1.0-1.2ms — same
+ballpark. **Adopted in src** (`forgevtt.js`): `parseTimingLine` is the
+single-exec twin with the `indexOf` pre-guard kept as the intake
+admission gate (no regex runs on an arrow-less line — the same guard
+the manual scanner opened with); `timecodeToSeconds`, `isDigitCode`,
+and the code-point const table died with the verdict (−~90 lines, the
+bundle −1KB). The 4-assembler `RegExp.escape` census row is untouched —
+the twin is a module-constant literal, not a table-derived build.
+Historical records above stay date-stamped truth as measured on their
+floors. Battery receipt: 3 consecutive all-green full-battery runs
+(86.8/86.5/86.5s, 239 rows).
+
 ## 5. Conventions (the change bar)
 
 1. **Native-first implementation bar.** Every new or rewritten behavior asks
@@ -3660,7 +3700,9 @@ record-only), then the census-premise substrate audit (post-`ef8393e`,
 record-only), the C++-internals delegation probe (post-`d5c2b81`,
 record-only), the native-robustness series and the Native-first law
 ledger (batches 1–7), the Firefox 160 release floor probe (`4952c7c`)
-and the C++ budget small-run on 160 (record-only). The
+and the C++ budget small-run on 160 (record-only), then the T2 reopen
+adoption (Nov 2026, src — the scanner twin landed on its measured
+verdict). The
 series'
 record-only commits changed
 AGENTS.md alone; every src-touching pass proved
