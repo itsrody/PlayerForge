@@ -235,10 +235,14 @@
       pointer-events: none;
       z-index: var(--pf-z-hud);
       contain: layout style;
-      /* The forge bar's strip height: declared on the scope so the cue-layer
-         shift rule (a sibling :has() arm below) inherits it - the bar
-         element itself cannot feed a rule that targets its sibling. */
+      /* The forge bar's strip height + edge inset: declared on the scope so
+         the cue-layer shift rule (a sibling :has() arm below) inherits them
+         - the bar element itself cannot feed a rule that targets its
+         sibling. The inset is part of the shift: the floating pill's top
+         edge sits at inset + height above the region's bottom edge, and
+         that is the clearance the captions owe. */
       --pf-forge-bar-h: 56px;
+      --pf-forge-bar-inset: 8px;
       /* Stage size container: the hud is inset:0 of the host, so its inline
          size IS the player region - the real responsive condition, not the
          viewport (their relation flips tiny on embedded players). Declared
@@ -441,28 +445,34 @@
     }
 
     /* - Forge bar (fullscreen forge-mode control strip) - */
-    /* Full-width strip on the player region's bottom edge - the shell-owned
-       chrome fullscreen mode shows while the document-realm hide rule clears
-       the SDK's own around the video chain. Ink law: the resting sheet plus
-       the hairline border-top, nothing else. Enter motion follows the
-       cue-slot grammar (@starting-style + allow-discrete over the hidden
-       flip; per the measured S2 record the exit across a display:none flip
-       is an instant removal on this engine - the mirrored targets stand
-       ready anyway). No z-index: DOM order under the toast and panel keeps
-       the z doctrine (hud 2 < toast 3 < panel 4) with the bar inside the
-       hud's own band. */
+    /* Floating pill over the player region's bottom edge - the toast's pill
+       grammar carried to the bar: inset from every edge by the same token
+       (--pf-forge-bar-inset), fully rounded ends (R5: a pill container keeps
+       pill radius on its own hover targets - the circular buttons), hairline
+       border all around, opaque sheet ink. Inset + padding cost the range
+       16px against the old flush strip while the tighter gap (xs) pays 12px
+       back; the 6px track carries the "wider" ask where arithmetic can't.
+       The shell-owned chrome fullscreen mode shows while the document-realm
+       hide rule clears the SDK's own around the video chain. Enter motion
+       follows the cue-slot grammar (@starting-style + allow-discrete over
+       the hidden flip; per the measured S2 record the exit across a
+       display:none flip is an instant removal on this engine - the mirrored
+       targets stand ready anyway). No z-index: DOM order under the toast and
+       panel keeps the z doctrine (hud 2 < toast 3 < panel 4) with the bar
+       inside the hud's own band. */
     .pf-forge-bar {
       position: absolute;
-      left: 0;
-      right: 0;
-      bottom: 0;
+      left: var(--pf-forge-bar-inset);
+      right: var(--pf-forge-bar-inset);
+      bottom: var(--pf-forge-bar-inset);
       height: var(--pf-forge-bar-h);
       display: flex;
       align-items: center;
-      gap: var(--pf-space-sm);
+      gap: var(--pf-space-xs);
       padding: 0 var(--pf-space-md);
       background: var(--pf-sheet);
-      border-top: var(--pf-sheet-border);
+      border: var(--pf-sheet-border);
+      border-radius: var(--pf-radius-pill);
       transition:
         opacity var(--pf-ease-duration) var(--pf-ease-curve),
         translate var(--pf-ease-duration) var(--pf-ease-curve),
@@ -480,9 +490,10 @@
       }
     }
 
-    /* Touch-friendly square targets; the glyph rides .pf-icon's 1em sizing
-       (font-size carries it). Instant-dim press feedback is the shared
-       pf-button law; focus rings keep the panel's grammar. */
+    /* Touch targets stay 40px square (the touch-friendly law); the hover
+       wash is a circle now - the pill container's own grammar (R5: pill
+       container, pill inset elements). Instant-dim press feedback is the
+       shared pf-button law; focus rings keep the panel's grammar. */
     .pf-forge-btn {
       flex: none;
       width: 40px;
@@ -492,7 +503,7 @@
       justify-content: center;
       padding: 0;
       border: none;
-      border-radius: var(--pf-radius-sm);
+      border-radius: var(--pf-radius-pill);
       background: transparent;
       color: var(--pf-fg);
       font-size: 18px;
@@ -515,8 +526,11 @@
     /* The seek scrubber: the native range input owns its own hit area and
        keyboard, so only track/thumb geometry is authored (the floor probe
        proved a real driver drag moves a styled ::-moz-range-thumb). The
-       ball: a 16px round white thumb on the 4px track; the played span is
-       Firefox's own ::-moz-range-progress. */
+       ball: a 16px round white thumb over the 6px track (the "wider" ask -
+       the track reads as the bar, so its height is the visible width); the
+       played span is Firefox's own ::-moz-range-progress. Track radii ride
+       the pill token - on a 6px box 999px clamps to the 3px stadium per
+       spec, no hand math. */
     .pf-forge-range {
       flex: 1 1 0;
       min-width: 0;
@@ -527,14 +541,14 @@
       cursor: pointer;
 
       &::-moz-range-track {
-        height: 4px;
-        border-radius: 2px;
+        height: 6px;
+        border-radius: var(--pf-radius-pill);
         background: var(--pf-border-soft);
       }
 
       &::-moz-range-progress {
-        height: 4px;
-        border-radius: 2px;
+        height: 6px;
+        border-radius: var(--pf-radius-pill);
         background: var(--pf-fg);
       }
 
@@ -571,7 +585,7 @@
        picture-anchored slots follow through the renderer's universal clip,
        which also clips against this canvas box (subtitles.js). */
     :scope:has(> .pf-forge-bar:not([hidden])) > .pf-cue-layer {
-      bottom: var(--pf-forge-bar-h);
+      bottom: calc(var(--pf-forge-bar-h) + var(--pf-forge-bar-inset));
     }
 
     /* - Toast (singleton <pf-toast>) - */

@@ -1288,8 +1288,10 @@ iframes, same-origin and cross-origin:
   pooled custom element), `forgebar.js` (`ForgeBar` — the forge-mode control
   strip: fullscreen IS forge mode, so the bar shows while a fullscreen chain
   contains the shell's container, via `subscribeFullscreen` + a
-  `contains(container)` re-check per flip; full-width bottom strip in the hud
-  layer, `[back][play][fwd][seek+ball][time][settings][exit]` wired through
+  `contains(container)` re-check per flip; a floating pill in the hud layer
+  (inset 8px from the region edges, pill radius, hairline border all around —
+  the toast's pill grammar; the height/inset tokens live on the hud scope so
+  the cue-shift sibling rule can read both), `[back][play][fwd][seek+ball][time][settings][exit]` wired through
   the one `data-action` router — play/pause calls `shell.media.togglePlay`,
   skip buttons ride `ShellActions.skipStep` (the SAME streak+step+toast story
   the arrow keys ride, one owner), seek is the native `<input type=range>`
@@ -1301,9 +1303,10 @@ iframes, same-origin and cross-origin:
   `pointermove/pointerdown/keydown` witnesses stamping an activity stamp
   (window capture: the engine's own document listeners cannot hide the
   stamp), and a visible bar shortens the cue canvas from the bottom edge
-  through the sheet's `:has()` sibling rule — picture-anchored cue slots
-  follow with zero bar-aware JS, riding `#derivePicture`'s universal canvas
-  clip), `panel.js`
+  through the sheet's `:has()` sibling rule (the pill's inset is part of
+  the shift: `calc(--pf-forge-bar-h + --pf-forge-bar-inset)`) —
+  picture-anchored cue slots follow with zero bar-aware JS, riding
+  `#derivePicture`'s universal canvas clip), `panel.js`
   (the `ui.panelScale` write rides `#applyCompactSetting()` as the panel
   root's inline `style.zoom`, per-open like compact), **styles.css** (the
   HUD — §6; the section labels carry the `text-box-trim` cap rule; the
@@ -3710,7 +3713,11 @@ Still in force from the design process — rewritten ink-style by user direction
 - **R5 Nested radii are concentric and derived:** container radius R with
   inset padding P → inset elements use R − P (panel 16 → strip/close 8 →
   tab 5). Derived, not chosen, so container changes stay correct.
-- **R6 The panel (sheet) has the largest radius in the HUD (16px).**
+- **R6 The panel (sheet) has the largest radius in the HUD's derived
+  sheet-radius chain (16px, lg > md > sm > xs); the pill element class
+  (toast, forge bar) rides `--pf-radius-pill` above that chain — a pill
+  container's own inset hover targets stay pills (the R5 derivation
+  degenerates at 999px, so the pill carries through).**
 - **R7 Section headers are title case** (no uppercase transform).
 - **R9 Every HUD change needs a measured contrast assertion**, not a
   screenshot. The opaque ink makes the assertion content-independent (spectral
