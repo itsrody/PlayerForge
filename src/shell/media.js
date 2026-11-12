@@ -214,10 +214,14 @@ export function createMediaControls({ video }) {
 /** Media events that push position state to the OS surface. `timeupdate` is
  *  the media clock (fires ~4 Hz while the playhead advances), so OS/mediaSession
  *  progress stays live without a frame callback or a poll; the boundary events
- *  cover starts, stops, seeks, and metadata/duration changes. */
+ *  cover starts, stops, seeks, and metadata/duration changes. `volumechange`
+ *  left the set: sync() writes playbackState + position state and reads volume
+ *  in neither, and the css sync it shares the handler with writes only
+ *  `--pf-media-paused`, which volume cannot flip - every drag step paid two
+ *  provably no-op closures for nothing. */
 export const MEDIA_SESSION_SYNC_EVENTS = new Set([
   "play", "pause", "playing", "ended", "seeked", "durationchange", "ratechange",
-  "volumechange", "loadedmetadata", "timeupdate"
+  "loadedmetadata", "timeupdate"
 ]);
 
 const SESSION_ACTIONS = ["play", "pause", "stop", "seekbackward", "seekforward", "seekto"];
@@ -395,7 +399,7 @@ class MediaSessionBridge {
   #positionState = { duration: 0, playbackRate: 0, position: 0 };
   /**
    * Last state actually handed to the session. sync() rides nine media
-   * events (`timeupdate`, `volumechange`, `seeked`, ...), which routinely
+   * events (`timeupdate`, `seeked`, ...), which routinely
    * arrive several per playback transition with IDENTICAL values - each
    * redundant write is a browser-process IPC for nothing. The position is
    * quantized before comparison so sub-frame currentTime jitter (which never

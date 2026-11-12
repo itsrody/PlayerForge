@@ -29,7 +29,7 @@ const EDITABLE_SELECTOR =
  * 4200-node tree), but a CHANGED custom property walks every inheriting
  * descendant - ~90ns/node, ~379us over that tree - even with no consumer of
  * the var, where a changed class/attribute costs only an element-local ~333ns.
- * Event storms - volumechange under a volume drag, visualViewport
+ * Event storms - the pause-flip transitions on the media clock, visualViewport
  * resize/scroll while the URL bar collapses per frame - carry real flips per
  * event, so each prop must write only on an actual flip and the compare must
  * cost nothing the write would not (measured in the media-vars row this
@@ -443,9 +443,10 @@ export class Shell {
         ["--pf-media-paused", () => (video.paused ? "1" : "0")]
       ]);
     }
-    // One registration set for both concerns: play/pause/volumechange are in
-    // MEDIA_SESSION_SYNC_EVENTS, so separate css-sync listeners would double-
-    // dispatch those three hottest state events into two closures each.
+    // One registration set for both concerns: the pause-flip events
+    // (play/pause/playing) are in MEDIA_SESSION_SYNC_EVENTS, so separate
+    // css-sync listeners would double-dispatch every pause transition into
+    // two closures each.
     const handler = () => {
       this.#mediaSession?.sync();
       cssSync?.();

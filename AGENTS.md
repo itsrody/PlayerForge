@@ -4059,7 +4059,49 @@ lean sweep (Nov 2026, src — the destroy-readopt identity hand-off and
 the resume duration-proof ownership; every other pipeline traced to the
 one-proof shape), and the same-task double-proof housekeeping (Nov 2026,
 src — the probe's one-presence-ask consider and `#onVideoFound`'s
-dead shell re-checks deleted; the deliberate multi-path asks recorded).
+dead shell re-checks deleted; the deliberate multi-path asks recorded),
+and the progress-drive review (Nov 2026, src — the volumechange dead arm
+left the MediaSession sync set; the read-direction impossibility and the
+deliberate boundary asks recorded).
+
+**The progress-drive review + the volumechange dead arm (Nov 12 2026, user
+direction "review how we currently track the video progress to have leaner
+pipeline relying on firefox' native media session API"; src — media.js +
+shell.js comments; one adoption).** The review walked the resume tracker's
+progress drive (the read plane) and the MediaSession bridge (the write
+plane) end to end. **The verdict on the API direction:** the Media Session
+API cannot carry the READ half — `setPositionState()` has no getter
+counterpart anywhere in the spec or Firefox, so the element's own clock
+(`timeupdate` + `currentTime`) is the only progress read that exists, and
+that is exactly what the drive rides; the WRITE half is already maximal
+(1s-epsilon-deduped ~1 IPC/s, pooled scratch, boundary events bypassing
+the quantum). Riding the tracker's cadence on the bridge's sync clock was
+declined on both grounds: the bridge is a lifecycle-displaced surface
+(newest-claim-wins), and the saving is ~3 no-op compares/second. The
+one-main-video/one-shell law's existing collections recorded: the claim
+registry's displacement machinery is a backstop (the adoption guard's
+displaced-destroy class, not a live path), and the drive's 6-listener
+boundary set is complete — every flush earns its keep (pause = the most
+common user stop; seeked = the explicit position choice; ended =
+terminal; visibilitychange hidden = the tab-hide throttle belt; pagehide
+= the bfcache leg), and the off-screen IO gate stops GM storage churn for
+unseen autoplay embeds. **The one adoption — `volumechange` left
+`MEDIA_SESSION_SYNC_EVENTS` (10 → 9 events):** both consumers it fed
+were verified — `sync()` writes playbackState + position state and reads
+volume in neither, and the shared handler's css sync writes only
+`--pf-media-paused`, which volume cannot flip — so every volume-drag
+step paid two provably no-op closures (a dedup return + a same-value
+var skip). One fewer video listener, zero behavior lost; the two stale
+comments that justified it (shell.js's "three hottest state events",
+predating the css sync's narrowing to the paused var) rewritten to the
+live shape. Kept deliberately: `play` + `playing` both live in the set
+(`play` fires at the paused-flip even when start stalls, `playing`
+covers stall-end/buffering resumption — both directions real, the dedup
+makes the redundant one a ~free read-batch); the per-tick span hoist
+candidate (recompute → per-entry scalar) declined at ~25ns/tick × 4Hz —
+the same noise scale the tree's measured declines record. No counted
+census vocabulary moved. Battery receipt: three consecutive all-green
+full-battery runs (265 rows each; 106.0/105.9/105.8s).
 
 **The shell-mount adoption (Nov 12 2026, user direction "which is more
 native efficient and reliable and lean approach to adopt shell into sdk
