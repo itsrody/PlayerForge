@@ -10,7 +10,7 @@ import { getSetting, SETTING_KEYS } from "./chrome/config.js";
 import { TUNING } from "../shared/core.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
-import { SHELL_MARKER, warmStyles, injectShell, watchShellHost, ensureViewportFitCover } from "./chrome/inject.js";
+import { SHELL_MARKER, warmStyles, injectShell, ensureViewportFitCover } from "./chrome/inject.js";
 import { retryFullscreenProvision } from "../shared/page.js";
 
 /**
@@ -415,16 +415,17 @@ export class Shell {
       return;
     }
     // Register host for auto-removal on destroy and mark managed attributes.
-    this.#dom.defer(() => this.#shellDom?.host.remove());
+    // The host is a custom element: one dispose verb latches the lifecycle
+    // dead (the destroy removal must never be fought), drops the armed
+    // detached-window watch, and removes - the old watchdog's separate
+    // cleanup defer merged into the element's own dispose.
+    this.#dom.defer(() => this.#shellDom?.host.dispose());
     this.#dom.markAttribute(this.#shellDom.host, SHELL_MARKER, "");
     // Restore container position if we changed it from static.
     const style = getComputedStyle(this.container);
     if (style.position === "static") {
       this.#dom.markStyle(this.container, "position", "relative");
     }
-    // Parasite watchdog: re-attach host if evicted by SDK.
-    const dropWatch = watchShellHost(this.container, this.#shellDom.host);
-    this.#dom.defer(dropWatch);
   }
 
   #forwardMediaEvents() {

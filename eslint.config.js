@@ -22,6 +22,7 @@ export default [
         requestAnimationFrame: "readonly",
         IntersectionObserver: "readonly",
         MutationObserver: "readonly",
+        customElements: "readonly",
         AbortController: "readonly",
         AbortSignal: "readonly",
         performance: "readonly",

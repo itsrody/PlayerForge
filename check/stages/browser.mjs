@@ -22,7 +22,7 @@ const CASES_DIR = join(HERE, "..", "browser", "cases");
 const ROOT = join(HERE, "..", "..");
 
 /** Standard ceremony so every case starts from the same known page state. */
-async function bootCasePage(session, { pagePath, baseUrl, version, bundle, seed = {}, persist = false, grants = null, resources = null, header = null }) {
+async function bootCasePage(session, { pagePath, baseUrl, version, bundle, seed = {}, persist = false, grants = null, resources = null, header = null, pre = null }) {
   // A distinct query per boot forces a real document navigation: driver.get to
   // the identical URL can race as a same-URL reload and eat the injected
   // bundle mid-document.
@@ -37,6 +37,12 @@ async function bootCasePage(session, { pagePath, baseUrl, version, bundle, seed 
     await session.harvestGm();
   }
   await session.navigate(`${baseUrl}${pagePath}?boot=${Date.now()}`);
+  // Page-realm script between navigation and the GM realm - the hostile-
+  // define row's ceremony: a page that pre-defines our shell-host tag before
+  // the bundle evaluates. Runs only when a case passes `pre`.
+  if (pre) {
+    await session.eval(pre);
+  }
   await session.injectGMRealm({ version, storage: persist ? session.gmHeadSnapshot() : seed, grants, resources, header });
   await session.injectBundle(bundle);
   await session.wakeVideos();
@@ -122,7 +128,8 @@ export async function run() {
       persist: overrides.persist ?? false,
       grants: header.grants,
       resources,
-      header
+      header,
+      pre: overrides.pre ?? null
     });
 
     for (const caseFile of readdirSync(CASES_DIR).filter((f) => f.endsWith(".mjs")).sort()) {

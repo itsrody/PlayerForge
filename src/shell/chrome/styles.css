@@ -88,6 +88,11 @@
   --pf-z-panel: 4;
 
   /* -- Reset + base -- */
+  /* The host is a custom element (pf-shell-host): unknown elements default
+     to display:inline, and while the absolute positioning below blockifies
+     it, the layout contract is spelled here so it never rides
+     blockification. On the plain-div shape this keyword is a no-op. */
+  display: block;
   position: absolute;
   top: 0;
   left: 0;

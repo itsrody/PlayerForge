@@ -1,6 +1,5 @@
 import SHELL_CSS from "./styles.css";
 import { logger } from "../../shared/runtime.js";
-import { onDomMutations } from "../../shared/dom.js";
 import { SHELL_MARKER } from "../../kernel/contract.js";
 import { el } from "./ui.js";
 import { gmGetResourceText } from "../../shared/store.js";
@@ -232,18 +231,158 @@ export function warmStyles() {
 }
 
 /**
+ * The shell host's attachment defense, owned by the platform's own custom
+ * element lifecycle. Every connectivity transition of the host delivers a
+ * callback - the floor probe (check/.tmp/shell-mount-probe.mjs, Firefox 160)
+ * proved the full matrix: eviction, container detach, container re-attach,
+ * connected re-homing and moveBefore moves all deliver d/c around the move,
+ * so the steady state carries ZERO observers and zero churn wakes. The one
+ * lifecycle-invisible shape - an eviction while the container itself is
+ * detached (no connectivity transition, and the container's re-insertion
+ * cannot recover a host that is no longer its child) - is covered by a
+ * childList observer on the container armed ONLY inside that window, whose
+ * immediate re-append into the detached container lets the container's own
+ * re-insertion announce recovery through connectedCallback. No timers, no
+ * surrender - the same indefinite-fight posture the hand-rolled watchdog
+ * carried, one native machine instead of observation machinery around one.
+ *
+ * Built lazily: the isolated import smoke evaluates this module in Node,
+ * where HTMLElement does not exist, and the class is only ever constructed
+ * inside a page realm (the first shellHostTag() call).
+ */
+let ShellHostClass = null;
+
+function shellHostClass() {
+  if (ShellHostClass) {
+    return ShellHostClass;
+  }
+  ShellHostClass = class PfShellHost extends HTMLElement {
+    #container = null;
+    #dead = false;
+    #armed = null;
+
+    /** injectShell hands the container over before the host is appended:
+        connectedCallback reads it, so adoption must precede insertion. */
+    adopt(container) {
+      this.#container = container;
+    }
+
+    /** Shell destroy: latch dead BEFORE the removal so the lifecycle never
+        fights the teardown, drop the armed watch, then remove. */
+    dispose() {
+      this.#dead = true;
+      this.#armed?.disconnect();
+      this.#armed = null;
+      this.remove();
+    }
+
+    #reattach() {
+      this.#container.appendChild(this);
+      logger.log("inject", "Shell host re-attached by lifecycle");
+    }
+
+    connectedCallback() {
+      // An alien-upgraded element (a page-authored node of our tag upgraded
+      // by our define) carries no container: every callback is a no-op.
+      if (this.#dead || !this.#container) {
+        return;
+      }
+      if (this.parentElement === this.#container) {
+        // Back in place (re-attach, or the recovery append landing). The
+        // detached window is over: drop the armed watch.
+        this.#armed?.disconnect();
+        this.#armed = null;
+      } else if (this.#container.isConnected) {
+        // Delivered in an alien parent - the connected re-home shape fires
+        // d,c around the move (floor-probed): go back now.
+        this.#reattach();
+      }
+    }
+
+    disconnectedCallback() {
+      if (this.#dead || !this.#container) {
+        return;
+      }
+      if (this.parentElement === this.#container && !this.isConnected) {
+        // Still parented and disconnected: the CONTAINER subtree left the
+        // document (the only shape with this signature - an evict+re-add in
+        // one task lands here connected and needs nothing). Eviction inside
+        // this detached window fires nothing on the host, so a container
+        // childList observer is armed for exactly this window.
+        if (!this.#armed) {
+          const armed = new MutationObserver(() => {
+            if (this.parentElement !== this.#container) {
+              // Re-append into the (detached) container immediately: the
+              // container's own re-insertion then announces recovery through
+              // our connectedCallback, and the armed watch is dropped there.
+              this.#container.appendChild(this);
+            }
+          });
+          armed.observe(this.#container, { childList: true });
+          this.#armed = armed;
+        }
+      } else if (this.parentElement !== this.#container && this.#container.isConnected) {
+        // Parentless eviction (or a re-home whose d delivered after the
+        // move): the container is live - go back now.
+        this.#reattach();
+      }
+      // Parentless while the container is itself detached: the armed watch
+      // (armed at the container's own detach) catches the container-side
+      // removal and re-appends; nothing to do here.
+    }
+  };
+  return ShellHostClass;
+}
+
+const SHELL_HOST_TAG = "pf-shell-host";
+let shellHostResolved = null;
+
+/**
+ * The host tag. The primary name is defined once per realm (each frame's
+ * script realm evaluates this module separately, one registry entry each).
+ * A page that pre-defines the primary name must not reach a define throw at
+ * boot (NotSupportedError - the hostile-define probe) and createElement must
+ * never yield an unregistered element, so a taken name walks counter names
+ * until a free one is defined and cached for the realm. At document-start
+ * the page has run no script yet, so the primary name is the shipped path;
+ * the walk exists for managers and harness ceremonies that inject later.
+ */
+function shellHostTag() {
+  if (shellHostResolved) {
+    return shellHostResolved;
+  }
+  if (!customElements.get(SHELL_HOST_TAG)) {
+    customElements.define(SHELL_HOST_TAG, shellHostClass());
+    shellHostResolved = SHELL_HOST_TAG;
+    return shellHostResolved;
+  }
+  for (let i = 1; ; i++) {
+    const name = `${SHELL_HOST_TAG}-${i}`;
+    if (!customElements.get(name)) {
+      customElements.define(name, shellHostClass());
+      shellHostResolved = name;
+      return name;
+    }
+  }
+}
+
+/**
  * Build the shell DOM inside the player container as a parasite:
  * host > #shadow-root > hud layer > cue layer, appended LAST so no SDK
  * child ever changes index. Rendering dominance comes from the host's
  * z-index, not tree order. The open shadow root encapsulates all PF UI
- * for style isolation from host-page CSS.
+ * for style isolation from host-page CSS. The host is a custom element
+ * (see PfShellHost): its own attachment lifecycle is the defense, so the
+ * caller no longer installs any watchdog machinery.
  */
 export function injectShell(container) {
   if (!container) {
     logger.error("inject", "injectShell: no container");
     return null;
   }
-  const host = el("div", { class: "pf-shell", tabindex: "-1" }, container);
+  const host = el(shellHostTag(), { class: "pf-shell", tabindex: "-1" });
+  host.adopt(container);
+  container.appendChild(host);
 
   const shadow = host.attachShadow({ mode: "open" });
   if (style.sheet) {
@@ -265,74 +404,6 @@ export function injectShell(container) {
     shadow,
     hudLayer,
     cueLayer
-  };
-}
-
-/**
- * Parasite watchdog, fully event-driven. Reacts only to real evictions of
- * the host - ordinary player churn never wakes us - and rides the document
- * stream whenever the container itself leaves the DOM, since detach and
- * reattach fire nothing on the container. There are deliberately no timers,
- * delays, or surrender heuristics: a page that keeps fighting gets fought
- * back indefinitely, and a stalemate is the user's to settle.
- *
- * Returns a cleanup function that disconnects all observers and stops the
- * watchdog. Call it on shell destroy.
- */
-export function watchShellHost(container, host) {
-  let scheduled = false;
-  /** Armed only while the container is out of the document. */
-  let detachWatch = null;
-
-  const reconcile = () => {
-    scheduled = false;
-    if (!container.isConnected) {
-      armReconnectWatch();
-      return;
-    }
-    dropReconnectWatch();
-    if (host.parentElement !== container) {
-      container.appendChild(host);
-      logger.log("inject", "Shell host re-attached by watchdog");
-    }
-  };
-
-  const schedule = () => {
-    if (!scheduled) {
-      scheduled = true;
-      queueMicrotask(reconcile);
-    }
-  };
-
-  // While detached, ANY document mutation may be the re-insertion - ride
-  // the shared dom-watch dispatcher instead of owning a full-document
-  // observer. The `scheduled` latch makes redundant wake-ups free.
-  const armReconnectWatch = () => {
-    if (!detachWatch) {
-      detachWatch = onDomMutations(schedule);
-    }
-  };
-
-  const dropReconnectWatch = () => {
-    detachWatch?.();
-    detachWatch = null;
-  };
-
-  const observer = new MutationObserver((records) => {
-    for (const { removedNodes } of records) {
-      for (const node of removedNodes) {
-        if (node === host) {
-          schedule();
-          return;
-        }
-      }
-    }
-  });
-  observer.observe(container, { childList: true });
-
-  return () => {
-    observer.disconnect();
-    dropReconnectWatch();
   };
 }
 

@@ -410,9 +410,11 @@ iframes, same-origin and cross-origin:
   `setRuntime` alias survives as the consumed path (`setDebugRuntime` →
   `setRuntime` → `setLogs`), not a dead surface.
 - **dom.js** — the shared mutation feed (`onDomMutations`: ONE page-level
-  MutationObserver; its four real subscribers are discovery's media tap +
-  detached-target prune, the page.js pipe diff, and inject.js's reconnect
-  watchdog — the module's other exports ride the same plane, not the feed),
+  MutationObserver; its three real subscribers are discovery's media tap +
+  detached-target prune and the page.js pipe diff — the feed's fourth
+  subscriber, inject.js's reconnect watchdog, retired with the shell-mount
+  adoption (the host's own custom-element lifecycle replaced it) — the
+  module's other exports ride the same plane, not the feed),
   `DomPool`
   (element recycling; the three reusable DOM pools are the toast pill, the
   panel's history cards, and the subtitle cue slots — the first two are
@@ -544,7 +546,8 @@ iframes, same-origin and cross-origin:
   no src gap. **dom.js**: the census claims re-derived live exactly as
   recorded — one mutation feed with its four real subscribers (discovery's
   media tap + detached-target prune, the iframe registry's added-node diff,
-  inject.js's detach watch), ten Fans, eleven Scope roots with the
+  inject.js's detach watch — the feed's fourth subscriber retired with the
+  shell-mount adoption; three ride it now), ten Fans, eleven Scope roots with the
   DOMManager as the shared-side root. Newly pinned: the feed's two
   proven-bug stories are measured engineering record, worth holding — the
   pooled batch double-buffer swaps then re-arms the incoming buffer EMPTY
@@ -824,9 +827,12 @@ iframes, same-origin and cross-origin:
   front-to-back with every seam reconciled against the wider records:
   the boot contract is two-phase (`#injectDom` → one `yield_` → the eager
   component set + lazy `PANEL_SECTIONS` builder → the watcher `runSteps`
-  with the managed-marker stamp as its tail), and `#injectDom`'s four
-  deferrals (host removal, `SHELL_MARKER` on the host, the static→relative
-  position fix, the parasite watchdog) all ride the shell's `DOMManager`.
+  with the managed-marker stamp as its tail), and `#injectDom`'s three
+  deferrals (host disposal, `SHELL_MARKER` on the host, the static→relative
+  position fix) all ride the shell's `DOMManager` — the fourth, the parasite
+  watchdog's cleanup defer, retired with the shell-mount adoption (the
+  host's one `dispose()` verb latches the lifecycle dead before the removal,
+  merging the removal and the watch teardown into a single defer).
   The teardown ownership matrix is the record's real deliverable — five
   components, five disjoint release stories, each pinned to exactly one
   root: `resume`/`subtitles`/`filters` own their `destroy()` verbs and are
@@ -1145,7 +1151,10 @@ iframes, same-origin and cross-origin:
   the shell scope's signal into the resume store's Fan),
   `ui.js` (`el`/`button` construction, the SVG icon factory), `inject.js`
   (`ShellStyle` sheet lifecycle: adopt-once, monotonic
-  `@resource` upgrade; viewport-fit-cover), `toast.js` (`ToastManager`,
+  `@resource` upgrade; viewport-fit-cover; the shell host is a custom
+  element — `PfShellHost`, lazily built and defined under the
+  `pf-shell-host` tag ladder — whose own attachment lifecycle is the
+  eviction defense; the old watchdog is retired), `toast.js` (`ToastManager`,
   pooled custom element), `panel.js`
   (the `ui.panelScale` write rides `#applyCompactSetting()` as the panel
   root's inline `style.zoom`, per-open like compact), **styles.css** (the
@@ -1189,10 +1198,20 @@ iframes, same-origin and cross-origin:
   do not evaluate inside `adoptedStyleSheets` in either harness engine
   (gate-probed), restating the sheet's old tie order as source order
   (density → landscape adjustment → compact reader LAST);
-  `watchShellHost` is fully event-driven as documented — container
-  childList MO + the detach leg armed only while the container is out
-  of the document, riding the shared mutation feed (one of the four
-  DomWatch feed subscribers §2 records), no timers, no surrender;
+  `watchShellHost` retired with the shell-mount adoption (Nov 2026) — the
+  container childList MO + the shared-feed detach leg it carried are now the
+  host element's own custom-element lifecycle: every connectivity
+  transition of the host delivers a callback (floor-probed on 160,
+  `check/.tmp/shell-mount-probe.mjs` — eviction, container detach/reattach,
+  connected re-home and `moveBefore` moves all deliver d/c around the move),
+  so the steady state carries ZERO observers; the one lifecycle-invisible
+  shape — eviction while the container itself is detached, which the
+  container's re-insertion cannot recover — arms a container childList
+  observer for exactly that detached window, whose immediate re-append into
+  the detached container lets the container's own re-insertion announce
+  recovery through `connectedCallback`. No timers, no surrender — the same
+  indefinite-fight posture the hand-rolled watchdog carried, one native
+  machine instead of observation machinery around one;
   `ensureViewportFitCover` is idempotent, and *forcing* cover over an
   embed's own fit keyword is the point, not an overreach.
   One classified surface (kept, not fixed): `pf-toast` is never
@@ -3448,7 +3467,12 @@ stub rows green.
    `removeEventListener` across src comes back empty: zero live manual
    removals remain, Fan's handle included — its handle now tears down by
    abort like every other machine's. The steady-state listener & observer
-   census (sweep): 124 static registration sites, 28 at document/window
+   census (sweep): 124 static registration sites (the count survives the
+   shell-mount adoption byte-identical at the site level — inject.js's one
+   container childList observe swapped for the PfShellHost detached-window
+   armed observe, a transient that never arms in steady state, so the
+   steady-state observer count is one LOWER while the raw site count holds),
+   28 at document/window
    level, zero manual removals — and every unscoped-looking site verified
    either `{ signal }` on a continuation line, an options-var binding,
    the panel's per-open dismissal scope, or a deliberate page-lifetime
@@ -3984,7 +4008,63 @@ video's width/height:100% CSS auto-heights the wrapper to the video's
 own aspect at any width, an aspect-matched box whose cover scale is
 exactly 1 (media.mjs's mismatch came from a fresh video that did not
 carry that CSS). Battery receipt: 4 consecutive all-green full-battery
-runs (107.0/106.9/107.1/106.8s). The series'
+runs (107.0/106.9/107.1/106.8s).
+
+**The shell-mount adoption (Nov 12 2026, user direction "which is more
+native efficient and reliable and lean approach to adopt shell into sdk
+inject or mount"; src — inject.js + shell.js + styles.css; adoption
+landed).** The question: should the shell host keep riding the hand-rolled
+`watchShellHost` watchdog (inject-side observation machinery around the
+attachment) or mount as a custom element whose own lifecycle owns the
+defense? **The floor probe first**
+(`check/.tmp/shell-mount-probe.mjs` + `shell-mount-report.json`,
+uncommitted per sweep convention; real Firefox 160): it overturned two
+analysis premises — (a) a connected re-homing DOES fire
+`disconnectedCallback`/`connectedCallback` (any remove+insert delivers
+callbacks), and (b) `moveBefore` (same-parent and cross-parent) also
+delivers the pair — so the lifecycle covers eviction, container
+detach/reattach, connected re-home and `moveBefore` moves with ZERO
+observers; M3's six-shape coverage matrix showed MutationObserver misses
+the container-detach shape entirely (woke 0) — which is what justified the
+feed arm in the watchdog — while catching evict-while-detached + connected
+re-home; M4's churn census measured the lifecycle at **0 wakes over 200
+churn batches vs the feed's 1** (per-checkpoint coalescing); M5 pinned the
+hostile pre-define shape (`NotSupportedError` at define, the
+alien-upgrade hazard real — a page-authored element of our tag upgrades
+and runs `connectedCallback` with `isConnected` true, hence the
+`#dead`/`#container` no-op guards); M6 proved re-append is
+state-preserving (shadow root + adopted sheets + text survive; cross-parent
+`moveBefore` carries the shadow intact); M7 pinned callback-time
+`parentElement` as the detach-vs-eviction discriminator (`d:still-child`
+vs `d:parentless`). The lifecycle's ONLY gap — **evict-while-detached**
+fires nothing on the host, and the container's re-insertion cannot recover
+a host that is no longer its child — is covered by a container childList
+observer armed ONLY inside that detached window, whose immediate re-append
+into the detached container lets the container's own re-insertion announce
+recovery through `connectedCallback` (end-to-end in probe axis M7).
+**Landed:** `PfShellHost` (lazy-built class — the isolated import smoke
+evaluates inject.js in Node where `HTMLElement` does not exist;
+`shellHostClass()` constructs on first tag resolution only) with
+`adopt(container)` (must precede insertion — `connectedCallback` reads
+`#container`), `dispose()` (dead-latch → drop armed watch → remove; the
+old watchdog's separate cleanup defer merged into one verb in shell.js's
+`#injectDom`), and the two callbacks armed by parent-equality signatures;
+`shellHostTag()` defines once per realm and walks counter names
+`pf-shell-host-1..` past a taken primary (the hostile-define belt —
+unreachable in the shipped document-start eval, live for managers and
+later-injected ceremonies). The sheet spells `display: block` on
+`.pf-shell` explicitly (custom elements default inline; layout never rides
+blockification). The class-census and import-smoke gates absorbed the new
+surface with a `customElements` eslint global; no counted census row
+moved (no MutationObserver/queueMicrotask/feed-subscriber rows exist —
+the feed subscriber count is prose-recorded 4→3 above). Battery rows: the
+media case gained three — plain eviction re-attach, evict-while-detached
+recovery through the armed watch (whole detour ~20ms, inside the kernel's
+500ms removal grace), and the hostile pre-define ladder row (via a new
+`pre` hook in the browser stage's boot ceremony). Battery receipt: four
+consecutive all-green full-battery runs (266 rows each; 107.6–107.9s).
+
+The series'
 record-only commits changed
 AGENTS.md alone; every src-touching pass proved
 itself on the full gate battery before its commit.*

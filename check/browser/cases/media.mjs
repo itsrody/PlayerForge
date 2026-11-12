@@ -768,6 +768,71 @@ export async function run({ session, baseUrl, boot }) {
     ms: null
   });
 
+  // The shell host is a custom element whose own attachment lifecycle is the
+  // eviction defense (the mount adoption). Row A: a plain SDK eviction of
+  // the host while the container is live - disconnectedCallback (parentless,
+  // container connected) re-attaches immediately, no observer, no watchdog.
+  const evict = await session.evalAsync(function main(done) {
+    const host = document.querySelector(".pf-shell");
+    if (!host || !host.parentElement) { done(null); return; }
+    const container = host.parentElement;
+    host.remove();
+    const deadline = Date.now() + 2000;
+    const tick = () => {
+      const back = host.parentElement === container && host.isConnected;
+      if (back || Date.now() > deadline) {
+        done({ back, tag: host.tagName.toLowerCase(), containerTag: container.tagName.toLowerCase() });
+        return;
+      }
+      setTimeout(tick, 50);
+    };
+    tick();
+  });
+  rows.push({
+    name: "SDK evicts the shell host - the mount re-attaches by lifecycle",
+    status: evict && evict.back && evict.tag.startsWith("pf-shell-host") ? "pass" : "fail",
+    note: evict ? JSON.stringify(evict) : "no shell host found",
+    ms: null
+  });
+
+  // Row B: the one lifecycle-invisible shape - eviction while the container
+  // itself is detached. Container detach arms the container childList watch;
+  // the eviction fires nothing on the host, the armed watch re-appends into
+  // the DETACHED container, and the container's own re-insertion announces
+  // recovery through connectedCallback (floor-probe axis M7). The whole
+  // detour must stay inside the kernel's 500ms removal grace - it does
+  // (~20ms, three awaited ticks), so the running shell is never destroyed.
+  const evictDetached = await session.evalAsync(function main(done) {
+    const host = document.querySelector(".pf-shell");
+    if (!host || !host.parentElement) { done(null); return; }
+    const container = host.parentElement;
+    const anchor = container.parentElement ?? document.body;
+    const tick = (fn) => { setTimeout(fn, 30); };
+    container.remove();                 // container subtree leaves the doc
+    tick(() => {
+      const armed = !host.isConnected && host.parentElement === container;
+      if (!armed) { done({ armed }); return; }
+      host.remove();                    // evict INSIDE the detached window
+      tick(() => {
+        const recovered = host.parentElement === container && !container.isConnected;
+        anchor.append(container);       // container re-insertion = recovery
+        tick(() => {
+          done({
+            armed,
+            recovered,
+            back: host.isConnected && host.parentElement === container
+          });
+        });
+      });
+    });
+  });
+  rows.push({
+    name: "eviction while the container is detached recovers through the armed watch",
+    status: evictDetached && evictDetached.armed && evictDetached.recovered && evictDetached.back ? "pass" : "fail",
+    note: evictDetached ? JSON.stringify(evictDetached) : "no shell host found",
+    ms: null
+  });
+
   // The panel's open/close flights schedule their class flip through
   // document.startViewTransition, whose update callback runs on the UA's own
   // clock. A shell destroy landing between the scheduling and that callback
@@ -932,6 +997,36 @@ export async function run({ session, baseUrl, boot }) {
     name: "refusal recovery: the refused candidate adopts when the main leaves (registry-empty edge re-arms the tap)",
     status: refusalRecovery && refusalRecovery.stamped && refusalRecovery.shells === 1 ? "pass" : "fail",
     note: refusalRecovery ? JSON.stringify(refusalRecovery) : "no live main and refused candidate to work",
+    ms: null
+  });
+
+  // Hostile pre-define: a page that defines our shell-host tag before the
+  // bundle evaluates (reachable only for managers/harness ceremonies - the
+  // shipped document-start eval precedes every page script). The tag ladder
+  // must walk to a free counter name (pf-shell-host-1) and boot must not
+  // reach the NotSupportedError a taken name throws; the page's own element
+  // must stay alien (no upgrade, no shadow, no pf-shell class).
+  const hostile = await boot({
+    pre: function main() {
+      customElements.define("pf-shell-host", class extends HTMLElement {});
+      const alien = document.createElement("pf-shell-host");
+      document.body.appendChild(alien);
+    }
+  });
+  const alienState = await session.eval(function main() {
+    const host = document.querySelector(".pf-shell");
+    const alien = document.querySelector("body > pf-shell-host");
+    return {
+      tag: host ? host.tagName.toLowerCase() : null,
+      alien: alien
+        ? { shadow: !!alien.shadowRoot, shellClass: alien.classList.contains("pf-shell") }
+        : null
+    };
+  });
+  rows.push({
+    name: "hostile page pre-defines pf-shell-host - the tag ladder boots on a free name",
+    status: hostile.shellHost && alienState.tag && alienState.tag !== "pf-shell-host" && alienState.tag.startsWith("pf-shell-host-") && alienState.alien && !alienState.alien.shadow && !alienState.alien.shellClass ? "pass" : "fail",
+    note: JSON.stringify(alienState),
     ms: null
   });
 
