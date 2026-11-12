@@ -610,10 +610,11 @@ iframes, same-origin and cross-origin:
   hand-spelled anywhere else.
 - **detection.js** — the SDK identity engine, registry-driven, importing only
   its contract.
-  20 supported SDK records (JW Player, Video.js, Plyr, ArtPlayer, DPlayer,
+  22 supported SDK records (JW Player, Video.js, Plyr, ArtPlayer, DPlayer,
   MediaElement.js, XGPlayer, Aliplayer, Fluid Player, Flowplayer, Clappr,
   Vidstack, Mux Player, Radiant, Laravel Video Embed, Shaka Player,
-  OpenPlayerJS, Bitmovin Player, Kaltura PlayKit, NPlayer), each a set of
+  OpenPlayerJS, OvenPlayer, Bitmovin Player, Kaltura PlayKit, NPlayer,
+  AblePlayer), each a set of
   **SDK-namespaced anchor selectors** resolved by the native `closest()`
   walk — the primary arm: `closest(ANCHOR_PROBE)` answers the nearest
   matching ancestor-or-self in ONE C++ call (light DOM AND shadow-internal
@@ -698,6 +699,49 @@ iframes, same-origin and cross-origin:
   facts. The registry is
   exported as `SDK_REGISTRY` so the check's registry-coverage case proves
   every record against a real anchor-satisfying stub per record.
+
+  **Registry-coverage batch 3 (Nov 12 2026, user direction "suggest batch"
+  → "Registry batch 3"; src — detection.js + sdk case; two records added,
+  four verified declines; the tie law's first cross-record split).** The
+  batch-2 verification method over the embed ring. **OvenPlayer added**
+  (OvenMediaLabs dist bundle): the ViewTemplate renders the player root
+  into the caller's container — `<div class="ovenplayer op-wrapper"
+  tabindex="-1">` — and inside it `<div class="op-player op-clear">` around
+  the media; `.ovenplayer` is unambiguous vendor vocabulary (OpenPlayerJS
+  ships no such class), and the second arm `.op-player.op-clear` exists
+  because the inner root ALSO matches OpenPlayerJS's `.op-player` anchor —
+  the first cross-record collision in the registry, resolved by the tie
+  law: the record is placed BEFORE OpenPlayerJS, whose wrapper is
+  `className="op-player op-player__keyboard--inactive"` (2.14.12 dist;
+  `op-clear` appears nowhere in its dist, so the compound can never
+  misattribute an OpenPlayerJS page — the ovenplayer-tie sdk row proves
+  the split live: the vendor-shaped stub resolves OvenPlayer at the
+  `.op-player` element, not OpenPlayerJS). **AblePlayer added** (ableplayer
+  v5.0.0 `injectPlayerCode`, vendor inline comment naming the layers):
+  video → `.able-media-container` (the player box that also carries
+  captions/controls; leads as the fewest-hops tight home) → `.able` →
+  `.able-wrapper` (outer fallback arm); `.able` itself is deliberately NOT
+  an anchor — a single unprefixed English word is not SDK-namespaced
+  vocabulary. Four candidates verified and DECLINED: **Amazon IVS Player**
+  is headless — the standard path is
+  `attachHTMLVideoElement(theIntegratorOwnVideo)`, and the only
+  vendor-owned DOM (the gpu-feature `surfaceContainer` div and the
+  `ivs-player-canvas-surface` canvas) is classless or an optional overlay;
+  no vendor-namespaced container ever enters the page DOM (v1.58.0 dist) —
+  a record would need the generic fallback the tree refuses. **Brightcove
+  Player** is Video.js-based at every release: video.js itself stamps the
+  `video-js` class onto the `<video-js>` element in the custom-element
+  path (`De(i,"video-js")||Pe(i,"video-js")` in the Player constructor,
+  v8.23.4 bundle), so the existing Video.js record covers the standard
+  embed (the THEOplayer verdict shape). **TCPlayer (Tencent)** is
+  Video.js-based — the dist CSS is the video.js `.video-js` sheet and the
+  bundle carries the `video-js` vocabulary (tcplayer.js 5.3.4, Brightcove
+  copyright + `vjsstandard` lint). **Bunny Stream Player** is an iframe
+  player — the host page carries no video DOM at all
+  (`player.mediadelivery.net` iframe per the docs receipt), and the
+  in-frame player is closed-source with no verifiable anchor vocabulary,
+  the no-generic-fallback law leaving it alone. Registry is now 22
+  records; sdk case rows 260 → 263.
 - **discovery.js** — presence machinery: min-size thresholds (100×60),
   on-screen/layout deferral gates (`PresenceGate`, per-instance
   MutationObserver check), the media feed (`DiscoveryTap`: lazy escalation —
@@ -3921,7 +3965,10 @@ registry-coverage batch 2 (Nov 2026, src — Bitmovin, Kaltura PlayKit,
 NPlayer records; dash.js/hls.js/Pillarbox verified declines), and the
 quality-and-robustness batch (Nov 2026, check-only — the new `robust2`
 browser case, 14 rows over four boots, no src change; the battery grew
-to 15 cases / 260 rows / ~107s). The batch pinned the Native-first
+to 15 cases / 260 rows / ~107s), and the registry-coverage batch 3
+(Nov 2026, src — OvenPlayer + AblePlayer records, the tie law's first
+cross-record split; Amazon IVS/Brightcove/TCPlayer/Bunny verified
+declines; the battery grew to 263 rows). The batch pinned the Native-first
 ledger's admission adoptions live on the floor (the filter seed clamp,
 the resume string-field admission + media-sink restore clamp, the store
 truthiness-object read) and drove the engine's recorded session-end

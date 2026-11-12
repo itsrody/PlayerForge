@@ -89,6 +89,19 @@ const REGISTRY = [
   // which we populate"; the demo markup mounts both on one element). The
   // attribute leads as the API surface every integration route sets.
   { name: "Shaka Player", anchors: ["[data-shaka-player-container]", ".shaka-video-container"] },
+  // OvenPlayer renders its player root INTO the caller's container
+  // (OvenPlayer.create(container, options); dist v5.3.4-era bundle
+  // ViewTemplate: '<div class="ovenplayer op-wrapper" tabindex="-1">' —
+  // .ovenplayer is unambiguous vendor vocabulary, and OpenPlayerJS ships no
+  // such class). The player root inside it is '<div class="op-player
+  // op-clear">' — which ALSO matches OpenPlayerJS's .op-player anchor, so
+  // identity at that element is decided by registry order: this record MUST
+  // precede OpenPlayerJS. The second arm is the rescue: .op-clear is stamped
+  // by OvenPlayer on the root and on every internal element, and
+  // OpenPlayerJS's wrapper is className="op-player
+  // op-player__keyboard--inactive" (2.14.12 dist) — op-clear never appears
+  // in its dist, so the compound cannot misattribute an OpenPlayerJS page.
+  { name: "OvenPlayer", anchors: [".ovenplayer", ".op-player.op-clear"] },
   // OpenPlayerJS wraps the media from vendor source (openplayerjs master,
   // packages/player/src/ui.ts createUI): the injected wrapper carries
   // .op-player on both the audio and the video path, and the media's own
@@ -117,6 +130,16 @@ const REGISTRY = [
   // The video's own .video class is not vendor-namespaced and stays off
   // the list - the anchor resolves the container at hop 1.
   { name: "NPlayer", anchors: [".nplayer"] },
+  // AblePlayer wraps the media in a three-layer chain at init
+  // (ableplayer/ableplayer v5.0.0, injectPlayerCode — the vendor's own
+  // inline comment names the layers): the video is wrapped in
+  // .able-media-container (the player box that also carries captions and
+  // controls), then .able, then .able-wrapper. The innermost layer leads
+  // as the fewest-hops, tightest shell home; .able-wrapper stays as the
+  // outer fallback arm. .able itself is deliberately NOT an anchor - a
+  // single unprefixed English word is not SDK-namespaced vocabulary (a
+  // page styling a div class="able" would misattribute).
+  { name: "AblePlayer", anchors: [".able-media-container", ".able-wrapper"] },
 ];
 
 /** The registry as a check-tool surface: the registry-coverage case derives

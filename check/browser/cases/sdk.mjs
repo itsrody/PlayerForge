@@ -102,7 +102,9 @@ export async function run({ session, baseUrl }) {
       OpenPlayerJS: () => stub({ class: "op-player" }),
       "Bitmovin Player": () => stub({ class: "bmpui-ui-uicontainer" }),
       "Kaltura PlayKit": () => stub({ class: "playkit-container" }),
-      NPlayer: () => stub({ class: "nplayer" })
+      NPlayer: () => stub({ class: "nplayer" }),
+      AblePlayer: () => stub({ class: "able-media-container" }),
+      OvenPlayer: () => stub({ class: "ovenplayer" })
     };
 
     for (const record of SDK_REGISTRY) {
@@ -188,6 +190,38 @@ export async function run({ session, baseUrl }) {
       why: appHome ? `${appHome.sdk.name}@${appHome.sdk.hops}` : "null"
     };
 
+    // The OvenPlayer tie-law row: OvenPlayer's inner player root
+    // (.op-player op-clear) ALSO matches OpenPlayerJS's .op-player anchor,
+    // so identity at that element is decided by registry order. The stub
+    // mirrors the vendor DOM (dist ViewTemplate: .ovenplayer op-wrapper
+    // root, .op-player op-clear player root, .op-media-element-container
+    // around the video): the nearest anchor match is the .op-player element
+    // at hop 2, and OvenPlayer - earlier in the registry - must claim it,
+    // NOT OpenPlayerJS. The container is that op-player root (the tight
+    // player box the matched element IS).
+    const ovenRoot = document.createElement("div");
+    ovenRoot.className = "ovenplayer op-wrapper";
+    const ovenPlayer = document.createElement("div");
+    ovenPlayer.className = "op-player op-clear";
+    const ovenMedia = document.createElement("div");
+    ovenMedia.className = "op-media-element-container";
+    ovenRoot.append(ovenPlayer);
+    ovenPlayer.append(ovenMedia);
+    const ovenVideo = document.createElement("video");
+    ovenMedia.append(ovenVideo);
+    const ovenHolder = document.createElement("div");
+    document.body.append(ovenHolder);
+    ovenHolder.append(ovenRoot);
+    const ovenHome = resolveAdoptionHome(ovenVideo);
+    ovenHolder.remove();
+    results.__ovenplayerTie = {
+      ok: !!ovenHome
+        && ovenHome.sdk.name === "OvenPlayer"
+        && ovenHome.sdk.container === ovenPlayer
+        && ovenHome.sdk.hops === 2,
+      why: ovenHome ? `${ovenHome.sdk.name}@${ovenHome.sdk.hops}` : "null"
+    };
+
     // The shadow-boundary arm: closest() stops at the ShadowRoot, so a video
     // whose owning anchor sits ABOVE its shadow host is only reachable by
     // the composed parentNode/.host walk. The stub nests the video inside a
@@ -253,6 +287,12 @@ export async function run({ session, baseUrl }) {
     name: "shadow boundary: the composed arm resolves through the host at fewest hops",
     status: probe.__shadowBoundary?.ok === true ? "pass" : "fail",
     note: probe.__shadowBoundary?.ok === true ? null : `shadow arm: ${probe.__shadowBoundary?.why}`,
+    ms: null
+  });
+  rows.push({
+    name: "OvenPlayer tie law: the inner op-player root claims before OpenPlayerJS",
+    status: probe.__ovenplayerTie?.ok === true ? "pass" : "fail",
+    note: probe.__ovenplayerTie?.ok === true ? null : `tie arm: ${probe.__ovenplayerTie?.why}`,
     ms: null
   });
   return rows;
