@@ -10,7 +10,7 @@ import { getSetting, SETTING_KEYS } from "./chrome/config.js";
 import { TUNING } from "../shared/core.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
-import { SHELL_MARKER, warmStyles, injectShell, ensureViewportFitCover } from "./chrome/inject.js";
+import { SHELL_MARKER, warmStyles, mountShell, ensureViewportFitCover } from "./chrome/inject.js";
 import { retryFullscreenProvision } from "../shared/page.js";
 
 /**
@@ -409,7 +409,7 @@ export class Shell {
     if (getSetting(SETTING_KEYS.edgeToEdge) !== false) {
       ensureViewportFitCover();
     }
-    this.#shellDom = injectShell(this.container);
+    this.#shellDom = mountShell(this.container);
     if (!this.#shellDom) {
       logger.error("shell", "Failed to inject shell DOM");
       return;

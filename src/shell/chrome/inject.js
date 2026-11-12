@@ -14,7 +14,7 @@ export { SHELL_MARKER };
  * (replaceSync in place, propagating to every adopted reference), and its
  * adoption into the document. The three loose variables it replaced are
  * private fields so "adopted once, upgraded monotonically" is one object's
- * story; warmStyles()/injectShell() stay plain-call façades.
+ * story; warmStyles()/mountShell() stay plain-call façades.
  */
 class ShellStyle {
   #sheet = null;
@@ -261,7 +261,7 @@ function shellHostClass() {
     #dead = false;
     #armed = null;
 
-    /** injectShell hands the container over before the host is appended:
+    /** mountShell hands the container over before the host is appended:
         connectedCallback reads it, so adoption must precede insertion. */
     adopt(container) {
       this.#container = container;
@@ -367,7 +367,7 @@ function shellHostTag() {
 }
 
 /**
- * Build the shell DOM inside the player container as a parasite:
+ * Mount the shell DOM inside the player container as a parasite:
  * host > #shadow-root > hud layer > cue layer, appended LAST so no SDK
  * child ever changes index. Rendering dominance comes from the host's
  * z-index, not tree order. The open shadow root encapsulates all PF UI
@@ -375,9 +375,9 @@ function shellHostTag() {
  * (see PfShellHost): its own attachment lifecycle is the defense, so the
  * caller no longer installs any watchdog machinery.
  */
-export function injectShell(container) {
+export function mountShell(container) {
   if (!container) {
-    logger.error("inject", "injectShell: no container");
+    logger.error("inject", "mountShell: no container");
     return null;
   }
   const host = el(shellHostTag(), { class: "pf-shell", tabindex: "-1" });
