@@ -12,14 +12,13 @@ export { SHELL_MARKER };
  * One owner of the shell stylesheet lifecycle: the embedded sheet applied
  * synchronously at document-start, the @resource upgrade in the background
  * (replaceSync in place, propagating to every adopted reference), and its
- * adoption into the document. The three loose variables it replaced are
- * private fields so "adopted once, upgraded monotonically" is one object's
- * story; warmStyles()/mountShell() stay plain-call façades.
+ * adoption into the document. The loose variables it replaced are private
+ * fields so "adopted once, upgraded monotonically" is one object's story;
+ * warmStyles()/mountShell() stay plain-call façades.
  */
 class ShellStyle {
   #sheet = null;
   #adopted = false;
-  #load = null;
 
   /** The live sheet - attached to every shadow root mountShell() creates. */
   get sheet() {
@@ -37,13 +36,12 @@ class ShellStyle {
       this.#adopted = true;
       document.adoptedStyleSheets = [...document.adoptedStyleSheets, this.#sheet];
     }
-    this.#load = this.#warmFromResource();
+    // Fire-and-forget: the upgrade body carries its own catches (the
+    // resource-fetch belt and the malformed-CSS keep), so its promise can
+    // never reject unhandled - there is no awaiting consumer (styles are
+    // never awaited at boot; the shell resolves on DOM).
+    this.#warmFromResource();
     return this.#sheet;
-  }
-
-  /** Resolve the authoritative (post-@resource) stylesheet. Never rejects. */
-  settled() {
-    return this.#load;
   }
 
   async #warmFromResource() {
@@ -70,7 +68,6 @@ class ShellStyle {
         logger.error("mount", "Rejected malformed @resource stylesheet:", err);
       }
     }
-    return this.#sheet;
   }
 }
 
@@ -401,7 +398,6 @@ export function mountShell(container) {
 
   return {
     host,
-    shadow,
     hudLayer,
     cueLayer
   };
