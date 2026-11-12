@@ -144,6 +144,12 @@ export const TUNING = {
     actionMs: 4000,
     /** Onboarding hints. */
     hintMs: 5000
+  },
+  forgeBar: {
+    /** Idle time before the forge-mode control bar auto-hides. WCAG 2.2.1
+     *  holds: hover over the bar, focus within it, or a paused video park
+     *  the sweep until released. */
+    hideMs: 2500
   }
 };
 /* - 3. Timing - */

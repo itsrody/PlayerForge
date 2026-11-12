@@ -589,17 +589,24 @@ export class ForgeTrack {
     const centerX = vBox.x + (vBox.width - width) / 2;
     const centerY = vBox.y + (vBox.height - height) / 2;
     // Universal clip: the picture ends at the one fill-box (the ReferenceBox
-    // rect; its fallback answer covers the shell-less defensive read). Fill
-    // mode makes the transform-scaled stream span the box and the clip is a
-    // no-op there; letterbox modes leave the black bars OUT of the anchor.
+    // rect; its fallback answer covers the shell-less defensive read), and
+    // at the cue canvas itself - the cue layer's own box. The canvas is the
+    // region captions may paint in, so a shorter canvas clips the picture
+    // with it: the forge bar shortens this box from the bottom via a CSS
+    // :has() rule (styles.css) and every anchored slot follows on the next
+    // render with zero JS awareness of the bar. Fill mode makes the
+    // transform-scaled stream span the box and the clip is a no-op there;
+    // letterbox modes leave the black bars OUT of the anchor.
     const ref = this.#reference?.get();
     const stage = ref && ref.width > 0 && ref.height > 0
       ? ref
       : { x: layerBox.x, y: layerBox.y, width: layerBox.width, height: layerBox.height };
     const left = Math.max(centerX, stage.x);
     const top = Math.max(centerY, stage.y);
-    const right = Math.min(centerX + width, stage.x + stage.width);
-    const bottom = Math.min(centerY + height, stage.y + stage.height);
+    const right = Math.min(centerX + width, stage.x + stage.width,
+      layerBox.x + layerBox.width);
+    const bottom = Math.min(centerY + height, stage.y + stage.height,
+      layerBox.y + layerBox.height);
     if (right - left <= 0 || bottom - top <= 0) {
       // Video and stage stopped sharing any viewport region (a stale stage
       // under a scroll the cache missed, a service-wide toggled layout) —

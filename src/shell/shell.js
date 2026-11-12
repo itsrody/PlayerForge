@@ -9,6 +9,7 @@ import { SettingsPanel, addSettingsSection, addHistorySection } from "./chrome/p
 import { getSetting, SETTING_KEYS } from "./chrome/config.js";
 import { TUNING } from "../shared/core.js";
 import { ToastManager } from "./chrome/toast.js";
+import { ForgeBar } from "./chrome/forgebar.js";
 import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
 import { SHELL_MARKER, warmStyles, mountShell, ensureViewportFitCover } from "./chrome/mount.js";
 import { BARE_SDK_NAME } from "../kernel/contract.js";
@@ -157,7 +158,14 @@ export class Shell {
     this.#toasts = new ToastManager(this.#shellDom.hudLayer);
     this.#inputs = new InputForge(this.video, this.container, this.shellHost,
       () => this.referenceBox);
-    attachInputActions(this, this.shellHost, this.#inputs.signal);
+    // The forge bar holds itself: every listener and the sweep timer ride
+    // the shell scope signal, and its DOM lives in the hud layer - no shell
+    // field needs to reach it.
+    new ForgeBar({
+      shell: this,
+      actions: attachInputActions(this, this.shellHost, this.#inputs.signal),
+      signal: this.#scope.signal
+    });
     this.#resume = new ResumeTracker(this);
     this.#subtitles = new SubtitleSession(this);
     this.#filters = new FilterSession(this);
@@ -512,13 +520,15 @@ export class Shell {
   }
 
   /**
-   * The bare surface's fullscreen entry: the stripped native controls took
-   * their fullscreen button with them, so center dbltap enters through the
-   * adopted container - the gesture context supplies the user activation,
-   * and an iframe embed's grant chain was provisioned at shell creation.
-   * SDK shells never call this (their fullscreen stays the SDK's own).
-   * A rejection surfaces through the fullscreenerror watcher below, which
-   * owns the failure sentence and the re-provision.
+   * The forge entry: fullscreen IS forge mode, so entering it is one verb
+   * for every shell - the container (the SDK's own player box, or the
+   * adopted page container of a bare surface) takes the top layer, the
+   * document-realm hide rule clears the chrome around the video chain, and
+   * the forge bar arms on the fullscreen flip. The gesture context supplies
+   * the user activation (the center dbltap), and an iframe embed's grant
+   * chain was provisioned at shell creation. A rejection surfaces through
+   * the fullscreenerror watcher below, which owns the failure sentence and
+   * the re-provision.
    */
   enterFullscreen() {
     if (fs) {

@@ -1504,7 +1504,12 @@ export class InputForge {
       this.#gestureZone !== null
     ) {
       if (this.#tap.tap(now) === "second") {
-        if (allowsIntent("dbltap")) {
+        // The zone-aware ask: the forge entry arms the center dbltap in
+        // normal view while the edge inputs stay fs-gated, so an inline
+        // edge dblclick is never claimed here (the native second click
+        // passes untouched) and the entry's own dispatch suppresses the
+        // activation (the SDK must not also see the dblclick).
+        if (allowsIntent("dbltap", this.#gestureZone)) {
           this.#suppressNextActivations();
           dbltapDetail.zone = this.#gestureZone;
           dbltapDetail.method = "pointer";

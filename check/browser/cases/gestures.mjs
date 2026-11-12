@@ -63,7 +63,10 @@ export async function run({ session, baseUrl, boot, bundle }) {
   await boot();
   await recordGestureEvents(session);
 
-  const center = await session.eval(videoCenterScript);
+  // Re-derivable: the inline forge-entry row below round-trips a REAL
+  // element fullscreen, and the later viewport-coordinate rows must read
+  // the post-exit box, not the pre-entry snapshot.
+  let center = await session.eval(videoCenterScript);
   if (center === null) {
     rows.push({ name: "shell host present for gestures", status: "fail", note: "no [data-pf-shell]", ms: null });
     return rows;
@@ -243,22 +246,55 @@ export async function run({ session, baseUrl, boot, bundle }) {
     v.currentTime = 2;
   });
   await sleep(300);
-  // Inline restore, the complement: with fs closed the same two-tap sequence
-  // carries ONE native dblclick - inline the SDK's double tap is its own.
+  // Inline forge entry, the complement: with fs closed the same two-tap
+  // sequence at center IS the forge entry now - fullscreen IS forge mode -
+  // so the shell's own container requests REAL fullscreen on the taps'
+  // trusted activation (focusWindow is the document-focused precondition
+  // the bare rows pinned) and the native dblclick is suppressed, the same
+  // prevent-scope face the fs surface showed above. The bar rides in with
+  // the flip (container-fs satisfies the contains-chain) and stays shown -
+  // the paused hold disarms the idle sweep.
+  await session.focusWindow();
+  await session.eval(function main() {
+    window.__pfDbclicks = [];
+    window.__pfEvents = [];
+  });
   await acts()
     .move({ origin: "viewport", x: Math.round(center.x), y: Math.round(center.y) })
     .press().release()
     .press().release()
     .pause(500)
     .perform();
-  await sleep(300);
-  status(rows, "inline double tap passes one native trusted dblclick", await session.eval(function main() {
-    return window.__pfDbclicks.length === 1 && window.__pfDbclicks.every(Boolean);
-  }), `dbclicks=${JSON.stringify(await session.eval(function main() {
+  await sleep(600);
+  status(rows, "inline center dbltap enters forge mode: container fullscreen, no native dblclick, bar shown", await session.eval(function main() {
+    const host = document.querySelector(".pf-shell");
+    const bar = host?.shadowRoot?.querySelector(".pf-forge-bar");
+    return !!document.fullscreenElement &&
+      document.fullscreenElement.contains(host.parentElement) &&
+      window.__pfDbclicks.length === 0 &&
+      bar !== null && bar.hidden === false;
+  }), `fs=${JSON.stringify(await session.eval(function main() {
+    return document.fullscreenElement ? (document.fullscreenElement.id || document.fullscreenElement.tagName) : null;
+  }))} dbclicks=${JSON.stringify(await session.eval(function main() {
     return window.__pfDbclicks;
-  }))} acts=${JSON.stringify(await session.eval(function main() {
-    return window.__pfActivations;
+  }))} bar=${JSON.stringify(await session.eval(function main() {
+    const bar = document.querySelector(".pf-shell")?.shadowRoot?.querySelector(".pf-forge-bar");
+    return bar ? { present: true, hidden: bar.hidden } : { present: false };
   }))}`);
+  // Forge exit re-seats the inline posture for the keyboard rows below:
+  // script exitFullscreen is allowed (the activation lives on entry only),
+  // and the box re-derivation re-arms the later viewport-coordinate rows
+  // against any residue the element-fullscreen round-trip leaves.
+  await session.eval(function main() { document.exitFullscreen()?.catch(() => {}); });
+  await sleep(500);
+  center = await session.eval(videoCenterScript);
+  await session.eval(function main() {
+    window.__pfEvents = [];
+    const v = document.querySelector("#check-video");
+    v.pause();
+    v.currentTime = 2;
+  });
+  await sleep(200);
 
   await fireKeys(["KeyM"]);
   await sleep(350);

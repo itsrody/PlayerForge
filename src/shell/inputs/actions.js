@@ -55,7 +55,18 @@ const INPUT_ACTIONS = [
   },
   {
     id: "double-tap",
-    inputs: [{ kind: "pointer", family: "dbltap", setting: GESTURES.dbltap.setting, fs: true }]
+    // Fullscreen law: edges skip, center toggles. The forge entry adds the
+    // normal-view CENTER dbltap as its own armed input - fullscreen is forge
+    // mode, so entering it is a normal-view verb for every shell - while the
+    // edge zones stay fs-gated (the inline edge dblclick keeps belonging to
+    // the player natively: the gate's zone-aware ask refuses them, so the
+    // engine never claims the second tap's activation there). Both inputs
+    // ride the same gesture setting, so disabling double-tap disables the
+    // forge entry with it.
+    inputs: [
+      { kind: "pointer", family: "dbltap", setting: GESTURES.dbltap.setting, fs: true },
+      { kind: "pointer", family: "dbltap", setting: GESTURES.dbltap.setting, fs: false, zone: "screen" }
+    ]
   },
   {
     id: "pinch-fill",
@@ -170,7 +181,9 @@ class IntentGates {
    *  container IS its gesture space in normal view (the tier owns the
    *  surface: controls stripped, no SDK player to conflict with), so its
    *  fs-flagged intents - scrub, swipe, dbltap, pinch - arm without a
-   *  fullscreen witness. SDK shells keep the fullscreen-only law. */
+   *  fullscreen witness. SDK shells keep the fullscreen-only law, with the
+   *  forge entry's center dbltap as the one zone-pinned exception (see the
+   *  double-tap row). */
   #bare = false;
   #spaceStamp = false;
 
@@ -215,12 +228,30 @@ class IntentGates {
 
   /** True when at least one input of the pointer-intent family is armed.
    *  Mid-session toggles still apply at the next decision via the space
-   *  validity recheck. */
-  allows(gesture) {
+   *  validity recheck. The zone-aware ask (allows with a zone) re-derives
+   *  from the family's own inputs: an input may pin a zone - the forge
+   *  entry's center dbltap arms in normal view while the edge inputs stay
+   *  fs-gated - which the "any input armed" snapshot cannot answer alone.
+   *  Zone-blind callers (every other family's dispatch sites) ride the
+   *  snapshot. */
+  allows(gesture, zone = null) {
     if ((fs || this.#bare) !== this.#spaceStamp) {
       this.#recompute();
     }
-    return this.#armed.get(gesture) === true;
+    if (zone === null) {
+      return this.#armed.get(gesture) === true;
+    }
+    const inputs = this.#families.get(gesture);
+    if (!inputs) {
+      return false;
+    }
+    const spaceOpen = fs || this.#bare;
+    for (const input of inputs) {
+      if ((!input.zone || input.zone === zone) && gateOpen(input, spaceOpen)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /** Any pointer-intent family member armed - the press-ownership gate. Same
@@ -253,8 +284,8 @@ class IntentGates {
 
 const gates = new IntentGates();
 
-export function allowsIntent(gesture) {
-  return gates.allows(gesture);
+export function allowsIntent(gesture, zone = null) {
+  return gates.allows(gesture, zone);
 }
 
 export function allowsAnyIntent() {
@@ -264,8 +295,10 @@ export function allowsAnyIntent() {
 /** The engine's gesture-space read, mirroring the gates' own stamp: the
  *  fullscreen gate, OR the bare tier's adopted surface. Every engine site
  *  that used to read `fs` for intent eligibility reads this, so the bare
- *  shell's fs-flagged intents arm in normal view and an SDK shell's never
- *  do. The bare fact rides the same module state (set once per shell at
+ *  shell's fs-flagged intents arm in normal view; the SDK shell's one
+ *  normal-view exception is the forge entry's center dbltap, which is a
+ *  per-input `zone` pin the zone-aware ask answers rather than this space
+ *  read. The bare fact rides the same module state (set once per shell at
  *  attach), so engine and gates can never disagree. */
 export function spaceOpen() {
   return gates.spaceOpen();
@@ -922,6 +955,16 @@ class ShellActions {
     shell.toastFlash(direction === "right" ? "right-arrows" : "left-arrows", `${step}s`, "skip");
   }
 
+  /**
+   * The forge bar's skip entry: the SAME streak + step + toast story as the
+   * gesture path, one owner. A rapid bar-button tap accumulates exactly like
+   * a rapid edge dbltap - the streak is the skip affordance's state, not a
+   * gesture-plane implementation detail.
+   */
+  skipStep(direction) {
+    this.#skip(direction);
+  }
+
   /** Hold the pointer/keyboard boost: first source wins, later arrivals add
    *  nothing until the first releases. */
   #hold(detail) {
@@ -1012,17 +1055,18 @@ class ShellActions {
   }
 
   /**
-   * Fullscreen-only double-tap semantics: edges skip, center toggles
-   * playback. Inline double-taps belong to the browser/player natively.
-   * The bare surface's exception: its fs-flagged intents arm in normal
-   * view (the tier owns the surface), so center dbltap there IS the
-   * fullscreen entry - the stripped native controls took their fullscreen
-   * button with them - and the edge zones skip without a fullscreen
-   * witness too.
+   * Double-tap semantics. Center dbltap is the forge entry in normal view -
+   * fullscreen IS forge mode, so entering it is the same verb for the SDK
+   * player and the bare surface alike. In fullscreen the edges skip and
+   * center toggles playback. Inline edge double-taps keep belonging to the
+   * player natively: the gate's zone-aware ask refuses them in normal view
+   * (SDK shells), so this handler never sees an edge zone there - a bare
+   * surface's edges DO arrive (its whole space is open) and skip, the
+   * adopted bare-tier semantics.
    */
   #dbltap(detail) {
     const shell = this.#shell;
-    if (isBare() && !fs && detail.zone === "screen") {
+    if (!fs && detail.zone === "screen") {
       shell.enterFullscreen();
       return;
     }
@@ -1150,5 +1194,9 @@ export function attachInputActions(shell, host, signal) {
   // one attach call site (the one-shell-per-realm law keeps it current -
   // a re-adopt boots a fresh shell and re-attaches).
   gates.setBareSpace(shell.sdk?.name === BARE_SDK_NAME);
-  new ShellActions(shell).attach(host, signal);
+  const actions = new ShellActions(shell);
+  actions.attach(host, signal);
+  // The forge bar rides the same instance: its skip buttons reuse the
+  // streak/step/toast skip story through skipStep() (one owner).
+  return actions;
 }

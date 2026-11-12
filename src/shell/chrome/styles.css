@@ -130,6 +130,27 @@
   inset: 0 !important;
   width: 100% !important;
   height: 100% !important;
+  /* The letterbox floor: a fullscreened container whose aspect does not
+     match the stream could otherwise show page content behind the top
+     layer's uncovered bands. */
+  background: #000;
+}
+
+/* Forge mode's chrome hide: while a fullscreen chain contains a shell, every
+   element in that chain's subtree dies unless it carries video or the shell
+   itself - the SDK's control bars, spinners, posters, overlays and ad
+   iframes alike. One generic rule instead of a per-record chrome vocabulary:
+   `:has(video)` protects the video's ancestor chain, the stamped elements
+   protect the shell chain (video + container + host all carry the marker),
+   and everything the :not() arm matches is chrome by construction. The
+   document realm owns it because the SDK chrome lives in the page's light
+   DOM; the HUD's shadow content is unreachable by document rules and needs
+   no protection. Probed live (forge-probe): the rule hides inside the
+   container-fs shape and the root-fs shape a page can produce around the
+   shell, survives a stub chrome rebuild (the rule is structural, not a
+   class list), and is fs-keyed - fully reversible on exit. */
+:fullscreen:has([data-pf-shell]) :not(:has(video), :has([data-pf-shell]), [data-pf-shell]) {
+  display: none !important;
 }
 
 /* Register the cue-position custom properties as syntax-typed so Blink can
@@ -214,6 +235,10 @@
       pointer-events: none;
       z-index: var(--pf-z-hud);
       contain: layout style;
+      /* The forge bar's strip height: declared on the scope so the cue-layer
+         shift rule (a sibling :has() arm below) inherits it - the bar
+         element itself cannot feed a rule that targets its sibling. */
+      --pf-forge-bar-h: 56px;
       /* Stage size container: the hud is inset:0 of the host, so its inline
          size IS the player region - the real responsive condition, not the
          viewport (their relation flips tiny on embedded players). Declared
@@ -413,6 +438,140 @@
         opacity: 0;
         translate: var(--pf-cue-x, -50%) 3px;
       }
+    }
+
+    /* - Forge bar (fullscreen forge-mode control strip) - */
+    /* Full-width strip on the player region's bottom edge - the shell-owned
+       chrome fullscreen mode shows while the document-realm hide rule clears
+       the SDK's own around the video chain. Ink law: the resting sheet plus
+       the hairline border-top, nothing else. Enter motion follows the
+       cue-slot grammar (@starting-style + allow-discrete over the hidden
+       flip; per the measured S2 record the exit across a display:none flip
+       is an instant removal on this engine - the mirrored targets stand
+       ready anyway). No z-index: DOM order under the toast and panel keeps
+       the z doctrine (hud 2 < toast 3 < panel 4) with the bar inside the
+       hud's own band. */
+    .pf-forge-bar {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: var(--pf-forge-bar-h);
+      display: flex;
+      align-items: center;
+      gap: var(--pf-space-sm);
+      padding: 0 var(--pf-space-md);
+      background: var(--pf-sheet);
+      border-top: var(--pf-sheet-border);
+      transition:
+        opacity var(--pf-ease-duration) var(--pf-ease-curve),
+        translate var(--pf-ease-duration) var(--pf-ease-curve),
+        display var(--pf-ease-duration) allow-discrete;
+
+      @starting-style {
+        opacity: 0;
+        translate: 0 8px;
+      }
+
+      &[hidden] {
+        display: none !important;
+        opacity: 0;
+        translate: 0 8px;
+      }
+    }
+
+    /* Touch-friendly square targets; the glyph rides .pf-icon's 1em sizing
+       (font-size carries it). Instant-dim press feedback is the shared
+       pf-button law; focus rings keep the panel's grammar. */
+    .pf-forge-btn {
+      flex: none;
+      width: 40px;
+      height: 40px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      border: none;
+      border-radius: var(--pf-radius-sm);
+      background: transparent;
+      color: var(--pf-fg);
+      font-size: 18px;
+      cursor: pointer;
+
+      &:hover {
+        background: var(--pf-surface-mid);
+      }
+
+      &:focus-visible {
+        outline: 2px solid var(--pf-fg);
+        outline-offset: 2px;
+      }
+
+      &:active {
+        filter: brightness(0.9);
+      }
+    }
+
+    /* The seek scrubber: the native range input owns its own hit area and
+       keyboard, so only track/thumb geometry is authored (the floor probe
+       proved a real driver drag moves a styled ::-moz-range-thumb). The
+       ball: a 16px round white thumb on the 4px track; the played span is
+       Firefox's own ::-moz-range-progress. */
+    .pf-forge-range {
+      flex: 1 1 0;
+      min-width: 0;
+      height: 40px;
+      margin: 0;
+      appearance: none;
+      background: transparent;
+      cursor: pointer;
+
+      &::-moz-range-track {
+        height: 4px;
+        border-radius: 2px;
+        background: var(--pf-border-soft);
+      }
+
+      &::-moz-range-progress {
+        height: 4px;
+        border-radius: 2px;
+        background: var(--pf-fg);
+      }
+
+      &::-moz-range-thumb {
+        width: 16px;
+        height: 16px;
+        border: none;
+        border-radius: var(--pf-radius-pill);
+        background: var(--pf-fg);
+      }
+
+      &:disabled {
+        opacity: 0.35;
+        cursor: default;
+      }
+
+      &:focus-visible {
+        outline: 2px solid var(--pf-fg);
+        outline-offset: 2px;
+      }
+    }
+
+    .pf-forge-time {
+      flex: none;
+      font-size: var(--pf-font-sm);
+      font-variant-numeric: tabular-nums;
+      color: var(--pf-text-dim);
+      white-space: nowrap;
+    }
+
+    /* The bar is an overlay band across the picture's bottom: a visible bar
+       shortens the cue canvas from the bottom edge so cues read above it.
+       Percent-fallback slots resolve against this box directly; the
+       picture-anchored slots follow through the renderer's universal clip,
+       which also clips against this canvas box (subtitles.js). */
+    :scope:has(> .pf-forge-bar:not([hidden])) > .pf-cue-layer {
+      bottom: var(--pf-forge-bar-h);
     }
 
     /* - Toast (singleton <pf-toast>) - */

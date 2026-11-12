@@ -162,6 +162,19 @@ export async function run() {
       note: `glued grammar tokens in shipped sheet: ${gluedTokens.slice(0, 6).join(", ")}`
     });
   }
+  // Positive pin on the forge hide rule's descendant separator: pass 1 once
+  // stripped the run before ":not(" after "]" (an attribute selector ends a
+  // selector unit just like an identifier does), fusing the descendant
+  // combinator into a compound - `]:not(` - a shape that matches nothing,
+  // shipping the whole forge chrome hide inert. A negative glue scan cannot
+  // see this class (`[data-pf-shell]:fullscreen` is a legitimate compound),
+  // so the load-bearing rule rides its separator as a positive signature.
+  if (!sheet.includes(":has([data-pf-shell]) :not(")) {
+    fails.push({
+      name: "sheet fidelity (forge hide rule)",
+      note: "the descendant separator in :fullscreen:has([data-pf-shell]) :not(...) was stripped - the hide rule fused into a compound that matches nothing"
+    });
+  }
 
   if (fails.length > 0) {
     return { rows: [...rows, ...fails.map((f) => ({ name: f.name, status: "fail", note: f.note, ms: null }))], ok: false };

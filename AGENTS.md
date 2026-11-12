@@ -25,15 +25,15 @@ both platforms:
   excluded in the header (YouTube, Vimeo, Netflix, streams, socials…), and
   `entry.js` keeps a runtime skip list above that.
 
-**Repo shape (23 source modules, ~15k LOC):**
+**Repo shape (24 source modules, ~15k LOC):**
 
 ```
 src/
   entry.js            install-time contract: which frames run the script
   kernel/  (4)        contract, detection, discovery, kernel orchestrator
   shared/  (5)        core, runtime, dom, page, store — the data planes
-  shell/   (14)       shell, media, resume, filter, forge+actions,
-                      subtitles(2), chrome(5 + styles.css)
+  shell/   (15)       shell, media, resume, filter, forge+actions,
+                      subtitles(2), chrome(6 + styles.css)
 check/                the one testing tool (see §7)
 dist/                 generated, not the review target
 esbuild.config.mjs    single build: IIFE userscript + css resource
@@ -52,16 +52,27 @@ deliberately **no `@noframes`**: every frame gets the script (§2).
 `@downloadURL` pins the branch dist for VM's updater. Version is
 derived from `package.json` by the build; never hand-edit the header version.
 The bundled sheet rides the hand minifier (`minifyCss` in esbuild.config.mjs),
-whose whitespace stripping carries two grammar-critical preservation rules
+whose whitespace stripping carries grammar-critical preservation rules
 (build-pipeline A→Z sweep, probed on the floor): the run before `(`/`:` is
-kept when an identifier-ish character precedes it — dropping it merges two
-tokens into one, `) and (` into the function token `and(...)`, which Firefox
-silently rewrites to `@media not all` (a media row that never applies; the
-coarse-pointer bottom-sheet rows shipped inert for releases under this bug),
-and the run after `)` is kept when a letter or `+`/`-` follows — calc's `+`/`-`
+kept when the preceding character can END a selector unit — an
+identifier-ish char (dropping it merges two tokens into one, `) and (` into
+the function token `and(...)`, which Firefox silently rewrites to
+`@media not all`; a media row that never applies; the coarse-pointer
+bottom-sheet rows shipped inert for releases under this bug) or a selector
+unit terminator — `]` (attribute selector), `)` (functional pseudo), `*`
+(universal) — where the drop fuses a descendant combinator into a compound
+selector that matches nothing (the forge hide rule's `] :not(` shipped as
+`]:not(` and the whole chrome hide was inert until the class was caught
+live by the forge probe; a glued `]:`/`):` can also be a legitimate
+compound, so the gate's pin on this rule is the positive form), and the run
+after `)` is kept when a letter or `+`/`-` follows — calc's `+`/`-`
 infix demands whitespace on both sides of the operator even after a paren
 (`)+ var(` dies at substitution time: the probe read the computed fallback
-where the spaced form computes). Stripping elsewhere still collapses to one
+where the spaced form computes) — or a `:`/`(` follows, the pass-1
+interlock (pass 1 kept the run before the compound-led token only because
+of the `)` before it; stripping here re-fuses the descendant, and only a
+run the source spelled is kept since a glued `):is(` is a legitimate
+compound the author authored without the space). Stripping elsewhere still collapses to one
 space; calc arithmetic and descendant selectors survive as single spaces. The
 shipped damage this fixed: the bottom-sheet row's `bottom` and `max-height`
 calcs and the landscape coarse compact-panel row were all inert. The bundle
@@ -334,9 +345,9 @@ iframes, same-origin and cross-origin:
   echo-storm hot path: 1000 foreign writes ride the robust row inside
   400ms) and ResumeStore's entry set.
   **Subscriber census (the audience axis, recorded alongside the instance
-  axis)**: fs-gate 4 (ReferenceBox's fs-flip re-seed, the pinch wheel's
-  fill-release, `ViewershipTransform`'s reset, the panel's close-on-fs);
-  sync grain 2 (session offset apply + panel stepper echo); placement
+  axis)**: fs-gate 5 (ReferenceBox's fs-flip re-seed, the pinch wheel's
+  fill-release, `ViewershipTransform`'s reset, the panel's close-on-fs,
+  the ForgeBar's show/hide ride); sync grain 2 (session offset apply + panel stepper echo); placement
   grain 2 (the grain's forward into the session + the panel position
   echo); settings bus 2 (the action layer's hotkey recompute + the
   panel's cross-tab sync); resume store 2 (the sync grain's re-resolve
@@ -576,7 +587,8 @@ iframes, same-origin and cross-origin:
   verified (container RO, fs flip, orientation, capture-phase scroll), its
   audience is exactly the four fullscreen subscribers the census names
   (ReferenceBox, the forge pinch fill-release, `ViewershipTransform`'s
-  reset, the panel close-on-fs), and the two traversal helpers + the ONE
+  reset, the panel close-on-fs — the count the sweep measured; the ForgeBar
+  joined as the fifth after it), and the two traversal helpers + the ONE
   layout-viewport read hold their consumer lists (forge's control-focus
   gate and zone width, the panel's focus-return, shell's shadow-host
   check, discovery's presence gate). **page.js**: the census holds — zero
@@ -883,7 +895,19 @@ iframes, same-origin and cross-origin:
   `AdoptionHome` the provider hands it and exposes `video`/`container`/`sdk`
   as read-only aliases of the same record (identity is a shell-lifetime
   fact; the container alias reads through the record's `sdk` descriptor
-  since the record's alias getters retired). The panel-section destroy loop rides ONE uniform bare `catch` (the
+  since the record's alias getters retired). The `#boot` step constructs
+  `attachInputActions` (whose returned `ShellActions` instance feeds the
+  `ForgeBar`'s skip entries) and then the `ForgeBar` itself — the bar holds
+  no shell field: its listeners and sweep timer ride the shell scope signal
+  and its DOM lives in the hud layer. `enterFullscreen()` is EVERY shell's
+  forge entry: center dbltap in normal view is the forge verb for the SDK
+  player and the bare surface alike, and the verb requests REAL fullscreen
+  on the shell's own container (the gesture's trusted activation supplies
+  the user gesture script-launched requests lack; rejection surfaces on the
+  existing fullscreenerror watcher, the catch only keeps the promise off
+  the unhandled lane). In fullscreen the document-realm hide rule clears
+  the SDK chrome and the forge bar is the shell-owned control surface.
+  The panel-section destroy loop rides ONE uniform bare `catch` (the
   release-tail class): a section destroy that throws must not strand the
   inputs/panel/toast/DOM teardown steps behind it — they are the shell's
   only unregister on that path, so the broken member dies contained and the
@@ -1087,7 +1111,11 @@ iframes, same-origin and cross-origin:
   table (one row per user-facing function, each gathering every trigger
   under its `inputs` — pointer families and key codes, one-shot or
   hold-session; the hold-speed row defines 2x hold-to-speed ONCE, its
-  pointer hold and Space hold both riding it) + `IntentGates`,
+  pointer hold and Space hold both riding it; the dbltap row carries TWO
+  inputs — the fs-armed family and a zone-pinned `zone: "screen"`,
+  `fs: false` forge-entry arm, both riding `GESTURES.dbltap.setting`, so
+  `allowsIntent(gesture, zone)` can refuse the inline edge dbltap while
+  arming the center forge entry) + `IntentGates`,
   and the per-story state machines `SkipStreak`, `ScrubSession` (the input/
   commit decoupling: moves accrue `#pendingDelta`, requestAnimationFrame —
   the compositor tick — commits one clamped seek per display refresh (the
@@ -1115,7 +1143,17 @@ iframes, same-origin and cross-origin:
   `ViewershipTransform` (the fill-mode cover scale composed as one
   `scale(s)` — pinch-to-fill's transform, released on pinch-in or fullscreen
   exit) — the one class allowed to write the video transform, exposed on
-  the shell as `shell.view`.
+  the shell as `shell.view`. The dbltap dispatch is zone-aware: normal-view
+  center dbltap IS the forge entry (the engine passes `#gestureZone` into
+  the ask, the dispatch fires, and the activation suppressors cover the
+  SDK's own double-tap — the first tap's native click still reaches the
+  player, native-standard and accepted), while inline edge dbltaps stay
+  refused in normal view (the native inline edge dblclick keeps belonging
+  to the player) and fullscreen edges skip / center toggles playback.
+  `skipStep(direction)` is the ONE skip owner — the arrow-key gesture
+  dispatch and the forge bar's skip buttons both ride it (streak + step +
+  toast, one story) — and `attachInputActions` returns the `ShellActions`
+  instance so the `ForgeBar` wire can reach it.
 
   **Sweep #11 record (inputs plane A→Z, audit-clean).** Both modules read
   front-to-back — the pair's first dedicated series pass — and the seam
@@ -1247,10 +1285,35 @@ iframes, same-origin and cross-origin:
   eviction defense; the old watchdog is retired; named for its primary
   verb `mountShell` — the file was `inject.js` before the shell-mount
   adoption), `toast.js` (`ToastManager`,
-  pooled custom element), `panel.js`
+  pooled custom element), `forgebar.js` (`ForgeBar` — the forge-mode control
+  strip: fullscreen IS forge mode, so the bar shows while a fullscreen chain
+  contains the shell's container, via `subscribeFullscreen` + a
+  `contains(container)` re-check per flip; full-width bottom strip in the hud
+  layer, `[back][play][fwd][seek+ball][time][settings][exit]` wired through
+  the one `data-action` router — play/pause calls `shell.media.togglePlay`,
+  skip buttons ride `ShellActions.skipStep` (the SAME streak+step+toast story
+  the arrow keys ride, one owner), seek is the native `<input type=range>`
+  with the ball as its styled `::-moz-range-thumb` committing
+  `scrubToLatched` per input event, settings opens the panel, exit calls
+  `shell.exitFullscreen`; idle auto-hide rides ONE self-extending `delay()`
+  with the WCAG 2.2.1 holds (pointer-over bar, focus-within, paused video
+  each disarm the sweep) re-armed on release, window-capture
+  `pointermove/pointerdown/keydown` witnesses stamping an activity stamp
+  (window capture: the engine's own document listeners cannot hide the
+  stamp), and a visible bar shortens the cue canvas from the bottom edge
+  through the sheet's `:has()` sibling rule — picture-anchored cue slots
+  follow with zero bar-aware JS, riding `#derivePicture`'s universal canvas
+  clip), `panel.js`
   (the `ui.panelScale` write rides `#applyCompactSetting()` as the panel
   root's inline `style.zoom`, per-open like compact), **styles.css** (the
-  HUD — §6; the section labels carry the `text-box-trim` cap rule).
+  HUD — §6; the section labels carry the `text-box-trim` cap rule; the
+  forge-mode document-realm hide rule: while a fullscreen chain contains a
+  shell, every element in that subtree dies unless it carries video or a
+  `[data-pf-shell]` marker — one generic rule instead of a per-record chrome
+  vocabulary, `:has(video)` protecting the video's ancestor chain, fs-keyed
+  and fully reversible on exit; plus the letterbox floor `background: #000`
+  on the fullscreened shell container and the bar's cue-canvas `:has()`
+  shift).
 
   **Sweep #9 record (chrome/ A→Z, audit-clean).** The three small modules
   read front-to-back with no src gap:
@@ -3595,7 +3658,10 @@ stub rows green.
    loadedmetadata listener + 2 witness MOs + subtitles' rVFC crank (an
    arm, not a listener) with its video RO/IO + 4 video events + 2 host
    gesture relays + ReferenceBox's RO/orientation/scroll + forge's
-   machine-owned streams + the shell's document-level wires; panel open
+   machine-owned streams + the forge bar's plane (3 window-capture
+   activity witnesses + 6 video events + the click router + the 4 WCAG
+   pointer/focus holds + the range input handler, all scope-settled, plus
+   its fs-gate subscribe) + the shell's document-level wires; panel open
    adds exactly the dismissal trio + the CloseWatcher close listener on a
    per-open scope; scrubbing adds zero listeners (the rAF commit chain is
    one callback swap, not a socket).
@@ -3740,7 +3806,11 @@ stop at the first failure:
    that shipped the two compound coarse-pointer media rows inert — the
    mobile coarse bottom-sheet block and the landscape coarse compact-panel
    block never applied, and the two calc infix glues inside the bottom-sheet
-   block died double-covered, dead rows owning the glued declarations.
+   block died double-covered, dead rows owning the glued declarations —
+   plus the positive pin on the forge hide rule's descendant separator
+   (`:has([data-pf-shell]) :not(` must ship with its space; the `]:not(`
+   glue this guards is a legitimate compound shape, so the scan for it is
+   the positive form).
 5. **browser** — real browser + real bundle in a GM realm: **real native
    Firefox 159** headless, driven by geckodriver (this branch's floor, not a
    fork shim). Proves: boot, gesture contract, media semantics, resume,
@@ -3831,7 +3901,14 @@ stop at the first failure:
   TypeError at the IDL dictionary conversion against a finite control
   ACCEPTED, the native admission gate behind the engine's event-stream
   intakes, with the unrestricted movementX rider as a measured
-  non-gated witness),
+  non-gated witness; the dbltap rows carry the forge semantics — the
+  inline edge dbltap stays refused (no dispatch), the fs dbltap suppresses
+  the SDK's native dblclick at the surface, and the inline center dbltap
+  IS the forge entry: real container fullscreen on the taps' trusted
+  activation (focusWindow first, the document-focused lesson), zero
+  native dblclick, the bar shown, then a script `exitFullscreen` +
+  center re-derivation re-seats the inline posture for the later
+  viewport-coordinate rows),
   `hotpaths` (the hot-path budgets: the per-frame/echo loops the tree rides,
   benchmarked in the REAL engine as regression tripwires — fan dispatch at
   100k emissions (10-subscriber echo-audience shape and the zero-subscriber

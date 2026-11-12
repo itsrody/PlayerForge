@@ -122,24 +122,39 @@ function minifyCss(css) {
   const collapsed = noComments.replace(/\s+/g, " ");
   // Pass 1: whitespace around {} ; : , ( — the run before a delimiter is
   // preserved (as one space) when dropping it would merge the preceding
-  // identifier into a function token (ident+"(") or a compound pseudo
-  // (ident+":"); the run after is always strippable, since "("+"ident" and
-  // ":"+"ident" stay separate tokens in that direction.
+  // unit into a compound: an identifier (ident+"(" fuses a function token,
+  // ident+":") fuses a pseudo-class) OR a selector-unit terminator - "]" (an
+  // attribute selector), ")" (a functional pseudo), "*" (the universal) -
+  // where the merge fuses a descendant combinator into a compound selector
+  // and the rule silently matches the wrong thing (the forge hide rule's
+  // `] :not(` shipped as `]:not(`, a compound that matches nothing). The
+  // run after is always strippable, since "("+"ident" and ":"+"ident" stay
+  // separate tokens in that direction; `,`/`>`/`+`/`~`/`{`/`}`/`;` before
+  // are terminators a merge cannot fuse across.
   const delimSlim = collapsed.replace(/\s*([{};:,(])\s*/g, (match, delim, offset, text) => {
     const hadRun = match[0] === " ";
     const before = offset > 0 ? text[offset - 1] : "";
     const runMerges = delim === "(" || delim === ":";
-    return runMerges && hadRun && /[A-Za-z0-9_%.@#-]/.test(before) ? " " + delim : delim;
+    return runMerges && hadRun && /[A-Za-z0-9_%.@#\-)\]*]/.test(before) ? " " + delim : delim;
   });
-  // Pass 2: whitespace after ")". Preserved for the two grammar classes that
+  // Pass 2: whitespace after ")". Preserved for the grammar classes that
   // require the separator: the media-query keyword ("and", "not" — the MQ
   // prelude silently rewrites a row parsed without this whitespace to
-  // `@media not all`), and calc's +/- infix, which must be surrounded by
-  // whitespace on BOTH sides even after a closing paren (") + var").
-  // A run before ")" is strippable ("%)" tokenizes as number+paren).
-  const slim = delimSlim.replace(/\)\s*/g, (match, offset, text) => (
-    /[A-Za-z+-]/.test(text[offset + match.length] ?? "") ? ") " : ")"
-  ));
+  // `@media not all`), calc's +/- infix, which must be surrounded by
+  // whitespace on BOTH sides even after a closing paren (") + var"), and —
+  // the pass-1 interlock — a following ":"/"(" compound-led selector: pass 1
+  // preserved the run before that token only because of the ")" before it,
+  // so stripping here would re-fuse the descendant (`:has(x) :not(y)` →
+  // `):not(`). Only a run the source spelled is kept (a glued `):is(` is a
+  // legitimate compound the author authored without the space). A run
+  // before ")" is strippable ("%)" tokenizes as number+paren).
+  const slim = delimSlim.replace(/\)\s*/g, (match, offset, text) => {
+    const next = text[offset + match.length] ?? "";
+    if (/[A-Za-z+-]/.test(next)) {
+      return ") ";
+    }
+    return match.length > 1 && (next === ":" || next === "(") ? ") " : ")";
+  });
   return slim.trim();
 }
 
