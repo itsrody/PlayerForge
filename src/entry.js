@@ -104,10 +104,10 @@ function bootstrap() {
   initFullscreenGate();
 
   // The shell stylesheet is warmed lazily at first shell construction
-  // (shell.js #injectDom): the embedded sheet is adopted synchronously there,
+  // (shell.js #mountDom): the embedded sheet is adopted synchronously there,
   // and the @resource fetch is a background async upgrade - so first-video
   // dimming never waits on the network, and non-video / skipped pages never
-  // pay for a pointless adopted-sheet injection or remote CSS fetch.
+  // pay for a pointless adopted-sheet mount or remote CSS fetch.
 
   // GM menu commands exist from script eval - not from first video
   // discovery. Registration used to live inside kernel.init(), so pages

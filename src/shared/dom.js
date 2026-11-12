@@ -20,8 +20,8 @@ import { Scope, logger, postTask, yield_, Fan } from "./runtime.js";
 /**
  * Single document-level mutation feed for every document-wide interest.
  *
- * Discovery (kernel/discovery.js) and the shell-host reconnect watchdog
- * (chrome/inject.js) both need "something anywhere changed" - running two
+ * Discovery (kernel/discovery.js) and the page.js pipe diff both need
+ * "something anywhere changed" - running two
  * full-document MutationObservers makes busy pages pay twice per mutation
  * batch. This dispatcher observes once, coalesces records per microtask,
  * and fans out to subscribers.

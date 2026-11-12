@@ -290,7 +290,7 @@
            false) - an absent attribute is the auto-detect state, which is
            exactly how the old JS resolved "unset setting, consult the
            query". Descendant form: same shape as the pocket's off veto
-           (inject.js), so the two readers mirror each other. */
+           (mount.js), so the two readers mirror each other. */
         &:has(.pf-panel[data-compact="on"]) {
           --pf-compact-explicit: 1;
         }
@@ -555,7 +555,7 @@
        flips display via the pf-open class (allow-discrete) and fades opacity in
        place - a pure fade, no motion; Esc and outside-click dismissal are
        JS-owned in panel.js. Density adapts to the *shell* (not the viewport)
-       via the 330px pocket rule (inject.js) - the size gate lives there
+       via the 330px pocket rule (mount.js) - the size gate lives there
        because @container size rules cannot evaluate in the adopted sheet. */
     .pf-panel {
       container-type: inline-size;
@@ -1412,7 +1412,7 @@
     /* - Shell-true density - the panel adapts to its own width (~ the video
          container), not the viewport: wide panels keep the two-column grid,
          very narrow players collapse it to one column. The rules live in the
-         @container pocket (inject.js) - the adoptedSheets path cannot
+         @container pocket (mount.js) - the adoptedSheets path cannot
          evaluate a @container SIZE rule in this build; the pocket's copy is
          gated on --pf-compact: 0 so compact always outranks it without the
          block re-ranking against the sheet's cascade. */
@@ -1505,7 +1505,7 @@
     }
 
     /* Compact mode: fired by the compact bus style() query, but the body
-       lives in the container pocket (inject.js) - the sheet's size-type
+       lives in the container pocket (mount.js) - the sheet's size-type
        queries never evaluate in this build, and the pocket is where the
        stage-true density block and the compact reader keep their mutual
        tie order (compact outranks density on shared tokens) in one live

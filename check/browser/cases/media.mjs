@@ -512,7 +512,7 @@ export async function run({ session, baseUrl, boot }) {
 
   // The container pockets ride a real <style> element because @container SIZE
   // rules inside a document-adopted constructable sheet never evaluate their
-  // conditions in the harness engine build (src/shell/chrome/inject.js compiles the
+  // conditions in the harness engine build (src/shell/chrome/mount.js compiles the
   // whole pocket as a <style> carrier). This row IS that premise probe: one
   // always-true @container rule seeded into both carriers, each writing a
   // distinct declaration of the same custom property. The <style> twin must

@@ -69,7 +69,7 @@ gate pins both glue signatures as a static artifact row.
 The header↔runtime cross-check (sweep): the 8 `@grant`s map 1:1 onto real
 call sites — setValue/getValue/addValueChangeListener/removeValueChangeListener
 (store.js's storage plane), registerMenuCommand/unregisterMenuCommand
-(kernel.js's MenuCommands), getResourceText (inject.js's `pfStyle` warm),
+(kernel.js's MenuCommands), getResourceText (mount.js's `pfStyle` warm),
 xmlhttpRequest (store.js's `gmRequestText`, the CORS-bypass subtitle ingest);
 `GM_info` needs no grant (entry's version mirror) and `GM_setClipboard` is
 deliberately absent — the store.js docstring's dead-permission-surface record
@@ -825,9 +825,9 @@ iframes, same-origin and cross-origin:
 
   **Sweep #8 record (shell lifecycle A→Z, audit-clean).** The module read
   front-to-back with every seam reconciled against the wider records:
-  the boot contract is two-phase (`#injectDom` → one `yield_` → the eager
+  the boot contract is two-phase (`#mountDom` → one `yield_` → the eager
   component set + lazy `PANEL_SECTIONS` builder → the watcher `runSteps`
-  with the managed-marker stamp as its tail), and `#injectDom`'s three
+  with the managed-marker stamp as its tail), and `#mountDom`'s three
   deferrals (host disposal, `SHELL_MARKER` on the host, the static→relative
   position fix) all ride the shell's `DOMManager` — the fourth, the parasite
   watchdog's cleanup defer, retired with the shell-mount adoption (the
@@ -850,7 +850,7 @@ iframes, same-origin and cross-origin:
   `#dom`-without-`#scope` shape cannot happen: `shell.destroy` is the
   only caller and runs both). The re-entrant destroy guard rides
   `#scope.disposed` returning early; mid-boot destroys are legal (every
-  post-`#injectDom` field guards `?.`, the sections array is empty by
+  post-`#mountDom` field guards `?.`, the sections array is empty by
   construction). Idle-state facts recorded for the next reader:
   `#home` stays intentionally (identity is a shell-lifetime fact),
   `#view` is not nulled because `exitFill(false)` restores every byte
@@ -1149,12 +1149,14 @@ iframes, same-origin and cross-origin:
   teardown source of truth, so attempt-rollback and shell destroy call
   `section.destroy?.()` on real handles, and the history subscription rides
   the shell scope's signal into the resume store's Fan),
-  `ui.js` (`el`/`button` construction, the SVG icon factory), `inject.js`
+  `ui.js` (`el`/`button` construction, the SVG icon factory), `mount.js`
   (`ShellStyle` sheet lifecycle: adopt-once, monotonic
   `@resource` upgrade; viewport-fit-cover; the shell host is a custom
   element — `PfShellHost`, lazily built and defined under the
   `pf-shell-host` tag ladder — whose own attachment lifecycle is the
-  eviction defense; the old watchdog is retired), `toast.js` (`ToastManager`,
+  eviction defense; the old watchdog is retired; named for its primary
+  verb `mountShell` — the file was `inject.js` before the shell-mount
+  adoption), `toast.js` (`ToastManager`,
   pooled custom element), `panel.js`
   (the `ui.panelScale` write rides `#applyCompactSetting()` as the panel
   root's inline `style.zoom`, per-open like compact), **styles.css** (the
@@ -1190,7 +1192,7 @@ iframes, same-origin and cross-origin:
   only — the held pill rides the hud-removal defer in shell.js); the
   four pointer/focus listeners are element-owned and die with the layer
   at natural GC.
-  `inject.js` — `ShellStyle` is the one-object sheet story (adopt-once,
+  `mount.js` — `ShellStyle` is the one-object sheet story (adopt-once,
   the strictly-monotonic `@resource` upgrade with its parity guard and
   last-good-keep on a bad `replaceSync` — the log-then-continue class
   the error-path census pins; `settled()` never rejects); the container
@@ -3468,7 +3470,8 @@ stub rows green.
    removals remain, Fan's handle included — its handle now tears down by
    abort like every other machine's. The steady-state listener & observer
    census (sweep): 124 static registration sites (the count survives the
-   shell-mount adoption byte-identical at the site level — inject.js's one
+   shell-mount adoption byte-identical at the site level — the shell host
+   module's one
    container childList observe swapped for the PfShellHost detached-window
    armed observe, a transient that never arms in steady state, so the
    steady-state observer count is one LOWER while the raw site count holds),
@@ -4063,6 +4066,13 @@ recovery through the armed watch (whole detour ~20ms, inside the kernel's
 500ms removal grace), and the hostile pre-define ladder row (via a new
 `pre` hook in the browser stage's boot ceremony). Battery receipt: four
 consecutive all-green full-battery runs (266 rows each; 107.6–107.9s).
+Same-day follow-up (user direction): the file renamed to its primary verb —
+`inject.js` → `mount.js`, `injectShell()` → `mountShell()`, `#injectDom` →
+`#mountDom`, the logger channel `inject` → `mount` — pure rename, import
+paths and comment references only (styles.css/dom.js/bundle-gate corpus
+path/media case comment); dated audit records keep the old filename as
+date-stamped truth, and the bundle gate's class-vocabulary corpus follows
+the renamed file.
 
 The series'
 record-only commits changed

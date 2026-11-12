@@ -99,7 +99,7 @@ export async function run() {
 
   // HUD class-vocabulary agreement: every pf-* class the source JS spells
   // must have a reader on the HUD's one styling surface (styles.css or the
-  // inject-side compact sheet). A JS class no CSS consumes is a dead
+  // mount-side container pocket). A JS class no CSS consumes is a dead
   // vocabulary token, the way an ungranted GM_ call is a silent undefined -
   // the same audit shape as the grant-coverage row above. Two deliberate
   // scan exclusions: "pf-debug" is the DEBUG_HASH_TAG vocabulary (the
@@ -109,7 +109,7 @@ export async function run() {
   let cssCorpus = "";
   try {
     cssCorpus = readFileSync(join(HERE, "src/shell/chrome/styles.css"), "utf8")
-      + readFileSync(join(HERE, "src/shell/chrome/inject.js"), "utf8");
+      + readFileSync(join(HERE, "src/shell/chrome/mount.js"), "utf8");
   } catch {
     // The styling surfaces always ship; an unreadable corpus fails below
     // with every class unstyled, never silently passes.

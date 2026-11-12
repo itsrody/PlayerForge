@@ -10,7 +10,7 @@ import { getSetting, SETTING_KEYS } from "./chrome/config.js";
 import { TUNING } from "../shared/core.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
-import { SHELL_MARKER, warmStyles, mountShell, ensureViewportFitCover } from "./chrome/inject.js";
+import { SHELL_MARKER, warmStyles, mountShell, ensureViewportFitCover } from "./chrome/mount.js";
 import { retryFullscreenProvision } from "../shared/page.js";
 
 /**
@@ -143,12 +143,12 @@ export class Shell {
    * on a network round trip.
    */
   async #boot() {
-    await this.#injectDom();
+    await this.#mountDom();
     if (!this.#shellDom) {
-      throw new Error(`Shell "${this.sdk.name}": failed to inject shell DOM`);
+      throw new Error(`Shell "${this.sdk.name}": failed to mount shell DOM`);
     }
 
-    // Yield between DOM injection and component construction so the browser
+    // Yield between DOM mount and component construction so the browser
     // can process pending layout/paint work before the panel builds its tree.
     await yield_();
 
@@ -394,14 +394,14 @@ export class Shell {
     return this.#media;
   }
 
-  async #injectDom() {
+  async #mountDom() {
     // warmStyles() is synchronous - the embedded sheet is adopted immediately,
     // so shell construction never blocks on the @resource fetch. A warm
     // background upgrade later propagates through the same shared sheet.
     warmStyles();
     // Document-level (idempotent): make the SDK's own viewport report
     // viewport-fit=cover so the fullscreen frame can draw edge-to-edge
-    // behind the cutout on Android Chromium (see inject.js) - inert on
+    // behind the cutout on Android Chromium (see mount.js) - inert on
     // Android Firefox, whose fullscreen presents no safe area at all
     // (AGENTS.md). Gated by fullscreen.edgeToEdge:
     // when disabled we leave the iframe at the default (Chromium letterboxes
@@ -411,7 +411,7 @@ export class Shell {
     }
     this.#shellDom = mountShell(this.container);
     if (!this.#shellDom) {
-      logger.error("shell", "Failed to inject shell DOM");
+      logger.error("shell", "Failed to mount shell DOM");
       return;
     }
     // Register host for auto-removal on destroy and mark managed attributes.

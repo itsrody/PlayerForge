@@ -21,7 +21,7 @@ class ShellStyle {
   #adopted = false;
   #load = null;
 
-  /** The live sheet - attached to every shadow root inject() creates. */
+  /** The live sheet - attached to every shadow root mountShell() creates. */
   get sheet() {
     return this.#sheet;
   }
@@ -51,7 +51,7 @@ class ShellStyle {
     try {
       css = await gmGetResourceText("pfStyle");
     } catch (err) {
-      logger.error("inject", "Failed to load @resource stylesheet:", err);
+      logger.error("mount", "Failed to load @resource stylesheet:", err);
     }
     // Parity guard: only ever swap in STRICTLY better CSS. An empty or
     // malformed resource must not clobber the working embedded sheet - the
@@ -67,7 +67,7 @@ class ShellStyle {
         // Replace in place: adopted sheets everywhere see the upgrade.
         this.#sheet.replaceSync(css);
       } catch (err) {
-        logger.error("inject", "Rejected malformed @resource stylesheet:", err);
+        logger.error("mount", "Rejected malformed @resource stylesheet:", err);
       }
     }
     return this.#sheet;
@@ -278,7 +278,7 @@ function shellHostClass() {
 
     #reattach() {
       this.#container.appendChild(this);
-      logger.log("inject", "Shell host re-attached by lifecycle");
+      logger.log("mount", "Shell host re-attached by lifecycle");
     }
 
     connectedCallback() {
@@ -377,7 +377,7 @@ function shellHostTag() {
  */
 export function mountShell(container) {
   if (!container) {
-    logger.error("inject", "mountShell: no container");
+    logger.error("mount", "mountShell: no container");
     return null;
   }
   const host = el(shellHostTag(), { class: "pf-shell", tabindex: "-1" });
@@ -397,7 +397,7 @@ export function mountShell(container) {
   pocket.textContent = CONTAINER_POCKET_CSS;
   shadow.appendChild(pocket);
 
-  logger.log("inject", `Shell DOM built inside ${container.tagName}#${container.id || container.className}`);
+  logger.log("mount", `Shell DOM built inside ${container.tagName}#${container.id || container.className}`);
 
   return {
     host,
