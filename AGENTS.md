@@ -778,9 +778,12 @@ iframes, same-origin and cross-origin:
   container-equality compare all read the same record, whose container
   fact is read through the `sdk` descriptor after the alias getters
   retired) — the boot itself receives the probe's handed home
-  (`init(home)` → `#adoptVideo(video, home)` skips the detection re-scan
-  and both presence re-proofs, all proven in the same synchronous boot
-  task; the seed walk becomes recovery-only — `#armDiscoveryTap` runs at
+  (`init(home)` → `#adoptVideo(video, home, true)` skips the detection
+  re-scan and both presence re-proofs, all proven in the same synchronous
+  boot task; the destroy-readopt hand-off rides the same seam identity-only
+  — `#onRewrap` passes its compare's resolution as the readopt's identity
+  proof, while presence stays re-proved because a live re-home can move the
+  box; the seed walk becomes recovery-only — `#armDiscoveryTap` runs at
   the registry-empty edge, and init-without-home keeps the discovery-first
   posture) — the `ShellSlot`
   (one shell per session; a displaced shell is **destroyed**, never
@@ -919,7 +922,11 @@ iframes, same-origin and cross-origin:
 - **resume.js** — the resume tracker: store warm → context resolve → entry
   match/create → restore → progress drive. One adoption per tracker
   lifetime — a same-document route change is out of scope (see the page.js
-  bullet), so there is no route-follow/`#adopting` machinery. Save cadence
+  bullet), so there is no route-follow/`#adopting` machinery. The restore
+  pipeline is lean by construction: context and store warm run eagerly in
+  the constructor (parallel to shell construction + paint), the duration
+  wait is event-driven and owns the duration proof — `#adoptEntry` follows
+  it synchronously and consumes the fact, not re-proves it. Save cadence
   = 10s checkpoint span; flushes on `seeked`, on pause, on visibility loss,
   on pagehide (persisted leg; the freeze leg retired — Firefox exposes no
   freeze, and pagehide is the belt's one suspension surface);
@@ -4040,10 +4047,13 @@ runs (107.0/106.9/107.1/106.8s), the shell-mount adoption (Nov 2026, src —
 `PfShellHost` custom element replaces the hand-rolled `watchShellHost`
 watchdog; `inject.js` renamed `mount.js`), the robustness-case merge
 (Nov 2026, check-only — robust + robust2 folded onto one boot, every row
-preserved, battery 266→265 rows), and the lean boot pipeline batch (Nov
+preserved, battery 266→265 rows), the lean boot pipeline batch (Nov
 2026, src — the probe resolves SDK identity together with presence and
 hands the kernel the frozen `AdoptionHome`; `findSdk` descriptor face,
-kernel boots adopted, recovery-only seed walk).
+kernel boots adopted, recovery-only seed walk), and the all-pipelines
+lean sweep (Nov 2026, src — the destroy-readopt identity hand-off and
+the resume duration-proof ownership; every other pipeline traced to the
+one-proof shape).
 
 **The shell-mount adoption (Nov 12 2026, user direction "which is more
 native efficient and reliable and lean approach to adopt shell into sdk
@@ -4170,6 +4180,48 @@ tail is untouched (the settle is the measured mid-build protection, and
 `#watchVideoRemoval` stays pre-settle: the abandon path's seen-pin release
 rides its watch). Battery receipt: three consecutive all-green full-battery
 runs (265 rows each; 106.1/105.8/105.7s).
+
+**The all-pipelines lean sweep (Nov 12 2026, user direction "boot pipeline
+is lean now explore same approach for all pipelines"; src — kernel.js +
+resume.js; adoption landed).** The boot batch's lens — each fact proven
+once, at the earliest owner, handed forward frozen — walked every other
+pipeline in the tree. Two same-task double-proofs found and adopted:
+**the destroy-readopt pipeline** — `#onRewrap` resolved the adoption home
+for its container compare, then `#adoptVideo(video)` re-resolved the SAME
+home in the same synchronous task (destroy() reaps the HUD host without
+touching the SDK anchor ancestry, so the answer cannot change) — two
+detection passes and two `AdoptionHome` wraps per rewrap; now the
+compare's resolution rides into the readopt as its identity proof, while
+presence stays re-proved (a live re-home can move the box — the
+`presenceProven` flag separates the boot probe's full proof from the
+rewrap's identity-only hand-off, and the deferral gates stay live for the
+off-screen re-home shape); and **the resume restore pipeline** —
+`#adoptEntry` re-checked the duration that `#waitForDuration` had just
+guaranteed (its only caller, no await between), the dead belt deleted
+with the proof-ownership named in the docstring. Every other pipeline
+traced and already in the one-proof shape, recorded so the walk stands
+somewhere: resume restore (context + store warm eager in the constructor,
+parallel to shell construction; the event-driven duration wait; the
+native `timeupdate` cadence; boundary flushes — the eager-parallel shape
+the boot batch's probe → kernel hand-off mirrors), subtitle ingest/
+restore (the content-hash parse memo, the `#restoreAttemptedUrl` latch;
+the restore path's cross-realm re-fetch is inherent — no text cache by
+design, and the immediate `#tryRestore()` at session init is an
+audited-and-kept ordering belt: the tracker's announce always lands after
+the session's subscription by microtask ordering — the announce follows
+an await the subscription does not — but the belt costs one early return
+and covers a future ordering drift), subtitle render (pooled slots +
+dead floor + dirty-check), filter (boot-apply at bind, seed clamps), panel
+(lazy section builder + rollback), media session (epsilon-deduped position
+state), bridge context (one eager caller, event-driven announce-down),
+toast (pooled pill + fingerprint skip), teardown/recovery (the pagehide
+runSteps and the bfcache orphan reconcile — whose re-derivation is
+NECESSARY, not redundant: facts can change across a hide, unlike the
+same-task shapes the lens deletes). The `#adoptEntry` false return path
+dies with the belt; `#init`'s `!(await …) || !this.#adoptEntry(context)`
+shape is untouched. No counted census vocabulary moved. Battery receipt:
+three consecutive all-green full-battery runs (265 rows each;
+105.7/105.7/105.7s).
 
 The series'
 record-only commits changed

@@ -592,7 +592,7 @@ export class Kernel {
       () => window.addEventListener("pagehide", this.#onPageHide, { signal }),
       () => {
         if (home) {
-          this.#adoptVideo(home.video, home);
+          this.#adoptVideo(home.video, home, true);
         } else {
           this.#armDiscoveryTap();
         }
@@ -716,14 +716,16 @@ export class Kernel {
    * law (see the block comment below), so a refused candidate never pins
    * observers.
    *
-   * `prequalified` is the boot probe's handed home: identity, min size, and
-   * on-screen were all proven in the same synchronous task that reaches this
-   * body (probe finish -> entry boot -> init), so the detection re-scan and
-   * both presence re-proofs are skipped for it - the redundant passes the
-   * pipeline used to run twice. Every other arrival is an event that carries
-   * no proof, so the full screen re-runs.
+   * `prequalified` is a handed home whose identity fact is already proven in
+   * the same synchronous task that reaches this body, so the detection
+   * re-scan is skipped for it. Two hand-offs exist: the boot probe's home
+   * (identity + min size + on-screen, probe finish -> entry boot -> init —
+   * pass `presenceProven` too) and the destroy-readopt compare's home
+   * (#onRewrap — identity only, because a live re-home can change the box,
+   * so the presence gates still run). Every other arrival is an event that
+   * carries no proof, so the full screen re-runs.
    */
-  #adoptVideo(video, prequalified = null) {
+  #adoptVideo(video, prequalified = null, presenceProven = false) {
     if (this.#seenVideos.has(video) || video.hasAttribute(SHELL_MARKER)) {
       return;
     }
@@ -747,7 +749,7 @@ export class Kernel {
       }
       return;
     }
-    if (!prequalified && !meetsMinSize(video)) {
+    if (!presenceProven && !meetsMinSize(video)) {
       // Not player-sized yet: a one-shot rect here would strand the video
       // forever unless an unrelated media event re-ran adoption. The layout
       // gate re-enters this method the moment the delivered box qualifies
@@ -760,7 +762,7 @@ export class Kernel {
     // defer the shell until the lookahead intersection, so a page of embeds
     // does not boot a full shell for a video the user cannot see. isOnScreen
     // reports true when the viewport is unknown, so this can only delay.
-    if (!prequalified && !isOnScreen(video)) {
+    if (!presenceProven && !isOnScreen(video)) {
       this.#ensureGate(createOnScreenGate)?.watch(video, () => this.#adoptVideo(video));
       return;
     }
@@ -831,7 +833,12 @@ export class Kernel {
     logger.log("lifecycle", `${redetected.sdk.name} re-wrapped: container identity changed - destroy-readopt`);
     watch.stop();
     shell.destroy();
-    this.#adoptVideo(video);
+    // The compare's resolution IS the readopt's identity proof (same task,
+    // and destroy() reaps the HUD host without touching the SDK anchor
+    // ancestry), so the frozen record rides instead of paying a second
+    // resolveAdoptionHome + AdoptionHome wrap; presence stays re-proved
+    // (no presenceProven) - the re-home may have moved the box.
+    this.#adoptVideo(video, redetected);
   }
 
   #createShell({ home }) {

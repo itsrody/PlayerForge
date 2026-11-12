@@ -666,15 +666,13 @@ export class ResumeTracker {
    * entry is matched against this document's (path, duration) and a
    * mid-lifetime resource swap on the same element is out of scope - a
    * route change is a document navigation (kernel pagehide + fresh boot)
-   * and an in-place swap without one has no watcher by design.
+   * and an in-place swap without one has no watcher by design. The duration
+   * fact is owned by #waitForDuration, which this body follows synchronously
+   * (no await between), so it is consumed here, not re-proven.
    */
   #adoptEntry(context) {
     const shell = this.#shell;
     const duration = Number(shell.video.duration);
-    if (!Number.isFinite(duration) || duration <= 0) {
-      logger.log("resume", "No duration available - skipping");
-      return false;
-    }
 
     this.#store.cleanStale();
     const match = this.#store.findMatch(context.domain, context.path, duration);
