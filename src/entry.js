@@ -124,7 +124,10 @@ function bootstrap() {
   // resolver as the menu commands: the dump reads identity through the
   // entry's reference at dump time, not at install.
   installFrameDiagnostics(() => menuKernelRef.current);
-  const boot = () => {
+  // `home` is the adoption home the probe resolved (identity + presence
+  // proven together at the candidate); the kernel boots adopted, skipping
+  // its own seed walk and re-measures.
+  const boot = (home) => {
     if (window.PlayerForge) {
       logger.warn("entry", "Kernel already initialized");
       return;
@@ -141,7 +144,7 @@ function bootstrap() {
         return new Shell({ home, onDestroy });
       }
     });
-    kernel.init();
+    kernel.init(home);
 
     // One subscription serves both duties: readiness log always, first-run
     // welcome toast only until the flag flips. The flag lives under the single

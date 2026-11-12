@@ -11,17 +11,23 @@
  *                         the cheap media-event floor to the shared document
  *                         feed once evidence of a player exists
  *   4. Boot probe       - installVideoProbe, the pre-kernel sentinel that
- *                         defers the full kernel boot until a document
- *                         actually shows a player candidate
+ *                         resolves a candidate's SDK identity TOGETHER with
+ *                         its presence and hands the kernel the frozen
+ *                         AdoptionHome - the kernel boots adopted, not
+ *                         discovery-first
  *
  * The boot probe and the kernel arm the same machinery with different
  * escalation discipline (the probe's contract: a video-less or hidden-only
  * page never opens a document-wide observer); the kernel keeps discovery
  * alive via the media-event floor between player generations. Which SDK owns
- * a video is NOT this module's question - that lives in detection.js.
+ * a video is detection.js's question - this module asks it at the probe's
+ * consider/finish seams (the descriptor face, allocation-free on the repeat
+ * path) instead of re-deriving it kernel-side after the boot.
  */
 import { onDomMutations, layoutViewport } from "../shared/dom.js";
 import { logger } from "../shared/runtime.js";
+import { AdoptionHome } from "./contract.js";
+import { findSdk } from "./detection.js";
 
 /** Player thresholds: the measured box must reach this to count as a player. */
 export const MIN_VIDEO_WIDTH = 100;
@@ -436,9 +442,12 @@ export function createDiscoveryTap(onVideo, { mutations = true } = {}) {
 /**
  * Presence probe - framework video detection.
  *
- * Two-phase sentinel that defers the full kernel boot until a document
- * actually shows a video candidate - without paying for a full-document
- * MutationObserver on pages that never host a player.
+ * Two-phase sentinel that resolves a player candidate's identity TOGETHER
+ * with its presence and boots the kernel with the resolved adoption home -
+ * without paying for a full-document MutationObserver on pages that never
+ * host a player, and without booting the kernel at all on pages whose only
+ * videos carry no SDK anchor (the kernel's detection would refuse them, so
+ * the boot would be pure waste).
  *
  * Phase 1 (cheap, no observer): capture-phase loadedmetadata/loadeddata/play
  * listeners plus a one-time DOM-ready <video> presence check. SDK players fire
@@ -452,8 +461,10 @@ export function createDiscoveryTap(onVideo, { mutations = true } = {}) {
  * so documents that only carry non-player videos never open the subtree
  * observer either.
  *
- * The first size-qualified candidate fires the candidate callback exactly
- * once; documents without a usable player never boot a kernel.
+ * The first candidate that is SDK-anchored, player-sized, and on-screen
+ * fires the candidate callback exactly once with the frozen AdoptionHome
+ * (identity re-asked at the finish so the deferred paths hand a fresh
+ * answer); documents without a usable player never boot a kernel.
  */
 class VideoProbe {
   #minWidth;
@@ -510,36 +521,65 @@ class VideoProbe {
     this.#onScreenGate.stop();
   }
 
-  #finish() {
+  /**
+   * The one finish: identity is re-asked here (cache hit on the normal path -
+   * #consider proved it this same task) so the deferred fires hand a fresh
+   * answer, and the boot receives the ONE AdoptionHome record: identity and
+   * presence proven together, wrapped once, consumed as the shell's frozen
+   * adoption identity. A null here means the anchor left between the qualify
+   * and the fire (an SDK teardown during a deferred scroll-in): back to the
+   * watching posture, not a stranded candidate and not a boot for nothing.
+   */
+  #finish(video) {
     if (this.#done) {
+      return;
+    }
+    const sdk = findSdk(video);
+    if (!sdk) {
+      if (hasPresentBox(video)) {
+        this.#tap.escalate();
+      }
+      this.#layoutGate.watch(video, () => this.#consider(video));
       return;
     }
     this.#done = true;
     this.#detach();
-    logger.log("probe", "Video candidate found - booting kernel");
-    this.#onCandidate();
+    logger.log("probe", `Player candidate resolved (${sdk.name}) - booting kernel`);
+    this.#onCandidate(new AdoptionHome({ video, sdk }));
   }
 
-  // A player-sized candidate that is not yet on screen (a carousel slide, a
+  // A qualified candidate that is not yet on screen (a carousel slide, a
   // below-the-fold embed) is deferred rather than booted: the lookahead margin
   // readies the shell just before it scrolls in. isOnScreen reports true when
-  // the viewport is unknown, so this can only delay, never strand.
+  // the viewport is unknown, so this can only delay, never strand. The
+  // deferred fire re-runs the full consider (identity included) - facts may
+  // have changed while off-screen.
   #tryFinish(video) {
     if (this.#done) {
       return;
     }
     if (isOnScreen(video)) {
-      this.#finish();
+      this.#finish(video);
       return;
     }
-    this.#onScreenGate.watch(video, () => this.#tryFinish(video));
+    this.#onScreenGate.watch(video, () => this.#consider(video));
   }
 
+  /**
+   * Identity and presence, asked together (the lean pipeline's front door):
+   * the descriptor ask is a cache hit on every repeat consider, so the
+   * short-circuit `sdk &&` keeps the unanchored video's repeat path to one
+   * WeakMap read plus the presence check - no rect read, no record wrap. A
+   * candidate that carries identity AND the measured box fires the boot; one
+   * missing either fact keeps watching, because the missing fact's arrival
+   * (a wrap is a mutation, a reveal is a box change) re-runs this method.
+   */
   #consider(video) {
     if (this.#done) {
       return;
     }
-    if (meetsMinSize(video, this.#minWidth, this.#minHeight)) {
+    const sdk = findSdk(video);
+    if (sdk && meetsMinSize(video, this.#minWidth, this.#minHeight)) {
       this.#tryFinish(video);
       return;
     }
@@ -551,11 +591,14 @@ class VideoProbe {
     // for the whole page on a site that will never boot a kernel. A hidden
     // candidate still goes under the layout gate, so a later reveal that
     // changes its box can qualify it, and a hidden-but-real player is caught
-    // when it starts loading/playing (media events route back here).
+    // when it starts loading/playing (media events route back here). The gate
+    // callback re-runs the full consider, not the finish: identity is part of
+    // the qualification, and the wrap that grants it may land between the
+    // watch and the fire.
     if (hasPresentBox(video)) {
       this.#tap.escalate();
     }
-    this.#layoutGate.watch(video, () => this.#tryFinish(video));
+    this.#layoutGate.watch(video, () => this.#consider(video));
   }
 
   /**

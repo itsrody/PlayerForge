@@ -237,14 +237,17 @@ iframes, same-origin and cross-origin:
   installation, its own GM realm. A kernel boots only when **its own
   document** holds a qualifying video, and it adopts exactly **one main
   video per document** — the product's scope law: the first qualifying
-  candidate wins (detection + presence gates order = the pick), later
+  candidate wins (identity + presence proven together at the boot probe —
+  the pick; the kernel boots adopted, not discovery-first), later
   qualifying candidates are refused while a shell is live or mid-boot, and
   the registry-empty edge re-arms discovery so the next candidate adopts
   when the main leaves. Enforcement is **per document only** — cross-frame
   coordination machinery does not exist, so a Top video plus a
   separate-iframe video still yields two shells. Exactly one document boots
-  a shell per embedded player, neighbors stay inert, and a video-less host
-  page never boots.
+  a shell per embedded player, neighbors stay inert, a video-less host
+  page never boots, and neither does a page whose only videos carry no SDK
+  anchor — the probe's identity ask makes that literal, where the old
+  pipeline booted a kernel that then refused every candidate.
 - Menu commands install **top-frame only**.
 - `window.top !== window` frames push fullscreen provisioning up the chain on
   shell creation: every ancestor document grants `allowfullscreen` on its
@@ -744,12 +747,22 @@ iframes, same-origin and cross-origin:
   (`player.mediadelivery.net` iframe per the docs receipt), and the
   in-frame player is closed-source with no verifiable anchor vocabulary,
   the no-generic-fallback law leaving it alone. Registry is now 22
-  records; sdk case rows 260 → 263.
+  records; sdk case rows 260 → 263. Two export faces, one engine:
+  `resolveAdoptionHome` is the kernel's wrap face (one `AdoptionHome` per
+  adoption attempt), `findSdk` the boot probe's descriptor face — the
+  cached matcher answer with no record wrap, because the probe's #consider
+  runs per surfacing event and its repeat path must stay allocation-free
+  (the descriptor cache's own contract); the ONE `AdoptionHome` is built at
+  the probe's finish, where the adoption decision lands.
 - **discovery.js** — presence machinery: min-size thresholds (100×60),
   on-screen/layout deferral gates (`PresenceGate`, per-instance
   MutationObserver check), the media feed (`DiscoveryTap`: lazy escalation —
-  cheap tap first, full listeners only for rendered candidates), idempotent
-  boot sentinel, `RemovalWatch` (grace-per-disconnect observer, re-parent
+  cheap tap first, full listeners only for rendered candidates), the
+  identity-aware boot sentinel — the probe asks detection's descriptor face
+  TOGETHER with presence at every consider and fires the kernel boot with
+  the ONE frozen `AdoptionHome` (identity re-asked at the finish so deferred
+  fires hand a fresh answer; a page whose videos carry no SDK anchor never
+  boots the kernel at all), `RemovalWatch` (grace-per-disconnect observer, re-parent
   aware, and `moveBefore`-aware by derivation: state-preserving moves land
   as the same remove+add record shape, both primitive forms live on the 159
   floor, and the watch's decisions re-derive from live DOM state — no
@@ -764,7 +777,12 @@ iframes, same-origin and cross-origin:
   at the re-wrap seam; the provider, `RemovalWatch`, and the
   container-equality compare all read the same record, whose container
   fact is read through the `sdk` descriptor after the alias getters
-  retired) — the `ShellSlot`
+  retired) — the boot itself receives the probe's handed home
+  (`init(home)` → `#adoptVideo(video, home)` skips the detection re-scan
+  and both presence re-proofs, all proven in the same synchronous boot
+  task; the seed walk becomes recovery-only — `#armDiscoveryTap` runs at
+  the registry-empty edge, and init-without-home keeps the discovery-first
+  posture) — the `ShellSlot`
   (one shell per session; a displaced shell is **destroyed**, never
   orphaned; the adoption guard makes the displaced-destroy a backstop),
   `MenuCommands` (debug toggle + the two one-shot reset
@@ -3704,7 +3722,10 @@ stop at the first failure:
   itself stays manager-truth (every harness realm is an echo island;
   the same premise the settings live-reload row rides).
 - **Cases (14):** `boot` (install contract, positive/negative discovery),
-  `discovery` (min size, no-anchor, tiny-video),
+  `discovery` (min size, no-anchor, tiny-video — the negative rows assert
+  the FULL unbooted contract: no shell AND `window.PlayerForge` undefined,
+  the probe's identity ask keeping anchor-less and sub-floor pages
+  kernel-less),
   `fan` (the fan-out owner unit, imported into the page realm: positional
   fan, callable handle, native signal teardown, aborted-signal no-op,
   Symbol.dispose presence+use, `using` release (a live and a dead handle),
@@ -4015,7 +4036,14 @@ video's width/height:100% CSS auto-heights the wrapper to the video's
 own aspect at any width, an aspect-matched box whose cover scale is
 exactly 1 (media.mjs's mismatch came from a fresh video that did not
 carry that CSS). Battery receipt: 4 consecutive all-green full-battery
-runs (107.0/106.9/107.1/106.8s).
+runs (107.0/106.9/107.1/106.8s), the shell-mount adoption (Nov 2026, src —
+`PfShellHost` custom element replaces the hand-rolled `watchShellHost`
+watchdog; `inject.js` renamed `mount.js`), the robustness-case merge
+(Nov 2026, check-only — robust + robust2 folded onto one boot, every row
+preserved, battery 266→265 rows), and the lean boot pipeline batch (Nov
+2026, src — the probe resolves SDK identity together with presence and
+hands the kernel the frozen `AdoptionHome`; `findSdk` descriptor face,
+kernel boots adopted, recovery-only seed walk).
 
 **The shell-mount adoption (Nov 12 2026, user direction "which is more
 native efficient and reliable and lean approach to adopt shell into sdk
@@ -4106,6 +4134,42 @@ with the `#check-video` id and store reads intact. The battery count moves
 266 → 265 (one fewer GM-usage-audit row: two cases became one). Battery
 receipt: three consecutive all-green full-battery runs (265 rows each;
 105.7–107.3s).
+
+**The lean boot pipeline batch (Nov 12 2026, user direction "explore leaner
+cycle with same allocation — probe the video and its sdk together, adopt
+them, create shell and mount it in lean pipeline"; src — detection.js +
+discovery.js + kernel.js + entry.js, check — discovery case; adoption
+landed).** The cycle used to prove the same facts three times: the probe
+qualified a candidate by size+screen, booted the kernel, and the kernel's
+init re-walked the document (seed walk), re-detected the same video, and
+re-measured size+screen before settling — a bare video even booted a kernel
+whose detection then refused every candidate. The lean pipeline collapses
+those passes into one proof at the probe. `findSdk` is detection's new
+descriptor face (the cached matcher answer, no record wrap): the probe's
+`#consider` runs per surfacing event and its repeat path must stay
+allocation-free — the descriptor cache's own contract, now actually
+consumed without the per-call `AdoptionHome` wrap. The probe fires
+`onCandidate(home)` exactly once, for a candidate proven identity+size+
+screen together (identity re-asked at `#finish` so the deferred
+scroll-in fires hand a fresh answer; a null there falls back to the
+watching posture, not a stranded candidate), and the kernel boots adopted:
+`init(home)` → `#adoptVideo(video, home)` skips the detection re-scan and
+both presence re-proofs (all proven in the same synchronous boot task —
+probe finish → entry boot → init, no intervening task), the seed walk
+becomes recovery-only (`#armDiscoveryTap` now runs at the registry-empty
+edge; init-without-home keeps the discovery-first posture), and the
+boot-time full tap is never built-and-dropped — the handed adoption
+downgrades straight to the media-event tap. Net per boot: one
+`AdoptionHome` instead of two, one tap build instead of two, zero
+redundant rect reads, and pages whose videos carry no SDK anchor (the
+bare-page shape the discovery case rows pin) never boot the kernel at all.
+Row updates: the two negative discovery rows now assert the FULL unbooted
+contract (`window.PlayerForge` undefined alongside no shell) — the row
+names document the stronger fact. The settle → create → ready → register
+tail is untouched (the settle is the measured mid-build protection, and
+`#watchVideoRemoval` stays pre-settle: the abandon path's seen-pin release
+rides its watch). Battery receipt: three consecutive all-green full-battery
+runs (265 rows each; 106.1/105.8/105.7s).
 
 The series'
 record-only commits changed

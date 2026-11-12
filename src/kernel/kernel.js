@@ -455,8 +455,7 @@ export class Kernel {
    * identity the shell boots with is the one adoption resolved. A boot that
    * ends without a shell is handed to #abandonBoot - the pin and the
    * downgrade were placed before the wait, and nothing else releases them.
-   */
-  async #onVideoFound({ home, watch }) {
+   */async #onVideoFound({ home, watch }) {
     const { video, sdk } = home;
     const container = sdk.container;
     logger.log("lifecycle", `video:found - ${sdk.name}`);
@@ -556,7 +555,18 @@ export class Kernel {
     }
   }
 
-  init() {
+  /**
+   * Boot the kernel. `home` (optional) is the adoption home the boot probe
+   * resolved AND proofed - identity, min size, and on-screen - in the same
+   * synchronous task that boots this kernel (probe finish -> entry boot ->
+   * init), so #adoptVideo skips its re-proofs for the handed candidate and
+   * the boot-time seed walk never runs: the probe already walked the
+   * document, and the handed candidate IS its first qualifying pick. Null
+   * boots discovery-first (full tap armed + seed walk), the posture
+   * #onRegistryEmpty re-arms for recovery and the shape a probe-less boot
+   * caller would take.
+   */
+  init(home = null) {
     if (this.#initialized) {
       return;
     }
@@ -580,7 +590,13 @@ export class Kernel {
       () => this.#armDebugWatch(),
       () => document.addEventListener("pageshow", this.#onPageShow, { signal }),
       () => window.addEventListener("pagehide", this.#onPageHide, { signal }),
-      () => this.#armDiscoveryTap()
+      () => {
+        if (home) {
+          this.#adoptVideo(home.video, home);
+        } else {
+          this.#armDiscoveryTap();
+        }
+      }
     ]);
     logger.log("kernel", "Kernel ready - discovery tap active");
   }
@@ -616,10 +632,13 @@ export class Kernel {
 
   /**
    * (Re)establish the full-document discovery tap and replay the videos already
-   * in the parsed DOM. The probe boots us precisely so a video already present
-   * gets its shell without waiting for the next media event; the media-event
-   * tap still catches script-lazy SDK players that surface after boot. Called
-   * at init and again whenever the last shell leaves (see #onRegistryEmpty).
+   * in the parsed DOM. Recovery posture: the boot probe hands the kernel its
+   * resolved candidate at init, so the boot itself never arms this (the probe
+   * already walked the document, and the handed adoption downgrades straight
+   * to the media-event tap); this method re-arms it whenever the last shell
+   * leaves (see #onRegistryEmpty) - a host teardown rebuild can destroy the
+   * shell and insert a fresh player that never fires a media event, so the
+   * seed walk re-runs adoption over what actually lives on the page.
    */
   #armDiscoveryTap() {
     this.#discoveryTap?.stop();
@@ -696,12 +715,19 @@ export class Kernel {
    * presence gates run. The scope guard before the gates is the one-main-video
    * law (see the block comment below), so a refused candidate never pins
    * observers.
+   *
+   * `prequalified` is the boot probe's handed home: identity, min size, and
+   * on-screen were all proven in the same synchronous task that reaches this
+   * body (probe finish -> entry boot -> init), so the detection re-scan and
+   * both presence re-proofs are skipped for it - the redundant passes the
+   * pipeline used to run twice. Every other arrival is an event that carries
+   * no proof, so the full screen re-runs.
    */
-  #adoptVideo(video) {
+  #adoptVideo(video, prequalified = null) {
     if (this.#seenVideos.has(video) || video.hasAttribute(SHELL_MARKER)) {
       return;
     }
-    const home = resolveAdoptionHome(video);
+    const home = prequalified ?? resolveAdoptionHome(video);
     if (!home) {
       return;
     }
@@ -721,7 +747,7 @@ export class Kernel {
       }
       return;
     }
-    if (!meetsMinSize(video)) {
+    if (!prequalified && !meetsMinSize(video)) {
       // Not player-sized yet: a one-shot rect here would strand the video
       // forever unless an unrelated media event re-ran adoption. The layout
       // gate re-enters this method the moment the delivered box qualifies
@@ -734,7 +760,7 @@ export class Kernel {
     // defer the shell until the lookahead intersection, so a page of embeds
     // does not boot a full shell for a video the user cannot see. isOnScreen
     // reports true when the viewport is unknown, so this can only delay.
-    if (!isOnScreen(video)) {
+    if (!prequalified && !isOnScreen(video)) {
       this.#ensureGate(createOnScreenGate)?.watch(video, () => this.#adoptVideo(video));
       return;
     }

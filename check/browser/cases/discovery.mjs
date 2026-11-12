@@ -3,9 +3,11 @@ import { sleep } from "../../lib/driver.mjs";
  * The discovery contract's negative half: a kernel that shells *every* video
  * is worse than one that boots nothing. Probe the boundaries the discovery
  * probe enforces - the Plyr-style wrapper and the 100x60 MIN_VIDEO floor -
- * and require both pages to stay unbooted. Plus the boot-abandon recovery:
- * a settle-window disconnect reconnected inside the removal grace must
- * re-boot (the abandoned boot's seen-pin released through its watch, the
+ * and require both pages to stay unbooted (window.PlayerForge undefined:
+ * the probe resolves SDK identity together with presence, so an unanchored
+ * or sub-floor candidate never even boots the kernel). Plus the boot-abandon
+ * recovery: a settle-window disconnect reconnected inside the removal grace
+ * must re-boot (the abandoned boot's seen-pin released through its watch, the
  * downgraded tap re-armed), not strand the video forever.
  */
 const BARE_PAGE = `<!DOCTYPE html>
@@ -69,7 +71,7 @@ export async function run({ session, baseUrl, bundle }) {
   const bare = await bootAttempt("/check/bare");
   rows.push({
     name: "bare video (no Plyr wrapper) stays unbooted",
-    status: !bare.shell ? "pass" : "fail",
+    status: !bare.shell && bare.version === "undefined" ? "pass" : "fail",
     note: bare.shell ? `shell attached on ${baseUrl}/check/bare` : null,
     ms: null
   });
@@ -77,14 +79,15 @@ export async function run({ session, baseUrl, bundle }) {
   const small = await bootAttempt("/check/small");
   rows.push({
     name: "sub-MIN_VIDEO video (80x44) stays unbooted",
-    status: !small.shell ? "pass" : "fail",
+    status: !small.shell && small.version === "undefined" ? "pass" : "fail",
     note: small.shell ? "shell attached despite size floor" : null,
     ms: null
   });
 
   // Boot-abandon recovery. The eval owns the whole timeline (no wake ceremony:
   // the wrapper starts empty, so checkStatic and the sleep see no candidate):
-  // the video surfaces at t0 and adoption begins (probe -> kernel seed walk,
+  // the video surfaces at t0 and adoption begins (the probe resolves identity
+  // together with presence and hands the home; kernel adopts prequalified,
   // settle quiet 50/cap 150). The 80ms removal lands inside the settle window,
   // so the boot resolves with the video out of the document - the abandoned
   // path. The 400ms re-add rides within the 500ms removal grace: the stranded

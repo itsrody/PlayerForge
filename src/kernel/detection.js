@@ -370,3 +370,17 @@ export function resolveAdoptionHome(video) {
   }
   return new AdoptionHome({ video, sdk });
 }
+
+/**
+ * The descriptor-level identity ask: the cached matcher answer, no record
+ * wrap. The boot probe's face - its #consider runs per surfacing event (the
+ * media tap and the escalated mutation feed) for every video on the page, so
+ * the repeat path must stay allocation-free, which is the descriptor cache's
+ * own contract; the AdoptionHome record is built exactly once, at the probe's
+ * finish where the adoption decision lands. The kernel keeps
+ * resolveAdoptionHome: its ask rate is the adoption attempt (one per
+ * candidate lifetime against the seen-pin), not the discovery event.
+ */
+export function findSdk(video) {
+  return matcher.find(video);
+}
