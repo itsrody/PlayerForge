@@ -125,17 +125,26 @@ function hasPresentBox(el) {
   });
 }
 
-/** Shared synchronous adoption gate: the measured box must reach min size. */
-export function meetsMinSize(video, minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_VIDEO_HEIGHT) {
-  if (!hasPresentBox(video)) {
-    return false;
-  }
+/**
+ * The size compare alone: the caller owns the presence gate. The probe's
+ * #consider reads the painted-box fact ONCE per consider and feeds both of
+ * its decisions (size qualification, escalate-on-rendered) from that single
+ * ask - the old shape asked checkVisibility twice per consider (inside
+ * meetsMinSize, then again for the escalate branch), so a hidden candidate's
+ * media-event repeat path paid two visibility computations per event.
+ */
+function boxAtLeast(video, minWidth, minHeight) {
   try {
     const rect = video.getBoundingClientRect();
     return rect.width >= minWidth && rect.height >= minHeight;
   } catch {
     return false;
   }
+}
+
+/** Shared synchronous adoption gate: the measured box must reach min size. */
+export function meetsMinSize(video, minWidth = MIN_VIDEO_WIDTH, minHeight = MIN_VIDEO_HEIGHT) {
+  return hasPresentBox(video) && boxAtLeast(video, minWidth, minHeight);
 }
 
 /**
@@ -579,7 +588,11 @@ class VideoProbe {
       return;
     }
     const sdk = findSdk(video);
-    if (sdk && meetsMinSize(video, this.#minWidth, this.#minHeight)) {
+    // The ONE presence ask per consider: it answers both decisions below
+    // (size qualification and escalate-on-rendered), so a hidden candidate's
+    // media-event repeat path pays one checkVisibility read, not two.
+    const present = hasPresentBox(video);
+    if (sdk && present && boxAtLeast(video, this.#minWidth, this.#minHeight)) {
       this.#tryFinish(video);
       return;
     }
@@ -595,7 +608,7 @@ class VideoProbe {
     // callback re-runs the full consider, not the finish: identity is part of
     // the qualification, and the wrap that grants it may land between the
     // watch and the fire.
-    if (hasPresentBox(video)) {
+    if (present) {
       this.#tap.escalate();
     }
     this.#layoutGate.watch(video, () => this.#consider(video));

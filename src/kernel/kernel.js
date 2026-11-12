@@ -448,26 +448,29 @@ export class Kernel {
   /**
    * Bridges video discovery to shell creation (former lifecycle.js): a settle
    * wait defers creation until the SDK's DOM has quiesced (or the cap expires),
-   * with post-wait guards against videos that vanished or were adopted
-   * meanwhile. A ready shell is handed to #notifyShellCreated. In-flight
-   * waits ride the kernel scope's signal, so pagehide disposal aborts them.
-   * The adoption home rides frozen: whatever the settle costs in time, the
-   * identity the shell boots with is the one adoption resolved. A boot that
-   * ends without a shell is handed to #abandonBoot - the pin and the
-   * downgrade were placed before the wait, and nothing else releases them.
-   */async #onVideoFound({ home, watch }) {
+   * then creates and registers the shell. In-flight waits ride the kernel
+   * scope's signal, so pagehide disposal aborts them. The adoption home rides
+   * frozen: whatever the settle costs in time, the identity the shell boots
+   * with is the one adoption resolved. A boot that ends without a shell is
+   * handed to #abandonBoot - the pin and the downgrade were placed before the
+   * wait, and nothing else releases them.
+   *
+   * One caller (#adoptVideo) owns the pre-wait facts and holds them across
+   * the whole settle window - the seen-pin (added before this call) refuses
+   * every re-adoption, and the one-main-video guard refuses every candidate
+   * while #booting is set - so no shell-vs-shell or mid-boot re-proof runs
+   * here (the old entry/post-settle re-checks asked facts that could not
+   * change in the same task). The facts that CAN change across the settle
+   * gap are exactly the ones re-read below: kernel disposed, video/container
+   * disconnected. The provider check is the framework-invariant belt, not a
+   * re-proof - no earlier ask in the task carries it.
+   */
+  async #onVideoFound({ home, watch }) {
     const { video, sdk } = home;
     const container = sdk.container;
     logger.log("lifecycle", `video:found - ${sdk.name}`);
-    if (this.#registry.getByVideo(video)) {
-      logger.log("lifecycle", "Video already has a shell, skipping");
-      return;
-    }
     if (!this.#shellProvider) {
       logger.error("lifecycle", "No shell factory set!");
-      return;
-    }
-    if (this.#booting === video) {
       return;
     }
     this.#booting = video;
@@ -489,9 +492,6 @@ export class Kernel {
     }
     if (!video.isConnected || !container.isConnected) {
       this.#abandonBoot(watch, `${sdk.name} video left the document before settle`);
-      return;
-    }
-    if (this.#registry.getByVideo(video)) {
       return;
     }
     let shell = null;

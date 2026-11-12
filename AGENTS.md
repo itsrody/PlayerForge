@@ -762,7 +762,11 @@ iframes, same-origin and cross-origin:
   TOGETHER with presence at every consider and fires the kernel boot with
   the ONE frozen `AdoptionHome` (identity re-asked at the finish so deferred
   fires hand a fresh answer; a page whose videos carry no SDK anchor never
-  boots the kernel at all), `RemovalWatch` (grace-per-disconnect observer, re-parent
+  boots the kernel at all), and ONE presence ask per consider — the
+  painted-box fact answers both the size gate and the escalate branch
+  (`boxAtLeast` is the size-only compare; the old shape ran
+  `checkVisibility` twice per consider on the hidden candidate's media-event
+  repeat path), `RemovalWatch` (grace-per-disconnect observer, re-parent
   aware, and `moveBefore`-aware by derivation: state-preserving moves land
   as the same remove+add record shape, both primitive forms live on the 159
   floor, and the watch's decisions re-derive from live DOM state — no
@@ -4053,7 +4057,9 @@ hands the kernel the frozen `AdoptionHome`; `findSdk` descriptor face,
 kernel boots adopted, recovery-only seed walk), and the all-pipelines
 lean sweep (Nov 2026, src — the destroy-readopt identity hand-off and
 the resume duration-proof ownership; every other pipeline traced to the
-one-proof shape).
+one-proof shape), and the same-task double-proof housekeeping (Nov 2026,
+src — the probe's one-presence-ask consider and `#onVideoFound`'s
+dead shell re-checks deleted; the deliberate multi-path asks recorded).
 
 **The shell-mount adoption (Nov 12 2026, user direction "which is more
 native efficient and reliable and lean approach to adopt shell into sdk
@@ -4222,6 +4228,54 @@ dies with the belt; `#init`'s `!(await …) || !this.#adoptEntry(context)`
 shape is untouched. No counted census vocabulary moved. Battery receipt:
 three consecutive all-green full-battery runs (265 rows each;
 105.7/105.7/105.7s).
+
+**The same-task double-proof housekeeping (Nov 12 2026, user direction "a
+housekeeping batch to ensure no same-task double-proofs leftover"; src —
+discovery.js + kernel.js).** The tree walked with the one lens — the same
+fact asked twice with no await/observer gap between the asks (facts
+cannot change, so one ask is dead) — over every fact-verb call site:
+`resolveAdoptionHome`/`findSdk`, `meetsMinSize`/`isOnScreen`/
+`hasPresentBox`, `getByVideo`/`#seenVideos`, the media verbs' readiness
+gates, the `#scope.disposed` checks, the panel open/close idempotence
+guards, `#armLoop`'s re-arm guard, the toast fingerprint, FsGate's `#doc`
+latch, Scope's abort-flip. **Three dead re-proofs deleted, two adopted as
+src changes:** (1) **the probe's double presence ask** — `#consider`
+read the painted-box fact twice in one task (inside `meetsMinSize`, then
+again for the escalate branch), so a hidden candidate's media-event
+repeat path — the common repeat path — paid two `checkVisibility`
+computations per event (three reads on the present-but-small shape);
+`boxAtLeast` is now the size-only compare, `meetsMinSize` = presence +
+`boxAtLeast`, and `#consider` hoists ONE `hasPresentBox` ask that answers
+both decisions — one read per consider on every shape; and (2)
+**`#onVideoFound`'s entry + post-settle shell re-checks** — the entry
+`getByVideo`/`#booting === video` checks re-asked facts `#adoptVideo`
+established one call-frame earlier in the same task (the occupied guard
+refuses every arrival while a shell is live or booting, so both answers
+were provably false), and the post-settle `getByVideo` re-asked a fact
+the seen-pin holds across the whole settle window (the pin is added
+before the call and released only by paths that cannot run mid-boot:
+`#onRewrap` needs a registered shell, `#abandonBoot` fires from the
+boot's own exits, pagehide disposal is caught by the disposed check);
+the deleted checks cannot affect the refusal-recovery or one-main-refusal
+rows (they pin `#adoptVideo`'s guards, not these). The provider-null
+check stays — it is the framework-invariant belt, not a re-proof (no
+earlier ask in the task carries it), and the two await-gap-separated
+re-reads (kernel disposed, video/container disconnected) stay — the
+settle gap is exactly where those facts can change. **The deliberate
+multi-path asks recorded so the next walk does not re-litigate them:**
+`#finish`'s `findSdk` re-ask (one site serving the direct path — same
+task, descriptor-cache hit — and the deferred gate path, where the gap
+is real), the probe's fallback-branch `hasPresentBox` re-ask (same
+multi-path shape), the media/action `canSeek` double-ask (two owners —
+the feedback surface and the command verb — each owning its ask), the
+subtitles session's immediate `#tryRestore()` (the ordering belt),
+`boot()`'s `window.PlayerForge` guard (the module-boundary belt), and
+ScrubSession's clamp + media's `#clampTarget` (idempotent normalization
+at two ownership boundaries, not a proof). Every other audited site is
+gap-separated (necessary) or single-asked (clean). No counted census
+vocabulary moved (the one try/catch moved with `boxAtLeast` — count
+unchanged). Battery receipt: three consecutive all-green full-battery
+runs (265 rows each; 105.9/106.0/106.1s).
 
 The series'
 record-only commits changed
