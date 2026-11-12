@@ -3703,7 +3703,7 @@ stop at the first failure:
   foreign `pf:diag` write through the audit surface — cross-realm delivery
   itself stays manager-truth (every harness realm is an echo island;
   the same premise the settings live-reload row rides).
-- **Cases (15):** `boot` (install contract, positive/negative discovery),
+- **Cases (14):** `boot` (install contract, positive/negative discovery),
   `discovery` (min size, no-anchor, tiny-video),
   `fan` (the fan-out owner unit, imported into the page realm: positional
   fan, callable handle, native signal teardown, aborted-signal no-op,
@@ -3866,43 +3866,47 @@ stop at the first failure:
   cue's computed `text-wrap-style` is exactly `balance` (vocabulary
   presence — the pixel-top rows are the geometry guard balance must not
   move), `robust`
-  (hidden-flush without user pause - a real second tab sets the document
+  (the robustness case, both planes on one file — merged Nov 12 2026 from the
+  former `robust` + `robust2` pair, every row preserved byte-identically, the
+  two normal-install planes sharing one boot; four boots: **Boot 1** the
+  storage floor + the interruption plane on one normal install — the
+  hidden flush without a user pause (a real second tab sets the document
   hidden and the native visibilitychange flush must land the position; the
   freeze surface the row once dispatched synthetically is Chromium vocabulary
- Firefox 159 has no realm for, probed - , checkpoint cadence on the native
-  timeupdate media clock at 4x, 1000-echo
-  < 400ms, 400 remote-adoption merges < 800ms),
-  `robust2` (interrupted-state + hostile-storage robustness on the real
-  engine, four boots: Boot 1 drives every recorded session-end path live —
-  a window blur mid-hold releases the 2x boost with the stray keyup a
-  no-op (the forge blur belt), panel churn x10 ends closed with the toggle
-  still live (per-open dismissal scopes under overlapping view
-  transitions), a scrub storm x30 ends every stroke with playback state
-  untouched, pointercancel mid-drag/mid-swipe/mid-pinch-session each ends
-  the stroke cleanly with no stranded transform or latch and the
-  recognizer working for the next stroke (the pinch row pins the exact
-  close contract: after the live pair's recognition, the one-finger
-  cancel plus the trailing orphan release ADD nothing to the semantic
-  event stream and a fresh pair recognizes exactly once), a fullscreen
-  exit mid-fill releases the fill with the box handed back (the staged
-  embed-owned inline object-fit is the released value, not an
-  empty-vs-empty coincidence; the stage shape must be an explicit
-  mismatched wrapper box — the fixture video's width/height:100% CSS
-  auto-heights the wrapper to the video's own aspect at any width, an
-  aspect-matched box whose cover scale is exactly 1), and a
+  Firefox 159 has no realm for, probed), the checkpoint cadence on the native
+  timeupdate media clock at 4x, the completion reset persisting the zero with
+  a bumped doc stamp (parked on a real sub-ratio baseline first so a
+  zero-to-zero no-op write cannot read as an eaten write), then the
+  session-end plane live — a window blur mid-hold releases the 2x boost with
+  the stray keyup a no-op (the forge blur belt), panel churn x10 ends closed
+  with the toggle still live (per-open dismissal scopes under overlapping
+  view transitions), a scrub storm x30 ends every stroke with playback state
+  untouched, pointercancel mid-drag/mid-swipe/mid-pinch-session each ends the
+  stroke cleanly with no stranded transform or latch and the recognizer
+  working for the next stroke (the pinch row pins the exact close contract:
+  after the live pair's recognition, the one-finger cancel plus the trailing
+  orphan release ADD nothing to the semantic event stream and a fresh pair
+  recognizes exactly once), a fullscreen exit mid-fill releases the fill with
+  the box handed back (the staged embed-owned inline object-fit is the
+  released value, not an empty-vs-empty coincidence; the stage shape must be
+  an explicit mismatched wrapper box — the fixture video's
+  width/height:100% CSS auto-heights the wrapper to the video's own aspect at
+  any width, an aspect-matched box whose cover scale is exactly 1), a
   destroy-readopt thrash x20 converges to exactly one shell at the last
-  home; Boot 2 seeds a hostile pf:configs (brightness 1e9 clamps at the
-  FILTER_SCHEMA bound the steppers commit with — the seed-bypass class
-  the ledger adopted — contrast/hue non-numeric values degrade to the
-  defaults, saturate -50 clamps at 0); Boot 3 seeds a hostile pf:resume
-  doc (a 1e9 saved position restores clamped at the media sink, and an
-  entry with a non-string domain/title rides the string-field admission
-  into a clean History render with no [object Object]); Boot 4 seeds
-  non-object docs ("garbage"/42) which degrade to filter defaults
-  (buildFilterString's all-defaults string is the literal "none") and no
-  restore artifact, with playback parked first so the witness cannot
-  read drift as a restore; uncaught errors from any row fail the case
-  through the stage's audit net),
+  home, and the echo/merge budgets close boot 1 (1000-echo < 400ms, 400
+  remote-adoption merges < 800ms — last, so the earlier playback sweeps have
+  loaded the tracker and every write pays the real LWW merge); **Boot 2**
+  seeds a hostile pf:configs (brightness 1e9 clamps at the FILTER_SCHEMA
+  bound the steppers commit with — the seed-bypass class the ledger adopted —
+  contrast/hue non-numeric values degrade to the defaults, saturate -50
+  clamps at 0); **Boot 3** seeds a hostile pf:resume doc (a 1e9 saved
+  position restores clamped at the media sink, and an entry with a
+  non-string domain/title rides the string-field admission into a clean
+  History render with no [object Object]); **Boot 4** seeds non-object docs
+  ("garbage"/42) which degrade to filter defaults (buildFilterString's
+  all-defaults string is the literal "none") and no restore artifact, with
+  playback parked first so the witness cannot read drift as a restore;
+  uncaught errors from any row fail the case through the stage's audit net),
   `scheduler` (the postTask façade unit, imported into the page realm:
   firing order and delay honors, dead-handle/release/rejection-swallow
   choreography, the two-controller shape surviving an abort inside the
@@ -4073,6 +4077,35 @@ paths and comment references only (styles.css/dom.js/bundle-gate corpus
 path/media case comment); dated audit records keep the old filename as
 date-stamped truth, and the bundle gate's class-vocabulary corpus follows
 the renamed file.
+
+**The robustness-case merge (Nov 12 2026, user direction "merge robust and
+robust2 in one well-optimized module"; check-only — `robust2.mjs` retired,
+every row preserved byte-identically, no src change).** The two robustness
+cases shared the same fixture and the same normal-install ceremony but
+booted separately (the former `robust`'s storage-floor plane and
+`robust2`'s Boot 1 interruption plane), so the merge folds both normal
+planes onto ONE boot and keeps the three hostile boots unchanged:
+storage-floor rows first (hidden flush → cadence → completion reset, before
+any fs stub is installed so no row can interfere with another's backing
+reads), then the interruption plane (blur → panel churn → fs stub + pointer
+driver → scrub storm → cancel drag/swipe/pinch → fill release → stage
+restore → thrash), then the echo/merge budget rows last (the earlier
+playback sweeps have loaded the tracker by then, so every write pays the
+real LWW merge), then hostile boots 2/3/4 verbatim. Shared helpers deduped:
+one page-side pointer driver `window.__pfFire(id, type, dx, dy, buttons,
+isPrimary)` replaces the four per-row `fire` closures (deltas relative to
+the video center read per call; `isPrimary` passed per call so the pinch
+pair's second pointer keeps its original non-primary semantics), plus
+node-side `status`/`waitDuration`/`settle`/`storeResume`/`fireKeys`/
+`wireGestureRecorder`/`armFsStub`/`restoreStage`. Row interplay verified
+during the merge design: the completion-reset row tolerates the cadence
+row's stale baseline by design (its own sub-ratio re-arm parking), the
+gesture recorder's page-lifetime listeners survive every row of boot 1 (the
+array is re-seeded per row), and after the thrash the video is re-homed
+with the `#check-video` id and store reads intact. The battery count moves
+266 → 265 (one fewer GM-usage-audit row: two cases became one). Battery
+receipt: three consecutive all-green full-battery runs (265 rows each;
+105.7–107.3s).
 
 The series'
 record-only commits changed
