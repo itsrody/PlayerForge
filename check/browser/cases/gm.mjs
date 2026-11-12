@@ -332,12 +332,13 @@ export async function run({ session, boot, header, version: bundleVersion }) {
       done({
         ok: (stats1.GM_registerMenuCommand ?? 0) - (stats0.GM_registerMenuCommand ?? 0) === 1
           && (stats1.GM_unregisterMenuCommand ?? 0) - (stats0.GM_unregisterMenuCommand ?? 0) === 0
-          // The four live commands keep their handles across the update -
+          // The five live commands keep their handles across the update -
           // an in-place edit, never a create-churn cycle.
-          && ids0.length === 4 && ids1.length === 4 && ids0.every((v, i) => ids1[i] === v)
+          && ids0.length === 5 && ids1.length === 5 && ids0.every((v, i) => ids1[i] === v)
           && debugKey1 != null && debugKey1 !== debugKey
           && keys1.some((k) => k.includes("Color"))
-          && keys1.some((k) => k.includes("Subtitle")),
+          && keys1.some((k) => k.includes("Subtitle"))
+          && keys1.some((k) => k.includes("Bare")),
         why: `reg=${stats1.GM_registerMenuCommand - stats0.GM_registerMenuCommand} unreg=${stats1.GM_unregisterMenuCommand - stats0.GM_unregisterMenuCommand} ids0=${ids0} ids1=${ids1} caption="${debugKey}"->"${debugKey1}"`
       });
     }, 500);

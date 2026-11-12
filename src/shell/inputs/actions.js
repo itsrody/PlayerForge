@@ -1,7 +1,7 @@
 import { getSetting, onSettingsChanged, SETTING_KEYS } from "../chrome/config.js";
 import { TUNING, clamp, formatTime, EASE_SNAPPY_CURVE, EASE_SNAPPY_MS } from "../../shared/core.js";
 import { fs, subscribeFullscreen } from "../../shared/dom.js";
-import { GESTURE_EVENTS, GESTURES, GESTURE_IDS } from "../../kernel/contract.js";
+import { GESTURE_EVENTS, GESTURES, GESTURE_IDS, BARE_SDK_NAME } from "../../kernel/contract.js";
 
 export { GESTURE_EVENTS };
 
@@ -62,6 +62,16 @@ const INPUT_ACTIONS = [
     inputs: [{ kind: "pointer", family: "pinch", setting: GESTURES.pinch.setting, fs: true }]
   },
   {
+    id: "tap-toggle",
+    // Bare-only action (the consumer refuses non-bare shells): on an SDK
+    // player a plain tap's click-to-play is the SDK's own native surface,
+    // so the row dispatches the family event and the action layer ignores
+    // it there. fs: false - the tap toggle is the bare surface's basic
+    // verb in every posture (it replaced the stripped native controls'
+    // click-to-play).
+    inputs: [{ kind: "pointer", family: "tap", setting: GESTURES.tap.setting, fs: false }]
+  },
+  {
     id: "skip",
     inputs: [
       { kind: "key", code: "ArrowRight", event: GESTURE_EVENTS.skip, direction: "right", setting: SETTING_KEYS.hotkeys, fs: false },
@@ -119,9 +129,9 @@ const HOLD_SPEED =
   TUNING.controller.holdSpeed;
 
 /** Whether an input row's gates are open right now. */
-function gateOpen(input) {
+function gateOpen(input, spaceOpen) {
   return (!input.setting || getSetting(input.setting)) &&
-    (!input.fs || fs);
+    (!input.fs || spaceOpen);
 }
 
 /**
@@ -155,21 +165,38 @@ class IntentGates {
    *  press replaces the 5-entry `.some(allowsIntent)` scan the ownership
    *  decision used to run. */
   #anyPointer = false;
-  /** Fullscreen value the snapshot was taken against. */
-  #fsStamp = false;
+  /** Gesture-space value the snapshot was taken against: the fullscreen
+   *  gate, OR the bare tier's adopted surface. A bare shell's page
+   *  container IS its gesture space in normal view (the tier owns the
+   *  surface: controls stripped, no SDK player to conflict with), so its
+   *  fs-flagged intents - scrub, swipe, dbltap, pinch - arm without a
+   *  fullscreen witness. SDK shells keep the fullscreen-only law. */
+  #bare = false;
+  #spaceStamp = false;
 
   constructor() {
     this.#recompute();
     onSettingsChanged(() => this.#recompute());
   }
 
-  /** Re-sample every family's gate snapshot against live settings + fs. */
+  /** The gesture-space fact, set once per shell from the adoption identity
+   *  (attachInputActions - the one call site, riding the one-shell-per-
+   *  realm law). A flip recomputes the snapshot so no stale arm survives. */
+  setBareSpace(bare) {
+    if (bare !== this.#bare) {
+      this.#bare = bare;
+      this.#recompute();
+    }
+  }
+
+  /** Re-sample every family's gate snapshot against live settings + space. */
   #recompute() {
+    const spaceOpen = fs || this.#bare;
     let anyPointer = false;
     for (const [family, inputs] of this.#families) {
       let open = false;
       for (let i = 0; i < inputs.length; i++) {
-        if (gateOpen(inputs[i])) {
+        if (gateOpen(inputs[i], spaceOpen)) {
           open = true;
           break;
         }
@@ -183,14 +210,14 @@ class IntentGates {
       }
     }
     this.#anyPointer = anyPointer;
-    this.#fsStamp = fs;
+    this.#spaceStamp = spaceOpen;
   }
 
   /** True when at least one input of the pointer-intent family is armed.
-   *  Mid-session toggles still apply at the next decision via the fs-validity
-   *  recheck. */
+   *  Mid-session toggles still apply at the next decision via the space
+   *  validity recheck. */
   allows(gesture) {
-    if (fs !== this.#fsStamp) {
+    if ((fs || this.#bare) !== this.#spaceStamp) {
       this.#recompute();
     }
     return this.#armed.get(gesture) === true;
@@ -199,7 +226,7 @@ class IntentGates {
   /** Any pointer-intent family member armed - the press-ownership gate. Same
    *  snapshot revalidation as allows(), without the per-call scan. */
   anyPointer() {
-    if (fs !== this.#fsStamp) {
+    if ((fs || this.#bare) !== this.#spaceStamp) {
       this.#recompute();
     }
     return this.#anyPointer;
@@ -207,7 +234,20 @@ class IntentGates {
 
   /** Whether a key input's gates are open right now (live per read). */
   keyArmed(input) {
-    return gateOpen(input);
+    return gateOpen(input, fs || this.#bare);
+  }
+
+  /** The gesture-space read the engine's intent sites mirror: fullscreen,
+   *  OR the bare tier's adopted surface. Lives on the class so the private
+   *  bare fact has one owner. */
+  spaceOpen() {
+    return fs || this.#bare;
+  }
+
+  /** The bare fact itself - the zone-reference discriminator: a bare
+   *  surface's edge zones resolve against the video box, not the viewport. */
+  isBare() {
+    return this.#bare;
   }
 }
 
@@ -219,6 +259,23 @@ export function allowsIntent(gesture) {
 
 export function allowsAnyIntent() {
   return gates.anyPointer();
+}
+
+/** The engine's gesture-space read, mirroring the gates' own stamp: the
+ *  fullscreen gate, OR the bare tier's adopted surface. Every engine site
+ *  that used to read `fs` for intent eligibility reads this, so the bare
+ *  shell's fs-flagged intents arm in normal view and an SDK shell's never
+ *  do. The bare fact rides the same module state (set once per shell at
+ *  attach), so engine and gates can never disagree. */
+export function spaceOpen() {
+  return gates.spaceOpen();
+}
+
+/** Whether the live shell is a bare-tier adoption - the zone-reference
+ *  discriminator: a bare surface's edge zones resolve against the video
+ *  box, not the viewport. */
+export function isBare() {
+  return gates.isBare();
 }
 
 export function isKeyArmed(input) {
@@ -957,17 +1014,41 @@ class ShellActions {
   /**
    * Fullscreen-only double-tap semantics: edges skip, center toggles
    * playback. Inline double-taps belong to the browser/player natively.
+   * The bare surface's exception: its fs-flagged intents arm in normal
+   * view (the tier owns the surface), so center dbltap there IS the
+   * fullscreen entry - the stripped native controls took their fullscreen
+   * button with them - and the edge zones skip without a fullscreen
+   * witness too.
    */
   #dbltap(detail) {
+    const shell = this.#shell;
+    if (isBare() && !fs && detail.zone === "screen") {
+      shell.enterFullscreen();
+      return;
+    }
     // Both edge-skip and center-play are inert before the timeline exists.
-    if (!this.#shell.media.ready) {
+    if (!shell.media.ready) {
       return;
     }
     if (detail.zone === "left-edge" || detail.zone === "right-edge") {
       this.#skip(detail.zone === "left-edge" ? "left" : "right");
     } else if (detail.zone === "screen") {
-      this.#shell.media.togglePlay();
+      shell.media.togglePlay();
     }
+  }
+
+  /**
+   * Tap play/pause, bare shells only: the surface takeover stripped the
+   * native controls, so the plain tap's click-to-play is OURS now (the
+   * native click on a controls-less video does nothing). SDK shells return
+   * here as a no-op - their tap's click-to-play is the SDK's own, and the
+   * engine's prevent-scope rule passed the native stream through untouched.
+   */
+  #tap() {
+    if (this.#shell.sdk.name !== BARE_SDK_NAME) {
+      return;
+    }
+    this.#shell.media.togglePlay();
   }
 
   #volume(detail) {
@@ -1051,6 +1132,7 @@ class ShellActions {
     host.addEventListener(GESTURE_EVENTS.swipeStart, ({ detail }) => this.#swipeStart(detail), { signal });
     host.addEventListener(GESTURE_EVENTS.swipe, ({ detail }) => this.#swipe(detail), { signal });
     host.addEventListener(GESTURE_EVENTS.dbltap, ({ detail }) => this.#dbltap(detail), { signal });
+    host.addEventListener(GESTURE_EVENTS.tap, () => this.#tap(), { signal });
     host.addEventListener(GESTURE_EVENTS.skip, ({ detail }) => this.#skip(detail.direction), { signal });
     host.addEventListener(GESTURE_EVENTS.volume, ({ detail }) => this.#volume(detail), { signal });
     host.addEventListener(GESTURE_EVENTS.mute, () => this.#mute(), { signal });
@@ -1064,5 +1146,9 @@ class ShellActions {
  * all own themselves.
  */
 export function attachInputActions(shell, host, signal) {
+  // The gesture-space fact rides the adoption identity, read once at the
+  // one attach call site (the one-shell-per-realm law keeps it current -
+  // a re-adopt boots a fresh shell and re-attaches).
+  gates.setBareSpace(shell.sdk?.name === BARE_SDK_NAME);
   new ShellActions(shell).attach(host, signal);
 }

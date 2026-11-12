@@ -401,6 +401,29 @@ export class BrowserSession {
     } catch {}
   }
 
+  /** Re-assert OS focus on the test window. The Fullscreen API spec rejects
+   *  requestFullscreen with a bare TypeError when the document is not
+   *  focused - a headed battery run minutes deep (the user working in
+   *  another window) fails its real-fullscreen rows on focus, not behavior;
+   *  the fresh launch a probe gets never sees it. switchTo() on the current
+   *  handle plus the tiling manager's focus verb are the two focus routes;
+   *  both are best-effort. */
+  async focusWindow() {
+    try {
+      const handle = await this.#driver.getWindowHandle();
+      await this.#driver.switchTo().window(handle);
+    } catch {}
+    try {
+      const pid = (await this.#driver.getCapabilities()).get("moz:processID");
+      const testWindows = execFileSync("aerospace", ["list-windows", "--all", "--format", "%{window-id} %{app-pid}"], { encoding: "utf8" })
+        .split("\n").map((line) => line.trim().split(" "))
+        .filter(([wid, aPid]) => wid && Number(aPid) === Number(pid)).map(([wid]) => wid);
+      for (const wid of testWindows) {
+        execFileSync("aerospace", ["focus", "--window-id", wid], { stdio: "ignore" });
+      }
+    } catch {}
+  }
+
   async navigate(url) {
     await this.#driver.get(url);
     // Verify the landing: a get() that resolves while the browser stays on

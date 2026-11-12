@@ -37,20 +37,19 @@ its video.
 
 **Gestures** (pointer/touch over the video; the press-and-hold works
 anywhere, the drag gestures are fullscreen-only — inline screens leave
-every tap and drag to the host page natively):
-
-**Gestures** (pointer/touch over the video; the press-and-hold works
-anywhere, the drag gestures are fullscreen-only — inline screens leave
-every tap and drag to the host page natively):
+every tap and drag to the host page natively. On a **bare-tier adopted
+video** the drag gestures work in normal view too — the tier owns that
+surface):
 
 | Gesture            | Works      | Action                                               |
 | ------------------ | ---------- | ---------------------------------------------------- |
 | Press and hold     | Everywhere | Speed up playback while held (2×)                    |
-| Horizontal drag    | Fullscreen | Scrub seeking with a live time readout               |
-| Vertical drag down | Fullscreen | Picture follows the drag; a long drag exits fullscreen |
-| Vertical drag up   | Fullscreen | Opens the PlayerForge panel                          |
-| Double-tap         | Fullscreen | Screen edges skip ±1 step; center play/pause         |
-| Two-finger pinch   | Fullscreen | Pinch out to fill edge-to-edge; pinch in to release  |
+| Tap                | Everywhere | Play/pause on bare-tier videos (SDK players keep their own click-to-play) |
+| Horizontal drag    | Fullscreen (bare tier: anywhere) | Scrub seeking with a live time readout |
+| Vertical drag down | Fullscreen (bare tier: anywhere) | Picture follows the drag; a long drag exits fullscreen |
+| Vertical drag up   | Fullscreen (bare tier: anywhere) | Opens the PlayerForge panel |
+| Double-tap         | Fullscreen (bare tier: anywhere) | Screen edges skip ±1 step; center play/pause — on a bare-tier video, center double-tap enters fullscreen |
+| Two-finger pinch   | Fullscreen (bare tier: anywhere) | Pinch out to fill edge-to-edge; pinch in to release  |
 
 **Hotkeys** (all on a single toggle):
 
@@ -100,7 +99,15 @@ controls: **JW Player, Video.js, Plyr, ArtPlayer, DPlayer, MediaElement.js,
 XGPlayer, Aliplayer, Fluid Player, Flowplayer, Clappr, Vidstack, Mux Player,
 Radiant Media Player, and Laravel Video Embeds**. A bare `<video>` with no
 recognizable player is left alone on purpose — no half-boots on unknown
-markup.
+markup. The one exception is the opt-in **bare-player tier** (off by
+default; the `🎬 Bare Videos` menu command flips it): a programmatic
+blob/MSE video that has actually played adopts through its own page
+container — the video never moves, no DOM surgery. Adoption takes over the
+surface: the native `controls` attribute is stripped (Firefox's UA controls
+widget swallows pointer input before the page in every posture, so
+gestures are impossible under it) and restored when the shell goes away;
+tap-to-play/pause, double-tap fullscreen entry, and the drag gestures in
+normal view replace it.
 
 ## Menu commands
 

@@ -399,12 +399,25 @@ function watchMediaEvents(onVideo) {
   // loadeddata (which needs frame data) and can otherwise stay invisible to
   // discovery until the user presses play. loadeddata still matters for
   // players that surface metadata only on data; play catches late starts.
+  // playing + timeupdate carry the bare tier's evidence leg: `play` fires
+  // when play() is INVOKED - before playback starts, so played.length is
+  // still 0 - and the played range fills only once playback actually runs,
+  // at `playing` and the following `timeupdate`s. Without them an anchor-less
+  // blob candidate that just started playing has no later event to re-ask
+  // identity (the accidental RO re-watch cycle that used to poll it fired
+  // Firefox's RO-loop page error per cycle and is retired - see the watch
+  // guards in VideoProbe.#consider/#finish). Both fire only while playing,
+  // and every consider short-circuits at the identity+size check once a
+  // candidate qualifies, so the steady-state cost is the repeat path's one
+  // WeakMap read per event until the boot fires.
   // One native teardown: every listener rides the controller's signal, so
   // stop() is a single abort() - the turn has no manual removal list.
   const scope = new AbortController();
   document.addEventListener("loadedmetadata", onMediaEvent, { capture: true, signal: scope.signal });
   document.addEventListener("loadeddata", onMediaEvent, { capture: true, signal: scope.signal });
   document.addEventListener("play", onMediaEvent, { capture: true, signal: scope.signal });
+  document.addEventListener("playing", onMediaEvent, { capture: true, signal: scope.signal });
+  document.addEventListener("timeupdate", onMediaEvent, { capture: true, signal: scope.signal });
   return () => scope.abort();
 }
 
@@ -548,7 +561,12 @@ class VideoProbe {
       if (hasPresentBox(video)) {
         this.#tap.escalate();
       }
-      this.#layoutGate.watch(video, () => this.#consider(video));
+      // No re-watch here: #finish is reached only through #tryFinish, whose
+      // caller proved the box present and minimum-sized one call-frame
+      // earlier - the gate would deliver immediately and re-run #consider
+      // with no new fact (the observe/deliver/re-observe churn that fires
+      // Firefox's RO-loop page error; see the same guard in #consider).
+      // The escalated tap owns the later identity arrival.
       return;
     }
     this.#done = true;
@@ -611,7 +629,20 @@ class VideoProbe {
     if (present) {
       this.#tap.escalate();
     }
-    this.#layoutGate.watch(video, () => this.#consider(video));
+    // The layout gate is for boxes that cannot qualify yet: hidden candidates
+    // (the reveal side-channel qualifies them) and sub-minimum boxes that CSS
+    // may size later. A present, already-minimum box delivers on the next
+    // frame and re-runs this consider with no new fact - identity arrives by
+    // media event or DOM change, both of which route here through the taps -
+    // so re-watching one spins the observe/deliver/re-observe cycle, one
+    // Firefox "ResizeObserver loop" page error per cycle (re-observing the
+    // target inside its own delivery is the exact shape the spec limits to
+    // one delivery per frame). The churn was a pre-existing burst on any
+    // anchor-less candidate that plays; the gestures case's bare-surface boot
+    // is the first case to END on such a page, which is what surfaced it.
+    if (!(present && boxAtLeast(video, this.#minWidth, this.#minHeight))) {
+      this.#layoutGate.watch(video, () => this.#consider(video));
+    }
   }
 
   /**
@@ -626,9 +657,30 @@ class VideoProbe {
       this.#detach();
     }
   }
+
+  /**
+   * Re-run the seed walk under the current setting posture - the bare-tier
+   * flip's re-arm. The matcher's cache is cleared by the flip applier before
+   * this runs (see detection.js clearDescriptorCache), so every #consider
+   * re-asks identity live and a candidate that only qualifies under the new
+   * posture boots. No-op once a candidate fired: the kernel's own discovery
+   * tap owns later candidates, and the one-main-video law governs adoption
+   * from there. The media taps and gates are still armed (stop() is the only
+   * detach), so videos that surface later are caught regardless.
+   */
+  refresh() {
+    if (this.#done) {
+      return;
+    }
+    logger.log("probe", "Discovery re-armed by a settings flip");
+    forEachVideoInDocument((video) => this.#consider(video));
+  }
 }
 
 export function installVideoProbe(options) {
   const probe = new VideoProbe(options);
-  return () => probe.stop();
+  // stop: pagehide's release (the pagehide leg owns it). refresh: the
+  // bare-tier flip's re-arm - re-runs the seed walk under the new posture
+  // while the probe is still live; a no-op once the kernel booted.
+  return { stop: () => probe.stop(), refresh: () => probe.refresh() };
 }

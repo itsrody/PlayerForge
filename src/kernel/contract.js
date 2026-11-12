@@ -22,12 +22,27 @@
  *                          the input stack (GM menu).
  *   - DEBUG_LOGS_KEY     - the configs-doc field behind the debug-log toggle
  *                          (kernel init + GM menu).
+ *   - BARE_VIDEOS_KEY    - the configs-doc field behind the bare-video
+ *                          adoption tier (GM menu toggle; read by the
+ *                          detection matcher and the entry's echo re-arm).
  *   - FRAMEWORK_TUNING   - calibration constants that belong to the framework
  *                          (not shell UI), e.g. the removal grace window.
  */
 export const SHELL_MARKER = "data-pf-shell";
 
 export const DEBUG_LOGS_KEY = "debug.logs";
+
+/** The bare-video adoption tier's gate: a <video> with no SDK anchor is
+ *  adoptable through its page container only when this config reads true
+ *  (default off). Same shape as DEBUG_LOGS_KEY - a kernel-plane key the
+ *  menu flips and the discovery plane reads. */
+export const BARE_VIDEOS_KEY = "discovery.bareVideos";
+
+/** The bare tier's descriptor name: the shell's surface takeover (controls
+ *  strip, tap toggle, fullscreen entry) and the input gate's bare-space
+ *  open both read the adoption identity through it, so the kernel plane's
+ *  descriptor and the shell plane's behavior can never drift apart. */
+export const BARE_SDK_NAME = "Native Video";
 
 /** The hash tag that flips debug mode for one page load (never persisted).
  *  An explicit menu "Off" wins over it. */
@@ -44,7 +59,8 @@ const GESTURE_LABELS = Object.freeze({
   scrub: "Scrub Seeking",
   swipe: "Swiping",
   dbltap: "Double-tap Skip",
-  pinch: "Pinch to Fill"
+  pinch: "Pinch to Fill",
+  tap: "Tap Play/Pause"
 });
 
 /** Gesture-family ids in registry-declaration order (the canonical vocabulary). */

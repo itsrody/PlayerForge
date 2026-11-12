@@ -1,7 +1,9 @@
-import { AdoptionHome } from "./contract.js";
+import { AdoptionHome, BARE_SDK_NAME, BARE_VIDEOS_KEY } from "./contract.js";
+import { getConfigValue } from "../shared/store.js";
 
 /**
- * SDK identity engine. Registry-driven, importing only its contract.
+ * SDK identity engine. Registry-driven, importing its contract plus the one
+ * configs read the bare-video tier gates on.
  *
  * Detection is registry-driven: every supported player SDK declares exactly one
  * record below, and a video is adopted only when its composed ancestry contains
@@ -9,6 +11,14 @@ import { AdoptionHome } from "./contract.js";
  * anchor must be owned by its SDK (prefixed class, dedicated data attribute, or
  * custom element tag), so pages merely styling a <div class="player"> stay
  * unrecognized rather than misidentified. Coverage grows by adding records.
+ *
+ * The ONE deliberate exception is the opt-in bare-video tier below: a <video>
+ * whose page constructed the media programmatically (blob: src - the MSE
+ * shape) and that has actually started playing can be adopted through its
+ * page container when the user enables `discovery.bareVideos`. The evidence
+ * bar replaces the identity ask at least as strongly (a decoder texture and
+ * a preload-never-plays embed both fail it), and the tier is off by default,
+ * so the no-generic-fallback law still governs every default install.
  *
  * Record schema:
  *   name    - label used for logging and shell metadata.
@@ -337,17 +347,62 @@ class SdkMatcher {
       return cached.descriptor;
     }
     const match = this.#matchSdk(video);
-    if (!match) {
+    if (match) {
+      const descriptor = {
+        name: match.record.name,
+        container: this.#resolveContainer(match),
+        hops: match.hops
+      };
+      this.#descriptorCache.set(video, { descriptor, parent: video.parentNode });
+      return descriptor;
+    }
+    // No SDK anchor anywhere in the composed ancestry. Two no-anchor
+    // postures, decided by the bare tier's gate:
+    if (!getConfigValue(BARE_VIDEOS_KEY, false)) {
+      // Tier off: the negative cache stands - a page of many non-SDK videos
+      // (ad grids, untracked embeds) never re-runs the full ancestry scan
+      // per discovery pass.
       this.#descriptorCache.set(video, { descriptor: null, parent: video.parentNode });
       return null;
     }
-    const descriptor = {
-      name: match.record.name,
-      container: this.#resolveContainer(match),
-      hops: match.hops
-    };
-    this.#descriptorCache.set(video, { descriptor, parent: video.parentNode });
-    return descriptor;
+    // Tier on: no anchor is not yet a no. The evidence bar is time-varying
+    // (the src can be assigned late by an MSE pipeline, played accumulates
+    // with playback), so a null must NEVER cache - every re-ask re-reads
+    // the two facts. A qualified candidate adopts through its page
+    // container (the parent element, taken as-is: the video is never
+    // moved, the shell mounts beside it like in any SDK home), and the
+    // positive descriptor caches parent-stamped like any other - once
+    // blob+played qualify they stay qualified, and a re-parent invalidates.
+    const parent = video.parentElement;
+    if (parent !== null && this.#qualifiesBare(video)) {
+      const descriptor = { name: BARE_SDK_NAME, container: parent, hops: 1 };
+      this.#descriptorCache.set(video, { descriptor, parent: video.parentNode });
+      return descriptor;
+    }
+    return null;
+  }
+
+  /**
+   * The bare tier's evidence bar, all native reads, all required:
+   *   - `blob:` scheme on currentSrc - the page constructed the media
+   *     programmatically (MSE hands out exactly these URLs). A plain,
+   *     data, or empty src never qualifies; that is the deliberate-player
+   *     discriminator. mediastream: is deliberately excluded - the
+   *     conferencing/capture class is a different topology, not a player.
+   *   - `played.length > 0` - the video has actually started playing. The
+   *     junk killer: decoder/canvas textures and preload-never-plays
+   *     embeds never reach it.
+   * Presence (the 100x60 painted box, on-screen at finish) is discovery's
+   * unchanged job - this ask only replaces the registry's identity leg.
+   */
+  #qualifiesBare(video) {
+    const url = URL.parse(video.currentSrc);
+    return url !== null && url.protocol === "blob:" && video.played.length > 0;
+  }
+
+  /** The tier-flip invalidation: see clearDescriptorCache. */
+  clear() {
+    this.#descriptorCache = new WeakMap();
   }
 }
 
@@ -356,12 +411,12 @@ const matcher = new SdkMatcher();
 /**
  * The adoption screen: resolve the SDK identity once and wrap it in the
  * AdoptionHome record the watcher protocol carries. Null (no registered SDK
- * anchor) stays the engine's no-shape answer, unmodified. Called only at
- * adoption and at the re-wrap seam - the descriptor cache makes both free
- * when the composed ancestry is unchanged. Module's sole export face: the
- * findSdkForVideo export retired with its injectable-registry arm (no
- * external consumer since the kernel's adoption and re-wrap seams moved to
- * the record).
+ * anchor, or an unqualified bare candidate) stays the engine's no-shape
+ * answer, unmodified. Called only at adoption and at the re-wrap seam - the
+ * descriptor cache makes both free when the composed ancestry is unchanged.
+ * Module's sole export face: the findSdkForVideo export retired with its
+ * injectable-registry arm (no external consumer since the kernel's adoption
+ * and re-wrap seams moved to the record).
  */
 export function resolveAdoptionHome(video) {
   const sdk = matcher.find(video);
@@ -383,4 +438,16 @@ export function resolveAdoptionHome(video) {
  */
 export function findSdk(video) {
   return matcher.find(video);
+}
+
+/**
+ * Drop every cached descriptor, positive and negative alike. The bare-tier
+ * flip is exactly the invalidation condition the parent stamp cannot express:
+ * a null cached while the tier was off (or a bare positive cached while it
+ * was on) would otherwise answer forever, because the tier gate reads live
+ * config, not DOM state. The flip applier calls this before re-running
+ * discovery, so the next ask re-scans under the new posture.
+ */
+export function clearDescriptorCache() {
+  matcher.clear();
 }

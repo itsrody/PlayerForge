@@ -11,6 +11,7 @@ import { TUNING } from "../shared/core.js";
 import { ToastManager } from "./chrome/toast.js";
 import { claimMediaSession, createMediaControls, MEDIA_SESSION_SYNC_EVENTS } from "./media.js";
 import { SHELL_MARKER, warmStyles, mountShell, ensureViewportFitCover } from "./chrome/mount.js";
+import { BARE_SDK_NAME } from "../kernel/contract.js";
 import { retryFullscreenProvision } from "../shared/page.js";
 
 /**
@@ -214,6 +215,16 @@ export class Shell {
       // so the companion machines paid their listeners for behavior the
       // platform owns.
       () => this.#watchVisualViewport(),
+      // The bare tier's surface takeover: with the native `controls`
+      // attribute present, Firefox's UA controls widget owns the whole
+      // pointer plane - pointerdown/up are consumed inside the closed UA
+      // shadow tree and NEVER reach the page, in normal view or in the
+      // fullscreen-gated posture (floor-probed: check/.tmp/
+      // bare-ctl-fs-probe.mjs - only stray pointermoves escape). The tier
+      // strips the attribute at adoption, so the engine becomes the control
+      // surface (tap play/pause, dbltap fullscreen entry, the full gesture
+      // suite), and the destroy scope restores exactly what was there.
+      () => this.#adoptBareSurface(),
       // The runSteps tail: once every watcher is armed, the videos are
       // officially ours - stamp video and container as managed.
       () => {
@@ -471,6 +482,53 @@ export class Shell {
     this.#dom.listen(this.video, "error", () => {
       const code = this.video.error?.code;
       this.toastInfo("alert", MEDIA_ERROR_LABELS[code] ?? "Video playback error", "media-error");
+    });
+  }
+
+  /**
+   * The bare tier's surface takeover: with the native `controls` attribute
+   * present, Firefox's UA controls widget consumes pointerdown/up inside
+   * its closed shadow tree before the page sees them (in every posture -
+   * floor-probed), so gestures are structurally impossible on such a
+   * video. The tier strips the attribute (one IDL write - the element
+   * stays, its position stays, no DOM surgery) and defers the exact
+   * restore onto the destroy scope, so every teardown path (kernel
+   * destroyAll, destroy-readopt, abandon-boot) hands the video back
+   * native. The tap toggle / fullscreen entry / fs-open intents that
+   * replace the stripped surfaces live in the action layer.
+   */
+  #adoptBareSurface() {
+    if (this.sdk.name !== BARE_SDK_NAME) {
+      return;
+    }
+    const video = this.video;
+    if (!video.hasAttribute("controls")) {
+      return;
+    }
+    video.controls = false;
+    this.#scope.defer(() => {
+      video.controls = true;
+    });
+  }
+
+  /**
+   * The bare surface's fullscreen entry: the stripped native controls took
+   * their fullscreen button with them, so center dbltap enters through the
+   * adopted container - the gesture context supplies the user activation,
+   * and an iframe embed's grant chain was provisioned at shell creation.
+   * SDK shells never call this (their fullscreen stays the SDK's own).
+   * A rejection surfaces through the fullscreenerror watcher below, which
+   * owns the failure sentence and the re-provision.
+   */
+  enterFullscreen() {
+    if (fs) {
+      return;
+    }
+    this.container.requestFullscreen?.()?.catch((err) => {
+      // The fullscreenerror listener is the user-facing failure surface
+      // (spec: a failed entry fires the event AND rejects the promise);
+      // this catch only keeps the rejection off the unhandled lane.
+      logger.log("shell", "fullscreen entry rejected:", err.name);
     });
   }
 

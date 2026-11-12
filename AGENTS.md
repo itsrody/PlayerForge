@@ -600,8 +600,11 @@ iframes, same-origin and cross-origin:
 ### kernel/ — policy layer
 - **contract.js** — the shared vocabulary both layers import in isolation:
   gesture registry (`GESTURES`/`GESTURE_IDS` are formula-derived from `{id:
-  label}` pairs), `GESTURE_EVENTS` (`pf:gesture-<id>`), `DEBUG_HASH_TAG =
-  "pf-debug"`, tuning knobs, and `AdoptionHome` — the frozen adoption
+  label}` pairs — six families: hold, scrub, swipe, dbltap, pinch, tap),
+  `GESTURE_EVENTS` (`pf:gesture-<id>`), `DEBUG_HASH_TAG =
+  "pf-debug"`, tuning knobs, `BARE_SDK_NAME` (the bare tier's descriptor
+  name, the adoption identity both the shell's surface takeover and the
+  input gate's bare-space open read), and `AdoptionHome` — the frozen adoption
   identity the kernel→shell watcher protocol carries (one record per
   adoption through the provider, the `RemovalWatch` anchors, and the
   destroy-readopt compare; every seam previously re-spelled the
@@ -614,8 +617,10 @@ iframes, same-origin and cross-origin:
   their own single prefix inside `page.js` (module-local by documented
   design); key bindings derive in `actions.js`. No machine-facing string is
   hand-spelled anywhere else.
-- **detection.js** — the SDK identity engine, registry-driven, importing only
-  its contract.
+- **detection.js** — the SDK identity engine, registry-driven, importing its
+  contract plus the one configs read the bare-video tier gates on
+  (`BARE_VIDEOS_KEY` through `getConfigValue`; the import graph stays
+  kernel-plane downward into shared).
   22 supported SDK records (JW Player, Video.js, Plyr, ArtPlayer, DPlayer,
   MediaElement.js, XGPlayer, Aliplayer, Fluid Player, Flowplayer, Clappr,
   Vidstack, Mux Player, Radiant, Laravel Video Embed, Shaka Player,
@@ -639,7 +644,25 @@ iframes, same-origin and cross-origin:
   into an anchor would silently become two arms under the record's name; a
   comma inside a quoted attribute value is one selector to the engine and
   fine). There is deliberately **no generic fallback** — a bare
-  `<video>` with no SDK anchor never boots. Record provenance is
+  `<video>` with no SDK anchor never boots. The ONE deliberate exception is
+  the opt-in **bare-player adoption tier** (Nov 12 2026, user-directed): with
+  `discovery.bareVideos` ON (default off, the menu flips it), an anchor-less
+  `<video>` qualifies on the evidence bar `URL.parse(currentSrc)?.protocol
+  === "blob:"` AND `played.length > 0` — all native reads, all required; the
+  blob leg is the deliberate-player discriminator (MSE hands out exactly
+  these URLs; plain/data/empty src and `mediastream:` never qualify), the
+  played leg is the junk killer (decoder/canvas textures and preload-never-plays
+  embeds never reach it), and presence stays discovery's unchanged job. The
+  qualified descriptor is `{ name: "Native Video", container:
+  video.parentElement, hops: 1 }` — the page's own container adopted as-is,
+  the video NEVER moved, zero DOM surgery (user direction "Adopt page
+  container, video stays" + "Take the parent as-is"); once blob+played
+  qualify they stay qualified, so the positive caches parent-stamped like
+  any other, while a null NEVER caches while the tier is on (the evidence is
+  time-varying) and the tier-off negative cache stands byte-identical. The
+  tier flip is the one invalidation the parent stamp cannot express —
+  `clearDescriptorCache()` reassigns the matcher's WeakMap, called by the
+  entry's flip applier before re-running discovery. Record provenance is
   source-verified, not assumed: Clappr's compound lead anchor
   `.container[data-container]` (the vendor-set `{ class: "container",
   "data-container": "" }` Container element, one hop closer than the Core's
@@ -770,7 +793,24 @@ iframes, same-origin and cross-origin:
   aware, and `moveBefore`-aware by derivation: state-preserving moves land
   as the same remove+add record shape, both primitive forms live on the 159
   floor, and the watch's decisions re-derive from live DOM state — no
-  per-shape code exists).
+  per-shape code exists). The boot sentinel grew the bare-tier re-arm:
+  `VideoProbe.refresh()` re-runs the seed walk under the current setting
+  posture (no-op once a candidate fired — the kernel's own discovery tap
+  owns later candidates; the media taps and gates stay armed, `stop()` is
+  the only detach), and `installVideoProbe` returns `{ stop, refresh }` —
+  the flip applier drops the matcher's descriptor cache first, so every
+  re-consider asks identity live under the new posture. The probe's watch
+  guards (Nov 2026, the bare-surface batch) skip re-watching a present +
+  already-minimum box in the layout gate — such a target delivers on the
+  next frame and re-runs `#consider` with no new fact, and re-observing a
+  target inside its own delivery fired one Firefox RO-loop page error per
+  cycle (the burst was 12–13 errors per bare boot). That accidental cycle
+  was also the bare tier's identity poller, so `watchMediaEvents` carries
+  `playing` + `timeupdate` capture listeners — the events where the
+  `played.length` leg can actually complete (`play` fires when play() is
+  invoked, before playback starts; the tap fires on the invocation edge and
+  is why the played leg never rode it) — identity arrives by media event or
+  DOM change, both of which route through the taps.
 - **kernel.js** — the orchestrator: `whenDomSettled` boot sequencing
   (`runSteps`), the one-main-video scope guard on adoption — the pick policy
   "first-qualifying wins": a candidate meeting SDK identity is refused while
@@ -792,12 +832,19 @@ iframes, same-origin and cross-origin:
   posture) — the `ShellSlot`
   (one shell per session; a displaced shell is **destroyed**, never
   orphaned; the adoption guard makes the displaced-destroy a backstop),
-  `MenuCommands` (debug toggle + the two one-shot reset
+  `MenuCommands` (debug toggle + the bare-videos tier toggle + the two
+  one-shot reset
   commands + the frame-state diagnostics dump, installed from script eval
   and resolving their shell host through the entry's kernel reference —
   works even kernel-less; menus
   are top-frame only, and `#armDebugWatch` rides the storage echo to
-  propagate the debug flip into sibling frames mid-flight),
+  propagate the debug flip into sibling frames mid-flight), the bare
+  toggle among them riding a hooks channel (`installMenuCommands(
+  resolveKernel, { onBareFlip })`): the writing realm applies its own flip
+  through the entry's applier — `watchStorageKey` filters own echoes, so
+  the writing realm's matcher cache and probe would never hear the write
+  otherwise — while sibling frames apply through the entry's storage echo
+  watch,
   `installFrameDiagnostics` + `dumpFrameState` — the one-tap field triage:
   the dump command writes `pf:diag`, the top realm answers by direct call
   (its own write is echo-filtered), and every script realm
@@ -1019,6 +1066,20 @@ iframes, same-origin and cross-origin:
   after the credits roll — exactly when the keyboard has nothing else to
   do; one shell per realm-document (the scope law) makes vacancy
   single-engine, so no cross-engine routing question survives. The
+  yield lattice carries the focused-`<video controls>` arm (the
+  bare-tier batch, Nov 2026): a focused video that carries the UA controls
+  is a native keyboard surface of its own — Space toggles, arrows
+  seek/volume — and yielding there is the SELECT-typeahead class; the
+  native-controls floor probe (`check/.tmp/bare-controls-probe.mjs`,
+  real Firefox 160 driver taps) measured the two planes: with `controls`
+  present the UA-controls overlay owns the whole POINTER surface (page
+  and container listeners see nothing — E1–E4 empty recordings, the
+  engine structurally blind, no conflict clause needed on the pointer
+  plane, native click-to-play intact), while the KEYBOARD plane
+  double-acts on a focused controls-video (Space play-then-pause,
+  ArrowRight seeks past the engine's +10 to the duration clamp; KeyM
+  clean) — the yield arm is the fix; no fixture video carries `controls`,
+  so no existing row rides the branch. The
   gestures case proves the shape: seek to duration marks `ended` on the
   paused fixture video, the real driver KeyS still opens the panel, and
   the row restores (seek-back + panel close) before the hold-speed rows.
@@ -3521,11 +3582,15 @@ stub rows green.
    the page plane). Everything else is scope-settled or element-owned —
    listeners on nodes the feature DOM discards ride natural GC teardown; a
    signal there would be ceremony, not scope. Per-state live table:
-   pre-boot = bridge 1 + DomWatch MO + 1 visibilitychange + discovery's 3
-   document media taps + the kernel's pageshow/pagehide pair (the resume
+   pre-boot = bridge 1 + DomWatch MO + 1 visibilitychange + discovery's 5
+   document media taps (the bare-tier playing/timeupdate pair joined the
+   loadedmetadata/loadeddata/play trio on the one controller) + the
+   kernel's pageshow/pagehide pair (the resume
    arm retired - freeze/resume unreachable on the Firefox floor) +
-   the entry hint trio (armed only in the first-run hint window) + the 4
-   `watchStorageKey` consumers (the GM echo channel, not DOM events);
+   the entry hint trio (armed only in the first-run hint window) + the 5
+   `watchStorageKey` consumers (the GM echo channel, not DOM events; the
+   fifth is the entry's bare-tier echo watch - sibling realms re-arming
+   discovery under the flipped tier posture);
    live shell = resume's 6-event drive cluster + its IO + media's
    loadedmetadata listener + 2 witness MOs + subtitles' rVFC crank (an
    arm, not a listener) with its video RO/IO + 4 video events + 2 host
@@ -3736,7 +3801,13 @@ stop at the first failure:
   `discovery` (min size, no-anchor, tiny-video — the negative rows assert
   the FULL unbooted contract: no shell AND `window.PlayerForge` undefined,
   the probe's identity ask keeping anchor-less and sub-floor pages
-  kernel-less),
+  kernel-less), plus the bare-player tier's four rows (Nov 2026): a real
+  blob-URL feed through the page (fetch → `createObjectURL` → src →
+  muted play) with the tier seeded ON boots through the page container
+  (shell inside `#player`, video's parent unchanged, `data-pf-shell`
+  stamped), while tier OFF + blob+played, tier ON + plain-src playing,
+  and tier ON + blob-never-played all stay fully unbooted — each
+  evidence leg and the tier gate itself proven load-bearing,
   `fan` (the fan-out owner unit, imported into the page realm: positional
   fan, callable handle, native signal teardown, aborted-signal no-op,
   Symbol.dispose presence+use, `using` release (a live and a dead handle),
@@ -3831,8 +3902,9 @@ stop at the first failure:
   configs write flips the running kernel mid-flight (mirror line + real
   debug chatter), the reverse flip is proven silent, and a value-neutral
   rewrite never re-mirrors, xhr shape + `ontimeout` on a
-  held route, pfStyle resource warmth, menu-handle census (four live
-  commands: debug toggle, the frame-state dump, the two resets), the
+  held route, pfStyle resource warmth, menu-handle census (five live
+  commands: debug toggle, the bare-videos tier toggle, the frame-state
+  dump, the two resets), the
   diagnostics dump row (one menu tap prints the realm's own state line
   through the warn plane — identity, live registry, per-video attribution
   parsed whole), harvest-seeded
@@ -4062,7 +4134,10 @@ src — the probe's one-presence-ask consider and `#onVideoFound`'s
 dead shell re-checks deleted; the deliberate multi-path asks recorded),
 and the progress-drive review (Nov 2026, src — the volumechange dead arm
 left the MediaSession sync set; the read-direction impossibility and the
-deliberate boundary asks recorded).
+deliberate boundary asks recorded), and the bare-player adoption tier
+(Nov 2026, src + check — the opt-in `discovery.bareVideos` tier adopting
+bare blob/MSE videos through their page container, the focused-video
+keyboard yield arm, five menu commands; four new discovery rows).
 
 **The progress-drive review + the volumechange dead arm (Nov 12 2026, user
 direction "review how we currently track the video progress to have leaner
@@ -4318,6 +4393,206 @@ gap-separated (necessary) or single-asked (clean). No counted census
 vocabulary moved (the one try/catch moved with `boxAtLeast` — count
 unchanged). Battery receipt: three consecutive all-green full-battery
 runs (265 rows each; 105.9/106.0/106.1s).
+
+**The bare-player adoption tier (Nov 12 2026, user-directed; user shape
+pinned via question tool — "Adopt page container, video stays" +
+"Take the parent as-is"; src — contract.js + detection.js + discovery.js +
+kernel.js + entry.js + inputs/forge.js; check — discovery +4 rows, gm menu
+census 4→5, sdk/hotpaths served-neighbor additions).** The question: bare
+MSE videos (`<video controls playsinline src="blob:https://…">` — the
+page-built player with NO SDK anchor) never boot under the
+no-generic-fallback law. The adopted design: an **opt-in tier** that
+replaces the registry's identity leg with a measured evidence bar, and
+adopts the video through its OWN page container — the video never moves,
+zero DOM surgery, no synthetic wrapper (the earlier `data-pf-bare-wrap`
+wrapper design and the `moveBefore` wrap are dead, user-pinned).
+
+- **The tier gate and evidence bar (detection.js).** `BARE_VIDEOS_KEY =
+  "discovery.bareVideos"` in contract.js (default off — the
+  no-generic-fallback law governs every default install), following the
+  `DEBUG_LOGS_KEY` kernel-plane pattern. With the tier ON, an anchor-less
+  video qualifies on `URL.parse(currentSrc)?.protocol === "blob:"` AND
+  `played.length > 0` — all native reads, all required. The blob leg is
+  the deliberate-player discriminator (MSE hands out exactly these URLs;
+  plain/data/empty src never qualify; `mediastream:` deliberately
+  excluded — the conferencing/capture class is a different topology, not
+  a player). The played leg is the junk killer (decoder/canvas textures
+  and preload-never-plays embeds never reach it). Presence gates
+  unchanged — the 100×60 painted box and the finish on-screen check stay
+  discovery's job. The descriptor is `{ name: "Native Video", container:
+  video.parentElement, hops: 1 }` — the page's container taken as-is.
+- **The cache law.** The qualified positive caches parent-stamped like
+  any SDK answer (once blob+played qualify they stay qualified); a null
+  NEVER caches while the tier is on (the evidence is time-varying — src
+  can be assigned late by an MSE pipeline, played accumulates with
+  playback); the tier-OFF negative cache stands byte-identical (a page of
+  many non-SDK videos never re-runs the ancestry scan). The tier flip is
+  the one invalidation the parent stamp cannot express —
+  `clearDescriptorCache()` reassigns the matcher's WeakMap, the flip
+  applier calls it before re-running discovery.
+- **The flip plumbing.** `VideoProbe.refresh()` re-runs the pre-boot seed
+  walk (no-op once a candidate fired — the kernel's own discovery tap
+  owns later candidates under the one-main law; the media taps and gates
+  stay armed, `stop()` is the only detach); `installVideoProbe` returns
+  `{ stop, refresh }`. The fifth menu command `🎬 Bare Videos: Off/On`
+  rides a hooks channel (`installMenuCommands(resolveKernel, hooks)` —
+  the menu installs before the probe, so the entry passes a ref-boxed
+  applier): the WRITING realm applies its flip through `onBareFlip` —
+  `watchStorageKey` filters own echoes (`remote === false`), so the
+  writing realm's matcher cache and probe would never hear the write
+  otherwise — while sibling frames and other tabs apply through the
+  entry's `watchStorageKey(KEYS.configs, …)` echo watch, whose one
+  latched read dedupes value-neutral config rewrites (a doc write that
+  did not touch the key must not clear every cached descriptor). The
+  pre-boot `probeRef`/`applyBareFlip` definitions moved ahead of the menu
+  install for exactly the TDZ the closure would otherwise hit.
+- **The native-controls floor probe** (`check/.tmp/bare-controls-probe.mjs`,
+  real Firefox 160 geckodriver input, 9 axes N1/N2/E1–E4/K1–K3 — the
+  durable survey artifact for any future bare-tier control work; kept
+  uncommitted per sweep convention). Findings that shaped the shipped
+  code: (1) with `controls` present, Firefox's UA-controls overlay owns
+  the whole POINTER surface — page/container listeners see NOTHING
+  (empty recordings across E1–E4), so the gesture engine is structurally
+  blind and no conflict clause is needed on the pointer plane; native
+  click-to-play works, there is no native dblclick-fullscreen. (2) the
+  KEYBOARD plane double-acts when the video is FOCUSED: Space
+  play-then-pause (t advanced 0.2→0.3 — the native keydown toggled play,
+  the engine's keyup toggled pause), ArrowRight seeks past the engine's
+  +10 to the duration clamp (t→12), KeyM clean. (3) the adopted fix is
+  one yield arm in `#keysAllowedForTarget` — a focused `<video controls>`
+  yields like the SELECT-typeahead class; no fixture video carries
+  `controls`, so no existing row rides the branch.
+- **Check rows.** discovery case: four bare-tier rows over a real blob
+  feed (fetch → `createObjectURL` → src → muted play) — tier ON boots
+  through the page container (shell inside `#player`, video's parent
+  unchanged, `data-pf-shell` stamped), tier OFF + blob+played stays
+  unbooted, tier ON + plain-src playing stays unbooted (played leg
+  alone never adopts), tier ON + blob-never-played stays unbooted
+  (blob leg alone never adopts). gm case: the menu census row pins five
+  live commands (the Bare caption present). sdk + hotpaths cases serve
+  the two shared neighbors detection.js's new import chain needs
+  (`store.js` → `runtime.js`; both load side-effect-free in-page — the
+  ConfigStore read is lazy — and the positive SDK paths never reach the
+  tier read).
+- **No counted census row moved** — the echo/menu counts are
+  prose-recorded, not census patterns; the prose rows updated in the same
+  change (the live table's fifth `watchStorageKey` consumer, the menu
+  census wording). Battery receipt: three consecutive all-green
+  full-battery runs (269 rows each; 114.8/115.0/114.9s).
+
+**The bare-surface gesture batch (Nov 12 2026, user report "Gestures not
+working" + user-pinned direction via question tool — "Strip at adoption"
++ "Open for bare shells"; src — contract.js + detection.js + shell.js +
+inputs/actions.js + inputs/forge.js; check — gestures +5 rows; README).**
+The report's diagnosis came first, and the engine was NOT the defect: the
+registry deliberately carries no single-tap pointer family, and
+scrub/swipe/dbltap are fullscreen-gated by design, so the first probe's
+"engine dead on bare adoption" readings (G1/G2) were wrong expectations —
+re-probed against the product's ACTUAL gate surface
+(`check/.tmp/bare-engine-probe.mjs`): fs-armed scrub commits a seek, fs
+center-dbltap toggles, focused Space toggles, hold-to-speed boosts — all
+PASS on a no-controls bare adoption. The real gap is structural and lives
+only with `controls` present: **the UA controls widget consumes
+pointerdown/up inside its closed shadow tree before the page sees them in
+EVERY posture** — re-measured under the fullscreen gate too
+(`check/.tmp/bare-ctl-fs-probe.mjs`: C1 only stray `pointermove`s escape,
+C2 no seek), so a controls video has no gesture surface anywhere and the
+keyboard plane yields on focus (the earlier double-act arm). User
+direction resolved both product questions: the tier strips `controls` at
+adoption (restore on destroy), and the fs-flagged intents open in normal
+view for bare shells.
+
+- **The surface takeover (shell.js).** `#adoptBareSurface()` in the boot
+  step list, bare identity only (`BARE_SDK_NAME` — now contract
+  vocabulary, moved out of detection.js so the shell plane and the input
+  gate read the adoption identity from the one source): one IDL write
+  `video.controls = false`, restore deferred onto the destroy scope —
+  every teardown path (kernel destroyAll, destroy-readopt, abandon-boot)
+  hands the video back native. `enterFullscreen()` is the bare surface's
+  fullscreen entry (the stripped controls took their button with them):
+  `container.requestFullscreen()` under user activation, rejection
+  surfaced by the existing fullscreenerror watcher; SDK shells never call
+  it.
+- **The gesture-space gate (actions.js).** `IntentGates` owns the bare
+  fact (`setBareSpace`, set once per shell at the one `attachInputActions`
+  call site, riding the one-shell-per-realm law); `gateOpen` folds
+  `spaceOpen = fs || bare`, the snapshot stamp compares against the
+  composite, and the exported `spaceOpen()` replaces every engine `fs`
+  read for intent eligibility — the bare shell's fs-flagged intents
+  (scrub/swipe/dbltap/pinch rows keep `fs: true`) arm in normal view
+  because their gesture space IS the adopted surface; SDK shells keep the
+  fullscreen-only law byte-identical. `isBare()` serves the zone
+  reference: a bare surface's edge zones resolve against the VIDEO box
+  (the cached press rect), not the viewport — the behavioral edge
+  consumers are no longer fs-only, so the inline telemetry-only zone
+  excuse no longer covers the bare shape.
+- **The tap family.** `tap: "Tap Play/Pause"` in `GESTURE_LABELS` (the
+  sixth family; schema toggle + panel label derive); a `tap-toggle`
+  INPUT_ACTIONS row (`fs: false`); the engine dispatches the pooled tap
+  detail on an owned plain tap (elapsed < hold timeout, distance ≤ the
+  hold-cancel bound); the action layer's `#tap()` refuses non-bare shells
+  — an SDK player's click-to-play is its own native surface, so the
+  dispatch is inert there by consumer contract, and the prevent-scope
+  rule still passes the plain tap's whole native stream through
+  untouched. `#dbltap` gains the bare normal-view arm: center dbltap IS
+  the fullscreen entry; in fullscreen the existing semantics stand. The
+  keyboard yield arm needs no change — it live-reads `el.controls`, and
+  the strip removes it.
+- **Check rows.** gestures case second boot (controls fixture + real blob
+  feed): strip at adoption, tap toggles in normal view, scrub commits a
+  seek in normal view (no fs stub — the space gate itself is the row's
+  subject), center dbltap enters REAL fullscreen (the gesture supplies
+  the activation; no stub), video removal destroys the shell and restores
+  controls (held detached reference — the restore writes the attribute
+  back on the removed element). The discovery blob fixture carries no
+  `controls`, so its four rows are untouched by the strip. The bare-surface
+  boot rides the manual boot ceremony (the discovery case's `bootAttempt`
+  shape) — the stage's `boot()` throws when no shell attaches, and the bare
+  tier needs the blob feed BEFORE the shell can exist.
+- **The RO-churn fix that rode the batch (src — kernel/discovery.js).** The
+  gestures case is the first case to END on a bare page, and the audit net
+  reads only the case's final page — which surfaced a pre-existing bare-tier
+  burst: 12–13 Firefox "ResizeObserver loop completed with undelivered
+  notifications" page errors per bare boot. The mechanism: for a present +
+  already-minimum-sized but identity-less candidate, `VideoProbe.#consider`
+  re-watched it in the layout gate → the gate delivered immediately (the box
+  already qualifies) → re-ran `#consider` → re-watched — an
+  observe/deliver/re-observe cycle per media event, and re-observing a
+  target inside its own delivery is the exact shape the spec limits to one
+  delivery per frame (one error per cycle). The accidental cycle was ALSO
+  the bare tier's accidental identity poller: the media tap listened only
+  for loadedmetadata/loadeddata/play, and `play` fires when play() is
+  INVOKED — before playback starts, so `played.length` is still 0. The fix
+  is two-sided: the watch guards skip re-watching a present + minimum box
+  (`#consider` tail and `#finish`'s null-sdk arm — the latter's caller
+  `#tryFinish` proved the box one call-frame earlier), and `watchMediaEvents`
+  gains `playing` + `timeupdate` capture listeners — the events where the
+  played leg can actually complete. Both fire only while playing, and every
+  consider short-circuits at the identity+size check once a candidate
+  qualifies, so the steady-state cost is the repeat path's one WeakMap read
+  per event until the boot fires. Floor-probed clean (bisect probe: the
+  exact discovery blob page boots AND reports errs=0 on both the margin and
+  no-margin shapes; the no-userscript control never fired the burst, and
+  the pre-fix observation logged the 13 watch cycles at ~8ms cadence).
+- **The focused-document denial (check only).** The dbltap-fullscreen row
+  failed 3/3 in the battery while passing every probe replica; failure-time
+  diagnostics (gesture-event recorder + a `requestFullscreen` rejection
+  wrapper) pinned it: taps + dbltap all dispatched, activation
+  active+transient, but `TypeError: Fullscreen request denied` — the spec's
+  document-not-focused rejection. A headed battery run minutes deep loses
+  OS focus to the user's own window; a fresh-launch probe never sees it
+  (the same environment-correlation class the hidden-flush clock row once
+  recorded). Fix: `BrowserSession.focusWindow()` (driver.mjs — switchTo on
+  the current handle plus the tiling manager's focus verb, best-effort)
+  called before the row, and the row note carries
+  hasFocus/activation/gesture/fs-event state on fail. The inline hold row's
+  one-off empty-recorder failure the same pair of runs was the same class
+  at a different row and did not recur in any subsequent run.
+- **No counted census row moved** (no new listener/observer/timer
+  vocabulary; the tap dispatch rides the pooled per-family detail; the two
+  new media-event listeners ride the existing page-lifetime controller).
+  Battery receipt: three consecutive all-green full-battery runs (274 rows
+  each; 121.0/121.4/121.0s).
 
 The series'
 record-only commits changed

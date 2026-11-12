@@ -58,7 +58,7 @@ function status(rows, name, ok, note = null) {
   rows.push({ name, status: ok ? "pass" : "fail", note: ok ? null : note, ms: null });
 }
 
-export async function run({ session, baseUrl, boot }) {
+export async function run({ session, baseUrl, boot, bundle }) {
   const rows = [];
   await boot();
   await recordGestureEvents(session);
@@ -1044,6 +1044,178 @@ export async function run({ session, baseUrl, boot }) {
   status(rows, "non-finite event intake rejected at the IDL conversion (native admission gate)",
     controlOk === true && hostileOk === true,
     gate.length + " rejectable attempts all TypeError + " + intakes.join("; "));
+
+  // ---- The bare tier's surface takeover (second boot, controls fixture) ----
+  // With the native controls attribute present, Firefox's UA controls widget
+  // consumes pointerdown/up inside its closed shadow tree before the page
+  // sees them, in EVERY posture (floor-probed: check/.tmp/bare-ctl-fs-probe.mjs
+  // - only stray pointermoves escape). The tier strips the attribute at
+  // adoption, so the engine becomes the control surface: tap play/pause,
+  // dbltap fullscreen entry, and the fs-flagged intents arm in normal view
+  // (the gesture-space gate opens for the bare shell; SDK shells keep the
+  // fullscreen-only law).
+  session.registerFixture("/check/bare-surface", `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>bare surface</title>
+<style>
+  #player { position: relative; width: 640px; height: 360px; margin: 40px; }
+  video { width: 100%; height: 100%; display: block; }
+</style></head>
+<body style="background:#000">
+  <div id="player"><video id="check-video" controls playsinline></video></div>
+</body>
+</html>`);
+  const bareRect = () => session.eval(function main() {
+    const r = document.querySelector("video").getBoundingClientRect();
+    return { x: r.left, y: r.top, w: r.width, h: r.height };
+  });
+  const bareState = () => session.eval(function main() {
+    const v = document.querySelector("video");
+    return {
+      paused: v.paused,
+      t: Math.round(v.currentTime * 10) / 10,
+      controls: v.controls,
+      fs: document.fullscreenElement ? (document.fullscreenElement.id || document.fullscreenElement.tagName) : null
+    };
+  });
+  const bareTap = async (x, y) => {
+    const p = new Pointer("bare-tap", Pointer.Type.MOUSE);
+    await raw.actions({ async: true }).insert(
+      p,
+      p.move({ x: Math.round(x), y: Math.round(y), origin: Origin.VIEWPORT, duration: 0 }),
+      p.press(Button.LEFT),
+      p.release(Button.LEFT)
+    ).perform();
+  };
+
+  // Manual boot ceremony (the discovery case's bootAttempt shape), NOT the
+  // stage's boot(): the bare tier needs the blob feed BEFORE the shell can
+  // exist (evidence bar: blob: currentSrc + played.length), and the stage's
+  // boot throws when the shell never attaches. The window rect is re-asserted
+  // because the first boot's dbltap row drove REAL fullscreen, which can
+  // reshape the headed window.
+  await session.normalizeWindowRect();
+  await session.navigate(`${baseUrl}/check/bare-surface?boot=${Date.now()}`);
+  await session.injectGMRealm({ storage: { "pf:configs": { discovery: { bareVideos: true } } } });
+  await session.injectBundle(bundle);
+  await session.wakeVideos();
+  const bareFed = await session.evalAsync(function main(done) {
+    fetch("/check-video.mp4")
+      .then((r) => r.blob())
+      .then((b) => {
+        const v = document.querySelector("#check-video");
+        v.src = URL.createObjectURL(b);
+        v.muted = true;
+        v.addEventListener("playing", () => done({ ok: true }), { once: true });
+        v.play().catch((err) => done({ ok: false, why: `play rejected: ${err}` }));
+        setTimeout(() => done({ ok: false, why: "playing never fired" }), 6000);
+      })
+      .catch((err) => done({ ok: false, why: `fetch failed: ${err}` }));
+  });
+  const bareShell = await session.waitFor(function main() {
+    return document.querySelector(".pf-shell") !== null ? { ready: true } : null;
+  }, 9000, 120).catch(() => null);
+  if (!bareFed?.ok || bareShell === null) {
+    status(rows, "bare surface boot (controls fixture)", false,
+      `fed=${JSON.stringify(bareFed)} shell=${bareShell !== null}`);
+  } else {
+    // Failure-time diagnostics for the fs/dbltap rows: the shell's gesture
+    // dispatches and the document's fullscreen outcomes, page-lifetime. The
+    // row notes read these on fail - a fullscreenElement=null answer without
+    // the dispatched gesture, a dispatched gesture with a rejection, or a
+    // stale activation answer each name a different defect.
+    await session.eval(function main() {
+      window.__pfBare = { events: [], fsErrs: [], fsChanges: 0 };
+      const host = document.querySelector(".pf-shell");
+      if (host) {
+        host.addEventListener("pf:gesture-tap", () => window.__pfBare.events.push("tap"));
+        host.addEventListener("pf:gesture-dbltap", () => window.__pfBare.events.push("dbltap"));
+      }
+      document.addEventListener("fullscreenerror", () => window.__pfBare.fsErrs.push("error"));
+      document.addEventListener("fullscreenchange", () => window.__pfBare.fsChanges++);
+      // Record the actual rejection reason: the spec fires fullscreenerror
+      // without one, and the shell's own catch logs at debug level (off).
+      const orig = Element.prototype.requestFullscreen;
+      Element.prototype.requestFullscreen = function (...args) {
+        return orig.apply(this, args).catch((err) => {
+          window.__pfBare.fsErrs.push(`${err?.name}: ${String(err?.message).slice(0, 100)}`);
+          throw err;
+        });
+      };
+    });
+    const bareStart = await bareState();
+    status(rows, "bare surface: adoption strips native controls", bareStart.controls === false,
+      `video.controls=${bareStart.controls} (the fixture carries the attribute)`);
+
+    const r1 = await bareRect();
+    await session.eval(function main() { document.querySelector("video").pause(); });
+    await sleep(300);
+    const tapBefore = await bareState();
+    await bareTap(r1.x + r1.w / 2, r1.y + r1.h * 0.4);
+    await sleep(500);
+    const tapAfter = await bareState();
+    status(rows, "bare tap toggles playback (normal view)", tapBefore.paused !== tapAfter.paused,
+      `paused ${tapBefore.paused}->${tapAfter.paused}`);
+
+    const r2 = await bareRect();
+    await session.eval(function main() {
+      const v = document.querySelector("video");
+      v.currentTime = 1;
+      return v.play();
+    });
+    await sleep(400);
+    const scrubBefore = await bareState();
+    const bareP = new Pointer("bare-scrub", Pointer.Type.MOUSE);
+    await raw.actions({ async: true }).insert(
+      bareP,
+      bareP.move({ x: Math.round(r2.x + r2.w * 0.3), y: Math.round(r2.y + r2.h * 0.4), origin: Origin.VIEWPORT, duration: 0 }),
+      bareP.press(Button.LEFT),
+      bareP.move({ x: Math.round(r2.x + r2.w * 0.6), y: Math.round(r2.y + r2.h * 0.4), origin: Origin.VIEWPORT, duration: 100 }),
+      bareP.move({ x: Math.round(r2.x + r2.w * 0.85), y: Math.round(r2.y + r2.h * 0.4), origin: Origin.VIEWPORT, duration: 100 }),
+      bareP.release(Button.LEFT)
+    ).perform();
+    await sleep(800);
+    const scrubAfter = await bareState();
+    status(rows, "bare scrub commits a seek (normal view, no fs stub)", scrubAfter.t > scrubBefore.t + 2,
+      `t ${scrubBefore.t}->${scrubAfter.t}`);
+
+    const r3 = await bareRect();
+    // The fullscreen denial class: requestFullscreen rejects when the
+    // DOCUMENT is not focused (spec step, independent of user activation -
+    // a headed battery run minutes deep loses OS focus to the user's own
+    // window). Re-assert focus and record the state with the row.
+    await session.focusWindow();
+    await session.eval(function main() { document.querySelector("video").pause(); });
+    await sleep(300);
+    const act = await session.eval(function main() {
+      return { active: navigator.userActivation.isActive, transient: navigator.userActivation.hasBeenActive, focused: document.hasFocus() };
+    });
+    await bareTap(r3.x + r3.w / 2, r3.y + r3.h / 2);
+    await sleep(80);
+    await bareTap(r3.x + r3.w / 2, r3.y + r3.h / 2);
+    await sleep(900);
+    const fsAfter = await bareState();
+    const bareDiag = await session.eval(function main() { return window.__pfBare; });
+    status(rows, "bare center dbltap enters real fullscreen", fsAfter.fs !== null,
+      `fullscreenElement=${JSON.stringify(fsAfter.fs)} paused=${fsAfter.paused} events=${JSON.stringify(bareDiag.events)} fsErrs=${JSON.stringify(bareDiag.fsErrs)} fsChanges=${bareDiag.fsChanges} act=${JSON.stringify(act)}`);
+    await session.eval(function main() { document.exitFullscreen()?.catch(() => {}); });
+    await sleep(400);
+
+    await session.eval(function main() {
+      const v = document.querySelector("video");
+      window.__bareDetached = v;
+      v.remove();
+    });
+    await sleep(1200);
+    const bareTeardown = await session.eval(function main() {
+      return {
+        shell: document.querySelector(".pf-shell") !== null,
+        controls: window.__bareDetached ? window.__bareDetached.controls : null
+      };
+    });
+    status(rows, "bare removal: shell destroyed and controls restored", bareTeardown.shell === false && bareTeardown.controls === true,
+      `shell=${bareTeardown.shell} controls(restored)=${bareTeardown.controls}`);
+  }
 
   return rows;
 }

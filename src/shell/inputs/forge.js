@@ -1,4 +1,4 @@
-import { allowsIntent, allowsAnyIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo, cancelEase } from "./actions.js";
+import { allowsIntent, allowsAnyIntent, isKeyArmed, KEY_BINDINGS, GESTURE_EVENTS, easeTransformTo, cancelEase, spaceOpen, isBare } from "./actions.js";
 import { TUNING, isBenignMediaPolicyError } from "../../shared/core.js";
 import { deepestActiveElement, isInsideShell, fs, subscribeFullscreen, DOMManager, layoutViewport } from "../../shared/dom.js";
 import { logger, Scope, delay } from "../../shared/runtime.js";
@@ -132,6 +132,7 @@ const pinchDetail = { zone: "", method: "pointer", direction: "" };
 const swipeStartDetail = { zone: "", method: "pointer", direction: "" };
 const swipeDetail = { zone: "", method: "pointer", direction: "", distance: 0 };
 const dbltapDetail = { zone: "", method: "pointer" };
+const tapDetail = { zone: "", method: "pointer" };
 const keyDetail = { method: "keyboard", direction: undefined };
 // Scrub's per-name detail payload, refilled in place by ScrubStroke.advance
 // (same
@@ -946,11 +947,12 @@ export class InputForge {
     }, { signal });
 
     subscribeFullscreen(() => {
-      this.setTrackpadPinchEnabled(fs);
+      this.setTrackpadPinchEnabled(spaceOpen());
     }, this.#scope.signal);
     // Reconcile now, not just on the next change: a shell that spawns while
-    // already fullscreen must get the wheel listener from frame one.
-    this.setTrackpadPinchEnabled(fs);
+    // already fullscreen (or a bare surface, whose space is always open)
+    // must get the wheel listener from frame one.
+    this.setTrackpadPinchEnabled(spaceOpen());
 
     forgeRegistry.add(this);
   }
@@ -1046,18 +1048,20 @@ export class InputForge {
   }
 
   #zoneForPoint(pointerEvent) {
-    // Edge zones only steer fullscreen gestures (dbltap edge-skip, swipe-down
-    // exit - both fs-gated), so while the fs gate is open the reference is the
-    // SAME fill box every geometry consumer reads (shell.referenceBox) - the
-    // SDK container's own rect, which in the SDK's fullscreen IS the
-    // edge-to-edge gesture space (the gate's fs only arms in the video's own
-    // document, and there the fullscreened tree is the SDK's container tree).
-    // Inline the player occupies only the viewport: a fullscreen-vs-player
-    // confusion could name edges the player does not have, so the reference
-    // becomes the surface-invariant viewport width. Every behavioral zone
-    // consumer is fs-gated (the inline zone is telemetry only - hold/release
-    // details and the press breadcrumbs), which is exactly why fs closing may
-    // degrade the reference instead of breaking a gesture. Both widths are
+    // Edge zones steer the fs-flagged family gestures (dbltap edge-skip,
+    // swipe-down exit - fullscreen-gated for an SDK shell), so while the
+    // gesture space is fullscreen the reference is the SAME fill box every
+    // geometry consumer reads (shell.referenceBox) - the SDK container's
+    // own rect, which in the SDK's fullscreen IS the edge-to-edge gesture
+    // space (the gate's fs only arms in the video's own document, and there
+    // the fullscreened tree is the SDK's container tree). Inline the player
+    // occupies only the viewport: a fullscreen-vs-player confusion could
+    // name edges the player does not have, so the reference becomes the
+    // surface-invariant viewport width. The bare surface's inline exception:
+    // its fs-flagged intents arm in normal view (the tier owns the surface),
+    // so the behavioral consumers there need REAL edges - the reference is
+    // the video box the press was hit-tested against (the cached press rect,
+    // populated by #hitTestVideo before this read). Both widths are
     // real-world reads: the fs box rides the container's own laid-out rect,
     // the inline reference layoutViewport()'s root-element box - the laid-out
     // clientX domain presses land in - and the reported innerWidth fallback
@@ -1065,7 +1069,9 @@ export class InputForge {
     // missing-global paranoia.
     const screenW = fs
       ? (this.#boxFor?.()?.width ?? 0) || layoutViewport().width
-      : layoutViewport().width;
+      : isBare()
+        ? (this.#videoRect?.width ?? 0) || layoutViewport().width
+        : layoutViewport().width;
     if (pointerEvent.clientX < screenW * EDGE_ZONE_RATIO) {
       return "left-edge";
     } else if (pointerEvent.clientX > screenW * EDGE_ZONE_START) {
@@ -1130,7 +1136,7 @@ export class InputForge {
   }
 
   #checkPinch() {
-    if (!fs || this.#pinchFired || this.#pinchStartDistance < PINCH_MIN_DISTANCE_PX) {
+    if (!spaceOpen() || this.#pinchFired || this.#pinchStartDistance < PINCH_MIN_DISTANCE_PX) {
       return;
     }
     if (!captureFirstTwo(this.#pointers, firstTwoPointers)) {
@@ -1210,6 +1216,18 @@ export class InputForge {
     if (tag === "SELECT" || tag === "OPTION") {
       // Letter keys in a focused select are native typeahead, not hotkeys -
       // even KeyS (panel toggle, allowControlFocus) yields to them.
+      return false;
+    }
+    if (tag === "VIDEO" && el.controls) {
+      // A focused <video controls> is a native keyboard surface of its own:
+      // Space toggles play, arrows seek/volume, Home/End/M all act. Yielding
+      // here is the same class as the SELECT typeahead above - the two
+      // surfaces would otherwise DOUBLE-act (floor-probed on real Firefox
+      // 160 driver input, check/.tmp/bare-controls-probe.mjs K1/K2: Space
+      // play-then-pause, ArrowRight seeks past the engine's +10 to the
+      // duration clamp). No fixture video carries controls, so no existing
+      // row rides this branch; a focused controls-less video (the SDK stub
+      // shape) keeps hotkey ownership as before.
       return false;
     }
     if (tag === "INPUT") {
@@ -1379,12 +1397,13 @@ export class InputForge {
       this.#pointerHold.clear();
     }
 
-    // The `fs` gate and the intent gates drive the session only until it
-    // latches: once a scrub/swipe starts (both are fs-gated intents that began
-    // fullscreen), #gestureFsActive replaces the per-move `fs` read and the
-    // allowsIntent scans for the rest of the move stream - the same decisions
-    // stay fixed mid-session.
-    if ((this.#gestureFsActive || fs) && !this.#pointerHold.holding) {
+    // The gesture-space gate and the intent gates drive the session only
+    // until it latches: once a scrub/swipe starts (both are space-gated
+    // intents - fullscreen for an SDK shell, the bare tier's adopted
+    // surface in any posture), #gestureFsActive replaces the per-move
+    // space read and the allowsIntent scans for the rest of the move
+    // stream - the same decisions stay fixed mid-session.
+    if ((this.#gestureFsActive || spaceOpen()) && !this.#pointerHold.holding) {
       if (!this.#scrub.active && !this.#swipe.active) {
         // Intent gates are sampled live: toggling a setting mid-session
         // applies to the very next move.
@@ -1482,14 +1501,26 @@ export class InputForge {
     } else if (
       ownedTap &&
       elapsed < HOLD_TIMEOUT_MS &&
-      this.#gestureZone !== null &&
-      allowsIntent("dbltap")
+      this.#gestureZone !== null
     ) {
       if (this.#tap.tap(now) === "second") {
-        this.#suppressNextActivations();
-        dbltapDetail.zone = this.#gestureZone;
-        dbltapDetail.method = "pointer";
-        this.#dispatch(GESTURE_EVENTS.dbltap, dbltapDetail);
+        if (allowsIntent("dbltap")) {
+          this.#suppressNextActivations();
+          dbltapDetail.zone = this.#gestureZone;
+          dbltapDetail.method = "pointer";
+          this.#dispatch(GESTURE_EVENTS.dbltap, dbltapDetail);
+        }
+      } else if (allowsIntent("tap") && distance <= HOLD_CANCEL_MOVE_PX) {
+        // The tap family: a plain tap the engine owned (the prevent-scope
+        // rule passed its native stream through untouched). The action
+        // layer refuses non-bare shells - an SDK player's click-to-play is
+        // its own - so this dispatch is inert there by consumer contract.
+        // The move bound keeps a trailing micro-drag inside a quick
+        // release from toggling (a stroke past the hold-cancel distance
+        // was a drag, not a tap).
+        tapDetail.zone = this.#gestureZone;
+        tapDetail.method = "pointer";
+        this.#dispatch(GESTURE_EVENTS.tap, tapDetail);
       }
     }
     // A plain tap has nothing owned to replay: by the prevent-scope rule its

@@ -24,12 +24,26 @@ export async function run({ session, baseUrl }) {
   const rows = [];
   const KERNEL = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "src", "kernel");
   // The route mirrors the module's real directory (a cache-busting prefix in
-  // front of /kernel/), so detection.js's one relative import - the
-  // import-clean contract.js sibling - resolves against a served neighbor
-  // instead of dead-ending at the route prefix (the first run's abort).
+  // front of /kernel/), so detection.js's relative imports - the contract.js
+  // sibling and the shared store/runtime chain - resolve against served
+  // neighbors instead of dead-ending at the route prefix (the first run's
+  // abort).
   const base = `/check/sdk-${Date.now()}/kernel`;
   session.registerAsset(`${base}/detection.js`, Buffer.from(await readFile(join(KERNEL, "detection.js"), "utf8")), "text/javascript");
   session.registerAsset(`${base}/contract.js`, Buffer.from(await readFile(join(KERNEL, "contract.js"), "utf8")), "text/javascript");
+  // detection.js's bare-tier gate reads the configs doc through the shared
+  // store plane - the import chain the page realm must serve alongside the
+  // kernel neighbors (store.js -> runtime.js; runtime imports nothing).
+  // Both load side-effect-free in-page (ConfigStore's read is lazy), and the
+  // positive SDK paths never reach the tier read - the bare arm is the only
+  // getConfigValue call site, and every stub here satisfies a record.
+  const SHARED = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "src", "shared");
+  // ../shared/ from ${base}/kernel/detection.js normalizes to the sdk-<ts>
+  // root's /shared/ (the URL parser removes the dot segment before the
+  // request), so the routes are registered in normalized form.
+  const sdkRoot = base.slice(0, -"/kernel".length);
+  session.registerAsset(`${sdkRoot}/shared/store.js`, Buffer.from(await readFile(join(SHARED, "store.js"), "utf8")), "text/javascript");
+  session.registerAsset(`${sdkRoot}/shared/runtime.js`, Buffer.from(await readFile(join(SHARED, "runtime.js"), "utf8")), "text/javascript");
 
   const probe = await session.eval(async (url) => {
     const { SDK_REGISTRY, resolveAdoptionHome } = await import(url);

@@ -1,12 +1,13 @@
 import { Kernel } from "./kernel/kernel.js";
-import { DEBUG_HASH_TAG } from "./kernel/contract.js";
+import { DEBUG_HASH_TAG, BARE_VIDEOS_KEY } from "./kernel/contract.js";
 import { Shell } from "./shell/shell.js";
 import { installMenuCommands, installFrameDiagnostics } from "./kernel/kernel.js";
 import { installContextBridge, requestFullscreenProvision } from "./shared/page.js";
 import { installVideoProbe } from "./kernel/discovery.js";
 import { MIN_VIDEO_WIDTH, MIN_VIDEO_HEIGHT } from "./kernel/discovery.js";
+import { clearDescriptorCache } from "./kernel/detection.js";
 import { logger } from "./shared/runtime.js";
-import { getConfigValue, setConfigValue, deleteConfigField } from "./shared/store.js";
+import { KEYS, getConfigValue, setConfigValue, deleteConfigField, watchStorageKey, invalidateConfigCache } from "./shared/store.js";
 import { initFullscreenGate } from "./shared/dom.js";
 
 // The version lives in the banner and is read from the installed script at
@@ -115,8 +116,22 @@ function bootstrap() {
   // (which the reset commands resolve their shell host through) boots after
   // this call, so the commands read it through a resolver hook at click time.
   const menuKernelRef = { current: null };
+  // The probe handle rides a ref box: the bare-tier flip hook lives in the
+  // menu's closure, which is installed here - BEFORE the probe (line ~250) -
+  // so the hook reads the current probe through it instead of racing the
+  // install order.
+  const probeRef = { current: null };
+  // The bare tier's flip applier: drop every cached matcher descriptor
+  // (the tier gate reads live config - the one invalidation the parent
+  // stamp cannot express), then re-run the pre-boot seed walk under the
+  // new posture. No-op once the kernel booted (the probe's refresh is);
+  // after a boot the kernel's own discovery tap governs later candidates.
+  const applyBareFlip = () => {
+    clearDescriptorCache();
+    probeRef.current?.refresh();
+  };
   if (window.top === window) {
-    installMenuCommands(() => menuKernelRef.current);
+    installMenuCommands(() => menuKernelRef.current, { onBareFlip: applyBareFlip });
   }
   // The diagnostics responder is EVERY frame's (the command is top-frame
   // only, the echo answer is realm-wide - each script instance reports its
@@ -244,10 +259,27 @@ function bootstrap() {
   } catch (error) {
     logger.error("entry", "Frame bridge install failed", error);
   }
-  const stopProbe = installVideoProbe({
+  const probe = installVideoProbe({
     minWidth: MIN_VIDEO_WIDTH,
     minHeight: MIN_VIDEO_HEIGHT,
     onCandidate: boot
+  });
+  probeRef.current = probe;
+  // The menu toggle runs top-frame only; the writing realm applies its flip
+  // through the hook above (own-write echoes are filtered), so this watch
+  // exists for SIBLING realms: another frame or another tab hears the write
+  // with remote === true and re-arms its own discovery. One latched read
+  // dedupes value-neutral rewrites (a config doc write that did not touch
+  // the key must not clear every cached descriptor).
+  let bareLast = getConfigValue(BARE_VIDEOS_KEY, false);
+  watchStorageKey(KEYS.configs, () => {
+    invalidateConfigCache();
+    const next = getConfigValue(BARE_VIDEOS_KEY, false);
+    if (next === bareLast) {
+      return;
+    }
+    bareLast = next;
+    applyBareFlip();
   });
   // The probe owns discovery until it boots the kernel (which detaches it). If
   // the document is torn down before any candidate appears, release its capture
@@ -255,7 +287,7 @@ function bootstrap() {
   // after restore is still caught - mirroring the kernel's pagehide handling.
   window.addEventListener("pagehide", (event) => {
     if (!event.persisted) {
-      stopProbe();
+      probe.stop();
     }
   });
 }

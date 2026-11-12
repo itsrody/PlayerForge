@@ -2,7 +2,7 @@ import { logger, setDebugRuntime, postTask, Scope, runSteps, Fan } from "../shar
 import { randomNonce } from "../shared/core.js";
 import { KEYS, watchStorageKey, gmSetValue, invalidateConfigCache, getConfigValue, setConfigValue, gmRegisterMenu, gmUnregisterMenu } from "../shared/store.js";
 import { getDomainKey } from "../shared/page.js";
-import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, DEBUG_HASH_TAG, FRAMEWORK_TUNING } from "./contract.js";
+import { SHELL_MARKER, GESTURE_EVENTS, DEBUG_LOGS_KEY, BARE_VIDEOS_KEY, DEBUG_HASH_TAG, FRAMEWORK_TUNING } from "./contract.js";
 import { resolveAdoptionHome } from "./detection.js";
 import { forEachVideoInDocument, meetsMinSize, createLayoutGate, createOnScreenGate, isOnScreen, createDiscoveryTap } from "./discovery.js";
 
@@ -956,15 +956,21 @@ export function installFrameDiagnostics(resolveKernel = null) {
  *  previously returned handle so the manager updates the item in place. */
 class MenuCommands {
   #debugId = null;
+  #bareId = null;
   #diagId = null;
   #filterId = null;
   #syncId = null;
   /** () -> kernel: the entry keeps the kernel reference for commands to
    *  resolve their target shell host at click time. */
   #resolveKernel = null;
+  /** Optional flip hooks from the entry: the bare toggle must apply its
+   *  flip in the WRITING realm too (watchStorageKey filters own echoes),
+   *  and the probe handle lives at entry level. */
+  #onBareFlip = null;
 
-  constructor(resolveKernel = null) {
+  constructor(resolveKernel = null, hooks = null) {
     this.#resolveKernel = resolveKernel ?? null;
+    this.#onBareFlip = hooks?.onBareFlip ?? null;
   }
 
   #hostFor(label) {
@@ -1008,8 +1014,29 @@ class MenuCommands {
     );
   }
 
+  #refreshBare() {
+    const enabled = getConfigValue(BARE_VIDEOS_KEY, false);
+    // The in-place update shape as #refreshDebug. The click writes the
+    // configs key and applies the flip in THIS realm through the entry's
+    // hook - watchStorageKey filters own echoes (remote === false), so the
+    // writing realm's matcher cache and discovery probe would never hear
+    // the write otherwise. Sibling frames apply through the entry's
+    // storage echo watch instead (see entry.js).
+    this.#bareId = gmRegisterMenu(
+      `\u{1F3AC} Bare Videos:${enabled ? "On" : "Off"}`,
+      () => {
+        const next = !getConfigValue(BARE_VIDEOS_KEY, false);
+        setConfigValue(BARE_VIDEOS_KEY, next);
+        this.#onBareFlip?.();
+        this.#refreshBare();
+      },
+      { id: this.#bareId, title: "Adopt bare <video> players (blob/MSE sources)" }
+    );
+  }
+
   install() {
     this.#refreshDebug();
+    this.#refreshBare();
     this.#diagId = gmRegisterMenu(
       "\u{1F50D} Dump Frame State",
       () => {
@@ -1033,16 +1060,16 @@ class MenuCommands {
       { title: "Restore the default subtitle sync offset" }
     );
     return () => {
-      for (const id of [this.#debugId, this.#diagId, this.#filterId, this.#syncId]) {
+      for (const id of [this.#debugId, this.#bareId, this.#diagId, this.#filterId, this.#syncId]) {
         if (id != null) {
           gmUnregisterMenu(id);
         }
       }
-      this.#debugId = this.#filterId = this.#syncId = null;
+      this.#debugId = this.#bareId = this.#filterId = this.#syncId = null;
     };
   }
 }
 
-export function installMenuCommands(resolveKernel = null) {
-  return new MenuCommands(resolveKernel).install();
+export function installMenuCommands(resolveKernel = null, hooks = null) {
+  return new MenuCommands(resolveKernel, hooks).install();
 }

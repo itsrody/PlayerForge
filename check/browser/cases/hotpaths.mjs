@@ -36,6 +36,10 @@ export async function run({ session, baseUrl }) {
   // zero-import leaf), so two files serve the identity engine whole.
   session.registerAsset(`/check/hotpath/kernel/contract.js`, Buffer.from(await readFile(join(root, "kernel", "contract.js"), "utf8")), "text/javascript");
   session.registerAsset(`/check/hotpath/kernel/detection.js`, Buffer.from(await readFile(join(root, "kernel", "detection.js"), "utf8")), "text/javascript");
+  // The bare-tier gate's configs read rides the shared store plane - the two
+  // neighbors detection.js's relative import chain needs served (store.js ->
+  // runtime.js; both load side-effect-free in-page).
+  session.registerAsset(`/check/hotpath/shared/store.js`, Buffer.from(await readFile(join(root, "shared", "store.js"), "utf8")), "text/javascript");
 
   const stats = await session.eval(function main(bust) {
     return import(`/check/hotpath/shell/subtitles/forgevtt.js?ts=${bust}`).then(async (forgevtt) => {
