@@ -150,6 +150,23 @@ const REGISTRY = [
   // single unprefixed English word is not SDK-namespaced vocabulary (a
   // page styling a div class="able" would misattribute).
   { name: "AblePlayer", anchors: [".able-media-container", ".able-wrapper"] },
+  // Jellyfin web builds the dialog itself (jellyfin-web master,
+  // src/plugins/htmlVideoPlayer/plugin.js createMediaElement): a
+  // <div class="videoPlayerContainer"> inserted as document.body.firstChild
+  // with the <video class="htmlvideoplayer"> as its direct child, styled
+  // fixed full-viewport flex by the plugin's own style.scss. The video's
+  // .htmlvideoplayer class stays off the list (0-hop law). The vocabulary
+  // predates the fork: jellyfin-web descends from Emby's web client and the
+  // class is verifiable on Emby's own theming surface (Emby community
+  // custom-CSS threads style ".videoPlayerContainer > div", Emby themes
+  // reference it), so one record covers both servers - the servers differ
+  // in the app shell, not the player dialog this record adopts. Registry
+  // batch 4 (Nov 2026): the ring's other candidates verified declines -
+  // PeerTube/MediaCMS/Owncast are Video.js-based (client deps + player
+  // components read from vendor source), Audiobookshelf has no video
+  // player surface at all (client/players is audio-only), Plex/Wistia are
+  // closed-source embeds with no verifiable in-document vocabulary.
+  { name: "Jellyfin", anchors: [".videoPlayerContainer"] },
 ];
 
 /** The registry as a check-tool surface: the registry-coverage case derives

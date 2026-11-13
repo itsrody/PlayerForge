@@ -633,11 +633,11 @@ iframes, same-origin and cross-origin:
   contract plus the one configs read the bare-video tier gates on
   (`BARE_VIDEOS_KEY` through `getConfigValue`; the import graph stays
   kernel-plane downward into shared).
-  22 supported SDK records (JW Player, Video.js, Plyr, ArtPlayer, DPlayer,
+  23 supported SDK records (JW Player, Video.js, Plyr, ArtPlayer, DPlayer,
   MediaElement.js, XGPlayer, Aliplayer, Fluid Player, Flowplayer, Clappr,
   Vidstack, Mux Player, Radiant, Laravel Video Embed, Shaka Player,
   OpenPlayerJS, OvenPlayer, Bitmovin Player, Kaltura PlayKit, NPlayer,
-  AblePlayer), each a set of
+  AblePlayer, Jellyfin), each a set of
   **SDK-namespaced anchor selectors** resolved by the native `closest()`
   walk — the primary arm: `closest(ANCHOR_PROBE)` answers the nearest
   matching ancestor-or-self in ONE C++ call (light DOM AND shadow-internal
@@ -789,6 +789,43 @@ iframes, same-origin and cross-origin:
   runs per surfacing event and its repeat path must stay allocation-free
   (the descriptor cache's own contract); the ONE `AdoptionHome` is built at
   the probe's finish, where the adoption decision lands.
+
+  **Registry batch 4 — the self-hostable media-server ring (Nov 13 2026,
+  user direction "Registry batch 4: media servers"; src — detection.js + sdk
+  case; one record added, seven verified declines).** The batch-2/3
+  verification method over the media-server/app ring. **Jellyfin added**
+  (jellyfin-web master, `src/plugins/htmlVideoPlayer/plugin.js`
+  `createMediaElement`): the plugin builds a
+  `<div class="videoPlayerContainer">` — inserted as
+  `document.body.firstChild`, styled fixed full-viewport flex by the
+  plugin's own `style.scss` — with the `<video class="htmlvideoplayer">` as
+  its direct child (hop 1). The video's `.htmlvideoplayer` class stays off
+  the list (0-hop law). The vocabulary predates the fork: jellyfin-web
+  descends from Emby's web client and the class is verifiable on Emby's own
+  theming surface (Emby community custom-CSS threads style
+  `.videoPlayerContainer > div`, Emby themes reference it), so **one record
+  covers both servers** — the servers differ in the app shell, not the
+  player dialog this record adopts. Seven candidates verified and DECLINED:
+  **PeerTube** is Video.js-based — the client depends on `video.js ^8.24.0`
+  (client/package.json) and `@peertube/player`'s `peertube-player.ts` rides
+  `videojs(playerElement)`; video.js stamps the `.video-js` class itself
+  (the THEOplayer verdict shape). **MediaCMS** is Video.js-based — the
+  project's own README says "customized video.js player", and the player
+  component is `frontend-tools/video-js/src/components/video-player/
+  VideoJSPlayer.jsx`. **Owncast** is Video.js-based —
+  `web/components/video/VideoJS/VideoJS.tsx` rides `videojs(videoElement)`
+  with the `video-js vjs-owncast` class on the media element.
+  **Audiobookshelf** has NO video player surface at all — `client/players/`
+  is `LocalAudioPlayer`/`CastPlayer`/`PlayerHandler` (audio-only topology;
+  the web app plays audiobooks and podcasts, no video-container vocabulary
+  exists). **Plex web** declines closed-source — the served bundle is
+  minified with no stable vendor-namespaced container vocabulary
+  verifiable. **Wistia API embeds** are the Bunny shape — the integrator's
+  host div (`wistia_embed`) carries no video DOM (the video lives in the
+  cross-origin iframe), and the in-frame player is closed-source with no
+  verifiable vocabulary. Registry is now 23 records; the sdk case's
+  per-record rows derive from the registry loop, so the battery grew
+  279 → 280 rows.
 - **discovery.js** — presence machinery: min-size thresholds (100×60),
   on-screen/layout deferral gates (`PresenceGate`, per-instance
   MutationObserver check), the media feed (`DiscoveryTap`: lazy escalation —

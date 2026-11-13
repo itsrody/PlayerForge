@@ -118,7 +118,8 @@ export async function run({ session, baseUrl }) {
       "Kaltura PlayKit": () => stub({ class: "playkit-container" }),
       NPlayer: () => stub({ class: "nplayer" }),
       AblePlayer: () => stub({ class: "able-media-container" }),
-      OvenPlayer: () => stub({ class: "ovenplayer" })
+      OvenPlayer: () => stub({ class: "ovenplayer" }),
+      Jellyfin: () => stub({ class: "videoPlayerContainer" })
     };
 
     for (const record of SDK_REGISTRY) {
