@@ -490,10 +490,14 @@
       }
     }
 
-    /* Touch targets stay 40px square (the touch-friendly law); the hover
-       wash is a circle now - the pill container's own grammar (R5: pill
-       container, pill inset elements). Instant-dim press feedback is the
-       shared pf-button law; focus rings keep the panel's grammar. */
+    /* Touch targets stay 40px square (the touch-friendly law); the glyph
+       rides .pf-icon's 1em sizing at 20px - a half of the circle's box, a
+       step larger than the 18px start (the glyph is the button's whole
+       content, so it reads bigger than the ratio suggests) while the hover
+       wash stays the 40px circle. The wash is a circle - the pill
+       container's own grammar (R5: pill container, pill inset elements).
+       Instant-dim press feedback is the shared pf-button law; focus rings
+       keep the panel's grammar. */
     .pf-forge-btn {
       flex: none;
       width: 40px;
@@ -506,7 +510,7 @@
       border-radius: var(--pf-radius-pill);
       background: transparent;
       color: var(--pf-fg);
-      font-size: 18px;
+      font-size: 20px;
       cursor: pointer;
 
       &:hover {

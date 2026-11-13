@@ -1123,6 +1123,15 @@ export async function run({ session, baseUrl, boot, bundle }) {
       p.release(Button.LEFT)
     ).perform();
   };
+  // Move-only witness: the bar's idle sweep and its reveal ride the
+  // window-capture pointermove stamp, no press needed.
+  const bareMove = async (x, y) => {
+    const p = new Pointer("bare-move", Pointer.Type.MOUSE);
+    await raw.actions({ async: true }).insert(
+      p,
+      p.move({ x: Math.round(x), y: Math.round(y), origin: Origin.VIEWPORT, duration: 0 })
+    ).perform();
+  };
 
   // Manual boot ceremony (the discovery case's bootAttempt shape), NOT the
   // stage's boot(): the bare tier needs the blob feed BEFORE the shell can
@@ -1234,6 +1243,169 @@ export async function run({ session, baseUrl, boot, bundle }) {
     const bareDiag = await session.eval(function main() { return window.__pfBare; });
     status(rows, "bare center dbltap enters real fullscreen", fsAfter.fs !== null,
       `fullscreenElement=${JSON.stringify(fsAfter.fs)} paused=${fsAfter.paused} events=${JSON.stringify(bareDiag.events)} fsErrs=${JSON.stringify(bareDiag.fsErrs)} fsChanges=${bareDiag.fsChanges} act=${JSON.stringify(act)}`);
+    await session.eval(function main() { document.exitFullscreen()?.catch(() => {}); });
+    await sleep(400);
+
+    // ---- The bare shell's forge bar (inline + fs) ----
+    // The tier stripped the native controls, so the bar IS the control
+    // surface in EVERY mode (user-pinned): shown inline under the same idle
+    // sweep, fs only repurposes the 7th button (enter inline / exit in fs).
+    // Bar interactions ride the engine's hud rejection (isInsideShell), so
+    // the __pfBare gesture recorder must read zero through every row below.
+    const bareBar = () => session.eval(function main() {
+      const bar = document.querySelector(".pf-shell")?.shadowRoot
+        ?.querySelector(".pf-forge-bar");
+      if (!bar) {
+        return null;
+      }
+      const btn = bar.querySelector('[data-action="exit"], [data-action="enter"]');
+      const r = bar.getBoundingClientRect();
+      return {
+        hidden: bar.hidden,
+        action: btn?.getAttribute("data-action"),
+        label: btn?.getAttribute("aria-label"),
+        exitCount: bar.querySelectorAll('[data-action="exit"]').length,
+        rect: { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }
+      };
+    });
+    const barBtnCenter = (action) => session.eval(function main(act) {
+      const btn = document.querySelector(".pf-shell")?.shadowRoot
+        ?.querySelector(`.pf-forge-bar [data-action="${act}"]`);
+      if (!btn) {
+        return null;
+      }
+      const r = btn.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    }, action);
+    const bareEventCount = () => session.eval(function main() {
+      return window.__pfBare ? window.__pfBare.events.length : -1;
+    });
+
+    // B1: back inline after the dbltap row's fs exit - the bar STAYS shown
+    // (the bare leg re-pokes on fs exit; the paused video parks it too) and
+    // the 7th button has flipped back to the enter verb. The shown-bar
+    // posture is where the icon's rendered geometry is real (getBBox on a
+    // display:none bar reads zeros): the enter path's box must fit its
+    // viewBox (the redrawn 512-grid pair - the old icon declared 300x280
+    // over 299x341 ink and clipped its bottom corners).
+    const b1 = await bareBar();
+    const b1Icon = await session.eval(function main() {
+      const svg = document.querySelector(".pf-shell")?.shadowRoot
+        ?.querySelector('.pf-forge-bar [data-action="enter"] svg.pf-icon');
+      if (!svg) {
+        return null;
+      }
+      const bb = svg.querySelector("path").getBBox();
+      const vb = svg.getAttribute("viewBox").split(" ").map(Number);
+      return { viewBox: vb, box: { x: bb.x, y: bb.y, w: bb.width, h: bb.height } };
+    });
+    status(rows, "bare bar shows inline after fs exit with the enter verb",
+      b1 !== null && b1.hidden === false && b1.action === "enter" &&
+        b1.exitCount === 0 && b1.label === "Enter fullscreen" &&
+        b1Icon !== null && b1Icon.viewBox[2] === 512 && b1Icon.viewBox[3] === 512 &&
+        b1Icon.box.x >= 0 && b1Icon.box.y >= 0 &&
+        b1Icon.box.x + b1Icon.box.w <= 512 && b1Icon.box.y + b1Icon.box.h <= 512,
+      `bar=${JSON.stringify(b1)} icon=${JSON.stringify(b1Icon)}`);
+
+    // B2: the same idle auto-hide sweep as fs - playing video + no pointer
+    // over the bar hides it after ~2.5s; the next pointermove reveals it.
+    await session.eval(function main() { document.querySelector("video").play(); });
+    await bareMove(10, 10);
+    await sleep(3100);
+    const b2Hidden = await bareBar();
+    await bareMove(b2Hidden.rect.x + b2Hidden.rect.w / 2, b2Hidden.rect.y + b2Hidden.rect.h / 2);
+    await sleep(250);
+    const b2Shown = await bareBar();
+    status(rows, "bare bar rides the same idle sweep inline (hide + pointermove reveal)",
+      b2Hidden.hidden === true && b2Shown.hidden === false && b2Shown.action === "enter",
+      `hidden=${JSON.stringify(b2Hidden.hidden)} revealed=${JSON.stringify({ hidden: b2Shown.hidden, action: b2Shown.action })}`);
+
+    // B3: the repurposed 7th button IS the inline fullscreen entry - a
+    // trusted tap on it drives the same REAL container fullscreen the
+    // center-dbltap verb drives (focus first: the document-not-focused
+    // denial class the dbltap row records). Events compare as a delta: the
+    // tap/dbltap rows above already seeded the recorder.
+    await session.focusWindow();
+    const b3Events = await bareEventCount();
+    const enterBtn = await barBtnCenter("enter");
+    await bareTap(enterBtn.x, enterBtn.y);
+    const b3Fs = await session.waitFor(function main() {
+      return document.fullscreenElement !== null ? { ready: true } : null;
+    }, 4000, 60).catch(() => null);
+    await sleep(300);
+    const b3Bar = await bareBar();
+    const b3Diag = await session.eval(function main() { return window.__pfBare; });
+    status(rows, "bare bar enter button enters real fullscreen (trusted click)",
+      b3Fs !== null && b3Bar.hidden === false && b3Bar.action === "exit" &&
+        b3Diag.events.length === b3Events && b3Diag.fsErrs.length === 0,
+      `fs=${b3Fs !== null} bar=${JSON.stringify({ hidden: b3Bar.hidden, action: b3Bar.action })} events=${JSON.stringify(b3Diag.events)} (baseline ${b3Events}) fsErrs=${JSON.stringify(b3Diag.fsErrs)}`);
+
+    // B4 holds the fs posture; B5/B6 prove chrome-tap neutrality inside it.
+    // The video pauses first so the time readout is a stable witness (a
+    // playing clock advances without any seek), and the paused hold parks
+    // the shown bar visible - the rows assert that visibility so a hidden
+    // bar cannot turn the tap/drag into vacuous video presses.
+    await session.eval(function main() { document.querySelector("video").pause(); });
+    await sleep(300);
+    const b5Bar = await bareBar();
+    const b5Events = await bareEventCount();
+    const b5Before = await bareState();
+    const timeRect = await session.eval(function main() {
+      const t = document.querySelector(".pf-shell")?.shadowRoot
+        ?.querySelector(".pf-forge-time");
+      const r = t.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    });
+    await bareTap(timeRect.x, timeRect.y);
+    await sleep(300);
+    const b5After = await bareState();
+    status(rows, "bare bar time tap: no gesture dispatch, no seek",
+      b5Bar.hidden === false && (await bareEventCount()) === b5Events &&
+        b5After.t === b5Before.t,
+      `barShown=${b5Bar.hidden === false} t ${b5Before.t}->${b5After.t} events ${b5Events}->${await bareEventCount()}`);
+
+    // B6: the seek scrubber works inline-in-fs through the router-free
+    // native input path; the drag still dispatches zero gestures.
+    const range = await session.eval(function main() {
+      const el = document.querySelector(".pf-shell")?.shadowRoot
+        ?.querySelector(".pf-forge-range");
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.left), y: Math.round(r.top), w: r.width, h: r.height };
+    });
+    const b6Shown = await bareBar();
+    const b6Events = await bareEventCount();
+    const b6Before = await bareState();
+    const bareDrag = new Pointer("bare-range", Pointer.Type.MOUSE);
+    await raw.actions({ async: true }).insert(
+      bareDrag,
+      bareDrag.move({ x: range.x + 4, y: range.y + range.h / 2, origin: Origin.VIEWPORT, duration: 0 }),
+      bareDrag.press(Button.LEFT),
+      bareDrag.move({ x: Math.round(range.x + range.w * 0.5), y: range.y + Math.round(range.h / 2), origin: Origin.VIEWPORT, duration: 80 }),
+      bareDrag.move({ x: Math.round(range.x + range.w * 0.8), y: range.y + Math.round(range.h / 2), origin: Origin.VIEWPORT, duration: 80 }),
+      bareDrag.release(Button.LEFT)
+    ).perform();
+    await sleep(600);
+    const b6After = await session.eval(function main() {
+      const v = document.querySelector("video");
+      const range = document.querySelector(".pf-shell")?.shadowRoot
+        ?.querySelector(".pf-forge-range");
+      return {
+        t: Math.round(v.currentTime * 10) / 10,
+        value: range ? Math.round(Number(range.value) * 10) / 10 : null,
+        duration: Math.round(v.duration * 10) / 10
+      };
+    });
+    // The committed clock must track the dragged thumb (t ≈ value) and the
+    // value must sit at the drag target's band (~80% of duration) - the
+    // thumb's start position varies with earlier rows, so the delta to the
+    // BEFORE time is not the contract; value-tracking is.
+    status(rows, "bare bar seek drag commits through the range, zero gestures",
+      b6Shown.hidden === false && Math.abs(b6After.t - b6After.value) <= 0.2 &&
+        Math.abs(b6After.value / b6After.duration - 0.8) <= 0.05 &&
+        (await bareEventCount()) === b6Events,
+      `barShown=${b6Shown.hidden === false} t ${b6Before.t}->${b6After.t}/${b6After.duration} value=${b6After.value} events ${b6Events}->${await bareEventCount()}`);
+
+    // Back inline for the removal row below.
     await session.eval(function main() { document.exitFullscreen()?.catch(() => {}); });
     await sleep(400);
 

@@ -1,6 +1,7 @@
 import { delay } from "../../shared/runtime.js";
 import { subscribeFullscreen } from "../../shared/dom.js";
 import { TUNING, formatTime } from "../../shared/core.js";
+import { BARE_SDK_NAME } from "../../kernel/contract.js";
 import { button, createIconElement, el } from "./ui.js";
 
 /**
@@ -11,9 +12,9 @@ import { button, createIconElement, el } from "./ui.js";
  *
  * Two laws shape it:
  *  - Zero engine gestures. The buttons call the shell API directly (media,
- *    panel, exitFullscreen) instead of dispatching gesture events - the
- *    probe's E1a row pins that a bar tap dispatches nothing, so the engine's
- *    own gesture vocabulary never fires from chrome.
+ *    panel, fullscreen) instead of dispatching gesture events - the probe's
+ *    E1a row pins that a bar tap dispatches nothing, so the engine's own
+ *    gesture vocabulary never fires from chrome.
  *  - Idle auto-hide with WCAG 2.2.1 holds. One self-extending delay sweep:
  *    the witnesses (pointermove/pointerdown/keydown on window CAPTURE - the
  *    engine's document-capture keydown stopImmediatePropagation cannot kill
@@ -23,14 +24,25 @@ import { button, createIconElement, el } from "./ui.js";
  *    the bar, focus within it, or a paused video park the hide until
  *    released.
  *
- * Visibility is the fullscreen gate's own fact: the bar exists only while
- * this document's fullscreenElement contains the shell container (the
+ * Visibility is the shell's own mode fact. An SDK shell shows the bar only
+ * while this document's fullscreenElement contains the shell container (the
  * container-fs shape enterFullscreen() produces, and the same-document
- * root-fs shape a page can produce around it). A cross-frame fullscreen -
- * a PARENT document fullscreening this iframe element - presents no
- * fullscreenElement inside this document and fires no fullscreenchange, so
- * the gate goes dark there by the same recorded construction the fs gate
- * itself rides; forge mode is not entered that way.
+ * root-fs shape a page can produce around it) - inline an SDK player owns
+ * its own chrome, and fullscreen IS forge mode. A bare shell shows the bar
+ * in EVERY mode: the adoption tier stripped the native controls, so the bar
+ * IS the control surface inline as much as in forge mode, under the same
+ * idle sweep. A cross-frame fullscreen - a PARENT document fullscreening
+ * this iframe element - presents no fullscreenElement inside this document
+ * and fires no fullscreenchange, so the fs leg goes dark there by the same
+ * recorded construction the fs gate itself rides; forge mode is not entered
+ * that way (a bare shell's bar stays visible by the bare leg, which is
+ * mode-independent).
+ *
+ * The 7th button rides the mode: inline it is the fullscreen ENTRY (a
+ * discoverable verb beside the center-dbltap entry; the stripped controls
+ * took their own button), fullscreen it is the EXIT. Both verbs ride the
+ * button's trusted click - script-launched requestFullscreen is
+ * activation-denied, the click supplies it.
  *
  * The seek scrubber is a native <input type=range>: the engine's keydown
  * arbitration already declines for a focused input (native arrows own it),
@@ -47,6 +59,10 @@ export class ForgeBar {
   #range;
   #time;
   #playBtn;
+  #fsBtn;
+  /** Bare adoption identity: the bar is the inline control surface (the
+   *  stripped native controls took theirs), not a forge-mode-only strip. */
+  #bare;
   /** Monotonic stamp of the last user activity; the sweep reads it. */
   #lastActive = 0;
   /** The one delay() handle (abort closure); null when disarmed. */
@@ -62,14 +78,18 @@ export class ForgeBar {
     this.#shell = shell;
     this.#actions = actions;
     this.#signal = signal;
+    this.#bare = shell.sdk.name === BARE_SDK_NAME;
     const hud = shell.shellDom.hudLayer;
     this.#build(hud, hud.ownerDocument);
     this.#wire();
     // A shell restored into a live fullscreen (bfcache restore, an embed
-    // fullscreened before the kernel booted) starts visible, not hidden.
+    // fullscreened before the kernel booted) starts visible, not hidden; a
+    // bare shell starts visible in EVERY mode - there is no other control
+    // surface to fall back to.
     const fsEl = document.fullscreenElement;
     this.#live = fsEl != null && fsEl.contains(shell.container);
-    if (this.#live) {
+    this.#syncFsButton();
+    if (this.#bare || this.#live) {
       this.#show();
     }
     // The sweep handle rides delay() without a signal (the one timer
@@ -105,7 +125,7 @@ export class ForgeBar {
     }, root);
     this.#time = el("span", { class: "pf-forge-time" }, root);
     mk("settings", "settings", "Settings");
-    mk("exit", "exit-fullscreen", "Exit fullscreen");
+    this.#fsBtn = mk("exit", "exit-fullscreen", "Exit fullscreen");
     this.#root = root;
     this.#paused = this.#shell.video.paused;
     // The build's static icon is the paused glyph; a video already playing
@@ -140,6 +160,9 @@ export class ForgeBar {
           break;
         case "exit":
           this.#shell.exitFullscreen();
+          break;
+        case "enter":
+          this.#shell.enterFullscreen();
           break;
       }
     }, { signal });
@@ -200,19 +223,38 @@ export class ForgeBar {
     subscribeFullscreen(() => this.#onFsFlip(), signal);
   }
 
-  /** The fullscreen gate's flip: show inside our chain, hide outside it. */
+  /** The fullscreen gate's flip: sync the mode-fact 7th button, then show
+   *  inside our chain, and outside it hide - except a bare shell, whose bar
+   *  is the control surface in EVERY mode, so fs exit re-pokes (fresh idle
+   *  window) instead of hiding. */
   #onFsFlip() {
     const fsEl = document.fullscreenElement;
     this.#live = fsEl != null && fsEl.contains(this.#shell.container);
-    if (this.#live) {
+    this.#syncFsButton();
+    if (this.#live || this.#bare) {
       this.#poke();
     } else {
       this.#hide();
     }
   }
 
+  /** The 7th button's mode fact: inline (bare, fs closed) it is the
+   *  fullscreen ENTRY; in forge mode it is the EXIT. Attribute/icon swap,
+   *  one call per flip. */
+  #syncFsButton() {
+    const icon = createIconElement(this.#live ? "exit-fullscreen" : "fullscreen",
+      this.#root.ownerDocument);
+    if (icon) {
+      this.#fsBtn.replaceChildren(icon);
+    }
+    this.#fsBtn.setAttribute("data-action", this.#live ? "exit" : "enter");
+    this.#fsBtn.setAttribute("aria-label",
+      this.#live ? "Exit fullscreen" : "Enter fullscreen");
+    this.#fsBtn.title = this.#live ? "Exit fullscreen" : "Enter fullscreen";
+  }
+
   #poke() {
-    if (!this.#live) {
+    if (!this.#bare && !this.#live) {
       return;
     }
     this.#lastActive = performance.now();
@@ -266,9 +308,10 @@ export class ForgeBar {
   }
 
   /** A hold-edge change while visible: held parks the sweep, released arms a
-   *  fresh window. While hidden (or fs gone) holds mean nothing. */
+   *  fresh window. While hidden (or no mode fact - an SDK shell inline)
+   *  holds mean nothing. */
   #syncHold() {
-    if (!this.#live) {
+    if (!this.#bare && !this.#live) {
       return;
     }
     if (this.#isHeld()) {

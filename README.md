@@ -66,6 +66,16 @@ Arrow keys skip faster the faster you tap them. All of this only engages when
 a video is actually playable, so page shortcuts keep working when playback has
 ended.
 
+**Forge mode.** Fullscreening the player is forge mode: PlayerForge hides the
+host player's own chrome around the video and shows its own control bar — a
+floating pill with skip / play-pause / seek scrubber / time / settings /
+exit. It appears on activity and hides after a couple of idle seconds
+(hovering it, focusing it, or pausing keeps it up). On a **bare-tier adopted
+video** the bar shows in normal view too, not just fullscreen — the tier
+stripped the player's native controls, so this bar is the control surface.
+The last button follows the mode: it enters fullscreen in normal view and
+exits it in forge mode.
+
 **In-player settings panel** (`S`, or from the shell surface): skip step size
 (5/10/15 s), hotkeys on/off, per-gesture toggles, edge-to-edge fullscreen,
 compact panel mode. Settings live in your browser via the userscript

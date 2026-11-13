@@ -84,7 +84,16 @@ const ICONS = {
   "left-arrows": svgIcon("M11 16.07V7.93c0-.81-.91-1.28-1.58-.82l-5.77 4.07c-.56.4-.56 1.24 0 1.63l5.77 4.07c.67.47 1.58 0 1.58-.81zm1.66-3.25l5.77 4.07c.66.47 1.58-.01 1.58-.82V7.93c0-.81-.91-1.28-1.58-.82l-5.77 4.07a1 1 0 0 0 0 1.64z"),
   "down-arrow": svgIcon("M152 0q-21 0-21 21v297l-94-77q-7-6-16-5t-14 7q-6 7-5 16t7 14l143 111l141-111q15-15 2-30q-16-14-30-2l-92 77V21q0-21-21-21z", "304 480"),
   resume: svgIcon("M22.5 12c0-5.799-4.701-10.5-10.5-10.5c-1.798 0-3.493.453-4.975 1.251A10.55 10.55 0 0 0 3.5 5.834V2.5h-2v7h7v-2H4.787a8.545 8.545 0 0 1 3.187-2.988A8.458 8.458 0 0 1 12 3.5a8.5 8.5 0 1 1-8.454 9.396l-.104-.995l-1.989.209l.104.994C2.11 18.384 6.573 22.5 12 22.5c5.799 0 10.5-4.701 10.5-10.5ZM11 6v6.414l3.5 3.5l1.414-1.414L13 11.586V6h-2Z"),
-  fullscreen: svgIcon("M43 235v64h64v42H0V235h43zM0 149V43h107v42H43v64H0zm256 150v-64h43v106H192v-42h64zM192 43h107v106h-43V85h-64V43z", "300 280"),
+  /* The enter/exit fullscreen pair is ONE geometry: both redrawn on the 512
+     grid, corner boxes 64..192 / 320..448, arm thickness 42.667, 64px
+     margins - the bar's 7th button swaps them per mode (#syncFsButton), so
+     the pair must share weight and margins to read as a swap. The enter
+     arms hug the corner box's OUTER edges (corners push out); the exit arms
+     hug the INNER edges (corners collapse in). The old enter path was a
+     299x298-ink icon declared on a 300x280 viewBox - the bottom ~20% of
+     both bottom corners clipped past y=280 and the ink sat edge-to-edge,
+     mismatching the twin. */
+  fullscreen: svgIcon("M64 64h128v42.667H106.667V192H64zM320 64h128v128h-42.667v-85.333H320zM64 320h42.667v85.333H192v42.667H64zM405.333 320H448v128h-128v-42.667h85.333z", "512 512"),
   "exit-fullscreen": svgIcon("m192 64l-.001 85.333H192V192l-.001-.001l.001.001h-42.667v-.001L64 192v-42.667h85.333V64zm0 256v42.667l-.001-.001L192 448h-42.667v-85.334H64V320zM362.667 64l-.001 85.333H448V192l-85.334-.001V192H320V64zM448 320v42.667l-85.334-.001V448H320V320z", "512 512"),
   "picture-in-picture": svgIcon("M19 7h-8v6h8V7zm2 4H3a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h18a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2zm-2-6H3v6h16V5zm-2 12h-6v4h6v-4zm8 2a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v4z"),
   "fill-aspect": svgIcon("M17 15h-2q-.425 0-.713.288T14 16q0 .425.288.713T15 17h3q.425 0 .713-.288T19 16v-3q0-.425-.288-.713T18 12q-.425 0-.713.288T17 13v2ZM7 9h2q.425 0 .713-.288T10 8q0-.425-.288-.713T9 7H6q-.425 0-.713.288T5 8v3q0 .425.288.713T6 12q.425 0 .713-.288T7 11V9ZM4 20q-.825 0-1.413-.588T2 18V6q0-.825.588-1.413T4 4h16q.825 0 1.413.588T22 6v12q0 .825-.588 1.413T20 20H4Zm0-2h16V6H4v12Zm0 0V6v12Z"),

@@ -1285,19 +1285,29 @@ iframes, same-origin and cross-origin:
   eviction defense; the old watchdog is retired; named for its primary
   verb `mountShell` — the file was `inject.js` before the shell-mount
   adoption), `toast.js` (`ToastManager`,
-  pooled custom element), `forgebar.js` (`ForgeBar` — the forge-mode control
-  strip: fullscreen IS forge mode, so the bar shows while a fullscreen chain
-  contains the shell's container, via `subscribeFullscreen` + a
-  `contains(container)` re-check per flip; a floating pill in the hud layer
+  pooled custom element), `forgebar.js` (`ForgeBar` — the shell-owned control
+  bar. Visibility is the shell's mode fact: an SDK shell shows the bar while a
+  fullscreen chain contains its container (fullscreen IS forge mode — the
+  player owns its inline chrome) via `subscribeFullscreen` + a
+  `contains(container)` re-check per flip; a **bare shell shows the bar in
+  EVERY mode** — the adoption tier stripped the native controls, so the bar
+  IS the control surface inline as much as in forge mode, under the same
+  sweep. A floating pill in the hud layer
   (inset 8px from the region edges, pill radius, hairline border all around —
   the toast's pill grammar; the height/inset tokens live on the hud scope so
-  the cue-shift sibling rule can read both), `[back][play][fwd][seek+ball][time][settings][exit]` wired through
+  the cue-shift sibling rule can read both), `[back][play][fwd][seek+ball][time][settings][mode]` wired through
   the one `data-action` router — play/pause calls `shell.media.togglePlay`,
   skip buttons ride `ShellActions.skipStep` (the SAME streak+step+toast story
   the arrow keys ride, one owner), seek is the native `<input type=range>`
   with the ball as its styled `::-moz-range-thumb` committing
-  `scrubToLatched` per input event, settings opens the panel, exit calls
-  `shell.exitFullscreen`; idle auto-hide rides ONE self-extending `delay()`
+  `scrubToLatched` per input event, settings opens the panel, and the 7th
+  button rides the mode: inline it is the fullscreen ENTRY
+  (`shell.enterFullscreen()` — a discoverable verb beside the center-dbltap
+  entry; the stripped controls took their own button), in forge mode it is
+  the EXIT (`shell.exitFullscreen`); both verbs ride the button's trusted
+  click (script-launched `requestFullscreen` is activation-denied). The
+  button's mode swap is `#syncFsButton()` — data-action/label/icon attrs per
+  flip, one call per flip — so no mode-specific button exists; idle auto-hide rides ONE self-extending `delay()`
   with the WCAG 2.2.1 holds (pointer-over bar, focus-within, paused video
   each disarm the sweep) re-armed on release, window-capture
   `pointermove/pointerdown/keydown` witnesses stamping an activity stamp
@@ -4633,6 +4643,33 @@ view for bare shells.
   boot rides the manual boot ceremony (the discovery case's `bootAttempt`
   shape) — the stage's `boot()` throws when no shell attaches, and the bare
   tier needs the blob feed BEFORE the shell can exist.
+  The forge-bar batch (Nov 13 2026) added six bare-bar rows after the
+  dbltap row's fs exit: the bar stays shown inline with the ENTER verb on
+  the 7th button (fs exit re-pokes the bare leg; the paused hold parks it
+  too); the same idle sweep applies inline (playing + pointer away hides
+  at ~2.5s, the next pointermove reveals); a trusted tap on the enter
+  button enters REAL fullscreen with the button flipped to EXIT (focus
+  asserted first — the recorded document-not-focused denial class; events
+  compared as a delta over the earlier rows' seeds); the time readout tap
+  dispatches zero gestures and moves no clock (the video parked so the
+  readout is a stable witness; bar visibility asserted so a hidden bar
+  cannot turn the tap into a vacuous video press); the range drag commits
+  the seek through the native input path with zero gestures (the
+  committed clock must track the dragged thumb — t ≈ value — and the
+  value must sit at the drag target's ~80% band; the thumb's start
+  position varies with earlier rows, so a before-delta is not the
+  contract). Bar-interaction neutrality rides the engine's hud rejection
+  (`isInsideShell` → `rejected = "hud"`), the same mechanism the forge
+  probe's E1 rows pin in fullscreen. The enter icon itself was redrawn
+  onto the exit twin's 512 grid (same corner boxes 64..192/320..448, arm
+  thickness 42.667, 64px margins; enter arms hug the corner box's outer
+  edges, exit arms the inner edges) — the old path was 299×341 ink on a
+  "0 0 300 280" viewBox, clipping the bottom ~20% of both bottom corners
+  and sitting edge-to-edge against the twin's 12.5% margins. The render
+  is pinned at the shown-bar postures (a hidden bar's `getBBox` reads
+  zeros, so the hidden I0 posture pins the viewBox attribute only): the
+  probe's S1 row asserts the exit twin's live bbox (64..448), the
+  gestures B1 row the enter verb's.
 - **The RO-churn fix that rode the batch (src — kernel/discovery.js).** The
   gestures case is the first case to END on a bare page, and the audit net
   reads only the case's final page — which surfaced a pre-existing bare-tier
