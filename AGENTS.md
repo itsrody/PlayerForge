@@ -5274,6 +5274,90 @@ engine-permissive reading is recorded as the isFinite arm's honest posture
 (gate stays). Artifact scripts under `check/.tmp/`, uncommitted per sweep
 convention; the battery receipt below covers the docstring-only src pass.
 
+**The filter plane floor probe (Nov 14 2026, user-selected batch;
+record-only, no src change, audit-clean).** The engine premises behind
+FilterSession's apply path on Firefox 160 â the plane had never carried a
+floor batch. Consumers grounded BEFORE probing: filter.js's `#apply` (ONE
+unconditional `video.style.filter = string` write per state change â per
+stepper step-commit during a drag, per preset select, per menu reset; only
+the persist is debounced), `buildFilterString` (up to 7 terms â
+brightness/contrast/saturate/hue-rotate/grayscale/sepia/invert, temp+tint
+fold into the saturate/hue terms; `none` at rest, `""` on destroy), the
+schema-clamped `#load` intake (ledger batch 5), and the panel Stepper's
+drag cadence (one step-commit per 14px of pointer travel). Artifacts:
+`check/.tmp/filter-plane-probe.mjs` (16 rows over FL0âFL7, one playing
+fixture video, no userscript/GM realm) and `filter-plane-report.json`,
+uncommitted per sweep convention. Verdicts, one per leg:
+
+- **(FL1) the same-value skip holds on the filter property â the
+  substrate-A law re-witnessed on the video's own inline style.** A
+  changed write+flush costs ~4.7Âµs; rewriting the IDENTICAL string costs
+  ~1.0Âµs (near the flush-only baseline ~0.6Âµs). The unconditional
+  `#apply` is safe on identical strings: double reset, a preset re-apply,
+  and any sync echo that lands the same string pay the flush-baseline,
+  not the invalidation. The removal arm (`""` vs a value, the destroy
+  shape) costs ~3.8Âµs â a real change, priced like one.
+- **(FL2) chain-length scaling is flat across the 7-term ceiling.**
+  Changed-write cost is ~1.2â1.4Âµs/op from 1 term to all 7 (max/min
+  1.17) â the dominant cost is the invalidation+flush itself, not chain
+  parsing; a 7-term preset write stays in the 1-term cost class. The
+  engine work behind a full preset switch is noise on the drag budget.
+- **(FL2b) filter+transform combined writes are the same cost class**
+  (~4.4 vs ~5.0Âµs/op, ratio 1.14): a pinch (ViewershipTransform's
+  `scale()` on the same inline style) during an active filter session
+  does not double the invalidation.
+- **(FL3) playing-vs-paused carries no premium** (~4.4 paused vs ~4.6
+  playing Âµs/op): live tuning during a drag pays no playing cost.
+- **(FL4) acceptance + serialization: hue-rotate accepts negative and
+  >360 values verbatim** (the temp/tint fold-ins, e.g. hue-rotate(-30deg)
+  / (410deg), compute through unnormalized); **computed style serializes
+  percentages as numbers** (`saturate(250%)` reads back `saturate(2.5)`,
+  the same vocabulary shape the responsive case's snap row documents) â
+  the tree's own 200 clamp lives in `buildFilterString` by schema choice,
+  not engine necessity.
+- **(FL5) the style.filter intake receipt (the uBO class, recorded for
+  the property the tree writes):** an absurd-but-valid percentage
+  (`brightness(1e9%)`) computes through (`brightness(10000000)`) â the
+  CSSOM is total and the schema clamp at `#load` is the real bound, the
+  ledger batch-5 posture re-witnessed at the property level; junk from a
+  clean state IACVTs to `none` (degrades, never throws); **an invalid
+  write over an existing filter RETAINS the prior value**
+  (drop-the-declaration semantics, not reset-to-none) â a bad write can
+  never poison a good filter; a `url()` filter reference is
+  same-document and fetches nothing (resource census flat) â the class
+  carries no network surface.
+- **(FL6) the containing-block/stacking-context fact, with one
+  video-children floor fact on the way.** A non-none filter makes the
+  filtered element the containing block for its absolute descendants
+  (offsetParent flips BODY â the filtered div) and the inline `none`
+  creates nothing (the at-rest string from `buildFilterString` is inert).
+  The detection route cannot witness the fact on the VIDEO element
+  itself: children of a video get no layout boxes in either arm (fallback
+  content only) â recorded as its own floor fact.
+- **(FL7) the drag budget: a full 41-write sweep (0â200 at step 5, one
+  flush per write) costs ~0.15ms per sweep** â three orders below the
+  interaction threshold; the unconditional per-step `#apply` never
+  accumulates into a visible drag cost.
+
+Harness lessons worth holding: the fixed/relative wrapper control trap
+(the first FL6 draft's wrapper carried `position: fixed`, which is
+ALREADY a containing block â the control must be static to test the
+filter's contribution); the 1ms-grain sizing law re-applied (per-arm N
+chosen so every raw total clears 20ms; the same-value arm runs 4x longer
+because it is 4x cheaper); and the IACVT semantics correction (an invalid
+write over an existing value drops the declaration, retaining the prior
+value â a "computed must read none" assert from a dirty state answers a
+different question).
+
+Sweep disposition: record-only, no src change earned adoption â the
+unconditional `#apply` rides the engine's same-value skip on its own
+hotpath, the drag budget is three orders under interaction scale, and
+every property-level premise (serialization, drop-the-declaration, url()
+inertness, containing-block fact) is recorded as floor truth the plane
+already rides or explicitly does not need. Artifact scripts under
+`check/.tmp/`, uncommitted per sweep convention; the batch rides one green
+full-battery run per the record-only rule.
+
 The series'
 record-only commits changed
 AGENTS.md alone; every src-touching pass proved
