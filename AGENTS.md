@@ -4887,6 +4887,115 @@ trigger:
   prior tree, whose same-method A/B reading is 288; the historical
   record figures predate this count basis).
 
+**The shadow-native / clone-warp probe (Nov 14 2026, user-directed "explore a
+new record-only probe batch for Firefox-specific native surfaces: shadow
+piercing (>>>), the clone/move family, other unexplored native operators";
+post-`81ae26f`, record-only, no src change, audit-clean).** Interpretation
+note recorded up front: "clone warp" is read as the clone/move modern-DOM
+family (structuredClone, cloneNode/custom-element semantics,
+`Element.moveBefore`) â if the direction meant a different surface, the
+record re-aims. Consumers grounded BEFORE probing (the batch method â a
+candidate must name a real tree consumer first): detection.js's composed arm
+(`#fillComposedChain`/`#matchSdk`, the upward parentNode/.host walk),
+discovery.js's `videoFromEvent` composedPath scan and its two seed walks,
+dom.js's `deepestActiveElement`/`isInsideShell` compositions, ui.js's ONE
+DOMParser site (icon markup, XML mode, target-realm resolution, WeakMap
+cache), the ~20 `setAttribute("aria-*")` construction sites through the
+generic attr helper, and toast.js's cloneNode template derivation. Artifacts:
+`check/.tmp/shadow-native-probe.mjs` (a 4-axis PLAN runner â PIERCE,
+CLONEWARP, QUADS, SURFACE; every body self-contained and booleanized) and
+`shadow-native-report.json`, uncommitted per sweep convention. Harness
+lessons worth holding for any future floor probe: a returned DOM element
+serializes as a WebDriver element reference that goes STALE once the axis's
+own fixture teardown runs before the script completes (the first PIERCE draft
+failed "element no longer attached" on exactly that â booleanize every
+element read); and the boundary fixture must be BUILT light-DOM-anchor-above-
+host â the first draft's anchor sat inside the video's own shadow tree,
+where `closest()` trivially answers and the boundary row tested nothing.
+Verdicts, one per axis:
+
+- **(PIERCE) `>>>` is not on Firefox 160 in any query surface, and the
+  upward crossing detection.js's composed arm needs has no native operator
+  at any posture.** `querySelectorAll("body >>> *")`/`matches`/`closest`
+  with the combinator all throw `SyntaxError`; `CSS.supports("selector(div
+  >>> video)")` and `:has(>>>)` are false. The combinator, even if shipped,
+  is DOWNWARD-piercing â it could only have served the seed walk
+  (`document.querySelectorAll("video")` measurably misses a shadow-internal
+  video; MO `addedNodes` carries only the host div), and that gap is a
+  known shape, not a defect: a shadow-internal video is discovered by its
+  media events through the composed path (videoFromEvent's premise â media
+  events don't bubble but document capture listeners receive them composed,
+  where the host retargets `target` away), so adoption is delayed only
+  until first play/loadedmetadata, exactly the path the feed already rides;
+  a hand-rolled root-walking seed is new machinery against a covered case
+  (the lean-boot record's shape). Boundary witnesses confirmed: closest()
+  stops at the ShadowRoot (`anchorAbove: false` with the anchor in light
+  DOM above the host); `getRootNode()`/`root.host` are the primitives the
+  composed arm rides.
+- **(PIERCEb) dom.js's shadow compositions stay â no native replacement on
+  the floor.** All four witnesses hold: `document.activeElement` retargets
+  to the HOST on shadow-internal focus, `shadowRoot.activeElement` reads
+  the real focus (why `deepestActiveElement` exists), `host.contains()` is
+  blind across the boundary while `shadowRoot.contains` sees (why
+  `isInsideShell` exists). These are the composition of the only
+  primitives the floor ships.
+- **(CLONEWARP) the clone/move family re-witnessed, no unexercised
+  consumer.** structuredClone present (the D4 decline's re-price lives in
+  the 160 small-run, not re-measured here). A clone of an upgraded custom
+  element is upgraded AT CLONE TIME (`instanceof` true pre-insertion) and
+  runs `connectedCallback` on insertion (conns 1â2); the shadow root does
+  NOT travel with the clone (spec). No tree site clones a custom element
+  (toast's cloneNode derives SVG markup; the pooled elements are never
+  cloned with lifecycle), so the semantics are recorded, unexercised.
+  `moveBefore` cross-parent re-witnessed on 160: performs the re-home
+  WITHOUT throwing, flips the parent, and delivers the standard r1/a1
+  record pair â the J/L3 + 160 record stands byte-true.
+- **(QUADS) the box-quad family is GONE from Firefox 160.**
+  `Element.getBoxQuads`, `document.getBoxQuads`,
+  `CSSStyleDeclaration.getBoxQuads`, and `getTransformTo` are all
+  undefined. The one genuinely unexplored native geometry read â which
+  could have answered the S3 transform-split natively (gBCR re-measured
+  carrying the ancestor scale(2): 100Ã50 â 200Ã100 while offsetWidth
+  stays 100) â is absent from the engine; the S3 premises stand
+  hand-derived.
+- **(SURFACE) the shipped-without-consumer sweep, each declined on
+  consumer absence so none re-opens silently:** scrollend (shipped on
+  window + document; ReferenceBox's per-event scroll invalidation is
+  mid-scroll origin truth â scrollend alone leaves anchors stale through
+  the scroll, and the per-event invalidate already covers the
+  end-of-scroll instant at zero layout cost); invoker commands (shipped:
+  `command`/`commandForElement` IDL + `CommandEvent`; the shipped command
+  vocabulary covers popover/dialog verbs only â no media commands exist
+  for play/pause/seek, so the forge bar's `data-action` router keeps
+  owning every verb it carries); ARIA IDL reflection (shipped, reflected +
+  null-clear verified; the ~20 aria sites ride the generic attr-map helper
+  at construction rate â property special-casing forks the one
+  construction surface for zero behavior change, the attribute form
+  stays); `Document.parseHTMLUnsafe`/`getHTML`/`setHTMLUnsafe` (shipped,
+  parseHTMLUnsafe shape verified â static, returns a Document, parses SVG;
+  the ui.js icon site parses build-static SVG markup in XML mode via the
+  target-realm DOMParser behind a boot-rate WeakMap cache, so a switch
+  changes the parse grammar XMLâHTML for zero measured gain â declined);
+  `showPicker` (shipped; no input-picker consumer); `Intl.Segmenter`
+  (shipped; the title sanitizer is code-point-regex by design, no grapheme
+  consumer); `Array.fromAsync` (shipped; no async-iteration consumer);
+  TreeWalker (long-shipped; `querySelectorAll` is already the native
+  drain, the loop-body walk's recorded shape); rVFC + `cancelRvfc`
+  (re-witnessed shipped, already consumed by the crank â witness only);
+  `navigator.userActivation` (present â witness only).
+
+Sweep disposition: record-only, no src change earned adoption â the
+shadow-piercing direction is closed by engine absence (and the covered-case
+decline for the seed-coverage gap it could only partially have served), the
+clone/move family has no unexercised consumer, the geometry candidate is
+absent from the engine, and every shipped-without-consumer operator is
+declined on consumer absence. The Native-first bar's
+implementation-IS-the-operator reading gains one more floor fact: on
+Firefox 160 there is no selector vocabulary that crosses a shadow boundary
+upward, so detection.js's composed arm is the only shape the floor permits.
+Battery receipt: src untouched; the batch rides one green full-battery run
+per the record-only rule.
+
 The series'
 record-only commits changed
 AGENTS.md alone; every src-touching pass proved
