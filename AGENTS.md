@@ -5174,6 +5174,106 @@ belts' named shapes are real. Artifact scripts under `check/.tmp/`,
 uncommitted per sweep convention; the batch rides one green full-battery
 run per the record-only rule.
 
+**The media evidence plane floor probe (Nov 14 2026, user-selected batch;
+record-only with one docstring wording correction landed on user
+direction).** The engine premises behind the bare tier's evidence bar, the
+resume restore pipeline, and media.js's readiness gates. Consumers grounded
+BEFORE probing: detection.js's `#qualifiesBare` (the `blob:` protocol +
+`played.length > 0` bar), discovery.js's `watchMediaEvents` taps (the
+`playing` + `timeupdate` pair carrying the played leg because `play` fires
+at invocation, before playback starts), media.js's `#isReady`/`#canSeekNow`
+(readyState â¥ 1, or a finite positive duration), and resume.js's
+`#waitForDuration` (event-driven duration proof). Artifacts:
+`check/.tmp/media-evidence-probe.mjs` (17 rows over ME1âME7 + ME4b, one
+same-document fixture â no userscript, no GM realm) and
+`media-evidence-report.json`, uncommitted per sweep convention. Fixture:
+the check video's 12s mp4 (progressive) plus its fragmented-MP4 twin
+(`-movflags frag_keyframe+empty_moov+default_base_moof`, 17KB) for the MSE
+legs. Verdicts, one per leg:
+
+- **(ME1) the played-leg cadence holds byte-true.** A real blob feed reads
+  `currentSrc` as `blob:` from `loadeddata` (the discriminator's positive
+  arm); `play` fires with `played.length` still 0 (the discovery tap
+  premise â the invocation-edge fire); the played range is 1 by the first
+  `timeupdate`. The `playing` + `timeupdate` tap pair is
+  measure-necessary.
+- **(ME2) the identity table is structural.** plain-src reads `http:`,
+  data-src reads `data:`, empty-src and `srcObject` (capture-stream)
+  candidates read `currentSrc` = "" â `URL.parse` null â never qualify.
+  The mediastream exclusion needs no code: a stream video's `currentSrc`
+  is never a blob: URL.
+- **(ME3) the junk killer holds on both never-played classes.** A
+  `preload=none` embed stays readyState 0 / played 0 (no metadata fetch at
+  all); a metadata-loaded idle embed keeps `played.length` 0 through the
+  wait window.
+- **(ME4) the MSE window is a readable fact â and one docstring wording is
+  measure-false.** Setting `MediaSource.duration` while readyState is 0
+  yields `v.duration === 12` readable at rs 0 (the window
+  `#canSeekNow`'s isFinite arm admits exists) â BUT **no
+  `durationchange` fires while readyState is 0**: the only fire lands at
+  rs 1, at `loadedmetadata`, carrying the appended media's real duration
+  (12.08) which overrides the pre-set 12. The `#canSeekNow` docstring's
+  "MSE/streaming players set duration (firing `durationchange`) while
+  readyState is still HAVE_NOTHING" was wrong on the event clause â the
+  substance (duration readable while rs 0) is true; only the "(firing
+  `durationchange`)" wording was measure-false. Correction landed on user
+  direction (prose-only: the docstring now records the readable fact + the
+  measured event timing + the ME4b posture; no code change, resume.js's
+  event-driven wait unaffected â `loadedmetadata`/`durationchange` both
+  settle it at rs 1).
+- **(ME4 premise row) the parked restore lands.** A `currentTime = 8`
+  write issued at rs 0 with duration 12 set reads 8 from the write
+  onward, is 8 at `loadedmetadata`, and is 8 at settle (readyState 4).
+  The `#canSeekNow` premise holds end to end: a restore issued in the MSE
+  window is never lost.
+- **(ME4b) the isFinite arm is product-cautious, not engine-required.** A
+  write issued while duration is still NaN (rs 0, `duration` null) ALSO
+  parks and lands â the position reads 8 from the write onward and is 8
+  at settle. The spec's default-playback-start parking does not require a
+  known duration; the engine honors a parked position regardless. The arm
+  stays (a restore target against an unknown duration may overshoot the
+  eventual duration), and the honest posture is recorded: the gate is
+  product-cautious, engine-permissive underneath.
+- **(ME5) the duration proof timing on a progressive feed.** The order is
+  `durationchange` â `loadedmetadata` (both at rs 1, duration 12) â
+  `loadeddata` (rs 4) â duration is finite by the first of them, so
+  `#waitForDuration`'s event-driven settle is sound, and the progressive
+  feed's durationchange-at-rs-1 is the contrast witness that sharpens
+  ME4's MSE finding (the event exists and fires at metadata there, never
+  at rs 0 on either feed class).
+- **(ME6) the blob lifecycle.** A revoke AFTER `loadeddata` leaves the
+  engine holding the resource: playback advances, readyState 4, played 1
+  (the loaded fixture shape is safe). A revoke in the SAME task as the
+  src assignment kills the load outright (rs 0, nothing fired) â the
+  page-revoke hazard shape is real, and the tree's consumers ride the
+  safe side by construction (the discovery case's bare rows revoke
+  nothing; a page revoking its own feed URL after assigning it would lose
+  the load regardless of anything the script does).
+- **(ME7) the played range survives a backward seek.** After playback
+  then a seek back to 0.3, `played.length` stays 1 (one contiguous range
+  from 0) â the bare tier's `> 0` read never sees range fragmentation on
+  a plain seek-back; the junk-killer leg cannot be defeated by a
+  range-boundary trick.
+
+Harness lessons worth holding for any future media probe: register
+`loadedmetadata` listeners BEFORE `appendBuffer` (readyState reaches 1 by
+`updateend`, so a `{once:true}` registered after the fact never fires â
+settle on readyState instead); `ms.duration` set before appends is
+readable on `v.duration` at rs 0 but fires no `durationchange` there, and
+the appended media's real duration overrides the pre-set value at
+`loadedmetadata` (a probe must capture EVERY durationchange fire, not a
+last-write-wins variable); and `evalAsync` is args-first/done-last (the
+debug trail's first draft hung into Marionette's 30s ScriptTimeoutError).
+
+Sweep disposition: record-only with the one measure-false wording landed
+(`#canSeekNow`'s "(firing `durationchange`)" clause corrected to the
+measured readable-fact + event-timing statement, prose-only, on user
+direction) â the bare tier's evidence bar, the discovery tap pair, and the
+resume duration wait are all engine-true as shipped, and ME4b's
+engine-permissive reading is recorded as the isFinite arm's honest posture
+(gate stays). Artifact scripts under `check/.tmp/`, uncommitted per sweep
+convention; the battery receipt below covers the docstring-only src pass.
+
 The series'
 record-only commits changed
 AGENTS.md alone; every src-touching pass proved

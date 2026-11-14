@@ -37,11 +37,16 @@ class MediaControls {
   /**
    * A seekable timeline exists when metadata loaded (readyState >= HAVE_METADATA)
    * OR a finite positive duration is already established. MSE/streaming players
-   * set duration (firing `durationchange`) while readyState is still
-   * HAVE_NOTHING; seeking in that window is legal - per spec, setting
-   * currentTime before metadata with a known duration parks the default
-   * playback start position, which the browser honors when playback begins. So
-   * a restore (resume) issued in the MSE window is never lost.
+   * set MediaSource.duration while readyState is still HAVE_NOTHING, and the
+   * fact is readable on the element there - no `durationchange` fires in that
+   * window (measured on Firefox 160: the event lands at loadedmetadata with
+   * the appended media's real duration, which overrides the pre-set value);
+   * seeking in the window is legal - per spec, setting currentTime before
+   * metadata with a known duration parks the default playback start position,
+   * which the browser honors when playback begins (a write parked with
+   * duration still NaN lands too - the isFinite arm is product-cautious
+   * against overshooting an unknown duration, not engine-required). So a
+   * restore (resume) issued in the MSE window is never lost.
    */
   #canSeekNow() {
     return this.#isReady() || (Number.isFinite(this.#video.duration) && this.#video.duration > 0);
