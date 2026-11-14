@@ -146,10 +146,14 @@ export const TUNING = {
     hintMs: 5000
   },
   forgeBar: {
-    /** Idle time before the forge-mode control bar auto-hides. WCAG 2.2.1
-     *  holds: hover over the bar, focus within it, or a paused video park
-     *  the sweep until released. */
-    hideMs: 2500
+    /** Idle time before the forge-mode control bar auto-hides: 1.5s from
+     *  the last activity (a hold release re-arms a fresh window, so a
+     *  pointer-leave starts the window then) - the bar is an overlay band
+     *  across the picture's bottom, so the covered cue band stays short.
+     *  WCAG 2.2.1 holds still park the sweep: hover over the bar, focus
+     *  within it, or a paused video (the bar is the paused surface's only
+     *  control strip) until released. */
+    hideMs: 1500
   }
 };
 /* - 3. Timing - */

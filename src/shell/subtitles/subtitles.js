@@ -161,7 +161,12 @@ function shiftTime(time, offset) {
  * scroll); no duplicate fs/RO/orientation/scroll of ours. Video-relative marks -
  * the video's own box moving inside an unmoved stage, and its intrinsic
  * size changing - are this class's own RO + the media element's resize
- * event, both signal-scoped.
+ * event, both signal-scoped. Canvas-relative marks - the cue layer's own
+ * box moving (the forge bar's :has() flip, the height-tier tokens, env
+ * insets) - are the cue-canvas RO, the paused gap's one trigger: the
+ * playing cadence re-derives per presented frame, but a paused video
+ * presents nothing and the video box/ReferenceBox are untouched by the
+ * bar.
  */
 export class ForgeTrack {
   #cueLayer;
@@ -276,6 +281,20 @@ export class ForgeTrack {
     this.#scope.defer(() => videoRo.disconnect());
     video.addEventListener("resize", () => this.#schedule(), { signal: this.#scope.signal, passive: true });
     video.addEventListener("loadedmetadata", () => this.#schedule(), { signal: this.#scope.signal });
+    if (cueLayer) {
+      // The cue canvas's own box is a per-render stage fact: #derivePicture
+      // clips the picture against it, and the forge bar shortens it from
+      // the bottom through the sheet's :has() rule (styles.css), as do the
+      // height-tier tokens and env insets. While playing the
+      // presented-frame crank re-derives per frame anyway; while paused
+      // nothing else would fire - the video box and the ReferenceBox are
+      // untouched by a bar flip - so this observer is the paused gap's one
+      // trigger. The render writes slot styles only (absolute children),
+      // so the layer's own box never loops the observer.
+      const layerRo = new ResizeObserver(() => this.#schedule());
+      layerRo.observe(cueLayer);
+      this.#scope.defer(() => layerRo.disconnect());
+    }
     // The paused-seek cliff: whether a paused engine re-presents on seek is
     // unowned platform behavior - the presented-frame crank cannot promise
     // the cue refresh there. This event rider closes it both ways: fires on

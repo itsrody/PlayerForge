@@ -1308,7 +1308,7 @@ export async function run({ session, baseUrl, boot, bundle }) {
       `bar=${JSON.stringify(b1)} icon=${JSON.stringify(b1Icon)}`);
 
     // B2: the same idle auto-hide sweep as fs - playing video + no pointer
-    // over the bar hides it after ~2.5s; the next pointermove reveals it.
+    // over the bar hides it after ~1.5s; the next pointermove reveals it.
     await session.eval(function main() { document.querySelector("video").play(); });
     await bareMove(10, 10);
     await sleep(3100);

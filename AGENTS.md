@@ -1266,7 +1266,12 @@ iframes, same-origin and cross-origin:
   env-inset layer space; unreadable geometry and zero-area clips fall back
   to the old layer-relative resolution â re-anchoring rides the ReferenceBox
   change tick, video-relative marks ride the renderer's own signal-scoped
-  RO + the media `resize` event; drag-drop/URL ingest with
+  RO + the media `resize` event, and canvas-relative marks (the cue
+  layer's own box moving: the forge bar's `:has()` flip, the height-tier
+  tokens, env insets) ride the cue-canvas RO — the paused gap's one
+  trigger, since the playing cadence re-derives per presented frame but
+  a paused video presents nothing and the bar touches neither the video
+  box nor the ReferenceBox; drag-drop/URL ingest with
   per-entry restore, parsing memoized, the `SubtitleSyncState`,
   `SubtitleStyleState` (all five values boot-apply at bind; the former
   partial font/stroke boot left a stored custom size/color/shadow unapplied
@@ -3682,8 +3687,9 @@ stub rows green.
    module's one
    container childList observe swapped for the PfShellHost detached-window
    armed observe, a transient that never arms in steady state, so the
-   steady-state observer count is one LOWER while the raw site count holds),
-   28 at document/window
+   steady-state observer count is one LOWER while the raw site count holds);
+   the cue-canvas RO joined at 125 with the bar-flip batch (the forge
+   bar's :has() flip needed a paused-gap render trigger), 28 at document/window
    level, zero manual removals â and every unscoped-looking site verified
    either `{ signal }` on a continuation line, an options-var binding,
    the panel's per-open dismissal scope, or a deliberate page-lifetime
@@ -3711,7 +3717,8 @@ stub rows green.
    discovery under the flipped tier posture);
    live shell = resume's 6-event drive cluster + its IO + media's
    loadedmetadata listener + 2 witness MOs + subtitles' rVFC crank (an
-   arm, not a listener) with its video RO/IO + 4 video events + 2 host
+   arm, not a listener) with its video RO/IO + the cue-canvas RO (the
+   bar flip's paused re-anchor) + 4 video events + 2 host
    gesture relays + ReferenceBox's RO/orientation/scroll + forge's
    machine-owned streams + the forge bar's plane (3 window-capture
    activity witnesses + 6 video events + the click router + the 4 WCAG
@@ -4115,8 +4122,13 @@ stop at the first failure:
   and degrade IACVT to the sheet defaults), and
   the balance pin: the visible
   cue's computed `text-wrap-style` is exactly `balance` (vocabulary
-  presence â the pixel-top rows are the geometry guard balance must not
-  move), `robust`
+  presence — the pixel-top rows are the geometry guard balance must not
+  move), and the canvas-awareness row: the fixture reshapes to a
+  picture-to-bottom stage, the video parks paused inside the scale cue
+  window, and the forge bar's `hidden` flip re-anchors the running slot
+  through the cue-canvas RO (top 557.0 → 499.5 with the bar visible —
+  the picture clipped at the lifted canvas — and back; the paused posture
+  is the row's isolation), `robust`
   (the robustness case, both planes on one file â merged Nov 12 2026 from the
   former `robust` + `robust2` pair, every row preserved byte-identically, the
   two normal-install planes sharing one boot; four boots: **Boot 1** the
@@ -4828,6 +4840,52 @@ the player region), so the fix is container bands, not media queries.
 - **No counted census row moved** (no listeners/timers/Fans; the bands are
   sheet+pocket declarations). Battery receipt: four consecutive all-green
   full-battery runs (282 rows each; 134.1/134.1/134.2/134.2s).
+
+**The bar-flip batch (Nov 14 2026, user direction "forge bar to disappear
+after 1.5 seconds from lose focus" + "subtitle cues aware of the bar when
+visible and reposition well"; src â core.js + subtitles.js; check â
+subtitles +1 row; adoption landed).** Two changes, one timing and one
+trigger:
+
+- **The idle window: 1.5s.** `TUNING.forgeBar.hideMs` 2500 â 1500 (the one
+  constant; both use sites in forgebar.js read it). The bar is an overlay
+  band across the picture's bottom, so the covered cue band stays short; a
+  hold release (pointer leaving the bar, focus out, resume) re-arms a fresh
+  window, so "1.5s from lose focus" is exactly what ships. The WCAG 2.2.1
+  holds stay byte-identical â hover/focus-within/paused park the sweep,
+  and the paused hold is load-bearing: the bar is a paused surface's only
+  control strip (a bare shell stripped its native controls).
+- **The cue-canvas RO: the paused gap's one trigger.** The cue-awareness
+  machinery already existed â the sheet's `:has()` sibling rule lifts the
+  cue layer's `bottom` by the bar band while the bar is visible, and
+  `#derivePicture`'s universal clip ends the picture at the canvas box, so
+  percent-anchored slots re-anchor on the next render. The gap was the
+  trigger: while playing the presented-frame crank re-derives per frame,
+  but a paused video presents nothing, and a bar flip touches neither the
+  video box nor the ReferenceBox (the video-relative RO and the fill-box
+  tick both stay silent) â a paused shell's slots hung stale over the bar
+  until the next cue/seek event. `ForgeTrack` now carries a cue-canvas
+  ResizeObserver (its own box change IS the canvas fact; the render writes
+  slot styles only, absolute children, so the layer never loops it),
+  signal-scoped with the other observers. This also covers the
+  height-tier token changes and env insets under the same observer.
+- **Check row** (subtitles case, the last row): the fixture reshapes to a
+  picture-to-bottom stage (video height = its 16:9 picture height) so the
+  bar's 64px band overlaps the picture; the video parks paused inside the
+  scale cue window so slot 0 stays lit; the bar's `hidden` attribute
+  flips directly (the same attribute #show/#hide write) â the row
+  machines the rendering path, not the visibility policy. Expected tops:
+  557.0 baseline â 499.5 with the bar visible (picture clipped at
+  619-64), slot bottom above the bar's top edge, and the restore back to
+  557.0. The paused posture is the row's isolation: with the crank
+  running, the flip would be picked up next frame regardless.
+- **No counted census row moved** (no Fans/Scopes/timers; the static
+  registration site count moves 124 â 125 in Â§5.6's prose â the
+  cue-canvas RO). Battery receipt: four consecutive all-green
+  full-battery runs (131.7/131.8/131.3/131.5s; 290 all-gate PASS rows
+  each, stable across the three counted runs - the +1 case row over the
+  prior tree, whose same-method A/B reading is 288; the historical
+  record figures predate this count basis).
 
 The series'
 record-only commits changed

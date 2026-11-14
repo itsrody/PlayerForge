@@ -449,5 +449,85 @@ export async function run({ session, boot }) {
     ms: null
   });
 
+  // The canvas-awareness row (the forge-bar flip's re-anchor): the cue
+  // canvas is a per-render fact (#derivePicture clips the picture against
+  // the layer box), and the forge bar shortens it from the bottom through
+  // the sheet's :has() rule. While PLAYING the presented-frame crank
+  // re-derives per frame anyway; while PAUSED nothing else would fire -
+  // the video box and the ReferenceBox are untouched by the bar - so the
+  // cue-canvas RO is the paused gap's one trigger, and the row pauses the
+  // video FIRST so the re-anchor can only come from it. The fixture
+  // reshapes to a picture-to-bottom stage (video height = its 16:9
+  // picture height, stage matching) so the bar's 64px band actually
+  // overlaps the picture bottom; the video parks inside the scale cue
+  // window (4.5-5.5) so slot 0 stays lit. The bar's hidden attribute
+  // flips directly - the same attribute #show/#hide write - so the row
+  // machines the rendering path, not the visibility policy (the policy
+  // rows live in the gestures case). Expected tops: baseline
+  // 0.125 + 0.9*618.75 = 557.0; bar visible clips the picture at
+  // 619-64 = 555 -> height 554.875 -> 0.125 + 0.9*554.875 = 499.51.
+  await session.eval(function main() {
+    const video = document.querySelector("#check-video");
+    video.pause();
+    video.currentTime = 4.8;
+    document.querySelector(".plyr").style.height = "619px";
+    video.style.height = "619px";
+  });
+  await sleep(400);
+  const canvasBefore = await session.eval(function main() {
+    const shadow = document.querySelector(".pf-shell")?.shadowRoot;
+    const slot = shadow?.querySelector(".pf-cue:not([hidden])");
+    const bar = shadow?.querySelector(".pf-forge-bar");
+    return {
+      top: slot ? parseFloat(getComputedStyle(slot).top) : null,
+      slotBottom: slot?.getBoundingClientRect().bottom ?? null,
+      barTop: bar?.getBoundingClientRect().top ?? null,
+      barHidden: bar?.hidden ?? null
+    };
+  });
+  await session.eval(function main() {
+    const bar = document.querySelector(".pf-shell")?.shadowRoot
+      ?.querySelector(".pf-forge-bar");
+    if (bar) {
+      bar.hidden = false;
+    }
+  });
+  await sleep(300);
+  const canvasShown = await session.eval(function main() {
+    const shadow = document.querySelector(".pf-shell")?.shadowRoot;
+    const slot = shadow?.querySelector(".pf-cue:not([hidden])");
+    const bar = shadow?.querySelector(".pf-forge-bar");
+    return {
+      top: slot ? parseFloat(getComputedStyle(slot).top) : null,
+      slotBottom: slot?.getBoundingClientRect().bottom ?? null,
+      barTop: bar?.getBoundingClientRect().top ?? null
+    };
+  });
+  await session.eval(function main() {
+    const bar = document.querySelector(".pf-shell")?.shadowRoot
+      ?.querySelector(".pf-forge-bar");
+    if (bar) {
+      bar.hidden = true;
+    }
+  });
+  await sleep(300);
+  const canvasRestored = await session.eval(function main() {
+    const slot = document.querySelector(".pf-shell")?.shadowRoot
+      ?.querySelector(".pf-cue:not([hidden])");
+    return slot ? parseFloat(getComputedStyle(slot).top) : null;
+  });
+  const canvasOk = Math.abs((canvasBefore?.top ?? 999) - 557.0) < 2
+    && Math.abs((canvasShown?.top ?? 999) - 499.5) < 2
+    && (canvasShown?.slotBottom ?? 9999) <= (canvasShown?.barTop ?? 0) + 1
+    && Math.abs((canvasRestored ?? 999) - 557.0) < 2;
+  rows.push({
+    name: "cue canvas follows the forge bar's flip (paused re-anchor via the canvas RO)",
+    status: canvasOk ? "pass" : "fail",
+    note: canvasOk
+      ? `top ${canvasBefore.top} -> ${canvasShown.top} (slot bottom ${canvasShown.slotBottom} above bar top ${canvasShown.barTop}) -> restored ${canvasRestored}`
+      : `before=${JSON.stringify(canvasBefore)} shown=${JSON.stringify(canvasShown)} restored=${canvasRestored}`,
+    ms: null
+  });
+
   return rows;
 }
