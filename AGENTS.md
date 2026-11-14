@@ -5072,6 +5072,108 @@ runs (132.3/131.8/131.7s) after one environment-correlated gestures flake
 (0 shells at the bare-surface page, the recorded focus/timing class, not
 recurred in any subsequent run).
 
+**The frame-bridge plane floor probe (Nov 14 2026, user-pinned batch via the
+question tool "Frame-bridge plane probe (Recommended)"; record-only, no src
+change, audit-clean).** The bridge's engine premises re-derived on real
+Firefox 160 â the transfer/buffering, listener-shape, throw-class, FIFO,
+navigation, and bfcache behavior the frame model's bridge code rides.
+Consumers grounded BEFORE probing (page.js): `TopFrameResponder`'s
+synchronous port answer inside the transfer-receiving window handler + the
+pipe entry registration shape (addEventListener + explicit `start()`);
+`FrameRelay.handle`'s same-port re-transfer upward (`window.parent.
+postMessage(data, "*", ports)`); `requestPageContextOverPipe`/
+`#onPipeRequest`'s port-post try/catch ("port closed under us") and the 3s
+requester watchdog; the announce-down's FIFO premise; and the fresh-document
+re-request recovery the frame bridge owns. Artifacts:
+`check/.tmp/bridge-probe.mjs` (8 legs PF1âPF8, 21 rows, one plain fixture â
+no userscript, no GM realm) and `bridge-report.json`, uncommitted per sweep
+convention; the debug trail (`bridge-debug4..10.mjs`) stayed uncommitted with
+it. Fixture: the dual-loopback three-level chain â top (127.0.0.1) â child
+(localhost, genuinely cross-origin) â grandchild (127.0.0.1 embedded BY the
+child, cross-origin to its parent). Verdicts, one per leg:
+
+- **(PF1) the pipe's transfer+buffering contract holds byte-true.** The top
+  answered SYNCHRONOUSLY inside the transfer-receiving window handler
+  (`answered-on-port`, no `answer-throw`), and the child â which had armed
+  nothing yet â received the buffered answer the moment it later ran
+  `addEventListener` + `start()`: exactly the TopFrameResponder contract.
+- **(PF2) the port FIFO is real**: two posts in order delivered `[1,2]` in
+  order on the transferred channel.
+- **(PF3) listener shapes measured**: a port armed with
+  `addEventListener` WITHOUT `start()` keeps its pre-transfer message
+  queued (A = undefined across the wait window); an `onmessage`
+  assignment delivers without an explicit `start()` (implicit start);
+  and the queued answer delivered once `start()` ran. The bridge's
+  explicit `start()` is belt-load-bearing, and its ordering guarantee
+  does not depend on the peer's listener style.
+- **(PF4) the two-hop relay chain works, and the intermediate's stale copy
+  is an inert husk.** The SAME port transferred twice (grandchild â child â
+  top, the FrameRelay shape) delivered the top's answer to the
+  grandchild's original end (`twoHops: true`). The spec-reading premise
+  "transfer neuters the sender's copy synchronously (InvalidStateError)"
+  is measure-false on this floor: posting on the intermediate's copy
+  after the successful re-transfer NO-THROWS (immediately and after a
+  beat, with passive or active receivers; self-realm transfer included)
+  and delivers NOTHING â not to the original end, not as a second end
+  (`strays: 0`). The tree premise FrameRelay rides ("the copy is dead
+  after re-transfer") holds behaviorally â expressed as silent
+  inertness, not a throw; the tree never touches its copy after
+  re-transfer, so nothing changes either way.
+- **(PF5) throw classes at the port seams, four recorded facts.** (a) a
+  transfer LIST carrying a once-transferred (neutered) port throws
+  `DataCloneError` at send; (b) a transfer list carrying a port whose
+  PEER called `close()` throws `DataCloneError` at send; (c) posting ON
+  a port whose peer closed is a SILENT DROP â no throw (the same for a
+  port you closed yourself), so `#onPipeRequest`'s catch never fires on
+  the "closed peer" class; the requester-side 3s watchdog is the real
+  belt there; (d) an uncloneable field alongside a fresh port throws
+  `DataCloneError` and the port SURVIVES the failed post (usable after);
+  (e) peer posts into our closed end are dropped, and a `close()` racing
+  an already-queued delivery still delivers that message (the close does
+  not unsend the queue).
+- **(PF6) same-task FIFO across the two channels**: window.postMessage
+  then port.postMessage from one task delivered in posting order, and
+  the reverse in the next task â the announce-down's ordering premise.
+- **(PF7) navigation lifecycle**: the top's post to a navigated-away
+  realm is a silent no-throw with no `messageerror` (no tree premise
+  binds a throw there â the 3s requester watchdog + the 60s idle sweep
+  are the belts, both confirmed as the real protection), and the fresh
+  child document re-requests through a NEW pipe whose answer lands â
+  the bridge's recovery premise holds end to end.
+- **(PF8) bfcache**: with a pipe live before navigation, a history
+  restore landed on the "fresh-document" shape (state died with the
+  document; the fresh realm re-requests) â the re-boot shape the tree's
+  frame bridge already covers; a same-realm restore alternative was
+  not delivered by this engine on this fixture.
+
+Harness lessons worth holding for any future floor probe: `evalAsync(fn,
+...args)` signature is **args first, done last** (the handler's `done` is
+the LAST parameter); `evalInFrame` is synchronous `executeScript` (no
+done; awaited promises resolve through the sync path) while
+`executeAsyncScript`'s ONLY completion route is the `done` callback â a
+returned Promise is ignored; an `await session.evalAsync(driver)`
+BLOCKS until timeout, so a flow that needs page events to fire the
+callback must arm listeners with sync `session.eval` + state polling
+instead; a named function EXPRESSION passed to `addEventListener` is
+bound only in its own scope (sibling functions see `ReferenceError` â
+declare siblings as plain function declarations); fixture template
+literals must spell plain `</script>` (an escaped `<\\/script>` becomes a
+double backslash that never closes the element); and a top-side
+`__rec`-match wait is STALE after the first leg (every child load pushes
+the same record) â wait on the frame's own document readiness via
+`waitForFrame` instead, which re-enters the chain per poll and absorbs
+the about:blank â /child swap.
+
+Sweep disposition: record-only, no src change earned adoption â every
+re-derived premise is the shape the bridge code already rides (the sync
+answer + buffering, FIFO, listener ordering, dead-realm silence, fresh-doc
+recovery, bfcache re-boot), the two measured divergences from spec reading
+(the inert-husk stale copy, the silent drop on a closed peer) both land in
+territory the tree never walks, and PF5's throw classes confirm the catch
+belts' named shapes are real. Artifact scripts under `check/.tmp/`,
+uncommitted per sweep convention; the batch rides one green full-battery
+run per the record-only rule.
+
 The series'
 record-only commits changed
 AGENTS.md alone; every src-touching pass proved
