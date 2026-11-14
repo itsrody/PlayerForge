@@ -250,8 +250,11 @@
          light boundary to the host (established by the check browser gate);
          inset:0 keeps the geometry identical to the host box. Stage-true
          rules query this under pf-stage; the compact band writer is the
-         consumer. */
-          container: pf-stage / inline-size;
+         consumer. `size` (not inline-size) so the forge bar's short-stage
+         tier (pocket) can query block size too: inset:0 makes both axes
+         content-independent, which is what size containment requires - the
+         hud's own geometry cannot be affected by its children. */
+      container: pf-stage / size;
 
       /* The floor's anchor positioning (live on Firefox 147+, probed here)
          never substitutes for this tree's geometry: the only resolved
@@ -1635,14 +1638,18 @@
        within thumb reach and never covers the whole video.
        --pf-vv-height/--pf-vv-inset-bottom (set on the host by shell.js from
        window.visualViewport) keep the sheet inside the on-screen keyboard's
-       shrunken viewport; both fall back to layout-viewport values. */
+       shrunken viewport; both fall back to layout-viewport values. The
+       third min() arm is the player region itself - vh and the vv mirror
+       are window readings, and on an embedded player the region can be far
+       shorter than either, so the sheet's own inset:0 box is the final
+       bound. */
     @media (max-width: 520px) and (pointer: coarse) {
       .pf-panel {
         top: auto;
         bottom: calc(var(--pf-space-md) + var(--pf-vv-inset-bottom, 0px));
         left: var(--pf-space-md);
         right: var(--pf-space-md);
-        max-height: min(62vh, calc(var(--pf-vv-height, 100vh) - 2 * var(--pf-space-md)));
+        max-height: min(62vh, calc(var(--pf-vv-height, 100vh) - 2 * var(--pf-space-md)), calc(100% - 2 * var(--pf-space-md)));
         margin: 0;
         /* Derived radius (R6): the sheet keeps its token as the largest HUD
            radius in the bottom-sheet variant too - the hardcoded literal
@@ -1659,13 +1666,16 @@
        centered dialog would swallow the height. Compact right-edge sheet
        instead - anchored to the top, capped at 70vh so it never fills the
        short viewport, narrow enough to leave the video's center clear, with
-       icon-only tabs. */
+       icon-only tabs. The min() adds the player region as a second bound:
+       on an embedded player the region can be far shorter than the viewport
+       (vh is the window's), and an unbounded sheet would grow out of the
+       region it is inset:0'd into. */
     @media (orientation: landscape) and (pointer: coarse) and (max-height: 480px) {
       .pf-panel {
         inset: 0;
         margin: auto;
         width: min(340px, 45vw);
-        max-height: 70vh;
+        max-height: min(70vh, calc(100% - 2 * var(--pf-space-md)));
         border-radius: var(--pf-radius-lg);
       }
       .pf-tab-label { display: none; }

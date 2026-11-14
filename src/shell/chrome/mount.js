@@ -195,20 +195,57 @@ const CONTAINER_POCKET_CSS = `
         .pf-stepper { height: 30px; }
       }
 
-      /* Compact mode bottom-sheet on portrait touch phones. */
+      /* Compact mode bottom-sheet on portrait touch phones. The min() adds
+         the player region as a bound (vh is the window's; on an embedded
+         player the region can be far shorter). Radius rides the R6 token -
+         the hardcoded literal here predates the sheet's own token use and
+         would silently diverge when the token moves. */
       @media (max-width: 520px) and (pointer: coarse) {
         width: auto;
         top: auto;
         bottom: var(--pf-space-sm);
         left: var(--pf-space-sm);
         right: var(--pf-space-sm);
-        max-height: 56vh;
-        border-radius: 14px 14px 0 0;
+        max-height: min(56vh, calc(100% - 2 * var(--pf-space-md)));
+        border-radius: var(--pf-radius-lg) var(--pf-radius-lg) 0 0;
         border-left: none;
         border-right: none;
         border-bottom: none;
       }
     }
+  }
+
+  /* Forge-bar responsive bands - the bar's fixed chrome (5 x 40px targets +
+     63px time readout + padding/gaps ~ 305px) starves the range flex arm
+     below ~400px of stage and overflows the pill below ~323px (the floor
+     probe's sweep: range 39px at a 360px stage, 0px + scroll overflow at
+     320, 32px child spill at 280). Ladder: tighten chrome first (targets
+     untouched), then drop the time readout, then shrink the targets -
+     each band's onset is the width the previous one buys back. The height
+     tier caps the bar's share of a short stage (58px is 32% of a 180px
+     picture). Queries ride the pocket because container size conditions
+     never evaluate inside the adopted sheet (the gate's own probe); the
+     height tokens are set on BOTH the bar and the cue layer - the bar
+     reads its height var on itself while the sheet's cue-shift rule reads
+     the vars on the cue layer, and a container cannot style itself, so
+     there is no single element both consumers can inherit from. These
+     classes exist only in the shadow hud, so the document-realm adoption
+     stays inert like the panel pockets above. */
+  @container pf-stage (max-width: 400px) {
+    .pf-forge-bar { padding: 0 var(--pf-space-sm); gap: 2px; }
+  }
+  @container pf-stage (max-width: 340px) {
+    .pf-forge-bar { padding: 0 var(--pf-space-sm); gap: 2px; }
+    .pf-forge-time { display: none; }
+  }
+  @container pf-stage (max-width: 260px) {
+    .pf-forge-bar { padding: 0 var(--pf-space-sm); gap: 2px; }
+    .pf-forge-time { display: none; }
+    .pf-forge-btn { width: 32px; height: 32px; font-size: 18px; }
+  }
+  @container pf-stage (max-height: 280px) {
+    .pf-forge-bar { --pf-forge-bar-h: 44px; --pf-forge-bar-inset: 6px; }
+    .pf-cue-layer { --pf-forge-bar-h: 44px; --pf-forge-bar-inset: 6px; }
   }
 `;
 
