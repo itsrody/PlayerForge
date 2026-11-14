@@ -1586,6 +1586,46 @@
       flex-shrink: 0;
     }
 
+    /* - Quality section - the adaptor's mirrored rows (shell/quality.js).
+          One button per entry, the active entry carried by the -active
+          class; rows reuse the history card's surface grammar. */
+    .pf-quality-list {
+      display: flex;
+      flex-direction: column;
+      gap: var(--pf-space-xs);
+      max-height: var(--pf-history-list-height);
+      overflow: clip auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--pf-text-mid) transparent;
+      overscroll-behavior: contain;
+    }
+
+    .pf-quality-row {
+      text-align: left;
+      padding: var(--pf-space-sm) var(--pf-space-md);
+      border: 1px solid var(--pf-border-soft);
+      border-radius: var(--pf-radius-sm);
+      background: var(--pf-surface-soft);
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+
+      @media (hover: hover) {
+        &:hover {
+          background: var(--pf-surface-mid);
+        }
+      }
+    }
+
+    .pf-quality-row-active {
+      background: var(--pf-surface-mid);
+      border-color: var(--pf-border-control);
+      cursor: default;
+    }
+
     /* - Shell-true density - the panel adapts to its own width (~ the video
          container), not the viewport: wide panels keep the two-column grid,
          very narrow players collapse it to one column. The rules live in the

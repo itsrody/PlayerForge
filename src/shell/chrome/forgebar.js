@@ -63,6 +63,8 @@ export class ForgeBar {
   /** Bare adoption identity: the bar is the inline control surface (the
    *  stripped native controls took theirs), not a forge-mode-only strip. */
   #bare;
+  /** Quality button: hidden until the shell's adaptor has read entries. */
+  #qualityBtn;
   /** Monotonic stamp of the last user activity; the sweep reads it. */
   #lastActive = 0;
   /** The one delay() handle (abort closure); null when disarmed. */
@@ -89,6 +91,12 @@ export class ForgeBar {
     const fsEl = document.fullscreenElement;
     this.#live = fsEl != null && fsEl.contains(shell.container);
     this.#syncFsButton();
+    // Quality button visibility: seeded from the adaptor's sticky state,
+    // then flipped by its fan (the first read that saw entries emits).
+    this.#qualityBtn.hidden = !this.#shell.quality?.available;
+    this.#shell.quality?.subscribe(() => {
+      this.#qualityBtn.hidden = !this.#shell.quality.available;
+    }, { signal });
     if (this.#bare || this.#live) {
       this.#show();
     }
@@ -124,6 +132,7 @@ export class ForgeBar {
       "aria-label": "Seek"
     }, root);
     this.#time = el("span", { class: "pf-forge-time" }, root);
+    this.#qualityBtn = mk("quality", "quality", "Quality");
     mk("settings", "settings", "Settings");
     this.#fsBtn = mk("exit", "exit-fullscreen", "Exit fullscreen");
     this.#root = root;
@@ -157,6 +166,9 @@ export class ForgeBar {
           break;
         case "settings":
           this.#shell.panel.open();
+          break;
+        case "quality":
+          this.#shell.panel.open("Quality");
           break;
         case "exit":
           this.#shell.exitFullscreen();

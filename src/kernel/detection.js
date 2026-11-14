@@ -31,12 +31,29 @@ import { getConfigValue } from "../shared/store.js";
  *             DOM; resolved against the matched element's composed ancestry
  *             (overriding default of the matched element itself). Not yet set
  *             by any record - kept as the extensible placement hook.
+ *   quality - optional quality-menu vocabulary for shell/quality.js, spelled
+ *             only by records whose vendor ships a quality menu (each field's
+ *             receipt lives on the record). Two planes:
+ *               select  - a native <select> rebuilt eagerly by the vendor;
+ *                         entries are its <option> children, active is the
+ *                         selected IDL property, switching is set .value +
+ *                         dispatch change.
+ *               menu    - an aria/class-menu: menu (root selector, or null
+ *                         when items render document-wide / portaled), item
+ *                         (item selector scoped under the root when present),
+ *                         active (witness kind: attr | cls | inside | label),
+ *                         label (kind inside, or null = the item's own text),
+ *                         value (kind attr, or null = the label text IS the
+ *                         value), clone (the switch verb: click the item, or
+ *                         set the menu root's .value), open (the lazy open
+ *                         walk: steps + close, or null = eager).
  *
  * The shell-facing descriptor carries name + the resolved container (plus the
  * matched anchor element and its hop distance, both computed free during the
- * scan), so the kernel has one source of truth for SDK identity AND shell
- * placement. The descriptor is cached per video (same object across re-queries
- * while its ancestry holds; invalidated when the video is re-parented).
+ * scan, and the quality vocabulary above), so the kernel has one source of
+ * truth for SDK identity AND shell placement. The descriptor is cached per
+ * video (same object across re-queries while its ancestry holds; invalidated
+ * when the video is re-parented).
  *
  * Reserved for future needs (not implemented): corroborating selectors,
  * version gates. Adding an SDK = one record plus one fixture test.
@@ -60,13 +77,64 @@ import { getConfigValue } from "../shared/store.js";
  */
 
 const REGISTRY = [
-  { name: "JW Player", anchors: [".jwplayer", ".jw-wrapper"] },
+  // Quality vocabulary (jwplayer master, settings-menu.js + menu/menu-item.js):
+  // the quality submenu renders eagerly at setup as
+  // <div id="jw-settings-submenu-quality"> > .jw-settings-submenu-items >
+  // <button class="jw-reset-text jw-settings-content-item" role="menuitem"
+  // aria-checked="false">LABEL</button> (itemButtonTemplate); the active item
+  // carries .jw-settings-item-active (ButtonMenuItem.activate), the label is
+  // the button's own text (the quality name), and the switch verb is the
+  // vendor's own click action -> api.setCurrentQuality(index) - a
+  // programmatic .click() rides it (addClickAction has no isTrusted gate).
+  { name: "JW Player", anchors: [".jwplayer", ".jw-wrapper"],
+    quality: {
+      menu: "#jw-settings-submenu-quality", item: ".jw-settings-content-item",
+      active: { kind: "cls", cls: "jw-settings-item-active" },
+      label: null, value: null, clone: { kind: "click" }, open: null
+    } },
   { name: "Video.js", anchors: ["[data-vjs-player]", ".video-js"] },
-  { name: "Plyr", anchors: ["[data-plyr]", ".plyr__video-wrapper", ".plyr"] },
+  // Quality vocabulary (sampotts/plyr master, src/js/controls.js): the
+  // settings panels render eagerly at init; the quality panel is
+  // <div id="plyr-settings-<id>-quality"> > [role="menu"] and setQualityMenu
+  // fills it with <button type="button" role="menuitemradio" aria-checked
+  // value="quality"><span>title</span></button> (createMenuItem); active =
+  // aria-checked (the checked defineProperty enforces exclusivity through the
+  // attribute), value = the button's value attribute (the raw quality),
+  // label = own text (the title span; the badge svg adds no text), switch =
+  // the vendor's own click listener -> this.quality = value.
+  { name: "Plyr", anchors: ["[data-plyr]", ".plyr__video-wrapper", ".plyr"],
+    quality: {
+      menu: '[id^="plyr-settings-"][id$="-quality"]', item: '[role="menuitemradio"]',
+      active: { kind: "attr", attr: "aria-checked" },
+      label: null, value: { kind: "attr", attr: "value" },
+      clone: { kind: "click" }, open: null
+    } },
   { name: "ArtPlayer", anchors: [".art-video-player", ".artplayer"] },
-  { name: "DPlayer", anchors: [".dplayer"] },
+  // Quality vocabulary (DIYgod/DPlayer master, src/template/player.art +
+  // controller.js initQualityButton + player.js switchQuality): the eager
+  // quality mask renders <div class="dplayer-quality-list"> with
+  // <div class="dplayer-quality-item" data-index="N">NAME</div> children; the
+  // vendor marks NO item class - the active item is the one whose text equals
+  // .dplayer-quality-icon's text (the current-quality button, rewritten by
+  // switchQuality: qualityButton.innerHTML = this.quality.name), so the
+  // witness is the label-compare kind; value = data-index, switch = the
+  // delegated click listener on the list (e.target = the item - a
+  // programmatic item.click() bubbles into it).
+  { name: "DPlayer", anchors: [".dplayer"],
+    quality: {
+      menu: ".dplayer-quality-list", item: ".dplayer-quality-item",
+      active: { kind: "label", sel: ".dplayer-quality-icon" },
+      label: null, value: { kind: "attr", attr: "data-index" },
+      clone: { kind: "click" }, open: null
+    } },
   { name: "MediaElement.js", anchors: [".mejs-container", ".mejs__container"] },
-  { name: "XGPlayer", anchors: [".xgplayer"] },
+  { name: "XGPlayer", anchors: [".xgplayer"],
+    quality: {
+      menu: ".xgplayer-definition", item: "li.option-item",
+      active: { kind: "cls", cls: "selected" },
+      label: null, value: { kind: "attr", attr: "data-index" },
+      clone: { kind: "click" }, open: null
+    } },
   { name: "Aliplayer", anchors: [".prism-player"] },
   { name: "Fluid Player", anchors: [".fluid_video_wrapper"] },
   { name: "Flowplayer", anchors: [".fp-player", "flowplayer-ui", "[data-player-id]", ".flowplayer"] },
@@ -79,8 +147,39 @@ const REGISTRY = [
   // home resolves to the tight box; the bare [data-player] stays as the
   // fallback arm for layouts the compound misses.
   { name: "Clappr", anchors: [".container[data-container]", "[data-player]"] },
-  { name: "Vidstack", anchors: ["media-player"] },
-  { name: "Mux Player", anchors: ["mux-player"] },
+  { name: "Vidstack", anchors: ["media-player"],
+    // Quality vocabulary (vidstack/vidstack main,
+    // elements/define/menus/{quality-radio-group-element,_template,radio-element}.ts
+    // + components/ui/menu/radio/radio.ts): media-quality-radio-group
+    // clone-renders its options (after one animation frame) as
+    // <media-radio value="height_bitrate|auto" aria-checked data-checked>
+    // <span data-part="label">1080p</span></media-radio>; the group itself may
+    // be MenuPortal-ed to document.body, so items are resolved document-wide
+    // (menu: null) and the label sits in the label part (own text would drag
+    // the bitrate part in); active = aria-checked; switch = the radio's own
+    // press handler -> group change event.
+    quality: {
+      menu: null, item: "media-quality-radio-group media-radio",
+      active: { kind: "attr", attr: "aria-checked" },
+      label: { kind: "inside", sel: '[data-part="label"]' },
+      value: { kind: "attr", attr: "value" },
+      clone: { kind: "click" }, open: null
+    } },
+  { name: "Mux Player", anchors: ["mux-player"],
+    // Quality vocabulary (muxinc/media-chrome main, src/js/menu/
+    // media-rendition-menu.ts + media-chrome-menu.ts createMenuItem): the
+    // media-rendition-menu renders media-chrome-menu-item radios eagerly on
+    // rendition attribute changes - <media-chrome-menu-item value="id"
+    // aria-checked="true|false"><span>label</span></media-chrome-menu-item>
+    // (label = own text; the checked-indicator svg adds none); switch rides
+    // the verified clone chain: menu.value = id -> #selectItem -> change
+    // (bubbles+composed) -> MEDIA_RENDITION_REQUEST, no isTrusted gate.
+    quality: {
+      menu: "media-rendition-menu", item: "media-chrome-menu-item",
+      active: { kind: "attr", attr: "aria-checked" },
+      label: null, value: { kind: "attr", attr: "value" },
+      clone: { kind: "menu-value" }, open: null
+    } },
   // Radiant ships TWO install routes (docs 10.7.9 quick-start): the primary
   // script build appends the player into a site-chosen div via
   // `new RadiantMP(elementID)` - the appended wrapper carries the
@@ -98,7 +197,21 @@ const REGISTRY = [
   // .shaka-video-container (ui/less/containers.less - "the auto-setup div
   // which we populate"; the demo markup mounts both on one element). The
   // attribute leads as the API surface every integration route sets.
-  { name: "Shaka Player", anchors: ["[data-shaka-player-container]", ".shaka-video-container"] },
+  { name: "Shaka Player", anchors: ["[data-shaka-player-container]", ".shaka-video-container"],
+    // Quality vocabulary (shaka-project/shaka-player main,
+    // ui/resolution_selection.js): the overflow quality menu .shaka-resolutions
+    // renders eagerly; entries are <button> children - both the
+    // explicit-resolution buttons and the .shaka-enable-abr-button Auto
+    // button, each carrying role=menuitemradio + aria-checked
+    // (shaka.ui.Utils.setChosenItem sets the attribute and the
+    // .shaka-chosen-item span class together), label = own text (one span),
+    // switch = the vendor's own click listener (onTrackSelected_ /
+    // enableAbr).
+    quality: {
+      menu: ".shaka-resolutions", item: "button",
+      active: { kind: "attr", attr: "aria-checked" },
+      label: null, value: null, clone: { kind: "click" }, open: null
+    } },
   // OvenPlayer renders its player root INTO the caller's container
   // (OvenPlayer.create(container, options); dist v5.3.4-era bundle
   // ViewTemplate: '<div class="ovenplayer op-wrapper" tabindex="-1">' —
@@ -111,7 +224,33 @@ const REGISTRY = [
   // OpenPlayerJS's wrapper is className="op-player
   // op-player__keyboard--inactive" (2.14.12 dist) — op-clear never appears
   // in its dist, so the compound cannot misattribute an OpenPlayerJS page.
-  { name: "OvenPlayer", anchors: [".ovenplayer", ".op-player.op-clear"] },
+  { name: "OvenPlayer", anchors: [".ovenplayer", ".op-player.op-clear"],
+    // Quality vocabulary (OvenMediaLabs/OvenPlayer master,
+    // controls/settingButton.js + settingPanel/{main,mainTemplate,qualityPanel}.js):
+    // DOUBLY LAZY - the .op-setting-button toggles the panel stack
+    // (panelManager.clear() when open), and the main panel's quality row
+    // .op-setting-item[op-panel-type="quality"] builds the sub-panel
+    // synchronously on click. EVERY row carries op-panel-type + op-data-value
+    // (main AND sub), so the menu scope is the non-root panel: the main panel
+    // root is class "animated fadeIn" (isRoot:true), sub-panel roots are not -
+    // ".op-setting-panel:not(.animated)" answers sub-panels only. Items carry
+    // op-data-value (quality index or "AUTO"), the active witness is the
+    // .op-setting-item-checked.op-show span inside the item, and the label
+    // sits in .op-setting-item-title. Item click -> the vendor switches AND
+    // calls panelManager.clear() itself (its own menu DOM is destroyed - the
+    // adaptor snapshot holds the read). Close = the settings button again.
+    quality: {
+      menu: ".op-setting-panel:not(.animated)",
+      item: '.op-setting-item[op-panel-type="quality"]',
+      active: { kind: "inside", sel: ".op-setting-item-checked.op-show" },
+      label: { kind: "inside", sel: ".op-setting-item-title" },
+      value: { kind: "attr", attr: "op-data-value" },
+      clone: { kind: "click" },
+      open: {
+        steps: [".op-setting-button", '.op-setting-item[op-panel-type="quality"]'],
+        close: ".op-setting-button"
+      }
+    } },
   // OpenPlayerJS wraps the media from vendor source (openplayerjs master,
   // packages/player/src/ui.ts createUI): the injected wrapper carries
   // .op-player on both the audio and the video path, and the media's own
@@ -126,7 +265,17 @@ const REGISTRY = [
   // "block any events (e.g. click events) on the video", so the video is
   // outside it (the class ships 95x in the built bitmovinplayer-ui.css;
   // the bmpui prefix is the documented _variables.scss default).
-  { name: "Bitmovin Player", anchors: [".bmpui-ui-uicontainer"] },
+  { name: "Bitmovin Player", anchors: [".bmpui-ui-uicontainer"],
+    // Quality vocabulary (bitmovin/bitmovin-player-ui develop,
+    // settings/VideoQualitySelectBox.ts + settings/SelectBox.ts): the native
+    // <select class="ui-selectbox ui-videoqualityselectbox"> is rebuilt
+    // eagerly per item change (updateDomItems empties + refills
+    // <option value=id>label</option>); active = the option's selected IDL
+    // property (the [selected] attribute is only a rebuild-time projection);
+    // switch = set select.value + dispatch change - the vendor's own change
+    // listener -> player.setVideoQuality(value). The select plane needs no
+    // menu/open/clone fields.
+    quality: { select: ".ui-videoqualityselectbox" } },
   // Kaltura PlayKit: the core builds the container itself
   // (kaltura/playkit-js, _createPlayerContainer stamps .playkit-container)
   // and the README mount contract appends player.getView() - that same
@@ -351,7 +500,9 @@ class SdkMatcher {
    *
    * The emitted descriptor carries exactly what the adoption protocol reads:
    * name (log/error prose), container (the shell-host home), hops (the
-   * removal watch's depth input). The host/anchor emissions retired with the
+   * removal watch's depth input), and the record's quality vocabulary when
+   * it spells one (shell/quality.js reads it; null on records without a
+   * quality menu). The host/anchor emissions retired with the
    * findSdkForVideo export face - no consumer outside this module ever read
    * them, and the host branch stays reachable through the record schema (see
    * #resolveContainer). The injectable-registry arm retired with it: the
@@ -368,7 +519,8 @@ class SdkMatcher {
       const descriptor = {
         name: match.record.name,
         container: this.#resolveContainer(match),
-        hops: match.hops
+        hops: match.hops,
+        quality: match.record.quality ?? null
       };
       this.#descriptorCache.set(video, { descriptor, parent: video.parentNode });
       return descriptor;

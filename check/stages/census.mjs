@@ -1,7 +1,7 @@
 /**
  * Gate 3 - the executable census.
  *
- * The AGENTS.md census records (ten Fans, eleven Scope roots, the
+ * The AGENTS.md census records (eleven Fans, eleven Scope roots, the
  * zero-timer pipeline, zero manual teardowns, the network egress floor)
  * used to be prose re-derived by hand each review; here they are re-derived
  * by the tool, so a deliberate
@@ -102,8 +102,8 @@ const ROWS = [
   {
     name: "Fan instances",
     pattern: "new Fan(",
-    expect: 10,
-    why: "the one plain-fan-out owner; ten owners, one per grain - the few-fans review recorded them with their subscriber axes, and direct-callback or grain-tagged-bus reducers are declined verdicts"
+    expect: 11,
+    why: "the one plain-fan-out owner; eleven owners, one per grain - the few-fans review recorded them with their subscriber axes (the eleventh is the qualities adaptor's state fan, one subscriber: the forge bar's button visibility + the section render), and direct-callback or grain-tagged-bus reducers are declined verdicts"
   },
   {
     name: "Scope destroy-roots",
