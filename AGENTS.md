@@ -25,14 +25,14 @@ both platforms:
   excluded in the header (YouTube, Vimeo, Netflix, streams, socials…), and
   `entry.js` keeps a runtime skip list above that.
 
-**Repo shape (25 source modules, ~15k LOC):**
+**Repo shape (24 source modules, ~15k LOC):**
 
 ```
 src/
   entry.js            install-time contract: which frames run the script
   kernel/  (4)        contract, detection, discovery, kernel orchestrator
   shared/  (5)        core, runtime, dom, page, store — the data planes
-  shell/   (16)       shell, media, resume, filter, quality, forge+actions,
+  shell/   (15)       shell, media, resume, filter, forge+actions,
                       subtitles(2), chrome(6 + styles.css)
 check/                the one testing tool (see §7)
 dist/                 generated, not the review target
@@ -335,13 +335,13 @@ iframes, same-origin and cross-origin:
   ResumeStore, ConfigStore, SubtitleSyncState,
   SubtitleSession, and kernel shell-ready audiences all rode it — the
   kernel's per-listener try/catch retired with the conversion, native
-  dispatch isolation is the real thing). Audited census: eleven instances —
+  dispatch isolation is the real thing). Audited census: ten instances —
   kernel shell-ready (entry's page-lifetime only; its returned handle is
   never consumed), FsGate, ReferenceBox change-ticks (exactly ONE
   subscriber: the subtitle renderer; every gesture consumer
   reads-and-discards via `get()` — the emit heat is scroll-frequency but
   one-tap-deep), FilterSession, the three SubtitleState grains +
-  SubtitleSession's presentation state, the QualityAdaptor's fan (the qualities-menu adaptor's snapshot changes: the section's re-render + the forge bar's visibility seed), ConfigStore's `settings` bus (the
+  SubtitleSession's presentation state, ConfigStore's `settings` bus (the
   echo-storm hot path: 1000 foreign writes ride the robust row inside
   400ms) and ResumeStore's entry set.
   **Subscriber census (the audience axis, recorded alongside the instance
@@ -351,7 +351,7 @@ iframes, same-origin and cross-origin:
   grain 2 (the grain's forward into the session + the panel position
   echo); settings bus 2 (the action layer's hotkey recompute + the
   panel's cross-tab sync); resume store 2 (the sync grain's re-resolve
-  via the tracker + the subtitle restore); quality 2 (the section's re-render + the forge bar's visibility seed); kernel shell-ready 1
+  via the tracker + the subtitle restore); kernel shell-ready 1
   (multi-boot across destroy-readopt and registry-empty recovery);
   reference-box ticks 1; FilterSession 1 (the VideoFilter section);
   style grain 1 (the panel echo — the five values boot-apply directly at
@@ -1083,33 +1083,6 @@ iframes, same-origin and cross-origin:
   trailing persist, the menu reset gesture) + `VideoFilter` (the lazy panel
   section over it). The filter lives on the video from first play — a
   stored preset needs no panel open — and reset works with none.
-- **quality.js** — the qualities-menu adaptor: reads an SDK's own quality
-  menu, mirrors its entries into the panel, and switches through the
-  vendor's own handlers (the discovery/identity contract with an adopted
-  player is DOM-shaped — no SDK API surface is touched). Per-record
-  vocabulary on the registry (detection.js `quality`: `select` plane for
-  Bitmovin's native `<select>`; menu plane `{ menu, item, active, label,
-  value, clone, open }` for the nine verified menu vendors — menu null
-  means portal-hosted items resolved document-wide, `open` spells the
-  doubly-lazy open walk, `clone` is the switch verb). `QualityAdaptor`
-  (one per shell, constructed in `#boot` before the ForgeBar): eager
-  probe at construct + `loadeddata` + `resize`, sticky availability, a
-  snapshot that holds the last non-empty read (a doubly-lazy vendor's own
-  menu DOM is destroyed on close — the snapshot is what keeps entries
-  listed), eager vendors re-query per read and get one delayed re-read
-  (`TUNING.quality.recheckMs`) after a switch; lazy vendors arm the open
-  walk only when items are absent (switches re-arm on demand and never
-  settle after success — the vendor destroys its own panel). Reads and
-  item lookups ride the document-wide deep walk through open shadow
-  roots (closed roots read null and are skipped — page-realm premise).
-  One `new Fan` per adaptor (census 11). `addQualitySection` builds the
-  panel section (one delegated click listener, `replaceChildren()`
-  renders, `textContent`-only labels — page-authored text never rides
-  markup); the ForgeBar's 8th button (`data-action="quality"`, before
-  settings) seeds hidden until `shell.quality?.available` and opens the
-  panel via `open("Quality")` — panel `open(prefer)` +
-  `#activatePreferred` land the tab by `dataset.title`, unmatched names
-  fall back silently.
 - **inputs/forge.js** — the pointer/keyboard gesture engine: the stream
   router (passive press/move streams under the prevent-scope rule — a plain
   tap's whole native sequence passes unclaimed, no press-time cancel
@@ -4779,107 +4752,7 @@ view for bare shells.
   Battery receipt: three consecutive all-green full-battery runs (274 rows
   each; 121.0/121.4/121.0s).
 
-**The qualities-menu adaptor (Nov 14 2026, user-directed; user adopted via
-question tool — "Adopt the adaptor (Recommended)"; HUD surface pinned as bar
-button + panel section; src — detection.js + shell/quality.js (new) + shell.js
-+ chrome/{panel,forgebar,ui}.js + styles.css + shared/core.js; check —
-browser/cases/quality.mjs (new, 28 rows), census Fan row 10→11; battery 306
-rows).** The question: an adopted player's quality switching is the vendor's
-own surface — how does the shell mirror it without touching any SDK API? The
-adopted design reads the vendor's own quality menu DOM and switches through
-the vendor's own handlers, the same DOM-shaped contract the discovery/identity
-planes ride.
-
-- **The vocabulary (detection.js).** Per-record `quality` field on nine
-  records, each verified in vendor source: JW Player (`#jw-settings-submenu-quality`
-  / `.jw-settings-content-item` / cls witness / label-as-value, eager), Plyr
-  (`[id^="plyr-settings-"][id$="-quality"]` / `[role="menuitemradio"]` /
-  aria-checked / value attr, eager), DPlayer (`.dplayer-quality-list` /
-  `.dplayer-quality-item` / label-compare witness vs `.dplayer-quality-icon`
-  / data-index value, eager), XGPlayer (`.xgplayer-definition` / `li.option-item`
-  / `selected` cls / data-index, eager), Shaka Player (`.shaka-resolutions` /
-  `button` / aria-checked / label-as-value, eager), Vidstack (menu null —
-  portal/shadow-hosted items resolved document-wide / `media-quality-radio-group
-  media-radio` / aria-checked / label `[data-part="label"]` / value attr, eager),
-  Mux Player (`media-rendition-menu` / `media-chrome-menu-item` / aria-checked
-  / value attr / clone `menu-value` — the media-chrome value-setter chain
-  verified, eager), OvenPlayer (doubly lazy: menu `.op-setting-panel:not(.animated)`
-  — the main panel root carries `animated`, sub-panels don't — item
-  `.op-setting-item[op-panel-type="quality"]`, active inside
-  `.op-setting-item-checked.op-show`, label inside `.op-setting-item-title`,
-  value `op-data-value`, open steps `[".op-setting-button", '…[op-panel-type="quality"]']`,
-  close `.op-setting-button`; the vendor destroys its own panel on switch),
-  Bitmovin Player (the `select` plane: `.ui-videoqualityselectbox` rebuilt
-  eagerly per item change; active = the option's `selected` IDL property — the
-  `[selected]` attribute is only the rebuild-time projection; switch = set
-  `.value` + dispatch `change`, the vendor's own listener calls
-  `player.setVideoQuality`). The descriptor carries `quality` through to the
-  shell. Video.js and the rest carry no vocabulary: `supported` false, read
-  EMPTY, the tab and the bar button never appear.
-- **The adaptor (quality.js).** `QualityAdaptor(video, container, quality,
-  signal)` + `addQualitySection(panel, shell, signal)`. Eager probe at
-  construct + `loadeddata` + `resize`; `available` sticky once any read saw
-  entries (a late-populating menu is caught by the use-time re-query, not by
-  auto-flip); `#snapshot` holds the last non-empty read — the doubly-lazy
-  vendor's own menu DOM is destroyed on close, the snapshot is what keeps the
-  panel's rows listed. `read()`: eager vendors re-query every time; the lazy
-  vendor arms its open walk only when no snapshot is held (the first ask —
-  the section's first open — is what flips availability) and later asks serve
-  the snapshot; switches re-arm on demand. `switchTo(entry)` re-reads the
-  live menu, matches by value||label (a vendor-rebuilt menu still resolves),
-  optimistically snapshots + emits, and for eager vendors schedules ONE
-  delayed re-read (`TUNING.quality.recheckMs` 130, the shared scheduler) for
-  late witness moves; lazy vendors get no settle after success (the vendor
-  destroys its own panel — the OvenPlayer row pins the exact close contract:
-  the arm's own settings click is the ONE delta, a settle-after-success would
-  land a second). Reads and item lookups ride the document-wide deep walk
-  through `el.shadowRoot` recursively (closed roots read null and are skipped
-  — the page-realm premise the probe pinned); label values cap at 64 chars
-  (page-authored text admission). One `new Fan("quality")` per adaptor
-  (census 10→11, the reasoning-commit row).
-- **The HUD surface.** The adaptor is constructed in `#boot` BEFORE the
-  ForgeBar (the bar seeds visibility from it). ForgeBar's 8th button
-  (`data-action="quality"`, before settings, sliders icon in the ICONS
-  vocabulary) seeds hidden until `shell.quality?.available` and subscribes to
-  the adaptor's fan; click routes `panel.open("Quality")`. Panel `open(prefer)`
-  + `#activatePreferred(prefer)` land the tab by `dataset.title`, unmatched
-  names fall back to the default section silently (a preference, never a
-  gate). `PANEL_SECTIONS` gains the Quality entry after VideoFilter
-  (Subtitles, VideoFilter, Quality, History, Settings). The section is one
-  delegated click listener + `replaceChildren()` renders + `textContent`-only
-  labels (page-authored text never rides markup); styles.css carries the
-  quality list/row/row-active blocks.
-- **The case (check/browser/cases/quality.mjs).** Unit plane: one fixture
-  page hosts all nine vendor stubs + the Video.js control; each record's
-  vocabulary is read from the SERVED detection.js (the hotpath/sdk served-
-  module precedent) — the case proves the shipped vocabularies, never a
-  re-spelled copy. Rows: the supported map (9 true + control false), the
-  control's EMPTY read, the Vidstack shadow-premise row (plain document
-  queries are shadow-blind, the adaptor's walk reaches the menu), six eager
-  read rows, the doubly-lazy OvenPlayer row (unavailable until read() arms
-  the open walk, and the panel handed back closed), the DPlayer late-menu row
-  (the menu builds 400ms after load; sticky-off until the use-time re-query —
-  the case awaits the menu's arrival before reading, its own eval sequence
-  runs faster than the vendor's timer), eight switch rows (witness + active
-  move through the vendor's own handler; the Bitmovin row pins the
-  [selected]-attribute staleness beside the moved IDL witness), and the
-  OvenPlayer switch close-contract row. Integration plane: a Plyr-shaped page
-  boots the real bundle — the bar button exists, seeded visible, ordered
-  before settings; the panel lands on the Quality tab and mirrors the vendor
-  rows; a row click switches the vendor menu AND the media to the real HD
-  stream (`ensureHdVideoAsset()` in the committed fixture lib builds the
-  second-resolution fixture — the honest videoWidth 960 witness); the closed
-  panel reopens on the Quality tab through the bar button's `open(prefer)`.
-- **No counted census row moved** except the Fan count (10→11, the row's why
-  updated in the same change; the subscriber census gains quality 2 — the
-  section's render + the bar's visibility seed). Battery receipt: three
-  consecutive all-green full-battery runs (306 rows each;
-  131.3/131.4/131.2s) after two honest instrument fixes on the case itself
-  (the unit page's module script initially resolved the shadow-hosted
-  stubs' element args through getElementById — null constructors — now it
-  takes ids-or-elements and traps its own failure into `window.__qErr` for
-  the fail row's note; and the case's module-scope `readOf` helper closed
-  over the run-scoped session — signature fixed).
-
-*The series' record-only commits changed AGENTS.md alone; every src-touching
-pass proved itself on the full gate battery before its commit.*
+The series'
+record-only commits changed
+AGENTS.md alone; every src-touching pass proved
+itself on the full gate battery before its commit.*

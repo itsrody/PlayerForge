@@ -5,7 +5,6 @@ import { attachInputActions, ViewershipTransform } from "./inputs/actions.js";
 import { ResumeTracker } from "./resume.js";
 import { SubtitleSession, SubtitlesSection, subtitleSync } from "./subtitles/subtitles.js";
 import { VideoFilter, FilterSession } from "./filter.js";
-import { QualityAdaptor, addQualitySection } from "./quality.js";
 import { SettingsPanel, addSettingsSection, addHistorySection } from "./chrome/panel.js";
 import { getSetting, SETTING_KEYS } from "./chrome/config.js";
 import { TUNING } from "../shared/core.js";
@@ -72,7 +71,6 @@ const MEDIA_ERROR_LABELS = {
 const PANEL_SECTIONS = [
   ({ shell }) => new SubtitlesSection(shell),
   ({ shell, panel }) => new VideoFilter(shell, panel),
-  ({ shell, panel, signal }) => addQualitySection(panel, shell, signal),
   ({ shell, panel, signal }) => addHistorySection(panel, shell, signal),
   ({ panel, signal }) => addSettingsSection(panel, signal)
 ];
@@ -97,8 +95,6 @@ export class Shell {
   #subtitles = null;
   /** Eager filter session: stored filter applies at play, menu resets work. */
   #filters = null;
-  /** Qualities-menu adaptor: null for SDKs without a quality vocabulary. */
-  #quality = null;
   /** Fullscreen fill + crop transform machine (per-shell, owns every
    *  video.style.transform write), exposed as shell.view. */
   #view = new ViewershipTransform(this);
@@ -142,11 +138,6 @@ export class Shell {
     return this.#home.sdk;
   }
 
-  /** The qualities-menu adaptor (shell/quality.js), or null. */
-  get quality() {
-    return this.#quality;
-  }
-
   /**
    * Resolves when the shell DOM and HUD are live. Styles are NOT awaited:
    * warmStyles() applies the embedded sheet synchronously and upgrades it in
@@ -167,10 +158,6 @@ export class Shell {
     this.#toasts = new ToastManager(this.#shellDom.hudLayer);
     this.#inputs = new InputForge(this.video, this.container, this.shellHost,
       () => this.referenceBox);
-    // Qualities adaptor before the forge bar: the bar seeds its button
-    // visibility off the adaptor's state and subscribes to its fan.
-    this.#quality = new QualityAdaptor(this.video, this.container,
-      this.#home.sdk.quality, this.#scope.signal);
     // The forge bar holds itself: every listener and the sweep timer ride
     // the shell scope signal, and its DOM lives in the hud layer - no shell
     // field needs to reach it.

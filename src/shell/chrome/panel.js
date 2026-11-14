@@ -411,13 +411,7 @@ export class SettingsPanel {
     this.#sectionBuilder = fn;
   }
 
-  /**
-   * Open the panel. `prefer` (optional) names a section title ("Quality",
-   * "History", ...) to land on instead of the first section - the forge bar's
-   * quality button rides it. Unmatched names fall back to the default
-   * (first-built) section: the arg is a preference, never a gate.
-   */
-  async open(prefer = null) {
+  async open() {
     if (!this.#root || this.#scope.disposed || this.isOpen || this.#opening) {
       return;
     }
@@ -456,7 +450,6 @@ export class SettingsPanel {
     // Snapshot the opener before focus moves into the panel; close() hands
     // focus back to it (native showModal() behavior), not just the host.
     this.#returnFocus = deepestActiveElement(this.#shellHost);
-    this.#activatePreferred(prefer);
     this.#armDismissal();
     this.#runWithViewTransition(() => {
       // The UA schedules the update callback on its own clock: a destroy
@@ -512,19 +505,6 @@ export class SettingsPanel {
       this.close();
     } else {
       this.open();
-    }
-  }
-
-  /** Activate the section whose tab spells `title`; silent when unmatched. */
-  #activatePreferred(prefer) {
-    if (!prefer) {
-      return;
-    }
-    for (const [section, tab] of this.#sections) {
-      if (tab.dataset.title === prefer) {
-        this.#activateSection(section);
-        return;
-      }
     }
   }
 

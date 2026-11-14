@@ -183,33 +183,3 @@ export function ensureVideoAsset() {
   ]);
   return VIDEO_ROUTE;
 }
-
-const HD_ROUTE = "/check-video-hd.mp4";
-
-/** Build the second-resolution fixture once (idempotent) and return its
- *  route path. A genuine quality switch must deliver a real
- *  videoWidth/Height change, which only two different streams do - the
- *  quality case's integration rows swap between these two routes. */
-export function ensureHdVideoAsset() {
-  const out = join(FIXTURE_DIR, "check-video-hd.mp4");
-  if (existsSync(out)) return HD_ROUTE;
-  const ffmpeg = ["ffmpeg", "/opt/homebrew/bin/ffmpeg"]
-    .find((bin) => {
-      try {
-        return execFileSync("sh", ["-c", `command -v ${bin}`]).length > 0;
-      } catch { return false; }
-    });
-  if (ffmpeg === undefined) {
-    throw new Error("ffmpeg not found - the HD quality-switch fixture needs a second resolution");
-  }
-  mkdirSync(FIXTURE_DIR, { recursive: true });
-  execFileSync(ffmpeg, [
-    "-y", "-loglevel", "error",
-    "-f", "lavfi", "-i", "color=c=blue:s=960x540:r=25",
-    "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
-    "-t", "12", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
-    "-movflags", "+faststart",
-    out
-  ]);
-  return HD_ROUTE;
-}

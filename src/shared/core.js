@@ -150,13 +150,6 @@ export const TUNING = {
      *  holds: hover over the bar, focus within it, or a paused video park
      *  the sweep until released. */
     hideMs: 2500
-  },
-  quality: {
-    /** The one post-switch recheck. Some vendors move their active witness
-     *  late (track/rendition events land after the click), and none exposes
-     *  an observable we own - a deadline over witness absence, riding the
-     *  shared scheduler. */
-    recheckMs: 130
   }
 };
 /* - 3. Timing - */
