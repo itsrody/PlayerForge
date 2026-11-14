@@ -4996,6 +4996,82 @@ upward, so detection.js's composed arm is the only shape the floor permits.
 Battery receipt: src untouched; the batch rides one green full-battery run
 per the record-only rule.
 
+**The forge-mode floor probe (Nov 14 2026, user direction "explore batch for
+forge mode" pinned to the record-only floor-probe shape via the question
+tool; post-`c629e5a`; one adoption landed with user direction).** The
+fullscreen plane's engine premises re-derived on Firefox 160 — the fs gate,
+the forge bar's mode swap, the document-realm hide rule, the ancestor
+provisioning chain — plus the unexplored fullscreen vocabulary. Artifacts:
+`check/.tmp/forge-mode-probe.mjs` (FM1âFM4 legs) and
+`forge-mode-report.json`, uncommitted per sweep convention. Consumers
+grounded BEFORE probing: dom.js FsGate `#truth()` (fullscreenElement read
+per event), shell.js `enterFullscreen()` (container.requestFullscreen under
+the gesture's activation; rejection rides the fullscreenerror watcher),
+styles.css's `:fullscreen` hide rule + letterbox floor, page.js's
+allowfullscreen provisioning. Real fullscreen rode REAL trusted input
+(focusWindow + driver click / Escape) â the recorded harness lesson.
+
+- **(FM1) enter/exit substrate.** Script-launched `requestFullscreen()` on a
+  FOCUSED page with no user activation rejects
+  `TypeError: "Fullscreen request denied"` (the repro shape the fs-scrub
+  harness lesson recorded, now named). Trusted click enters real
+  fullscreen; `fullscreenElement` is set AT event-delivery time (the
+  FsGate premise holds); the event fires AT the element and bubbles to the
+  document listener (target = the element, not document); the entry
+  promise resolves first (~22ms) with the event ~0â6ms later; on exit the
+  promise resolves first too and `fullscreenElement` is ALREADY null at
+  the exit event (the gate's read-per-event law is measured-necessary â a
+  captured element at the exit event would be a stale read).
+- **(FM2) the styling plane.** `:fullscreen` matches only the fullscreened
+  element (video/ancestors/body false; `matches()` honest); the shipped
+  `[data-pf-shell]:fullscreen` position replica wins over the container's
+  inline `position: relative` (the rule's own why-comment, re-proven);
+  the hide-rule replica is live (chrome dies, the marked video chain
+  survives, outside the subtree untouched â the marker must sit on a
+  marked DESCENDANT, the first draft's miss, because `:has()` cannot see
+  the fullscreen element's own attribute); `::backdrop` is
+  computed-readable and styleable (default rgb(0,0,0), rule-set
+  rgb(1,2,3)).
+- **(FM3) the frame plane.** A granted cross-origin child enters
+  fullscreen on a trusted click inside it, and the TOP document's
+  `fullscreenElement` is the IFRAME element (matching `:fullscreen`) â the
+  premise the kernel's diagnostics dump rides when it reads
+  `document.fullscreenElement` in the top realm during a child
+  fullscreen. Native Escape exits the whole chain. No-grant rejects the
+  same `TypeError: Fullscreen request denied` class and delivers
+  `fullscreenerror` in the CHILD document only (the top document saw no
+  error event) â grounds both the provisioning chain's grant shape and
+  the watcher's realm-local ownership. Harness finding worth holding:
+  **Marionette's viewport-origin pointer actions dispatched from the top
+  context DO NOT retarget into a cross-origin child** â the synthesized
+  pointerdown landed on the TOP document at coordinates where
+  `elementFromPoint` returned the iframe (measured twice), and the child
+  received nothing; the WebDriver context switch (`switchTo().frame()` +
+  a real element click in the child context, the same machinery
+  `evalInFrame` rides) is the working route for trusted input into a
+  cross-origin frame. A same-origin srcdoc iframe entered fullscreen with
+  NO `allowfullscreen` at all â the permissions default allowlist is
+  `'self'`, so the attribute is only load-bearing for cross-origin
+  embeds; the legs were re-aimed at the dual-loopback origin.
+- **(FM4) the vocabulary sweep.** Legacy booleans both false
+  (`document.fullscreen`, `window.fullScreen`);
+  `:fullscreen-ancestor` NOT shipped; `screen.orientation.lock` present,
+  `navigator.keyboard.lock` absent (witness only â the orientation-lock
+  companion retired by direction stands).
+
+**Adoption: the letterbox floor's `background: #000` arm carries
+`!important` (styles.css).** The arm had no `!important` while its four
+position siblings do, so an SDK page styling its container by ID
+(`#player { background: ... }` â a common shape) won on specificity
+(attribute selector loses to ID) and left the fullscreen letterbox bands
+the page's color instead of the floor: measured rgb(34,34,34) with the
+replica, `!important` control restores rgb(0,0,0) (FM2). The flag is the
+same page-specificity defense the position arms ride; legit flows
+byte-unchanged. Battery receipt: 3 consecutive all-green full-battery
+runs (132.3/131.8/131.7s) after one environment-correlated gestures flake
+(0 shells at the bare-surface page, the recorded focus/timing class, not
+recurred in any subsequent run).
+
 The series'
 record-only commits changed
 AGENTS.md alone; every src-touching pass proved

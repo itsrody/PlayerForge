@@ -132,8 +132,13 @@
   height: 100% !important;
   /* The letterbox floor: a fullscreened container whose aspect does not
      match the stream could otherwise show page content behind the top
-     layer's uncovered bands. */
-  background: #000;
+     layer's uncovered bands. The !important carries the same
+ page-specificity defense the position arms ride: an SDK page styling
+ its container by ID (#player { background: ... } - a common shape)
+ wins on specificity over the attribute selector, leaving the bands
+ the page's color instead of the floor (forge-mode probe FM2,
+ Nov 2026: rgb(34,34,34) measured without the flag). */
+  background: #000 !important;
 }
 
 /* Forge mode's chrome hide: while a fullscreen chain contains a shell, every
