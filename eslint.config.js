@@ -172,6 +172,28 @@ export default [
     }
   },
   {
+    // The check/ harness and the build config run in Node, and their
+    // page-realm function bodies are serialized into Firefox. The browser-only
+    // block above declares neither realm's globals for them, so scope these
+    // here: no-undef stays honest for harness code without handing `process`
+    // to src/, where it would pass lint but fail at userscript runtime.
+    files: ["check/**/*.mjs", "esbuild.config.mjs"],
+    languageOptions: {
+      globals: {
+        // Node
+        process: "readonly",
+        Buffer: "readonly",
+        // page-realm constructors used inside serialized eval/executeScript bodies
+        PointerEvent: "readonly",
+        KeyboardEvent: "readonly",
+        WheelEvent: "readonly",
+        PageTransitionEvent: "readonly",
+        DragEvent: "readonly",
+        DataTransfer: "readonly"
+      }
+    }
+  },
+  {
     ignores: [
       "dist/**",
       "node_modules/**"
